@@ -84,6 +84,13 @@ class LLMRequestError extends Error {
   }
 }
 
+class LLMAvailabilityError extends LLMRequestError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LLMAvailabilityError';
+  }
+}
+
 // Verified current via search: gemini-2.0-flash (originally used here) was
 // shut down June 1, 2026. gemini-3.7-flash, used here, is Google's newest
 // GA Flash model as of their current docs (confirmed against three
@@ -123,6 +130,9 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
     let res: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 7_000);
+
     try {
       res = await fetch(url, {
         method: 'POST',
@@ -130,22 +140,31 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey, // header, not query param — keeps the key out of server access logs
         },
+        signal: controller.signal,
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemPrompt }] },
           contents,
           generationConfig: {
             responseMimeType: 'application/json', // ask Gemini to return strict JSON directly
+            thinkingConfig: {
+              thinkingLevel: 'low',
+            },
             maxOutputTokens: 4096, // a 3-day structured Journey with per-stop reasons can exceed 1024
             // No temperature/top_p/top_k — deprecated and ignored on 3.x Flash
-            // models. No explicit thinkingLevel — left at the model default
-            // rather than tuned without a clear need.
+            // models.
           },
         }),
       });
     } catch (networkErr) {
+      if ((networkErr as Error).name === 'AbortError') {
+        console.error('THONGTHAI_AI_MODEL_TIMEOUT', model);
+        lastAvailabilityError = 'Gemini API request timed out.';
+        continue;
+      }
       throw new LLMRequestError(`Network error calling Gemini: ${(networkErr as Error).message}`);
+    } finally {
+      clearTimeout(timeout);
     }
-
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
 
@@ -177,7 +196,7 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
     return text;
   }
 
-  throw new LLMRequestError(lastAvailabilityError || 'Gemini models are unavailable.');
+  throw new LLMAvailabilityError(lastAvailabilityError || 'Gemini models are unavailable.');
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +368,16 @@ function isValidRequest(body: unknown): body is ChatRequest {
   return isNonEmptyString(b.message) && isNonEmptyString(b.language) && Array.isArray(b.chatHistory);
 }
 
+function availabilityChatResponse(): ChatResponse {
+  return {
+    message: 'ตอนนี้ระบบ AI ตอบช้ากว่าปกติครับ ลองส่งอีกครั้งในอีกสักครู่นะครับ',
+    intent: 'conversation',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+  };
+}
+
 export const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
@@ -390,6 +419,13 @@ export const handler: Handler = async (event: HandlerEvent) => {
         }),
       };
     }
+    if (err instanceof LLMAvailabilityError) {
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(availabilityChatResponse()),
+      };
+    }
     return { statusCode: 502, body: JSON.stringify({ error: 'Chat request failed. Please try again.' }) };
   }
 
@@ -407,7 +443,14 @@ export const handler: Handler = async (event: HandlerEvent) => {
       const repaired = await callLanguageModel(systemPrompt, repairMessages);
       const parsed = validateChatResponse(JSON.parse(stripCodeFences(repaired)));
       return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) };
-    } catch {
+    } catch (repairError) {
+      if (repairError instanceof LLMAvailabilityError) {
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(availabilityChatResponse()),
+        };
+      }
       return { statusCode: 502, body: JSON.stringify({ error: 'Chat response could not be validated. Please try again.' }) };
     }
   }
