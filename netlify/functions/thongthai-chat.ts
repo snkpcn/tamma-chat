@@ -100,6 +100,8 @@ const GEMINI_MODELS = [
   'gemini-3.5-flash',
 ] as const;
 
+const OPENAI_MODEL = 'gpt-5.6-luna';
+
 /**
  * Real Gemini API call, using a live GEMINI_API_KEY server-side environment
  * variable. Written to the current Gemini 3.x REST contract — confirmed via
@@ -194,6 +196,99 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
   }
 
   throw new LLMAvailabilityError(lastAvailabilityError || 'Gemini models are unavailable.');
+}
+
+async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.error('THONGTHAI_AI_OPENAI_NOT_CONFIGURED');
+    throw new LLMAvailabilityError('OpenAI fallback is not configured.');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  let res: Response;
+
+  try {
+    res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        instructions: systemPrompt,
+        input: messages.map(message => ({
+          role: message.role,
+          content: [{ type: 'input_text', text: message.content }],
+        })),
+        reasoning: { effort: 'none' },
+        max_output_tokens: 4096,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'thongthai_chat_response',
+            strict: false,
+            schema: { type: 'object' },
+          },
+        },
+      }),
+    });
+  } catch (networkErr) {
+    if ((networkErr as Error).name === 'AbortError') {
+      console.error('THONGTHAI_AI_OPENAI_TIMEOUT', OPENAI_MODEL);
+      throw new LLMAvailabilityError('OpenAI API request timed out.');
+    }
+    throw new LLMRequestError(`Network error calling OpenAI: ${(networkErr as Error).message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    const safeErrorBody = errBody.slice(0, 300);
+
+    if ([429, 500, 502, 503, 504].includes(res.status)) {
+      console.error('THONGTHAI_AI_OPENAI_ERROR', res.status, safeErrorBody);
+      throw new LLMAvailabilityError(`OpenAI API returned ${res.status}: ${safeErrorBody}`);
+    }
+
+    console.error('THONGTHAI_AI_OPENAI_ERROR', res.status, safeErrorBody);
+    throw new LLMRequestError(`OpenAI API returned ${res.status}: ${safeErrorBody}`);
+  }
+
+  const data = await res.json() as {
+    output_text?: string;
+    output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string }> }>;
+  };
+  let text = data.output_text ?? '';
+  if (!text) {
+    for (const item of data.output ?? []) {
+      for (const content of item.content ?? []) {
+        if (content.type === 'output_text' && content.text) text += content.text;
+      }
+    }
+  }
+
+  if (!text) {
+    throw new LLMRequestError('OpenAI returned no text content.');
+  }
+
+  console.log('THONGTHAI_AI_OPENAI_SUCCESS', OPENAI_MODEL);
+  return text;
+}
+
+async function callPreferredLanguageModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
+  try {
+    return await callLanguageModel(systemPrompt, messages);
+  } catch (err) {
+    if (!(err instanceof LLMAvailabilityError)) throw err;
+
+    console.log('THONGTHAI_AI_PROVIDER_FALLBACK', 'gemini', 'openai');
+    return callOpenAI(systemPrompt, messages);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -418,7 +513,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   let raw: string;
   try {
-    raw = await callLanguageModel(systemPrompt, messages);
+    raw = await callPreferredLanguageModel(systemPrompt, messages);
   } catch (err) {
       console.error('THONGTHAI_AI_ERROR', err);
     if (err instanceof ProviderNotConfiguredError) {
@@ -451,7 +546,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
         { role: 'assistant', content: raw },
         { role: 'user', content: `Your previous response was invalid: ${(firstError as Error).message}. Return ONLY a corrected JSON object matching the required schema.` },
       ];
-      const repaired = await callLanguageModel(systemPrompt, repairMessages);
+      const repaired = await callPreferredLanguageModel(systemPrompt, repairMessages);
       const parsed = validateChatResponse(JSON.parse(stripCodeFences(repaired)));
       return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) };
     } catch (repairError) {
