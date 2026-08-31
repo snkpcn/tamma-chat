@@ -363,6 +363,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   try {
     raw = await callLanguageModel(systemPrompt, messages);
   } catch (err) {
+      console.error('THONGTHAI_AI_ERROR', err);
     if (err instanceof ProviderNotConfiguredError) {
       return {
         statusCode: 503,
