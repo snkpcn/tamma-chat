@@ -222,7 +222,10 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
         instructions: systemPrompt,
         input: messages.map(message => ({
           role: message.role,
-          content: [{ type: 'input_text', text: message.content }],
+          content: [{
+            type: message.role === 'assistant' ? 'output_text' : 'input_text',
+            text: message.content,
+          }],
         })),
         reasoning: { effort: 'none' },
         max_output_tokens: 4096,
