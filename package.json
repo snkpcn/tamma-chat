@@ -1,0 +1,11 @@
+{
+  "name": "thammachat-thongthai-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ทำมา-ชาติ — Experiences of Isan. Static site (index.html) plus the Thongthai AI concierge Netlify Functions backend.",
+  "devDependencies": {
+    "@netlify/functions": "^2.8.1",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}
