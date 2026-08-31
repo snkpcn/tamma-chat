@@ -90,7 +90,11 @@ class LLMRequestError extends Error {
 // independent sources: ai.google.dev, Firebase AI Logic docs, and Google's
 // own developer blog). Its predecessor, gemini-3.6-flash, is also still
 // valid/GA if you'd rather stay one version back.
-const GEMINI_MODEL = 'gemini-3.7-flash';
+const GEMINI_MODELS = [
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+] as const;
 
 /**
  * Real Gemini API call, using a live GEMINI_API_KEY server-side environment
@@ -113,54 +117,67 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
     parts: [{ text: m.content }],
   }));
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  let lastAvailabilityError = '';
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': apiKey, // header, not query param — keeps the key out of server access logs
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: {
-          responseMimeType: 'application/json', // ask Gemini to return strict JSON directly
-          maxOutputTokens: 4096, // a 3-day structured Journey with per-stop reasons can exceed 1024
-          // No temperature/top_p/top_k — deprecated and ignored on 3.x Flash
-          // models. No explicit thinkingLevel — left at the model default
-          // rather than tuned without a clear need.
+  for (const model of GEMINI_MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey, // header, not query param — keeps the key out of server access logs
         },
-      }),
-    });
-  } catch (networkErr) {
-    throw new LLMRequestError(`Network error calling Gemini: ${(networkErr as Error).message}`);
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          generationConfig: {
+            responseMimeType: 'application/json', // ask Gemini to return strict JSON directly
+            maxOutputTokens: 4096, // a 3-day structured Journey with per-stop reasons can exceed 1024
+            // No temperature/top_p/top_k — deprecated and ignored on 3.x Flash
+            // models. No explicit thinkingLevel — left at the model default
+            // rather than tuned without a clear need.
+          },
+        }),
+      });
+    } catch (networkErr) {
+      throw new LLMRequestError(`Network error calling Gemini: ${(networkErr as Error).message}`);
+    }
+
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+
+      if (res.status === 429 || res.status === 503) {
+        console.error('THONGTHAI_AI_MODEL_RETRY', model, res.status, errBody);
+        lastAvailabilityError = `Gemini API returned ${res.status}: ${errBody.slice(0, 300)}`;
+        continue;
+      }
+
+      throw new LLMRequestError(`Gemini API returned ${res.status}: ${errBody.slice(0, 300)}`);
+    }
+
+    console.log('THONGTHAI_AI_MODEL_SUCCESS', model);
+
+    const data = await res.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+      promptFeedback?: { blockReason?: string };
+    };
+
+    if (data.promptFeedback?.blockReason) {
+      throw new LLMRequestError(`Gemini blocked the request: ${data.promptFeedback.blockReason}`);
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      throw new LLMRequestError('Gemini returned no text content (check candidates[0].finishReason for why).');
+    }
+
+    return text;
   }
 
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => '');
-    throw new LLMRequestError(`Gemini API returned ${res.status}: ${errBody.slice(0, 300)}`);
-  }
-
-  const data = await res.json() as {
-    candidates?: Array<{
-      content?: { parts?: Array<{ text?: string }> };
-      finishReason?: string;
-    }>;
-    promptFeedback?: { blockReason?: string };
-  };
-
-  if (data.promptFeedback?.blockReason) {
-    throw new LLMRequestError(`Gemini blocked the request: ${data.promptFeedback.blockReason}`);
-  }
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new LLMRequestError('Gemini returned no text content (check candidates[0].finishReason for why).');
-  }
-  return text;
+  throw new LLMRequestError(lastAvailabilityError || 'Gemini models are unavailable.');
 }
 
 // ---------------------------------------------------------------------------
