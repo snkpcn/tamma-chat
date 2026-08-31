@@ -91,14 +91,11 @@ class LLMAvailabilityError extends LLMRequestError {
   }
 }
 
-// Verified current via search: gemini-2.0-flash (originally used here) was
-// shut down June 1, 2026. gemini-3.7-flash, used here, is Google's newest
-// GA Flash model as of their current docs (confirmed against three
-// independent sources: ai.google.dev, Firebase AI Logic docs, and Google's
-// own developer blog). Its predecessor, gemini-3.6-flash, is also still
-// valid/GA if you'd rather stay one version back.
+// gemini-2.0-flash (originally used here) was shut down June 1, 2026.
+// The primary production list starts with models that have succeeded in
+// production. gemini-3.7-flash is intentionally excluded while its 503
+// UNAVAILABLE frequency remains high.
 const GEMINI_MODELS = [
-  'gemini-3.7-flash',
   'gemini-3.6-flash',
   'gemini-3.5-flash',
 ] as const;
@@ -107,9 +104,9 @@ const GEMINI_MODELS = [
  * Real Gemini API call, using a live GEMINI_API_KEY server-side environment
  * variable. Written to the current Gemini 3.x REST contract — confirmed via
  * search (not from training-data memory, which predates these models) that
- * temperature/top_p/top_k are deprecated and silently ignored on gemini-3.7
- * -flash, gemini-3.6-flash, and gemini-3.5-flash-lite, so they're
- * deliberately omitted below rather than included as a no-op.
+ * temperature/top_p/top_k are deprecated and silently ignored on Gemini 3.x
+ * Flash models, so they're deliberately omitted below rather than included
+ * as a no-op.
  * Structurally correct against the documented contract, but — same caveat
  * as always — never run against the live endpoint, since no real key
  * exists in this environment to test with.
@@ -131,7 +128,7 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
 
     let res: Response;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 7_000);
+    const timeout = setTimeout(() => controller.abort(), 10_000);
 
     try {
       res = await fetch(url, {
