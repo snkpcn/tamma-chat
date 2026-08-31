@@ -104,7 +104,10 @@ const GEMINI_MODELS = [
  * -flash, gemini-3.6-flash, and gemini-3.5-flash-lite, so they're
  * deliberately omitted below rather than included as a no-op.
  * Structurally correct against the documented contract, but — same caveat
- * as always — never run against the live endpoint, sinceasync function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
+ * as always — never run against the live endpoint, since no real key
+ * exists in this environment to test with.
+ */
+async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ProviderNotConfiguredError();
 
