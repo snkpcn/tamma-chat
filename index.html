@@ -4100,12 +4100,35 @@ function hideTyping(){
 function defaultGuestContext(){
   return { tripDuration:null, travelerType:null, group:{adults:null,children:null,elderly:null}, interests:[], pace:null, budget:null, constraints:[] };
 }
-function buildChatRequestPayload(text){
+function getAnonymousGuestId(){
+      const key = 'tamma_guest_id';
+      let id = null;
+      try { id = localStorage.getItem(key); } catch(e) {}
+      if(id) return id;
+
+      if(window.crypto && typeof window.crypto.randomUUID === 'function'){
+        id = window.crypto.randomUUID();
+      } else {
+        const bytes = new Uint8Array(16);
+        if(window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+        else for(let i=0;i<bytes.length;i++) bytes[i] = Math.floor(Math.random() * 256);
+        bytes[6] = (bytes[6] & 15) | 64;
+        bytes[8] = (bytes[8] & 63) | 128;
+        const hex = Array.from(bytes, b => b.toString(16).padStart(2,'0')).join('');
+        id = hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
+      }
+
+      try { localStorage.setItem(key, id); } catch(e) {}
+      return id;
+    }
+
+    function buildChatRequestPayload(text){
   const js = window.JourneyProvider ? window.JourneyProvider.get() : {};
   return {
     message: text,
     language: window.I18N ? window.I18N.lang() : 'th',
-    chatHistory: (js.chatHistory || []).slice(-12).map(m => ({ role: m.role, content: m.text })),
+    guestId: getAnonymousGuestId(),
+        chatHistory: (js.chatHistory || []).slice(-12).map(m => ({ role: m.role, content: m.text })),
     // The real, accumulated conversational memory — not reconstructed from
     // currentPrefs each time, so nothing an earlier turn established gets lost.
     guestContext: js.guestContext || defaultGuestContext(),
