@@ -12,11 +12,16 @@ type LineMessage = {
   text?: string;
 };
 
+type LinePostback = {
+  data?: string;
+};
+
 type LineWebhookEvent = {
   type?: string;
   replyToken?: string;
   source?: LineSource;
   message?: LineMessage;
+  postback?: LinePostback;
 };
 
 type LineWebhookBody = {
@@ -49,12 +54,19 @@ type CustomerLoadResponse = {
   guestContext?: GuestContext;
 };
 
+type LineTextMessage = { type: 'text'; text: string };
+type LineFlexMessage = { type: 'flex'; altText: string; contents: Record<string, unknown> };
+type LineReplyMessage = LineTextMessage | LineFlexMessage;
+
 const TAMMA_SITE_URL = 'https://tamma-chat.netlify.app';
 const THONGTHAI_ENDPOINT = '/.netlify/functions/thongthai-chat';
 const CUSTOMER_MEMORY_ENDPOINT = '/.netlify/functions/customer-memory';
+const LINE_LINK_ENDPOINT = '/.netlify/functions/line-link';
 const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
+const OFFICIAL_MAP_URL = 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic';
 const MAX_LINE_TEXT = 4500;
 const MAX_LINE_MESSAGES = 5;
+const LINK_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function getHeader(event: HandlerEvent, name: string): string | undefined {
   const target = name.toLowerCase();
@@ -73,12 +85,7 @@ function verifyLineSignature(rawBody: string, signature: string | undefined, cha
   }
 }
 
-/**
- * Stable UUID-shaped anonymous ID for a LINE user.
- * We never persist or log the raw LINE user ID. The existing customer-memory
- * layer only requires a valid UUID anonymous_id, so this lets LINE use the
- * exact same guests / guest_memory / journeys pipeline as the website.
- */
+/** Stable UUID-shaped anonymous ID for a LINE user. Raw LINE user IDs are never persisted or logged. */
 function lineGuestId(userId: string): string {
   const hex = createHash('sha256').update('tamma-line:' + userId, 'utf8').digest('hex').slice(0, 32).split('');
   hex[12] = '5';
@@ -113,11 +120,6 @@ function emptyGuestContext(): GuestContext {
   };
 }
 
-/**
- * High-confidence structured facts should not depend solely on an LLM choosing
- * the right enum. These phrases all unambiguously mean limited walking/mobility.
- * Keep this narrow: ambiguous statements remain for Thongthai to interpret.
- */
 function deterministicConstraints(text: string): string[] {
   const normalized = text.trim();
   const limitedWalking = [
@@ -139,17 +141,10 @@ async function reinforceStructuredMemory(message: string, userId: string, langua
   const loadResponse = await fetch(baseUrl + CUSTOMER_MEMORY_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'load',
-      guestId,
-      language,
-      guestContext: emptyGuestContext(),
-    }),
+    body: JSON.stringify({ action: 'load', guestId, language, guestContext: emptyGuestContext() }),
   });
 
-  if (!loadResponse.ok) {
-    throw new Error(`Customer memory load returned ${loadResponse.status}`);
-  }
+  if (!loadResponse.ok) throw new Error(`Customer memory load returned ${loadResponse.status}`);
 
   const loaded = await loadResponse.json() as CustomerLoadResponse;
   const current = loaded.guestContext ?? emptyGuestContext();
@@ -166,18 +161,10 @@ async function reinforceStructuredMemory(message: string, userId: string, langua
   const saveResponse = await fetch(baseUrl + CUSTOMER_MEMORY_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'profile',
-      guestId,
-      language,
-      guestContext: merged,
-    }),
+    body: JSON.stringify({ action: 'profile', guestId, language, guestContext: merged }),
   });
 
-  if (!saveResponse.ok) {
-    throw new Error(`Customer memory save returned ${saveResponse.status}`);
-  }
-
+  if (!saveResponse.ok) throw new Error(`Customer memory save returned ${saveResponse.status}`);
   console.log('LINE_STRUCTURED_MEMORY_REINFORCED', inferredConstraints.join(','));
 }
 
@@ -190,15 +177,7 @@ async function askThongthai(message: string, userId: string): Promise<ThongthaiR
       message,
       language: detectLanguage(message),
       chatHistory: [],
-      guestContext: {
-        tripDuration: null,
-        travelerType: null,
-        group: { adults: null, children: null, elderly: null },
-        interests: [],
-        pace: null,
-        budget: null,
-        constraints: [],
-      },
+      guestContext: emptyGuestContext(),
       journeyContext: {
         currentPlan: null,
         savedPlan: null,
@@ -210,10 +189,7 @@ async function askThongthai(message: string, userId: string): Promise<ThongthaiR
     }),
   });
 
-  if (!response.ok) {
-    throw new Error(`Thongthai endpoint returned ${response.status}`);
-  }
-
+  if (!response.ok) throw new Error(`Thongthai endpoint returned ${response.status}`);
   return await response.json() as ThongthaiResponse;
 }
 
@@ -224,7 +200,6 @@ function splitText(value: string): string[] {
 
   const chunks: string[] = [];
   let remaining = text;
-
   while (remaining.length > MAX_LINE_TEXT && chunks.length < MAX_LINE_MESSAGES - 1) {
     let cut = remaining.lastIndexOf('\n', MAX_LINE_TEXT);
     if (cut < MAX_LINE_TEXT * 0.6) cut = remaining.lastIndexOf(' ', MAX_LINE_TEXT);
@@ -232,38 +207,173 @@ function splitText(value: string): string[] {
     chunks.push(remaining.slice(0, cut).trim());
     remaining = remaining.slice(cut).trim();
   }
-
   if (remaining) chunks.push(remaining.slice(0, MAX_LINE_TEXT));
   return chunks.slice(0, MAX_LINE_MESSAGES);
 }
 
-function buildReplyTexts(result: ThongthaiResponse): string[] {
-  let text = typeof result.message === 'string' && result.message.trim()
+function createLinkToken(userId: string, channelSecret: string): string {
+  const guestId = lineGuestId(userId);
+  const expiresAt = Date.now() + LINK_TOKEN_TTL_MS;
+  const payload = `${guestId}.${expiresAt}`;
+  const signature = createHmac('sha256', channelSecret).update(payload, 'utf8').digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function buildJourneyFlex(result: ThongthaiResponse, userId: string, channelSecret: string): LineFlexMessage {
+  const summaryRaw = typeof result.message === 'string' ? result.message.replace(/\s+/g, ' ').trim() : '';
+  const summary = summaryRaw.length > 260 ? summaryRaw.slice(0, 257) + '…' : summaryRaw;
+  const linkToken = encodeURIComponent(createLinkToken(userId, channelSecret));
+  const linkedJourneyUrl = `${TAMMA_SITE_URL}${LINE_LINK_ENDPOINT}?token=${linkToken}&next=journey`;
+
+  return {
+    type: 'flex',
+    altText: 'Journey จากทองไทยพร้อมแล้ว',
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#3B2A20',
+        paddingAll: '20px',
+        contents: [
+          { type: 'text', text: 'ทำมา-ชาติ', color: '#DDB66F', size: 'sm', weight: 'bold' },
+          { type: 'text', text: 'Journey ของคุณ', color: '#FFFFFF', size: 'xl', weight: 'bold', margin: 'sm' },
+          { type: 'text', text: 'วางโดยทองไทย AI Local Host', color: '#E8DED4', size: 'xs', margin: 'sm' },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'md',
+        paddingAll: '20px',
+        contents: [
+          { type: 'text', text: summary || 'แผนของคุณพร้อมแล้วครับ', wrap: true, color: '#4A4039', size: 'sm' },
+          { type: 'separator', margin: 'lg', color: '#E8E0D7' },
+          { type: 'text', text: 'ปรับแผนได้ต่อในแชตนี้ และความจำของทองไทยจะตามไปบนเว็บเมื่อเปิดแผนเต็ม', wrap: true, color: '#7B6C61', size: 'xs', margin: 'lg' },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: '16px',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            color: '#7A5A32',
+            action: { type: 'uri', label: 'ดู Journey เต็ม', uri: linkedJourneyUrl },
+          },
+          {
+            type: 'button',
+            style: 'secondary',
+            action: { type: 'postback', label: 'บันทึก Journey', data: 'action=save_journey', displayText: 'บันทึก Journey นี้' },
+          },
+          {
+            type: 'button',
+            style: 'link',
+            action: { type: 'uri', label: 'เปิดแผนที่ ทำมา-ชาติ', uri: OFFICIAL_MAP_URL },
+          },
+        ],
+      },
+    },
+  };
+}
+
+function buildReplyMessages(result: ThongthaiResponse, userId: string, channelSecret: string): LineReplyMessage[] {
+  const baseText = typeof result.message === 'string' && result.message.trim()
     ? result.message.trim()
     : 'ทองไทยได้รับข้อความแล้วครับ ลองพิมพ์ใหม่อีกครั้งได้เลยครับ';
 
-  if (result.journeyAction?.type && result.journeyAction.type !== 'none') {
-    text += `\n\nดู Journey และบันทึกแผนแบบเต็มได้ที่ ${TAMMA_SITE_URL}/`;
-  }
+  const isJourney = Boolean(
+    result.journeyAction?.type
+    && result.journeyAction.type !== 'none'
+    && result.journeyAction.journey,
+  );
 
-  return splitText(text);
-}
-
-async function replyToLine(replyToken: string, texts: string[], accessToken: string): Promise<void> {
-  const messages = texts
-    .filter(Boolean)
-    .slice(0, MAX_LINE_MESSAGES)
+  const textLimit = isJourney ? MAX_LINE_MESSAGES - 1 : MAX_LINE_MESSAGES;
+  const messages: LineReplyMessage[] = splitText(baseText)
+    .slice(0, textLimit)
     .map(text => ({ type: 'text', text }));
 
-  if (!messages.length) return;
+  if (isJourney) messages.push(buildJourneyFlex(result, userId, channelSecret));
+  return messages.slice(0, MAX_LINE_MESSAGES);
+}
 
+function supabaseConfig(): { url: string; key: string } | null {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return url && key ? { url: url.replace(/\/$/, ''), key } : null;
+}
+
+async function supabaseFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const config = supabaseConfig();
+  if (!config) throw new Error('Supabase configuration missing');
+  const response = await fetch(`${config.url}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: config.key,
+      Authorization: `Bearer ${config.key}`,
+      'Content-Type': 'application/json',
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!response.ok) throw new Error(`Supabase request failed ${response.status}`);
+  return response;
+}
+
+async function saveLatestJourney(userId: string): Promise<'saved' | 'already_saved' | 'missing'> {
+  const anonymousId = lineGuestId(userId);
+  const guestResponse = await supabaseFetch(
+    `guests?anonymous_id=eq.${encodeURIComponent(anonymousId)}&select=id&limit=1`,
+  );
+  const guests = await guestResponse.json() as Array<{ id: string }>;
+  const guestDbId = guests[0]?.id;
+  if (!guestDbId) return 'missing';
+
+  const journeyResponse = await supabaseFetch(
+    `journeys?guest_id=eq.${encodeURIComponent(guestDbId)}&select=action,intent,journey&order=created_at.desc&limit=1`,
+  );
+  const journeys = await journeyResponse.json() as Array<{ action: string; intent: string | null; journey: unknown }>;
+  const latest = journeys[0];
+  if (!latest?.journey) return 'missing';
+  if (latest.action === 'save') return 'already_saved';
+
+  await supabaseFetch('journeys', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      guest_id: guestDbId,
+      action: 'save',
+      intent: 'save_journey',
+      journey: latest.journey,
+    }),
+  });
+
+  await supabaseFetch('guest_events', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      guest_id: guestDbId,
+      event_type: 'journey_saved',
+      intent: 'save_journey',
+      metadata: { source: 'line_flex' },
+    }),
+  });
+
+  return 'saved';
+}
+
+async function replyToLine(replyToken: string, messages: LineReplyMessage[], accessToken: string): Promise<void> {
+  if (!messages.length) return;
   const response = await fetch(LINE_REPLY_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ replyToken, messages }),
+    body: JSON.stringify({ replyToken, messages: messages.slice(0, MAX_LINE_MESSAGES) }),
   });
 
   if (!response.ok) {
@@ -272,19 +382,34 @@ async function replyToLine(replyToken: string, texts: string[], accessToken: str
   }
 }
 
-async function handleEvent(event: LineWebhookEvent, accessToken: string): Promise<void> {
+async function handleEvent(
+  event: LineWebhookEvent,
+  accessToken: string,
+  channelSecret: string,
+): Promise<void> {
   const replyToken = event.replyToken;
   if (!replyToken) return;
-
-  if (event.type !== 'message') return;
 
   const userId = event.source?.userId;
   if (!userId) return;
 
+  if (event.type === 'postback' && event.postback?.data === 'action=save_journey') {
+    const status = await saveLatestJourney(userId);
+    const text = status === 'saved'
+      ? 'บันทึก Journey นี้ให้แล้วครับ ✅ กลับมาคุยกับทองไทยเมื่อไรก็เรียกแผนนี้ต่อได้ครับ'
+      : status === 'already_saved'
+        ? 'Journey นี้ถูกบันทึกไว้แล้วครับ ✅'
+        : 'ยังไม่พบ Journey ล่าสุดให้บันทึกครับ ลองให้ทองไทยวางแผนก่อนนะครับ';
+    await replyToLine(replyToken, [{ type: 'text', text }], accessToken);
+    return;
+  }
+
+  if (event.type !== 'message') return;
+
   if (event.message?.type !== 'text' || typeof event.message.text !== 'string') {
     await replyToLine(
       replyToken,
-      ['ตอนนี้ทองไทยคุยผ่านข้อความตัวอักษรก่อนนะครับ พิมพ์สิ่งที่อยากรู้หรือให้ช่วยวาง Journey มาได้เลยครับ'],
+      [{ type: 'text', text: 'ตอนนี้ทองไทยคุยผ่านข้อความตัวอักษรก่อนนะครับ พิมพ์สิ่งที่อยากรู้หรือให้ช่วยวาง Journey มาได้เลยครับ' }],
       accessToken,
     );
     return;
@@ -294,9 +419,6 @@ async function handleEvent(event: LineWebhookEvent, accessToken: string): Promis
   const language = detectLanguage(message);
   const result = await askThongthai(message, userId);
 
-  // The AI remains the primary extractor. For a very small set of explicit,
-  // high-confidence mobility phrases, reinforce the structured enum so the
-  // persistent memory cannot silently lose an important accessibility need.
   try {
     await reinforceStructuredMemory(message, userId, language);
   } catch (err) {
@@ -304,13 +426,11 @@ async function handleEvent(event: LineWebhookEvent, accessToken: string): Promis
     console.error('LINE_STRUCTURED_MEMORY_ERROR', detail.slice(0, 240));
   }
 
-  await replyToLine(replyToken, buildReplyTexts(result), accessToken);
+  await replyToLine(replyToken, buildReplyMessages(result, userId, channelSecret), accessToken);
 }
 
 export const handler: Handler = async (event: HandlerEvent) => {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method not allowed' };
-  }
+  if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
 
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
   const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -334,11 +454,11 @@ export const handler: Handler = async (event: HandlerEvent) => {
   }
 
   const events = Array.isArray(payload.events) ? payload.events : [];
-  if (!events.length) {
-    return { statusCode: 200, body: 'OK' };
-  }
+  if (!events.length) return { statusCode: 200, body: 'OK' };
 
-  const results = await Promise.allSettled(events.map(item => handleEvent(item, accessToken)));
+  const results = await Promise.allSettled(
+    events.map(item => handleEvent(item, accessToken, channelSecret)),
+  );
   const failures = results.filter(result => result.status === 'rejected');
   if (failures.length) {
     for (const failure of failures) {
@@ -349,8 +469,5 @@ export const handler: Handler = async (event: HandlerEvent) => {
     }
   }
 
-  // LINE expects a 2xx response for a successfully received webhook. Individual
-  // event errors are logged server-side so a transient AI failure does not cause
-  // LINE to redeliver the same user message repeatedly.
   return { statusCode: 200, body: 'OK' };
 };
