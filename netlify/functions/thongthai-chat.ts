@@ -148,10 +148,6 @@ function mergeAgentState(
   return Object.keys(merged).length ? merged : undefined;
 }
 
-/**
- * The second brain pass exists only to phrase the result after real tools ran.
- * It must not silently mutate the structural decision made before execution.
- */
 function mergeAfterTools(first: BrainResponse, second: BrainResponse): BrainResponse {
   return {
     ...first,
@@ -193,6 +189,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
       guestContext: customerState.guestContext,
       journeyContext: {
         ...request.journeyContext,
+        currentPlan: request.journeyContext.currentPlan || customerState.journeyContext.currentPlan,
         savedPlan: request.journeyContext.savedPlan || customerState.journeyContext.savedPlan,
         visitedExperiences: request.journeyContext.visitedExperiences.length
           ? request.journeyContext.visitedExperiences
@@ -204,7 +201,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
     };
   }
 
-  // Keep the channel-local key as an alias even when it resolves to a canonical guest.
   await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
 
   const [communityOfferings, runtime] = await Promise.all([
@@ -233,8 +229,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
     return json(502, { error: 'Thongthai brain request failed. Please try again.' });
   }
 
-  // Persist the structural decision before tool writes so stale request arrays cannot
-  // overwrite favorite/visited changes made by the agent tools.
   await persistCustomerResult(guestDbId, firstResponse, request.journeyContext, request.language);
 
   let finalResponse = firstResponse;
@@ -269,7 +263,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   await persistBrainRuntime(guestDbId, channel, finalResponse);
 
-  // Internal reasoning state and tool orchestration never leave this endpoint.
   return json(200, {
     message: finalResponse.message,
     intent: finalResponse.intent,
