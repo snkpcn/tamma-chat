@@ -559,6 +559,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
       guestContext: customerState.guestContext,
       journeyContext: {
         ...req.journeyContext,
+        savedPlan: req.journeyContext.savedPlan || customerState.journeyContext.savedPlan,
         visitedExperiences: req.journeyContext.visitedExperiences.length
           ? req.journeyContext.visitedExperiences
           : customerState.journeyContext.visitedExperiences,
