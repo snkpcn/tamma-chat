@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#171914">
+<title>บัญชีของฉัน · ทำมา-ชาติ</title>
+<style>
+:root{--bg:#141611;--panel:#1c1f18;--paper:#f4eee2;--ink:#201d18;--muted:#84796b;--gold:#c3a369;--gold2:#94713e;--line:rgba(195,163,105,.24);--green:#70876a;--red:#b35b4d}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% -10%,#363523 0,transparent 34%),var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif;color:#f4eee2;min-height:100vh}.shell{max-width:880px;margin:auto;padding:24px 16px 70px}.brand{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}.logo{font-weight:900;letter-spacing:.08em;color:var(--gold)}.back{color:#d8cbb5;text-decoration:none;font-size:13px}.hero{margin-bottom:24px}.eyebrow{font-size:12px;color:var(--gold);font-weight:800;letter-spacing:.14em}.hero h1{font-size:clamp(34px,8vw,58px);line-height:1.02;margin:8px 0 12px;letter-spacing:-.04em}.hero p{max-width:640px;color:#bdb5a7;line-height:1.65;margin:0}.panel{background:var(--paper);color:var(--ink);border-radius:28px;padding:22px;box-shadow:0 22px 60px rgba(0,0,0,.25);margin-top:18px}.grid{display:grid;gap:14px}.two{grid-template-columns:1fr}@media(min-width:680px){.two{grid-template-columns:1fr 1fr}.panel{padding:28px}}label{font-size:12px;font-weight:800;color:#655b50;display:block;margin:2px 0 7px}input,select{width:100%;border:1px solid #d9cebd;background:#fffdf8;color:#211e19;border-radius:14px;padding:13px 14px;font-size:16px;outline:none}input:focus,select:focus{border-color:var(--gold2);box-shadow:0 0 0 3px rgba(148,113,62,.12)}button{appearance:none;border:0;border-radius:14px;padding:13px 16px;font-size:15px;font-weight:850;cursor:pointer}.primary{background:#6f5734;color:white}.secondary{background:#e7ded0;color:#342b20}.ghost{background:transparent;border:1px solid #d7cabb;color:#55493b}.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.row button{flex:1;min-width:140px}.muted{font-size:13px;color:var(--muted);line-height:1.55}.status{border-radius:14px;padding:11px 13px;font-size:13px;margin:12px 0;display:none}.status.show{display:block}.status.ok{background:#e8f0e5;color:#40583b}.status.err{background:#f5e4e0;color:#7e352a}.tabs{display:flex;gap:8px;margin-bottom:17px}.tab{background:#e9dfd0;color:#6d5a43;padding:9px 12px;border-radius:999px;font-size:12px}.tab.active{background:#6f5734;color:#fff}.hidden{display:none!important}.section-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 14px}.section-title h2{font-size:20px;margin:0}.cards{display:grid;gap:10px}.item{border:1px solid #ddd1c1;border-radius:17px;padding:14px;background:#fffaf2}.item-top{display:flex;justify-content:space-between;gap:10px}.code{font-weight:900;color:#4b3b28}.badge{font-size:11px;padding:5px 8px;border-radius:999px;background:#eee5d8;color:#655442;height:fit-content}.meta{font-size:13px;color:#75685a;line-height:1.6;margin-top:7px}.empty{padding:20px;text-align:center;color:#8f8375;border:1px dashed #d8ccbd;border-radius:16px}.account-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:18px}.account-name{font-size:24px;font-weight:900}.privacy{font-size:11px;color:#978a7b;margin-top:18px;border-top:1px solid #ded4c6;padding-top:14px;line-height:1.6}.pill{display:inline-flex;padding:7px 9px;border-radius:999px;background:#e9dfd0;color:#63523f;font-size:11px;font-weight:800}.loading{opacity:.55;pointer-events:none}
+</style>
+</head>
+<body>
+<main class="shell">
+  <div class="brand"><div class="logo">ทำมา-ชาติ · THONGTHAI</div><a class="back" href="/">กลับหน้าเว็บ</a></div>
+  <section class="hero"><div class="eyebrow">MY TAMMA-CHART</div><h1>บัญชีของฉัน</h1><p>เก็บข้อมูลติดต่อ การจอง Journey คำสั่งซื้อ และเรื่องที่ทีมทำมา-ชาติต้องติดตามให้คุณไว้ในที่เดียว</p></section>
+
+  <section id="authPanel" class="panel">
+    <div class="tabs"><button id="loginTab" class="tab active" type="button">เข้าสู่ระบบ</button><button id="signupTab" class="tab" type="button">สมัครบัญชี</button></div>
+    <div class="grid">
+      <div><label>อีเมล</label><input id="email" type="email" autocomplete="email" placeholder="name@example.com"></div>
+      <div><label>รหัสผ่าน</label><input id="password" type="password" autocomplete="current-password" minlength="8" placeholder="อย่างน้อย 8 ตัวอักษร"></div>
+    </div>
+    <div id="authStatus" class="status"></div>
+    <div class="row"><button id="authSubmit" class="primary" type="button">เข้าสู่ระบบ</button></div>
+    <p class="muted">ระบบบัญชีใช้ Supabase Auth โดยตรง รหัสผ่านไม่ถูกส่งเข้า Thongthai Brain และไม่ถูกเก็บในฐานข้อมูลลูกค้าของทำมา-ชาติ</p>
+  </section>
+
+  <section id="accountPanel" class="panel hidden">
+    <div class="account-head"><div><div class="pill">CUSTOMER ACCOUNT</div><div id="accountName" class="account-name" style="margin-top:8px">บัญชีของคุณ</div><div id="accountEmail" class="muted"></div></div><button id="logoutBtn" class="ghost" type="button">ออกจากระบบ</button></div>
+    <div class="section-title"><h2>ข้อมูลติดต่อ</h2><span class="pill">เข้ารหัสในระบบ</span></div>
+    <div class="grid two">
+      <div><label>ชื่อที่ให้ทีมงานติดต่อ</label><input id="fullName" maxlength="120" placeholder="ชื่อ-นามสกุล"></div>
+      <div><label>เบอร์โทร</label><input id="phone" type="tel" maxlength="30" placeholder="08x-xxx-xxxx"></div>
+      <div><label>ช่องทางที่สะดวก</label><select id="preferredContact"><option value="phone">โทรศัพท์</option><option value="email">อีเมล</option><option value="line">LINE</option></select></div>
+      <div><label>อีเมลบัญชี</label><input id="profileEmail" disabled></div>
+    </div>
+    <label style="margin-top:14px;display:flex;gap:9px;align-items:center;font-weight:650"><input id="marketingOptIn" type="checkbox" style="width:18px;height:18px">รับข่าวสาร/ข้อเสนอจากทำมา-ชาติ (ไม่จำเป็น)</label>
+    <div id="profileStatus" class="status"></div>
+    <div class="row"><button id="saveProfile" class="primary" type="button">บันทึกข้อมูล</button><button id="refreshBtn" class="secondary" type="button">รีเฟรชรายการ</button></div>
+
+    <div style="height:28px"></div>
+    <div class="section-title"><h2>การจอง</h2><span id="bookingCount" class="pill">0 รายการ</span></div><div id="bookings" class="cards"></div>
+    <div style="height:25px"></div>
+    <div class="section-title"><h2>คำสั่งซื้อ OTOP</h2><span id="orderCount" class="pill">0 รายการ</span></div><div id="orders" class="cards"></div>
+    <div style="height:25px"></div>
+    <div class="section-title"><h2>เรื่องที่สอบถามร้านกาแฟ</h2><span id="inquiryCount" class="pill">0 รายการ</span></div><div id="inquiries" class="cards"></div>
+    <div class="privacy">ข้อมูลชื่อ เบอร์โทร อีเมล และที่อยู่สำหรับการจัดส่งถูกเก็บแยกจากความจำเชิงสนทนาของทองไทย และเข้ารหัสฝั่งเซิร์ฟเวอร์ ใช้เพื่อให้บริการ การจอง คำสั่งซื้อ และการติดต่อกลับเท่านั้น</div>
+  </section>
+</main>
+<script>
+const SUPABASE_URL='https://upaokrprawzhgzeqsdke.supabase.co';
+const SUPABASE_KEY='sb_publishable_RhUfQ8ZqUx9PYQWaEvV6Yw_Z8oB5zN_';
+const ACCOUNT_API='/.netlify/functions/customer-account';
+let mode='login';
+const $=id=>document.getElementById(id);
+function token(){return sessionStorage.getItem('tamma_access_token')||''}
+function setStatus(id,msg,ok){const el=$(id);el.textContent=msg;el.className='status show '+(ok?'ok':'err')}
+function clearStatus(id){$(id).className='status'}
+function authHeaders(extra={}){return {'Content-Type':'application/json',apikey:SUPABASE_KEY,...extra}}
+function apiHeaders(){return {'Content-Type':'application/json',Authorization:'Bearer '+token()}}
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+function thTime(v){if(!v)return '-';try{return new Intl.DateTimeFormat('th-TH',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Bangkok'}).format(new Date(v))}catch{return v}}
+function statusLabel(v){return ({requested:'รอตรวจสอบ',confirmed:'ยืนยันแล้ว',cancelled:'ยกเลิก',completed:'เสร็จแล้ว',no_show:'ไม่มา',preparing:'กำลังเตรียม',ready:'พร้อมรับ',shipped:'จัดส่งแล้ว',open:'รอตอบ',replied:'ตอบแล้ว',closed:'ปิดเรื่อง'})[v]||v||'-'}
+function empty(el,text){el.innerHTML='<div class="empty">'+esc(text)+'</div>'}
+function render(account){
+  $('accountName').textContent=account.fullName||'บัญชีของคุณ'; $('accountEmail').textContent=account.email||'';
+  $('fullName').value=account.fullName||''; $('phone').value=account.phone||''; $('profileEmail').value=account.email||'';
+  $('preferredContact').value=account.preferredContact||'phone'; $('marketingOptIn').checked=account.marketingOptIn===true;
+  const bookings=Array.isArray(account.bookings)?account.bookings:[]; $('bookingCount').textContent=bookings.length+' รายการ';
+  if(!bookings.length)empty($('bookings'),'ยังไม่มีรายการจอง');else $('bookings').innerHTML=bookings.map(x=>`<div class="item"><div class="item-top"><div class="code">${esc(x.booking_code)}</div><span class="badge">${esc(statusLabel(x.status))}</span></div><div class="meta">${esc(({restaurant:'ร้านอาหาร',stay:'ที่พัก',activity:'กิจกรรม'})[x.service_type]||x.service_type)} · ${esc(thTime(x.start_at))}<br>${x.party_size?'จำนวน '+esc(x.party_size)+' คน':''}${x.quantity>1?' · '+esc(x.quantity)+' หน่วย':''}</div></div>`).join('');
+  const orders=Array.isArray(account.orders)?account.orders:[]; $('orderCount').textContent=orders.length+' รายการ';
+  if(!orders.length)empty($('orders'),'ยังไม่มีคำสั่งซื้อ');else $('orders').innerHTML=orders.map(x=>`<div class="item"><div class="item-top"><div class="code">${esc(x.order_code)}</div><span class="badge">${esc(statusLabel(x.status))}</span></div><div class="meta">ยอด ${Number(x.total_amount||0).toLocaleString('th-TH')} บาท · ${x.fulfillment_type==='shipping'?'จัดส่ง':'รับสินค้า'}</div></div>`).join('');
+  const inquiries=Array.isArray(account.inquiries)?account.inquiries:[]; $('inquiryCount').textContent=inquiries.length+' รายการ';
+  if(!inquiries.length)empty($('inquiries'),'ยังไม่มีเรื่องที่ส่งให้ร้านกาแฟ');else $('inquiries').innerHTML=inquiries.map(x=>`<div class="item"><div class="item-top"><div class="code">${esc(x.inquiry_code)}</div><span class="badge">${esc(statusLabel(x.status))}</span></div><div class="meta">${esc(x.question)}</div>${x.response_note?'<div class="meta"><b>ทีมงาน:</b> '+esc(x.response_note)+'</div>':''}</div>`).join('');
+}
+async function loadAccount(){
+  if(!token())return false;
+  const res=await fetch(ACCOUNT_API,{headers:apiHeaders()});
+  if(res.status===401){sessionStorage.removeItem('tamma_access_token');return false}
+  if(!res.ok)throw new Error('โหลดบัญชีไม่สำเร็จ'); const data=await res.json();
+  $('authPanel').classList.add('hidden');$('accountPanel').classList.remove('hidden');
+  if(data.account)render(data.account); return true;
+}
+async function authenticate(){
+  clearStatus('authStatus'); const email=$('email').value.trim();const password=$('password').value;
+  if(!email||password.length<8){setStatus('authStatus','กรอกอีเมลและรหัสผ่านอย่างน้อย 8 ตัวอักษร',false);return}
+  $('authSubmit').classList.add('loading');
+  try{
+    const url=mode==='signup'?SUPABASE_URL+'/auth/v1/signup':SUPABASE_URL+'/auth/v1/token?grant_type=password';
+    const res=await fetch(url,{method:'POST',headers:authHeaders(),body:JSON.stringify({email,password})});const data=await res.json();
+    if(!res.ok)throw new Error(data.msg||data.error_description||data.message||'ไม่สำเร็จ');
+    const access=data.access_token||data.session?.access_token;
+    if(!access){setStatus('authStatus','สมัครเรียบร้อยแล้ว กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ (ถ้าระบบขอการยืนยัน)',true);return}
+    sessionStorage.setItem('tamma_access_token',access); await saveProfile(true); await loadAccount();
+  }catch(e){setStatus('authStatus',e.message||'เกิดข้อผิดพลาด',false)}finally{$('authSubmit').classList.remove('loading')}
+}
+async function saveProfile(silent=false){
+  if(!token())return;
+  if(!silent)clearStatus('profileStatus');
+  const payload={guestId:localStorage.getItem('tamma_guest_id')||null,fullName:$('fullName')?.value||null,phone:$('phone')?.value||null,preferredContact:$('preferredContact')?.value||'email',marketingOptIn:$('marketingOptIn')?.checked===true};
+  const res=await fetch(ACCOUNT_API,{method:'POST',headers:apiHeaders(),body:JSON.stringify(payload)}); const data=await res.json();
+  if(!res.ok){if(!silent)setStatus('profileStatus','บันทึกไม่สำเร็จ',false);return}
+  if(data.account)render(data.account); if(!silent)setStatus('profileStatus','บันทึกข้อมูลแล้ว',true);
+}
+function setMode(next){mode=next;$('loginTab').classList.toggle('active',mode==='login');$('signupTab').classList.toggle('active',mode==='signup');$('authSubmit').textContent=mode==='login'?'เข้าสู่ระบบ':'สมัครบัญชี';$('password').autocomplete=mode==='login'?'current-password':'new-password';clearStatus('authStatus')}
+$('loginTab').onclick=()=>setMode('login');$('signupTab').onclick=()=>setMode('signup');$('authSubmit').onclick=authenticate;$('saveProfile').onclick=()=>saveProfile(false);$('refreshBtn').onclick=()=>loadAccount().catch(()=>setStatus('profileStatus','รีเฟรชไม่สำเร็จ',false));$('logoutBtn').onclick=async()=>{const t=token();if(t)fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:authHeaders({Authorization:'Bearer '+t})}).catch(()=>{});sessionStorage.removeItem('tamma_access_token');location.reload()};
+loadAccount().catch(()=>{});
+</script>
+</body>
+</html>
