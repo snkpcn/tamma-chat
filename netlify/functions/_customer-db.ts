@@ -243,6 +243,7 @@ export async function loadCustomerMemory(
       + '&select=memory_key,memory_value',
     );
     const rows = await memoryRes.json() as Array<{ memory_key: string; memory_value: unknown }>;
+    const persisted = Object.fromEntries(rows.map(row => [row.memory_key, row.memory_value]));
 
     return {
       guestDbId,
