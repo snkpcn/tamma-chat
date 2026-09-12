@@ -11,7 +11,7 @@ import {
   type ChatTurn,
   type GuestContext,
   type JourneyContext,
-} from './_thongthai-brain';
+} from './_thongthai-brain-v3';
 import {
   loadCustomerMemory,
   loadVerifiedCommunityOfferings,
@@ -23,7 +23,7 @@ import {
   loadBrainRuntime,
   persistBrainRuntime,
   registerGuestIdentity,
-} from './_thongthai-runtime';
+} from './_thongthai-runtime-v3';
 
 export type {
   BrainRequest as ChatRequest,
@@ -31,7 +31,7 @@ export type {
   ChatTurn,
   GuestContext,
   JourneyContext,
-} from './_thongthai-brain';
+} from './_thongthai-brain-v3';
 
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
 
