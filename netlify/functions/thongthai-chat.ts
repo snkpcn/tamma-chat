@@ -17,6 +17,7 @@
 
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
+import { loadCustomerMemory, persistCustomerResult } from './_customer-db';
 
 // ---------------------------------------------------------------------------
 // Request / response contracts — exactly the shapes specified for this
@@ -44,6 +45,7 @@ export interface JourneyContext {
 }
 
 export interface ChatRequest {
+  guestId?: string;
   message: string;
   language: 'th' | 'en' | 'zh' | 'lo' | 'vi';
   chatHistory: ChatTurn[];
@@ -540,7 +542,13 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (!isValidRequest(body)) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing required fields: message, language, chatHistory' }) };
   }
-  const req = body as ChatRequest;
+  let req = body as ChatRequest;
+  let guestDbId: string | null = null;
+  const customerState = await loadCustomerMemory(req.guestId, req.language, req.guestContext);
+  if (customerState) {
+    guestDbId = customerState.guestDbId;
+    req = { ...req, guestContext: customerState.guestContext };
+  }
 
   const systemPrompt = buildSystemPrompt(req);
   // Defensive dedup: even though the frontend now sends chatHistory BEFORE
@@ -578,6 +586,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   try {
     const parsed = validateChatResponse(JSON.parse(stripCodeFences(raw)));
+    await persistCustomerResult(guestDbId, parsed, req.journeyContext, req.language);
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) };
   } catch (firstError) {
     // one repair retry, same discipline as the planning agent
@@ -589,6 +598,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
       ];
       const repaired = await callPreferredLanguageModel(systemPrompt, repairMessages);
       const parsed = validateChatResponse(JSON.parse(stripCodeFences(repaired)));
+      await persistCustomerResult(guestDbId, parsed, req.journeyContext, req.language);
       return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) };
     } catch (repairError) {
       if (repairError instanceof LLMAvailabilityError) {
