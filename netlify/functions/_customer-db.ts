@@ -25,9 +25,19 @@ export interface CustomerState {
   guestDbId: string;
   guestContext: GuestContextShape;
   journeyContext: {
+    savedPlan: unknown | null;
     visitedExperiences: string[];
     favorites: string[];
   };
+}
+
+export type CustomerSnapshotAction = 'profile' | 'favorite' | 'visited' | 'save_journey';
+
+export interface CustomerSnapshot {
+  guestContext: GuestContextShape;
+  visitedExperiences: unknown;
+  favorites: unknown;
+  savedPlan?: unknown | null;
 }
 
 export type VerifiedCommunityOffering = {
@@ -181,7 +191,12 @@ function mergeGuestContext(
   };
 }
 
-async function insertEvent(guestDbId: string, eventType: string, intent: string | null = null): Promise<void> {
+async function insertEvent(
+  guestDbId: string,
+  eventType: string,
+  intent: string | null = null,
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
   await dbFetch('guest_events', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
@@ -189,7 +204,7 @@ async function insertEvent(guestDbId: string, eventType: string, intent: string 
       guest_id: guestDbId,
       event_type: eventType,
       intent,
-      metadata: {},
+      metadata,
     }),
   });
 }
@@ -244,11 +259,17 @@ export async function loadCustomerMemory(
     );
     const rows = await memoryRes.json() as Array<{ memory_key: string; memory_value: unknown }>;
     const persisted = Object.fromEntries(rows.map(row => [row.memory_key, row.memory_value]));
+    const journeyRes = await dbFetch(
+      'journeys?guest_id=eq.' + encodeURIComponent(guestDbId)
+      + '&action=eq.save&select=journey&order=created_at.desc&limit=1',
+    );
+    const savedJourneys = await journeyRes.json() as Array<{ journey: unknown }>;
 
     return {
       guestDbId,
       guestContext: mergeGuestContext(current, rows),
       journeyContext: {
+        savedPlan: savedJourneys[0]?.journey ?? null,
         visitedExperiences: sanitizeExperienceIds(persisted.visited_experiences),
         favorites: sanitizeExperienceIds(persisted.favorites),
       },
@@ -256,6 +277,88 @@ export async function loadCustomerMemory(
   } catch (err) {
     safeDbError('load', err);
     return null;
+  }
+}
+
+export async function persistCustomerSnapshot(
+  guestDbId: string,
+  snapshot: CustomerSnapshot,
+  language: string,
+  action: CustomerSnapshotAction,
+): Promise<boolean> {
+  if (!guestDbId || !configuration()) return false;
+
+  try {
+    const context = snapshot.guestContext ?? {
+      tripDuration: null,
+      travelerType: null,
+      group: { adults: null, children: null, elderly: null },
+      interests: [],
+      pace: null,
+      budget: null,
+      constraints: [],
+    };
+    const rows: Array<{ guest_id: string; memory_key: string; memory_value: unknown; updated_at: string }> = [];
+    const add = (memoryKey: string, value: unknown) => {
+      rows.push({
+        guest_id: guestDbId,
+        memory_key: memoryKey,
+        memory_value: value,
+        updated_at: new Date().toISOString(),
+      });
+    };
+
+    if (TRAVELER_TYPES.has(String(context.travelerType))) add('traveler_type', context.travelerType);
+    if (TRIP_DURATIONS.has(String(context.tripDuration))) add('trip_duration', context.tripDuration);
+    if (PACES.has(String(context.pace))) add('pace', context.pace);
+    const group = sanitizeGroup(context.group);
+    if (group) add('group', group);
+    if (Array.isArray(context.interests)) add('interests', dedupeAllowed(context.interests, INTERESTS));
+    if (Array.isArray(context.constraints)) add('constraints', dedupeAllowed(context.constraints, CONSTRAINTS));
+    const band = budgetBand(context.budget);
+    if (band) add('budget_band', band);
+    if (LANGUAGES.has(language)) add('preferred_language', language);
+    if (Array.isArray(snapshot.visitedExperiences)) {
+      add('visited_experiences', sanitizeExperienceIds(snapshot.visitedExperiences));
+    }
+    if (Array.isArray(snapshot.favorites)) {
+      add('favorites', sanitizeExperienceIds(snapshot.favorites));
+    }
+
+    if (rows.length) {
+      await dbFetch('guest_memory?on_conflict=guest_id,memory_key', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(rows),
+      });
+    }
+
+    if (action === 'save_journey' && snapshot.savedPlan) {
+      await dbFetch('journeys', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          guest_id: guestDbId,
+          action: 'save',
+          intent: 'save_journey',
+          journey: snapshot.savedPlan,
+        }),
+      });
+      await insertEvent(guestDbId, 'journey_saved', 'save_journey');
+    } else if (action === 'favorite') {
+      await insertEvent(guestDbId, 'experience_favorited', null, {
+        count: sanitizeExperienceIds(snapshot.favorites).length,
+      });
+    } else if (action === 'visited') {
+      await insertEvent(guestDbId, 'experience_visited', null, {
+        count: sanitizeExperienceIds(snapshot.visitedExperiences).length,
+      });
+    }
+
+    return true;
+  } catch (err) {
+    safeDbError('snapshot', err);
+    return false;
   }
 }
 
@@ -299,10 +402,10 @@ export async function persistCustomerResult(
     if (LANGUAGES.has(language)) add('preferred_language', language);
 
     const visitedExperiences = sanitizeExperienceIds(journeyContext.visitedExperiences);
-    if (visitedExperiences.length) add('visited_experiences', visitedExperiences);
+    if (Array.isArray(journeyContext.visitedExperiences)) add('visited_experiences', visitedExperiences);
 
     const favorites = sanitizeExperienceIds(journeyContext.favorites);
-    if (favorites.length) add('favorites', favorites);
+    if (Array.isArray(journeyContext.favorites)) add('favorites', favorites);
 
     if (memoryRows.length) {
       await dbFetch('guest_memory?on_conflict=guest_id,memory_key', {
