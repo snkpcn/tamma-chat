@@ -24,6 +24,10 @@ type JourneyContextShape = {
 export interface CustomerState {
   guestDbId: string;
   guestContext: GuestContextShape;
+  journeyContext: {
+    visitedExperiences: string[];
+    favorites: string[];
+  };
 }
 
 const TRAVELER_TYPES = new Set(['solo', 'couple', 'friends', 'family', 'group']);
@@ -198,6 +202,10 @@ export async function loadCustomerMemory(
     return {
       guestDbId,
       guestContext: mergeGuestContext(current, rows),
+      journeyContext: {
+        visitedExperiences: sanitizeExperienceIds(persisted.visited_experiences),
+        favorites: sanitizeExperienceIds(persisted.favorites),
+      },
     };
   } catch (err) {
     safeDbError('load', err);
