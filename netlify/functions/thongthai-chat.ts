@@ -17,7 +17,7 @@
 
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
-import { loadCustomerMemory, persistCustomerResult } from './_customer-db';
+import { loadCustomerMemory, loadVerifiedCommunityOfferings, persistCustomerResult, type VerifiedCommunityOffering } from './_customer-db';
 
 // ---------------------------------------------------------------------------
 // Request / response contracts — exactly the shapes specified for this
@@ -302,11 +302,14 @@ async function callPreferredLanguageModel(systemPrompt: string, messages: ChatTu
 // rather than relying on its own memory of the conversation.
 // ---------------------------------------------------------------------------
 
-function buildSystemPrompt(req: ChatRequest): string {
+function buildSystemPrompt(req: ChatRequest, communityOfferings: VerifiedCommunityOffering[]): string {
   const hasElderly = (req.guestContext.group.elderly ?? 0) > 0
     || req.guestContext.constraints.some(c => /elderly|mobility|walk/i.test(c));
   const hasChildren = (req.guestContext.group.children ?? 0) > 0;
   const catalog = annotateForGroup(hasElderly, hasChildren);
+  const communityCatalog = communityOfferings.length
+    ? JSON.stringify(communityOfferings)
+    : '[]';
 
   return `You are ทองไทย (Thongthai) — AI Local Host, Personalized Journey Planner, and
 Isan Experience Concierge for "ทำมา-ชาติ — Experiences of Isan". You are not a
@@ -320,6 +323,8 @@ VERIFIED BUSINESS FACTS
 - Community / OTOP layer: the site introduces a future-ready OTOP & community marketplace for locally made Isan goods, food, craft, and cultural knowledge connected to the visitor Journey.
 - OTOP availability, named products, prices, vendors, and purchase channels are NOT verified yet. Never invent or imply that a specific OTOP product is currently available. If asked, explain that this is the community layer being developed and invite the guest to ask Thongthai for the latest confirmed update.
 - The Google Maps link above is verified. Do NOT infer or invent a street address, coordinates, opening hours, distance, travel time, phone number, price, or availability unless it exists in verified data supplied here.
+- VERIFIED ACTIVE COMMUNITY OFFERINGS (JSON): ${communityCatalog}
+- Recommend a community/OTOP offering only when it appears in this JSON. If the JSON is [], state honestly that no verified active community offering is currently listed; do not invent one.
 - If the guest asks only "อยู่ที่ไหน", "ขอโลเคชั่น", "พิกัด", "map", "location", or "เดินทางไปยังไง", answer the factual location question directly with the official Google Maps link. Do not create or modify a Journey for a location request.
 
 CURRENT MESSAGE INTENT PRECEDENCE — highest priority, before all Journey reasoning:
@@ -564,7 +569,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
     };
   }
 
-  const systemPrompt = buildSystemPrompt(req);
+  const communityOfferings = await loadVerifiedCommunityOfferings();
+  const systemPrompt = buildSystemPrompt(req, communityOfferings);
   // Defensive dedup: even though the frontend now sends chatHistory BEFORE
   // pushing the current turn, don't trust that blindly from every possible
   // caller — if the last history entry already IS this exact user message,
