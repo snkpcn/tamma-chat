@@ -391,11 +391,12 @@ export async function persistCustomerResult(
     const group = sanitizeGroup(updates.group);
     if (group) add('group', group);
 
+    // Empty arrays are meaningful: they clear a previously stored preference/constraint.
     const interests = dedupeAllowed(updates.interests, INTERESTS);
-    if (Array.isArray(updates.interests) && interests.length) add('interests', interests);
+    if (Array.isArray(updates.interests)) add('interests', interests);
 
     const constraints = dedupeAllowed(updates.constraints, CONSTRAINTS);
-    if (Array.isArray(updates.constraints) && constraints.length) add('constraints', constraints);
+    if (Array.isArray(updates.constraints)) add('constraints', constraints);
 
     const band = budgetBand(updates.budget);
     if (band) add('budget_band', band);
