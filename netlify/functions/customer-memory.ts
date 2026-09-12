@@ -1,6 +1,7 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
   loadCustomerMemory,
+  loadVerifiedCommunityOfferings,
   persistCustomerSnapshot,
   type CustomerSnapshotAction,
 } from './_customer-db';
@@ -82,6 +83,13 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   if (FORBIDDEN_RAW_CHAT_KEYS.some(key => key in body)) {
     return json(400, { error: 'Raw chat content is not accepted by this endpoint' });
+  }
+
+  // Read-only, no guest identity involved — the homepage OTOP/community
+  // section reads this before (or without) any guest ever being created.
+  if (body.action === 'community') {
+    const offerings = await loadVerifiedCommunityOfferings();
+    return json(200, { offerings });
   }
 
   const guestId = typeof body.guestId === 'string' ? body.guestId : undefined;

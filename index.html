@@ -603,6 +603,8 @@ p{ margin:0; }
 /* Constraint toggles — same visual language as .is-on, but independently
    toggleable (not a single-select group like time/who/mood). */
 .p-opt-toggle.is-on{ background:var(--olive); border-color:var(--olive); }
+.onboarding-actions{ display:flex; flex-wrap:wrap; gap:10px; margin-top:28px; }
+.onboarding-note{ margin-top:14px; font-size:13px; font-weight:600; color:var(--olive); }
 .planner-progress{ margin-top:30px; border-top:1px dashed var(--line); padding-top:24px; }
 .pp-title{ font-size:14px; font-weight:700; color:var(--brown-deep); margin-bottom:12px; }
 .pp-steps{ list-style:none; display:flex; flex-direction:column; gap:8px; }
@@ -887,6 +889,98 @@ p{ margin:0; }
 </section>
 
 <!-- ============================================================
+     QUICK PROFILE — optional, skippable onboarding straight into the
+     same customer memory database the AI chat already reads and writes
+     (netlify/functions/customer-memory.ts, action:'profile'). Reuses
+     .planner-card / .p-opt from the Plan Your Journey section below —
+     no new visual language, no new icon pack.
+     ============================================================ -->
+<section class="section-pad" id="onboarding">
+  <div class="container">
+    <div class="section-head fade-up">
+      <span class="eyebrow" data-i18n="onboard_eyebrow">Quick Profile</span>
+      <h2 data-i18n="onboard_heading">ให้ทองไทยรู้จักคุณสักนิด</h2>
+      <p data-i18n="onboard_sub">ตอบสัก 30 วินาที เพื่อให้ทองไทยแนะนำ Journey ที่ตรงใจคุณตั้งแต่คำถามแรก — ข้ามได้ทุกเมื่อ</p>
+    </div>
+    <div class="planner-card fade-up">
+      <div class="planner-grid">
+        <div class="planner-group">
+          <h4 data-i18n="plan_who_label">มากับใคร</h4>
+          <div class="planner-options" id="onboardWho">
+            <button class="p-opt" data-val="solo" data-i18n="opt_who_solo">มาคนเดียว</button>
+            <button class="p-opt" data-val="couple" data-i18n="opt_who_couple">มาเป็นคู่</button>
+            <button class="p-opt" data-val="friends" data-i18n="opt_who_friends">เพื่อน</button>
+            <button class="p-opt" data-val="family" data-i18n="opt_who_family">ครอบครัว</button>
+            <button class="p-opt" data-val="group" data-i18n="onboard_who_group">กลุ่มใหญ่</button>
+          </div>
+        </div>
+        <div class="planner-group">
+          <h4 data-i18n="onboard_interests_label">สนใจอะไรเป็นพิเศษ (เลือกได้หลายข้อ)</h4>
+          <div class="planner-options" id="onboardInterests">
+            <button class="p-opt p-opt-toggle" data-val="food" data-i18n="onboard_interest_food">อาหาร</button>
+            <button class="p-opt p-opt-toggle" data-val="nature" data-i18n="onboard_interest_nature">ธรรมชาติ</button>
+            <button class="p-opt p-opt-toggle" data-val="adventure" data-i18n="onboard_interest_adventure">ผจญภัย</button>
+            <button class="p-opt p-opt-toggle" data-val="rest" data-i18n="onboard_interest_rest">พักผ่อน</button>
+            <button class="p-opt p-opt-toggle" data-val="culture" data-i18n="onboard_interest_culture">วัฒนธรรม</button>
+            <button class="p-opt p-opt-toggle" data-val="coffee" data-i18n="onboard_interest_coffee">กาแฟ</button>
+            <button class="p-opt p-opt-toggle" data-val="local_community" data-i18n="onboard_interest_local_community">ชุมชนท้องถิ่น</button>
+            <button class="p-opt p-opt-toggle" data-val="family" data-i18n="onboard_interest_family">กิจกรรมครอบครัว</button>
+            <button class="p-opt p-opt-toggle" data-val="photography" data-i18n="onboard_interest_photography">ถ่ายรูป</button>
+            <button class="p-opt p-opt-toggle" data-val="wellness" data-i18n="onboard_interest_wellness">Wellness</button>
+          </div>
+        </div>
+        <div class="planner-group">
+          <h4 data-i18n="onboard_pace_label">เที่ยวแบบไหน</h4>
+          <div class="planner-options" id="onboardPace">
+            <button class="p-opt" data-val="slow" data-i18n="onboard_pace_slow">ช้า ๆ สบาย ๆ</button>
+            <button class="p-opt" data-val="relaxed" data-i18n="onboard_pace_relaxed">ผ่อนคลาย</button>
+            <button class="p-opt" data-val="balanced" data-i18n="onboard_pace_balanced">สมดุล</button>
+            <button class="p-opt" data-val="active" data-i18n="onboard_pace_active">Active</button>
+          </div>
+        </div>
+        <div class="planner-group">
+          <h4 data-i18n="plan_time_label">มีเวลาเท่าไร</h4>
+          <div class="planner-options" id="onboardDuration">
+            <button class="p-opt" data-val="short" data-i18n="opt_time_short">2–3 ชั่วโมง</button>
+            <button class="p-opt" data-val="half" data-i18n="opt_time_half">ครึ่งวัน</button>
+            <button class="p-opt" data-val="full" data-i18n="opt_time_full">1 วัน</button>
+            <button class="p-opt" data-val="overnight" data-i18n="opt_time_overnight">ค้างคืน</button>
+            <button class="p-opt" data-val="2d1n" data-i18n="opt_time_2d1n">2 วัน 1 คืน</button>
+            <button class="p-opt" data-val="3d2n" data-i18n="opt_time_3d2n">3 วัน 2 คืน</button>
+          </div>
+        </div>
+        <div class="planner-group">
+          <h4 data-i18n="onboard_budget_label">งบประมาณโดยประมาณ (ไม่บังคับ)</h4>
+          <div class="planner-options" id="onboardBudget">
+            <button class="p-opt" data-val="under_3000" data-i18n="onboard_budget_1">ต่ำกว่า 3,000</button>
+            <button class="p-opt" data-val="3000_8000" data-i18n="onboard_budget_2">3,000–8,000</button>
+            <button class="p-opt" data-val="8000_15000" data-i18n="onboard_budget_3">8,000–15,000</button>
+            <button class="p-opt" data-val="15000_plus" data-i18n="onboard_budget_4">15,000+</button>
+          </div>
+        </div>
+        <div class="planner-group">
+          <h4 data-i18n="plan_constraints_label">มีข้อจำกัดไหม (เลือกได้มากกว่า 1)</h4>
+          <div class="planner-options" id="onboardConstraints">
+            <button class="p-opt p-opt-toggle" data-val="limited_walking" data-i18n="onboard_constraint_walking">เดินไกลไม่ได้</button>
+            <button class="p-opt p-opt-toggle" data-val="wheelchair_access" data-i18n="onboard_constraint_wheelchair">ใช้รถเข็น</button>
+            <button class="p-opt p-opt-toggle" data-val="elderly_friendly" data-i18n="opt_constraint_elderly">มีผู้สูงอายุ</button>
+            <button class="p-opt p-opt-toggle" data-val="child_friendly" data-i18n="opt_constraint_children">มากับเด็กเล็ก</button>
+            <button class="p-opt p-opt-toggle" data-val="vegetarian" data-i18n="onboard_constraint_vegetarian">มังสวิรัติ</button>
+            <button class="p-opt p-opt-toggle" data-val="no_spicy" data-i18n="onboard_constraint_no_spicy">ทานเผ็ดไม่ได้</button>
+            <button class="p-opt p-opt-toggle" data-val="rain_sensitive" data-i18n="onboard_constraint_rain">กังวลเรื่องฝน</button>
+          </div>
+        </div>
+      </div>
+      <div class="onboarding-actions">
+        <button class="btn btn-primary btn-sm" id="onboardSave" type="button" data-i18n="onboard_save">บันทึกโปรไฟล์</button>
+        <button class="btn btn-outline btn-sm" id="onboardSkip" type="button" data-i18n="onboard_skip">ข้ามไปก่อน</button>
+      </div>
+      <p class="onboarding-note" id="onboardSavedNote" hidden data-i18n="onboard_saved_note">บันทึกแล้ว — ทองไทยจะจำไว้ให้ในทุกการสนทนาครับ</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
      WELCOME PARTNER — INTHANIN
      ============================================================ -->
 <section class="welcome-partner" id="welcome">
@@ -1012,22 +1106,22 @@ p{ margin:0; }
 <section class="section-pad community-section" id="community">
   <div class="container">
     <div class="section-head fade-up">
-      <span class="eyebrow">OTOP &amp; Community</span>
-      <h2>Journey ที่พาไปไกลกว่าการมาเที่ยว</h2>
-      <p>เชื่อมการกิน การพัก และการค้นพบเข้ากับผู้คน ภูมิปัญญา และสินค้าจากชุมชนอีสาน เพื่อให้ทุกการมาเยือนส่งต่อคุณค่าได้จริง</p>
+      <span class="eyebrow" data-i18n="otop_eyebrow">OTOP &amp; Community</span>
+      <h2 data-i18n="otop_heading">Journey ที่พาไปไกลกว่าการมาเที่ยว</h2>
+      <p data-i18n="otop_sub">เชื่อมการกิน การพัก และการค้นพบเข้ากับผู้คน ภูมิปัญญา และสินค้าจากชุมชนอีสาน เพื่อให้ทุกการมาเยือนส่งต่อคุณค่าได้จริง</p>
     </div>
-    <div class="community-grid fade-up">
-      <div class="community-card community-empty-state">
-        <div class="card-kicker">Verified community catalog</div>
-        <h3>กำลังเตรียมเรื่องราวจากชุมชน</h3>
-        <p>ขณะนี้ยังไม่มีสินค้า OTOP หรือกิจกรรมชุมชนที่ผ่านการยืนยันและเปิดใช้งานในระบบ รายการจะแสดงเมื่อมีข้อมูลจริงเท่านั้น</p>
+    <div class="community-grid fade-up" id="communityGrid">
+      <div class="community-card community-empty-state" id="communityEmptyState">
+        <div class="card-kicker" data-i18n="otop_empty_kicker">Verified community catalog</div>
+        <h3 data-i18n="otop_empty_heading">กำลังเตรียมเรื่องราวจากชุมชน</h3>
+        <p data-i18n="otop_empty_body">ขณะนี้ยังไม่มีสินค้า OTOP หรือกิจกรรมชุมชนที่ผ่านการยืนยันและเปิดใช้งานในระบบ รายการจะแสดงเมื่อมีข้อมูลจริงเท่านั้น</p>
       </div>
     </div>
     <div class="community-actions fade-up">
-      <button class="btn btn-primary" id="askThongthaiOTOP" type="button">ถามทองไทยเรื่องชุมชน</button>
-      <a class="btn btn-outline" href="#journey">ดูเส้นทาง Journey</a>
+      <button class="btn btn-primary" id="askThongthaiOTOP" type="button" data-i18n="otop_ask">ถามทองไทยเรื่องชุมชน</button>
+      <a class="btn btn-outline" href="#journey" data-i18n="otop_view_journey">ดูเส้นทาง Journey</a>
     </div>
-    <p class="community-note">ส่วน OTOP &amp; Community เป็นชั้นประสบการณ์ที่กำลังพัฒนา รายการสินค้า ราคา และผู้ขายจะแสดงเมื่อยืนยันข้อมูลแล้วเท่านั้น</p>
+    <p class="community-note" data-i18n="otop_note">ส่วน OTOP &amp; Community เป็นชั้นประสบการณ์ที่กำลังพัฒนา รายการสินค้า ราคา และผู้ขายจะแสดงเมื่อยืนยันข้อมูลแล้วเท่านั้น</p>
   </div>
 </section>
 
@@ -1439,6 +1533,32 @@ function defaultState(){
   };
 }
 
+// Best-effort sync of the customer memory database (Supabase, via
+// netlify/functions/customer-memory.ts) for actions that don't already go
+// through the AI chat turn — favorite/visited chips and the Plan section's
+// Save Journey button. Never blocks or breaks the local action: local
+// state (via storageSet) is always the source of truth for this session;
+// this is a mirror, not a dependency. Raw chat text is never sent here —
+// only structured guestContext / experience ids / a saved plan object.
+async function syncCustomerMemory(guestContext, action, extra){
+  try{
+    const guestId = typeof window.getAnonymousGuestId === 'function' ? window.getAnonymousGuestId() : null;
+    if(!guestId) return null;
+    const res = await fetch('/.netlify/functions/customer-memory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({
+        guestId,
+        language: window.I18N ? window.I18N.lang() : 'th',
+        guestContext,
+        action,
+      }, extra)),
+    });
+    if(!res.ok) return null;
+    return await res.json();
+  }catch(e){ return null; }
+}
+
 /* ============================================================
    JourneyProvider — central state store
    ============================================================ */
@@ -1470,16 +1590,19 @@ const JourneyProvider = (function(){
     const i = state.visitedExperiences.indexOf(loc);
     if(i>-1) state.visitedExperiences.splice(i,1); else state.visitedExperiences.push(loc);
     await persist();
+    syncCustomerMemory(state.guestContext, 'visited', { visitedExperiences: state.visitedExperiences, favorites: state.favorites });
   }
   async function toggleFavorite(loc){
     const i = state.favorites.indexOf(loc);
     if(i>-1) state.favorites.splice(i,1); else state.favorites.push(loc);
     await persist();
+    syncCustomerMemory(state.guestContext, 'favorite', { visitedExperiences: state.visitedExperiences, favorites: state.favorites });
   }
   async function savePlan(plan){
     state.savedPlans.unshift(Object.assign({ id: uid(), ts: Date.now() }, plan));
     state.lastPlan = plan;
     await persist();
+    syncCustomerMemory(state.guestContext, 'save_journey', { savedPlan: plan, visitedExperiences: state.visitedExperiences, favorites: state.favorites });
   }
   async function setLastPlan(plan){
     state.lastPlan = plan;
@@ -1526,7 +1649,49 @@ const JourneyProvider = (function(){
     await persist();
   }
 
-  return { init, get, subscribe, addJournalEntry, toggleVisited, toggleFavorite, savePlan, setLastPlan, addPlanToJournal, pushChat, updateGuestContext };
+  // Onboarding-card submit: same local merge as an AI-driven contextUpdates,
+  // then mirrored to the server via the 'profile' action (independent of
+  // any chat turn).
+  async function saveProfile(updates){
+    await updateGuestContext(updates);
+    return syncCustomerMemory(state.guestContext, 'profile', { visitedExperiences: state.visitedExperiences, favorites: state.favorites });
+  }
+
+  // Page-load hydration from the server-side customer memory database:
+  // fills in only what's still unknown locally (a scalar guestContext field
+  // that's still null, or an experience id / saved plan the server has but
+  // this device doesn't) — anything already known locally is left
+  // untouched, so a fresher local answer is never overwritten by a stale
+  // server one. This is what lets a returning guest skip questions already
+  // answered and get their last saved Journey back.
+  async function hydrateFromServer(){
+    const result = await syncCustomerMemory(state.guestContext, 'load', {});
+    if(!result) return;
+    const gc = state.guestContext;
+    const sgc = result.guestContext;
+    if(sgc){
+      if(gc.tripDuration == null && sgc.tripDuration != null) gc.tripDuration = sgc.tripDuration;
+      if(gc.travelerType == null && sgc.travelerType != null) gc.travelerType = sgc.travelerType;
+      if(gc.pace == null && sgc.pace != null) gc.pace = sgc.pace;
+      if(gc.budget == null && sgc.budget != null) gc.budget = sgc.budget;
+      if(sgc.group){
+        if(gc.group.adults == null && sgc.group.adults != null) gc.group.adults = sgc.group.adults;
+        if(gc.group.children == null && sgc.group.children != null) gc.group.children = sgc.group.children;
+        if(gc.group.elderly == null && sgc.group.elderly != null) gc.group.elderly = sgc.group.elderly;
+      }
+      if(!gc.interests?.length && sgc.interests?.length) gc.interests = [...sgc.interests];
+      if(!gc.constraints?.length && sgc.constraints?.length) gc.constraints = [...sgc.constraints];
+    }
+    const jc = result.journeyContext;
+    if(jc){
+      (jc.favorites||[]).forEach(id => { if(!state.favorites.includes(id)) state.favorites.push(id); });
+      (jc.visitedExperiences||[]).forEach(id => { if(!state.visitedExperiences.includes(id)) state.visitedExperiences.push(id); });
+      if(!state.lastPlan && jc.savedPlan) state.lastPlan = jc.savedPlan;
+    }
+    await persist();
+  }
+
+  return { init, get, subscribe, addJournalEntry, toggleVisited, toggleFavorite, savePlan, setLastPlan, addPlanToJournal, pushChat, updateGuestContext, saveProfile, hydrateFromServer };
 })();
 
 window.JourneyProvider = JourneyProvider;
@@ -1627,6 +1792,31 @@ th: {
   notify_plan_added_journal:"เพิ่ม Journey นี้ลงสมุดบันทึกแล้วนะ 📓",
   community_eyebrow:"Return Again", community_heading:"ทำมา-ชาติไม่ได้จบตอนคุณกลับบ้าน",
   community_copy:"Journey Journal ของคุณยังอยู่ Rewards ยังคงสะสมต่อ และทองไทยพร้อมช่วยวางแผนการมาเยือนครั้งต่อไปเสมอ เพราะสำหรับเรา ทุกการจากลาคือจุดเริ่มต้นของการกลับมาอีกครั้ง",
+  otop_eyebrow:"OTOP & Community", otop_heading:"Journey ที่พาไปไกลกว่าการมาเที่ยว",
+  otop_sub:"เชื่อมการกิน การพัก และการค้นพบเข้ากับผู้คน ภูมิปัญญา และสินค้าจากชุมชนอีสาน เพื่อให้ทุกการมาเยือนส่งต่อคุณค่าได้จริง",
+  otop_empty_kicker:"Verified community catalog", otop_empty_heading:"กำลังเตรียมเรื่องราวจากชุมชน",
+  otop_empty_body:"ขณะนี้ยังไม่มีสินค้า OTOP หรือกิจกรรมชุมชนที่ผ่านการยืนยันและเปิดใช้งานในระบบ รายการจะแสดงเมื่อมีข้อมูลจริงเท่านั้น",
+  otop_ask:"ถามทองไทยเรื่องชุมชน", otop_view_journey:"ดูเส้นทาง Journey",
+  otop_note:"ส่วน OTOP & Community เป็นชั้นประสบการณ์ที่กำลังพัฒนา รายการสินค้า ราคา และผู้ขายจะแสดงเมื่อยืนยันข้อมูลแล้วเท่านั้น",
+  otop_type_product:"สินค้า", otop_type_food:"อาหารท้องถิ่น", otop_type_workshop:"เวิร์กช็อป",
+  otop_type_cultural_experience:"ประสบการณ์วัฒนธรรม", otop_type_wellness:"Wellness",
+  otop_type_agriculture:"เกษตรกรรม", otop_type_craft:"งานฝีมือ", otop_type_activity:"กิจกรรม",
+  onboard_eyebrow:"Quick Profile", onboard_heading:"ให้ทองไทยรู้จักคุณสักนิด",
+  onboard_sub:"ตอบสัก 30 วินาที เพื่อให้ทองไทยแนะนำ Journey ที่ตรงใจคุณตั้งแต่คำถามแรก — ข้ามได้ทุกเมื่อ",
+  onboard_who_group:"กลุ่มใหญ่",
+  onboard_interests_label:"สนใจอะไรเป็นพิเศษ (เลือกได้หลายข้อ)",
+  onboard_interest_food:"อาหาร", onboard_interest_nature:"ธรรมชาติ", onboard_interest_adventure:"ผจญภัย",
+  onboard_interest_rest:"พักผ่อน", onboard_interest_culture:"วัฒนธรรม", onboard_interest_coffee:"กาแฟ",
+  onboard_interest_local_community:"ชุมชนท้องถิ่น", onboard_interest_family:"กิจกรรมครอบครัว",
+  onboard_interest_photography:"ถ่ายรูป", onboard_interest_wellness:"Wellness",
+  onboard_pace_label:"เที่ยวแบบไหน", onboard_pace_slow:"ช้า ๆ สบาย ๆ", onboard_pace_relaxed:"ผ่อนคลาย",
+  onboard_pace_balanced:"สมดุล", onboard_pace_active:"Active",
+  onboard_budget_label:"งบประมาณโดยประมาณ (ไม่บังคับ)",
+  onboard_budget_1:"ต่ำกว่า 3,000", onboard_budget_2:"3,000–8,000", onboard_budget_3:"8,000–15,000", onboard_budget_4:"15,000+",
+  onboard_constraint_walking:"เดินไกลไม่ได้", onboard_constraint_wheelchair:"ใช้รถเข็น",
+  onboard_constraint_vegetarian:"มังสวิรัติ", onboard_constraint_no_spicy:"ทานเผ็ดไม่ได้", onboard_constraint_rain:"กังวลเรื่องฝน",
+  onboard_save:"บันทึกโปรไฟล์", onboard_skip:"ข้ามไปก่อน",
+  onboard_saved_note:"บันทึกแล้ว — ทองไทยจะจำไว้ให้ในทุกการสนทนาครับ",
   btn_view_journey:"ดู Journey ของฉัน", btn_plan_next:"วางแผนครั้งต่อไป",
   footer_brand_desc:"Isan Wellness Community — พื้นที่ที่เชื่อมโยงการกิน การพัก และการค้นพบอีสานไว้ในที่เดียวกัน",
   footer_col_journey:"Journey", footer_community:"ชุมชนของเรา", footer_contact:"ติดต่อเรา",
@@ -1814,6 +2004,31 @@ en: {
   notify_plan_added_journal:"Added this Journey to your Journal 📓",
   community_eyebrow:"Return Again", community_heading:"Thammachat Doesn't End When You Go Home",
   community_copy:"Your Journey Journal stays with you. Rewards keep building. And Thongthai is always ready to help plan your next visit — because for us, every goodbye is really the start of coming back.",
+  otop_eyebrow:"OTOP & Community", otop_heading:"A Journey that reaches further than the visit itself",
+  otop_sub:"Connecting food, stay, and discovery with the people, knowledge, and products of Isan communities, so every visit passes real value forward.",
+  otop_empty_kicker:"Verified community catalog", otop_empty_heading:"Community stories are on the way",
+  otop_empty_body:"There are no verified, active OTOP products or community activities in the system yet. Listings will appear only once real data is confirmed.",
+  otop_ask:"Ask Thongthai about the community", otop_view_journey:"View the Journey route",
+  otop_note:"The OTOP & Community layer is still being developed. Products, prices, and vendors will appear only once verified.",
+  otop_type_product:"Product", otop_type_food:"Local food", otop_type_workshop:"Workshop",
+  otop_type_cultural_experience:"Cultural experience", otop_type_wellness:"Wellness",
+  otop_type_agriculture:"Agriculture", otop_type_craft:"Craft", otop_type_activity:"Activity",
+  onboard_eyebrow:"Quick Profile", onboard_heading:"Let Thongthai get to know you",
+  onboard_sub:"Answer a few quick questions so Thongthai can suggest a Journey that fits from the very first message — skip anytime.",
+  onboard_who_group:"Large group",
+  onboard_interests_label:"What are you into? (pick any)",
+  onboard_interest_food:"Food", onboard_interest_nature:"Nature", onboard_interest_adventure:"Adventure",
+  onboard_interest_rest:"Rest", onboard_interest_culture:"Culture", onboard_interest_coffee:"Coffee",
+  onboard_interest_local_community:"Local community", onboard_interest_family:"Family activities",
+  onboard_interest_photography:"Photography", onboard_interest_wellness:"Wellness",
+  onboard_pace_label:"What pace do you like", onboard_pace_slow:"Slow and easy", onboard_pace_relaxed:"Relaxed",
+  onboard_pace_balanced:"Balanced", onboard_pace_active:"Active",
+  onboard_budget_label:"Roughly how much budget (optional)",
+  onboard_budget_1:"Under 3,000", onboard_budget_2:"3,000–8,000", onboard_budget_3:"8,000–15,000", onboard_budget_4:"15,000+",
+  onboard_constraint_walking:"Limited walking", onboard_constraint_wheelchair:"Wheelchair access",
+  onboard_constraint_vegetarian:"Vegetarian", onboard_constraint_no_spicy:"No spicy food", onboard_constraint_rain:"Rain-sensitive",
+  onboard_save:"Save profile", onboard_skip:"Skip for now",
+  onboard_saved_note:"Saved — Thongthai will remember this for every conversation.",
   btn_view_journey:"View My Journey", btn_plan_next:"Plan Your Next Visit",
   footer_brand_desc:"Isan Wellness Community — a place where eating, staying, and discovering Isan come together.",
   footer_col_journey:"Journey", footer_community:"Our Community", footer_contact:"Contact Us",
@@ -2001,6 +2216,31 @@ zh: {
   notify_plan_added_journal:"已将这段行程加入您的行程日记 📓",
   community_eyebrow:"欢迎再次到访", community_heading:"塔玛猜的故事，不会在您回家后结束",
   community_copy:"您的行程日记依然保留，奖励也持续累积，通泰随时准备为您规划下一次到访——因为对我们而言，每一次道别都是重逢的开始。",
+  otop_eyebrow:"社区与 OTOP", otop_heading:"一段延伸到旅程之外的行程",
+  otop_sub:"将美食、住宿与探索，与伊善社区的人、智慧和产品连接起来，让每一次到访都能真正传递价值。",
+  otop_empty_kicker:"已验证社区目录", otop_empty_heading:"社区故事正在准备中",
+  otop_empty_body:"目前系统中还没有已验证且启用的 OTOP 产品或社区活动。只有在确认真实数据后才会显示相关项目。",
+  otop_ask:"向 ทองไทย 询问社区相关信息", otop_view_journey:"查看行程路线",
+  otop_note:"OTOP 与社区板块仍在开发中，产品、价格与供应商信息将在验证后才会显示。",
+  otop_type_product:"产品", otop_type_food:"本地美食", otop_type_workshop:"工作坊",
+  otop_type_cultural_experience:"文化体验", otop_type_wellness:"养生",
+  otop_type_agriculture:"农业", otop_type_craft:"手工艺", otop_type_activity:"活动",
+  onboard_eyebrow:"快速档案", onboard_heading:"让 ทองไทย 稍微了解您",
+  onboard_sub:"花 30 秒回答几个问题，让 ทองไทย 从第一句话就为您推荐合适的行程——随时可以跳过。",
+  onboard_who_group:"大团体",
+  onboard_interests_label:"您对什么特别感兴趣（可多选）",
+  onboard_interest_food:"美食", onboard_interest_nature:"自然", onboard_interest_adventure:"探险",
+  onboard_interest_rest:"休息", onboard_interest_culture:"文化", onboard_interest_coffee:"咖啡",
+  onboard_interest_local_community:"当地社区", onboard_interest_family:"亲子活动",
+  onboard_interest_photography:"摄影", onboard_interest_wellness:"养生",
+  onboard_pace_label:"喜欢什么节奏", onboard_pace_slow:"悠闲慢节奏", onboard_pace_relaxed:"轻松",
+  onboard_pace_balanced:"均衡", onboard_pace_active:"活力",
+  onboard_budget_label:"大概预算（可选）",
+  onboard_budget_1:"3,000 以下", onboard_budget_2:"3,000–8,000", onboard_budget_3:"8,000–15,000", onboard_budget_4:"15,000 以上",
+  onboard_constraint_walking:"不能走太远", onboard_constraint_wheelchair:"需要轮椅通道",
+  onboard_constraint_vegetarian:"素食", onboard_constraint_no_spicy:"不能吃辣", onboard_constraint_rain:"担心下雨",
+  onboard_save:"保存档案", onboard_skip:"暂时跳过",
+  onboard_saved_note:"已保存 — ทองไทย 会在每次对话中记住这些信息。",
   btn_view_journey:"查看我的行程", btn_plan_next:"规划下一次到访",
   footer_brand_desc:"伊善身心康养社区 — 一个将品尝美食、入住休憩与探索伊善融为一体的地方。",
   footer_col_journey:"行程", footer_community:"我们的社区", footer_contact:"联系我们",
@@ -2188,6 +2428,31 @@ lo: {
   notify_plan_added_journal:"ເພີ່ມການເດີນທາງນີ້ລົງສະໝຸດບັນທຶກແລ້ວ 📓",
   community_eyebrow:"ກັບມາອີກຄັ້ງ", community_heading:"ທຳມາຊາດບໍ່ໄດ້ຈົບລົງເມື່ອທ່ານກັບບ້ານ",
   community_copy:"ສະໝຸດບັນທຶກການເດີນທາງຂອງທ່ານຍັງຢູ່ ລາງວັນຍັງສະສົມຕໍ່ ແລະ ທອງໄທພ້ອມຊ່ວຍວາງແຜນການມາຢ້ຽມຢາມຄັ້ງຕໍ່ໄປສະເໝີ ເພາະສຳລັບພວກເຮົາ ທຸກການອຳລາຄືຈຸດເລີ່ມຕົ້ນຂອງການກັບມາອີກຄັ້ງ.",
+  otop_eyebrow:"OTOP ແລະ ຊຸມຊົນ", otop_heading:"ການເດີນທາງທີ່ໄປໄກກວ່າການມາທ່ຽວ",
+  otop_sub:"ເຊື່ອມການກິນ ການພັກ ແລະ ການຄົ້ນພົບເຂົ້າກັບຄົນ ພູມິປັນຍາ ແລະ ສິນຄ້າຈາກຊຸມຊົນອີສານ ເພື່ອໃຫ້ທຸກການມາຢ້ຽມຢາມສົ່ງຕໍ່ຄຸນຄ່າໄດ້ແທ້ຈິງ",
+  otop_empty_kicker:"ບັນຊີລາຍການຊຸມຊົນທີ່ກວດສອບແລ້ວ", otop_empty_heading:"ກຳລັງກຽມເລື່ອງລາວຈາກຊຸມຊົນ",
+  otop_empty_body:"ຕອນນີ້ຍັງບໍ່ມີສິນຄ້າ OTOP ຫຼື ກິດຈະກຳຊຸມຊົນທີ່ຜ່ານການກວດສອບ ແລະ ເປີດໃຊ້ງານໃນລະບົບ ລາຍການຈະສະແດງເມື່ອມີຂໍ້ມູນຈິງເທົ່ານັ້ນ",
+  otop_ask:"ຖາມທອງໄທກ່ຽວກັບຊຸມຊົນ", otop_view_journey:"ເບິ່ງເສັ້ນທາງການເດີນທາງ",
+  otop_note:"ພາກສ່ວນ OTOP ແລະ ຊຸມຊົນຍັງກຳລັງພັດທະນາ ລາຍການສິນຄ້າ, ລາຄາ ແລະ ຜູ້ຂາຍຈະສະແດງເມື່ອກວດສອບຂໍ້ມູນແລ້ວເທົ່ານັ້ນ.",
+  otop_type_product:"ສິນຄ້າ", otop_type_food:"ອາຫານທ້ອງຖິ່ນ", otop_type_workshop:"ກອງປະຊຸມຝຶກອົບຮົມ",
+  otop_type_cultural_experience:"ປະສົບການວັດທະນະທຳ", otop_type_wellness:"ສຸຂະພາບ",
+  otop_type_agriculture:"ກະສິກຳ", otop_type_craft:"ງານຫັດຖະກຳ", otop_type_activity:"ກິດຈະກຳ",
+  onboard_eyebrow:"ໂປຣໄຟລ໌ດ່ວນ", onboard_heading:"ໃຫ້ທອງໄທຮູ້ຈັກທ່ານໜ້ອຍໜຶ່ງ",
+  onboard_sub:"ຕອບພຽງ 30 ວິນາທີ ເພື່ອໃຫ້ທອງໄທແນະນຳການເດີນທາງທີ່ເໝາະກັບທ່ານຕັ້ງແຕ່ຄຳຖາມທຳອິດ — ຂ້າມໄດ້ທຸກເວລາ",
+  onboard_who_group:"ກຸ່ມໃຫຍ່",
+  onboard_interests_label:"ສົນໃຈຫຍັງເປັນພິເສດ (ເລືອກໄດ້ຫຼາຍຂໍ້)",
+  onboard_interest_food:"ອາຫານ", onboard_interest_nature:"ທຳມະຊາດ", onboard_interest_adventure:"ຜະຈົນໄພ",
+  onboard_interest_rest:"ພັກຜ່ອນ", onboard_interest_culture:"ວັດທະນະທຳ", onboard_interest_coffee:"ກາເຟ",
+  onboard_interest_local_community:"ຊຸມຊົນທ້ອງຖິ່ນ", onboard_interest_family:"ກິດຈະກຳຄອບຄົວ",
+  onboard_interest_photography:"ຖ່າຍຮູບ", onboard_interest_wellness:"ສຸຂະພາບ",
+  onboard_pace_label:"ມັກຈັງຫວະແບບໃດ", onboard_pace_slow:"ຊ້າໆ ສະບາຍໆ", onboard_pace_relaxed:"ຜ່ອນຄາຍ",
+  onboard_pace_balanced:"ສົມດຸນ", onboard_pace_active:"ຄ່ອງແຄ້ວ",
+  onboard_budget_label:"ງົບປະມານໂດຍປະມານ (ບໍ່ບັງຄັບ)",
+  onboard_budget_1:"ຕ່ຳກວ່າ 3,000", onboard_budget_2:"3,000–8,000", onboard_budget_3:"8,000–15,000", onboard_budget_4:"15,000+",
+  onboard_constraint_walking:"ຍ່າງໄກບໍ່ໄດ້", onboard_constraint_wheelchair:"ໃຊ້ລົດເຂັນ",
+  onboard_constraint_vegetarian:"ກິນເຈ", onboard_constraint_no_spicy:"ກິນເຜັດບໍ່ໄດ້", onboard_constraint_rain:"ກັງວົນເລື່ອງຝົນ",
+  onboard_save:"ບັນທຶກໂປຣໄຟລ໌", onboard_skip:"ຂ້າມໄປກ່ອນ",
+  onboard_saved_note:"ບັນທຶກແລ້ວ — ທອງໄທຈະຈື່ໄວ້ໃນທຸກການສົນທະນາ.",
   btn_view_journey:"ເບິ່ງການເດີນທາງຂອງຂ້ອຍ", btn_plan_next:"ວາງແຜນຄັ້ງຕໍ່ໄປ",
   footer_brand_desc:"ຊຸມຊົນສຸຂະພາບອີສານ — ພື້ນທີ່ທີ່ເຊື່ອມໂຍງການກິນ ການພັກ ແລະ ການຄົ້ນພົບອີສານໄວ້ໃນບ່ອນດຽວກັນ.",
   footer_col_journey:"ການເດີນທາງ", footer_community:"ຊຸມຊົນຂອງພວກເຮົາ", footer_contact:"ຕິດຕໍ່ພວກເຮົາ",
@@ -2375,6 +2640,31 @@ vi: {
   notify_plan_added_journal:"Đã thêm hành trình này vào Nhật Ký của bạn 📓",
   community_eyebrow:"Quay Lại Lần Nữa", community_heading:"Thammachat Không Kết Thúc Khi Bạn Về Nhà",
   community_copy:"Nhật Ký Hành Trình của bạn vẫn còn đó. Ưu đãi vẫn tiếp tục tích lũy. Và Thongthai luôn sẵn sàng giúp lên kế hoạch cho lần ghé thăm tiếp theo — bởi với chúng tôi, mỗi lời tạm biệt là khởi đầu của một lần quay lại.",
+  otop_eyebrow:"OTOP & Cộng đồng", otop_heading:"Hành Trình vươn xa hơn cả chuyến đi",
+  otop_sub:"Kết nối ẩm thực, lưu trú và khám phá với con người, tri thức và sản phẩm của các cộng đồng Isan, để mỗi chuyến thăm đều lan tỏa giá trị thật sự.",
+  otop_empty_kicker:"Danh mục cộng đồng đã xác minh", otop_empty_heading:"Những câu chuyện cộng đồng đang được chuẩn bị",
+  otop_empty_body:"Hiện chưa có sản phẩm OTOP hoặc hoạt động cộng đồng nào được xác minh và kích hoạt trong hệ thống. Danh sách sẽ hiển thị khi có dữ liệu thật.",
+  otop_ask:"Hỏi Thongthai về cộng đồng", otop_view_journey:"Xem lộ trình Hành Trình",
+  otop_note:"Lớp OTOP & Cộng đồng vẫn đang được phát triển. Sản phẩm, giá cả và nhà cung cấp sẽ chỉ hiển thị sau khi được xác minh.",
+  otop_type_product:"Sản phẩm", otop_type_food:"Ẩm thực địa phương", otop_type_workshop:"Workshop",
+  otop_type_cultural_experience:"Trải nghiệm văn hóa", otop_type_wellness:"Sức khỏe",
+  otop_type_agriculture:"Nông nghiệp", otop_type_craft:"Thủ công", otop_type_activity:"Hoạt động",
+  onboard_eyebrow:"Hồ sơ nhanh", onboard_heading:"Để Thongthai hiểu bạn hơn một chút",
+  onboard_sub:"Trả lời trong 30 giây để Thongthai gợi ý Hành Trình phù hợp ngay từ tin nhắn đầu tiên — có thể bỏ qua bất cứ lúc nào.",
+  onboard_who_group:"Nhóm đông",
+  onboard_interests_label:"Bạn quan tâm điều gì? (chọn nhiều)",
+  onboard_interest_food:"Ẩm thực", onboard_interest_nature:"Thiên nhiên", onboard_interest_adventure:"Phiêu lưu",
+  onboard_interest_rest:"Nghỉ ngơi", onboard_interest_culture:"Văn hóa", onboard_interest_coffee:"Cà phê",
+  onboard_interest_local_community:"Cộng đồng địa phương", onboard_interest_family:"Hoạt động gia đình",
+  onboard_interest_photography:"Nhiếp ảnh", onboard_interest_wellness:"Sức khỏe",
+  onboard_pace_label:"Bạn thích nhịp độ nào", onboard_pace_slow:"Chậm rãi", onboard_pace_relaxed:"Thư giãn",
+  onboard_pace_balanced:"Cân bằng", onboard_pace_active:"Năng động",
+  onboard_budget_label:"Ngân sách ước tính (không bắt buộc)",
+  onboard_budget_1:"Dưới 3.000", onboard_budget_2:"3.000–8.000", onboard_budget_3:"8.000–15.000", onboard_budget_4:"15.000+",
+  onboard_constraint_walking:"Hạn chế đi bộ", onboard_constraint_wheelchair:"Cần lối đi cho xe lăn",
+  onboard_constraint_vegetarian:"Ăn chay", onboard_constraint_no_spicy:"Không ăn cay", onboard_constraint_rain:"Lo ngại trời mưa",
+  onboard_save:"Lưu hồ sơ", onboard_skip:"Bỏ qua",
+  onboard_saved_note:"Đã lưu — Thongthai sẽ ghi nhớ điều này trong mọi cuộc trò chuyện.",
   btn_view_journey:"Xem Hành Trình Của Tôi", btn_plan_next:"Lên Kế Hoạch Lần Tới",
   footer_brand_desc:"Cộng Đồng Chăm Sóc Sức Khỏe Isan — nơi hội tụ ẩm thực, nghỉ dưỡng và khám phá vùng đất Isan.",
   footer_col_journey:"Hành Trình", footer_community:"Cộng Đồng Của Chúng Tôi", footer_contact:"Liên Hệ",
@@ -2737,6 +3027,99 @@ function wireLocationChips(containerId, getSet, toggleFn){
 }
 wireLocationChips('visitedPicker', s=>s.visitedExperiences, JourneyProvider.toggleVisited);
 wireLocationChips('favPicker', s=>s.favorites, JourneyProvider.toggleFavorite);
+
+// ============================================================
+// QUICK PROFILE — optional, skippable onboarding. Writes straight into
+// the same guestContext the AI chat and Plan Your Journey section already
+// share (via JourneyProvider.saveProfile), which also mirrors it to the
+// server-side customer memory database. Never required to use the site.
+// ============================================================
+const onboardState = { who:null, pace:null, duration:null, budget:null, interests:[], constraints:[] };
+
+function wireOnboardSingle(containerId, key){
+  qsa(`#${containerId} .p-opt`).forEach(btn=>{
+    on(btn,'click',()=>{
+      qsa(`#${containerId} .p-opt`).forEach(b=>b.classList.remove('is-on'));
+      btn.classList.add('is-on');
+      onboardState[key] = btn.dataset.val;
+    });
+  });
+}
+function wireOnboardToggle(containerId, key){
+  qsa(`#${containerId} .p-opt-toggle`).forEach(btn=>{
+    on(btn,'click',()=>{
+      btn.classList.toggle('is-on');
+      const val = btn.dataset.val;
+      if(btn.classList.contains('is-on')){ if(!onboardState[key].includes(val)) onboardState[key].push(val); }
+      else { onboardState[key] = onboardState[key].filter(v=>v!==val); }
+    });
+  });
+}
+wireOnboardSingle('onboardWho','who');
+wireOnboardSingle('onboardPace','pace');
+wireOnboardSingle('onboardDuration','duration');
+wireOnboardSingle('onboardBudget','budget');
+wireOnboardToggle('onboardInterests','interests');
+wireOnboardToggle('onboardConstraints','constraints');
+
+const ONBOARD_BUDGET_MIDPOINT = { under_3000:2000, '3000_8000':5000, '8000_15000':11000, '15000_plus':18000 };
+function numberToBudgetBand(n){
+  if(typeof n !== 'number') return null;
+  if(n < 3000) return 'under_3000';
+  if(n < 8000) return '3000_8000';
+  if(n < 15000) return '8000_15000';
+  return '15000_plus';
+}
+
+// Returning guest: pre-select whatever's already known (locally, or after
+// JourneyProvider.hydrateFromServer resolves, from the server too) so the
+// card visibly shows it already has the answer rather than asking again.
+function prefillOnboardFromState(state){
+  const gc = state.guestContext || {};
+  const singles = [['onboardWho', gc.travelerType], ['onboardPace', gc.pace], ['onboardDuration', gc.tripDuration]];
+  singles.forEach(([containerId, val])=>{
+    if(!val) return;
+    qsa(`#${containerId} .p-opt`).forEach(b=> b.classList.toggle('is-on', b.dataset.val===val));
+  });
+  if(gc.travelerType) onboardState.who = gc.travelerType;
+  if(gc.pace) onboardState.pace = gc.pace;
+  if(gc.tripDuration) onboardState.duration = gc.tripDuration;
+
+  if(Array.isArray(gc.interests) && gc.interests.length){
+    onboardState.interests = [...gc.interests];
+    qsa('#onboardInterests .p-opt-toggle').forEach(b=> b.classList.toggle('is-on', gc.interests.includes(b.dataset.val)));
+  }
+  if(Array.isArray(gc.constraints) && gc.constraints.length){
+    onboardState.constraints = [...gc.constraints];
+    qsa('#onboardConstraints .p-opt-toggle').forEach(b=> b.classList.toggle('is-on', gc.constraints.includes(b.dataset.val)));
+  }
+  const band = numberToBudgetBand(gc.budget);
+  if(band){
+    onboardState.budget = band;
+    qsa('#onboardBudget .p-opt').forEach(b=> b.classList.toggle('is-on', b.dataset.val===band));
+  }
+}
+JourneyProvider.subscribe(prefillOnboardFromState);
+
+on(qs('#onboardSave'), 'click', async ()=>{
+  const updates = {};
+  if(onboardState.who) updates.travelerType = onboardState.who;
+  if(onboardState.pace) updates.pace = onboardState.pace;
+  if(onboardState.duration) updates.tripDuration = onboardState.duration;
+  if(onboardState.interests.length) updates.interests = [...onboardState.interests];
+  if(onboardState.constraints.length) updates.constraints = [...onboardState.constraints];
+  if(onboardState.budget && ONBOARD_BUDGET_MIDPOINT[onboardState.budget] != null){
+    updates.budget = ONBOARD_BUDGET_MIDPOINT[onboardState.budget];
+  }
+  await JourneyProvider.saveProfile(updates);
+  const note = qs('#onboardSavedNote');
+  if(note) note.hidden = false;
+});
+
+on(qs('#onboardSkip'), 'click', ()=>{
+  const next = qs('#welcome');
+  if(next) next.scrollIntoView({ behavior:'smooth', block:'start' });
+});
 
 function tagLabel(tag){
   if(tag==='inthanin') return 'Inthanin';
@@ -3266,7 +3649,64 @@ window.JourneyProvider = JourneyProvider;
 window.__renderAll = renderAll;
 window.addEventListener('i18n:change', renderAll);
 
-window.addEventListener('DOMContentLoaded', ()=>{ JourneyProvider.init(); renderNearbyGrid(); });
+// ============================================================
+// OTOP / COMMUNITY — reads only verified+active data via
+// netlify/functions/customer-memory.ts (action:'community'). No guest
+// identity involved. Any failure (network, DB not configured, nothing
+// verified yet) renders the same honest empty state already built into
+// this section — never a fabricated listing.
+// ============================================================
+let lastLoadedOfferings = [];
+function communityTypeLabel(type){
+  return (window.I18N && window.I18N.t('otop_type_'+type)) || type;
+}
+function renderCommunityGrid(offerings){
+  const grid = qs('#communityGrid');
+  const emptyState = qs('#communityEmptyState');
+  if(!grid || !emptyState) return;
+  qsa('.community-card:not(#communityEmptyState)', grid).forEach(el=>el.remove());
+  if(!offerings.length){
+    emptyState.hidden = false;
+    return;
+  }
+  emptyState.hidden = true;
+  offerings.forEach(o=>{
+    const card = document.createElement('div');
+    card.className = 'community-card';
+    const price = (o.price_min!=null || o.price_max!=null)
+      ? `<p>${o.price_min!=null?('฿'+o.price_min):''}${(o.price_min!=null&&o.price_max!=null&&o.price_min!==o.price_max)?'–':''}${(o.price_max!=null&&o.price_max!==o.price_min)?('฿'+o.price_max):''}</p>`
+      : '';
+    card.innerHTML = `
+      <div class="card-kicker">${escapeHtml(communityTypeLabel(o.offering_type))}</div>
+      <h3>${escapeHtml(o.offering_name)}</h3>
+      ${o.description ? `<p>${escapeHtml(o.description)}</p>` : ''}
+      ${price}
+    `;
+    grid.appendChild(card);
+  });
+}
+async function loadCommunityOfferings(){
+  try{
+    const res = await fetch('/.netlify/functions/customer-memory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'community' }),
+    });
+    if(!res.ok) throw new Error('bad status');
+    const data = await res.json();
+    lastLoadedOfferings = Array.isArray(data.offerings) ? data.offerings : [];
+  }catch(e){
+    lastLoadedOfferings = [];
+  }
+  renderCommunityGrid(lastLoadedOfferings);
+}
+window.addEventListener('i18n:change', ()=> renderCommunityGrid(lastLoadedOfferings));
+
+window.addEventListener('DOMContentLoaded', ()=>{
+  JourneyProvider.init().then(()=> JourneyProvider.hydrateFromServer());
+  renderNearbyGrid();
+  loadCommunityOfferings();
+});
 })();
 </script>
 <script>
@@ -4165,6 +4605,11 @@ function getAnonymousGuestId(){
   try { localStorage.setItem(key, id); } catch(e) {}
   return id;
 }
+// Exposed on window: this function is declared inside this script block's
+// own closure, but the memory-loop sync code (favorite/visited/save/load,
+// wired near JourneyProvider earlier in the document) runs in a different
+// script block and needs to reach the same guest id.
+window.getAnonymousGuestId = getAnonymousGuestId;
 
 function buildChatRequestPayload(text){
   const js = window.JourneyProvider ? window.JourneyProvider.get() : {};
