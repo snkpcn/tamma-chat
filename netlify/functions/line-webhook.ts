@@ -24,10 +24,20 @@ type LineWebhookBody = {
   events?: LineWebhookEvent[];
 };
 
+type GuestContext = {
+  tripDuration: string | null;
+  travelerType: string | null;
+  group: { adults: number | null; children: number | null; elderly: number | null };
+  interests: string[];
+  pace: string | null;
+  budget: number | null;
+  constraints: string[];
+};
+
 type ThongthaiResponse = {
   message?: string;
   intent?: string;
-  contextUpdates?: Record<string, unknown>;
+  contextUpdates?: Partial<GuestContext>;
   journeyAction?: {
     type?: 'none' | 'create' | 'modify' | 'replace';
     journey?: unknown;
@@ -35,8 +45,13 @@ type ThongthaiResponse = {
   suggestedActions?: Array<{ label?: string; action?: string }>;
 };
 
+type CustomerLoadResponse = {
+  guestContext?: GuestContext;
+};
+
 const TAMMA_SITE_URL = 'https://tamma-chat.netlify.app';
 const THONGTHAI_ENDPOINT = '/.netlify/functions/thongthai-chat';
+const CUSTOMER_MEMORY_ENDPOINT = '/.netlify/functions/customer-memory';
 const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
 const MAX_LINE_TEXT = 4500;
 const MAX_LINE_MESSAGES = 5;
@@ -84,6 +99,86 @@ function detectLanguage(text: string): 'th' | 'en' | 'zh' | 'lo' | 'vi' {
 function siteBaseUrl(): string {
   const candidate = process.env.URL || process.env.DEPLOY_PRIME_URL || TAMMA_SITE_URL;
   return candidate.replace(/\/$/, '');
+}
+
+function emptyGuestContext(): GuestContext {
+  return {
+    tripDuration: null,
+    travelerType: null,
+    group: { adults: null, children: null, elderly: null },
+    interests: [],
+    pace: null,
+    budget: null,
+    constraints: [],
+  };
+}
+
+/**
+ * High-confidence structured facts should not depend solely on an LLM choosing
+ * the right enum. These phrases all unambiguously mean limited walking/mobility.
+ * Keep this narrow: ambiguous statements remain for Thongthai to interpret.
+ */
+function deterministicConstraints(text: string): string[] {
+  const normalized = text.trim();
+  const limitedWalking = [
+    /เดิน(?:เยอะ|ไกล|นาน).{0,12}(?:ไม่(?:ค่อย)?ไหว|ไม่ได้|ลำบาก|ไม่สะดวก)/u,
+    /(?:เดินไม่ไหว|เดินลำบาก|เดินไม่ได้|เดินไกลไม่ได้|เดินเยอะไม่ได้|เดินนานไม่ได้)/u,
+    /(?:เดิน.{0,8}ไม่ค่อยสะดวก|มีปัญหาเรื่องการเดิน)/u,
+    /(?:limited walking|mobility (?:issue|issues|limitation|limitations)|can't walk (?:far|much|long)|cannot walk (?:far|much|long)|unable to walk (?:far|much|long))/i,
+  ].some(pattern => pattern.test(normalized));
+
+  return limitedWalking ? ['limited_walking'] : [];
+}
+
+async function reinforceStructuredMemory(message: string, userId: string, language: string): Promise<void> {
+  const inferredConstraints = deterministicConstraints(message);
+  if (!inferredConstraints.length) return;
+
+  const guestId = lineGuestId(userId);
+  const baseUrl = siteBaseUrl();
+  const loadResponse = await fetch(baseUrl + CUSTOMER_MEMORY_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'load',
+      guestId,
+      language,
+      guestContext: emptyGuestContext(),
+    }),
+  });
+
+  if (!loadResponse.ok) {
+    throw new Error(`Customer memory load returned ${loadResponse.status}`);
+  }
+
+  const loaded = await loadResponse.json() as CustomerLoadResponse;
+  const current = loaded.guestContext ?? emptyGuestContext();
+  const merged: GuestContext = {
+    ...current,
+    group: current.group ?? { adults: null, children: null, elderly: null },
+    interests: Array.isArray(current.interests) ? current.interests : [],
+    constraints: [...new Set([
+      ...(Array.isArray(current.constraints) ? current.constraints : []),
+      ...inferredConstraints,
+    ])],
+  };
+
+  const saveResponse = await fetch(baseUrl + CUSTOMER_MEMORY_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'profile',
+      guestId,
+      language,
+      guestContext: merged,
+    }),
+  });
+
+  if (!saveResponse.ok) {
+    throw new Error(`Customer memory save returned ${saveResponse.status}`);
+  }
+
+  console.log('LINE_STRUCTURED_MEMORY_REINFORCED', inferredConstraints.join(','));
 }
 
 async function askThongthai(message: string, userId: string): Promise<ThongthaiResponse> {
@@ -195,7 +290,20 @@ async function handleEvent(event: LineWebhookEvent, accessToken: string): Promis
     return;
   }
 
-  const result = await askThongthai(event.message.text, userId);
+  const message = event.message.text;
+  const language = detectLanguage(message);
+  const result = await askThongthai(message, userId);
+
+  // The AI remains the primary extractor. For a very small set of explicit,
+  // high-confidence mobility phrases, reinforce the structured enum so the
+  // persistent memory cannot silently lose an important accessibility need.
+  try {
+    await reinforceStructuredMemory(message, userId, language);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Unknown structured-memory error';
+    console.error('LINE_STRUCTURED_MEMORY_ERROR', detail.slice(0, 240));
+  }
+
   await replyToLine(replyToken, buildReplyTexts(result), accessToken);
 }
 
