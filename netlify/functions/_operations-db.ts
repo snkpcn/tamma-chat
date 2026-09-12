@@ -95,6 +95,10 @@ export interface CustomerInput {
   phone?: string | null;
   preferredContact?: 'line' | 'phone' | 'email' | null;
   marketingOptIn?: boolean;
+  researchOptIn?: boolean;
+  birthDate?: string | null;
+  gender?: 'male' | 'female' | 'non_binary' | 'self_described' | 'prefer_not_to_say' | null;
+  genderSelfDescription?: string | null;
   isTest?: boolean;
   testLabel?: string | null;
 }
@@ -111,7 +115,16 @@ export async function upsertCustomerAccount(input: CustomerInput): Promise<strin
   if (phoneHash) clauses.push(`phone_hash=eq.${phoneHash}`);
 
   let existing: { id: string } | undefined;
+  if (input.authUserId && input.guestDbId) {
+    const merged = await dbFetch('rpc/merge_member_identity', {
+      method: 'POST',
+      body: JSON.stringify({ p_auth_user_id: input.authUserId, p_guest_id: input.guestDbId, p_source_channel: 'web' }),
+    });
+    const id = await merged.json() as string;
+    if (id) existing = { id };
+  }
   for (const clause of clauses) {
+    if (existing) break;
     const res = await dbFetch(`customer_accounts?${clause}&select=id&limit=1`);
     const rows = await res.json() as Array<{ id: string }>;
     if (rows[0]) { existing = rows[0]; break; }
@@ -127,6 +140,15 @@ export async function upsertCustomerAccount(input: CustomerInput): Promise<strin
   if (phone) { body.phone_enc = encryptPii(phone); body.phone_hash = phoneHash; }
   if (input.preferredContact) body.preferred_contact = input.preferredContact;
   if (typeof input.marketingOptIn === 'boolean') body.marketing_opt_in = input.marketingOptIn;
+  if (typeof input.researchOptIn === 'boolean') body.research_opt_in = input.researchOptIn;
+  if (input.birthDate && /^\d{4}-\d{2}-\d{2}$/.test(input.birthDate)) body.birth_date = input.birthDate;
+  if (input.gender) body.gender = input.gender;
+  if (input.gender === 'self_described' && input.genderSelfDescription?.trim()) {
+    body.gender_self_description = input.genderSelfDescription.trim().slice(0, 120);
+  }
+  if (input.authUserId) {
+    body.member_status = 'member';
+  }
   if (input.isTest === true) body.is_test = true;
   if (input.testLabel?.trim()) body.test_label = input.testLabel.trim().slice(0, 120);
 
@@ -136,26 +158,79 @@ export async function upsertCustomerAccount(input: CustomerInput): Promise<strin
       headers: { Prefer: 'return=minimal' },
       body: JSON.stringify(body),
     });
+    if (typeof input.marketingOptIn === 'boolean' || typeof input.researchOptIn === 'boolean') {
+      const consentRows = [];
+      if (typeof input.marketingOptIn === 'boolean') consentRows.push({ customer_id: existing.id, consent_type: 'marketing', granted: input.marketingOptIn, consent_version: 'v1', source_channel: 'web' });
+      if (typeof input.researchOptIn === 'boolean') consentRows.push({ customer_id: existing.id, consent_type: 'research', granted: input.researchOptIn, consent_version: 'v1', source_channel: 'web' });
+      await dbFetch('customer_consents', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(consentRows) });
+    }
     return existing.id;
   }
 
   const res = await dbFetch('customer_accounts', {
     method: 'POST',
     headers: { Prefer: 'return=representation' },
-    body: JSON.stringify({ ...body, created_at: new Date().toISOString() }),
+    body: JSON.stringify({
+      ...body,
+      created_at: new Date().toISOString(),
+      ...(input.authUserId ? { membership_started_at: new Date().toISOString(), acquisition_source: 'web' } : {}),
+    }),
   });
   const rows = await res.json() as Array<{ id: string }>;
   if (!rows[0]?.id) throw new Error('Customer account was not created');
+  const consentRows = [];
+  if (typeof input.marketingOptIn === 'boolean') consentRows.push({ customer_id: rows[0].id, consent_type: 'marketing', granted: input.marketingOptIn, consent_version: 'v1', source_channel: 'web' });
+  if (typeof input.researchOptIn === 'boolean') consentRows.push({ customer_id: rows[0].id, consent_type: 'research', granted: input.researchOptIn, consent_version: 'v1', source_channel: 'web' });
+  if (consentRows.length) await dbFetch('customer_consents', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(consentRows) });
   return rows[0].id;
 }
 
-export async function registerLineContact(anonymousId: string, rawLineUserId: string): Promise<void> {
-  if (!rawLineUserId || rawLineUserId.length > 160) return;
-  const guestDbId = await guestDbIdFromAnonymousId(anonymousId);
-  if (!guestDbId) return;
-  const customerId = await upsertCustomerAccount({ guestDbId, preferredContact: 'line' });
+async function ensureGuest(anonymousId: string): Promise<string | null> {
+  if (!UUID_RE.test(anonymousId)) return null;
+  const existing = await guestDbIdFromAnonymousId(anonymousId);
+  if (existing) return existing;
+  const response = await dbFetch('guests?on_conflict=anonymous_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify({ anonymous_id: anonymousId, language: 'th', last_seen_at: new Date().toISOString() }),
+  });
+  const rows = await response.json() as Array<{ id: string }>;
+  return rows[0]?.id ?? await guestDbIdFromAnonymousId(anonymousId);
+}
+
+export async function registerLineContact(anonymousId: string, rawLineUserId: string): Promise<{ customerId: string; guestDbId: string } | null> {
+  if (!rawLineUserId || rawLineUserId.length > 160) return null;
+  const guestDbId = await ensureGuest(anonymousId);
+  if (!guestDbId) return null;
   const hash = piiHash(rawLineUserId);
-  if (!hash) return;
+  if (!hash) return null;
+
+  const contactResponse = await dbFetch(
+    `customer_channel_contacts?provider=eq.line&external_id_hash=eq.${hash}&select=customer_id&limit=1`,
+  );
+  const contacts = await contactResponse.json() as Array<{ customer_id: string }>;
+  let customerId = contacts[0]?.customer_id ?? null;
+
+  if (customerId) {
+    const accountResponse = await dbFetch(
+      `customer_accounts?id=eq.${customerId}&select=id,auth_user_id,guest_id&limit=1`,
+    );
+    const account = (await accountResponse.json() as Array<{ id: string; auth_user_id: string | null; guest_id: string | null }>)[0];
+    if (account?.auth_user_id && account.guest_id !== guestDbId) {
+      const mergeResponse = await dbFetch('rpc/merge_member_identity', {
+        method: 'POST',
+        body: JSON.stringify({ p_auth_user_id: account.auth_user_id, p_guest_id: guestDbId, p_source_channel: 'line' }),
+      });
+      customerId = await mergeResponse.json() as string;
+    } else if (account && !account.guest_id) {
+      await dbFetch(`customer_accounts?id=eq.${customerId}`, {
+        method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ guest_id: guestDbId }),
+      });
+    }
+  } else {
+    customerId = await upsertCustomerAccount({ guestDbId, preferredContact: 'line' });
+  }
+
   await dbFetch('customer_channel_contacts?on_conflict=provider,external_id_hash', {
     method: 'POST',
     headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
@@ -169,6 +244,161 @@ export async function registerLineContact(anonymousId: string, rawLineUserId: st
       last_seen_at: new Date().toISOString(),
     }),
   });
+  return { customerId, guestDbId };
+}
+
+type LineMembershipStep = 'birth_date' | 'gender' | 'gender_description' | 'marketing' | 'research' | 'edit_choice';
+type LineMembershipState = { step?: LineMembershipStep };
+
+function parseBirthDate(value: string): string | null {
+  const match = value.trim().match(/^(\d{1,4})[\/-](\d{1,2})[\/-](\d{1,4})$/);
+  if (!match) return null;
+  let year: number; let month: number; let day: number;
+  if (match[1].length === 4) { year = Number(match[1]); month = Number(match[2]); day = Number(match[3]); }
+  else { day = Number(match[1]); month = Number(match[2]); year = Number(match[3]); }
+  if (year > 2400) year -= 543;
+  const iso = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const parsed = new Date(`${iso}T00:00:00Z`);
+  return year >= 1900 && parsed.getUTCFullYear() === year && parsed.getUTCMonth() + 1 === month
+    && parsed.getUTCDate() === day && parsed <= new Date() ? iso : null;
+}
+
+function parseGender(value: string): { gender: string; description?: string } | null {
+  const text = value.trim().toLowerCase();
+  if (/^(ชาย|ผู้ชาย|male)$/.test(text)) return { gender: 'male' };
+  if (/^(หญิง|ผู้หญิง|female)$/.test(text)) return { gender: 'female' };
+  if (/^(นอนไบนารี|non.?binary)$/.test(text)) return { gender: 'non_binary' };
+  if (/^(ไม่ระบุ|ไม่ต้องการระบุ|ไม่ประสงค์ระบุ|prefer not to say)$/.test(text)) return { gender: 'prefer_not_to_say' };
+  if (/^(ระบุเอง|อื่นๆ|อื่น ๆ|self.?described)$/.test(text)) return { gender: 'self_described' };
+  return null;
+}
+
+function parseConsent(value: string): boolean | null {
+  const text = value.trim().toLowerCase();
+  if (/^(ยินยอม|ตกลง|รับ|yes|y|ok|โอเค)$/.test(text)) return true;
+  if (/^(ไม่ยินยอม|ไม่ตกลง|ไม่รับ|no|n|ไม่)$/.test(text)) return false;
+  return null;
+}
+
+async function membershipState(guestDbId: string): Promise<LineMembershipState> {
+  const response = await dbFetch(`guest_agent_state?guest_id=eq.${guestDbId}&select=state&limit=1`);
+  const row = (await response.json() as Array<{ state: Record<string, unknown> }>)[0];
+  const membership = row?.state?.line_membership;
+  return membership && typeof membership === 'object' ? membership as LineMembershipState : {};
+}
+
+async function setMembershipStep(guestDbId: string, step?: LineMembershipStep): Promise<void> {
+  const response = await dbFetch(`guest_agent_state?guest_id=eq.${guestDbId}&select=state&limit=1`);
+  const row = (await response.json() as Array<{ state: Record<string, unknown> }>)[0];
+  const state = { ...(row?.state ?? {}) };
+  if (step) state.line_membership = { step };
+  else delete state.line_membership;
+  await dbFetch('guest_agent_state?on_conflict=guest_id', {
+    method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ guest_id: guestDbId, state, updated_at: new Date().toISOString() }),
+  });
+}
+
+async function updateLineMember(guestDbId: string, fields: Record<string, unknown>): Promise<string> {
+  const response = await dbFetch('rpc/upsert_line_member_profile', {
+    method: 'POST', body: JSON.stringify({ p_guest_id: guestDbId, ...fields }),
+  });
+  return await response.json() as string;
+}
+
+async function recordMembershipStarted(customerId: string, guestDbId: string): Promise<void> {
+  const response = await dbFetch(
+    `customer_membership_events?customer_id=eq.${customerId}&event_type=eq.signup_started&select=id&limit=1`,
+  );
+  if ((await response.json() as Array<{ id: number }>).length) return;
+  await dbFetch('customer_membership_events', {
+    method: 'POST', headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ customer_id: customerId, guest_id: guestDbId, event_type: 'signup_started', source_channel: 'line', metadata: { line_first: true } }),
+  });
+}
+
+async function memberSummary(customerId: string): Promise<string> {
+  const response = await dbFetch(
+    `customer_accounts?id=eq.${customerId}&select=member_status,birth_date,gender,marketing_opt_in,research_opt_in,profile_completed_at&limit=1`,
+  );
+  const row = (await response.json() as Array<Record<string, unknown>>)[0];
+  if (!row || row.member_status !== 'member') return 'ตอนนี้ยังเป็นข้อมูลผู้สนใจอยู่ครับ พิมพ์ “สมัครสมาชิก” เพื่อสมัครใน LINE ได้เลย';
+  const gender = ({ male: 'ชาย', female: 'หญิง', non_binary: 'นอนไบนารี', self_described: 'ระบุเอง', prefer_not_to_say: 'ไม่ประสงค์ระบุ' } as Record<string, string>)[String(row.gender)] || 'ยังไม่ระบุ';
+  return `สถานะสมาชิก: สมาชิก${row.profile_completed_at ? ' · โปรไฟล์ครบ' : ''}\nวันเกิด: ${row.birth_date || 'ยังไม่ระบุ'}\nเพศ: ${gender}\nการตลาด: ${row.marketing_opt_in ? 'ยินยอม' : 'ไม่ยินยอม'}\nวิจัย: ${row.research_opt_in ? 'ยินยอม' : 'ไม่ยินยอม'}`;
+}
+
+/** Deterministic LINE-first membership flow. Returns null when normal Thongthai should answer. */
+export async function handleLineMembershipMessage(anonymousId: string, rawLineUserId: string, message: string): Promise<string | null> {
+  const identity = await registerLineContact(anonymousId, rawLineUserId);
+  if (!identity) return null;
+  const text = message.trim();
+  const state = await membershipState(identity.guestDbId);
+  const isStart = /^(สมัครสมาชิก|อยากเป็นสมาชิก|เป็นสมาชิก)$/u.test(text);
+  const isProfile = /^(สมาชิก|ข้อมูลสมาชิก|ดูโปรไฟล์)$/u.test(text);
+  const isEdit = /^แก้ข้อมูลสมาชิก$/u.test(text);
+  const isWebLink = /^เชื่อมบัญชีเว็บ$/u.test(text);
+
+  if (isWebLink) return 'ได้ครับ บัญชีเว็บเป็นทางเลือก เปิดหน้า account.html แล้วเข้าสู่ระบบด้วยอีเมล จากอุปกรณ์ที่มี Journey เดิม ระบบจะเชื่อมเข้ากับ Customer ID เดียวกันครับ\nhttps://tamma-chat.netlify.app/account.html';
+  if (isProfile && !state.step) return memberSummary(identity.customerId);
+  if (isEdit) {
+    await setMembershipStep(identity.guestDbId, 'edit_choice');
+    return 'ได้ครับ อยากแก้ส่วนไหน: วันเกิด, เพศ, การตลาด หรือวิจัย?';
+  }
+  if (state.step === 'edit_choice') {
+    if (/วันเกิด/u.test(text)) { await setMembershipStep(identity.guestDbId, 'birth_date'); return 'ส่งวันเกิดเป็น วว/ดด/ปปปป ได้เลยครับ'; }
+    if (/เพศ/u.test(text)) { await setMembershipStep(identity.guestDbId, 'gender'); return 'ระบุเพศได้เลยครับ: ชาย, หญิง, นอนไบนารี, ระบุเอง หรือไม่ประสงค์ระบุ'; }
+    if (/การตลาด/u.test(text)) { await setMembershipStep(identity.guestDbId, 'marketing'); return 'ยินยอมรับข่าวสารและสิทธิพิเศษทางการตลาดไหมครับ? ตอบ “ยินยอม” หรือ “ไม่ยินยอม”'; }
+    if (/วิจัย/u.test(text)) { await setMembershipStep(identity.guestDbId, 'research'); return 'ยินยอมให้นำข้อมูลแบบไม่ระบุตัวตนไปใช้พัฒนาบริการและงานวิจัยไหมครับ? ตอบ “ยินยอม” หรือ “ไม่ยินยอม”'; }
+    return 'เลือกได้ 1 อย่างครับ: วันเกิด, เพศ, การตลาด หรือวิจัย';
+  }
+  if (isStart) {
+    const accountResponse = await dbFetch(`customer_accounts?id=eq.${identity.customerId}&select=member_status,birth_date,gender&limit=1`);
+    const account = (await accountResponse.json() as Array<{ member_status: string; birth_date: string | null; gender: string | null }>)[0];
+    if (account?.member_status === 'member' && account.birth_date && account.gender) return memberSummary(identity.customerId);
+    await recordMembershipStarted(identity.customerId, identity.guestDbId);
+    if (!account?.birth_date) { await setMembershipStep(identity.guestDbId, 'birth_date'); return 'ยินดีครับ เดี๋ยวทองไทยช่วยสมัครให้ในแชตนี้เลย ขอวันเกิดก่อนครับ ส่งเป็น วว/ดด/ปปปป ได้เลย'; }
+    await setMembershipStep(identity.guestDbId, 'gender');
+    return 'ขอเพศสำหรับโปรไฟล์ครับ: ชาย, หญิง, นอนไบนารี, ระบุเอง หรือไม่ประสงค์ระบุ';
+  }
+  if (!state.step) return null;
+
+  if (state.step === 'birth_date') {
+    const birthDate = parseBirthDate(text);
+    if (!birthDate) return 'วันเกิดยังอ่านไม่ออกครับ ลองส่งแบบ 15/04/2533 หรือ 1990-04-15';
+    await updateLineMember(identity.guestDbId, { p_birth_date: birthDate, p_finalize: false });
+    await setMembershipStep(identity.guestDbId, 'gender');
+    return 'ขอบคุณครับ ต่อไปขอเพศ: ชาย, หญิง, นอนไบนารี, ระบุเอง หรือไม่ประสงค์ระบุ';
+  }
+  if (state.step === 'gender') {
+    const value = parseGender(text);
+    if (!value) return 'เลือกได้ว่า ชาย, หญิง, นอนไบนารี, ระบุเอง หรือไม่ประสงค์ระบุครับ';
+    await updateLineMember(identity.guestDbId, { p_gender: value.gender, p_finalize: false });
+    if (value.gender === 'self_described') { await setMembershipStep(identity.guestDbId, 'gender_description'); return 'บอกคำที่อยากใช้ระบุเพศได้เลยครับ'; }
+    await setMembershipStep(identity.guestDbId, 'marketing');
+    return 'ยินยอมรับข่าวสารและสิทธิพิเศษทางการตลาดไหมครับ? ตอบ “ยินยอม” หรือ “ไม่ยินยอม” ได้เลย บริการพื้นฐานใช้ได้เหมือนเดิมไม่ว่าจะเลือกแบบไหน';
+  }
+  if (state.step === 'gender_description') {
+    const description = text.slice(0, 120);
+    if (!description) return 'บอกคำสั้น ๆ ที่อยากใช้ระบุเพศได้เลยครับ';
+    await updateLineMember(identity.guestDbId, { p_gender: 'self_described', p_gender_self_description: description, p_finalize: false });
+    await setMembershipStep(identity.guestDbId, 'marketing');
+    return 'ยินยอมรับข่าวสารและสิทธิพิเศษทางการตลาดไหมครับ? ตอบ “ยินยอม” หรือ “ไม่ยินยอม”';
+  }
+  if (state.step === 'marketing') {
+    const consent = parseConsent(text);
+    if (consent === null) return 'ตอบ “ยินยอม” หรือ “ไม่ยินยอม” ได้เลยครับ การเลือกนี้ไม่กระทบบริการพื้นฐาน';
+    await updateLineMember(identity.guestDbId, { p_marketing_opt_in: consent, p_finalize: false });
+    await setMembershipStep(identity.guestDbId, 'research');
+    return 'อีกข้อแยกกันครับ ยินยอมให้นำข้อมูลแบบไม่ระบุตัวตนไปใช้พัฒนาบริการและงานวิจัยไหมครับ? ตอบ “ยินยอม” หรือ “ไม่ยินยอม”';
+  }
+  if (state.step === 'research') {
+    const consent = parseConsent(text);
+    if (consent === null) return 'ตอบ “ยินยอม” หรือ “ไม่ยินยอม” ได้เลยครับ ข้อนี้แยกจากการตลาดและไม่กระทบบริการพื้นฐาน';
+    await updateLineMember(identity.guestDbId, { p_research_opt_in: consent, p_finalize: true });
+    await setMembershipStep(identity.guestDbId);
+    return 'สมัครสมาชิกเรียบร้อยแล้วครับ ✅ ความจำ Journey การจอง และรางวัลเดิมยังอยู่กับ Customer ID เดียวกัน อีเมลไม่จำเป็นสำหรับสมาชิกผ่าน LINE ครับ';
+  }
+  return null;
 }
 
 export interface BookingOption {
@@ -488,7 +718,7 @@ export async function authUserFromBearer(authHeader: string | undefined): Promis
 export async function loadCustomerPortal(authUserId: string): Promise<Record<string, unknown> | null> {
   const accountRes = await dbFetch(
     `customer_accounts?auth_user_id=eq.${encodeURIComponent(authUserId)}`
-    + '&select=id,guest_id,full_name_enc,email_enc,phone_enc,preferred_contact,marketing_opt_in,created_at&limit=1',
+    + '&select=id,guest_id,full_name_enc,email_enc,phone_enc,preferred_contact,marketing_opt_in,research_opt_in,birth_date,gender,gender_self_description,member_status,membership_started_at,profile_completed_at,created_at&limit=1',
   );
   const accounts = await accountRes.json() as Array<Record<string, unknown>>;
   const account = accounts[0];
@@ -506,6 +736,13 @@ export async function loadCustomerPortal(authUserId: string): Promise<Record<str
     phone: decryptPii(account.phone_enc as string | null),
     preferredContact: account.preferred_contact,
     marketingOptIn: account.marketing_opt_in,
+    researchOptIn: account.research_opt_in,
+    birthDate: account.birth_date,
+    gender: account.gender,
+    genderSelfDescription: account.gender_self_description,
+    memberStatus: account.member_status,
+    membershipStartedAt: account.membership_started_at,
+    profileCompleted: Boolean(account.profile_completed_at),
     createdAt: account.created_at,
     bookings: await bookingRes.json(),
     orders: await orderRes.json(),

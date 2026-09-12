@@ -35,7 +35,7 @@
 <body>
 <main class="shell">
   <div class="brand"><div class="logo">ทำมา-ชาติ · THONGTHAI</div><a class="back" href="/">กลับหน้าเว็บ</a></div>
-  <section class="hero"><div class="eyebrow">MY TAMMA-CHART</div><h1>บัญชีของฉัน</h1><p>เก็บข้อมูลติดต่อ การจอง Journey คำสั่งซื้อ และเรื่องที่ทีมทำมา-ชาติต้องติดตามให้คุณไว้ในที่เดียว</p></section>
+  <section class="hero"><div class="eyebrow">MY TAMMA-CHART</div><h1>บัญชีของฉัน</h1><p>บัญชีเว็บเป็นช่องทางเสริมสำหรับสมาชิก LINE ใช้ดูโปรไฟล์ การจอง Journey คำสั่งซื้อ และเรื่องที่ทีมทำมา-ชาติต้องติดตาม โดยเชื่อมกับ Customer ID เดิม</p></section>
 
   <section id="chess-rewards" class="panel tt-chess-rewards-panel">
     <div class="section-title"><h2>รางวัลของฉัน</h2><span id="ttChessRewardsCount" class="pill">0 รายการ</span></div>
@@ -56,15 +56,19 @@
   </section>
 
   <section id="accountPanel" class="panel hidden">
-    <div class="account-head"><div><div class="pill">CUSTOMER ACCOUNT</div><div id="accountName" class="account-name" style="margin-top:8px">บัญชีของคุณ</div><div id="accountEmail" class="muted"></div></div><button id="logoutBtn" class="ghost" type="button">ออกจากระบบ</button></div>
+    <div class="account-head"><div><div id="memberStatus" class="pill">CUSTOMER ACCOUNT</div><div id="accountName" class="account-name" style="margin-top:8px">บัญชีของคุณ</div><div id="accountEmail" class="muted"></div></div><button id="logoutBtn" class="ghost" type="button">ออกจากระบบ</button></div>
     <div class="section-title"><h2>ข้อมูลติดต่อ</h2><span class="pill">เข้ารหัสในระบบ</span></div>
     <div class="grid two">
       <div><label>ชื่อที่ให้ทีมงานติดต่อ</label><input id="fullName" maxlength="120" placeholder="ชื่อ-นามสกุล"></div>
       <div><label>เบอร์โทร</label><input id="phone" type="tel" maxlength="30" placeholder="08x-xxx-xxxx"></div>
       <div><label>ช่องทางที่สะดวก</label><select id="preferredContact"><option value="phone">โทรศัพท์</option><option value="email">อีเมล</option><option value="line">LINE</option></select></div>
       <div><label>อีเมลบัญชี</label><input id="profileEmail" disabled></div>
+      <div><label>วันเกิด</label><input id="birthDate" type="date" min="1900-01-01"></div>
+      <div><label>เพศ</label><select id="gender"><option value="">ยังไม่ระบุ</option><option value="male">ชาย</option><option value="female">หญิง</option><option value="non_binary">นอนไบนารี</option><option value="self_described">ระบุเอง</option><option value="prefer_not_to_say">ไม่ประสงค์ระบุ</option></select></div>
+      <div id="genderDescriptionWrap" class="hidden"><label>คำที่ใช้ระบุเพศ</label><input id="genderSelfDescription" maxlength="120"></div>
     </div>
     <label style="margin-top:14px;display:flex;gap:9px;align-items:center;font-weight:650"><input id="marketingOptIn" type="checkbox" style="width:18px;height:18px">รับข่าวสาร/ข้อเสนอจากทำมา-ชาติ (ไม่จำเป็น)</label>
+    <label style="margin-top:12px;display:flex;gap:9px;align-items:center;font-weight:650"><input id="researchOptIn" type="checkbox" style="width:18px;height:18px">ยินยอมให้นำข้อมูลแบบไม่ระบุตัวตนไปใช้พัฒนาบริการ/งานวิจัย (ไม่จำเป็นและแยกจากการตลาด)</label>
     <div id="profileStatus" class="status"></div>
     <div class="row"><button id="saveProfile" class="primary" type="button">บันทึกข้อมูล</button><button id="refreshBtn" class="secondary" type="button">รีเฟรชรายการ</button></div>
 
@@ -96,6 +100,9 @@ function render(account){
   $('accountName').textContent=account.fullName||'บัญชีของคุณ'; $('accountEmail').textContent=account.email||'';
   $('fullName').value=account.fullName||''; $('phone').value=account.phone||''; $('profileEmail').value=account.email||'';
   $('preferredContact').value=account.preferredContact||'phone'; $('marketingOptIn').checked=account.marketingOptIn===true;
+  $('researchOptIn').checked=account.researchOptIn===true; $('birthDate').value=account.birthDate||''; $('gender').value=account.gender||'';
+  $('genderSelfDescription').value=account.genderSelfDescription||''; $('genderDescriptionWrap').classList.toggle('hidden',account.gender!=='self_described');
+  $('memberStatus').textContent=account.memberStatus==='member'?(account.profileCompleted?'MEMBER · PROFILE COMPLETE':'MEMBER · PROFILE INCOMPLETE'):'CUSTOMER ACCOUNT';
   const bookings=Array.isArray(account.bookings)?account.bookings:[]; $('bookingCount').textContent=bookings.length+' รายการ';
   if(!bookings.length)empty($('bookings'),'ยังไม่มีรายการจอง');else $('bookings').innerHTML=bookings.map(x=>`<div class="item"><div class="item-top"><div class="code">${esc(x.booking_code)}</div><span class="badge">${esc(statusLabel(x.status))}</span></div><div class="meta">${esc(({restaurant:'ร้านอาหาร',stay:'ที่พัก',activity:'กิจกรรม'})[x.service_type]||x.service_type)} · ${esc(thTime(x.start_at))}<br>${x.party_size?'จำนวน '+esc(x.party_size)+' คน':''}${x.quantity>1?' · '+esc(x.quantity)+' หน่วย':''}</div></div>`).join('');
   const orders=Array.isArray(account.orders)?account.orders:[]; $('orderCount').textContent=orders.length+' รายการ';
@@ -121,19 +128,22 @@ async function authenticate(){
     if(!res.ok)throw new Error(data.msg||data.error_description||data.message||'ไม่สำเร็จ');
     const access=data.access_token||data.session?.access_token;
     if(!access){setStatus('authStatus','สมัครเรียบร้อยแล้ว กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ (ถ้าระบบขอการยืนยัน)',true);return}
-    sessionStorage.setItem('tamma_access_token',access); await saveProfile(true); await loadAccount();
+    sessionStorage.setItem('tamma_access_token',access);
+    await fetch(ACCOUNT_API,{method:'POST',headers:apiHeaders(),body:JSON.stringify({guestId:localStorage.getItem('tamma_guest_id')||null})});
+    await loadAccount();
   }catch(e){setStatus('authStatus',e.message||'เกิดข้อผิดพลาด',false)}finally{$('authSubmit').classList.remove('loading')}
 }
 async function saveProfile(silent=false){
   if(!token())return;
   if(!silent)clearStatus('profileStatus');
-  const payload={guestId:localStorage.getItem('tamma_guest_id')||null,fullName:$('fullName')?.value||null,phone:$('phone')?.value||null,preferredContact:$('preferredContact')?.value||'email',marketingOptIn:$('marketingOptIn')?.checked===true};
+  const payload={guestId:localStorage.getItem('tamma_guest_id')||null,fullName:$('fullName')?.value||null,phone:$('phone')?.value||null,preferredContact:$('preferredContact')?.value||'email',birthDate:$('birthDate')?.value||null,gender:$('gender')?.value||null,genderSelfDescription:$('genderSelfDescription')?.value||null,marketingOptIn:$('marketingOptIn')?.checked===true,researchOptIn:$('researchOptIn')?.checked===true};
   const res=await fetch(ACCOUNT_API,{method:'POST',headers:apiHeaders(),body:JSON.stringify(payload)}); const data=await res.json();
   if(!res.ok){if(!silent)setStatus('profileStatus','บันทึกไม่สำเร็จ',false);return}
   if(data.account)render(data.account); if(!silent)setStatus('profileStatus','บันทึกข้อมูลแล้ว',true);
 }
 function setMode(next){mode=next;$('loginTab').classList.toggle('active',mode==='login');$('signupTab').classList.toggle('active',mode==='signup');$('authSubmit').textContent=mode==='login'?'เข้าสู่ระบบ':'สมัครบัญชี';$('password').autocomplete=mode==='login'?'current-password':'new-password';clearStatus('authStatus')}
 $('loginTab').onclick=()=>setMode('login');$('signupTab').onclick=()=>setMode('signup');$('authSubmit').onclick=authenticate;$('saveProfile').onclick=()=>saveProfile(false);$('refreshBtn').onclick=()=>loadAccount().catch(()=>setStatus('profileStatus','รีเฟรชไม่สำเร็จ',false));$('logoutBtn').onclick=async()=>{const t=token();if(t)fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:authHeaders({Authorization:'Bearer '+t})}).catch(()=>{});sessionStorage.removeItem('tamma_access_token');location.reload()};
+$('gender').onchange=()=>{$('genderDescriptionWrap').classList.toggle('hidden',$('gender').value!=='self_described')};
 const requestedMode=new URLSearchParams(location.search).get('mode');if(requestedMode==='signup'||requestedMode==='login'){setMode(requestedMode);requestAnimationFrame(()=>document.getElementById('authPanel')?.scrollIntoView({block:'start'}))};
 loadAccount().catch(()=>{});
 

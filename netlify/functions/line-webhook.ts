@@ -24,6 +24,10 @@ function lineGuestId(userId: string): string {
 
 export const handler: Handler = async (event, context) => {
   const response = await coreHandler(event, context);
+  if (!response) {
+    console.error('LINE_WEBHOOK_EMPTY_RESPONSE');
+    return { statusCode: 500, body: 'LINE webhook failed' };
+  }
 
   // Only persist operational contact linkage after the core webhook has accepted
   // the signed LINE request. This keeps invalid/spoofed requests out of customer data.

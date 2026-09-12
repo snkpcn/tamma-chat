@@ -1,5 +1,6 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { handleLineMembershipMessage } from './_operations-db';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -417,6 +418,15 @@ async function handleEvent(
 
   const message = event.message.text;
   const language = detectLanguage(message);
+  try {
+    const membershipReply = await handleLineMembershipMessage(lineGuestId(userId), userId, message);
+    if (membershipReply) {
+      await replyToLine(replyToken, splitText(membershipReply).map(text => ({ type: 'text', text })), accessToken);
+      return;
+    }
+  } catch (error) {
+    console.error('LINE_MEMBERSHIP_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+  }
   const result = await askThongthai(message, userId);
 
   try {

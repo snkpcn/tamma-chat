@@ -61,6 +61,11 @@ export const handler: Handler = async (event: HandlerEvent) => {
     const preferred = ['line', 'phone', 'email'].includes(String(body.preferredContact))
       ? String(body.preferredContact) as 'line' | 'phone' | 'email'
       : null;
+    const birthDate = typeof body.birthDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.birthDate)
+      ? body.birthDate : null;
+    const gender = ['male', 'female', 'non_binary', 'self_described', 'prefer_not_to_say'].includes(String(body.gender))
+      ? String(body.gender) as 'male' | 'female' | 'non_binary' | 'self_described' | 'prefer_not_to_say'
+      : null;
 
     try {
       await upsertCustomerAccount({
@@ -70,7 +75,11 @@ export const handler: Handler = async (event: HandlerEvent) => {
         email: authUser.email ?? stringValue(body.email, 160),
         phone: stringValue(body.phone, 30),
         preferredContact: preferred,
-        marketingOptIn: body.marketingOptIn === true,
+        marketingOptIn: typeof body.marketingOptIn === 'boolean' ? body.marketingOptIn : undefined,
+        researchOptIn: typeof body.researchOptIn === 'boolean' ? body.researchOptIn : undefined,
+        birthDate,
+        gender,
+        genderSelfDescription: stringValue(body.genderSelfDescription, 120),
       });
       const portal = await loadCustomerPortal(authUser.id);
       return json(200, { account: portal });
