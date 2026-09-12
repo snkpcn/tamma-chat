@@ -1,5 +1,6 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { mergeBrainGuestData } from './_thongthai-runtime';
 
 const TAMMA_SITE_URL = 'https://tamma-chat.netlify.app';
 const OFFICIAL_MAP_URL = 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic';
@@ -165,6 +166,10 @@ async function mergeWebGuestIntoLineGuest(sourceAnonymousId: string, targetAnony
       });
     }
   }
+
+  // Brain V2 state follows the same canonical LINE guest: semantic travel memory,
+  // agent state, and channel aliases move with the structured profile.
+  await mergeBrainGuestData(sourceId, targetId);
 }
 
 async function latestJourney(targetAnonymousId: string): Promise<unknown | null> {
