@@ -1,0 +1,2 @@
+import type { Handler } from '@netlify/functions';
+export const handler:Handler=async()=>({statusCode:200,headers:{'Content-Type':'application/json','Cache-Control':'no-store'},body:JSON.stringify({ok:true,supabase:Boolean(process.env.SUPABASE_URL&&process.env.SUPABASE_SERVICE_ROLE_KEY),piiKey:Boolean(process.env.CUSTOMER_PII_ENCRYPTION_KEY),line:Boolean(process.env.LINE_CHANNEL_ACCESS_TOKEN&&process.env.LINE_CHANNEL_SECRET)})});
