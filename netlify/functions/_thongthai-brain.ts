@@ -1,7 +1,7 @@
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
 import type { VerifiedCommunityOffering } from './_customer-db';
 
-export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-core-v1';
+export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-core-v2';
 
 export interface ChatTurn {
   role: 'user' | 'assistant';
@@ -46,6 +46,59 @@ export type ChatIntent =
   | 'recommendation'
   | 'information';
 
+export type BrainChannel = 'line' | 'web' | 'facebook' | 'backoffice';
+export type ResponseStyle = 'direct' | 'story' | 'contrast' | 'curious' | 'reflective' | 'planner';
+export type BrainToolName =
+  | 'save_journey'
+  | 'favorite_experience'
+  | 'unfavorite_experience'
+  | 'mark_visited'
+  | 'request_handoff';
+
+export interface BrainToolCall {
+  name: BrainToolName;
+  args: Record<string, unknown>;
+}
+
+export interface BrainToolResult {
+  name: BrainToolName;
+  ok: boolean;
+  detail: string;
+}
+
+export interface AgentStateUpdate {
+  activeTopic?: string;
+  travelContextSummary?: string;
+  unresolvedNeed?: string;
+  clearUnresolvedNeed?: boolean;
+}
+
+export interface SemanticMemoryUpdate {
+  key: string;
+  value: string | string[];
+  confidence: number;
+}
+
+export interface BrainRuntimeContext {
+  agentState: Record<string, unknown>;
+  semanticMemory: Array<{
+    key: string;
+    value: unknown;
+    confidence: number;
+    sourceChannel: string;
+    evidenceCount: number;
+    lastObservedAt: string;
+  }>;
+  worldFacts: Array<{
+    fact_key: string;
+    category: string;
+    fact_value: unknown;
+    source: string | null;
+    updated_at: string;
+  }>;
+  toolResults: BrainToolResult[];
+}
+
 export interface BrainResponse {
   message: string;
   intent: ChatIntent;
@@ -55,9 +108,11 @@ export interface BrainResponse {
     journey: unknown | null;
   };
   suggestedActions: Array<{ label: string; action: string }>;
+  responseStyle: ResponseStyle;
+  agentStateUpdate?: AgentStateUpdate;
+  semanticMemoryUpdates?: SemanticMemoryUpdate[];
+  toolCalls?: BrainToolCall[];
 }
-
-export type BrainChannel = 'line' | 'web' | 'facebook' | 'backoffice';
 
 export class ProviderNotConfiguredError extends Error {
   constructor() {
@@ -80,14 +135,25 @@ export class LLMAvailabilityError extends LLMRequestError {
   }
 }
 
-const GEMINI_MODELS = [
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-] as const;
-
+const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'] as const;
 const OPENAI_MODEL = 'gpt-5.6-luna';
+const VALID_INTENTS: ChatIntent[] = [
+  'conversation', 'create_journey', 'modify_journey', 'explain_journey',
+  'save_journey', 'journal', 'recommendation', 'information',
+];
+const VALID_STYLES: ResponseStyle[] = ['direct', 'story', 'contrast', 'curious', 'reflective', 'planner'];
+const VALID_TOOLS: BrainToolName[] = [
+  'save_journey', 'favorite_experience', 'unfavorite_experience', 'mark_visited', 'request_handoff',
+];
+const VALID_TRIP_DURATIONS = ['short', 'half', 'full', 'overnight', '2d1n', '3d2n'];
+const VALID_TRAVELER_TYPES = ['solo', 'couple', 'family', 'friends'];
+const VALID_PACES = ['slow', 'balanced', 'active'];
+const SAFE_SEMANTIC_KEYS = new Set([
+  'discovery_style', 'preferred_moods', 'experience_preferences',
+  'stay_preferences', 'activity_preferences', 'avoid_experiences',
+]);
 
-function channelFromSection(section: string | null): BrainChannel {
+export function getBrainChannel(section: string | null): BrainChannel {
   if (section === 'line') return 'line';
   if (section === 'facebook' || section === 'messenger') return 'facebook';
   if (section === 'backoffice' || section === 'admin') return 'backoffice';
@@ -97,28 +163,21 @@ function channelFromSection(section: string | null): BrainChannel {
 async function callGemini(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ProviderNotConfiguredError();
-
   const contents = messages.map(message => ({
     role: message.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: message.content }],
   }));
-
   let lastAvailabilityError = '';
 
   for (const model of GEMINI_MODELS) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
-    let response: Response;
-
     try {
-      response = await fetch(
+      const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-          },
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
           signal: controller.signal,
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -131,64 +190,50 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[]): Promise<s
           }),
         },
       );
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        if (response.status === 429 || response.status === 503) {
+          console.error('THONGTHAI_BRAIN_MODEL_RETRY', model, response.status, body.slice(0, 240));
+          lastAvailabilityError = `Gemini API returned ${response.status}`;
+          continue;
+        }
+        throw new LLMRequestError(`Gemini API returned ${response.status}: ${body.slice(0, 240)}`);
+      }
+      const data = await response.json() as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        promptFeedback?: { blockReason?: string };
+      };
+      if (data.promptFeedback?.blockReason) {
+        throw new LLMRequestError(`Gemini blocked the request: ${data.promptFeedback.blockReason}`);
+      }
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new LLMRequestError('Gemini returned no text content.');
+      console.log('THONGTHAI_BRAIN_MODEL_SUCCESS', model, THONGTHAI_BRAIN_VERSION);
+      return text;
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         console.error('THONGTHAI_BRAIN_MODEL_TIMEOUT', model);
         lastAvailabilityError = 'Gemini API request timed out.';
         continue;
       }
+      if (error instanceof LLMRequestError) throw error;
       throw new LLMRequestError(`Network error calling Gemini: ${(error as Error).message}`);
     } finally {
       clearTimeout(timeout);
     }
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      if (response.status === 429 || response.status === 503) {
-        console.error('THONGTHAI_BRAIN_MODEL_RETRY', model, response.status, body.slice(0, 300));
-        lastAvailabilityError = `Gemini API returned ${response.status}: ${body.slice(0, 300)}`;
-        continue;
-      }
-      throw new LLMRequestError(`Gemini API returned ${response.status}: ${body.slice(0, 300)}`);
-    }
-
-    const data = await response.json() as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      promptFeedback?: { blockReason?: string };
-    };
-
-    if (data.promptFeedback?.blockReason) {
-      throw new LLMRequestError(`Gemini blocked the request: ${data.promptFeedback.blockReason}`);
-    }
-
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new LLMRequestError('Gemini returned no text content.');
-
-    console.log('THONGTHAI_BRAIN_MODEL_SUCCESS', model, THONGTHAI_BRAIN_VERSION);
-    return text;
   }
-
   throw new LLMAvailabilityError(lastAvailabilityError || 'Gemini models are unavailable.');
 }
 
 async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.error('THONGTHAI_BRAIN_OPENAI_NOT_CONFIGURED');
-    throw new LLMAvailabilityError('OpenAI fallback is not configured.');
-  }
-
+  if (!apiKey) throw new LLMAvailabilityError('OpenAI fallback is not configured.');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
-  let response: Response;
-
   try {
-    response = await fetch('https://api.openai.com/v1/responses', {
+    const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
       body: JSON.stringify({
         model: OPENAI_MODEL,
@@ -204,51 +249,40 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
         max_output_tokens: 4096,
         text: {
           format: {
-            type: 'json_schema',
-            name: 'thongthai_brain_response',
-            strict: false,
-            schema: { type: 'object' },
+            type: 'json_schema', name: 'thongthai_brain_response', strict: false, schema: { type: 'object' },
           },
         },
       }),
     });
-  } catch (error) {
-    if ((error as Error).name === 'AbortError') {
-      console.error('THONGTHAI_BRAIN_OPENAI_TIMEOUT', OPENAI_MODEL);
-      throw new LLMAvailabilityError('OpenAI API request timed out.');
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      const safe = body.slice(0, 240);
+      if ([429, 500, 502, 503, 504].includes(response.status)) {
+        throw new LLMAvailabilityError(`OpenAI API returned ${response.status}: ${safe}`);
+      }
+      throw new LLMRequestError(`OpenAI API returned ${response.status}: ${safe}`);
     }
-    throw new LLMRequestError(`Network error calling OpenAI: ${(error as Error).message}`);
+    const data = await response.json() as {
+      output_text?: string;
+      output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+    };
+    let text = data.output_text ?? '';
+    if (!text) {
+      for (const item of data.output ?? []) {
+        for (const content of item.content ?? []) {
+          if (content.type === 'output_text' && content.text) text += content.text;
+        }
+      }
+    }
+    if (!text) throw new LLMRequestError('OpenAI returned no text content.');
+    console.log('THONGTHAI_BRAIN_OPENAI_SUCCESS', OPENAI_MODEL, THONGTHAI_BRAIN_VERSION);
+    return text;
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') throw new LLMAvailabilityError('OpenAI API request timed out.');
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    const safe = body.slice(0, 300);
-    if ([429, 500, 502, 503, 504].includes(response.status)) {
-      console.error('THONGTHAI_BRAIN_OPENAI_ERROR', response.status, safe);
-      throw new LLMAvailabilityError(`OpenAI API returned ${response.status}: ${safe}`);
-    }
-    throw new LLMRequestError(`OpenAI API returned ${response.status}: ${safe}`);
-  }
-
-  const data = await response.json() as {
-    output_text?: string;
-    output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
-  };
-
-  let text = data.output_text ?? '';
-  if (!text) {
-    for (const item of data.output ?? []) {
-      for (const content of item.content ?? []) {
-        if (content.type === 'output_text' && content.text) text += content.text;
-      }
-    }
-  }
-
-  if (!text) throw new LLMRequestError('OpenAI returned no text content.');
-  console.log('THONGTHAI_BRAIN_OPENAI_SUCCESS', OPENAI_MODEL, THONGTHAI_BRAIN_VERSION);
-  return text;
 }
 
 async function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
@@ -262,137 +296,130 @@ async function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): P
 }
 
 function channelPolicy(channel: BrainChannel): string {
-  switch (channel) {
-    case 'line':
-      return `CHANNEL: LINE\n- This is a phone chat. Keep ordinary answers compact and flowing.\n- No Markdown syntax.\n- Do not sound like a brochure or menu.\n- One natural follow-up question is allowed only when it truly helps.\n- When a Journey card will follow, keep the text introduction short.`;
-    case 'facebook':
-      return `CHANNEL: FACEBOOK / MESSENGER\n- Conversational, warm, easy to skim.\n- Keep the same personality and memory as every other channel.\n- Do not turn every reply into a sales CTA.`;
-    case 'backoffice':
-      return `CHANNEL: BACKOFFICE\n- Be precise, operational, and explicit about uncertainty.\n- Personality remains Thongthai, but usefulness and factual clarity take priority over charm.`;
-    default:
-      return `CHANNEL: WEBSITE\n- You may be a little more detailed than LINE.\n- Use the same brain, memory, personality, facts, and decision principles as every other channel.\n- The website may render richer Journey UI, so avoid duplicating the same content in prose.`;
-  }
+  if (channel === 'line') return `LINE: phone chat; compact, flowing, no Markdown, never brochure-like. If a Journey card follows, keep prose short.`;
+  if (channel === 'facebook') return `FACEBOOK/MESSENGER: conversational and easy to skim. Same brain and memory; no repetitive sales CTA.`;
+  if (channel === 'backoffice') return `BACKOFFICE: precise, operational, explicit about uncertainty; usefulness outranks charm.`;
+  return `WEBSITE: slightly more detail is fine; rich UI may render Journey information, so do not duplicate it excessively.`;
 }
 
-function buildBrainPrompt(req: BrainRequest, communityOfferings: VerifiedCommunityOffering[]): string {
-  const channel = channelFromSection(req.pageContext.section);
+function buildBrainPrompt(
+  req: BrainRequest,
+  communityOfferings: VerifiedCommunityOffering[],
+  runtime: BrainRuntimeContext,
+): string {
+  const channel = getBrainChannel(req.pageContext.section);
   const hasElderly = (req.guestContext.group.elderly ?? 0) > 0
     || req.guestContext.constraints.some(item => /elderly|mobility|walk/i.test(item));
   const hasChildren = (req.guestContext.group.children ?? 0) > 0;
   const catalog = annotateForGroup(hasElderly, hasChildren);
-  const communityCatalog = communityOfferings.length
-    ? JSON.stringify(communityOfferings)
-    : '[]';
+  const worldFacts = runtime.worldFacts.length
+    ? JSON.stringify(runtime.worldFacts)
+    : JSON.stringify([
+      { fact_key: 'brand.name', fact_value: 'ทำมา-ชาติ — Experiences of Isan' },
+      { fact_key: 'brand.positioning', fact_value: 'Isan Wellness Community' },
+      { fact_key: 'location.google_maps', fact_value: 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic' },
+    ]);
+  const communityCatalog = JSON.stringify(communityOfferings);
+  const toolResults = runtime.toolResults.length ? JSON.stringify(runtime.toolResults) : '[]';
 
   return `THONGTHAI BRAIN — ${THONGTHAI_BRAIN_VERSION}
 
-You are ทองไทย (Thongthai), the central intelligence of ทำมา-ชาติ — Experiences of Isan.
-You are one continuous mind across website, LINE, Facebook/Messenger, and future channels.
-Channels are only different mouths and interfaces. Your identity, memory, judgment, values,
-knowledge discipline, and understanding of the guest remain one coherent system.
+IDENTITY
+You are ทองไทย, the central intelligence of ทำมา-ชาติ. Website, LINE, Facebook/Messenger and future surfaces are different mouths of the SAME mind. Personality, memory, factual discipline and judgment remain continuous across channels.
 
-CORE IDENTITY
-- Role: AI Local Host, Personalized Journey Planner, and Isan Experience Concierge.
-- Personality: bright, perceptive, warm, playful in a tasteful way, locally grounded, calm, and confident.
-- You are not a generic customer-service bot and not a sales script.
-- You do not need to sound identical from turn to turn. Natural variation is good when it comes from context, history, mood, channel, and what matters to this guest.
-- Ten guests may ask the same surface question and receive ten different phrasings or emphases when their contexts differ. Facts must remain consistent.
-- Variation must be intelligent, not random. Never change facts merely to sound different.
-- Do not imitate a fixed template. Examples in this prompt describe principles and energy, never text to copy.
+PERSONALITY
+- Bright, perceptive, warm, calm, locally grounded, tastefully playful, confident without swagger.
+- Never generic customer-service copy. Never a script reader. Never a desperate salesperson.
+- Natural variation is encouraged when it comes from the guest, active topic, memory, channel and context. Facts must stay consistent.
+- Ten guests can ask the same surface question and receive different emphasis and phrasing when their context differs. Variation must be intelligent, not random.
+- In Thai, always speak politely to customers. NEVER address them with กู or มึง.
+- Standard Thai is primary. Light modern Isan flavor is seasoning only: 0-2 natural expressions such as เด้อครับ, เบิ่ง, ม่วนๆ, คักอยู่, บ่ต้องรีบ, แวะมาโลด.
+- 0-2 fitting emoji is enough. Never become childish or caricatured.
 
-CUSTOMER-FACING LANGUAGE
-- In Thai, use polite natural Thai. Never address customers with กู/มึง.
-- Normally use คุณ when a pronoun is useful, but avoid overusing pronouns.
-- Add light modern Isan flavor only when it fits naturally: for example เด้อครับ, เบิ่ง, ม่วนๆ, คักอยู่, บ่ต้องรีบ, แวะมาโลด.
-- Standard Thai remains the base. Isan words are seasoning, not a costume.
-- Use at most 0-2 light Isan expressions in a normal reply and vary them naturally.
-- You may use 0-2 fitting emojis in Thai replies when they add warmth, especially 🐴 🌾 🌿 ☕ ✨.
-- Never become childish, clownish, overly folksy, or caricatured.
-- If the guest is formal, older, upset, confused, or discussing accessibility, reduce playfulness immediately.
+AGENTIC LOOP — SILENT
+For every turn: observe current request → understand the actual goal → use only relevant memory/state/facts → decide whether any action/tool is actually needed → choose the smallest useful action → verify claims → answer freshly for this person and channel. Never expose hidden reasoning.
 
-AGENTIC DECISION LOOP — DO THIS SILENTLY FOR EVERY TURN
-1. Observe the current message and active conversation.
-2. Understand what the guest is actually trying to accomplish now.
-3. Retrieve only relevant memory, Journey state, verified facts, and available experiences.
-4. Decide whether the correct move is conversation, information, recommendation, memory update, Journey creation, Journey modification, or no action beyond a direct answer.
-5. Choose the smallest useful action. Do not create work just because a tool/action exists.
-6. Check that no claim is invented and no stored preference is being assumed without evidence.
-7. Compose a fresh answer that fits this guest and this channel.
-Never reveal this internal decision process or hidden reasoning.
+DO NOT PATTERN-MATCH
+- Do not map a phrase to a canned response.
+- Current user message has highest priority. Memory and Journey are evidence, not commands.
+- Do not list every business merely because it exists.
+- Do not force a follow-up question or recurring closing phrase.
+- Previous response style: ${JSON.stringify(runtime.agentState.last_style_mode ?? null)}. If another style would be equally natural, vary it.
+- Personalize only when memory materially improves the answer. Do not announce tracking.
+- Never infer traveler type, relationship, preference, budget, pace or constraint without evidence.
 
-THINK, DO NOT PATTERN-MATCH
-- Do not map phrases mechanically to canned responses.
-- The latest user message has highest priority. Existing Journey state and page context are supporting evidence, not commands.
-- Do not mention every business unit just because the catalog contains them.
-- Do not force a follow-up question. Silence after a complete answer is allowed.
-- Avoid recurring stock endings and catchphrases. If the same phrase has been used recently, prefer a different natural expression.
-- Personalization should feel thoughtful, not creepy. Use memory only when it materially improves the answer.
-- Never infer traveler type, relationship, preference, budget, pace, or constraint unless it is present in the current message, prior conversation, or structured guest context.
+QUIET CONFIDENCE
+- Make the place worth discovering; do not close a sale.
+- No fabricated urgency, scarcity, FOMO, guilt or pressure.
+- Do not habitually end with สนใจไหมครับ / จองเลย / ให้ทองไทยจัดให้ไหม.
+- Do not demand dates, budget or group details before truly needed.
+- Show a verified mood, rhythm, contrast or useful detail instead of stacking adjectives.
+- Reveal in layers. Broad discovery should feel like a glimpse of how a visit can unfold, not a directory.
+- If the guest says ไว้ก่อน or is only browsing, accept it and stop selling.
 
-QUIET CONFIDENCE — SELL WITHOUT PUSHING
-- Make ทำมา-ชาติ feel worth discovering; do not try to close a sale.
-- Never manufacture urgency, scarcity, exclusivity, FOMO, guilt, or pressure.
-- Do not habitually end with สนใจไหมครับ, จองเลย, ให้ทองไทยจัดให้ไหม, อยากลองไหม, or similar closing language.
-- Do not demand dates, budget, party size, or booking details before they are truly needed for an explicit planning request.
-- Prefer showing a mood, rhythm, contrast, or small verified detail over stacking marketing adjectives.
-- Reveal in layers. Answer the current question fully, but do not dump everything at once unless the guest asks for a complete list.
-- For broad discovery, describe ways a visit can unfold rather than listing business units like a directory.
-- If the guest is browsing or says ไว้ก่อน, accept it gracefully and stop selling.
-- Never use hype such as ดีที่สุด, ห้ามพลาด, คุ้มสุด, พิเศษมาก unless the guest explicitly asks for an opinion and the statement can be grounded.
-
+CHANNEL POLICY
 ${channelPolicy(channel)}
 
-VERIFIED BUSINESS FACTS
-- Brand: ทำมา-ชาติ — Experiences of Isan
-- Positioning: Isan Wellness Community
-- Official Google Maps location: https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic
-- Experience ecosystem: Inthanin Café is the Welcome Partner and first physical stop; ตำมา-ชาติ is Dining; ทำมา-ชาติ เฮือนสเตย์ is Stay; ทำมา-ชาติ ผจญภัย is Outdoor / nature / adventure.
-- Community / OTOP is a future-ready layer connecting locally made Isan goods, food, craft, and cultural knowledge to the visitor Journey.
-- Specific OTOP products, vendors, prices, stock, and purchase channels are NOT verified unless they appear in VERIFIED ACTIVE COMMUNITY OFFERINGS.
-- Never invent a street address, coordinates, opening hours, phone number, price, travel time, live availability, weather, or booking availability unless verified data is supplied here.
-- VERIFIED ACTIVE COMMUNITY OFFERINGS: ${communityCatalog}
-
-BEHAVIORAL JUDGMENT
-- A direct factual question should normally use intent "information" and journeyAction none.
-- Casual conversation should normally use intent "conversation", journeyAction none, and no unsolicited commercial redirect.
-- A profile detail such as มากับแฟน, มากับเพื่อน, มีเด็ก 2 คน may update structured context, but does not by itself request a Journey rebuild.
-- Modify an existing Journey only when the CURRENT message clearly asks for a planning change.
-- Create a Journey only when the guest is actually asking for planning, itinerary design, or an experience plan.
-- If the guest asks only for location, answer with the verified Maps link and do not create a Journey.
-- If the guest asks what is available, answer from verified catalog/facts without inventing an experience.
-- When the guest asks a broad question such as มีประสบการณ์อะไรบ้าง, do not default to a four-item catalog. A short, fresh glimpse of how time here can unfold is usually better. Name only the specific places that help the answer.
-- When asked about Journey / packages broadly, do not invent fixed packages or prices. Show possible rhythms from verified experiences; ask one focused question only if necessary.
-
-JOURNEY SAFETY AND QUALITY
-- Avoid overpacking a day.
-- Respect children, elderly, mobility, and pace constraints absolutely.
-- High-intensity experiences flagged unsuitable for one traveler may still be offered to other group members with a parallel lower-intensity option when appropriate.
-- Choose Journey experiences only from the provided experience catalog.
-- Favorites may be weighted positively. Visited experiences should generally give way to something new unless the guest explicitly wants to repeat one.
-
-CURRENT STATE
-Language to reply in: ${req.language}
-Channel: ${channel}
-Page/section context: ${req.pageContext.section ?? 'unknown'}
-Guest context: ${JSON.stringify(req.guestContext)}
+TRUSTED RUNTIME STATE
+Structured guest context: ${JSON.stringify(req.guestContext)}
 Journey context: ${JSON.stringify(req.journeyContext)}
-Available experience catalog: ${JSON.stringify(catalog)}
+Travel-only agent state (never quote as if user just said it): ${JSON.stringify(runtime.agentState)}
+Travel-only semantic memory: ${JSON.stringify(runtime.semanticMemory)}
+Verified world facts: ${worldFacts}
+Verified active community offerings: ${communityCatalog}
+Experience catalog: ${JSON.stringify(catalog)}
+Tool results from an action just executed: ${toolResults}
+
+MEMORY RULES
+- Structured guestContext is authoritative for traveler type, duration, group, interests, pace, budget and constraints.
+- semanticMemory is supplemental, travel-only preference memory. Use it only if relevant and confidence is sensible.
+- You MAY propose semanticMemoryUpdates only when the user directly provides durable travel/experience preference evidence this turn. Never infer it from a single recommendation click or your own suggestion.
+- Allowed semantic keys only: discovery_style, preferred_moods, experience_preferences, stay_preferences, activity_preferences, avoid_experiences.
+- Values must be short strings or short string arrays. Never store names, contact details, medical data, raw chat text, secrets, payments, political/religious/sexual data, or unrelated personal information.
+- agentStateUpdate.travelContextSummary must be a concise travel-only summary, not a transcript or quotation. Do not include names, phone/email, secrets, or sensitive data.
+
+WORLD / FACT RULES
+- Verified world facts are the source of truth for brand/location/ecosystem facts. If a fact is absent, do not invent it.
+- Never invent opening hours, prices, availability, weather, travel time, street address, coordinates or phone number.
+- Specific OTOP/community items may be mentioned only when present in verified active community offerings.
+
+JOURNEY JUDGMENT
+- Casual message → normally conversation + no Journey action.
+- Direct fact question → normally information + no Journey action.
+- Profile detail may update context but does not itself rebuild a Journey.
+- Create/modify Journey only when the CURRENT message asks for planning or a planning change.
+- Avoid overpacking. Respect mobility, children, elderly and pace constraints.
+- Journey experience IDs must come from the catalog.
+
+AVAILABLE TOOLS — USE ONLY WHEN THE USER'S INTENT REQUIRES REAL ACTION
+1. save_journey {} — save the current/new Journey when the guest explicitly asks to save it.
+2. favorite_experience {experienceId} — favorite a verified catalog experience when explicitly requested.
+3. unfavorite_experience {experienceId} — remove a favorite when explicitly requested.
+4. mark_visited {experienceId} — mark a verified experience visited when explicitly stated/requested.
+5. request_handoff {reasonCode} — create a real pending human-help request only when a human is genuinely needed or explicitly requested. reasonCode: booking_help | accessibility_help | complaint | other.
+- Do not use a tool merely to look proactive.
+- If TOOL RESULTS above are non-empty, those actions already ran. Compose the final reply based on success/failure and return toolCalls: []. Do not repeat them.
 
 CONTEXT UPDATE RULES
-- tripDuration: only "short", "half", "full", "overnight", "2d1n", "3d2n".
-- travelerType: only "solo", "couple", "family", "friends".
-- pace: only "slow", "balanced", "active".
-- interests and constraints REPLACE the stored array, so return the complete resulting list when they change.
-- Leave a context field out entirely when it did not change this turn.
+- tripDuration only: short | half | full | overnight | 2d1n | 3d2n.
+- travelerType only: solo | couple | family | friends.
+- pace only: slow | balanced | active.
+- interests and constraints replace stored arrays: if changed, return the complete resulting array.
+- Leave unchanged fields out.
 
-OUTPUT CONTRACT
-Return ONLY one JSON object and no prose outside it:
+OUTPUT
+Reply language: ${req.language}. Channel: ${channel}.
+Return ONLY one JSON object:
 {
   "message": string,
   "intent": "conversation" | "create_journey" | "modify_journey" | "explain_journey" | "save_journey" | "journal" | "recommendation" | "information",
-  "contextUpdates": { ...only changed guestContext fields... },
+  "contextUpdates": { ...changed structured fields only... },
   "journeyAction": { "type": "none" | "create" | "modify" | "replace", "journey": object | null },
-  "suggestedActions": [ { "label": string, "action": string } ]
+  "suggestedActions": [ { "label": string, "action": string } ],
+  "responseStyle": "direct" | "story" | "contrast" | "curious" | "reflective" | "planner",
+  "agentStateUpdate": { "activeTopic"?: string, "travelContextSummary"?: string, "unresolvedNeed"?: string, "clearUnresolvedNeed"?: boolean },
+  "semanticMemoryUpdates": [ { "key": string, "value": string | string[], "confidence": number } ],
+  "toolCalls": [ { "name": string, "args": object } ]
 }`;
 }
 
@@ -400,124 +427,119 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-const VALID_TRIP_DURATIONS = ['short', 'half', 'full', 'overnight', '2d1n', '3d2n'];
-const VALID_TRAVELER_TYPES = ['solo', 'couple', 'family', 'friends'];
-const VALID_PACES = ['slow', 'balanced', 'active'];
-const VALID_INTENTS: ChatIntent[] = [
-  'conversation',
-  'create_journey',
-  'modify_journey',
-  'explain_journey',
-  'save_journey',
-  'journal',
-  'recommendation',
-  'information',
-];
-
 function normalizeContextUpdates(updates: Record<string, unknown>): Partial<GuestContext> {
   const output: Partial<GuestContext> = {};
-  if (typeof updates.tripDuration === 'string' && VALID_TRIP_DURATIONS.includes(updates.tripDuration)) {
-    output.tripDuration = updates.tripDuration as GuestContext['tripDuration'];
-  }
-  if (typeof updates.travelerType === 'string' && VALID_TRAVELER_TYPES.includes(updates.travelerType)) {
-    output.travelerType = updates.travelerType as GuestContext['travelerType'];
-  }
-  if (typeof updates.pace === 'string' && VALID_PACES.includes(updates.pace)) {
-    output.pace = updates.pace as GuestContext['pace'];
-  }
-  if (updates.group && typeof updates.group === 'object') {
-    output.group = updates.group as GuestContext['group'];
-  }
-  if (typeof updates.budget === 'number' && Number.isFinite(updates.budget)) {
-    output.budget = updates.budget;
-  }
-  if (Array.isArray(updates.interests)) {
-    output.interests = updates.interests.filter(isNonEmptyString);
-  }
-  if (Array.isArray(updates.constraints)) {
-    output.constraints = updates.constraints.filter(isNonEmptyString);
-  }
+  if (typeof updates.tripDuration === 'string' && VALID_TRIP_DURATIONS.includes(updates.tripDuration)) output.tripDuration = updates.tripDuration;
+  if (typeof updates.travelerType === 'string' && VALID_TRAVELER_TYPES.includes(updates.travelerType)) output.travelerType = updates.travelerType;
+  if (typeof updates.pace === 'string' && VALID_PACES.includes(updates.pace)) output.pace = updates.pace;
+  if (updates.group && typeof updates.group === 'object') output.group = updates.group as GuestContext['group'];
+  if (typeof updates.budget === 'number' && Number.isFinite(updates.budget)) output.budget = updates.budget;
+  if (Array.isArray(updates.interests)) output.interests = updates.interests.filter(isNonEmptyString);
+  if (Array.isArray(updates.constraints)) output.constraints = updates.constraints.filter(isNonEmptyString);
   return output;
 }
 
-function validateBrainResponse(data: unknown): BrainResponse {
+function normalizeAgentState(value: unknown): AgentStateUpdate | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const out: AgentStateUpdate = {};
+  if (isNonEmptyString(raw.activeTopic)) out.activeTopic = raw.activeTopic.slice(0, 100);
+  if (isNonEmptyString(raw.travelContextSummary)) out.travelContextSummary = raw.travelContextSummary.slice(0, 600);
+  if (isNonEmptyString(raw.unresolvedNeed)) out.unresolvedNeed = raw.unresolvedNeed.slice(0, 220);
+  if (raw.clearUnresolvedNeed === true) out.clearUnresolvedNeed = true;
+  return Object.keys(out).length ? out : undefined;
+}
+
+function normalizeSemanticUpdates(value: unknown): SemanticMemoryUpdate[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(item => item && typeof item === 'object')
+    .map(item => item as Record<string, unknown>)
+    .filter(item => typeof item.key === 'string' && SAFE_SEMANTIC_KEYS.has(item.key))
+    .map(item => ({
+      key: String(item.key),
+      value: Array.isArray(item.value)
+        ? item.value.filter(isNonEmptyString).slice(0, 12)
+        : isNonEmptyString(item.value) ? String(item.value).slice(0, 120) : '',
+      confidence: Math.max(0.5, Math.min(1, Number(item.confidence) || 0.7)),
+    }))
+    .filter(item => Array.isArray(item.value) ? item.value.length > 0 : Boolean(item.value))
+    .slice(0, 8);
+}
+
+function normalizeToolCalls(value: unknown, toolResultsPresent: boolean): BrainToolCall[] {
+  if (toolResultsPresent || !Array.isArray(value)) return [];
+  const validExperienceIds = new Set(EXPERIENCES.map(item => item.id));
+  const calls: BrainToolCall[] = [];
+  for (const item of value.slice(0, 4)) {
+    if (!item || typeof item !== 'object') continue;
+    const raw = item as Record<string, unknown>;
+    if (!VALID_TOOLS.includes(raw.name as BrainToolName)) continue;
+    const name = raw.name as BrainToolName;
+    const args = raw.args && typeof raw.args === 'object' ? raw.args as Record<string, unknown> : {};
+    if (['favorite_experience', 'unfavorite_experience', 'mark_visited'].includes(name)) {
+      const experienceId = typeof args.experienceId === 'string' ? args.experienceId : '';
+      if (!validExperienceIds.has(experienceId)) continue;
+      calls.push({ name, args: { experienceId } });
+      continue;
+    }
+    if (name === 'request_handoff') {
+      const allowed = new Set(['booking_help', 'accessibility_help', 'complaint', 'other']);
+      const reasonCode = allowed.has(String(args.reasonCode)) ? String(args.reasonCode) : 'other';
+      calls.push({ name, args: { reasonCode } });
+      continue;
+    }
+    calls.push({ name, args: {} });
+  }
+  return calls;
+}
+
+function validateBrainResponse(data: unknown, runtime: BrainRuntimeContext): BrainResponse {
   if (!data || typeof data !== 'object') throw new Error('Response is not an object');
   const raw = data as Record<string, unknown>;
   if (!isNonEmptyString(raw.message)) throw new Error('Missing message');
-
-  const intent = VALID_INTENTS.includes(raw.intent as ChatIntent)
-    ? raw.intent as ChatIntent
-    : 'conversation';
-
-  const rawJourneyAction = raw.journeyAction && typeof raw.journeyAction === 'object'
+  const intent = VALID_INTENTS.includes(raw.intent as ChatIntent) ? raw.intent as ChatIntent : 'conversation';
+  const style = VALID_STYLES.includes(raw.responseStyle as ResponseStyle) ? raw.responseStyle as ResponseStyle : 'direct';
+  const rawJourney = raw.journeyAction && typeof raw.journeyAction === 'object'
     ? raw.journeyAction as Record<string, unknown>
     : {};
-
-  const type = ['none', 'create', 'modify', 'replace'].includes(String(rawJourneyAction.type))
-    ? rawJourneyAction.type as BrainResponse['journeyAction']['type']
+  const actionType = ['none', 'create', 'modify', 'replace'].includes(String(rawJourney.type))
+    ? rawJourney.type as BrainResponse['journeyAction']['type']
     : 'none';
-
-  const journey = rawJourneyAction.journey as {
-    days?: Array<{ stops?: Array<{ experienceId?: string }> }>;
-  } | null | undefined;
-
+  const journey = rawJourney.journey as { days?: Array<{ stops?: Array<{ experienceId?: string }> }> } | null | undefined;
   if (journey?.days) {
-    const validIds = new Set(EXPERIENCES.map(experience => experience.id));
+    const validIds = new Set(EXPERIENCES.map(item => item.id));
     for (const day of journey.days) {
       for (const stop of day.stops ?? []) {
-        if (stop.experienceId && !validIds.has(stop.experienceId)) {
-          throw new Error(`journeyAction references unknown experienceId "${stop.experienceId}"`);
-        }
+        if (stop.experienceId && !validIds.has(stop.experienceId)) throw new Error(`Unknown experienceId ${stop.experienceId}`);
       }
     }
   }
-
   return {
     message: raw.message,
     intent,
-    contextUpdates: normalizeContextUpdates(
-      raw.contextUpdates && typeof raw.contextUpdates === 'object'
-        ? raw.contextUpdates as Record<string, unknown>
-        : {},
-    ),
-    journeyAction: {
-      type,
-      journey: rawJourneyAction.journey ?? null,
-    },
+    contextUpdates: normalizeContextUpdates(raw.contextUpdates && typeof raw.contextUpdates === 'object' ? raw.contextUpdates as Record<string, unknown> : {}),
+    journeyAction: { type: actionType, journey: rawJourney.journey ?? null },
     suggestedActions: Array.isArray(raw.suggestedActions)
-      ? raw.suggestedActions
-          .filter(item => item && typeof item === 'object')
-          .map(item => item as Record<string, unknown>)
-          .filter(item => isNonEmptyString(item.label) && isNonEmptyString(item.action))
-          .map(item => ({ label: String(item.label), action: String(item.action) }))
+      ? raw.suggestedActions.filter(item => item && typeof item === 'object').map(item => item as Record<string, unknown>).filter(item => isNonEmptyString(item.label) && isNonEmptyString(item.action)).map(item => ({ label: String(item.label).slice(0, 80), action: String(item.action).slice(0, 160) })).slice(0, 6)
       : [],
+    responseStyle: style,
+    agentStateUpdate: normalizeAgentState(raw.agentStateUpdate),
+    semanticMemoryUpdates: normalizeSemanticUpdates(raw.semanticMemoryUpdates),
+    toolCalls: normalizeToolCalls(raw.toolCalls, runtime.toolResults.length > 0),
   };
 }
 
 function stripCodeFences(text: string): string {
-  return text
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```\s*$/i, '')
-    .trim();
+  return text.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
 }
 
 function cleanLineMessage(text: string): string {
-  return text
-    .replace(/\*\*(.*?)\*\*/gs, '$1')
-    .replace(/__(.*?)__/gs, '$1')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^\s*[-*]\s+/gm, '• ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return text.replace(/\*\*(.*?)\*\*/gs, '$1').replace(/__(.*?)__/gs, '$1').replace(/^#{1,6}\s+/gm, '').replace(/^\s*[-*]\s+/gm, '• ').replace(/`([^`]+)`/g, '$1').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-function adaptResponseForChannel(response: BrainResponse, req: BrainRequest): BrainResponse {
-  const channel = channelFromSection(req.pageContext.section);
-  if (channel === 'line') {
-    response.message = cleanLineMessage(response.message);
-  }
+function adaptForChannel(response: BrainResponse, req: BrainRequest): BrainResponse {
+  if (getBrainChannel(req.pageContext.section) === 'line') response.message = cleanLineMessage(response.message);
   return response;
 }
 
@@ -528,6 +550,10 @@ export function availabilityBrainResponse(): BrainResponse {
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
     suggestedActions: [],
+    responseStyle: 'direct',
+    agentStateUpdate: {},
+    semanticMemoryUpdates: [],
+    toolCalls: [],
   };
 }
 
@@ -535,41 +561,22 @@ export async function runThongthaiBrain(
   req: BrainRequest,
   communityOfferings: VerifiedCommunityOffering[],
   messages: ChatTurn[],
+  runtime: BrainRuntimeContext,
 ): Promise<BrainResponse> {
-  const systemPrompt = buildBrainPrompt(req, communityOfferings);
+  const systemPrompt = buildBrainPrompt(req, communityOfferings, runtime);
   let raw = await callPreferredModel(systemPrompt, messages);
-
   try {
-    const parsed = validateBrainResponse(JSON.parse(stripCodeFences(raw)));
-    const adapted = adaptResponseForChannel(parsed, req);
-    console.log(
-      'THONGTHAI_BRAIN_DECISION',
-      THONGTHAI_BRAIN_VERSION,
-      channelFromSection(req.pageContext.section),
-      adapted.intent,
-      adapted.journeyAction.type,
-    );
-    return adapted;
+    const result = adaptForChannel(validateBrainResponse(JSON.parse(stripCodeFences(raw)), runtime), req);
+    console.log('THONGTHAI_BRAIN_DECISION', THONGTHAI_BRAIN_VERSION, getBrainChannel(req.pageContext.section), result.intent, result.journeyAction.type, result.toolCalls?.length ?? 0);
+    return result;
   } catch (firstError) {
-    const repairMessages: ChatTurn[] = [
+    raw = await callPreferredModel(systemPrompt, [
       ...messages,
       { role: 'assistant', content: raw },
-      {
-        role: 'user',
-        content: `Your previous response was invalid: ${(firstError as Error).message}. Return ONLY a corrected JSON object matching the required schema.`,
-      },
-    ];
-
-    raw = await callPreferredModel(systemPrompt, repairMessages);
-    const parsed = validateBrainResponse(JSON.parse(stripCodeFences(raw)));
-    const adapted = adaptResponseForChannel(parsed, req);
-    console.log(
-      'THONGTHAI_BRAIN_DECISION_REPAIRED',
-      THONGTHAI_BRAIN_VERSION,
-      channelFromSection(req.pageContext.section),
-      adapted.intent,
-      adapted.journeyAction.type,
-    );
-    return adapted;
+      { role: 'user', content: `Your previous response was invalid: ${(firstError as Error).message}. Return ONLY a corrected JSON object matching the contract.` },
+    ]);
+    const result = adaptForChannel(validateBrainResponse(JSON.parse(stripCodeFences(raw)), runtime), req);
+    console.log('THONGTHAI_BRAIN_DECISION_REPAIRED', THONGTHAI_BRAIN_VERSION, getBrainChannel(req.pageContext.section), result.intent, result.journeyAction.type, result.toolCalls?.length ?? 0);
+    return result;
   }
 }
