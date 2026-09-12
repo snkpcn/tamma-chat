@@ -1,0 +1,514 @@
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+
+export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
+export type ServiceType = 'restaurant' | 'stay' | 'activity';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function config(): { url: string; key: string } | null {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return url && key ? { url: url.replace(/\/$/, ''), key } : null;
+}
+
+async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const c = config();
+  if (!c) throw new Error('Operations database is not configured');
+  const res = await fetch(`${c.url}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: c.key,
+      Authorization: `Bearer ${c.key}`,
+      'Content-Type': 'application/json',
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Operations database request failed ${res.status}: ${body.slice(0, 240)}`);
+  }
+  return res;
+}
+
+function piiKey(): Buffer {
+  const raw = process.env.CUSTOMER_PII_ENCRYPTION_KEY;
+  if (!raw) throw new Error('CUSTOMER_PII_ENCRYPTION_KEY is not configured');
+  const padded = raw + '='.repeat((4 - (raw.length % 4)) % 4);
+  const key = Buffer.from(padded.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  if (key.length !== 32) throw new Error('CUSTOMER_PII_ENCRYPTION_KEY must decode to 32 bytes');
+  return key;
+}
+
+export function encryptPii(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  if (!text) return null;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', piiKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1.${iv.toString('base64url')}.${tag.toString('base64url')}.${encrypted.toString('base64url')}`;
+}
+
+export function decryptPii(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const [version, ivRaw, tagRaw, dataRaw] = value.split('.');
+  if (version !== 'v1' || !ivRaw || !tagRaw || !dataRaw) return null;
+  try {
+    const decipher = createDecipheriv('aes-256-gcm', piiKey(), Buffer.from(ivRaw, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tagRaw, 'base64url'));
+    return Buffer.concat([
+      decipher.update(Buffer.from(dataRaw, 'base64url')),
+      decipher.final(),
+    ]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+export function piiHash(value: string | null | undefined): string | null {
+  const text = value?.trim().toLowerCase();
+  return text ? createHash('sha256').update(text, 'utf8').digest('hex') : null;
+}
+
+function cleanPhone(value: string | null | undefined): string | null {
+  const text = value?.replace(/[^0-9+]/g, '').trim();
+  return text && text.length >= 8 && text.length <= 20 ? text : null;
+}
+
+function cleanEmail(value: string | null | undefined): string | null {
+  const text = value?.trim().toLowerCase();
+  return text && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) ? text : null;
+}
+
+export async function guestDbIdFromAnonymousId(anonymousId: string | undefined): Promise<string | null> {
+  if (!anonymousId || !UUID_RE.test(anonymousId)) return null;
+  const res = await dbFetch(`guests?anonymous_id=eq.${encodeURIComponent(anonymousId)}&select=id&limit=1`);
+  const rows = await res.json() as Array<{ id: string }>;
+  return rows[0]?.id ?? null;
+}
+
+export interface CustomerInput {
+  guestDbId?: string | null;
+  authUserId?: string | null;
+  fullName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  preferredContact?: 'line' | 'phone' | 'email' | null;
+  marketingOptIn?: boolean;
+  isTest?: boolean;
+  testLabel?: string | null;
+}
+
+export async function upsertCustomerAccount(input: CustomerInput): Promise<string> {
+  const email = cleanEmail(input.email);
+  const phone = cleanPhone(input.phone);
+  const emailHash = piiHash(email);
+  const phoneHash = piiHash(phone);
+  const clauses: string[] = [];
+  if (input.authUserId && UUID_RE.test(input.authUserId)) clauses.push(`auth_user_id=eq.${encodeURIComponent(input.authUserId)}`);
+  if (input.guestDbId && UUID_RE.test(input.guestDbId)) clauses.push(`guest_id=eq.${encodeURIComponent(input.guestDbId)}`);
+  if (emailHash) clauses.push(`email_hash=eq.${emailHash}`);
+  if (phoneHash) clauses.push(`phone_hash=eq.${phoneHash}`);
+
+  let existing: { id: string } | undefined;
+  for (const clause of clauses) {
+    const res = await dbFetch(`customer_accounts?${clause}&select=id&limit=1`);
+    const rows = await res.json() as Array<{ id: string }>;
+    if (rows[0]) { existing = rows[0]; break; }
+  }
+
+  const body: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+  if (input.authUserId && UUID_RE.test(input.authUserId)) body.auth_user_id = input.authUserId;
+  if (input.guestDbId && UUID_RE.test(input.guestDbId)) body.guest_id = input.guestDbId;
+  if (input.fullName?.trim()) body.full_name_enc = encryptPii(input.fullName);
+  if (email) { body.email_enc = encryptPii(email); body.email_hash = emailHash; }
+  if (phone) { body.phone_enc = encryptPii(phone); body.phone_hash = phoneHash; }
+  if (input.preferredContact) body.preferred_contact = input.preferredContact;
+  if (typeof input.marketingOptIn === 'boolean') body.marketing_opt_in = input.marketingOptIn;
+  if (input.isTest === true) body.is_test = true;
+  if (input.testLabel?.trim()) body.test_label = input.testLabel.trim().slice(0, 120);
+
+  if (existing) {
+    await dbFetch(`customer_accounts?id=eq.${existing.id}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify(body),
+    });
+    return existing.id;
+  }
+
+  const res = await dbFetch('customer_accounts', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({ ...body, created_at: new Date().toISOString() }),
+  });
+  const rows = await res.json() as Array<{ id: string }>;
+  if (!rows[0]?.id) throw new Error('Customer account was not created');
+  return rows[0].id;
+}
+
+export async function registerLineContact(anonymousId: string, rawLineUserId: string): Promise<void> {
+  if (!rawLineUserId || rawLineUserId.length > 160) return;
+  const guestDbId = await guestDbIdFromAnonymousId(anonymousId);
+  if (!guestDbId) return;
+  const customerId = await upsertCustomerAccount({ guestDbId, preferredContact: 'line' });
+  const hash = piiHash(rawLineUserId);
+  if (!hash) return;
+  await dbFetch('customer_channel_contacts?on_conflict=provider,external_id_hash', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      customer_id: customerId,
+      provider: 'line',
+      external_id_enc: encryptPii(rawLineUserId),
+      external_id_hash: hash,
+      reachable: true,
+      verified: true,
+      last_seen_at: new Date().toISOString(),
+    }),
+  });
+}
+
+export interface BookingOption {
+  scheduleId: string;
+  resourceCode: string;
+  resourceName: string;
+  serviceType: ServiceType;
+  startAt: string;
+  endAt: string;
+  available: number;
+}
+
+function dayBounds(date: string): { start: string; end: string } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return {
+    start: `${date}T00:00:00+07:00`,
+    end: `${date}T23:59:59+07:00`,
+  };
+}
+
+export async function listBookingOptions(
+  serviceType: ServiceType,
+  date: string,
+  environment: 'live' | 'test' = 'live',
+): Promise<BookingOption[]> {
+  const bounds = dayBounds(date);
+  if (!bounds) return [];
+  const resourcesRes = await dbFetch(
+    `service_resources?service_type=eq.${serviceType}&active=eq.true&select=id,code,name`,
+  );
+  const resources = await resourcesRes.json() as Array<{ id: string; code: string; name: string }>;
+  const output: BookingOption[] = [];
+  for (const resource of resources) {
+    const res = await dbFetch(
+      `service_schedules?resource_id=eq.${resource.id}&environment=eq.${environment}&status=eq.open`
+      + `&start_at=gte.${encodeURIComponent(bounds.start)}&start_at=lte.${encodeURIComponent(bounds.end)}`
+      + '&select=id,start_at,end_at,capacity_total,capacity_reserved&order=start_at.asc',
+    );
+    const rows = await res.json() as Array<{ id: string; start_at: string; end_at: string; capacity_total: number; capacity_reserved: number }>;
+    for (const row of rows) {
+      output.push({
+        scheduleId: row.id,
+        resourceCode: resource.code,
+        resourceName: resource.name,
+        serviceType,
+        startAt: row.start_at,
+        endAt: row.end_at,
+        available: Math.max(0, Number(row.capacity_total) - Number(row.capacity_reserved)),
+      });
+    }
+  }
+  return output;
+}
+
+async function scheduleRowsForBooking(args: {
+  serviceType: ServiceType;
+  resourceCode?: string;
+  date: string;
+  time?: string | null;
+  endDate?: string | null;
+  environment: 'live' | 'test';
+}): Promise<BookingOption[]> {
+  const resourcesRes = await dbFetch(
+    `service_resources?service_type=eq.${args.serviceType}&active=eq.true`
+    + (args.resourceCode ? `&code=eq.${encodeURIComponent(args.resourceCode)}` : '')
+    + '&select=id,code,name&limit=5',
+  );
+  const resources = await resourcesRes.json() as Array<{ id: string; code: string; name: string }>;
+  if (!resources.length) return [];
+
+  if (args.serviceType !== 'stay') {
+    let options = await listBookingOptions(args.serviceType, args.date, args.environment);
+    if (args.resourceCode) options = options.filter(item => item.resourceCode === args.resourceCode);
+    if (args.time && /^\d{2}:\d{2}$/.test(args.time)) {
+      options = options.filter(item => {
+        const local = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(item.startAt));
+        return local === args.time;
+      });
+    }
+    return options;
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date) || !args.endDate || !/^\d{4}-\d{2}-\d{2}$/.test(args.endDate)) return [];
+  const checkIn = new Date(`${args.date}T00:00:00+07:00`);
+  const checkOut = new Date(`${args.endDate}T00:00:00+07:00`);
+  if (!(checkOut > checkIn)) return [];
+  const nights = Math.round((checkOut.getTime() - checkIn.getTime()) / 86400000);
+  if (nights < 1 || nights > 30) return [];
+  const resource = resources[0];
+  const endBound = `${args.endDate}T23:59:59+07:00`;
+  const res = await dbFetch(
+    `service_schedules?resource_id=eq.${resource.id}&environment=eq.${args.environment}&status=eq.open`
+    + `&start_at=gte.${encodeURIComponent(`${args.date}T00:00:00+07:00`)}`
+    + `&start_at=lt.${encodeURIComponent(endBound)}`
+    + '&select=id,start_at,end_at,capacity_total,capacity_reserved&order=start_at.asc',
+  );
+  const rows = await res.json() as Array<{ id: string; start_at: string; end_at: string; capacity_total: number; capacity_reserved: number }>;
+  const picked = rows.slice(0, nights).map(row => ({
+    scheduleId: row.id,
+    resourceCode: resource.code,
+    resourceName: resource.name,
+    serviceType: args.serviceType,
+    startAt: row.start_at,
+    endAt: row.end_at,
+    available: Math.max(0, Number(row.capacity_total) - Number(row.capacity_reserved)),
+  }));
+  return picked.length === nights ? picked : [];
+}
+
+export interface CreateBookingInput {
+  guestDbId?: string | null;
+  channel: OpsChannel;
+  serviceType: ServiceType;
+  resourceCode?: string | null;
+  date: string;
+  time?: string | null;
+  endDate?: string | null;
+  partySize?: number | null;
+  quantity?: number | null;
+  customerName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  note?: string | null;
+  environment?: 'live' | 'test';
+}
+
+export async function createBooking(input: CreateBookingInput): Promise<{ bookingCode: string; status: string; startAt: string; endAt: string }> {
+  const environment = input.environment ?? 'live';
+  const options = await scheduleRowsForBooking({
+    serviceType: input.serviceType,
+    resourceCode: input.resourceCode ?? undefined,
+    date: input.date,
+    time: input.time,
+    endDate: input.endDate,
+    environment,
+  });
+  if (!options.length) throw new Error('no_matching_schedule');
+  if (input.serviceType !== 'stay' && options.length !== 1) throw new Error('schedule_choice_required');
+
+  const units = input.serviceType === 'stay'
+    ? Math.max(1, Math.min(6, Math.floor(input.quantity ?? 1)))
+    : Math.max(1, Math.min(50, Math.floor(input.partySize ?? 1)));
+  if (options.some(option => option.available < units)) throw new Error('schedule_full');
+
+  const customerId = await upsertCustomerAccount({
+    guestDbId: input.guestDbId,
+    fullName: input.customerName,
+    email: input.email,
+    phone: input.phone,
+    preferredContact: input.phone ? 'phone' : input.email ? 'email' : null,
+    isTest: environment === 'test',
+  });
+  const resourceRes = await dbFetch(`service_resources?code=eq.${encodeURIComponent(options[0].resourceCode)}&select=id&limit=1`);
+  const resourceRows = await resourceRes.json() as Array<{ id: string }>;
+  if (!resourceRows[0]?.id) throw new Error('resource_not_found');
+  const startAt = options[0].startAt;
+  const endAt = options[options.length - 1].endAt;
+
+  const bookingRes = await dbFetch('bookings', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      customer_id: customerId,
+      guest_id: input.guestDbId ?? null,
+      service_type: input.serviceType,
+      resource_id: resourceRows[0].id,
+      start_at: startAt,
+      end_at: endAt,
+      party_size: input.partySize ?? null,
+      quantity: input.quantity ?? 1,
+      status: 'requested',
+      source_channel: input.channel,
+      customer_note: input.note?.slice(0, 1000) ?? null,
+      environment,
+    }),
+  });
+  const bookings = await bookingRes.json() as Array<{ id: string; booking_code: string; status: string }>;
+  const booking = bookings[0];
+  if (!booking) throw new Error('booking_not_created');
+  try {
+    await dbFetch('booking_allocations', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify(options.map(option => ({
+        booking_id: booking.id,
+        schedule_id: option.scheduleId,
+        capacity_units: units,
+      }))),
+    });
+  } catch (error) {
+    await dbFetch(`bookings?id=eq.${booking.id}`, { method: 'DELETE' }).catch(() => undefined);
+    throw error;
+  }
+  return { bookingCode: booking.booking_code, status: booking.status, startAt, endAt };
+}
+
+export async function createCafeInquiry(input: {
+  guestDbId?: string | null;
+  channel: OpsChannel;
+  question: string;
+  customerName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  environment?: 'live' | 'test';
+}): Promise<{ inquiryCode: string }> {
+  const customerId = await upsertCustomerAccount({
+    guestDbId: input.guestDbId,
+    fullName: input.customerName,
+    phone: input.phone,
+    email: input.email,
+    preferredContact: input.phone ? 'phone' : input.email ? 'email' : null,
+    isTest: input.environment === 'test',
+  });
+  const res = await dbFetch('cafe_inquiries', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      customer_id: customerId,
+      guest_id: input.guestDbId ?? null,
+      question: input.question.trim().slice(0, 2000),
+      source_channel: input.channel,
+      environment: input.environment ?? 'live',
+    }),
+  });
+  const rows = await res.json() as Array<{ inquiry_code: string }>;
+  if (!rows[0]?.inquiry_code) throw new Error('inquiry_not_created');
+  return { inquiryCode: rows[0].inquiry_code };
+}
+
+export interface OrderableProduct { sku: string; name: string; description: string | null; price: number; stock: number }
+export async function listOtopProducts(environment: 'live' | 'test' = 'live'): Promise<OrderableProduct[]> {
+  const res = await dbFetch(
+    `otop_products?environment=eq.${environment}&active=eq.true&verified=eq.true&stock_qty=gt.0`
+    + '&select=sku,name,description,price,stock_qty&order=name.asc',
+  );
+  const rows = await res.json() as Array<{ sku: string; name: string; description: string | null; price: number; stock_qty: number }>;
+  return rows.map(row => ({ sku: row.sku, name: row.name, description: row.description, price: Number(row.price), stock: Number(row.stock_qty) }));
+}
+
+export async function createOtopOrder(input: {
+  guestDbId?: string | null;
+  channel: OpsChannel;
+  sku: string;
+  quantity: number;
+  customerName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  fulfillmentType?: 'pickup' | 'shipping';
+  shippingAddress?: string | null;
+  note?: string | null;
+  environment?: 'live' | 'test';
+}): Promise<{ orderCode: string; total: number }> {
+  const environment = input.environment ?? 'live';
+  const productRes = await dbFetch(
+    `otop_products?sku=eq.${encodeURIComponent(input.sku)}&environment=eq.${environment}&active=eq.true&verified=eq.true&select=id,price,stock_qty&limit=1`,
+  );
+  const products = await productRes.json() as Array<{ id: string; price: number; stock_qty: number }>;
+  const product = products[0];
+  if (!product) throw new Error('product_not_available');
+  const quantity = Math.max(1, Math.min(99, Math.floor(input.quantity || 1)));
+  if (product.stock_qty < quantity) throw new Error('insufficient_stock');
+  const customerId = await upsertCustomerAccount({
+    guestDbId: input.guestDbId,
+    fullName: input.customerName,
+    phone: input.phone,
+    email: input.email,
+    preferredContact: input.phone ? 'phone' : input.email ? 'email' : null,
+    isTest: environment === 'test',
+  });
+  const total = Number(product.price) * quantity;
+  const orderRes = await dbFetch('otop_orders', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      customer_id: customerId,
+      guest_id: input.guestDbId ?? null,
+      source_channel: input.channel,
+      fulfillment_type: input.fulfillmentType ?? 'pickup',
+      shipping_address_enc: input.shippingAddress ? encryptPii(input.shippingAddress) : null,
+      customer_note: input.note?.slice(0, 1000) ?? null,
+      total_amount: total,
+      environment,
+    }),
+  });
+  const orders = await orderRes.json() as Array<{ id: string; order_code: string }>;
+  const order = orders[0];
+  if (!order) throw new Error('order_not_created');
+  try {
+    await dbFetch('otop_order_items', {
+      method: 'POST',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ order_id: order.id, product_id: product.id, quantity, unit_price: product.price }),
+    });
+    await dbFetch(`otop_products?id=eq.${product.id}&stock_qty=eq.${product.stock_qty}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ stock_qty: product.stock_qty - quantity }),
+    });
+  } catch (error) {
+    await dbFetch(`otop_orders?id=eq.${order.id}`, { method: 'DELETE' }).catch(() => undefined);
+    throw error;
+  }
+  return { orderCode: order.order_code, total };
+}
+
+export async function authUserFromBearer(authHeader: string | undefined): Promise<{ id: string; email: string | null } | null> {
+  const c = config();
+  if (!c || !authHeader?.startsWith('Bearer ')) return null;
+  const res = await fetch(`${c.url}/auth/v1/user`, {
+    headers: { apikey: c.key, Authorization: authHeader },
+  });
+  if (!res.ok) return null;
+  const user = await res.json() as { id?: string; email?: string };
+  return user.id ? { id: user.id, email: user.email ?? null } : null;
+}
+
+export async function loadCustomerPortal(authUserId: string): Promise<Record<string, unknown> | null> {
+  const accountRes = await dbFetch(
+    `customer_accounts?auth_user_id=eq.${encodeURIComponent(authUserId)}`
+    + '&select=id,guest_id,full_name_enc,email_enc,phone_enc,preferred_contact,marketing_opt_in,created_at&limit=1',
+  );
+  const accounts = await accountRes.json() as Array<Record<string, unknown>>;
+  const account = accounts[0];
+  if (!account?.id) return null;
+  const [bookingRes, orderRes, inquiryRes] = await Promise.all([
+    dbFetch(`bookings?customer_id=eq.${account.id}&select=booking_code,service_type,start_at,end_at,party_size,quantity,status,contact_status,created_at&order=created_at.desc&limit=50`),
+    dbFetch(`otop_orders?customer_id=eq.${account.id}&select=order_code,status,total_amount,fulfillment_type,contact_status,created_at&order=created_at.desc&limit=50`),
+    dbFetch(`cafe_inquiries?customer_id=eq.${account.id}&select=inquiry_code,question,status,response_note,created_at&order=created_at.desc&limit=50`),
+  ]);
+  return {
+    id: account.id,
+    guestId: account.guest_id,
+    fullName: decryptPii(account.full_name_enc as string | null),
+    email: decryptPii(account.email_enc as string | null),
+    phone: decryptPii(account.phone_enc as string | null),
+    preferredContact: account.preferred_contact,
+    marketingOptIn: account.marketing_opt_in,
+    createdAt: account.created_at,
+    bookings: await bookingRes.json(),
+    orders: await orderRes.json(),
+    inquiries: await inquiryRes.json(),
+  };
+}
