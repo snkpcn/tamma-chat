@@ -17,6 +17,8 @@ type ChatResultShape = {
 type JourneyContextShape = {
   currentPlan: unknown | null;
   savedPlan: unknown | null;
+  visitedExperiences?: unknown;
+  favorites?: unknown;
 };
 
 export interface CustomerState {
@@ -73,6 +75,13 @@ async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> 
 function dedupeAllowed(value: unknown, allowed: Set<string>): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && allowed.has(item)))];
+}
+
+function sanitizeExperienceIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter(
+    (item): item is string => typeof item === 'string' && item.length > 0 && item.length <= 120,
+  ))];
 }
 
 function finiteCount(value: unknown): number | null {
@@ -234,6 +243,12 @@ export async function persistCustomerResult(
     const band = budgetBand(updates.budget);
     if (band) add('budget_band', band);
     if (LANGUAGES.has(language)) add('preferred_language', language);
+
+    const visitedExperiences = sanitizeExperienceIds(journeyContext.visitedExperiences);
+    if (visitedExperiences.length) add('visited_experiences', visitedExperiences);
+
+    const favorites = sanitizeExperienceIds(journeyContext.favorites);
+    if (favorites.length) add('favorites', favorites);
 
     if (memoryRows.length) {
       await dbFetch('guest_memory?on_conflict=guest_id,memory_key', {
