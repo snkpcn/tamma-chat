@@ -547,7 +547,19 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const customerState = await loadCustomerMemory(req.guestId, req.language, req.guestContext);
   if (customerState) {
     guestDbId = customerState.guestDbId;
-    req = { ...req, guestContext: customerState.guestContext };
+    req = {
+      ...req,
+      guestContext: customerState.guestContext,
+      journeyContext: {
+        ...req.journeyContext,
+        visitedExperiences: req.journeyContext.visitedExperiences.length
+          ? req.journeyContext.visitedExperiences
+          : customerState.journeyContext.visitedExperiences,
+        favorites: req.journeyContext.favorites.length
+          ? req.journeyContext.favorites
+          : customerState.journeyContext.favorites,
+      },
+    };
   }
 
   const systemPrompt = buildSystemPrompt(req);
