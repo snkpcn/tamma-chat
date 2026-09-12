@@ -2,6 +2,7 @@ import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const TAMMA_SITE_URL = 'https://tamma-chat.netlify.app';
+const OFFICIAL_MAP_URL = 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ARRAY_KEYS = new Set(['interests', 'constraints', 'favorites', 'visited_experiences']);
 
@@ -159,6 +160,16 @@ async function mergeWebGuestIntoLineGuest(sourceAnonymousId: string, targetAnony
   }
 }
 
+async function latestJourney(targetAnonymousId: string): Promise<unknown | null> {
+  const targetId = await guestDbId(targetAnonymousId, true);
+  if (!targetId) return null;
+  const response = await dbFetch(
+    `journeys?guest_id=eq.${encodeURIComponent(targetId)}&select=journey&order=created_at.desc&limit=1`,
+  );
+  const rows = await response.json() as Array<{ journey: unknown }>;
+  return rows[0]?.journey ?? null;
+}
+
 async function ensureLatestJourneySaved(targetAnonymousId: string): Promise<void> {
   const targetId = await guestDbId(targetAnonymousId, true);
   if (!targetId) return;
@@ -198,35 +209,71 @@ function linkPage(): string {
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow">
-  <title>เชื่อมทองไทยกับทำมา-ชาติ</title>
+  <title>Journey ของคุณ — ทำมา-ชาติ</title>
   <style>
-    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f0e9;color:#3b2a20;display:grid;place-items:center;min-height:100vh;padding:24px;box-sizing:border-box}
-    .card{max-width:480px;background:#fff;border-radius:22px;padding:30px;box-shadow:0 14px 40px rgba(59,42,32,.12);text-align:center}
-    h1{font-size:24px;margin:0 0 12px}p{line-height:1.65;margin:0;color:#75665d}.dot{font-size:34px;margin-bottom:16px}
+    :root{--ink:#3b2a20;--gold:#9a713d;--cream:#f7f1e7;--paper:#fffdfa;--muted:#786a60;--line:#e8ddd0}
+    *{box-sizing:border-box} body{margin:0;background:var(--cream);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif;min-height:100vh}
+    .wrap{max-width:680px;margin:0 auto;padding:22px 18px 48px}.brand{font-weight:800;letter-spacing:.04em;color:var(--gold);margin:4px 0 14px}.card{background:var(--paper);border:1px solid var(--line);border-radius:24px;padding:22px;box-shadow:0 10px 30px rgba(59,42,32,.08)}
+    h1{font-size:28px;line-height:1.25;margin:0 0 8px}.sub{color:var(--muted);margin:0 0 22px;line-height:1.55}.day{border-top:1px solid var(--line);padding-top:20px;margin-top:20px}.day h2{font-size:19px;margin:0 0 14px}.slot{display:grid;grid-template-columns:78px 1fr;gap:12px;padding:13px 0;border-bottom:1px dashed var(--line)}.slot:last-child{border-bottom:0}.time{font-size:12px;font-weight:800;color:var(--gold);text-transform:uppercase}.name{font-weight:800;margin-bottom:4px}.note{font-size:14px;line-height:1.55;color:var(--muted)}
+    .actions{display:grid;gap:10px;margin-top:22px}.btn{display:block;text-align:center;text-decoration:none;padding:14px 16px;border-radius:14px;font-weight:800}.primary{background:#7a5a32;color:white}.secondary{background:#eee5da;color:var(--ink)}.status{padding:36px 20px;text-align:center;color:var(--muted)}
   </style>
 </head>
 <body>
-  <div class="card"><div class="dot">🐴</div><h1 id="title">กำลังเชื่อมความจำของทองไทย…</h1><p id="detail">อีกสักครู่จะพากลับไปที่ทำมา-ชาติครับ</p></div>
+  <main class="wrap">
+    <div class="brand">ทำมา-ชาติ · THONGTHAI</div>
+    <section class="card" id="card"><div class="status" id="status">กำลังเปิด Journey และเชื่อมความจำของทองไทย…</div></section>
+  </main>
   <script>
     (async function(){
       const params=new URLSearchParams(location.search);
       const token=params.get('token')||'';
       const next=params.get('next')||'';
       const existing=localStorage.getItem('tamma_guest_id');
+      const card=document.getElementById('card');
+      const label={morning:'เช้า',lunch:'เที่ยง',afternoon:'บ่าย',evening:'เย็น',night:'ค่ำ'};
+      const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=String(text);return n};
       try{
         const res=await fetch('/.netlify/functions/line-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,existingGuestId:existing,saveLatestJourney:next==='journey'})});
         if(!res.ok)throw new Error('link failed');
         const data=await res.json();
         if(!data.guestId)throw new Error('missing guest');
         localStorage.setItem('tamma_guest_id',data.guestId);
-        document.getElementById('title').textContent='เชื่อมเรียบร้อยแล้ว ✓';
-        document.getElementById('detail').textContent='จากนี้ทองไทยบน LINE และเว็บจะใช้ความจำชุดเดียวกันครับ';
-        setTimeout(()=>location.replace('${TAMMA_SITE_URL}/'+(next==='journey'?'#plan':'')),700);
+
+        card.textContent='';
+        if(next==='journey'&&data.journey){
+          const j=data.journey;
+          card.appendChild(el('h1','',j.title||'Journey ของคุณ'));
+          card.appendChild(el('p','sub','แผนนี้เชื่อมกับความจำของทองไทยบน LINE และเว็บแล้ว'));
+          const days=Array.isArray(j.days)?j.days:[];
+          days.forEach((d,i)=>{
+            const day=el('div','day');
+            day.appendChild(el('h2','',d.title||('วันที่ '+(d.dayNumber||i+1))));
+            const slots=Array.isArray(d.slots)?d.slots:[];
+            slots.forEach(s=>{
+              const row=el('div','slot');
+              row.appendChild(el('div','time',label[s.timeOfDay]||s.timeOfDay||''));
+              const body=el('div','');
+              body.appendChild(el('div','name',s.experienceName||'จุดแวะ'));
+              if(s.note)body.appendChild(el('div','note',s.note));
+              row.appendChild(body);day.appendChild(row);
+            });
+            card.appendChild(day);
+          });
+          const actions=el('div','actions');
+          const site=el('a','btn primary','เปิดเว็บทำมา-ชาติ');site.href='${TAMMA_SITE_URL}/';
+          const map=el('a','btn secondary','เปิดแผนที่ ทำมา-ชาติ');map.href='${OFFICIAL_MAP_URL}';
+          actions.appendChild(site);actions.appendChild(map);card.appendChild(actions);
+        }else{
+          card.appendChild(el('h1','','เชื่อมความจำเรียบร้อยแล้ว ✓'));
+          card.appendChild(el('p','sub','จากนี้ทองไทยบน LINE และเว็บจะใช้ความจำชุดเดียวกันครับ'));
+          const site=el('a','btn primary','เปิดเว็บทำมา-ชาติ');site.href='${TAMMA_SITE_URL}/';card.appendChild(site);
+        }
       }catch(err){
-        document.getElementById('title').textContent='ลิงก์นี้ใช้ไม่ได้หรือหมดอายุแล้ว';
-        document.getElementById('detail').textContent='กลับไปที่ LINE แล้วให้ทองไทยสร้าง Journey ใหม่เพื่อรับลิงก์ล่าสุดครับ';
+        card.textContent='';
+        card.appendChild(el('h1','','ลิงก์นี้ใช้ไม่ได้หรือหมดอายุแล้ว'));
+        card.appendChild(el('p','sub','กลับไปที่ LINE แล้วให้ทองไทยสร้าง Journey ใหม่เพื่อรับลิงก์ล่าสุดครับ'));
       }
     })();
   </script>
@@ -273,10 +320,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
       } else {
         await guestDbId(targetGuestId, true);
       }
-      if (body.saveLatestJourney) {
-        await ensureLatestJourneySaved(targetGuestId);
-      }
-      return json(200, { guestId: targetGuestId });
+      if (body.saveLatestJourney) await ensureLatestJourneySaved(targetGuestId);
+      const journey = body.saveLatestJourney ? await latestJourney(targetGuestId) : null;
+      return json(200, { guestId: targetGuestId, journey });
     } catch (err) {
       const detail = err instanceof Error ? err.message : 'Unknown linking error';
       console.error('LINE_LINK_ERROR', detail.slice(0, 240));
