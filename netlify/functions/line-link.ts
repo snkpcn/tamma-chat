@@ -159,6 +159,40 @@ async function mergeWebGuestIntoLineGuest(sourceAnonymousId: string, targetAnony
   }
 }
 
+async function ensureLatestJourneySaved(targetAnonymousId: string): Promise<void> {
+  const targetId = await guestDbId(targetAnonymousId, true);
+  if (!targetId) return;
+
+  const latestResponse = await dbFetch(
+    `journeys?guest_id=eq.${encodeURIComponent(targetId)}&select=action,journey&order=created_at.desc&limit=1`,
+  );
+  const latestRows = await latestResponse.json() as Array<{ action: string; journey: unknown }>;
+  const latest = latestRows[0];
+  if (!latest?.journey || latest.action === 'save') return;
+
+  await dbFetch('journeys', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      guest_id: targetId,
+      action: 'save',
+      intent: 'save_journey',
+      journey: latest.journey,
+    }),
+  });
+
+  await dbFetch('guest_events', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      guest_id: targetId,
+      event_type: 'journey_saved',
+      intent: 'save_journey',
+      metadata: { source: 'line_view_full' },
+    }),
+  });
+}
+
 function linkPage(): string {
   return `<!doctype html>
 <html lang="th">
@@ -182,7 +216,7 @@ function linkPage(): string {
       const next=params.get('next')||'';
       const existing=localStorage.getItem('tamma_guest_id');
       try{
-        const res=await fetch('/.netlify/functions/line-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,existingGuestId:existing})});
+        const res=await fetch('/.netlify/functions/line-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,existingGuestId:existing,saveLatestJourney:next==='journey'})});
         if(!res.ok)throw new Error('link failed');
         const data=await res.json();
         if(!data.guestId)throw new Error('missing guest');
@@ -223,9 +257,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
   }
 
   if (event.httpMethod === 'POST') {
-    let body: { token?: string; existingGuestId?: string };
+    let body: { token?: string; existingGuestId?: string; saveLatestJourney?: boolean };
     try {
-      body = JSON.parse(event.body ?? '{}') as { token?: string; existingGuestId?: string };
+      body = JSON.parse(event.body ?? '{}') as { token?: string; existingGuestId?: string; saveLatestJourney?: boolean };
     } catch {
       return json(400, { error: 'Malformed JSON' });
     }
@@ -238,6 +272,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
         await mergeWebGuestIntoLineGuest(body.existingGuestId, targetGuestId);
       } else {
         await guestDbId(targetGuestId, true);
+      }
+      if (body.saveLatestJourney) {
+        await ensureLatestJourneySaved(targetGuestId);
       }
       return json(200, { guestId: targetGuestId });
     } catch (err) {
