@@ -19,11 +19,6 @@ import type { Handler, HandlerEvent } from '@netlify/functions';
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
 import { loadCustomerMemory, loadVerifiedCommunityOfferings, persistCustomerResult, type VerifiedCommunityOffering } from './_customer-db';
 
-// ---------------------------------------------------------------------------
-// Request / response contracts — exactly the shapes specified for this
-// endpoint, so the frontend fetch() call and this handler agree byte-for-byte.
-// ---------------------------------------------------------------------------
-
 export interface ChatTurn { role: 'user' | 'assistant'; content: string; }
 
 export interface GuestContext {
@@ -66,12 +61,6 @@ export interface ChatResponse {
   suggestedActions: Array<{ label: string; action: string }>;
 }
 
-// ---------------------------------------------------------------------------
-// Provider abstraction — identical pattern to thongthai-agent.ts, kept
-// separate because chat and planning have different prompt shapes, but both
-// funnel through the same "never fake a live call" discipline.
-// ---------------------------------------------------------------------------
-
 class ProviderNotConfiguredError extends Error {
   constructor() {
     super('GEMINI_API_KEY is not set as a Netlify environment variable.');
@@ -93,10 +82,6 @@ class LLMAvailabilityError extends LLMRequestError {
   }
 }
 
-// gemini-2.0-flash (originally used here) was shut down June 1, 2026.
-// The primary production list starts with models that have succeeded in
-// production. gemini-3.7-flash is intentionally excluded while its 503
-// UNAVAILABLE frequency remains high.
 const GEMINI_MODELS = [
   'gemini-3.6-flash',
   'gemini-3.5-flash',
@@ -104,22 +89,10 @@ const GEMINI_MODELS = [
 
 const OPENAI_MODEL = 'gpt-5.6-luna';
 
-/**
- * Real Gemini API call, using a live GEMINI_API_KEY server-side environment
- * variable. Written to the current Gemini 3.x REST contract — confirmed via
- * search (not from training-data memory, which predates these models) that
- * temperature/top_p/top_k are deprecated and silently ignored on Gemini 3.x
- * Flash models, so they're deliberately omitted below rather than included
- * as a no-op.
- * Structurally correct against the documented contract, but — same caveat
- * as always — never run against the live endpoint, since no real key
- * exists in this environment to test with.
- */
 async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ProviderNotConfiguredError();
 
-  // Gemini has no separate "assistant" role — its equivalent is "model".
   const contents = messages.map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
@@ -129,7 +102,6 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
 
   for (const model of GEMINI_MODELS) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
     let res: Response;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -139,20 +111,16 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey, // header, not query param — keeps the key out of server access logs
+          'x-goog-api-key': apiKey,
         },
         signal: controller.signal,
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemPrompt }] },
           contents,
           generationConfig: {
-            responseMimeType: 'application/json', // ask Gemini to return strict JSON directly
-            thinkingConfig: {
-              thinkingLevel: 'low',
-            },
-            maxOutputTokens: 4096, // a 3-day structured Journey with per-stop reasons can exceed 1024
-            // No temperature/top_p/top_k — deprecated and ignored on 3.x Flash
-            // models.
+            responseMimeType: 'application/json',
+            thinkingConfig: { thinkingLevel: 'low' },
+            maxOutputTokens: 4096,
           },
         }),
       });
@@ -166,15 +134,14 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
     } finally {
       clearTimeout(timeout);
     }
+
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
-
       if (res.status === 429 || res.status === 503) {
         console.error('THONGTHAI_AI_MODEL_RETRY', model, res.status, errBody);
         lastAvailabilityError = `Gemini API returned ${res.status}: ${errBody.slice(0, 300)}`;
         continue;
       }
-
       throw new LLMRequestError(`Gemini API returned ${res.status}: ${errBody.slice(0, 300)}`);
     }
 
@@ -190,10 +157,7 @@ async function callLanguageModel(systemPrompt: string, messages: ChatTurn[]): Pr
     }
 
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      throw new LLMRequestError('Gemini returned no text content (check candidates[0].finishReason for why).');
-    }
-
+    if (!text) throw new LLMRequestError('Gemini returned no text content (check candidates[0].finishReason for why).');
     return text;
   }
 
@@ -254,12 +218,10 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
     const safeErrorBody = errBody.slice(0, 300);
-
     if ([429, 500, 502, 503, 504].includes(res.status)) {
       console.error('THONGTHAI_AI_OPENAI_ERROR', res.status, safeErrorBody);
       throw new LLMAvailabilityError(`OpenAI API returned ${res.status}: ${safeErrorBody}`);
     }
-
     console.error('THONGTHAI_AI_OPENAI_ERROR', res.status, safeErrorBody);
     throw new LLMRequestError(`OpenAI API returned ${res.status}: ${safeErrorBody}`);
   }
@@ -276,11 +238,7 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
       }
     }
   }
-
-  if (!text) {
-    throw new LLMRequestError('OpenAI returned no text content.');
-  }
-
+  if (!text) throw new LLMRequestError('OpenAI returned no text content.');
   console.log('THONGTHAI_AI_OPENAI_SUCCESS', OPENAI_MODEL);
   return text;
 }
@@ -290,17 +248,10 @@ async function callPreferredLanguageModel(systemPrompt: string, messages: ChatTu
     return await callLanguageModel(systemPrompt, messages);
   } catch (err) {
     if (!(err instanceof LLMAvailabilityError)) throw err;
-
     console.log('THONGTHAI_AI_PROVIDER_FALLBACK', 'gemini', 'openai');
     return callOpenAI(systemPrompt, messages);
   }
 }
-
-// ---------------------------------------------------------------------------
-// System prompt — identity, principles, and the live guest/journey state,
-// rebuilt fresh on every request so the model always sees current context
-// rather than relying on its own memory of the conversation.
-// ---------------------------------------------------------------------------
 
 function buildSystemPrompt(req: ChatRequest, communityOfferings: VerifiedCommunityOffering[]): string {
   const hasElderly = (req.guestContext.group.elderly ?? 0) > 0
@@ -343,14 +294,19 @@ DISCOVERY-FIRST / QUIET CONFIDENCE — SELL WITHOUT PUSHING
 - If the guest is undecided, browsing, or says "ไว้ก่อน", accept it gracefully. Do not chase, overcome objections, upsell, or immediately propose another offer.
 - Never oversell with words like "ดีที่สุด", "ห้ามพลาด", "พิเศษมาก", or "คุ้มสุด" unless the guest explicitly asks for an opinion and the statement can be grounded. Quiet confidence is stronger than hype.
 - The target feeling is: ทองไทย knows the place deeply, notices what might suit the guest, and can reveal another layer when asked — but is never hungry for the sale.
+- For broad discovery replies, DO NOT default to an inventory format such as "หัวข้อ: คำอธิบาย" repeated for every business unit. Do not enumerate every brand just because it exists in the catalog.
+- Prefer a flowing mini-story of how a visit can unfold: one person may start with coffee and linger; another may come for food and drift toward nature; a longer stay changes the rhythm again. Use this as a style principle, not a fixed script.
+- Leave one layer undisclosed when appropriate. The goal is to create genuine curiosity without withholding the direct answer the guest asked for.
 
 ${isLine ? `LINE CHAT STYLE — STRICT
 - This reply is going to LINE. Write for a phone chat, not a webpage or brochure.
 - NO Markdown formatting at all: no **bold**, __underline__, # headings, backticks, or Markdown links. LINE will show those characters literally.
-- Prefer short paragraphs and clean emoji bullets such as "🌿 ..." or "• ...".
 - Answer the question first. Keep most non-Journey replies to roughly 2-6 short lines or 1-3 compact paragraphs.
 - Avoid long English category labels such as "Welcome Partner", "Dining", "Stay", "Adventure", or "Local & Relax" when natural Thai is clearer. Keep English only for real brand/product names or words the guest used.
-- For "มีประสบการณ์อะไรบ้าง", present 3-5 distinct moods or ways to spend time in a compact, inviting way. Do not read like a business directory and do not end with a hard CTA.
+- For broad "มีประสบการณ์อะไรบ้าง" or "ที่นี่มีอะไร" questions, default to short flowing prose, NOT a four-item catalog. Usually 3-5 sentences total is enough.
+- In those broad discovery replies, name at most 1-2 specific places or brands unless the guest explicitly asks for the full list. Suggest the rest through mood, rhythm, or contrast instead of listing every unit.
+- Do not use colon-style category bullets such as "กาแฟ: ...", "รสชาติอีสาน: ...", "การพักผ่อน: ...", "ธรรมชาติ & กิจกรรม: ..." unless the guest explicitly asks for a list or comparison.
+- A broad experience reply should feel like a glimpse of a day, not a menu. Example energy only (do not copy): "บางคนแค่แวะกาแฟแล้วนั่งยาว บางคนมาตามของกินแล้วค่อยเดินต่อเข้าหาธรรมชาติ ถ้ามีเวลามากขึ้น อารมณ์ของที่นี่ก็เปลี่ยนไปอีกแบบ".
 - For broad "Journey / แพ็กเกจ" questions, never invent fixed packages or prices. Briefly show 2-3 possible rhythms or styles that can be designed from verified experiences. Ask one focused question only if it materially improves the plan; never force the guest to commit.
 - For "เกี่ยวกับทำมา-ชาติ", explain the idea in a few warm sentences and leave one intriguing layer unexplained rather than turning it into a long manifesto.
 - For contact/location requests, lead with the verified Maps link and only add contact facts that are actually verified.
@@ -416,6 +372,7 @@ CONVERSATION MODE / INTENT ROUTING — follow this before offering any recommend
 - For casual conversation, intent must normally be "conversation"; journeyAction must be { "type": "none", "journey": null }; suggestedActions should normally be []; do not create or modify a Journey; and do not update guestContext unless the guest actually reveals travel-relevant information worth remembering.
 - Be warm, intelligent, concise, natural Thai, and polite without being stiff. Casual replies are generally one to three short sentences; one natural follow-up question is allowed only when useful. Do not sound like customer-service copy, an advertisement, or an over-explanation.
 - Never claim emotions, personal experiences, relationships, or a human life of your own. You can be warm and conversational without pretending to be human.
+
 Principles, in priority order:
 1. Guest needs come before maximizing sales. Relevance comes before promotion.
 2. Personalize using the guest context and conversation history below.
@@ -486,11 +443,6 @@ Respond with ONLY a single JSON object matching this shape, no prose outside it:
 }`;
 }
 
-// ---------------------------------------------------------------------------
-// Response validation — same discipline as the planning agent: never trust
-// model JSON blindly, never let it reference an experience outside the catalog.
-// ---------------------------------------------------------------------------
-
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
 }
@@ -499,11 +451,6 @@ const VALID_TRIP_DURATIONS = ['short', 'half', 'full', 'overnight', '2d1n', '3d2
 const VALID_TRAVELER_TYPES = ['solo', 'couple', 'family', 'friends'];
 const VALID_PACES = ['slow', 'balanced', 'active'];
 
-// Server-side normalization net for item 5 — the prompt instructs Gemini to
-// use canonical values, but a model can still drift (e.g. "3 days 2 nights"
-// instead of "3d2n"). Rather than trust the prompt alone, drop anything
-// that isn't one of the exact allowed values so a malformed value can never
-// silently corrupt persisted guestContext on the frontend.
 function normalizeContextUpdates(updates: Record<string, unknown>): Partial<GuestContext> {
   const out: Partial<GuestContext> = {};
   if (typeof updates.tripDuration === 'string' && VALID_TRIP_DURATIONS.includes(updates.tripDuration)) {
@@ -538,8 +485,6 @@ function validateChatResponse(data: unknown): ChatResponse {
     ? (journeyActionRaw.type as 'none' | 'create' | 'modify' | 'replace')
     : 'none';
 
-  // If the model proposes journey stops, every referenced experience must
-  // exist in the real catalog — reject (don't silently pass through) anything else.
   const validIds = new Set(EXPERIENCES.map(e => e.id));
   const journey = journeyActionRaw.journey as { days?: Array<{ stops?: Array<{ experienceId?: string }> }> } | null;
   if (journey?.days) {
@@ -576,10 +521,6 @@ function cleanLineMessage(text: string): string {
     .trim();
 }
 
-// ---------------------------------------------------------------------------
-// Handler
-// ---------------------------------------------------------------------------
-
 function isValidRequest(body: unknown): body is ChatRequest {
   if (typeof body !== 'object' || body === null) return false;
   const b = body as Record<string, unknown>;
@@ -611,6 +552,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (!isValidRequest(body)) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing required fields: message, language, chatHistory' }) };
   }
+
   let req = body as ChatRequest;
   let guestDbId: string | null = null;
   const customerState = await loadCustomerMemory(req.guestId, req.language, req.guestContext);
@@ -634,10 +576,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   const communityOfferings = await loadVerifiedCommunityOfferings();
   const systemPrompt = buildSystemPrompt(req, communityOfferings);
-  // Defensive dedup: even though the frontend now sends chatHistory BEFORE
-  // pushing the current turn, don't trust that blindly from every possible
-  // caller — if the last history entry already IS this exact user message,
-  // don't append it again. The model must see each user turn exactly once.
   const history = req.chatHistory.slice(-12);
   const lastEntry = history[history.length - 1];
   const alreadyIncluded = lastEntry && lastEntry.role === 'user' && lastEntry.content === req.message;
@@ -647,7 +585,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   try {
     raw = await callPreferredLanguageModel(systemPrompt, messages);
   } catch (err) {
-      console.error('THONGTHAI_AI_ERROR', err);
+    console.error('THONGTHAI_AI_ERROR', err);
     if (err instanceof ProviderNotConfiguredError) {
       return {
         statusCode: 503,
@@ -673,7 +611,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
     await persistCustomerResult(guestDbId, parsed, req.journeyContext, req.language);
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) };
   } catch (firstError) {
-    // one repair retry, same discipline as the planning agent
     try {
       const repairMessages: ChatTurn[] = [
         ...messages,
