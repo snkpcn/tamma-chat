@@ -11,13 +11,13 @@ import {
   type ChatTurn,
   type GuestContext,
   type JourneyContext,
-  type SemanticMemoryUpdate,
 } from './_thongthai-brain';
 import {
   loadCustomerMemory,
   loadVerifiedCommunityOfferings,
   persistCustomerResult,
 } from './_customer-db';
+import { resolveCanonicalGuestId } from './_thongthai-identity';
 import {
   executeBrainTools,
   loadBrainRuntime,
@@ -140,15 +140,6 @@ function json(statusCode: number, body: unknown) {
   };
 }
 
-function mergeSemanticMemory(
-  first: SemanticMemoryUpdate[] | undefined,
-  second: SemanticMemoryUpdate[] | undefined,
-): SemanticMemoryUpdate[] {
-  const map = new Map<string, SemanticMemoryUpdate>();
-  for (const item of [...(first ?? []), ...(second ?? [])]) map.set(item.key, item);
-  return [...map.values()];
-}
-
 function mergeAgentState(
   first: AgentStateUpdate | undefined,
   second: AgentStateUpdate | undefined,
@@ -157,17 +148,18 @@ function mergeAgentState(
   return Object.keys(merged).length ? merged : undefined;
 }
 
+/**
+ * The second brain pass exists only to phrase the result after real tools ran.
+ * It must not silently mutate the structural decision made before execution.
+ */
 function mergeAfterTools(first: BrainResponse, second: BrainResponse): BrainResponse {
-  const journeyAction = second.journeyAction.type !== 'none' ? second.journeyAction : first.journeyAction;
-  const intent = second.intent === 'conversation' && first.intent !== 'conversation' ? first.intent : second.intent;
   return {
-    ...second,
-    intent,
-    contextUpdates: { ...first.contextUpdates, ...second.contextUpdates },
-    journeyAction,
+    ...first,
+    message: second.message,
+    responseStyle: second.responseStyle,
     suggestedActions: second.suggestedActions.length ? second.suggestedActions : first.suggestedActions,
     agentStateUpdate: mergeAgentState(first.agentStateUpdate, second.agentStateUpdate),
-    semanticMemoryUpdates: mergeSemanticMemory(first.semanticMemoryUpdates, second.semanticMemoryUpdates),
+    semanticMemoryUpdates: first.semanticMemoryUpdates,
     toolCalls: [],
   };
 }
@@ -184,6 +176,13 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   let request = normalizeRequest(rawBody);
   if (!request) return json(400, { error: 'Missing required field: message' });
+
+  const channel = getBrainChannel(request.pageContext.section);
+  const providerUserKey = request.guestId;
+  const canonicalGuestId = await resolveCanonicalGuestId(channel, providerUserKey);
+  if (canonicalGuestId && canonicalGuestId !== request.guestId) {
+    request = { ...request, guestId: canonicalGuestId };
+  }
 
   let guestDbId: string | null = null;
   const customerState = await loadCustomerMemory(request.guestId, request.language, request.guestContext);
@@ -205,8 +204,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
     };
   }
 
-  const channel = getBrainChannel(request.pageContext.section);
-  await registerGuestIdentity(guestDbId, channel, request.guestId);
+  // Keep the channel-local key as an alias even when it resolves to a canonical guest.
+  await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
 
   const [communityOfferings, runtime] = await Promise.all([
     loadVerifiedCommunityOfferings(),
@@ -234,6 +233,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
     return json(502, { error: 'Thongthai brain request failed. Please try again.' });
   }
 
+  // Persist the structural decision before tool writes so stale request arrays cannot
+  // overwrite favorite/visited changes made by the agent tools.
   await persistCustomerResult(guestDbId, firstResponse, request.journeyContext, request.language);
 
   let finalResponse = firstResponse;
@@ -268,6 +269,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   await persistBrainRuntime(guestDbId, channel, finalResponse);
 
+  // Internal reasoning state and tool orchestration never leave this endpoint.
   return json(200, {
     message: finalResponse.message,
     intent: finalResponse.intent,
