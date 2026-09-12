@@ -8,12 +8,41 @@
 <style>
 :root{--bg:#141611;--panel:#1c1f18;--paper:#f4eee2;--ink:#201d18;--muted:#84796b;--gold:#c3a369;--gold2:#94713e;--line:rgba(195,163,105,.24);--green:#70876a;--red:#b35b4d}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% -10%,#363523 0,transparent 34%),var(--bg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif;color:#f4eee2;min-height:100vh}.shell{max-width:880px;margin:auto;padding:24px 16px 70px}.brand{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}.logo{font-weight:900;letter-spacing:.08em;color:var(--gold)}.back{color:#d8cbb5;text-decoration:none;font-size:13px}.hero{margin-bottom:24px}.eyebrow{font-size:12px;color:var(--gold);font-weight:800;letter-spacing:.14em}.hero h1{font-size:clamp(34px,8vw,58px);line-height:1.02;margin:8px 0 12px;letter-spacing:-.04em}.hero p{max-width:640px;color:#bdb5a7;line-height:1.65;margin:0}.panel{background:var(--paper);color:var(--ink);border-radius:28px;padding:22px;box-shadow:0 22px 60px rgba(0,0,0,.25);margin-top:18px}.grid{display:grid;gap:14px}.two{grid-template-columns:1fr}@media(min-width:680px){.two{grid-template-columns:1fr 1fr}.panel{padding:28px}}label{font-size:12px;font-weight:800;color:#655b50;display:block;margin:2px 0 7px}input,select{width:100%;border:1px solid #d9cebd;background:#fffdf8;color:#211e19;border-radius:14px;padding:13px 14px;font-size:16px;outline:none}input:focus,select:focus{border-color:var(--gold2);box-shadow:0 0 0 3px rgba(148,113,62,.12)}button{appearance:none;border:0;border-radius:14px;padding:13px 16px;font-size:15px;font-weight:850;cursor:pointer}.primary{background:#6f5734;color:white}.secondary{background:#e7ded0;color:#342b20}.ghost{background:transparent;border:1px solid #d7cabb;color:#55493b}.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.row button{flex:1;min-width:140px}.muted{font-size:13px;color:var(--muted);line-height:1.55}.status{border-radius:14px;padding:11px 13px;font-size:13px;margin:12px 0;display:none}.status.show{display:block}.status.ok{background:#e8f0e5;color:#40583b}.status.err{background:#f5e4e0;color:#7e352a}.tabs{display:flex;gap:8px;margin-bottom:17px}.tab{background:#e9dfd0;color:#6d5a43;padding:9px 12px;border-radius:999px;font-size:12px}.tab.active{background:#6f5734;color:#fff}.hidden{display:none!important}.section-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 14px}.section-title h2{font-size:20px;margin:0}.cards{display:grid;gap:10px}.item{border:1px solid #ddd1c1;border-radius:17px;padding:14px;background:#fffaf2}.item-top{display:flex;justify-content:space-between;gap:10px}.code{font-weight:900;color:#4b3b28}.badge{font-size:11px;padding:5px 8px;border-radius:999px;background:#eee5d8;color:#655442;height:fit-content}.meta{font-size:13px;color:#75685a;line-height:1.6;margin-top:7px}.empty{padding:20px;text-align:center;color:#8f8375;border:1px dashed #d8ccbd;border-radius:16px}.account-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:18px}.account-name{font-size:24px;font-weight:900}.privacy{font-size:11px;color:#978a7b;margin-top:18px;border-top:1px solid #ded4c6;padding-top:14px;line-height:1.6}.pill{display:inline-flex;padding:7px 9px;border-radius:999px;background:#e9dfd0;color:#63523f;font-size:11px;font-weight:800}.loading{opacity:.55;pointer-events:none}
+.tt-chess-rewards-list{display:flex;flex-direction:column;gap:10px}
+.tt-chess-reward-card{border:1px solid #ddd1c1;border-radius:17px;padding:14px;background:#fffaf2}
+.tt-chess-reward-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.tt-chess-reward-discount{font-size:22px;font-weight:900;color:#4b3b28}
+.tt-chess-reward-scope{font-size:12px;color:#75685a;font-weight:700;text-transform:uppercase}
+.tt-chess-status-pill{font-size:11px;font-weight:800;padding:5px 9px;border-radius:999px;height:fit-content}
+.tt-chess-status-pill.available{background:#e4ecdf;color:var(--green)}
+.tt-chess-status-pill.partially_used{background:#f3e6c9;color:#8a6a1f}
+.tt-chess-status-pill.used{background:#eee5d8;color:#655442}
+.tt-chess-status-pill.expired{background:#f5e4e0;color:var(--red)}
+.tt-chess-reward-expiry{font-size:12px;color:#8f8375;margin-top:6px}
+.tt-chess-master-chip{display:inline-flex;align-items:center;gap:5px;background:#201d18;color:var(--gold);font-size:10.5px;font-weight:800;padding:4px 8px;border-radius:999px;margin-bottom:6px}
+.tt-chess-zone-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 11px;border-radius:12px;background:#f4eee2;margin-top:8px}
+.tt-chess-zone-row.is-redeemed{opacity:.55}
+.tt-chess-zone-name{font-size:12.5px;font-weight:700}
+.tt-chess-zone-select-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.tt-chess-zone-btn{padding:8px 11px;border-radius:999px;border:1px solid #d9cebd;background:#fff;color:#342b20;font-size:11.5px;font-weight:700;cursor:pointer}
+.tt-chess-redeem-btn{padding:8px 12px;border-radius:999px;border:0;background:#6f5734;color:#fff;font-size:11.5px;font-weight:800;cursor:pointer}
+.tt-chess-redeem-btn:disabled{background:#c9c1af;cursor:not-allowed}
+.tt-chess-confirm-overlay{position:fixed;inset:0;background:rgba(20,17,12,.6);display:flex;align-items:center;justify-content:center;padding:20px;z-index:80}
+.tt-chess-confirm-box{background:#f4eee2;color:#201d18;border-radius:20px;padding:20px;max-width:380px;width:100%;text-align:center}
+.tt-chess-confirm-box p{font-size:13px;line-height:1.6;color:#4b3b28}
 </style>
 </head>
 <body>
 <main class="shell">
   <div class="brand"><div class="logo">ทำมา-ชาติ · THONGTHAI</div><a class="back" href="/">กลับหน้าเว็บ</a></div>
   <section class="hero"><div class="eyebrow">MY TAMMA-CHART</div><h1>บัญชีของฉัน</h1><p>เก็บข้อมูลติดต่อ การจอง Journey คำสั่งซื้อ และเรื่องที่ทีมทำมา-ชาติต้องติดตามให้คุณไว้ในที่เดียว</p></section>
+
+  <section id="chess-rewards" class="panel tt-chess-rewards-panel">
+    <div class="section-title"><h2>รางวัลของฉัน</h2><span id="ttChessRewardsCount" class="pill">0 รายการ</span></div>
+    <p class="muted">รางวัลจากการเล่นหมากรุกกับทองไทย — ใช้ได้จริงในทำมา-ชาติ แสดงหน้าจอนี้ให้พนักงานเพื่อใช้สิทธิ์</p>
+    <div id="ttChessRewardsList" class="tt-chess-rewards-list" style="margin-top:14px"></div>
+    <div style="margin-top:10px"><a href="chess.html" class="secondary" style="display:inline-block;text-decoration:none;padding:11px 16px;border-radius:14px;font-weight:800;font-size:13px">เล่นหมากรุกกับทองไทย</a></div>
+  </section>
 
   <section id="authPanel" class="panel">
     <div class="tabs"><button id="loginTab" class="tab active" type="button">เข้าสู่ระบบ</button><button id="signupTab" class="tab" type="button">สมัครบัญชี</button></div>
@@ -106,6 +135,101 @@ async function saveProfile(silent=false){
 function setMode(next){mode=next;$('loginTab').classList.toggle('active',mode==='login');$('signupTab').classList.toggle('active',mode==='signup');$('authSubmit').textContent=mode==='login'?'เข้าสู่ระบบ':'สมัครบัญชี';$('password').autocomplete=mode==='login'?'current-password':'new-password';clearStatus('authStatus')}
 $('loginTab').onclick=()=>setMode('login');$('signupTab').onclick=()=>setMode('signup');$('authSubmit').onclick=authenticate;$('saveProfile').onclick=()=>saveProfile(false);$('refreshBtn').onclick=()=>loadAccount().catch(()=>setStatus('profileStatus','รีเฟรชไม่สำเร็จ',false));$('logoutBtn').onclick=async()=>{const t=token();if(t)fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:authHeaders({Authorization:'Bearer '+t})}).catch(()=>{});sessionStorage.removeItem('tamma_access_token');location.reload()};
 loadAccount().catch(()=>{});
+
+/* ============================================================
+   My Rewards (Challenge Thongthai) — always visible, driven by
+   tamma_guest_id, never gated behind Supabase Auth login. The
+   server (chess-rewards.ts) is the sole source of truth for
+   status/expiry/redemption; nothing here is trusted client state.
+   ============================================================ */
+function ttGetGuestId(){
+  const key='tamma_guest_id'; let id=null;
+  try{ id=localStorage.getItem(key) }catch(e){}
+  if(id) return id;
+  if(window.crypto && typeof window.crypto.randomUUID==='function'){ id=window.crypto.randomUUID() }
+  else {
+    const bytes=new Uint8Array(16);
+    if(window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+    else for(let i=0;i<bytes.length;i++) bytes[i]=Math.floor(Math.random()*256);
+    bytes[6]=(bytes[6]&15)|64; bytes[8]=(bytes[8]&63)|128;
+    const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+    id=hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
+  }
+  try{ localStorage.setItem(key,id) }catch(e){}
+  return id;
+}
+const ttGuestId=ttGetGuestId();
+const ttRewardStatusLabel={available:'พร้อมใช้งาน',partially_used:'ใช้ไปบางส่วน',used:'ใช้สิทธิ์แล้ว',expired:'หมดอายุแล้ว'};
+let ttPendingRedeem=null;
+async function ttChessApiCall(action,extra){
+  const res=await fetch('/.netlify/functions/chess-rewards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({guestId:ttGuestId,language:'th',action,...extra})});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||'request_failed');
+  return data;
+}
+function ttFormatExpiry(iso){
+  try{
+    const d=new Date(iso);
+    return 'ใช้ได้ถึงวันนี้ 23:59 น. ('+new Intl.DateTimeFormat('th-TH',{timeZone:'Asia/Bangkok',hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(d)+')';
+  }catch(e){ return 'ใช้ได้ถึงวันนี้ 23:59 น.'; }
+}
+function ttRenderRewardCard(reward, eligibleZones){
+  const card=document.createElement('div'); card.className='tt-chess-reward-card';
+  const top=document.createElement('div'); top.className='tt-chess-reward-top';
+  top.innerHTML='<div><div class="tt-chess-reward-discount">'+esc(reward.discountPercent)+'%</div><div class="tt-chess-reward-scope">'+(reward.scope==='all_zones'?'ใช้ได้ทุกโซน':'ใช้ได้ 1 โซน')+'</div></div>'
+    +'<span class="tt-chess-status-pill '+esc(reward.status)+'">'+esc(ttRewardStatusLabel[reward.status]||reward.status)+'</span>';
+  card.appendChild(top);
+  if(reward.masterBadge){ const chip=document.createElement('div'); chip.className='tt-chess-master-chip'; chip.textContent='Thongthai Master'; card.appendChild(chip); }
+  const expiry=document.createElement('div'); expiry.className='tt-chess-reward-expiry'; expiry.textContent=ttFormatExpiry(reward.expiresAt); card.appendChild(expiry);
+
+  if(reward.needsZoneSelection){
+    const wrap=document.createElement('div'); wrap.className='tt-chess-zone-select-row';
+    (eligibleZones||[]).forEach(z=>{
+      const btn=document.createElement('button'); btn.type='button'; btn.className='tt-chess-zone-btn'; btn.textContent=z.name;
+      btn.onclick=async()=>{ try{ await ttChessApiCall('select_zone',{rewardId:reward.rewardId,zoneKey:z.zoneKey}); await ttLoadRewards(); }catch(e){} };
+      wrap.appendChild(btn);
+    });
+    card.appendChild(wrap);
+  }
+
+  (reward.coveredZones||[]).forEach(z=>{
+    const row=document.createElement('div'); row.className='tt-chess-zone-row'+(z.redeemed?' is-redeemed':'');
+    const left=document.createElement('div'); left.className='tt-chess-zone-name'; left.textContent=z.name;
+    row.appendChild(left);
+    if(!z.redeemed && (reward.status==='available'||reward.status==='partially_used')){
+      const btn=document.createElement('button'); btn.type='button'; btn.className='tt-chess-redeem-btn'; btn.textContent='ใช้สิทธิ์ตอนนี้';
+      btn.onclick=()=>{ ttPendingRedeem={rewardId:reward.rewardId,zoneKey:z.zoneKey}; $('ttChessRedeemOverlay').style.display='flex'; };
+      row.appendChild(btn);
+    } else {
+      const label=document.createElement('span'); label.style.fontSize='11px'; label.style.color='#8f8375'; label.textContent=z.redeemed?'ใช้สิทธิ์แล้ว':'—';
+      row.appendChild(label);
+    }
+    card.appendChild(row);
+  });
+
+  return card;
+}
+async function ttLoadRewards(){
+  const listEl=$('ttChessRewardsList');
+  try{
+    const data=await ttChessApiCall('list',{});
+    const rewards=Array.isArray(data.rewards)?data.rewards:[];
+    $('ttChessRewardsCount').textContent=rewards.length+' รายการ';
+    if(!rewards.length){ empty(listEl,'ยังไม่มีรางวัลจากการเล่นหมากรุกกับทองไทย'); return; }
+    rewards.sort((a,b)=> (a.status==='available'?0:1) - (b.status==='available'?0:1));
+    listEl.innerHTML='';
+    rewards.forEach(r=> listEl.appendChild(ttRenderRewardCard(r, data.eligibleZones)));
+  }catch(e){ empty(listEl,'โหลดรางวัลไม่สำเร็จ'); }
+}
+document.body.insertAdjacentHTML('beforeend','<div id="ttChessRedeemOverlay" class="tt-chess-confirm-overlay" style="display:none"><div class="tt-chess-confirm-box"><h3 style="margin:0 0 10px">ยืนยันการใช้สิทธิ์</h3><p>แสดงหน้าจอนี้ให้พนักงาน แล้วกดยืนยันเพื่อใช้สิทธิ์ส่วนลดนี้ที่โซนนี้ การใช้สิทธิ์นี้จะไม่สามารถย้อนกลับได้</p><div class="row"><button id="ttChessRedeemConfirm" class="primary" type="button" style="flex:1">ยืนยัน</button><button id="ttChessRedeemCancel" class="ghost" type="button" style="flex:1">ยกเลิก</button></div></div></div>');
+$('ttChessRedeemCancel').onclick=()=>{ ttPendingRedeem=null; $('ttChessRedeemOverlay').style.display='none'; };
+$('ttChessRedeemConfirm').onclick=async()=>{
+  const pending=ttPendingRedeem; $('ttChessRedeemOverlay').style.display='none'; ttPendingRedeem=null;
+  if(!pending) return;
+  try{ await ttChessApiCall('redeem',pending); }catch(e){}
+  await ttLoadRewards();
+};
+ttLoadRewards();
 </script>
 </body>
 </html>

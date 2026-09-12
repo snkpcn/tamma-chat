@@ -1,0 +1,1139 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#3B2414">
+<title>เล่นหมากรุกกับทองไทย · ทำมา-ชาติ</title>
+<style>
+:root{
+  --tt-cream:#F7F1E4; --tt-cream-2:#FBF8F1; --tt-ink-soft:#4A3A2C; --tt-brown-deep:#3B2414;
+  --tt-bronze:#9C7A45; --tt-olive:#6E7047; --tt-line-soft:rgba(43,29,19,0.08);
+  --tt-gold:#c3a369; --tt-red:#a24334; --tt-green:#4f6b46;
+}
+*{box-sizing:border-box}
+.tt-chess-page{
+  margin:0; min-height:100vh; background:var(--tt-cream);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif; color:var(--tt-ink-soft);
+  padding-bottom:calc(24px + env(safe-area-inset-bottom));
+}
+.tt-chess-header{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:calc(12px + env(safe-area-inset-top)) 16px 12px; background:var(--tt-brown-deep); color:var(--tt-cream-2);
+  position:sticky; top:0; z-index:20;
+}
+.tt-chess-header a{ color:var(--tt-cream-2); text-decoration:none; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; }
+.tt-chess-header .tt-chess-title{ font-size:14.5px; font-weight:800; letter-spacing:.02em; display:flex; align-items:center; gap:8px; }
+.tt-chess-header .tt-chess-title img{ width:26px; height:26px; border-radius:50%; object-fit:cover; background:var(--tt-cream); }
+.tt-chess-main{ max-width:640px; margin:0 auto; padding:18px 16px 8px; }
+
+.tt-chess-hero{ text-align:center; margin-bottom:18px; }
+.tt-chess-hero .tt-eyebrow{ font-size:12px; font-weight:800; letter-spacing:.12em; color:var(--tt-bronze); text-transform:uppercase; }
+.tt-chess-hero h1{ font-size:clamp(24px,6vw,32px); margin:6px 0 6px; color:var(--tt-brown-deep); }
+.tt-chess-hero p{ margin:0; font-size:14px; color:var(--tt-ink-soft); opacity:.85; }
+
+/* Difficulty selection */
+.tt-chess-side-toggle{ display:flex; gap:8px; justify-content:center; margin:14px 0 18px; }
+.tt-chess-side-btn{
+  flex:1; max-width:180px; padding:11px 10px; border-radius:14px; border:1.5px solid var(--tt-line-soft);
+  background:var(--tt-cream-2); color:var(--tt-ink-soft); font-weight:700; font-size:13.5px; cursor:pointer; min-height:44px;
+}
+.tt-chess-side-btn.is-active{ background:var(--tt-brown-deep); color:var(--tt-cream-2); border-color:var(--tt-brown-deep); }
+
+.tt-chess-diff-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media(max-width:400px){ .tt-chess-diff-grid{ grid-template-columns:1fr; } }
+.tt-chess-diff-card{
+  position:relative; border-radius:20px; padding:16px 14px; background:var(--tt-cream-2);
+  border:1.5px solid var(--tt-line-soft); text-align:left; cursor:pointer; min-height:44px;
+  display:flex; flex-direction:column; gap:8px; transition:transform .2s, box-shadow .2s;
+}
+.tt-chess-diff-card:active{ transform:scale(.98); }
+.tt-chess-diff-card.is-locked{ cursor:not-allowed; opacity:.72; }
+.tt-chess-diff-card img.tt-chess-badge{ width:52px; height:52px; object-fit:contain; }
+.tt-chess-diff-card h3{ margin:0; font-size:16px; color:var(--tt-brown-deep); }
+.tt-chess-diff-card .tt-chess-diff-sub{ font-size:11.5px; font-weight:700; color:var(--tt-bronze); text-transform:uppercase; letter-spacing:.04em; }
+.tt-chess-diff-card p{ margin:0; font-size:12.5px; color:var(--tt-ink-soft); opacity:.85; line-height:1.4; }
+.tt-chess-diff-card .tt-chess-lock-chip{
+  position:absolute; top:12px; right:12px; width:26px; height:26px; display:flex; align-items:center; justify-content:center;
+}
+.tt-chess-diff-card .tt-chess-lock-chip img{ width:20px; height:20px; object-fit:contain; }
+.tt-chess-diff-locked-note{ font-size:11px; color:var(--tt-red); font-weight:600; }
+
+.tt-chess-start-btn{
+  display:block; width:100%; margin-top:20px; padding:15px; border:0; border-radius:100px;
+  background:var(--tt-olive); color:var(--tt-cream-2); font-weight:800; font-size:15.5px; cursor:pointer; min-height:44px;
+}
+.tt-chess-start-btn:disabled{ opacity:.5; cursor:not-allowed; }
+
+/* Game screen */
+.tt-chess-game-top{ display:flex; align-items:center; gap:12px; margin-bottom:12px; }
+.tt-chess-thongthai-pose{ width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--tt-cream-2); border:2px solid var(--tt-bronze); flex:none; }
+.tt-chess-speech{ flex:1; background:var(--tt-cream-2); border-radius:14px; padding:9px 13px; font-size:13px; position:relative; min-height:44px; display:flex; align-items:center; }
+.tt-chess-turn-row{ display:flex; justify-content:space-between; align-items:center; font-size:12.5px; font-weight:700; color:var(--tt-ink-soft); margin-bottom:8px; }
+.tt-chess-turn-row .tt-chess-timer{ display:flex; align-items:center; gap:5px; opacity:.75; }
+.tt-chess-turn-row .tt-chess-timer img{ width:14px; height:14px; }
+
+.tt-chess-board{
+  width:100%; aspect-ratio:1/1; display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(8,1fr);
+  border-radius:14px; overflow:hidden; box-shadow:0 10px 30px rgba(59,36,20,.18); border:3px solid var(--tt-brown-deep);
+  touch-action:manipulation; user-select:none;
+}
+.tt-chess-sq{ position:relative; display:flex; align-items:center; justify-content:center; background-size:cover; background-position:center; }
+.tt-chess-sq.tt-chess-light{ background-color:#e9d9b8; }
+.tt-chess-sq.tt-chess-dark{ background-color:#8a6a42; }
+.tt-chess-sq.is-selected::after{ content:""; position:absolute; inset:0; background:rgba(156,122,69,.42); }
+.tt-chess-sq.is-legal::after{ content:""; position:absolute; width:28%; height:28%; border-radius:50%; background:rgba(74,58,44,.38); }
+.tt-chess-sq.is-legal-capture::after{ content:""; position:absolute; inset:6%; border-radius:8px; border:3px solid rgba(162,67,52,.6); background:none; }
+.tt-chess-sq.is-last-move{ box-shadow:inset 0 0 0 3px rgba(198,163,105,.7); }
+.tt-chess-sq.is-check{ box-shadow:inset 0 0 0 3px var(--tt-red); }
+.tt-chess-piece{ position:relative; width:78%; height:78%; display:flex; align-items:center; justify-content:center; z-index:2; }
+.tt-chess-piece .tt-chess-chip{
+  position:absolute; inset:6%; border-radius:50%; z-index:0;
+}
+.tt-chess-piece.tt-chess-white .tt-chess-chip{ background:radial-gradient(circle,#fbf6ea 0%,#e7d8b8 80%); box-shadow:0 0 0 1.5px rgba(59,36,20,.35); }
+.tt-chess-piece.tt-chess-black .tt-chess-chip{ background:radial-gradient(circle,#5a4025 0%,#2c1a0e 80%); box-shadow:0 0 0 1.5px rgba(0,0,0,.4); }
+.tt-chess-piece img{ position:relative; width:100%; height:100%; object-fit:contain; z-index:1; filter:drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+.tt-chess-piece.tt-chess-black img{ filter:drop-shadow(0 1px 1px rgba(0,0,0,.5)) brightness(.62); }
+.tt-chess-file-label,.tt-chess-rank-label{ position:absolute; font-size:8.5px; font-weight:700; color:rgba(59,36,20,.5); pointer-events:none; }
+.tt-chess-file-label{ bottom:2px; right:3px; } .tt-chess-rank-label{ top:2px; left:3px; }
+
+.tt-chess-controls{ display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; }
+.tt-chess-ctrl-btn{
+  flex:1; min-width:88px; display:flex; flex-direction:column; align-items:center; gap:4px; padding:10px 6px;
+  border-radius:14px; border:1.5px solid var(--tt-line-soft); background:var(--tt-cream-2); cursor:pointer; min-height:44px; font-size:11.5px; font-weight:700; color:var(--tt-ink-soft);
+}
+.tt-chess-ctrl-btn img{ width:22px; height:22px; object-fit:contain; }
+.tt-chess-ctrl-btn:disabled{ opacity:.45; cursor:not-allowed; }
+
+/* Overlays */
+.tt-chess-overlay{
+  position:fixed; inset:0; background:rgba(43,29,19,.55); display:flex; align-items:center; justify-content:center;
+  padding:20px; z-index:50;
+}
+.tt-chess-overlay[hidden]{ display:none; }
+.tt-chess-modal{
+  background:var(--tt-cream-2); border-radius:22px; padding:22px 20px calc(20px + env(safe-area-inset-bottom));
+  max-width:420px; width:100%; max-height:88vh; overflow-y:auto; text-align:center;
+}
+.tt-chess-modal img.tt-chess-modal-badge{ width:84px; height:84px; object-fit:contain; margin:0 auto 10px; display:block; }
+.tt-chess-modal h2{ margin:0 0 8px; font-size:21px; color:var(--tt-brown-deep); }
+.tt-chess-modal p{ margin:0 0 16px; font-size:13.5px; line-height:1.5; }
+.tt-chess-modal-actions{ display:flex; flex-direction:column; gap:9px; }
+.tt-chess-btn{ padding:13px; border-radius:100px; border:0; font-weight:800; font-size:14.5px; cursor:pointer; min-height:44px; }
+.tt-chess-btn-primary{ background:var(--tt-olive); color:var(--tt-cream-2); }
+.tt-chess-btn-secondary{ background:transparent; border:1.5px solid var(--tt-bronze); color:var(--tt-brown-deep); }
+.tt-chess-btn-outline{ background:transparent; color:var(--tt-ink-soft); font-weight:600; font-size:13px; }
+
+.tt-chess-promo-grid{ display:flex; gap:10px; justify-content:center; margin-bottom:6px; }
+.tt-chess-promo-opt{ width:60px; height:60px; border-radius:14px; border:1.5px solid var(--tt-line-soft); background:var(--tt-cream); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.tt-chess-promo-opt img{ width:70%; height:70%; object-fit:contain; }
+
+/* Winner pass */
+.tt-chess-pass-frame{ position:relative; border-radius:22px; overflow:hidden; margin-bottom:14px; }
+.tt-chess-pass-frame img.tt-chess-pass-bg{ width:100%; display:block; }
+.tt-chess-pass-body{ padding:16px 18px 18px; background:var(--tt-cream-2); border-radius:0 0 22px 22px; margin-top:-6px; }
+.tt-chess-pass-discount{ font-size:34px; font-weight:900; color:var(--tt-brown-deep); }
+.tt-chess-pass-scope{ font-size:12.5px; font-weight:700; color:var(--tt-bronze); text-transform:uppercase; letter-spacing:.03em; margin-bottom:10px; }
+.tt-chess-pass-expiry{ font-size:12px; color:var(--tt-ink-soft); opacity:.75; margin-bottom:14px; }
+.tt-chess-master-badge{ display:inline-flex; align-items:center; gap:6px; background:var(--tt-brown-deep); color:var(--tt-gold); font-size:11px; font-weight:800; padding:5px 10px; border-radius:100px; margin-bottom:10px; }
+.tt-chess-zone-list{ display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+.tt-chess-zone-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-radius:14px; background:var(--tt-cream); border:1.5px solid var(--tt-line-soft); }
+.tt-chess-zone-row.is-redeemed{ opacity:.55; }
+.tt-chess-zone-name{ font-size:13.5px; font-weight:700; text-align:left; }
+.tt-chess-zone-status{ font-size:11px; opacity:.7; }
+.tt-chess-redeem-btn{ padding:9px 14px; border-radius:100px; border:0; background:var(--tt-olive); color:var(--tt-cream-2); font-size:12.5px; font-weight:800; cursor:pointer; min-height:38px; }
+.tt-chess-redeem-btn:disabled{ background:#c9c1af; cursor:not-allowed; }
+.tt-chess-zone-select-btn{ padding:9px 12px; border-radius:100px; border:1.5px solid var(--tt-bronze); background:transparent; color:var(--tt-brown-deep); font-size:12.5px; font-weight:700; cursor:pointer; }
+.tt-chess-status-pill{ display:inline-block; font-size:11px; font-weight:800; padding:4px 10px; border-radius:100px; }
+.tt-chess-status-pill.available{ background:#e4ecdf; color:var(--tt-green); }
+.tt-chess-status-pill.partially_used{ background:#f3e6c9; color:#8a6a1f; }
+.tt-chess-status-pill.used{ background:#e6e1d6; color:#7a7060; }
+.tt-chess-status-pill.expired{ background:#f2ded9; color:var(--tt-red); }
+
+.tt-chess-toast{
+  position:fixed; left:50%; bottom:calc(18px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+  background:var(--tt-brown-deep); color:var(--tt-cream-2); padding:11px 18px; border-radius:100px; font-size:13px;
+  font-weight:600; z-index:60; box-shadow:0 8px 24px rgba(0,0,0,.25); max-width:90vw; text-align:center;
+}
+.tt-chess-toast[hidden]{ display:none; }
+
+.tt-chess-loading-row{ text-align:center; padding:40px 10px; color:var(--tt-ink-soft); font-size:13.5px; }
+[hidden]{ display:none!important; }
+</style>
+</head>
+<body class="tt-chess-page">
+
+<header class="tt-chess-header">
+  <a href="/" id="ttChessBackHome">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+    <span data-tt-i18n="back_home">กลับหน้าแรก</span>
+  </a>
+  <span class="tt-chess-title">
+    <img src="assets/thongthai/thongthai-wai.webp" alt="ทองไทย">
+    <span data-tt-i18n="heading">ท้าทายทองไทย</span>
+  </span>
+  <a href="/account.html#chess-rewards" id="ttChessMyRewardsLink">
+    <img src="assets/chess/derived/C08_profile_reward.webp" alt="" width="18" height="18" style="border-radius:0;background:none;">
+    <span data-tt-i18n="my_rewards_link">รางวัลของฉัน</span>
+  </a>
+</header>
+
+<main class="tt-chess-main">
+
+  <!-- ============ LOADING ============ -->
+  <div class="tt-chess-loading-row" id="ttChessLoading" data-tt-i18n="loading">กำลังโหลด...</div>
+
+  <!-- ============ DIFFICULTY SELECTION SCREEN ============ -->
+  <section id="ttChessScreenDifficulty" hidden>
+    <div class="tt-chess-hero">
+      <span class="tt-eyebrow" data-tt-i18n="choose_difficulty">เลือกระดับความยาก</span>
+      <h1 data-tt-i18n="heading">ท้าทายทองไทย</h1>
+      <p data-tt-i18n="subheading">ชนะทองไทย รับรางวัลใช้จริงในทำมา-ชาติ</p>
+    </div>
+
+    <div class="tt-chess-side-toggle" role="group" aria-label="เลือกฝ่ายที่จะเล่น">
+      <button type="button" class="tt-chess-side-btn is-active" id="ttChessSideWhite" data-tt-i18n="side_white">ฝ่ายขาว</button>
+      <button type="button" class="tt-chess-side-btn" id="ttChessSideBlack" data-tt-i18n="side_black">ฝ่ายดำ</button>
+    </div>
+
+    <div class="tt-chess-diff-grid" id="ttChessDiffGrid">
+      <button type="button" class="tt-chess-diff-card" data-difficulty="easy">
+        <img class="tt-chess-badge" src="assets/chess/derived/B01_badge_easy.webp" alt="">
+        <h3 data-tt-i18n="diff_easy_name">ง่าย</h3>
+        <span class="tt-chess-diff-sub">Little Knight</span>
+        <p data-tt-i18n="diff_easy_desc">รับส่วนลด 5% หนึ่งโซน</p>
+      </button>
+      <button type="button" class="tt-chess-diff-card" data-difficulty="medium">
+        <img class="tt-chess-badge" src="assets/chess/derived/B02_badge_medium.webp" alt="">
+        <h3 data-tt-i18n="diff_medium_name">กลาง</h3>
+        <span class="tt-chess-diff-sub">Challenger</span>
+        <p data-tt-i18n="diff_medium_desc">รับส่วนลด 10% หนึ่งโซน</p>
+      </button>
+      <button type="button" class="tt-chess-diff-card" data-difficulty="hard">
+        <img class="tt-chess-badge" src="assets/chess/derived/B03_badge_hard.webp" alt="">
+        <h3 data-tt-i18n="diff_hard_name">ยาก</h3>
+        <span class="tt-chess-diff-sub">Beat Thongthai</span>
+        <p data-tt-i18n="diff_hard_desc">รับส่วนลด 10% ทุกโซน</p>
+      </button>
+      <button type="button" class="tt-chess-diff-card" data-difficulty="master" id="ttChessMasterCard">
+        <span class="tt-chess-lock-chip"><img id="ttChessMasterLockIcon" src="assets/chess/derived/C04_lock.webp" alt=""></span>
+        <img class="tt-chess-badge" src="assets/chess/derived/B04_badge_master.webp" alt="">
+        <h3 data-tt-i18n="diff_master_name">ระดับตำนาน</h3>
+        <span class="tt-chess-diff-sub">Thongthai Master</span>
+        <p data-tt-i18n="diff_master_desc">รับส่วนลด 15% ทุกโซน พร้อมตราสัญลักษณ์พิเศษ</p>
+        <span class="tt-chess-diff-locked-note" id="ttChessMasterLockedNote" data-tt-i18n="diff_master_locked">ปลดล็อกหลังชนะระดับยากสำเร็จ</span>
+      </button>
+    </div>
+
+    <button type="button" class="tt-chess-start-btn" id="ttChessStartBtn" disabled data-tt-i18n="start_game">เริ่มเกม</button>
+  </section>
+
+  <!-- ============ GAME SCREEN ============ -->
+  <section id="ttChessScreenGame" hidden>
+    <div class="tt-chess-game-top">
+      <img class="tt-chess-thongthai-pose" id="ttChessPose" src="assets/thongthai/thongthai-wai.webp" alt="ทองไทย">
+      <div class="tt-chess-speech" id="ttChessSpeech" data-tt-i18n="thongthai_say_start">ลองมาสู้กันสักตาไหม ผมทองไทยรอท้าอยู่นะ</div>
+    </div>
+    <div class="tt-chess-turn-row">
+      <span id="ttChessTurnLabel" data-tt-i18n="your_turn">ตาของคุณ</span>
+      <span class="tt-chess-timer"><img src="assets/chess/derived/C03_timer.webp" alt=""><span id="ttChessTimer">00:00</span></span>
+    </div>
+    <div class="tt-chess-board" id="ttChessBoard" role="grid" aria-label="กระดานหมากรุก"></div>
+    <div class="tt-chess-controls">
+      <button type="button" class="tt-chess-ctrl-btn" id="ttChessHintBtn"><img src="assets/chess/derived/C01_hint.webp" alt=""><span data-tt-i18n="hint">คำใบ้</span></button>
+      <button type="button" class="tt-chess-ctrl-btn" id="ttChessResignBtn"><img src="assets/chess/derived/C10_lose_badge.webp" alt=""><span data-tt-i18n="resign">ยอมแพ้</span></button>
+      <button type="button" class="tt-chess-ctrl-btn" id="ttChessRematchFromGameBtn" hidden><img src="assets/chess/derived/C02_rematch.webp" alt=""><span data-tt-i18n="rematch">เล่นใหม่</span></button>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============ PROMOTION PICKER ============ -->
+<div class="tt-chess-overlay" id="ttChessPromoOverlay" hidden>
+  <div class="tt-chess-modal">
+    <h2 data-tt-i18n="promotion_pick" style="font-size:16px;">เลือกตัวหมากที่จะเลื่อนขั้น</h2>
+    <div class="tt-chess-promo-grid">
+      <button type="button" class="tt-chess-promo-opt" data-promo="q"><img src="assets/chess/derived/A08_piece_queen.webp" alt="Queen"></button>
+      <button type="button" class="tt-chess-promo-opt" data-promo="r"><img src="assets/chess/derived/A07_piece_rook.webp" alt="Rook"></button>
+      <button type="button" class="tt-chess-promo-opt" data-promo="b"><img src="assets/chess/derived/A06_piece_bishop.webp" alt="Bishop"></button>
+      <button type="button" class="tt-chess-promo-opt" data-promo="n"><img src="assets/chess/derived/A05_piece_knight.webp" alt="Knight"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ RESULT OVERLAY ============ -->
+<div class="tt-chess-overlay" id="ttChessResultOverlay" hidden>
+  <div class="tt-chess-modal">
+    <img class="tt-chess-modal-badge" id="ttChessResultBadge" src="assets/chess/derived/C09_win_badge.webp" alt="">
+    <h2 id="ttChessResultTitle" data-tt-i18n="result_win_title">คุณชนะทองไทย!</h2>
+    <p id="ttChessResultBody" data-tt-i18n="result_win_body">รางวัลของคุณถูกออกให้เรียบร้อยแล้ว ไปดู Winner Pass ได้เลย</p>
+    <div class="tt-chess-modal-actions">
+      <button type="button" class="tt-chess-btn tt-chess-btn-primary" id="ttChessViewWinnerPassBtn" data-tt-i18n="view_winner_pass" hidden>ดู Winner Pass</button>
+      <button type="button" class="tt-chess-btn tt-chess-btn-secondary" id="ttChessRematchBtn" data-tt-i18n="rematch">เล่นใหม่</button>
+      <button type="button" class="tt-chess-btn tt-chess-btn-outline" id="ttChessBackToDiffBtn" data-tt-i18n="back_to_difficulty">เลือกระดับใหม่</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ WINNER PASS OVERLAY ============ -->
+<div class="tt-chess-overlay" id="ttChessPassOverlay" hidden>
+  <div class="tt-chess-modal" style="max-width:440px;">
+    <div class="tt-chess-pass-frame">
+      <img class="tt-chess-pass-bg" src="assets/chess/derived/A10_winner_pass_frame.webp" alt="">
+    </div>
+    <div class="tt-chess-pass-body">
+      <div id="ttChessMasterBadgeRow" hidden><span class="tt-chess-master-badge"><img src="assets/chess/derived/B08_trophy.webp" alt="" style="width:16px;height:16px;">Thongthai Master</span></div>
+      <div class="tt-chess-pass-discount" id="ttChessPassDiscount">10%</div>
+      <div class="tt-chess-pass-scope" id="ttChessPassScope">ใช้ได้ทุกโซน</div>
+      <div><span class="tt-chess-status-pill" id="ttChessPassStatusPill">พร้อมใช้งาน</span></div>
+      <div class="tt-chess-pass-expiry" id="ttChessPassExpiry" style="margin-top:8px;"></div>
+      <div id="ttChessZoneSelectRow" hidden style="margin-bottom:10px;"></div>
+      <div class="tt-chess-zone-list" id="ttChessZoneList"></div>
+    </div>
+    <div class="tt-chess-modal-actions" style="margin-top:16px;">
+      <a class="tt-chess-btn tt-chess-btn-secondary" href="/account.html#chess-rewards" style="text-decoration:none;display:block;" data-tt-i18n="go_view_my_rewards">ดูรางวัลทั้งหมดในบัญชีของฉัน</a>
+      <button type="button" class="tt-chess-btn tt-chess-btn-outline" id="ttChessClosePassBtn" data-tt-i18n="cancel">ปิด</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ REDEEM CONFIRM ============ -->
+<div class="tt-chess-overlay" id="ttChessRedeemConfirmOverlay" hidden>
+  <div class="tt-chess-modal">
+    <h2 data-tt-i18n="redeem_confirm_title" style="font-size:18px;">ยืนยันการใช้สิทธิ์</h2>
+    <p data-tt-i18n="redeem_confirm_body">แสดงหน้าจอนี้ให้พนักงาน แล้วกดยืนยันเพื่อใช้สิทธิ์ส่วนลดนี้ที่โซนนี้ การใช้สิทธิ์นี้จะไม่สามารถย้อนกลับได้</p>
+    <div class="tt-chess-modal-actions">
+      <button type="button" class="tt-chess-btn tt-chess-btn-primary" id="ttChessRedeemConfirmBtn" data-tt-i18n="confirm">ยืนยัน</button>
+      <button type="button" class="tt-chess-btn tt-chess-btn-outline" id="ttChessRedeemCancelBtn" data-tt-i18n="cancel">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ RESIGN CONFIRM ============ -->
+<div class="tt-chess-overlay" id="ttChessResignConfirmOverlay" hidden>
+  <div class="tt-chess-modal">
+    <h2 data-tt-i18n="resign_confirm" style="font-size:17px;">ยืนยันการยอมแพ้เกมนี้หรือไม่?</h2>
+    <div class="tt-chess-modal-actions">
+      <button type="button" class="tt-chess-btn tt-chess-btn-primary" id="ttChessResignConfirmBtn" data-tt-i18n="confirm">ยืนยัน</button>
+      <button type="button" class="tt-chess-btn tt-chess-btn-outline" id="ttChessResignCancelBtn" data-tt-i18n="cancel">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
+<div class="tt-chess-toast" id="ttChessToast" hidden></div>
+
+<script type="module">
+import { Chess } from './assets/chess/vendor/chess.esm.js';
+
+/* ============================================================
+   ttChessI18N — mirrors index.html's I18N engine exactly (same
+   localStorage key, same 5 languages) so language choice stays
+   consistent across pages without a second translation system.
+   ============================================================ */
+const TT_CHESS_I18N = {
+th:{
+  back_home:"กลับหน้าแรก", my_rewards_link:"รางวัลของฉัน",
+  heading:"ท้าทายทองไทย", subheading:"ชนะทองไทย รับรางวัลใช้จริงในทำมา-ชาติ",
+  choose_difficulty:"เลือกระดับความยาก", side_white:"ฝ่ายขาว", side_black:"ฝ่ายดำ",
+  diff_easy_name:"ง่าย", diff_easy_desc:"รับส่วนลด 5% หนึ่งโซน",
+  diff_medium_name:"กลาง", diff_medium_desc:"รับส่วนลด 10% หนึ่งโซน",
+  diff_hard_name:"ยาก", diff_hard_desc:"รับส่วนลด 10% ทุกโซน",
+  diff_master_name:"ระดับตำนาน", diff_master_desc:"รับส่วนลด 15% ทุกโซน พร้อมตราสัญลักษณ์พิเศษ",
+  diff_master_locked:"ปลดล็อกหลังชนะระดับยากสำเร็จ",
+  start_game:"เริ่มเกม",
+  thongthai_say_start:"ลองมาสู้กันสักตาไหม ผมทองไทยรอท้าอยู่นะ",
+  thongthai_say_thinking:"ขอเวลาคิดสักครู่นะครับ...",
+  thongthai_say_player_win:"สุดยอดไปเลย! คุณเก่งกว่าที่ผมคิดไว้มาก",
+  thongthai_say_thongthai_win:"คราวนี้ผมชนะไปนะครับ ลองอีกครั้งไหม",
+  thongthai_say_draw:"เสมอกันไปครับ ฝีมือสูสีมากเลย",
+  your_turn:"ตาของคุณ", thongthai_turn:"ตาของทองไทย",
+  resign:"ยอมแพ้", resign_confirm:"ยืนยันการยอมแพ้เกมนี้หรือไม่?",
+  hint:"คำใบ้", rematch:"เล่นใหม่", back_to_difficulty:"เลือกระดับใหม่",
+  result_win_title:"คุณชนะทองไทย!", result_lose_title:"ทองไทยชนะไปในเกมนี้", result_draw_title:"เกมนี้เสมอกัน",
+  result_win_body:"รางวัลของคุณถูกออกให้เรียบร้อยแล้ว ไปดู Winner Pass ได้เลย",
+  result_lose_body:"ไม่เป็นไร ลองอีกครั้งได้เสมอ",
+  result_draw_body:"สูสีมาก ลองท้าทองไทยอีกครั้งไหม",
+  view_winner_pass:"ดู Winner Pass",
+  winner_pass_title:"Winner Pass",
+  reward_scope_one_zone:"ใช้ได้ 1 โซน", reward_scope_all_zones:"ใช้ได้ทุกโซน",
+  reward_select_zone:"เลือกโซนที่จะใช้สิทธิ์",
+  reward_expires_prefix:"ใช้ได้ถึงวันนี้ เวลา 23:59 น.",
+  reward_status_available:"พร้อมใช้งาน", reward_status_partially_used:"ใช้ไปบางส่วน",
+  reward_status_used:"ใช้สิทธิ์แล้ว", reward_status_expired:"หมดอายุแล้ว",
+  redeem_now:"ใช้สิทธิ์ตอนนี้", redeem_confirm_title:"ยืนยันการใช้สิทธิ์",
+  redeem_confirm_body:"แสดงหน้าจอนี้ให้พนักงาน แล้วกดยืนยันเพื่อใช้สิทธิ์ส่วนลดนี้ที่โซนนี้ การใช้สิทธิ์นี้จะไม่สามารถย้อนกลับได้",
+  confirm:"ยืนยัน", cancel:"ยกเลิก",
+  master_unlocked_toast:"ปลดล็อกระดับตำนานแล้ว!",
+  master_locked_toast:"ต้องชนะระดับยากก่อนจึงจะปลดล็อกระดับตำนานได้",
+  error_generic:"เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง",
+  error_network:"เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่",
+  retry:"ลองอีกครั้ง", loading:"กำลังโหลด...",
+  promotion_pick:"เลือกตัวหมากที่จะเลื่อนขั้น",
+  go_view_my_rewards:"ดูรางวัลทั้งหมดในบัญชีของฉัน",
+  redeemed_label:"ใช้สิทธิ์แล้ว", not_redeemed_label:"ยังไม่ได้ใช้",
+},
+en:{
+  back_home:"Back home", my_rewards_link:"My Rewards",
+  heading:"Challenge Thongthai", subheading:"Beat Thongthai, earn a real discount at TAMMA-CHAT",
+  choose_difficulty:"Choose your difficulty", side_white:"Play White", side_black:"Play Black",
+  diff_easy_name:"Easy", diff_easy_desc:"Get 5% off one zone",
+  diff_medium_name:"Medium", diff_medium_desc:"Get 10% off one zone",
+  diff_hard_name:"Hard", diff_hard_desc:"Get 10% off all zones",
+  diff_master_name:"Legendary", diff_master_desc:"Get 15% off all zones plus a Master Badge",
+  diff_master_locked:"Unlocks after a verified Hard win",
+  start_game:"Start game",
+  thongthai_say_start:"Fancy a match? I'm Thongthai, ready when you are.",
+  thongthai_say_thinking:"Give me a moment to think...",
+  thongthai_say_player_win:"Wow, you're better than I expected!",
+  thongthai_say_thongthai_win:"I won this one — want to try again?",
+  thongthai_say_draw:"A draw — that was close!",
+  your_turn:"Your turn", thongthai_turn:"Thongthai's turn",
+  resign:"Resign", resign_confirm:"Are you sure you want to resign this game?",
+  hint:"Hint", rematch:"Rematch", back_to_difficulty:"Choose again",
+  result_win_title:"You beat Thongthai!", result_lose_title:"Thongthai won this game", result_draw_title:"This game was a draw",
+  result_win_body:"Your reward has been issued — check your Winner Pass now.",
+  result_lose_body:"No worries, you can always try again.",
+  result_draw_body:"So close! Want another challenge?",
+  view_winner_pass:"View Winner Pass",
+  winner_pass_title:"Winner Pass",
+  reward_scope_one_zone:"Valid at 1 zone", reward_scope_all_zones:"Valid at every zone",
+  reward_select_zone:"Choose which zone to use this on",
+  reward_expires_prefix:"Valid until 23:59 today",
+  reward_status_available:"Available", reward_status_partially_used:"Partially used",
+  reward_status_used:"Used", reward_status_expired:"Expired",
+  redeem_now:"Redeem now", redeem_confirm_title:"Confirm redemption",
+  redeem_confirm_body:"Show this screen to staff, then confirm to redeem this discount at this zone. This cannot be undone.",
+  confirm:"Confirm", cancel:"Cancel",
+  master_unlocked_toast:"Legendary difficulty unlocked!",
+  master_locked_toast:"Win on Hard difficulty first to unlock Legendary.",
+  error_generic:"Something went wrong — please try again.",
+  error_network:"Could not connect — check your internet and try again.",
+  retry:"Retry", loading:"Loading...",
+  promotion_pick:"Choose a piece to promote to",
+  go_view_my_rewards:"View all rewards in My Account",
+  redeemed_label:"Redeemed", not_redeemed_label:"Not redeemed",
+},
+zh:{
+  back_home:"返回首页", my_rewards_link:"我的奖励",
+  heading:"挑战通泰", subheading:"战胜通泰，获得可在塔玛柴使用的真实折扣",
+  choose_difficulty:"选择难度", side_white:"执白", side_black:"执黑",
+  diff_easy_name:"简单", diff_easy_desc:"获得单一区域9折优惠",
+  diff_medium_name:"中等", diff_medium_desc:"获得单一区域9折优惠(10%)",
+  diff_hard_name:"困难", diff_hard_desc:"获得全部区域9折优惠(10%)",
+  diff_master_name:"传奇", diff_master_desc:"获得全部区域85折优惠及大师徽章",
+  diff_master_locked:"在困难难度取得胜利后解锁",
+  start_game:"开始游戏",
+  thongthai_say_start:"要不要来一局？我是通泰，随时奉陪。",
+  thongthai_say_thinking:"请稍等，我在思考…",
+  thongthai_say_player_win:"太厉害了！比我想象的还要强！",
+  thongthai_say_thongthai_win:"这局我赢了，要再来一局吗？",
+  thongthai_say_draw:"打成平局了，势均力敌！",
+  your_turn:"轮到你了", thongthai_turn:"轮到通泰",
+  resign:"认输", resign_confirm:"确定要认输吗？",
+  hint:"提示", rematch:"再来一局", back_to_difficulty:"重新选择难度",
+  result_win_title:"你战胜了通泰！", result_lose_title:"通泰赢得了这局", result_draw_title:"这局是平局",
+  result_win_body:"您的奖励已发放，现在就去查看 Winner Pass 吧。",
+  result_lose_body:"没关系，随时可以再挑战。",
+  result_draw_body:"势均力敌！要再挑战一次吗？",
+  view_winner_pass:"查看 Winner Pass",
+  winner_pass_title:"Winner Pass",
+  reward_scope_one_zone:"限一个区域使用", reward_scope_all_zones:"全部区域可用",
+  reward_select_zone:"选择要使用的区域",
+  reward_expires_prefix:"有效期至今日 23:59",
+  reward_status_available:"可使用", reward_status_partially_used:"部分已使用",
+  reward_status_used:"已使用", reward_status_expired:"已过期",
+  redeem_now:"立即使用", redeem_confirm_title:"确认使用",
+  redeem_confirm_body:"请向工作人员出示此画面，然后确认在此区域使用该折扣。此操作无法撤销。",
+  confirm:"确认", cancel:"取消",
+  master_unlocked_toast:"传奇难度已解锁！",
+  master_locked_toast:"请先在困难难度获胜以解锁传奇难度。",
+  error_generic:"出现错误，请重试。",
+  error_network:"连接失败，请检查网络后重试。",
+  retry:"重试", loading:"加载中...",
+  promotion_pick:"选择要升变的棋子",
+  go_view_my_rewards:"在我的账户中查看全部奖励",
+  redeemed_label:"已使用", not_redeemed_label:"尚未使用",
+},
+lo:{
+  back_home:"ກັບໜ້າຫຼັກ", my_rewards_link:"ລາງວັນຂອງຂ້ອຍ",
+  heading:"ທ້າທາຍທອງໄທ", subheading:"ຊະນະທອງໄທ ຮັບສ່ວນຫຼຸດໃຊ້ໄດ້ຈິງທີ່ TAMMA-CHAT",
+  choose_difficulty:"ເລືອກລະດັບຄວາມຍາກ", side_white:"ຝ່າຍຂາວ", side_black:"ຝ່າຍດຳ",
+  diff_easy_name:"ງ່າຍ", diff_easy_desc:"ຮັບສ່ວນຫຼຸດ 5% ໜຶ່ງໂຊນ",
+  diff_medium_name:"ກາງ", diff_medium_desc:"ຮັບສ່ວນຫຼຸດ 10% ໜຶ່ງໂຊນ",
+  diff_hard_name:"ຍາກ", diff_hard_desc:"ຮັບສ່ວນຫຼຸດ 10% ທຸກໂຊນ",
+  diff_master_name:"ຕຳນານ", diff_master_desc:"ຮັບສ່ວນຫຼຸດ 15% ທຸກໂຊນ ພ້ອມຕາປະທັບພິເສດ",
+  diff_master_locked:"ປົດລັອກຫຼັງຊະນະລະດັບຍາກສຳເລັດ",
+  start_game:"ເລີ່ມເກມ",
+  thongthai_say_start:"ລອງມາສູ້ກັນບໍ່? ຂ້ອຍທອງໄທລໍຖ້າຢູ່.",
+  thongthai_say_thinking:"ຂໍເວລາຄິດແດ່...",
+  thongthai_say_player_win:"ເກັ່ງຫຼາຍ! ເກັ່ງກວ່າທີ່ຂ້ອຍຄິດໄວ້ອີກ!",
+  thongthai_say_thongthai_win:"ຄາວນີ້ຂ້ອຍຊະນະໄປ ລອງອີກຄັ້ງບໍ່?",
+  thongthai_say_draw:"ສະເໝີກັນໄປ ຝີມືພໍໆກັນເລີຍ!",
+  your_turn:"ຕາຂອງເຈົ້າ", thongthai_turn:"ຕາຂອງທອງໄທ",
+  resign:"ຍອມແພ້", resign_confirm:"ຢືນຢັນການຍອມແພ້ເກມນີ້ບໍ່?",
+  hint:"ຄຳແນະນຳ", rematch:"ຫຼິ້ນໃໝ່", back_to_difficulty:"ເລືອກລະດັບໃໝ່",
+  result_win_title:"ເຈົ້າຊະນະທອງໄທ!", result_lose_title:"ທອງໄທຊະນະໃນເກມນີ້", result_draw_title:"ເກມນີ້ສະເໝີກັນ",
+  result_win_body:"ລາງວັນຂອງເຈົ້າຖືກອອກໃຫ້ແລ້ວ ໄປເບິ່ງ Winner Pass ໄດ້ເລີຍ",
+  result_lose_body:"ບໍ່ເປັນຫຍັງ ລອງອີກຄັ້ງໄດ້ສະເໝີ",
+  result_draw_body:"ພໍໆກັນຫຼາຍ ລອງທ້າທາຍອີກຄັ້ງບໍ່?",
+  view_winner_pass:"ເບິ່ງ Winner Pass",
+  winner_pass_title:"Winner Pass",
+  reward_scope_one_zone:"ໃຊ້ໄດ້ 1 ໂຊນ", reward_scope_all_zones:"ໃຊ້ໄດ້ທຸກໂຊນ",
+  reward_select_zone:"ເລືອກໂຊນທີ່ຈະໃຊ້ສິດ",
+  reward_expires_prefix:"ໃຊ້ໄດ້ຮອດວັນນີ້ເວລາ 23:59 ນ.",
+  reward_status_available:"ພ້ອມໃຊ້ງານ", reward_status_partially_used:"ໃຊ້ໄປບາງສ່ວນ",
+  reward_status_used:"ໃຊ້ສິດແລ້ວ", reward_status_expired:"ໝົດອາຍຸແລ້ວ",
+  redeem_now:"ໃຊ້ສິດຕອນນີ້", redeem_confirm_title:"ຢືນຢັນການໃຊ້ສິດ",
+  redeem_confirm_body:"ສະແດງໜ້າຈໍນີ້ໃຫ້ພະນັກງານ ແລ້ວກົດຢືນຢັນເພື່ອໃຊ້ສ່ວນຫຼຸດນີ້ທີ່ໂຊນນີ້ ຈະຍ້ອນກັບບໍ່ໄດ້",
+  confirm:"ຢືນຢັນ", cancel:"ຍົກເລີກ",
+  master_unlocked_toast:"ປົດລັອກລະດັບຕຳນານແລ້ວ!",
+  master_locked_toast:"ຕ້ອງຊະນະລະດັບຍາກກ່ອນຈຶ່ງຈະປົດລັອກລະດັບຕຳນານໄດ້",
+  error_generic:"ເກີດຂໍ້ຜິດພາດ ກະລຸນາລອງໃໝ່ອີກຄັ້ງ",
+  error_network:"ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ ກະລຸນາກວດສອບອິນເຕີເນັດແລ້ວລອງໃໝ່",
+  retry:"ລອງອີກຄັ້ງ", loading:"ກຳລັງໂຫຼດ...",
+  promotion_pick:"ເລືອກຕົວໝາກທີ່ຈະເລື່ອນຂັ້ນ",
+  go_view_my_rewards:"ເບິ່ງລາງວັນທັງໝົດໃນບັນຊີຂອງຂ້ອຍ",
+  redeemed_label:"ໃຊ້ສິດແລ້ວ", not_redeemed_label:"ຍັງບໍ່ໄດ້ໃຊ້",
+},
+vi:{
+  back_home:"Về trang chủ", my_rewards_link:"Phần thưởng của tôi",
+  heading:"Thách đấu Thongthai", subheading:"Thắng Thongthai, nhận ưu đãi thật tại TAMMA-CHAT",
+  choose_difficulty:"Chọn độ khó", side_white:"Chơi quân Trắng", side_black:"Chơi quân Đen",
+  diff_easy_name:"Dễ", diff_easy_desc:"Nhận giảm giá 5% cho một khu vực",
+  diff_medium_name:"Trung bình", diff_medium_desc:"Nhận giảm giá 10% cho một khu vực",
+  diff_hard_name:"Khó", diff_hard_desc:"Nhận giảm giá 10% cho mọi khu vực",
+  diff_master_name:"Huyền thoại", diff_master_desc:"Nhận giảm giá 15% cho mọi khu vực kèm huy hiệu Master",
+  diff_master_locked:"Mở khóa sau khi thắng ở độ Khó",
+  start_game:"Bắt đầu ván đấu",
+  thongthai_say_start:"Chơi một ván nhé? Tôi là Thongthai, sẵn sàng bất cứ lúc nào.",
+  thongthai_say_thinking:"Cho tôi một chút để suy nghĩ...",
+  thongthai_say_player_win:"Tuyệt vời! Bạn giỏi hơn tôi tưởng nhiều!",
+  thongthai_say_thongthai_win:"Lần này tôi thắng rồi — chơi lại nhé?",
+  thongthai_say_draw:"Hòa rồi — thật sít sao!",
+  your_turn:"Lượt của bạn", thongthai_turn:"Lượt của Thongthai",
+  resign:"Đầu hàng", resign_confirm:"Bạn chắc chắn muốn đầu hàng ván này?",
+  hint:"Gợi ý", rematch:"Chơi lại", back_to_difficulty:"Chọn lại độ khó",
+  result_win_title:"Bạn đã thắng Thongthai!", result_lose_title:"Thongthai đã thắng ván này", result_draw_title:"Ván này hòa",
+  result_win_body:"Phần thưởng của bạn đã được cấp — xem Winner Pass ngay.",
+  result_lose_body:"Không sao, bạn luôn có thể thử lại.",
+  result_draw_body:"Sít sao quá! Thử thách lại chứ?",
+  view_winner_pass:"Xem Winner Pass",
+  winner_pass_title:"Winner Pass",
+  reward_scope_one_zone:"Áp dụng cho 1 khu vực", reward_scope_all_zones:"Áp dụng cho mọi khu vực",
+  reward_select_zone:"Chọn khu vực để sử dụng",
+  reward_expires_prefix:"Có hiệu lực đến 23:59 hôm nay",
+  reward_status_available:"Còn hiệu lực", reward_status_partially_used:"Đã dùng một phần",
+  reward_status_used:"Đã sử dụng", reward_status_expired:"Đã hết hạn",
+  redeem_now:"Sử dụng ngay", redeem_confirm_title:"Xác nhận sử dụng",
+  redeem_confirm_body:"Đưa màn hình này cho nhân viên, sau đó xác nhận để sử dụng ưu đãi tại khu vực này. Không thể hoàn tác.",
+  confirm:"Xác nhận", cancel:"Hủy",
+  master_unlocked_toast:"Đã mở khóa độ Huyền thoại!",
+  master_locked_toast:"Hãy thắng ở độ Khó trước để mở khóa độ Huyền thoại.",
+  error_generic:"Đã xảy ra lỗi — vui lòng thử lại.",
+  error_network:"Không thể kết nối — kiểm tra mạng và thử lại.",
+  retry:"Thử lại", loading:"Đang tải...",
+  promotion_pick:"Chọn quân để phong cấp",
+  go_view_my_rewards:"Xem toàn bộ phần thưởng trong Tài khoản của tôi",
+  redeemed_label:"Đã sử dụng", not_redeemed_label:"Chưa sử dụng",
+},
+};
+
+const LANG_STORAGE_KEY = 'thammachat-lang-v1';
+let ttLang = 'th';
+function ttT(key){
+  const dict = TT_CHESS_I18N[ttLang] || TT_CHESS_I18N.th;
+  return dict[key] !== undefined ? dict[key] : (TT_CHESS_I18N.th[key] !== undefined ? TT_CHESS_I18N.th[key] : key);
+}
+function ttApplyTranslations(){
+  document.documentElement.setAttribute('lang', ttLang);
+  document.querySelectorAll('[data-tt-i18n]').forEach(el=>{ el.textContent = ttT(el.getAttribute('data-tt-i18n')); });
+}
+function ttInitI18n(){
+  let saved = null;
+  try{ saved = window.localStorage && window.localStorage.getItem(LANG_STORAGE_KEY); }catch(e){}
+  const supported = ['th','en','zh','lo','vi'];
+  if(saved && supported.includes(saved)) ttLang = saved;
+  else {
+    const nav = (navigator.language || 'th').toLowerCase();
+    if(nav.startsWith('en')) ttLang = 'en';
+    else if(nav.startsWith('zh')) ttLang = 'zh';
+    else if(nav.startsWith('lo')) ttLang = 'lo';
+    else if(nav.startsWith('vi')) ttLang = 'vi';
+  }
+  ttApplyTranslations();
+  window.addEventListener('storage', (e)=>{
+    if(e.key === LANG_STORAGE_KEY && e.newValue && supported.includes(e.newValue)){
+      ttLang = e.newValue; ttApplyTranslations(); ttChessRenderDynamicText();
+    }
+  });
+}
+
+/* ============================================================
+   Guest identity — identical generator to index.html's
+   getAnonymousGuestId(), so the same tamma_guest_id is reused.
+   ============================================================ */
+function ttGetGuestId(){
+  const key = 'tamma_guest_id';
+  let id = null;
+  try{ id = localStorage.getItem(key); }catch(e){}
+  if(id) return id;
+  if(window.crypto && typeof window.crypto.randomUUID === 'function'){
+    id = window.crypto.randomUUID();
+  } else {
+    const bytes = new Uint8Array(16);
+    if(window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+    else for(let i=0;i<bytes.length;i++) bytes[i] = Math.floor(Math.random()*256);
+    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, b=>b.toString(16).padStart(2,'0')).join('');
+    id = hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);
+  }
+  try{ localStorage.setItem(key, id); }catch(e){}
+  return id;
+}
+
+/* ============================================================
+   ttChessApi — talks only to chess-game.ts / chess-rewards.ts.
+   The server is the sole authority on rules and rewards.
+   ============================================================ */
+const ttChessApi = {
+  async _post(url, body){
+    let res;
+    try{ res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }); }
+    catch(e){ throw new Error('network'); }
+    let data = {};
+    try{ data = await res.json(); }catch(e){}
+    if(!res.ok) { const err = new Error(data.error || 'request_failed'); err.status = res.status; err.data = data; throw err; }
+    return data;
+  },
+  state(guestId){ return this._post('/.netlify/functions/chess-game', { guestId, language:ttLang, action:'state' }); },
+  start(guestId, difficulty, playerColor){ return this._post('/.netlify/functions/chess-game', { guestId, language:ttLang, action:'start', difficulty, playerColor }); },
+  move(guestId, gameId, from, to, promotion){ return this._post('/.netlify/functions/chess-game', { guestId, language:ttLang, action:'move', gameId, from, to, promotion }); },
+  resign(guestId, gameId){ return this._post('/.netlify/functions/chess-game', { guestId, language:ttLang, action:'resign', gameId }); },
+  rewardsList(guestId){ return this._post('/.netlify/functions/chess-rewards', { guestId, language:ttLang, action:'list' }); },
+  selectZone(guestId, rewardId, zoneKey){ return this._post('/.netlify/functions/chess-rewards', { guestId, language:ttLang, action:'select_zone', rewardId, zoneKey }); },
+  redeem(guestId, rewardId, zoneKey){ return this._post('/.netlify/functions/chess-rewards', { guestId, language:ttLang, action:'redeem', rewardId, zoneKey }); },
+};
+
+/* ============================================================
+   State
+   ============================================================ */
+const guestId = ttGetGuestId();
+const ttState = {
+  screen: 'loading',
+  selectedDifficulty: 'easy',
+  selectedSide: 'white',
+  masterUnlocked: false,
+  game: null,           // { gameId, difficulty, playerColor, fen, moves, status }
+  selectedSquare: null,
+  legalTargets: [],      // [{to, isCapture, promotion}]
+  moveInFlight: false,
+  pendingPromotion: null, // { from, to }
+  lastMoveSquares: null,  // [from, to]
+  timerStart: null,
+  timerHandle: null,
+  currentReward: null,    // PublicChessReward from a just-finished win
+  eligibleZones: [],
+  pendingRedeem: null,    // { rewardId, zoneKey }
+};
+
+const $ = (id) => document.getElementById(id);
+
+function ttShowToast(msg, ms){
+  const el = $('ttChessToast');
+  el.textContent = msg; el.hidden = false;
+  clearTimeout(el._ttTimer);
+  el._ttTimer = setTimeout(()=>{ el.hidden = true; }, ms || 3200);
+}
+
+function ttShowScreen(name){
+  ttState.screen = name;
+  $('ttChessLoading').hidden = name !== 'loading';
+  $('ttChessScreenDifficulty').hidden = name !== 'difficulty';
+  $('ttChessScreenGame').hidden = name !== 'game';
+}
+
+/* ============================================================
+   Difficulty screen
+   ============================================================ */
+function ttRenderMasterLock(){
+  const card = $('ttChessMasterCard');
+  const lockIcon = $('ttChessMasterLockIcon');
+  const note = $('ttChessMasterLockedNote');
+  if(ttState.masterUnlocked){
+    card.classList.remove('is-locked');
+    lockIcon.src = 'assets/chess/derived/C05_unlock.webp';
+    note.style.display = 'none';
+  } else {
+    card.classList.add('is-locked');
+    lockIcon.src = 'assets/chess/derived/C04_lock.webp';
+    note.style.display = '';
+  }
+}
+
+function ttSelectDifficultyCard(diff){
+  if(diff === 'master' && !ttState.masterUnlocked){
+    ttShowToast(ttT('master_locked_toast'));
+    return;
+  }
+  ttState.selectedDifficulty = diff;
+  document.querySelectorAll('.tt-chess-diff-card').forEach(c=>{
+    c.style.outline = c.getAttribute('data-difficulty') === diff ? '2.5px solid var(--tt-brown-deep)' : 'none';
+  });
+  $('ttChessStartBtn').disabled = false;
+}
+
+function ttWireDifficultyScreen(){
+  document.querySelectorAll('.tt-chess-diff-card').forEach(card=>{
+    card.addEventListener('click', ()=> ttSelectDifficultyCard(card.getAttribute('data-difficulty')));
+  });
+  $('ttChessSideWhite').addEventListener('click', ()=>{
+    ttState.selectedSide = 'white';
+    $('ttChessSideWhite').classList.add('is-active'); $('ttChessSideBlack').classList.remove('is-active');
+  });
+  $('ttChessSideBlack').addEventListener('click', ()=>{
+    ttState.selectedSide = 'black';
+    $('ttChessSideBlack').classList.add('is-active'); $('ttChessSideWhite').classList.remove('is-active');
+  });
+  $('ttChessStartBtn').addEventListener('click', ttStartGame);
+}
+
+async function ttStartGame(){
+  const btn = $('ttChessStartBtn');
+  btn.disabled = true;
+  try{
+    const res = await ttChessApi.start(guestId, ttState.selectedDifficulty, ttState.selectedSide);
+    ttState.game = res.game;
+    ttState.selectedSquare = null; ttState.legalTargets = []; ttState.lastMoveSquares = null;
+    ttStartTimer();
+    ttShowScreen('game');
+    ttRenderGameScreen();
+  }catch(e){
+    ttShowToast(e.message === 'network' ? ttT('error_network') : ttT('error_generic'));
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+/* ============================================================
+   Timer (cosmetic elapsed-time display only)
+   ============================================================ */
+function ttStartTimer(){
+  ttState.timerStart = Date.now();
+  clearInterval(ttState.timerHandle);
+  ttState.timerHandle = setInterval(()=>{
+    const secs = Math.floor((Date.now() - ttState.timerStart) / 1000);
+    const m = String(Math.floor(secs/60)).padStart(2,'0');
+    const s = String(secs%60).padStart(2,'0');
+    $('ttChessTimer').textContent = m+':'+s;
+  }, 1000);
+}
+function ttStopTimer(){ clearInterval(ttState.timerHandle); }
+
+/* ============================================================
+   Board rendering — a real 8x8 DOM grid, never a flat image.
+   ============================================================ */
+const FILES = ['a','b','c','d','e','f','g','h'];
+const PIECE_ASSET = { p:'A04_piece_pawn', n:'A05_piece_knight', b:'A06_piece_bishop', r:'A07_piece_rook', q:'A08_piece_queen', k:'A09_piece_king' };
+
+function ttParseFenBoard(fen){
+  const rows = fen.split(' ')[0].split('/');
+  const board = [];
+  for(const row of rows){
+    const line = [];
+    for(const ch of row){
+      if(/[1-8]/.test(ch)) { for(let i=0;i<Number(ch);i++) line.push(null); }
+      else line.push(ch);
+    }
+    board.push(line);
+  }
+  return board; // board[0] = rank 8 ... board[7] = rank 1
+}
+
+function ttSquareName(rankIdx, fileIdx){ return FILES[fileIdx] + String(8 - rankIdx); }
+
+function ttRenderBoard(){
+  const boardEl = $('ttChessBoard');
+  boardEl.innerHTML = '';
+  const board = ttParseFenBoard(ttState.game.fen);
+  const flipped = ttState.game.playerColor === 'black';
+
+  for(let displayRow = 0; displayRow < 8; displayRow++){
+    for(let displayCol = 0; displayCol < 8; displayCol++){
+      const rankIdx = flipped ? 7 - displayRow : displayRow;
+      const fileIdx = flipped ? 7 - displayCol : displayCol;
+      const square = ttSquareName(rankIdx, fileIdx);
+      const piece = board[rankIdx][fileIdx];
+
+      const sq = document.createElement('div');
+      sq.className = 'tt-chess-sq ' + (((rankIdx + fileIdx) % 2 === 0) ? 'tt-chess-light' : 'tt-chess-dark');
+      sq.dataset.square = square;
+      sq.setAttribute('role','gridcell');
+      sq.setAttribute('aria-label', square);
+
+      if(ttState.selectedSquare === square) sq.classList.add('is-selected');
+      if(ttState.lastMoveSquares && ttState.lastMoveSquares.includes(square)) sq.classList.add('is-last-move');
+      const legalHit = ttState.legalTargets.find(t=>t.to === square);
+      if(legalHit) sq.classList.add(legalHit.isCapture ? 'is-legal-capture' : 'is-legal');
+
+      if(piece){
+        const isWhite = piece === piece.toUpperCase();
+        const wrap = document.createElement('div');
+        wrap.className = 'tt-chess-piece ' + (isWhite ? 'tt-chess-white' : 'tt-chess-black');
+        const chip = document.createElement('div'); chip.className = 'tt-chess-chip';
+        const img = document.createElement('img');
+        img.src = 'assets/chess/derived/' + PIECE_ASSET[piece.toLowerCase()] + '.webp';
+        img.alt = square;
+        wrap.appendChild(chip); wrap.appendChild(img);
+        sq.appendChild(wrap);
+      }
+
+      if(displayCol === 0){ const lbl = document.createElement('span'); lbl.className='tt-chess-rank-label'; lbl.textContent = String(8-rankIdx); sq.appendChild(lbl); }
+      if(displayRow === 7){ const lbl = document.createElement('span'); lbl.className='tt-chess-file-label'; lbl.textContent = FILES[fileIdx]; sq.appendChild(lbl); }
+
+      sq.addEventListener('click', ()=> ttHandleSquareClick(square));
+      boardEl.appendChild(sq);
+    }
+  }
+}
+
+function ttCurrentTurnColor(fen){ return fen.split(' ')[1] === 'w' ? 'white' : 'black'; }
+
+function ttHandleSquareClick(square){
+  if(ttState.moveInFlight || !ttState.game || ttState.game.status !== 'active') return;
+  const turn = ttCurrentTurnColor(ttState.game.fen);
+  if(turn !== ttState.game.playerColor) return; // not the player's turn
+
+  const board = ttParseFenBoard(ttState.game.fen);
+  const [file, rank] = [FILES.indexOf(square[0]), 8 - Number(square[1])];
+  const pieceAtSquare = board[rank][file];
+  const isOwnPiece = pieceAtSquare && ((pieceAtSquare === pieceAtSquare.toUpperCase()) === (ttState.game.playerColor === 'white'));
+
+  if(ttState.selectedSquare === square){
+    ttState.selectedSquare = null; ttState.legalTargets = []; ttRenderBoard(); return;
+  }
+
+  if(ttState.selectedSquare){
+    const target = ttState.legalTargets.find(t=>t.to === square);
+    if(target){
+      if(target.needsPromotion){
+        ttState.pendingPromotion = { from: ttState.selectedSquare, to: square };
+        $('ttChessPromoOverlay').hidden = false;
+        return;
+      }
+      ttSubmitMove(ttState.selectedSquare, square, null);
+      return;
+    }
+    if(isOwnPiece){ ttSelectSquare(square); return; }
+    ttState.selectedSquare = null; ttState.legalTargets = []; ttRenderBoard();
+    return;
+  }
+
+  if(isOwnPiece) ttSelectSquare(square);
+}
+
+function ttSelectSquare(square){
+  ttState.selectedSquare = square;
+  try{
+    const chess = new Chess(ttState.game.fen);
+    const moves = chess.moves({ square, verbose:true });
+    ttState.legalTargets = moves.map(m=>({ to: m.to, isCapture: !!m.captured, needsPromotion: !!m.promotion }));
+  }catch(e){ ttState.legalTargets = []; }
+  ttRenderBoard();
+}
+
+async function ttSubmitMove(from, to, promotion){
+  ttState.moveInFlight = true;
+  ttState.selectedSquare = null; ttState.legalTargets = [];
+  ttSetPose('thinking'); $('ttChessSpeech').textContent = ttT('thongthai_say_thinking');
+  ttRenderBoard();
+  try{
+    const res = await ttChessApi.move(guestId, ttState.game.gameId, from, to, promotion);
+    ttState.game.fen = res.fen;
+    ttState.game.moves = res.moves;
+    ttState.game.status = res.status;
+    ttState.lastMoveSquares = res.thongthaiSan ? null : [from, to];
+    ttRenderBoard();
+    ttUpdateTurnLabel();
+    if(res.status !== 'active'){
+      ttStopTimer();
+      ttHandleGameEnd(res.status, res.reward || null);
+    } else {
+      ttSetPose('wai');
+      $('ttChessSpeech').textContent = ttState.game.playerColor === (ttCurrentTurnColor(res.fen)) ? ttT('your_turn') : ttT('thongthai_turn');
+    }
+  }catch(e){
+    if(e.status === 409){
+      // Two-tabs / stale-state race — refetch the authoritative server state rather than guessing.
+      await ttRefreshActiveGame();
+      ttShowToast(ttT('error_generic'));
+    } else {
+      ttShowToast(e.message === 'network' ? ttT('error_network') : ttT('error_generic'));
+      ttRenderBoard();
+    }
+  }finally{
+    ttState.moveInFlight = false;
+  }
+}
+
+async function ttRefreshActiveGame(){
+  try{
+    const res = await ttChessApi.state(guestId);
+    ttState.masterUnlocked = res.masterUnlocked;
+    if(res.activeGame){ ttState.game = res.activeGame; ttRenderBoard(); ttUpdateTurnLabel(); }
+    else { ttShowScreen('difficulty'); ttRenderMasterLock(); }
+  }catch(e){ /* keep current view — a stale board beats a broken one */ }
+}
+
+function ttUpdateTurnLabel(){
+  const turn = ttCurrentTurnColor(ttState.game.fen);
+  $('ttChessTurnLabel').textContent = turn === ttState.game.playerColor ? ttT('your_turn') : ttT('thongthai_turn');
+}
+
+function ttSetPose(state){
+  const map = { wai:'thongthai-wai', thinking:'thongthai-thinking', win:'thongthai-concierge', lose:'thongthai-default', draw:'thongthai-empathy' };
+  $('ttChessPose').src = 'assets/thongthai/' + (map[state] || 'thongthai-wai') + '.webp';
+}
+
+function ttRenderGameScreen(){
+  ttSetPose('wai');
+  $('ttChessSpeech').textContent = ttT('thongthai_say_start');
+  ttUpdateTurnLabel();
+  ttRenderBoard();
+  $('ttChessRematchFromGameBtn').hidden = true;
+}
+
+function ttHandleGameEnd(status, reward){
+  const badge = $('ttChessResultBadge');
+  const title = $('ttChessResultTitle');
+  const body = $('ttChessResultBody');
+  const viewPassBtn = $('ttChessViewWinnerPassBtn');
+  if(status === 'player_won'){
+    ttSetPose('win');
+    badge.src = 'assets/chess/derived/C09_win_badge.webp';
+    title.textContent = ttT('result_win_title'); body.textContent = ttT('result_win_body');
+    viewPassBtn.hidden = false;
+    ttState.currentReward = reward;
+  } else if(status === 'thongthai_won'){
+    ttSetPose('lose');
+    badge.src = 'assets/chess/derived/C10_lose_badge.webp';
+    title.textContent = ttT('result_lose_title'); body.textContent = ttT('result_lose_body');
+    viewPassBtn.hidden = true;
+  } else {
+    ttSetPose('draw');
+    badge.src = 'assets/chess/derived/B08_trophy.webp';
+    title.textContent = ttT('result_draw_title'); body.textContent = ttT('result_draw_body');
+    viewPassBtn.hidden = true;
+  }
+  $('ttChessResultOverlay').hidden = false;
+}
+
+/* ============================================================
+   Promotion picker
+   ============================================================ */
+document.addEventListener('click', (e)=>{
+  const opt = e.target.closest('.tt-chess-promo-opt');
+  if(!opt) return;
+  const promo = opt.getAttribute('data-promo');
+  $('ttChessPromoOverlay').hidden = true;
+  if(ttState.pendingPromotion){
+    const { from, to } = ttState.pendingPromotion;
+    ttState.pendingPromotion = null;
+    ttSubmitMove(from, to, promo);
+  }
+});
+
+/* ============================================================
+   Result overlay actions
+   ============================================================ */
+$('ttChessRematchBtn').addEventListener('click', async ()=>{
+  $('ttChessResultOverlay').hidden = true;
+  await ttStartGame();
+});
+$('ttChessBackToDiffBtn').addEventListener('click', async ()=>{
+  $('ttChessResultOverlay').hidden = true;
+  await ttRefreshMasterAndShowDifficulty();
+});
+$('ttChessViewWinnerPassBtn').addEventListener('click', ()=>{
+  $('ttChessResultOverlay').hidden = true;
+  ttOpenWinnerPass(ttState.currentReward);
+});
+
+async function ttRefreshMasterAndShowDifficulty(){
+  try{
+    const res = await ttChessApi.state(guestId);
+    ttState.masterUnlocked = res.masterUnlocked;
+  }catch(e){}
+  ttRenderMasterLock();
+  ttShowScreen('difficulty');
+}
+
+/* ============================================================
+   Resign
+   ============================================================ */
+$('ttChessResignBtn').addEventListener('click', ()=>{ $('ttChessResignConfirmOverlay').hidden = false; });
+$('ttChessResignCancelBtn').addEventListener('click', ()=>{ $('ttChessResignConfirmOverlay').hidden = true; });
+$('ttChessResignConfirmBtn').addEventListener('click', async ()=>{
+  $('ttChessResignConfirmOverlay').hidden = true;
+  try{
+    await ttChessApi.resign(guestId, ttState.game.gameId);
+    ttState.game.status = 'resigned';
+    ttStopTimer();
+    ttHandleGameEnd('thongthai_won', null);
+  }catch(e){ ttShowToast(ttT('error_generic')); }
+});
+
+/* ============================================================
+   Hint — client-side only convenience (never authoritative);
+   highlights one legal move using the vendored rules engine.
+   ============================================================ */
+$('ttChessHintBtn').addEventListener('click', ()=>{
+  if(!ttState.game || ttState.game.status !== 'active') return;
+  const turn = ttCurrentTurnColor(ttState.game.fen);
+  if(turn !== ttState.game.playerColor) return;
+  try{
+    const chess = new Chess(ttState.game.fen);
+    const moves = chess.moves({ verbose:true });
+    if(!moves.length) return;
+    const captures = moves.filter(m=>m.captured);
+    const pick = (captures.length ? captures : moves)[Math.floor(Math.random() * (captures.length ? captures.length : moves.length))];
+    ttState.selectedSquare = pick.from;
+    ttState.legalTargets = chess.moves({ square: pick.from, verbose:true }).map(m=>({ to:m.to, isCapture:!!m.captured, needsPromotion:!!m.promotion }));
+    ttRenderBoard();
+  }catch(e){}
+});
+
+/* ============================================================
+   Winner Pass
+   ============================================================ */
+function ttFormatExpiry(iso){
+  try{
+    const d = new Date(iso);
+    return ttT('reward_expires_prefix') + ' (' + new Intl.DateTimeFormat(ttLang === 'th' ? 'th-TH' : ttLang, { timeZone:'Asia/Bangkok', hour:'2-digit', minute:'2-digit' }).format(d) + ' ' + new Intl.DateTimeFormat(ttLang === 'th' ? 'th-TH' : ttLang, { timeZone:'Asia/Bangkok', day:'2-digit', month:'2-digit' }).format(d) + ')';
+  }catch(e){ return ttT('reward_expires_prefix'); }
+}
+
+function ttRenderWinnerPass(reward){
+  $('ttChessPassDiscount').textContent = reward.discountPercent + '%';
+  $('ttChessPassScope').textContent = reward.scope === 'all_zones' ? ttT('reward_scope_all_zones') : ttT('reward_scope_one_zone');
+  $('ttChessPassExpiry').textContent = ttFormatExpiry(reward.expiresAt);
+  $('ttChessMasterBadgeRow').hidden = !reward.masterBadge;
+
+  const pill = $('ttChessPassStatusPill');
+  pill.className = 'tt-chess-status-pill ' + reward.status;
+  pill.textContent = ttT('reward_status_' + reward.status);
+
+  const selectRow = $('ttChessZoneSelectRow');
+  selectRow.innerHTML = '';
+  selectRow.hidden = true;
+  if(reward.needsZoneSelection){
+    selectRow.hidden = false;
+    const label = document.createElement('p');
+    label.style.cssText = 'font-size:12.5px;margin-bottom:8px;';
+    label.textContent = ttT('reward_select_zone');
+    selectRow.appendChild(label);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;justify-content:center;';
+    ttState.eligibleZones.forEach(z=>{
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'tt-chess-zone-select-btn';
+      btn.textContent = z.name;
+      btn.addEventListener('click', async ()=>{
+        try{
+          const res = await ttChessApi.selectZone(guestId, reward.rewardId, z.zoneKey);
+          ttRenderWinnerPass(res.reward);
+          ttState.currentReward = res.reward;
+        }catch(e){ ttShowToast(ttT('error_generic')); }
+      });
+      row.appendChild(btn);
+    });
+    selectRow.appendChild(row);
+  }
+
+  const list = $('ttChessZoneList');
+  list.innerHTML = '';
+  reward.coveredZones.forEach(z=>{
+    const row = document.createElement('div');
+    row.className = 'tt-chess-zone-row' + (z.redeemed ? ' is-redeemed' : '');
+    const left = document.createElement('div');
+    left.innerHTML = '<div class="tt-chess-zone-name">'+ escapeHtml(z.name) +'</div><div class="tt-chess-zone-status">'+ (z.redeemed ? ttT('redeemed_label') : ttT('not_redeemed_label')) +'</div>';
+    row.appendChild(left);
+    if(!z.redeemed && (reward.status === 'available' || reward.status === 'partially_used')){
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'tt-chess-redeem-btn'; btn.textContent = ttT('redeem_now');
+      btn.addEventListener('click', ()=>{
+        ttState.pendingRedeem = { rewardId: reward.rewardId, zoneKey: z.zoneKey };
+        $('ttChessRedeemConfirmOverlay').hidden = false;
+      });
+      row.appendChild(btn);
+    }
+    list.appendChild(row);
+  });
+}
+
+function escapeHtml(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
+
+async function ttOpenWinnerPass(reward){
+  try{
+    const listRes = await ttChessApi.rewardsList(guestId);
+    ttState.eligibleZones = listRes.eligibleZones || [];
+    const fresh = reward ? listRes.rewards.find(r=>r.rewardId === reward.rewardId) : listRes.rewards[0];
+    ttRenderWinnerPass(fresh || reward);
+  }catch(e){
+    if(reward){ ttState.eligibleZones = []; ttRenderWinnerPass(reward); }
+    else { ttShowToast(ttT('error_generic')); return; }
+  }
+  $('ttChessPassOverlay').hidden = false;
+}
+$('ttChessClosePassBtn').addEventListener('click', ()=>{ $('ttChessPassOverlay').hidden = true; });
+
+$('ttChessRedeemCancelBtn').addEventListener('click', ()=>{ ttState.pendingRedeem = null; $('ttChessRedeemConfirmOverlay').hidden = true; });
+$('ttChessRedeemConfirmBtn').addEventListener('click', async ()=>{
+  const pending = ttState.pendingRedeem;
+  $('ttChessRedeemConfirmOverlay').hidden = true;
+  if(!pending) return;
+  try{
+    const res = await ttChessApi.redeem(guestId, pending.rewardId, pending.zoneKey);
+    ttState.currentReward = res.reward;
+    ttRenderWinnerPass(res.reward);
+    ttShowToast(ttT('reward_status_' + res.reward.status));
+  }catch(e){
+    ttShowToast(e.message === 'network' ? ttT('error_network') : ttT('error_generic'));
+  }finally{
+    ttState.pendingRedeem = null;
+  }
+});
+
+function ttChessRenderDynamicText(){
+  if(ttState.game) ttUpdateTurnLabel();
+}
+
+/* ============================================================
+   Boot
+   ============================================================ */
+ttWireDifficultyScreen();
+
+(async function ttBoot(){
+  ttInitI18n();
+  try{
+    const res = await ttChessApi.state(guestId);
+    ttState.masterUnlocked = res.masterUnlocked;
+    ttRenderMasterLock();
+    if(res.activeGame && res.activeGame.status === 'active'){
+      ttState.game = res.activeGame;
+      ttStartTimer();
+      ttShowScreen('game');
+      ttRenderGameScreen();
+    } else {
+      ttShowScreen('difficulty');
+      ttSelectDifficultyCard('easy');
+    }
+  }catch(e){
+    ttShowScreen('difficulty');
+    ttRenderMasterLock();
+    ttSelectDifficultyCard('easy');
+    ttShowToast(ttT('error_network'));
+  }
+})();
+</script>
+</body>
+</html>

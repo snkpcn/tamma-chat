@@ -815,6 +815,7 @@ p{ margin:0; }
     <nav class="main-nav" aria-label="เมนูหลัก">
       <a href="#experiences" data-i18n="nav_experiences">ประสบการณ์</a>
       <a href="#journey" data-i18n="nav_journey">Journey</a>
+      <a href="chess.html" data-i18n="nav_chess">เล่นกับทองไทย</a>
       <a href="#plan" data-i18n="nav_plan">วางแผนการเดินทาง</a>
       <a href="#about" data-i18n="nav_about">เกี่ยวกับเรา</a>
     </nav>
@@ -848,6 +849,7 @@ p{ margin:0; }
     <div class="mobile-nav-links">
       <a href="#experiences" data-i18n="nav_experiences">ประสบการณ์</a>
       <a href="#journey" data-i18n="nav_journey">Journey</a>
+      <a href="chess.html" data-i18n="nav_chess">เล่นกับทองไทย</a>
       <a href="#plan" data-i18n="nav_plan">วางแผนการเดินทาง</a>
       <a href="#about" data-i18n="nav_about">เกี่ยวกับเรา</a>
     </div>
@@ -1262,6 +1264,51 @@ p{ margin:0; }
           </div>
           <div class="rewards-grid" id="rewardsGrid"></div>
         </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     CHALLENGE THONGTHAI — chess game entry point (native homepage
+     card, namespaced .tt-chess-* styles/JS only, no new design
+     system). Full game lives at chess.html.
+     ============================================================ -->
+<style>
+.tt-chess-home-wrap{
+  max-width:1280px; margin-inline:auto;
+  padding: clamp(40px, 6vw, 72px) clamp(22px, 5vw, 64px);
+  display:grid; grid-template-columns:1fr; gap:22px;
+  background:var(--cream-2); border-radius:var(--radius-lg); box-shadow:var(--shadow-soft);
+}
+@media(min-width:860px){ .tt-chess-home-wrap{ grid-template-columns:1fr 34%; gap:40px; align-items:center; padding:clamp(32px,4vw,52px); } }
+.tt-chess-home-content{ display:flex; flex-direction:column; align-items:flex-start; gap:12px; min-width:0; }
+.tt-chess-home-content h3{ font-size:clamp(19px,2.3vw,25px); line-height:1.4; max-width:32ch; margin:0; }
+.tt-chess-home-content p{ color:var(--ink-soft); font-size:15px; line-height:1.7; max-width:40ch; margin:0; }
+.tt-chess-home-actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
+.tt-chess-home-art{ display:flex; align-items:center; justify-content:center; gap:10px; }
+.tt-chess-home-art img{ max-width:100%; height:auto; }
+.tt-chess-home-badge-row{ display:flex; gap:8px; }
+.tt-chess-home-badge-row img{ width:44px; height:44px; object-fit:contain; }
+</style>
+<section class="section-pad" id="chess-challenge">
+  <div class="container">
+    <div class="tt-chess-home-wrap fade-up">
+      <div class="tt-chess-home-content">
+        <span class="eyebrow" data-i18n="chess_card_eyebrow">Challenge Thongthai</span>
+        <h3 data-i18n="chess_card_heading">เล่นหมากรุกกับทองไทย</h3>
+        <p data-i18n="chess_card_sub">ชนะทองไทย รับรางวัลใช้จริงในทำมา-ชาติ</p>
+        <div class="tt-chess-home-badge-row" aria-hidden="true">
+          <img src="assets/chess/derived/B01_badge_easy.webp" alt="">
+          <img src="assets/chess/derived/B03_badge_hard.webp" alt="">
+          <img src="assets/chess/derived/B04_badge_master.webp" alt="">
+        </div>
+        <div class="tt-chess-home-actions">
+          <a href="chess.html" class="btn btn-primary btn-sm" data-i18n="chess_card_cta">เริ่มท้าทายทองไทย</a>
+        </div>
+      </div>
+      <div class="tt-chess-home-art">
+        <img src="assets/chess/derived/A10_winner_pass_frame.webp" alt="Winner Pass" style="max-width:180px;">
       </div>
     </div>
   </div>
@@ -1708,7 +1755,8 @@ window.JourneyProvider = JourneyProvider;
 const TRANSLATIONS = {
 
 th: {
-  nav_experiences:"ประสบการณ์", nav_journey:"Journey", nav_plan:"วางแผนการเดินทาง", nav_about:"เกี่ยวกับเรา",
+  nav_experiences:"ประสบการณ์", nav_journey:"Journey", nav_chess:"เล่นกับทองไทย", nav_plan:"วางแผนการเดินทาง", nav_about:"เกี่ยวกับเรา",
+  chess_card_eyebrow:"Challenge Thongthai", chess_card_heading:"เล่นหมากรุกกับทองไทย", chess_card_sub:"ชนะทองไทย รับรางวัลใช้จริงในทำมา-ชาติ", chess_card_cta:"เริ่มท้าทายทองไทย",
   cta_ask_thongthai_long:"ให้ทองไทยช่วยวางแผน", cta_ask_thongthai_short:"ถามทองไทย",
   hero_eyebrow:"Isan Wellness Community",
   hero_headline:"อีสานที่ไม่ได้แค่เดินทางผ่าน<br>แต่เป็นประสบการณ์ที่อยากกลับมาอีก",
@@ -1920,7 +1968,8 @@ th: {
   time_part_morning:"เช้า", time_part_afternoon:"บ่าย", time_part_evening:"เย็น", time_part_night:"ค่ำ",
 },
 en: {
-  nav_experiences:"Experiences", nav_journey:"Journey", nav_plan:"Plan Your Trip", nav_about:"About",
+  nav_experiences:"Experiences", nav_journey:"Journey", nav_chess:"Challenge Thongthai", nav_plan:"Plan Your Trip", nav_about:"About",
+  chess_card_eyebrow:"Challenge Thongthai", chess_card_heading:"Play Chess Against Thongthai", chess_card_sub:"Beat Thongthai, earn a real discount at TAMMA-CHAT", chess_card_cta:"Challenge Thongthai now",
   cta_ask_thongthai_long:"Ask Thongthai to Help Plan", cta_ask_thongthai_short:"Ask Thongthai",
   hero_eyebrow:"Isan Wellness Community",
   hero_headline:"Isan isn't somewhere you just pass through —<br>it's an experience you'll want to return to",
@@ -2132,7 +2181,8 @@ en: {
   time_part_morning:"morning", time_part_afternoon:"afternoon", time_part_evening:"evening", time_part_night:"night",
 },
 zh: {
-  nav_experiences:"体验项目", nav_journey:"行程", nav_plan:"规划行程", nav_about:"关于我们",
+  nav_experiences:"体验项目", nav_journey:"行程", nav_chess:"挑战通泰", nav_plan:"规划行程", nav_about:"关于我们",
+  chess_card_eyebrow:"Challenge Thongthai", chess_card_heading:"与通泰对弈象棋", chess_card_sub:"战胜通泰，获得可在塔玛柴使用的真实折扣", chess_card_cta:"立即挑战通泰",
   cta_ask_thongthai_long:"让通泰帮您规划", cta_ask_thongthai_short:"询问通泰",
   hero_eyebrow:"伊善身心康养社区",
   hero_headline:"伊善不只是路过之地<br>而是让人想要再度回来的旅程",
@@ -2344,7 +2394,8 @@ zh: {
   time_part_morning:"早上", time_part_afternoon:"下午", time_part_evening:"傍晚", time_part_night:"晚上",
 },
 lo: {
-  nav_experiences:"ປະສົບການ", nav_journey:"ການເດີນທາງ", nav_plan:"ວາງແຜນການເດີນທາງ", nav_about:"ກ່ຽວກັບພວກເຮົາ",
+  nav_experiences:"ປະສົບການ", nav_journey:"ການເດີນທາງ", nav_chess:"ທ້າທາຍທອງໄທ", nav_plan:"ວາງແຜນການເດີນທາງ", nav_about:"ກ່ຽວກັບພວກເຮົາ",
+  chess_card_eyebrow:"Challenge Thongthai", chess_card_heading:"ຫຼິ້ນໝາກຮຸກກັບທອງໄທ", chess_card_sub:"ຊະນະທອງໄທ ຮັບລາງວັນໃຊ້ໄດ້ຈິງທີ່ TAMMA-CHAT", chess_card_cta:"ເລີ່ມທ້າທາຍທອງໄທ",
   cta_ask_thongthai_long:"ໃຫ້ທອງໄທຊ່ວຍວາງແຜນ", cta_ask_thongthai_short:"ຖາມທອງໄທ",
   hero_eyebrow:"ຊຸມຊົນສຸຂະພາບອີສານ",
   hero_headline:"ອີສານທີ່ບໍ່ແມ່ນແຄ່ຜ່ານໄປ<br>ແຕ່ເປັນປະສົບການທີ່ຢາກກັບມາອີກ",
@@ -2556,7 +2607,8 @@ lo: {
   time_part_morning:"ຕອນເຊົ້າ", time_part_afternoon:"ຕອນບ່າຍ", time_part_evening:"ຕອນແລງ", time_part_night:"ຕອນກາງຄືນ",
 },
 vi: {
-  nav_experiences:"Trải Nghiệm", nav_journey:"Hành Trình", nav_plan:"Lên Kế Hoạch", nav_about:"Giới Thiệu",
+  nav_experiences:"Trải Nghiệm", nav_journey:"Hành Trình", nav_chess:"Thách Đấu Thongthai", nav_plan:"Lên Kế Hoạch", nav_about:"Giới Thiệu",
+  chess_card_eyebrow:"Challenge Thongthai", chess_card_heading:"Chơi Cờ Vua Với Thongthai", chess_card_sub:"Thắng Thongthai, nhận ưu đãi thật tại TAMMA-CHAT", chess_card_cta:"Thách đấu Thongthai ngay",
   cta_ask_thongthai_long:"Nhờ Thongthai Lên Kế Hoạch", cta_ask_thongthai_short:"Hỏi Thongthai",
   hero_eyebrow:"Cộng Đồng Chăm Sóc Sức Khỏe Isan",
   hero_headline:"Isan không chỉ là nơi bạn đi ngang qua<br>mà là một hành trình bạn sẽ muốn quay lại",

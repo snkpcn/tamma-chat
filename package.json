@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "ทำมา-ชาติ — Experiences of Isan. Static site (index.html) plus the Thongthai AI concierge Netlify Functions backend.",
+  "dependencies": {
+    "chess.js": "^1.4.0"
+  },
   "devDependencies": {
     "@netlify/functions": "^2.8.1",
     "@types/node": "^20.14.0",
