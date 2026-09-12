@@ -25,6 +25,7 @@ export interface CustomerState {
   guestDbId: string;
   guestContext: GuestContextShape;
   journeyContext: {
+    currentPlan: unknown | null;
     savedPlan: unknown | null;
     visitedExperiences: string[];
     favorites: string[];
@@ -253,22 +254,30 @@ export async function loadCustomerMemory(
       guestDbId = created[0].id;
     }
 
-    const memoryRes = await dbFetch(
-      'guest_memory?guest_id=eq.' + encodeURIComponent(guestDbId)
-      + '&select=memory_key,memory_value',
-    );
+    const [memoryRes, latestJourneyRes, savedJourneyRes] = await Promise.all([
+      dbFetch(
+        'guest_memory?guest_id=eq.' + encodeURIComponent(guestDbId)
+        + '&select=memory_key,memory_value',
+      ),
+      dbFetch(
+        'journeys?guest_id=eq.' + encodeURIComponent(guestDbId)
+        + '&select=journey&order=created_at.desc&limit=1',
+      ),
+      dbFetch(
+        'journeys?guest_id=eq.' + encodeURIComponent(guestDbId)
+        + '&action=eq.save&select=journey&order=created_at.desc&limit=1',
+      ),
+    ]);
     const rows = await memoryRes.json() as Array<{ memory_key: string; memory_value: unknown }>;
     const persisted = Object.fromEntries(rows.map(row => [row.memory_key, row.memory_value]));
-    const journeyRes = await dbFetch(
-      'journeys?guest_id=eq.' + encodeURIComponent(guestDbId)
-      + '&action=eq.save&select=journey&order=created_at.desc&limit=1',
-    );
-    const savedJourneys = await journeyRes.json() as Array<{ journey: unknown }>;
+    const latestJourneys = await latestJourneyRes.json() as Array<{ journey: unknown }>;
+    const savedJourneys = await savedJourneyRes.json() as Array<{ journey: unknown }>;
 
     return {
       guestDbId,
       guestContext: mergeGuestContext(current, rows),
       journeyContext: {
+        currentPlan: latestJourneys[0]?.journey ?? null,
         savedPlan: savedJourneys[0]?.journey ?? null,
         visitedExperiences: sanitizeExperienceIds(persisted.visited_experiences),
         favorites: sanitizeExperienceIds(persisted.favorites),
@@ -391,7 +400,6 @@ export async function persistCustomerResult(
     const group = sanitizeGroup(updates.group);
     if (group) add('group', group);
 
-    // Empty arrays are meaningful: they clear a previously stored preference/constraint.
     const interests = dedupeAllowed(updates.interests, INTERESTS);
     if (Array.isArray(updates.interests)) add('interests', interests);
 
