@@ -4837,5 +4837,87 @@ window.ThongthaiChat = {
 };
 })();
 </script>
+
+<!-- TAMMA global membership CTA -->
+<style id="tamma-global-auth-cta-style">
+.tamma-global-signup-cta{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  min-height:42px;padding:10px 18px;border-radius:999px;text-decoration:none;
+  background:#BE632B;color:#FFF9EE!important;font-weight:800;font-size:14px;
+  line-height:1;white-space:nowrap;box-shadow:0 7px 20px rgba(99,48,20,.16);
+  transition:transform .18s ease,box-shadow .18s ease,background .18s ease;
+}
+.tamma-global-signup-cta:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(99,48,20,.22);background:#A95422}
+.tamma-global-signup-cta:focus-visible{outline:3px solid rgba(190,99,43,.28);outline-offset:3px}
+.tamma-global-signup-cta.tamma-global-signup-header{margin-inline-start:10px;flex:0 0 auto;z-index:3}
+.tamma-global-auth-drawer-row{display:flex;gap:10px;width:100%;margin:18px 0 14px}
+.tamma-global-auth-drawer-row .tamma-global-signup-cta{flex:1;width:100%;min-height:52px;font-size:15px}
+.tamma-global-login-cta{
+  display:inline-flex;align-items:center;justify-content:center;min-height:52px;padding:10px 16px;
+  border-radius:999px;border:1px solid rgba(59,36,20,.20);background:transparent;
+  color:#3B2414!important;text-decoration:none;font-weight:750;font-size:14px;white-space:nowrap;
+}
+@media(max-width:430px){
+  .tamma-global-signup-cta.tamma-global-signup-header{padding:9px 12px;min-height:38px;font-size:12.5px;margin-inline-start:6px}
+}
+@media(min-width:900px){
+  .tamma-global-auth-drawer-row{display:none!important}
+}
+</style>
+<script id="tamma-global-auth-cta-script">
+(()=>{
+  const signupHref='/account.html?mode=signup#authPanel';
+  const loginHref='/account.html?mode=login#authPanel';
+  const copy={
+    th:{signup:'สมัครสมาชิก',login:'เข้าสู่ระบบ'},
+    en:{signup:'Sign up',login:'Log in'},
+    zh:{signup:'注册',login:'登录'},
+    lo:{signup:'ສະໝັກສະມາຊິກ',login:'ເຂົ້າລະບົບ'},
+    vi:{signup:'Đăng ký',login:'Đăng nhập'}
+  };
+  function lang(){
+    const raw=(document.documentElement.lang||localStorage.getItem('language')||localStorage.getItem('lang')||localStorage.getItem('tamma_language')||'th').toLowerCase();
+    if(raw.startsWith('zh'))return 'zh'; if(raw.startsWith('lo'))return 'lo'; if(raw.startsWith('vi'))return 'vi'; if(raw.startsWith('en'))return 'en'; return 'th';
+  }
+  function refreshCopy(){
+    const c=copy[lang()]||copy.th;
+    document.querySelectorAll('[data-tamma-auth-label="signup"]').forEach(el=>el.textContent=c.signup);
+    document.querySelectorAll('[data-tamma-auth-label="login"]').forEach(el=>el.textContent=c.login);
+  }
+  function signup(className=''){
+    const a=document.createElement('a'); a.href=signupHref; a.className=('tamma-global-signup-cta '+className).trim();
+    a.setAttribute('data-tamma-auth-label','signup'); a.setAttribute('aria-label','Create account'); return a;
+  }
+  function login(){
+    const a=document.createElement('a'); a.href=loginHref; a.className='tamma-global-login-cta';
+    a.setAttribute('data-tamma-auth-label','login'); a.setAttribute('aria-label','Log in'); return a;
+  }
+  function findHeader(){
+    const headers=[...document.querySelectorAll('header')];
+    return headers.find(h=>h.querySelector('button,nav,a'))||headers[0]||null;
+  }
+  function installHeader(){
+    if(document.querySelector('.tamma-global-signup-header'))return;
+    const h=findHeader(); if(!h)return;
+    const a=signup('tamma-global-signup-header');
+    const buttons=[...h.querySelectorAll(':scope > button, :scope button')];
+    const menuBtn=buttons.find(b=>/menu|เมนู|navigation/i.test((b.getAttribute('aria-label')||'')+' '+(b.title||'')))||buttons.at(-1);
+    if(menuBtn&&menuBtn.parentNode){menuBtn.parentNode.insertBefore(a,menuBtn)}else{h.appendChild(a)}
+  }
+  function installDrawer(){
+    if(document.querySelector('.tamma-global-auth-drawer-row'))return;
+    const actions=[...document.querySelectorAll('a,button')];
+    const planner=actions.find(el=>/ให้ทองไทยช่วยวางแผน|plan.*thongthai|thongthai.*plan|让.*通泰|ทองไทย.*ວາງແຜນ|lập kế hoạch/i.test((el.textContent||'').trim()));
+    if(!planner||!planner.parentNode)return;
+    const row=document.createElement('div'); row.className='tamma-global-auth-drawer-row';
+    row.append(login(),signup()); planner.parentNode.insertBefore(row,planner);
+  }
+  function install(){installHeader();installDrawer();refreshCopy()}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
+  document.addEventListener('click',e=>{if(e.target.closest('button,[data-lang],a'))setTimeout(()=>{install();refreshCopy()},60)},true);
+  new MutationObserver(refreshCopy).observe(document.documentElement,{attributes:true,attributeFilter:['lang']});
+})();
+</script>
+
 </body>
 </html>

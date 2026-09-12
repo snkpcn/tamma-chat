@@ -134,6 +134,7 @@ async function saveProfile(silent=false){
 }
 function setMode(next){mode=next;$('loginTab').classList.toggle('active',mode==='login');$('signupTab').classList.toggle('active',mode==='signup');$('authSubmit').textContent=mode==='login'?'เข้าสู่ระบบ':'สมัครบัญชี';$('password').autocomplete=mode==='login'?'current-password':'new-password';clearStatus('authStatus')}
 $('loginTab').onclick=()=>setMode('login');$('signupTab').onclick=()=>setMode('signup');$('authSubmit').onclick=authenticate;$('saveProfile').onclick=()=>saveProfile(false);$('refreshBtn').onclick=()=>loadAccount().catch(()=>setStatus('profileStatus','รีเฟรชไม่สำเร็จ',false));$('logoutBtn').onclick=async()=>{const t=token();if(t)fetch(SUPABASE_URL+'/auth/v1/logout',{method:'POST',headers:authHeaders({Authorization:'Bearer '+t})}).catch(()=>{});sessionStorage.removeItem('tamma_access_token');location.reload()};
+const requestedMode=new URLSearchParams(location.search).get('mode');if(requestedMode==='signup'||requestedMode==='login'){setMode(requestedMode);requestAnimationFrame(()=>document.getElementById('authPanel')?.scrollIntoView({block:'start'}))};
 loadAccount().catch(()=>{});
 
 /* ============================================================
