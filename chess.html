@@ -87,13 +87,12 @@
 .tt-chess-sq.is-last-move{ box-shadow:inset 0 0 0 3px rgba(198,163,105,.7); }
 .tt-chess-sq.is-check{ box-shadow:inset 0 0 0 3px var(--tt-red); }
 .tt-chess-piece{ position:relative; width:78%; height:78%; display:flex; align-items:center; justify-content:center; z-index:2; }
-.tt-chess-piece .tt-chess-chip{
-  position:absolute; inset:6%; border-radius:50%; z-index:0;
+.tt-chess-piece::after{
+  /* Soft contact shadow only — no baked circle behind the piece art. */
+  content:""; position:absolute; left:50%; bottom:2%; width:56%; height:14%; transform:translateX(-50%);
+  border-radius:50%; background:rgba(28,18,10,.28); filter:blur(3px); z-index:0;
 }
-.tt-chess-piece.tt-chess-white .tt-chess-chip{ background:radial-gradient(circle,#fbf6ea 0%,#e7d8b8 80%); box-shadow:0 0 0 1.5px rgba(59,36,20,.35); }
-.tt-chess-piece.tt-chess-black .tt-chess-chip{ background:radial-gradient(circle,#5a4025 0%,#2c1a0e 80%); box-shadow:0 0 0 1.5px rgba(0,0,0,.4); }
-.tt-chess-piece img{ position:relative; width:100%; height:100%; object-fit:contain; z-index:1; filter:drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
-.tt-chess-piece.tt-chess-black img{ filter:drop-shadow(0 1px 1px rgba(0,0,0,.5)) brightness(.62); }
+.tt-chess-piece img{ position:relative; width:100%; height:100%; object-fit:contain; z-index:1; filter:drop-shadow(0 2px 2px rgba(0,0,0,.3)); }
 .tt-chess-file-label,.tt-chess-rank-label{ position:absolute; font-size:8.5px; font-weight:700; color:rgba(59,36,20,.5); pointer-events:none; }
 .tt-chess-file-label{ bottom:2px; right:3px; } .tt-chess-rank-label{ top:2px; left:3px; }
 
@@ -253,10 +252,10 @@
   <div class="tt-chess-modal">
     <h2 data-tt-i18n="promotion_pick" style="font-size:16px;">เลือกตัวหมากที่จะเลื่อนขั้น</h2>
     <div class="tt-chess-promo-grid">
-      <button type="button" class="tt-chess-promo-opt" data-promo="q"><img src="assets/chess/derived/A08_piece_queen.webp" alt="Queen"></button>
-      <button type="button" class="tt-chess-promo-opt" data-promo="r"><img src="assets/chess/derived/A07_piece_rook.webp" alt="Rook"></button>
-      <button type="button" class="tt-chess-promo-opt" data-promo="b"><img src="assets/chess/derived/A06_piece_bishop.webp" alt="Bishop"></button>
-      <button type="button" class="tt-chess-promo-opt" data-promo="n"><img src="assets/chess/derived/A05_piece_knight.webp" alt="Knight"></button>
+      <button type="button" class="tt-chess-promo-opt" data-promo="q"><img id="ttChessPromoImgQ" alt="Queen"></button>
+      <button type="button" class="tt-chess-promo-opt" data-promo="r"><img id="ttChessPromoImgR" alt="Rook"></button>
+      <button type="button" class="tt-chess-promo-opt" data-promo="b"><img id="ttChessPromoImgB" alt="Bishop"></button>
+      <button type="button" class="tt-chess-promo-opt" data-promo="n"><img id="ttChessPromoImgN" alt="Knight"></button>
     </div>
   </div>
 </div>
@@ -733,7 +732,24 @@ function ttStopTimer(){ clearInterval(ttState.timerHandle); }
    Board rendering — a real 8x8 DOM grid, never a flat image.
    ============================================================ */
 const FILES = ['a','b','c','d','e','f','g','h'];
-const PIECE_ASSET = { p:'A04_piece_pawn', n:'A05_piece_knight', b:'A06_piece_bishop', r:'A07_piece_rook', q:'A08_piece_queen', k:'A09_piece_king' };
+// V2 piece set: each color has its own true art (no shared silhouette tinted
+// via CSS) — see assets/chess/pieces-v2/{white,black}/*.png masters.
+const PIECE_NAME = { p:'pawn', n:'knight', b:'bishop', r:'rook', q:'queen', k:'king' };
+function ttColorAssetPath(color, pieceName){
+  return 'assets/chess/derived/pieces-v2/' + color + '/' + color + '_' + pieceName + '.webp';
+}
+function ttPieceAssetPath(pieceChar){
+  const color = pieceChar === pieceChar.toUpperCase() ? 'white' : 'black';
+  return ttColorAssetPath(color, PIECE_NAME[pieceChar.toLowerCase()]);
+}
+function ttShowPromotionOverlay(playerColor){
+  // A promotion is always the player's own pawn, so show that side's set.
+  document.getElementById('ttChessPromoImgQ').src = ttColorAssetPath(playerColor, 'queen');
+  document.getElementById('ttChessPromoImgR').src = ttColorAssetPath(playerColor, 'rook');
+  document.getElementById('ttChessPromoImgB').src = ttColorAssetPath(playerColor, 'bishop');
+  document.getElementById('ttChessPromoImgN').src = ttColorAssetPath(playerColor, 'knight');
+  $('ttChessPromoOverlay').hidden = false;
+}
 
 function ttParseFenBoard(fen){
   const rows = fen.split(' ')[0].split('/');
@@ -779,11 +795,10 @@ function ttRenderBoard(){
         const isWhite = piece === piece.toUpperCase();
         const wrap = document.createElement('div');
         wrap.className = 'tt-chess-piece ' + (isWhite ? 'tt-chess-white' : 'tt-chess-black');
-        const chip = document.createElement('div'); chip.className = 'tt-chess-chip';
         const img = document.createElement('img');
-        img.src = 'assets/chess/derived/' + PIECE_ASSET[piece.toLowerCase()] + '.webp';
+        img.src = ttPieceAssetPath(piece);
         img.alt = square;
-        wrap.appendChild(chip); wrap.appendChild(img);
+        wrap.appendChild(img);
         sq.appendChild(wrap);
       }
 
@@ -817,7 +832,7 @@ function ttHandleSquareClick(square){
     if(target){
       if(target.needsPromotion){
         ttState.pendingPromotion = { from: ttState.selectedSquare, to: square };
-        $('ttChessPromoOverlay').hidden = false;
+        ttShowPromotionOverlay(ttState.game.playerColor);
         return;
       }
       ttSubmitMove(ttState.selectedSquare, square, null);

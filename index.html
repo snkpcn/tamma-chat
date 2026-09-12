@@ -1278,18 +1278,24 @@ p{ margin:0; }
 .tt-chess-home-wrap{
   max-width:1280px; margin-inline:auto;
   padding: clamp(40px, 6vw, 72px) clamp(22px, 5vw, 64px);
-  display:grid; grid-template-columns:1fr; gap:22px;
+  display:grid; grid-template-columns:minmax(0,1fr); gap:22px;
   background:var(--cream-2); border-radius:var(--radius-lg); box-shadow:var(--shadow-soft);
+  overflow:hidden;
 }
-@media(min-width:860px){ .tt-chess-home-wrap{ grid-template-columns:1fr 34%; gap:40px; align-items:center; padding:clamp(32px,4vw,52px); } }
+/* minmax(0, <cap>) on both tracks — never let track content force the row
+   wider than the card (the classic CSS Grid overflow bug: a bare 1fr or a
+   bare percentage track can be pushed past its share by a child's intrinsic
+   size). The art column has a firm px cap so it scales down but never grows
+   into overflow at in-between desktop/tablet widths. */
+@media(min-width:860px){ .tt-chess-home-wrap{ grid-template-columns:minmax(0,1fr) minmax(0,260px); gap:40px; align-items:center; padding:clamp(32px,4vw,52px); } }
 .tt-chess-home-content{ display:flex; flex-direction:column; align-items:flex-start; gap:12px; min-width:0; }
 .tt-chess-home-content h3{ font-size:clamp(19px,2.3vw,25px); line-height:1.4; max-width:32ch; margin:0; }
 .tt-chess-home-content p{ color:var(--ink-soft); font-size:15px; line-height:1.7; max-width:40ch; margin:0; }
 .tt-chess-home-actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
-.tt-chess-home-art{ display:flex; align-items:center; justify-content:center; gap:10px; }
-.tt-chess-home-art img{ max-width:100%; height:auto; }
+.tt-chess-home-art{ display:flex; align-items:center; justify-content:center; min-width:0; max-width:100%; }
+.tt-chess-home-art img{ display:block; width:100%; max-width:220px; height:auto; }
 .tt-chess-home-badge-row{ display:flex; gap:8px; }
-.tt-chess-home-badge-row img{ width:44px; height:44px; object-fit:contain; }
+.tt-chess-home-badge-row img{ width:44px; height:44px; object-fit:contain; flex:none; }
 </style>
 <section class="section-pad" id="chess-challenge">
   <div class="container">
@@ -1308,7 +1314,7 @@ p{ margin:0; }
         </div>
       </div>
       <div class="tt-chess-home-art">
-        <img src="assets/chess/derived/A10_winner_pass_frame.webp" alt="Winner Pass" style="max-width:180px;">
+        <img src="assets/chess/derived/A10_winner_pass_frame.webp" alt="Winner Pass">
       </div>
     </div>
   </div>
