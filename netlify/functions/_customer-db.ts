@@ -30,6 +30,51 @@ export interface CustomerState {
   };
 }
 
+export type VerifiedCommunityOffering = {
+  offering_id: string;
+  partner_id: string;
+  offering_name: string;
+  offering_type: string;
+  description: string | null;
+  tags: string[];
+  suitable_for: string[];
+  duration_minutes: number | null;
+  price_min: number | null;
+  price_max: number | null;
+  booking_required: boolean | null;
+  location_text: string | null;
+  external_url: string | null;
+};
+
+export async function loadVerifiedCommunityOfferings(): Promise<VerifiedCommunityOffering[]> {
+  if (!configuration()) return [];
+  try {
+    const res = await dbFetch(
+      'community_offerings?active=eq.true&verified=eq.true'
+      + '&select=offering_id,partner_id,offering_name,offering_type,description,tags,suitable_for,duration_minutes,price_min,price_max,booking_required,location_text,external_url',
+    );
+    const rows = await res.json() as Array<Record<string, unknown>>;
+    return rows.map(row => ({
+      offering_id: String(row.offering_id ?? ''),
+      partner_id: String(row.partner_id ?? ''),
+      offering_name: String(row.offering_name ?? ''),
+      offering_type: String(row.offering_type ?? ''),
+      description: typeof row.description === 'string' ? row.description : null,
+      tags: Array.isArray(row.tags) ? row.tags.filter((item): item is string => typeof item === 'string') : [],
+      suitable_for: Array.isArray(row.suitable_for) ? row.suitable_for.filter((item): item is string => typeof item === 'string') : [],
+      duration_minutes: typeof row.duration_minutes === 'number' ? row.duration_minutes : null,
+      price_min: typeof row.price_min === 'number' ? row.price_min : null,
+      price_max: typeof row.price_max === 'number' ? row.price_max : null,
+      booking_required: typeof row.booking_required === 'boolean' ? row.booking_required : null,
+      location_text: typeof row.location_text === 'string' ? row.location_text : null,
+      external_url: typeof row.external_url === 'string' ? row.external_url : null,
+    })).filter(row => row.offering_id && row.offering_name);
+  } catch (err) {
+    safeDbError('community_offerings', err);
+    return [];
+  }
+}
+
 const TRAVELER_TYPES = new Set(['solo', 'couple', 'friends', 'family', 'group']);
 const TRIP_DURATIONS = new Set(['short', 'half', 'full', 'overnight', '2d1n', '3d2n']);
 const PACES = new Set(['slow', 'relaxed', 'balanced', 'active']);
