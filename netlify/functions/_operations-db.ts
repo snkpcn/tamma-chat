@@ -410,7 +410,8 @@ type LineBookingSession = {
   end_date: string | null;
   party_size: number | null;
   quantity: number;
-  status: 'collecting' | 'awaiting_phone' | 'needs_slot' | 'ready' | 'submitted' | 'failed' | 'cancelled';
+  special_request: string | null;
+  status: 'collecting' | 'awaiting_phone' | 'awaiting_special_request' | 'needs_slot' | 'ready' | 'submitted' | 'failed' | 'cancelled';
   booking_code: string | null;
 };
 
@@ -521,7 +522,7 @@ function primaryGuestNameFromText(text: string): string | null {
 
 async function loadLineBookingSession(guestDbId: string): Promise<LineBookingSession | null> {
   const response = await dbFetch(
-    `booking_sessions?guest_id=eq.${guestDbId}&select=service_type,resource_code,requested_date,requested_time,end_date,party_size,quantity,status,booking_code&limit=1`,
+    `booking_sessions?guest_id=eq.${guestDbId}&select=service_type,resource_code,requested_date,requested_time,end_date,party_size,quantity,special_request,status,booking_code&limit=1`,
   );
   return (await response.json() as LineBookingSession[])[0] ?? null;
 }
@@ -572,6 +573,7 @@ async function createUnscheduledStayRequest(input: {
   partySize: number;
   quantity: number;
   environment: 'live' | 'test';
+  specialRequest?: string | null;
 }): Promise<{ bookingCode: string; status: string; startAt: string; endAt: string }> {
   const resourceResponse = await dbFetch('service_resources?service_type=eq.stay&active=eq.true&select=id&order=created_at.asc&limit=1');
   const resource = (await resourceResponse.json() as Array<{ id: string }>)[0];
@@ -591,6 +593,7 @@ async function createUnscheduledStayRequest(input: {
       quantity: input.quantity,
       status: 'requested',
       source_channel: 'line',
+      customer_note: input.specialRequest?.slice(0, 1000) ?? null,
       staff_note: 'ยังไม่มีตารางจริงสำหรับช่วงนี้ — กรุณาตรวจสอบห้องว่างก่อนยืนยัน',
       contact_status: 'pending',
       environment: input.environment,
@@ -616,6 +619,21 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   const environment: 'live' | 'test' = initialContact.isTest ? 'test' : 'live';
   let session = await loadLineBookingSession(identity.guestDbId);
   let lineOnlyContact = false;
+
+  // Special requests are captured by Thongthai inside the booking flow and
+  // stored on the booking itself. Empty string means the guest explicitly said none.
+  if (session?.status === 'awaiting_special_request') {
+    const noRequest = /^(?:ไม่มี|ไม่มีครับ|ไม่มีค่ะ|ไม่ต้อง|ไม่เป็นไร|none|no|nope)$/iu.test(text);
+    const specialRequest = noRequest ? '' : text.replace(/\s+/g, ' ').trim().slice(0, 1000);
+    if (!noRequest && !specialRequest) {
+      return 'ถ้าไม่มีคำขอพิเศษ ตอบว่า “ไม่มี” ได้เลยครับ หรือบอกสิ่งที่อยากให้ทีมเตรียมไว้ได้เลย';
+    }
+    await saveLineBookingSession(identity.guestDbId, environment, {
+      status: 'collecting',
+      special_request: specialRequest,
+    });
+    session = { ...session, status: 'collecting', special_request: specialRequest };
+  }
 
   // LINE is already a verified channel. If the customer does not want to
   // share a phone number, explicitly accepting LINE keeps the booking moving.
@@ -645,7 +663,7 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   if (!session) {
     session = {
       service_type: 'stay', resource_code: null, requested_date: null, requested_time: null,
-      end_date: null, party_size: null, quantity: 1, status: 'collecting', booking_code: null,
+      end_date: null, party_size: null, quantity: 1, special_request: null, status: 'collecting', booking_code: null,
     };
   }
   let requestedDate = bookingDateFromText(text) ?? session.requested_date;
@@ -703,12 +721,19 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
     return 'ขอบคุณครับ ขอเบอร์โทรสำรองสำหรับทีมงานอีกนิดครับ (ถ้าสะดวกให้ติดต่อทาง LINE นี้อย่างเดียว ตอบว่า “ใช้ LINE นี้ได้เลย” ได้ครับ)';
   }
 
+  if (session.special_request === null) {
+    await saveLineBookingSession(identity.guestDbId, environment, { status: 'awaiting_special_request' });
+    return 'ก่อนส่งคำขอจอง มีอะไรอยากให้ทองไทยแจ้งทีมเตรียมไว้เป็นพิเศษไหมครับ เช่น หมอนเพิ่ม เด็ก/ผู้สูงอายุ การเข้าถึง อาหาร/อาการแพ้ วันพิเศษ เวลาเข้าถึง หรือความต้องการเรื่องแม่บ้าน ถ้าไม่มีตอบว่า “ไม่มี” ได้เลยครับ';
+  }
+  const specialRequest = session.special_request.trim() || null;
+
   let created: { bookingCode: string; status: string; startAt: string; endAt: string };
   try {
     created = await createBooking({
       guestDbId: identity.guestDbId, channel: 'line', serviceType: 'stay',
       date: requestedDate, endDate, partySize, quantity,
       customerName: contact.fullName, phone: suppliedPhone ?? contact.phone,
+      note: specialRequest,
       environment,
     });
   } catch (error) {
@@ -731,7 +756,7 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
     created = await createUnscheduledStayRequest({
       guestDbId: identity.guestDbId, customerId: identity.customerId,
       date: requestedDate, endDate, partySize, quantity,
-      environment,
+      environment, specialRequest,
     });
   }
   await saveLineBookingSession(identity.guestDbId, environment, { status: 'submitted', booking_code: created.bookingCode });
@@ -742,7 +767,8 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
       metadata: { action: 'create_booking', bookingCode: created.bookingCode, channel: 'line' },
     }),
   });
-  return `รับคำขอจองแล้วครับ ✅\nเลขที่คำขอ: ${created.bookingCode}\nเฮือนสเตย์ · ${thaiShortDate(requestedDate)} – ${thaiShortDate(endDate)}\n${partySize} ท่าน · ${quantity} ห้อง\n\nสถานะ: รอทีมงานตรวจสอบห้องว่างและยืนยันกลับทาง LINE นี้ ลูกค้าไม่ต้องทักตามครับ\nหมายเหตุ: ยังไม่ถือว่ายืนยันการจองจนกว่าจะได้รับข้อความยืนยันจากทีมงาน`;
+  const requestLine = specialRequest ? `\nคำขอพิเศษ: ${specialRequest}\nทีมงานจะตรวจสอบคำขอนี้พร้อมการจองครับ` : '';
+  return `รับคำขอจองแล้วครับ ✅\nเลขที่คำขอ: ${created.bookingCode}\nเฮือนสเตย์ · ${thaiShortDate(requestedDate)} – ${thaiShortDate(endDate)}\n${partySize} ท่าน · ${quantity} ห้อง${requestLine}\n\nสถานะ: รอทีมงานตรวจสอบห้องว่างและยืนยันกลับทาง LINE นี้ ลูกค้าไม่ต้องทักตามครับ\nหมายเหตุ: ยังไม่ถือว่ายืนยันการจองหรือคำขอพิเศษจนกว่าจะได้รับข้อความยืนยันจากทีมงาน`;
 }
 
 export interface BookingOption {
