@@ -446,7 +446,7 @@ function bookingDateFromText(text: string): string | null {
 }
 
 function checkoutDateFromText(text: string, checkIn: string | null): string | null {
-  const explicit = text.match(/(?:เช็กเอาต์|เช็คเอาท์|เช็คเอาต์|checkout|ออก)(?:\s*วันที่)?\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?)?/iu);
+  const explicit = text.match(/(?:เช็กเอาต์|เชกเอาต์|เช็คเอาท์|เช็คเอาต์|เชคเอาท์|เชคเอาต์|checkout|ออก)(?:\s*วันที่)?\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?)?/iu);
   if (!explicit) return null;
   if (explicit[2]) {
     const today = bangkokDateParts();
@@ -468,13 +468,17 @@ function checkoutDateFromText(text: string, checkIn: string | null): string | nu
 
 function partySizeFromText(text: string): number | null {
   const matched = text.match(/(\d{1,2})\s*(?:คน|ท่าน)/u);
-  const count = matched ? Number(matched[1]) : 0;
+  const thaiMatched = text.match(/(หนึ่ง|สอง|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า|สิบ)\s*(?:คน|ท่าน)/u);
+  const thaiNumbers: Record<string, number> = { หนึ่ง: 1, สอง: 2, สาม: 3, สี่: 4, ห้า: 5, หก: 6, เจ็ด: 7, แปด: 8, เก้า: 9, สิบ: 10 };
+  const count = matched ? Number(matched[1]) : thaiMatched ? thaiNumbers[thaiMatched[1]] : 0;
   return count >= 1 && count <= 50 ? count : null;
 }
 
 function roomQuantityFromText(text: string): number | null {
   const matched = text.match(/(\d{1,2})\s*ห้อง/u);
-  const count = matched ? Number(matched[1]) : 0;
+  const thaiMatched = text.match(/(หนึ่ง|สอง|สาม|สี่|ห้า|หก)\s*ห้อง/u);
+  const thaiNumbers: Record<string, number> = { หนึ่ง: 1, สอง: 2, สาม: 3, สี่: 4, ห้า: 5, หก: 6 };
+  const count = matched ? Number(matched[1]) : thaiMatched ? thaiNumbers[thaiMatched[1]] : 0;
   return count >= 1 && count <= 6 ? count : null;
 }
 
