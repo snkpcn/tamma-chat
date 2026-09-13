@@ -401,6 +401,236 @@ export async function handleLineMembershipMessage(anonymousId: string, rawLineUs
   return null;
 }
 
+type LineBookingSession = {
+  service_type: ServiceType | null;
+  resource_code: string | null;
+  requested_date: string | null;
+  requested_time: string | null;
+  end_date: string | null;
+  party_size: number | null;
+  quantity: number;
+  status: 'collecting' | 'needs_slot' | 'ready' | 'submitted' | 'failed' | 'cancelled';
+  booking_code: string | null;
+};
+
+function bangkokDateParts(now = new Date()): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const value = (type: string) => Number(parts.find(part => part.type === type)?.value);
+  return { year: value('year'), month: value('month'), day: value('day') };
+}
+
+function validIsoDate(year: number, month: number, day: number): string | null {
+  const iso = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const parsed = new Date(`${iso}T00:00:00Z`);
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() + 1 === month && parsed.getUTCDate() === day ? iso : null;
+}
+
+function bookingDateFromText(text: string): string | null {
+  const numeric = text.match(/(?:^|\s)(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?(?:\s|$)/);
+  if (numeric) {
+    const today = bangkokDateParts();
+    let year = numeric[3] ? Number(numeric[3]) : today.year;
+    if (year < 100) year += 2000;
+    if (year > 2400) year -= 543;
+    return validIsoDate(year, Number(numeric[2]), Number(numeric[1]));
+  }
+  const matched = text.match(/วันที่\s*(\d{1,2})(?:\s*(?:เดือน)?\s*(นี้|หน้า))?/u);
+  if (!matched) return null;
+  const today = bangkokDateParts();
+  let month = today.month + (matched[2] === 'หน้า' ? 1 : 0);
+  let year = today.year;
+  if (month > 12) { month = 1; year += 1; }
+  return validIsoDate(year, month, Number(matched[1]));
+}
+
+function checkoutDateFromText(text: string, checkIn: string | null): string | null {
+  const explicit = text.match(/(?:เช็กเอาต์|เช็คเอาท์|เช็คเอาต์|checkout|ออก)(?:\s*วันที่)?\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?)?/iu);
+  if (!explicit) return null;
+  if (explicit[2]) {
+    const today = bangkokDateParts();
+    let year = explicit[3] ? Number(explicit[3]) : today.year;
+    if (year < 100) year += 2000;
+    if (year > 2400) year -= 543;
+    return validIsoDate(year, Number(explicit[2]), Number(explicit[1]));
+  }
+  if (!checkIn) return null;
+  const [yearRaw, monthRaw, startDayRaw] = checkIn.split('-').map(Number);
+  let year = yearRaw; let month = monthRaw;
+  const day = Number(explicit[1]);
+  if (day <= startDayRaw) {
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+  }
+  return validIsoDate(year, month, day);
+}
+
+function partySizeFromText(text: string): number | null {
+  const matched = text.match(/(\d{1,2})\s*(?:คน|ท่าน)/u);
+  const count = matched ? Number(matched[1]) : 0;
+  return count >= 1 && count <= 50 ? count : null;
+}
+
+function roomQuantityFromText(text: string): number | null {
+  const matched = text.match(/(\d{1,2})\s*ห้อง/u);
+  const count = matched ? Number(matched[1]) : 0;
+  return count >= 1 && count <= 6 ? count : null;
+}
+
+function phoneFromText(text: string): string | null {
+  return cleanPhone(text.match(/(?:\+?66|0)\d(?:[\s-]?\d){7,9}/)?.[0]);
+}
+
+function primaryGuestNameFromText(text: string): string | null {
+  const withoutPhone = text.replace(/(?:\+?66|0)\d(?:[\s-]?\d){7,9}/g, ' ');
+  const named = withoutPhone.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|ครับ|ค่ะ|คะ|$))/u)?.[1];
+  const candidate = (named ?? (/^[\p{L}.\s]{2,80}$/u.test(withoutPhone.trim()) ? withoutPhone : '')).trim();
+  return candidate ? candidate.replace(/^(?:คุณ|นาย|นาง|นางสาว)\s*/u, '').slice(0, 120) : null;
+}
+
+async function loadLineBookingSession(guestDbId: string): Promise<LineBookingSession | null> {
+  const response = await dbFetch(
+    `booking_sessions?guest_id=eq.${guestDbId}&select=service_type,resource_code,requested_date,requested_time,end_date,party_size,quantity,status,booking_code&limit=1`,
+  );
+  return (await response.json() as LineBookingSession[])[0] ?? null;
+}
+
+async function saveLineBookingSession(guestDbId: string, environment: 'live' | 'test', body: Partial<LineBookingSession>): Promise<void> {
+  await dbFetch('booking_sessions?on_conflict=guest_id', {
+    method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ guest_id: guestDbId, environment, ...body, updated_at: new Date().toISOString() }),
+  });
+}
+
+async function lineBookingContact(customerId: string): Promise<{ fullName: string | null; phone: string | null; isTest: boolean }> {
+  const response = await dbFetch(`customer_accounts?id=eq.${customerId}&select=full_name_enc,phone_enc,is_test&limit=1`);
+  const row = (await response.json() as Array<{ full_name_enc: string | null; phone_enc: string | null; is_test: boolean }>)[0];
+  return { fullName: decryptPii(row?.full_name_enc), phone: decryptPii(row?.phone_enc), isTest: row?.is_test === true };
+}
+
+async function createUnscheduledStayRequest(input: {
+  guestDbId: string;
+  customerId: string;
+  date: string;
+  endDate: string;
+  partySize: number;
+  quantity: number;
+  environment: 'live' | 'test';
+}): Promise<{ bookingCode: string; status: string; startAt: string; endAt: string }> {
+  const resourceResponse = await dbFetch('service_resources?service_type=eq.stay&active=eq.true&select=id&order=created_at.asc&limit=1');
+  const resource = (await resourceResponse.json() as Array<{ id: string }>)[0];
+  if (!resource?.id) throw new Error('resource_not_found');
+  const startAt = `${input.date}T00:00:00+07:00`;
+  const endAt = `${input.endDate}T00:00:00+07:00`;
+  const response = await dbFetch('bookings', {
+    method: 'POST', headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      customer_id: input.customerId,
+      guest_id: input.guestDbId,
+      service_type: 'stay',
+      resource_id: resource.id,
+      start_at: startAt,
+      end_at: endAt,
+      party_size: input.partySize,
+      quantity: input.quantity,
+      status: 'requested',
+      source_channel: 'line',
+      staff_note: 'ยังไม่มีตารางจริงสำหรับช่วงนี้ — กรุณาตรวจสอบห้องว่างก่อนยืนยัน',
+      contact_status: 'pending',
+      environment: input.environment,
+    }),
+  });
+  const booking = (await response.json() as Array<{ booking_code: string; status: string }>)[0];
+  if (!booking?.booking_code) throw new Error('booking_not_created');
+  return { bookingCode: booking.booking_code, status: booking.status, startAt, endAt };
+}
+
+function thaiShortDate(iso: string): string {
+  return new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', year: 'numeric' })
+    .format(new Date(`${iso}T00:00:00+07:00`));
+}
+
+/** Deterministic LINE stay-booking flow. PII is encrypted in customer_accounts, never chat memory. */
+export async function handleLineBookingMessage(anonymousId: string, rawLineUserId: string, message: string): Promise<string | null> {
+  const identity = await registerLineContact(anonymousId, rawLineUserId);
+  if (!identity) return null;
+  const text = message.trim();
+  const startIntent = /(?:จอง|สำรอง).{0,12}(?:ที่พัก|ห้อง|เฮือนสเตย์)|(?:ที่พัก|ห้อง|เฮือนสเตย์).{0,12}(?:จอง|สำรอง)/u.test(text);
+  const initialContact = await lineBookingContact(identity.customerId);
+  const environment: 'live' | 'test' = initialContact.isTest ? 'test' : 'live';
+  let session = await loadLineBookingSession(identity.guestDbId);
+
+  if (session?.status === 'submitted') {
+    if (/(?:สถานะ|เรียบร้อย|เลข(?:ที่)?จอง|คำขอจอง)/u.test(text)) {
+      return `รับคำขอจองไว้แล้วครับ ✅\nเลขที่คำขอ: ${session.booking_code}\nสถานะ: รอทีมงานตรวจสอบห้องว่างและยืนยันกลับทาง LINE นี้ครับ`;
+    }
+    if (!startIntent) return null;
+    session = null;
+  }
+  if (!session && !startIntent) return null;
+
+  if (!session) {
+    session = {
+      service_type: 'stay', resource_code: null, requested_date: null, requested_time: null,
+      end_date: null, party_size: null, quantity: 1, status: 'collecting', booking_code: null,
+    };
+  }
+  const requestedDate = session.requested_date ?? bookingDateFromText(text);
+  const endDate = checkoutDateFromText(text, requestedDate) ?? session.end_date;
+  const partySize = partySizeFromText(text) ?? session.party_size;
+  const quantity = roomQuantityFromText(text) ?? session.quantity ?? 1;
+  await saveLineBookingSession(identity.guestDbId, environment, {
+    service_type: 'stay', requested_date: requestedDate, end_date: endDate,
+    party_size: partySize, quantity, status: 'collecting', booking_code: null,
+  });
+
+  if (!requestedDate) return 'ได้ครับ ขอวันเช็กอิน วันเช็กเอาต์ และจำนวนผู้เข้าพักครับ เช่น “เช็กอิน 30/09 เช็กเอาต์ 02/10 พัก 2 คน”';
+  if (!endDate) return `รับวันเช็กอิน ${thaiShortDate(requestedDate)} แล้วครับ ขอวันเช็กเอาต์และจำนวนผู้เข้าพักด้วยครับ`;
+  if (!partySize) return 'ขอจำนวนผู้เข้าพักทั้งหมดกี่ท่านครับ';
+
+  const suppliedName = primaryGuestNameFromText(text);
+  const suppliedPhone = phoneFromText(text);
+  if (suppliedName || suppliedPhone) {
+    await upsertCustomerAccount({
+      guestDbId: identity.guestDbId,
+      fullName: suppliedName,
+      phone: suppliedPhone,
+      preferredContact: 'line',
+    });
+  }
+  const contact = await lineBookingContact(identity.customerId);
+  if (!contact.fullName) {
+    return 'ข้อมูลวันพักครบแล้วครับ ขอชื่อผู้ติดต่อหลักเพียง 1 คนครับ ไม่ต้องแจ้งชื่อผู้เข้าพักทุกท่าน ทีมงานจะตอบกลับทาง LINE นี้';
+  }
+
+  let created: { bookingCode: string; status: string; startAt: string; endAt: string };
+  try {
+    created = await createBooking({
+      guestDbId: identity.guestDbId, channel: 'line', serviceType: 'stay',
+      date: requestedDate, endDate, partySize, quantity,
+      customerName: contact.fullName, phone: suppliedPhone ?? contact.phone,
+      environment,
+    });
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('no_matching_schedule')) throw error;
+    created = await createUnscheduledStayRequest({
+      guestDbId: identity.guestDbId, customerId: identity.customerId,
+      date: requestedDate, endDate, partySize, quantity,
+      environment,
+    });
+  }
+  await saveLineBookingSession(identity.guestDbId, environment, { status: 'submitted', booking_code: created.bookingCode });
+  await dbFetch('guest_events', {
+    method: 'POST', headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      guest_id: identity.guestDbId, event_type: 'agent_action', intent: 'booking',
+      metadata: { action: 'create_booking', bookingCode: created.bookingCode, channel: 'line' },
+    }),
+  });
+  return `รับคำขอจองแล้วครับ ✅\nเลขที่คำขอ: ${created.bookingCode}\nเฮือนสเตย์ · ${thaiShortDate(requestedDate)} – ${thaiShortDate(endDate)}\n${partySize} ท่าน · ${quantity} ห้อง\n\nสถานะ: รอทีมงานตรวจสอบห้องว่างและยืนยันกลับทาง LINE นี้ ลูกค้าไม่ต้องทักตามครับ\nหมายเหตุ: ยังไม่ถือว่ายืนยันการจองจนกว่าจะได้รับข้อความยืนยันจากทีมงาน`;
+}
+
 export interface BookingOption {
   scheduleId: string;
   resourceCode: string;

@@ -1,6 +1,6 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { handleLineMembershipMessage } from './_operations-db';
+import { handleLineBookingMessage, handleLineMembershipMessage } from './_operations-db';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -426,6 +426,15 @@ async function handleEvent(
     }
   } catch (error) {
     console.error('LINE_MEMBERSHIP_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+  }
+  try {
+    const bookingReply = await handleLineBookingMessage(lineGuestId(userId), userId, message);
+    if (bookingReply) {
+      await replyToLine(replyToken, splitText(bookingReply).map(text => ({ type: 'text', text })), accessToken);
+      return;
+    }
+  } catch (error) {
+    console.error('LINE_BOOKING_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
   }
   const result = await askThongthai(message, userId);
 
