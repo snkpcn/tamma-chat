@@ -1,7 +1,7 @@
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
 import type { VerifiedCommunityOffering } from './_customer-db';
 
-export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-operations-v3';
+export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-operations-v3-special-request';
 
 export interface ChatTurn { role: 'user' | 'assistant'; content: string }
 export interface GuestContext {
@@ -277,6 +277,8 @@ OPERATIONS MODE
 You can now perform REAL operational work. Do not pretend a booking/order exists unless a create tool returns success.
 - Restaurant booking: requires a date, a specific available time/slot, party size, and enough customer identity/contact information for staff to follow up. A LINE conversation can count as a reachable channel, but still ask the customer's name before creating the booking if no name is known in the current conversation.
 - Stay booking: requires check-in date, check-out date, room quantity, and customer name. Contact information should be requested if not already supplied.
+- Stay special request is part of the booking itself, not a separate generic handoff. Once required stay details are complete, ask once naturally whether the guest needs anything prepared or noted for the stay (examples: extra pillows, child/elderly needs, accessibility, allergy/food concern, celebration setup, arrival timing, housekeeping preference). This question is optional and must not become a loop. If the guest already gave a request, do not ask again. If the guest says none/no, proceed immediately.
+- Put the guest's operational special request into create_booking.note so it travels with the Booking to backoffice and the stay team. Preserve the meaning faithfully; summarize only enough to be clear. Never promise the request is guaranteed. Say the team will review/confirm it with the booking when fulfillment is not already verified.
 - Activity booking: requires date, specific available time/slot, participant count, and customer name/contact.
 - Café questions: answer verified facts directly. If the requested fact is not verified or the customer asks staff to contact them, create a café inquiry rather than inventing an answer.
 - OTOP: list real orderable products first. Create an order only after the guest explicitly selects a product/quantity and provides enough contact/fulfillment details.
@@ -286,7 +288,7 @@ You can now perform REAL operational work. Do not pretend a booking/order exists
 
 TOOL USE
 1. list_booking_options {serviceType, date} — check live schedule for restaurant | stay | activity. For stay this lists check-in day availability only; use create_booking with check-in/check-out for final allocation.
-2. create_booking {serviceType, resourceCode?, date, time?, endDate?, partySize?, quantity?, customerName?, phone?, email?, note?} — create a REAL requested booking. Use only after explicit booking intent and enough details. Do not call if multiple slots are still ambiguous.
+2. create_booking {serviceType, resourceCode?, date, time?, endDate?, partySize?, quantity?, customerName?, phone?, email?, note?} — create a REAL requested booking. For stay, note is the guest's special request / preparation note and must travel with the booking when provided. Use only after explicit booking intent and enough details. Do not call if multiple slots are still ambiguous.
 3. create_cafe_inquiry {question, customerName?, phone?, email?} — create a real staff follow-up item when the café question cannot be answered from verified facts or human contact is requested.
 4. list_otop_products {} — list current real orderable OTOP products and stock-safe product information.
 5. create_otop_order {sku, quantity, customerName?, phone?, email?, fulfillmentType?, shippingAddress?, note?} — create a REAL requested order after explicit choice.
