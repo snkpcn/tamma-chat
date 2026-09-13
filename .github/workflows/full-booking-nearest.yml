@@ -1,0 +1,34 @@
+name: Full booking nearest date
+on:
+  push:
+    branches: [full-booking-nearest]
+    paths:
+      - .github/workflows/full-booking-nearest.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: full-booking-nearest
+          fetch-depth: 0
+      - run: python3 scripts/add_full_stay_nearest.py
+      - name: Validate markers
+        run: |
+          grep -q "findNearestStayAvailability" netlify/functions/_operations-db.ts
+          grep -q "ห้องเต็มแล้วครับ" netlify/functions/_operations-db.ts
+          grep -q "bookingDateFromText(text) ?? session.requested_date" netlify/functions/_operations-db.ts
+      - name: Type check
+        run: |
+          npm ci
+          npx tsc --noEmit
+      - name: Commit patch and cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/full-booking-nearest.yml scripts/add_full_stay_nearest.py
+          git add netlify/functions/_operations-db.ts
+          git commit -m "Handle full stays and suggest nearest available dates"
+          git push origin full-booking-nearest
