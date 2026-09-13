@@ -410,7 +410,7 @@ type LineBookingSession = {
   end_date: string | null;
   party_size: number | null;
   quantity: number;
-  status: 'collecting' | 'needs_slot' | 'ready' | 'submitted' | 'failed' | 'cancelled';
+  status: 'collecting' | 'awaiting_phone' | 'needs_slot' | 'ready' | 'submitted' | 'failed' | 'cancelled';
   booking_code: string | null;
 };
 
@@ -615,6 +615,22 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   const initialContact = await lineBookingContact(identity.customerId);
   const environment: 'live' | 'test' = initialContact.isTest ? 'test' : 'live';
   let session = await loadLineBookingSession(identity.guestDbId);
+  let lineOnlyContact = false;
+
+  // LINE is already a verified channel. If the customer does not want to
+  // share a phone number, explicitly accepting LINE keeps the booking moving.
+  if (session?.status === 'awaiting_phone') {
+    const phone = phoneFromText(text);
+    if (phone) {
+      await upsertCustomerAccount({ guestDbId: identity.guestDbId, phone, preferredContact: 'line' });
+    } else if (/(?:ใช้|ติดต่อ).{0,8}ไลน์|ไลน์นี้|ไม่สะดวก(?:แจ้ง|ให้).{0,8}(?:เบอร์|โทร)|ไม่มีเบอร์/u.test(text)) {
+      lineOnlyContact = true;
+    } else {
+      return 'ขอเบอร์โทรสำรองสำหรับทีมงานด้วยครับ หรือถ้าสะดวกให้ติดต่อทาง LINE นี้อย่างเดียว ตอบว่า “ใช้ LINE นี้ได้เลย” ครับ';
+    }
+    await saveLineBookingSession(identity.guestDbId, environment, { status: 'collecting' });
+    session = { ...session, status: 'collecting' };
+  }
 
   if (session?.status === 'submitted') {
     if (/(?:สถานะ|เรียบร้อย|เลข(?:ที่)?จอง|คำขอจอง)/u.test(text)) {
@@ -681,6 +697,10 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   const contact = await lineBookingContact(identity.customerId);
   if (!contact.fullName) {
     return 'ข้อมูลวันพักครบแล้วครับ ขอชื่อผู้ติดต่อหลักเพียง 1 คนครับ ไม่ต้องแจ้งชื่อผู้เข้าพักทุกท่าน ทีมงานจะตอบกลับทาง LINE นี้';
+  }
+  if (!contact.phone && !lineOnlyContact) {
+    await saveLineBookingSession(identity.guestDbId, environment, { status: 'awaiting_phone' });
+    return 'ขอบคุณครับ ขอเบอร์โทรสำรองสำหรับทีมงานอีกนิดครับ (ถ้าสะดวกให้ติดต่อทาง LINE นี้อย่างเดียว ตอบว่า “ใช้ LINE นี้ได้เลย” ได้ครับ)';
   }
 
   let created: { bookingCode: string; status: string; startAt: string; endAt: string };
