@@ -189,6 +189,59 @@ async function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): P
   }
 }
 
+export interface StayBookingInterpretation {
+  checkInDate: string | null;
+  checkOutDate: string | null;
+  partySize: number | null;
+  roomQuantity: number | null;
+}
+
+/**
+ * Uses the same Thongthai model stack as the main conversation brain to understand
+ * a booking turn. Database state remains authoritative; this only extracts fields
+ * the customer actually expressed, including colloquial Thai and misspellings.
+ */
+export async function interpretStayBookingTurn(
+  message: string,
+  current: StayBookingInterpretation,
+): Promise<StayBookingInterpretation> {
+  const currentBangkok = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const prompt = `You are the language-understanding layer of Thongthai for an active stay-booking conversation.
+Understand natural Thai, English, colloquial wording, omitted words, and ordinary typing mistakes from context.
+Today in Bangkok is ${currentBangkok}.
+Current collected booking state: ${JSON.stringify(current)}
+
+Extract only values stated or unambiguously implied by THIS customer message. The current state tells you what question is pending.
+- If check-in already exists and check-out is missing, a date-only answer such as "วันที่ 2", even with a misspelled checkout word, means check-out.
+- Resolve relative dates and year rollovers in Asia/Bangkok.
+- Do not invent a value. Do not return prose.
+- Return dates as Gregorian YYYY-MM-DD and counts as integers.
+
+Return ONLY JSON:
+{"checkInDate":string|null,"checkOutDate":string|null,"partySize":number|null,"roomQuantity":number|null}`;
+  const raw = await callPreferredModel(prompt, [{ role: 'user', content: message }]);
+  const parsed = JSON.parse(stripCodeFences(raw)) as Record<string, unknown>;
+  const date = (value: unknown) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const parsedDate = new Date(`${value}T00:00:00Z`);
+    return Number.isNaN(parsedDate.valueOf()) || parsedDate.toISOString().slice(0, 10) !== value ? null : value;
+  };
+  const count = (value: unknown, max: number) => {
+    const number = Number(value);
+    return Number.isInteger(number) && number >= 1 && number <= max ? number : null;
+  };
+  const checkInDate = date(parsed.checkInDate);
+  const checkOutDate = date(parsed.checkOutDate);
+  return {
+    checkInDate,
+    checkOutDate: checkOutDate && checkOutDate > (checkInDate ?? current.checkInDate ?? '') ? checkOutDate : null,
+    partySize: count(parsed.partySize, 50),
+    roomQuantity: count(parsed.roomQuantity, 20),
+  };
+}
+
 function channelPolicy(channel: BrainChannel): string {
   if (channel === 'line') return 'LINE: short phone chat; no Markdown; natural, compact, never brochure-like.';
   if (channel === 'facebook') return 'FACEBOOK/MESSENGER: conversational and skimmable; same brain and memory.';

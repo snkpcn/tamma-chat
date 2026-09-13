@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { interpretStayBookingTurn } from './_thongthai-brain-v3';
 
 export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
 export type ServiceType = 'restaurant' | 'stay' | 'activity';
@@ -466,6 +467,31 @@ function checkoutDateFromText(text: string, checkIn: string | null): string | nu
   return validIsoDate(year, month, day);
 }
 
+export function contextualCheckoutDateFromText(text: string, checkIn: string | null): string | null {
+  if (!checkIn) return null;
+  // During an active booking where checkout is the pending question, the state
+  // disambiguates a bare date even when the customer misspells or omits "checkout".
+  const hasDateCue = /วันที่\s*\d/u.test(text);
+  const hasCheckoutCue = /(?:เช[^\s]{0,12}(?:เอา|เอ้า|เอาต์|เอาท์)|ออก)/u.test(text);
+  if (!hasDateCue && !hasCheckoutCue) return null;
+  const matched = hasDateCue
+    ? text.match(/วันที่\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?)?/u)
+    : text.match(/(?:เช[^\s]{0,16}|ออก)[^\d]{0,16}(\d{1,2})(?:\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?)?/u);
+  if (!matched) return null;
+  const [checkInYear, checkInMonth, checkInDay] = checkIn.split('-').map(Number);
+  let year = matched[3] ? Number(matched[3]) : checkInYear;
+  let month = matched[2] ? Number(matched[2]) : checkInMonth;
+  const day = Number(matched[1]);
+  if (year < 100) year += 2000;
+  if (year > 2400) year -= 543;
+  if (!matched[2] && day <= checkInDay) {
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+  }
+  const candidate = validIsoDate(year, month, day);
+  return candidate && candidate > checkIn ? candidate : null;
+}
+
 function partySizeFromText(text: string): number | null {
   const matched = text.match(/(\d{1,2})\s*(?:คน|ท่าน)/u);
   const thaiMatched = text.match(/(หนึ่ง|สอง|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า|สิบ)\s*(?:คน|ท่าน)/u);
@@ -580,17 +606,40 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
       end_date: null, party_size: null, quantity: 1, status: 'collecting', booking_code: null,
     };
   }
-  const requestedDate = session.requested_date ?? bookingDateFromText(text);
-  const endDate = checkoutDateFromText(text, requestedDate) ?? session.end_date;
-  const partySize = partySizeFromText(text) ?? session.party_size;
-  const quantity = roomQuantityFromText(text) ?? session.quantity ?? 1;
+  let requestedDate = session.requested_date ?? bookingDateFromText(text);
+  let endDate = checkoutDateFromText(text, requestedDate) ?? session.end_date;
+  let partySize = partySizeFromText(text) ?? session.party_size;
+  let quantity = roomQuantityFromText(text) ?? session.quantity ?? 1;
+
+  // Fast parsing handles common messages. When anything remains unresolved,
+  // Thongthai's language model interprets the turn instead of trapping the
+  // customer in a brittle keyword loop. A state-aware local fallback remains
+  // available if both model providers are temporarily unavailable.
+  if (!requestedDate || !endDate || !partySize) {
+    try {
+      const understood = await interpretStayBookingTurn(text, {
+        checkInDate: requestedDate,
+        checkOutDate: endDate,
+        partySize,
+        roomQuantity: quantity,
+      });
+      requestedDate ??= understood.checkInDate;
+      endDate ??= understood.checkOutDate;
+      partySize ??= understood.partySize;
+      if (!roomQuantityFromText(text) && understood.roomQuantity) quantity = understood.roomQuantity;
+    } catch (error) {
+      console.error('LINE_BOOKING_NLU_FALLBACK', error instanceof Error ? error.message.slice(0, 180) : 'unknown');
+    }
+  }
+  endDate ??= contextualCheckoutDateFromText(text, requestedDate);
   await saveLineBookingSession(identity.guestDbId, environment, {
     service_type: 'stay', requested_date: requestedDate, end_date: endDate,
     party_size: partySize, quantity, status: 'collecting', booking_code: null,
   });
 
   if (!requestedDate) return 'ได้ครับ ขอวันเช็กอิน วันเช็กเอาต์ และจำนวนผู้เข้าพักครับ เช่น “เช็กอิน 30/09 เช็กเอาต์ 02/10 พัก 2 คน”';
-  if (!endDate) return `รับวันเช็กอิน ${thaiShortDate(requestedDate)} แล้วครับ ขอวันเช็กเอาต์และจำนวนผู้เข้าพักด้วยครับ`;
+  if (!endDate && !partySize) return `รับวันเช็กอิน ${thaiShortDate(requestedDate)} แล้วครับ ขอวันเช็กเอาต์และจำนวนผู้เข้าพักด้วยครับ`;
+  if (!endDate) return `รับจำนวนผู้เข้าพักแล้วครับ ขอวันเช็กเอาต์อีกอย่างเดียวครับ`;
   if (!partySize) return 'ขอจำนวนผู้เข้าพักทั้งหมดกี่ท่านครับ';
 
   const suppliedName = primaryGuestNameFromText(text);
