@@ -533,6 +533,31 @@ async function saveLineBookingSession(guestDbId: string, environment: 'live' | '
   });
 }
 
+async function bookingStatusReply(bookingCode: string | null): Promise<string | null> {
+  if (!bookingCode) return null;
+  const response = await dbFetch(
+    `bookings?booking_code=eq.${encodeURIComponent(bookingCode)}`
+    + '&select=booking_code,status,service_type,start_at,end_at,party_size,quantity&limit=1',
+  );
+  const booking = (await response.json() as Array<{
+    booking_code: string;
+    status: string;
+    service_type: ServiceType;
+    start_at: string;
+    end_at: string;
+    party_size: number | null;
+    quantity: number;
+  }>)[0];
+  if (!booking) return null;
+  const detail = `${booking.booking_code}\n${booking.service_type === 'stay' ? 'เฮือนสเตย์' : booking.service_type}`
+    + ` · ${thaiShortDate(booking.start_at)} – ${thaiShortDate(booking.end_at)}`;
+  if (booking.status === 'confirmed') return `ยืนยันการจองแล้วครับ ✅\n${detail}\nสถานะ: ยืนยันแล้ว ทีมงานได้รับรายการเรียบร้อยครับ`;
+  if (booking.status === 'cancelled') return `รายการจองถูกยกเลิกแล้วครับ\n${detail}\nหากต้องการเปลี่ยนวันหรือให้ทองไทยช่วยหาแผนใหม่ บอกได้เลยครับ`;
+  if (booking.status === 'completed') return `รายการนี้เสร็จสมบูรณ์แล้วครับ ✅\n${detail}`;
+  if (booking.status === 'no_show') return `รายการ ${booking.booking_code} ปิดแล้วครับ หากต้องการให้ทีมงานตรวจสอบเพิ่มเติม บอกทองไทยได้เลยครับ`;
+  return `รับคำขอจองไว้แล้วครับ ✅\nเลขที่คำขอ: ${booking.booking_code}\nสถานะ: รอทีมงานตรวจสอบห้องว่างและยืนยันกลับทาง LINE นี้ครับ`;
+}
+
 async function lineBookingContact(customerId: string): Promise<{ fullName: string | null; phone: string | null; isTest: boolean }> {
   const response = await dbFetch(`customer_accounts?id=eq.${customerId}&select=full_name_enc,phone_enc,is_test&limit=1`);
   const row = (await response.json() as Array<{ full_name_enc: string | null; phone_enc: string | null; is_test: boolean }>)[0];
@@ -578,7 +603,7 @@ async function createUnscheduledStayRequest(input: {
 
 function thaiShortDate(iso: string): string {
   return new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', year: 'numeric' })
-    .format(new Date(`${iso}T00:00:00+07:00`));
+    .format(new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00+07:00` : iso));
 }
 
 /** Deterministic LINE stay-booking flow. PII is encrypted in customer_accounts, never chat memory. */
@@ -593,7 +618,8 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
 
   if (session?.status === 'submitted') {
     if (/(?:สถานะ|เรียบร้อย|เลข(?:ที่)?จอง|คำขอจอง)/u.test(text)) {
-      return `รับคำขอจองไว้แล้วครับ ✅\nเลขที่คำขอ: ${session.booking_code}\nสถานะ: รอทีมงานตรวจสอบห้องว่างและยืนยันกลับทาง LINE นี้ครับ`;
+      return await bookingStatusReply(session.booking_code)
+        ?? `รับคำขอจองไว้แล้วครับ ✅\nเลขที่คำขอ: ${session.booking_code}\nสถานะ: รอทีมงานตรวจสอบและยืนยันกลับทาง LINE นี้ครับ`;
     }
     if (!startIntent) return null;
     session = null;
