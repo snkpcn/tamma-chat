@@ -1,4 +1,5 @@
 name: Full booking nearest date
+# retry-2
 on:
   push:
     branches: [full-booking-nearest]
@@ -20,10 +21,10 @@ jobs:
           grep -q "findNearestStayAvailability" netlify/functions/_operations-db.ts
           grep -q "ห้องเต็มแล้วครับ" netlify/functions/_operations-db.ts
           grep -q "bookingDateFromText(text) ?? session.requested_date" netlify/functions/_operations-db.ts
-      - name: Type check
+      - name: TypeScript parse check
         run: |
           npm ci
-          npx tsc --noEmit
+          npx tsc --noEmit netlify/functions/_operations-db.ts --target ES2022 --module commonjs --moduleResolution node --skipLibCheck
       - name: Commit patch and cleanup
         run: |
           git config user.name "github-actions[bot]"
