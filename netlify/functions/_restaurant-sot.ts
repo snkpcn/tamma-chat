@@ -1,4 +1,5 @@
 import { decryptPii, piiHash } from './_operations-db';
+import { createHash } from 'node:crypto';
 
 const RESTAURANT_SCHEMA = 'tamma_chart_os';
 const RESTAURANT_NAME = 'ตำมา-ชาติ';
@@ -40,7 +41,7 @@ type NotificationChannel = { id: string; target_id_enc: string };
 type PreorderCreateResult = {
   id: string; preorderCode: string; totalAmount: number; status: string;
   items: Array<{ name: string; quantity: number }>;
-  requestedFor: string; environment: string;
+  requestedFor: string; environment: string; duplicate?: boolean;
 };
 
 function config(): { url: string; key: string } {
@@ -286,17 +287,20 @@ export async function createRestaurantPreorder(input: {
   for (const item of resolved) {
     if (!item.menu!.is_orderable || item.menu!.available_servings < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);
   }
+  const environment = await guestEnvironment(input.guestDbId);
+  const canonicalItems = resolved
+    .map(item => ({ menuItemId:item.menu!.menu_item_id, quantity:item.quantity }))
+    .sort((a,b) => a.menuItemId.localeCompare(b.menuItemId));
+  const idempotencyKey = 'restaurant-preorder:v2:' + createHash('sha256').update(JSON.stringify({
+    guestDbId:input.guestDbId, requestedFor:requestedFor.toISOString(), items:canonicalItems,
+    customerName:input.customerName.trim().toLowerCase(), note:(input.note ?? '').trim(), environment,
+  })).digest('hex');
   const rid = await restaurantId();
-  const created = await rpc<{ id:string; preorderCode:string; totalAmount:number; status:string }>('create_restaurant_preorder', {
+  const created = await rpc<{ id:string; preorderCode:string; totalAmount:number; status:string; duplicate?:boolean }>('create_restaurant_preorder_v2', {
     p_restaurant_id: rid, p_requested_for: requestedFor.toISOString(), p_customer_name: input.customerName,
     p_phone: input.phone ?? '', p_email: input.email ?? '', p_source_channel: input.channel,
-    p_customer_note: input.note ?? '',
-    p_items: resolved.map(item => ({ menuItemId: item.menu!.menu_item_id, quantity: item.quantity })),
-  });
-  const environment = await guestEnvironment(input.guestDbId);
-  await chartDbFetch(`restaurant_preorders?id=eq.${created.id}`, {
-    method: 'PATCH', headers: { Prefer:'return=minimal' },
-    body: JSON.stringify({ guest_id: input.guestDbId, environment, updated_at: new Date().toISOString() }),
+    p_customer_note: input.note ?? '', p_items: canonicalItems, p_guest_id:input.guestDbId,
+    p_environment:environment, p_idempotency_key:idempotencyKey,
   });
   const result: PreorderCreateResult = {
     ...created, items: resolved.map(item => ({ name:item.menu!.name, quantity:item.quantity })),
