@@ -5,6 +5,7 @@ import {
   createBooking, createCafeInquiry, createOtopOrder, listBookingOptions, listOtopProducts,
   type OpsChannel, type ServiceType,
 } from './_operations-db';
+import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts } from './_restaurant-sot';
 
 const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
@@ -96,7 +97,8 @@ export async function loadBrainRuntime(guestDbId: string | null): Promise<BrainR
     const worldPromise = Promise.all([
     dbFetch('world_facts?active=eq.true&verified=eq.true&select=fact_key,category,fact_value,source,updated_at&order=fact_key.asc').then(r => r.json() as Promise<WorldFactRow[]>),
     loadActivityWorldFacts(),
-  ]).then(([baseFacts, activityFacts]) => [...baseFacts, ...activityFacts]);
+    loadRestaurantWorldFacts(),
+  ]).then(([baseFacts, activityFacts, restaurantFacts]) => [...baseFacts, ...activityFacts, ...restaurantFacts]);
     if (!guestDbId) return { ...fallback, worldFacts:await worldPromise };
     const [states, memories, worldFacts] = await Promise.all([
       dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`).then(r => r.json() as Promise<Array<{state:Record<string,unknown>}>>),
@@ -131,6 +133,9 @@ function toolErrorDetail(error: unknown): string {
   if (message.includes('activity_duration_required')) return 'activity_duration_required';
   if (message.includes('product_not_available')) return 'product_not_available';
   if (message.includes('insufficient_stock')) return 'insufficient_stock';
+  if (message.includes('menu_item_not_found')) return 'menu_item_not_found';
+  if (message.includes('menu_item_unavailable')) return 'menu_item_unavailable';
+  if (message.includes('invalid_requested_time')) return 'invalid_requested_time';
   return 'execution_failed';
 }
 
@@ -209,6 +214,26 @@ export async function executeBrainTools(
             results.push({name:call.name,ok:false,detail:JSON.stringify({reason:detail,options:options.slice(0,12)})});
           } else results.push({name:call.name,ok:false,detail});
         }
+        continue;
+      }
+      if (call.name === 'list_restaurant_menu') {
+        const menu = await listRestaurantMenu();
+        results.push({name:call.name,ok:true,detail:JSON.stringify({menuUrl:'https://tamma-chat.netlify.app/menu.html',items:menu.map(item=>({name:item.name,category:item.category_name,price:item.selling_price,orderable:item.is_orderable,availableServings:item.available_servings,ingredients:item.ingredient_names,unavailableIngredients:item.unavailable_ingredients}))})});
+        continue;
+      }
+      if (call.name === 'create_restaurant_preorder') {
+        try {
+          const created = await createRestaurantPreorder({
+            guestDbId, channel:provider(channel), date:String(call.args.date ?? ''), time:String(call.args.time ?? ''),
+            items:Array.isArray(call.args.items) ? call.args.items as Array<{name:string;quantity:number}> : [],
+            customerName:String(call.args.customerName ?? ''),
+            phone:typeof call.args.phone==='string' ? call.args.phone : null,
+            email:typeof call.args.email==='string' ? call.args.email : null,
+            note:typeof call.args.note==='string' ? call.args.note : null,
+          });
+          await insertEvent(guestDbId,'agent_action','order',{action:'create_restaurant_preorder',preorderCode:created.preorderCode,channel});
+          results.push({name:call.name,ok:true,detail:JSON.stringify(created)});
+        } catch(error) { results.push({name:call.name,ok:false,detail:toolErrorDetail(error)}); }
         continue;
       }
       if (call.name === 'create_cafe_inquiry') {

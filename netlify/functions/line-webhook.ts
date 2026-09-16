@@ -6,6 +6,7 @@ import { handleLineOpsGroupMessage } from './_ops-notifications';
 import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
 import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
 import { handleStaffBookingPostback, type LineMessage } from './_ops-line-ui';
+import { handleRestaurantPreorderPostback, handleRestaurantStockText } from './_restaurant-sot';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -100,6 +101,11 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
 
   // Staff buttons use LINE postback events. They never enter customer chat/memory.
   if (event.type === 'postback' && typeof event.postback?.data === 'string') {
+    const preorderMessages = await handleRestaurantPreorderPostback({ targetId, data: event.postback.data });
+    if (preorderMessages?.length) {
+      await replyToLine(event.replyToken, preorderMessages as LineMessage[], accessToken);
+      return;
+    }
     const messages = await handleStaffBookingPostback({
       targetId,
       userId: event.source?.userId ?? null,
@@ -138,6 +144,12 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   });
   if (fuelReply) {
     await replyToLine(event.replyToken, fuelReply, accessToken);
+    return;
+  }
+
+  const restaurantStockReply = await handleRestaurantStockText({ targetId, text: event.message.text });
+  if (restaurantStockReply) {
+    await replyToLine(event.replyToken, restaurantStockReply, accessToken);
     return;
   }
 
