@@ -1,7 +1,7 @@
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
 import type { VerifiedCommunityOffering } from './_customer-db';
 
-export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-operations-v3-special-request';
+export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-operations-v3-activity-inventory';
 
 export interface ChatTurn { role: 'user' | 'assistant'; content: string }
 export interface GuestContext {
@@ -279,7 +279,10 @@ You can now perform REAL operational work. Do not pretend a booking/order exists
 - Stay booking: requires check-in date, check-out date, room quantity, and customer name. Contact information should be requested if not already supplied.
 - Stay special request is part of the booking itself, not a separate generic handoff. Once required stay details are complete, ask once naturally whether the guest needs anything prepared or noted for the stay (examples: extra pillows, child/elderly needs, accessibility, allergy/food concern, celebration setup, arrival timing, housekeeping preference). This question is optional and must not become a loop. If the guest already gave a request, do not ask again. If the guest says none/no, proceed immediately.
 - Put the guest's operational special request into create_booking.note so it travels with the Booking to backoffice and the stay team. Preserve the meaning faithfully; summarize only enough to be clear. Never promise the request is guaranteed. Say the team will review/confirm it with the booking when fulfillment is not already verified.
-- Activity booking: requires date, specific available time/slot, participant count, and customer name/contact.
+- Activity booking is inventory-backed. The verified world facts contain the current real catalog, prices and active inventory. Never invent them.
+- Valid activity resource mapping: ATV = activity-atv, ขี่ม้า = activity-horse, ยิงธนู = activity-archery. Do not use the old generic activity-adventure resource.
+- Before creating an activity booking, collect: exact activity, duration (30/60/90 minutes), date, a specific available start time, participant count, and customer name/contact. Participant count consumes the same number of physical capacity units.
+- For activity pricing, a null price means the owner has not configured that price yet. Say the price is not set/needs staff confirmation; never turn null into 0 or invent a price.
 - Café questions: answer verified facts directly. If the requested fact is not verified or the customer asks staff to contact them, create a café inquiry rather than inventing an answer.
 - OTOP: list real orderable products first. Create an order only after the guest explicitly selects a product/quantity and provides enough contact/fulfillment details.
 - A booking/order initially means REQUESTED, not confirmed. Staff confirmation happens in backoffice. Say that clearly without sounding bureaucratic.
@@ -287,8 +290,8 @@ You can now perform REAL operational work. Do not pretend a booking/order exists
 - Never store contact data in semanticMemory or agentState. Contact data may appear only in an operational tool call that the guest explicitly provided for the transaction.
 
 TOOL USE
-1. list_booking_options {serviceType, date} — check live schedule for restaurant | stay | activity. For stay this lists check-in day availability only; use create_booking with check-in/check-out for final allocation.
-2. create_booking {serviceType, resourceCode?, date, time?, endDate?, partySize?, quantity?, customerName?, phone?, email?, note?} — create a REAL requested booking. For stay, note is the guest's special request / preparation note and must travel with the booking when provided. Use only after explicit booking intent and enough details. Do not call if multiple slots are still ambiguous.
+1. list_booking_options {serviceType, date, resourceCode?, durationMinutes?, partySize?} — check live schedule for restaurant | stay | activity. For activity, pass the exact resourceCode plus 30/60/90 duration and participant count so availability spans the whole requested duration. For stay this lists check-in day availability only; use create_booking with check-in/check-out for final allocation.
+2. create_booking {serviceType, resourceCode?, date, time?, endDate?, durationMinutes?, partySize?, quantity?, customerName?, phone?, email?, note?} — create a REAL requested booking. For activity, resourceCode and durationMinutes are mandatory and the selected slot must be unambiguous. For stay, note is the guest's special request / preparation note and must travel with the booking when provided. Use only after explicit booking intent and enough details. Do not call if multiple slots are still ambiguous.
 3. create_cafe_inquiry {question, customerName?, phone?, email?} — create a real staff follow-up item when the café question cannot be answered from verified facts or human contact is requested.
 4. list_otop_products {} — list current real orderable OTOP products and stock-safe product information.
 5. create_otop_order {sku, quantity, customerName?, phone?, email?, fulfillmentType?, shippingAddress?, note?} — create a REAL requested order after explicit choice.
@@ -392,27 +395,33 @@ function normalizeToolCalls(value: unknown, toolResultsPresent: boolean): BrainT
       calls.push({ name, args: { reasonCode: allowed.has(String(args.reasonCode)) ? String(args.reasonCode) : 'other' } }); continue;
     }
     if (name === 'list_booking_options') {
-      const serviceType = safeString(args.serviceType,20);
-      const date = dateString(args.date);
-      if (serviceType && ['restaurant','stay','activity'].includes(serviceType) && date) calls.push({ name, args: { serviceType, date } });
-      continue;
-    }
+    const serviceType = safeString(args.serviceType,20);
+    const date = dateString(args.date);
+    if (serviceType && ['restaurant','stay','activity'].includes(serviceType) && date) calls.push({ name, args: {
+      serviceType, date,
+      ...(safeString(args.resourceCode,80) ? { resourceCode: safeString(args.resourceCode,80) } : {}),
+      ...(safeNumber(args.durationMinutes,30,90) && [30,60,90].includes(Number(args.durationMinutes)) ? { durationMinutes: safeNumber(args.durationMinutes,30,90) } : {}),
+      ...(safeNumber(args.partySize,1,50) ? { partySize: safeNumber(args.partySize,1,50) } : {}),
+    }});
+    continue;
+  }
     if (name === 'create_booking') {
-      const serviceType = safeString(args.serviceType,20); const date = dateString(args.date);
-      if (!serviceType || !['restaurant','stay','activity'].includes(serviceType) || !date) continue;
-      calls.push({ name, args: {
-        serviceType, date,
-        ...(safeString(args.resourceCode,80) ? { resourceCode: safeString(args.resourceCode,80) } : {}),
-        ...(timeString(args.time) ? { time: timeString(args.time) } : {}),
-        ...(dateString(args.endDate) ? { endDate: dateString(args.endDate) } : {}),
-        ...(safeNumber(args.partySize,1,50) ? { partySize: safeNumber(args.partySize,1,50) } : {}),
-        ...(safeNumber(args.quantity,1,20) ? { quantity: safeNumber(args.quantity,1,20) } : {}),
-        ...(safeString(args.customerName,120) ? { customerName: safeString(args.customerName,120) } : {}),
-        ...(safeString(args.phone,30) ? { phone: safeString(args.phone,30) } : {}),
-        ...(safeString(args.email,160) ? { email: safeString(args.email,160) } : {}),
-        ...(safeString(args.note,1000) ? { note: safeString(args.note,1000) } : {}),
-      }}); continue;
-    }
+    const serviceType = safeString(args.serviceType,20); const date = dateString(args.date);
+    if (!serviceType || !['restaurant','stay','activity'].includes(serviceType) || !date) continue;
+    calls.push({ name, args: {
+      serviceType, date,
+      ...(safeString(args.resourceCode,80) ? { resourceCode: safeString(args.resourceCode,80) } : {}),
+      ...(timeString(args.time) ? { time: timeString(args.time) } : {}),
+      ...(dateString(args.endDate) ? { endDate: dateString(args.endDate) } : {}),
+      ...(safeNumber(args.durationMinutes,30,90) && [30,60,90].includes(Number(args.durationMinutes)) ? { durationMinutes: safeNumber(args.durationMinutes,30,90) } : {}),
+      ...(safeNumber(args.partySize,1,50) ? { partySize: safeNumber(args.partySize,1,50) } : {}),
+      ...(safeNumber(args.quantity,1,20) ? { quantity: safeNumber(args.quantity,1,20) } : {}),
+      ...(safeString(args.customerName,120) ? { customerName: safeString(args.customerName,120) } : {}),
+      ...(safeString(args.phone,30) ? { phone: safeString(args.phone,30) } : {}),
+      ...(safeString(args.email,160) ? { email: safeString(args.email,160) } : {}),
+      ...(safeString(args.note,1000) ? { note: safeString(args.note,1000) } : {}),
+    }}); continue;
+  }
     if (name === 'create_cafe_inquiry') {
       const question = safeString(args.question,2000); if (!question) continue;
       calls.push({ name, args: {

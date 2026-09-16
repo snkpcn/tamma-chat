@@ -1,0 +1,6 @@
+-- Applied in production: real activity resources and inventory-backed 30-minute base slots.
+-- Canonical migration is recorded in Supabase as activity_inventory_slots_v1.
+-- Resources: activity-atv, activity-horse, activity-archery.
+-- Physical inventory in activity_assets drives capacities through trg_activity_assets_sync_capacity.
+-- Offerings remain 30/60/90 minutes with price nullable for owner entry.
+-- Base schedules run 09:00-17:00 Asia/Bangkok and multi-slot bookings reserve every 30-minute segment.

@@ -1,0 +1,3 @@
+-- Applied in production as activity_schedule_rollover_v1.
+-- public.roll_activity_schedules() keeps a rolling 180-day live / 60-day test activity calendar.
+-- cron job tamma-activity-schedule-rollover runs daily at 17:20 UTC (00:20 Asia/Bangkok).

@@ -26,6 +26,40 @@ async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> 
   if (!res.ok) { const body = await res.text().catch(() => ''); throw new Error(`Supabase ${res.status}: ${body.slice(0,180)}`); }
   return res;
 }
+async function loadActivityWorldFacts(): Promise<WorldFactRow[]> {
+  try {
+    const [offerRes, assetRes] = await Promise.all([
+      dbFetch('activity_offerings?active=eq.true&select=activity_code,activity_name,duration_minutes,price,currency,metadata&order=sort_order.asc'),
+      dbFetch('activity_assets?active=eq.true&select=activity_code,asset_code,name,asset_type,metadata&order=sort_order.asc'),
+    ]);
+    const offerings = await offerRes.json() as Array<{ activity_code:string; activity_name:string; duration_minutes:number; price:number|null; currency:string; metadata:Record<string,unknown> }>;
+    const assets = await assetRes.json() as Array<{ activity_code:string; asset_code:string; name:string; asset_type:string; metadata:Record<string,unknown> }>;
+    const resourceCode = (code:string) => code === 'atv' ? 'activity-atv' : code === 'horse' ? 'activity-horse' : 'activity-archery';
+    const codes = [...new Set(offerings.map(row => row.activity_code))];
+    const activities = codes.map(code => {
+      const rows = offerings.filter(row => row.activity_code === code);
+      const physical = assets.filter(row => row.activity_code === code);
+      return {
+        activityCode: code,
+        resourceCode: resourceCode(code),
+        name: rows[0]?.activity_name ?? code,
+        durations: rows.map(row => ({ durationMinutes:Number(row.duration_minutes), price:row.price == null ? null : Number(row.price), currency:row.currency })),
+        activeInventory: physical.length,
+        assets: physical.map(row => ({ code:row.asset_code, name:row.name, type:row.asset_type })),
+      };
+    });
+    const now = new Date().toISOString();
+    return [{
+      fact_key:'activity_catalog_live', category:'operations',
+      fact_value:{ timezone:'Asia/Bangkok', serviceHours:{ start:'09:00', end:'17:00' }, bookingSlotMinutes:30, activities },
+      source:'activity_offerings+activity_assets', updated_at:now,
+    }];
+  } catch (error) {
+    console.error('THONGTHAI_ACTIVITY_FACTS_ERROR', error instanceof Error ? error.message.slice(0,180) : 'unknown');
+    return [];
+  }
+}
+
 function provider(channel: BrainChannel): OpsChannel { return channel === 'facebook' ? 'facebook' : channel; }
 function eq(value: string): string { return encodeURIComponent(value); }
 function safeShort(value: unknown, max: number): string | null {
@@ -59,7 +93,10 @@ export async function loadBrainRuntime(guestDbId: string | null): Promise<BrainR
   const fallback: BrainRuntimeContext = { agentState:{}, semanticMemory:[], worldFacts:[], toolResults:[] };
   if (!configuration()) return fallback;
   try {
-    const worldPromise = dbFetch('world_facts?active=eq.true&verified=eq.true&select=fact_key,category,fact_value,source,updated_at&order=fact_key.asc').then(r => r.json() as Promise<WorldFactRow[]>);
+    const worldPromise = Promise.all([
+    dbFetch('world_facts?active=eq.true&verified=eq.true&select=fact_key,category,fact_value,source,updated_at&order=fact_key.asc').then(r => r.json() as Promise<WorldFactRow[]>),
+    loadActivityWorldFacts(),
+  ]).then(([baseFacts, activityFacts]) => [...baseFacts, ...activityFacts]);
     if (!guestDbId) return { ...fallback, worldFacts:await worldPromise };
     const [states, memories, worldFacts] = await Promise.all([
       dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`).then(r => r.json() as Promise<Array<{state:Record<string,unknown>}>>),
@@ -90,6 +127,8 @@ function toolErrorDetail(error: unknown): string {
   if (message.includes('no_matching_schedule')) return 'no_matching_schedule';
   if (message.includes('schedule_choice_required')) return 'schedule_choice_required';
   if (message.includes('schedule_full') || message.includes('capacity')) return 'schedule_full';
+  if (message.includes('activity_resource_required')) return 'activity_resource_required';
+  if (message.includes('activity_duration_required')) return 'activity_duration_required';
   if (message.includes('product_not_available')) return 'product_not_available';
   if (message.includes('insufficient_stock')) return 'insufficient_stock';
   return 'execution_failed';
@@ -127,12 +166,15 @@ export async function executeBrainTools(
         results.push({name:call.name,ok:true,detail:reasonCode}); continue;
       }
       if (call.name === 'list_booking_options') {
-        const serviceType = String(call.args.serviceType) as ServiceType;
-        const date = String(call.args.date ?? '');
-        const options = await listBookingOptions(serviceType,date,'live');
-        results.push({ name:call.name, ok:true, detail:JSON.stringify({ date, serviceType, options:options.slice(0,12) }) });
-        continue;
-      }
+      const serviceType = String(call.args.serviceType) as ServiceType;
+      const date = String(call.args.date ?? '');
+      const resourceCode = typeof call.args.resourceCode === 'string' ? call.args.resourceCode : null;
+      const durationMinutes = typeof call.args.durationMinutes === 'number' ? call.args.durationMinutes : null;
+      const partySize = typeof call.args.partySize === 'number' ? call.args.partySize : null;
+      const options = await listBookingOptions(serviceType,date,'live',resourceCode,durationMinutes,partySize);
+      results.push({ name:call.name, ok:true, detail:JSON.stringify({ date, serviceType, resourceCode, durationMinutes, partySize, options:options.slice(0,24) }) });
+      continue;
+    }
       if (call.name === 'create_booking') {
         try {
           const created = await createBooking({
@@ -140,6 +182,7 @@ export async function executeBrainTools(
             resourceCode:typeof call.args.resourceCode === 'string' ? call.args.resourceCode : null,
             date:String(call.args.date ?? ''), time:typeof call.args.time === 'string' ? call.args.time : null,
             endDate:typeof call.args.endDate === 'string' ? call.args.endDate : null,
+            durationMinutes:typeof call.args.durationMinutes === 'number' ? call.args.durationMinutes : null,
             partySize:typeof call.args.partySize === 'number' ? call.args.partySize : null,
             quantity:typeof call.args.quantity === 'number' ? call.args.quantity : null,
             customerName:typeof call.args.customerName === 'string' ? call.args.customerName : null,
@@ -155,7 +198,14 @@ export async function executeBrainTools(
           if (detail === 'schedule_choice_required' || detail === 'no_matching_schedule') {
             const serviceType = String(call.args.serviceType) as ServiceType;
             const date = String(call.args.date ?? '');
-            const options = await listBookingOptions(serviceType,date,'live').catch(() => []);
+            const options = await listBookingOptions(
+    serviceType,
+    date,
+    'live',
+    typeof call.args.resourceCode === 'string' ? call.args.resourceCode : null,
+    typeof call.args.durationMinutes === 'number' ? call.args.durationMinutes : null,
+    typeof call.args.partySize === 'number' ? call.args.partySize : null,
+  ).catch(() => []);
             results.push({name:call.name,ok:false,detail:JSON.stringify({reason:detail,options:options.slice(0,12)})});
           } else results.push({name:call.name,ok:false,detail});
         }

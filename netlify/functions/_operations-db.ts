@@ -773,12 +773,14 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
 
 export interface BookingOption {
   scheduleId: string;
+  scheduleIds?: string[];
   resourceCode: string;
   resourceName: string;
   serviceType: ServiceType;
   startAt: string;
   endAt: string;
   available: number;
+  durationMinutes?: number;
 }
 
 function dayBounds(date: string): { start: string; end: string } | null {
@@ -789,18 +791,32 @@ function dayBounds(date: string): { start: string; end: string } | null {
   };
 }
 
+function normalizeActivityDuration(value: number | null | undefined): 30 | 60 | 90 {
+  const n = Number(value);
+  return n === 60 ? 60 : n === 90 ? 90 : 30;
+}
+
 export async function listBookingOptions(
   serviceType: ServiceType,
   date: string,
   environment: 'live' | 'test' = 'live',
+  resourceCode?: string | null,
+  durationMinutes?: number | null,
+  partySize?: number | null,
 ): Promise<BookingOption[]> {
   const bounds = dayBounds(date);
   if (!bounds) return [];
   const resourcesRes = await dbFetch(
-    `service_resources?service_type=eq.${serviceType}&active=eq.true&select=id,code,name`,
+    `service_resources?service_type=eq.${serviceType}&active=eq.true`
+    + (resourceCode ? `&code=eq.${encodeURIComponent(resourceCode)}` : '')
+    + '&select=id,code,name,metadata',
   );
-  const resources = await resourcesRes.json() as Array<{ id: string; code: string; name: string }>;
+  const resources = await resourcesRes.json() as Array<{ id: string; code: string; name: string; metadata: Record<string, unknown> }>;
   const output: BookingOption[] = [];
+  const requestedUnits = Math.max(1, Math.min(50, Math.floor(partySize ?? 1)));
+  const activityDuration = normalizeActivityDuration(durationMinutes);
+  const windowSize = activityDuration / 30;
+
   for (const resource of resources) {
     const res = await dbFetch(
       `service_schedules?resource_id=eq.${resource.id}&environment=eq.${environment}&status=eq.open`
@@ -808,15 +824,44 @@ export async function listBookingOptions(
       + '&select=id,start_at,end_at,capacity_total,capacity_reserved&order=start_at.asc',
     );
     const rows = await res.json() as Array<{ id: string; start_at: string; end_at: string; capacity_total: number; capacity_reserved: number }>;
-    for (const row of rows) {
+
+    if (serviceType !== 'activity') {
+      for (const row of rows) {
+        output.push({
+          scheduleId: row.id,
+          resourceCode: resource.code,
+          resourceName: resource.name,
+          serviceType,
+          startAt: row.start_at,
+          endAt: row.end_at,
+          available: Math.max(0, Number(row.capacity_total) - Number(row.capacity_reserved)),
+        });
+      }
+      continue;
+    }
+
+    for (let i = 0; i + windowSize <= rows.length; i += 1) {
+      const window = rows.slice(i, i + windowSize);
+      let contiguous = true;
+      for (let j = 1; j < window.length; j += 1) {
+        if (new Date(window[j].start_at).getTime() !== new Date(window[j - 1].end_at).getTime()) {
+          contiguous = false;
+          break;
+        }
+      }
+      if (!contiguous) continue;
+      const available = Math.min(...window.map(row => Math.max(0, Number(row.capacity_total) - Number(row.capacity_reserved))));
+      if (available < requestedUnits) continue;
       output.push({
-        scheduleId: row.id,
+        scheduleId: window[0].id,
+        scheduleIds: window.map(row => row.id),
         resourceCode: resource.code,
         resourceName: resource.name,
         serviceType,
-        startAt: row.start_at,
-        endAt: row.end_at,
-        available: Math.max(0, Number(row.capacity_total) - Number(row.capacity_reserved)),
+        startAt: window[0].start_at,
+        endAt: window[window.length - 1].end_at,
+        available,
+        durationMinutes: activityDuration,
       });
     }
   }
@@ -829,18 +874,27 @@ async function scheduleRowsForBooking(args: {
   date: string;
   time?: string | null;
   endDate?: string | null;
+  durationMinutes?: number | null;
+  partySize?: number | null;
   environment: 'live' | 'test';
 }): Promise<BookingOption[]> {
   const resourcesRes = await dbFetch(
     `service_resources?service_type=eq.${args.serviceType}&active=eq.true`
     + (args.resourceCode ? `&code=eq.${encodeURIComponent(args.resourceCode)}` : '')
-    + '&select=id,code,name&limit=5',
+    + '&select=id,code,name&limit=8',
   );
   const resources = await resourcesRes.json() as Array<{ id: string; code: string; name: string }>;
   if (!resources.length) return [];
 
   if (args.serviceType !== 'stay') {
-    let options = await listBookingOptions(args.serviceType, args.date, args.environment);
+    let options = await listBookingOptions(
+      args.serviceType,
+      args.date,
+      args.environment,
+      args.resourceCode ?? null,
+      args.serviceType === 'activity' ? args.durationMinutes ?? null : null,
+      args.partySize ?? null,
+    );
     if (args.resourceCode) options = options.filter(item => item.resourceCode === args.resourceCode);
     if (args.time && /^\d{2}:\d{2}$/.test(args.time)) {
       options = options.filter(item => {
@@ -917,6 +971,7 @@ export interface CreateBookingInput {
   date: string;
   time?: string | null;
   endDate?: string | null;
+  durationMinutes?: number | null;
   partySize?: number | null;
   quantity?: number | null;
   customerName?: string | null;
@@ -928,12 +983,18 @@ export interface CreateBookingInput {
 
 export async function createBooking(input: CreateBookingInput): Promise<{ bookingCode: string; status: string; startAt: string; endAt: string }> {
   const environment = input.environment ?? 'live';
+  if (input.serviceType === 'activity') {
+    if (!input.resourceCode) throw new Error('activity_resource_required');
+    if (![30, 60, 90].includes(Number(input.durationMinutes))) throw new Error('activity_duration_required');
+  }
   const options = await scheduleRowsForBooking({
     serviceType: input.serviceType,
     resourceCode: input.resourceCode ?? undefined,
     date: input.date,
     time: input.time,
     endDate: input.endDate,
+    durationMinutes: input.durationMinutes,
+    partySize: input.partySize,
     environment,
   });
   if (!options.length) throw new Error('no_matching_schedule');
@@ -956,7 +1017,7 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
   const resourceRows = await resourceRes.json() as Array<{ id: string }>;
   if (!resourceRows[0]?.id) throw new Error('resource_not_found');
   const startAt = options[0].startAt;
-  const endAt = options[options.length - 1].endAt;
+  const endAt = input.serviceType === 'activity' ? options[0].endAt : options[options.length - 1].endAt;
 
   const bookingRes = await dbFetch('bookings', {
     method: 'POST',
@@ -980,12 +1041,15 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
   const booking = bookings[0];
   if (!booking) throw new Error('booking_not_created');
   try {
+    const allocationScheduleIds = input.serviceType === 'activity'
+      ? (options[0].scheduleIds?.length ? options[0].scheduleIds : [options[0].scheduleId])
+      : options.map(option => option.scheduleId);
     await dbFetch('booking_allocations', {
       method: 'POST',
       headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify(options.map(option => ({
+      body: JSON.stringify(allocationScheduleIds.map(scheduleId => ({
         booking_id: booking.id,
-        schedule_id: option.scheduleId,
+        schedule_id: scheduleId,
         capacity_units: units,
       }))),
     });
