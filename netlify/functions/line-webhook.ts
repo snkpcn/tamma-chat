@@ -3,6 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handler as coreHandler } from './_line-webhook-core';
 import { registerLineContact } from './_operations-db';
 import { handleLineOpsGroupMessage } from './_ops-notifications';
+import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -14,8 +15,9 @@ type LineSource = {
 type LineWebhookEvent = {
   type?: string;
   replyToken?: string;
+  timestamp?: number;
   source?: LineSource;
-  message?: { type?: string; text?: string };
+  message?: { id?: string; type?: string; text?: string };
 };
 
 type LineWebhookBody = {
@@ -77,10 +79,34 @@ async function replyToLine(replyToken: string, text: string, accessToken: string
 async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Promise<void> {
   const sourceType = event.source?.type;
   if (sourceType !== 'group' && sourceType !== 'room') return;
-  if (event.type !== 'message' || event.message?.type !== 'text' || typeof event.message.text !== 'string') return;
-  if (!event.replyToken) return;
+  if (event.type !== 'message' || !event.replyToken) return;
   const targetId = sourceType === 'group' ? event.source?.groupId : event.source?.roomId;
   if (!targetId) return;
+
+  if (event.message?.type === 'image' && event.message.id) {
+    const fuelReply = await handleLineFuelImage({
+      targetType: sourceType,
+      targetId,
+      userId: event.source?.userId ?? null,
+      messageId: event.message.id,
+      timestamp: event.timestamp,
+    });
+    if (fuelReply) await replyToLine(event.replyToken, fuelReply, accessToken);
+    return;
+  }
+
+  if (event.message?.type !== 'text' || typeof event.message.text !== 'string') return;
+
+  const fuelReply = await handleLineFuelText({
+    targetType: sourceType,
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+  });
+  if (fuelReply) {
+    await replyToLine(event.replyToken, fuelReply, accessToken);
+    return;
+  }
 
   const reply = await handleLineOpsGroupMessage({
     targetType: sourceType,
