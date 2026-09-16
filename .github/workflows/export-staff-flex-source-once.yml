@@ -1,0 +1,19 @@
+name: Export Staff Flex Source Once
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/export-staff-flex-source-once.yml']
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tamma-chat-staff-flex-source
+          path: |
+            .
+            !node_modules
+            !.git
+          include-hidden-files: true
+          retention-days: 1
