@@ -1,4 +1,4 @@
-import type { Handler, HandlerEvent } from '@netlify/functions';
+import type { Handler, HandlerEvent, HandlerResponse } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handler as coreHandler } from './_line-webhook-core';
 import { registerLineContact } from './_operations-db';
@@ -153,7 +153,8 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
 export const handler: Handler = async (event, context) => {
   if (event.httpMethod !== 'POST') {
     const coreResponse = await coreHandler(event, context);
-    return coreResponse ?? { statusCode: 500, body: 'LINE core handler returned no response' };
+    if (!coreResponse) return { statusCode: 500, body: 'LINE core handler returned no response' };
+    return coreResponse;
   }
 
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
@@ -190,7 +191,7 @@ export const handler: Handler = async (event, context) => {
     }
   }
 
-  let response: Awaited<ReturnType<typeof coreHandler>> = { statusCode: 200, body: 'OK' };
+  let response: HandlerResponse = { statusCode: 200, body: 'OK' };
   if (customerEvents.length) {
     const customerBody = JSON.stringify({ ...payload, events: customerEvents });
     const headers = Object.fromEntries(
@@ -198,12 +199,12 @@ export const handler: Handler = async (event, context) => {
     );
     headers['x-line-signature'] = signInternalBody(customerBody, channelSecret);
     const customerEvent: HandlerEvent = { ...event, headers, body: customerBody };
-    response = await coreHandler(customerEvent, context);
-  }
-
-  if (!response) {
-    console.error('LINE_WEBHOOK_EMPTY_RESPONSE');
-    return { statusCode: 500, body: 'LINE webhook failed' };
+    const coreResponse = await coreHandler(customerEvent, context);
+    if (!coreResponse) {
+      console.error('LINE_WEBHOOK_EMPTY_RESPONSE');
+      return { statusCode: 500, body: 'LINE webhook failed' };
+    }
+    response = coreResponse;
   }
 
   // Persist customer linkage only for direct-user events. Staff group senders stay out of customer memory/CRM.
