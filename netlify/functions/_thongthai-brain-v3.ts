@@ -38,7 +38,8 @@ export type ResponseStyle = 'direct' | 'story' | 'contrast' | 'curious' | 'refle
 export type BrainToolName =
   | 'save_journey' | 'favorite_experience' | 'unfavorite_experience' | 'mark_visited'
   | 'request_handoff' | 'list_booking_options' | 'create_booking'
-  | 'create_cafe_inquiry' | 'list_otop_products' | 'create_otop_order';
+  | 'create_cafe_inquiry' | 'list_otop_products' | 'create_otop_order'
+  | 'list_restaurant_menu' | 'create_restaurant_preorder';
 export interface BrainToolCall { name: BrainToolName; args: Record<string, unknown> }
 export interface BrainToolResult { name: BrainToolName; ok: boolean; detail: string }
 export interface AgentStateUpdate {
@@ -89,6 +90,7 @@ const VALID_STYLES: ResponseStyle[] = ['direct','story','contrast','curious','re
 const VALID_TOOLS: BrainToolName[] = [
   'save_journey','favorite_experience','unfavorite_experience','mark_visited','request_handoff',
   'list_booking_options','create_booking','create_cafe_inquiry','list_otop_products','create_otop_order',
+  'list_restaurant_menu','create_restaurant_preorder',
 ];
 const VALID_TRIP_DURATIONS = ['short','half','full','overnight','2d1n','3d2n'];
 const VALID_TRAVELER_TYPES = ['solo','couple','family','friends'];
@@ -279,6 +281,8 @@ You can now perform REAL operational work. Do not pretend a booking/order exists
 - Stay booking: requires check-in date, check-out date, room quantity, and customer name. Contact information should be requested if not already supplied.
 - Stay special request is part of the booking itself, not a separate generic handoff. Once required stay details are complete, ask once naturally whether the guest needs anything prepared or noted for the stay (examples: extra pillows, child/elderly needs, accessibility, allergy/food concern, celebration setup, arrival timing, housekeeping preference). This question is optional and must not become a loop. If the guest already gave a request, do not ask again. If the guest says none/no, proceed immediately.
 - Put the guest's operational special request into create_booking.note so it travels with the Booking to backoffice and the stay team. Preserve the meaning faithfully; summarize only enough to be clear. Never promise the request is guaranteed. Say the team will review/confirm it with the booking when fulfillment is not already verified.
+- Restaurant MENU source of truth is verified world fact restaurant_menu_live, backed by tamma_chart_os menu + recipes + live stock. For food/menu/price/ingredient/availability questions, use ONLY this live source. Never rely on an old poster, memory, or invented dish. If orderable=false, say the dish is temporarily unavailable and, when useful, name the unavailable ingredient. The customer menu page is the menuUrl in that fact.
+- Restaurant PREORDER is different from a restaurant/table booking. For food ordered ahead, collect exact menu items + quantity, pickup date, pickup time, customer name, and contact if the channel itself is not reachable. Then use create_restaurant_preorder. A successful preorder is REQUESTED until staff accepts it in the restaurant LINE group. Never claim staff accepted it before the tool result says so.
 - Activity booking is inventory-backed. The verified world facts contain the current real catalog, prices and active inventory. Never invent them.
 - Valid activity resource mapping: ATV = activity-atv, ขี่ม้า = activity-horse, ยิงธนู = activity-archery. Do not use the old generic activity-adventure resource.
 - Before creating an activity booking, collect: exact activity, duration (30/60/90 minutes), date, a specific available start time, participant count, and customer name/contact. Participant count consumes the same number of physical capacity units.
@@ -295,7 +299,9 @@ TOOL USE
 3. create_cafe_inquiry {question, customerName?, phone?, email?} — create a real staff follow-up item when the café question cannot be answered from verified facts or human contact is requested.
 4. list_otop_products {} — list current real orderable OTOP products and stock-safe product information.
 5. create_otop_order {sku, quantity, customerName?, phone?, email?, fulfillmentType?, shippingAddress?, note?} — create a REAL requested order after explicit choice.
-6. save_journey {}, favorite_experience {experienceId}, unfavorite_experience {experienceId}, mark_visited {experienceId}, request_handoff {reasonCode} keep their prior meanings.
+6. list_restaurant_menu {} — read the current real ตำมา-ชาติ menu, prices, ingredients and live availability from the restaurant source of truth. Use it when a fresh explicit menu lookup is helpful.
+7. create_restaurant_preorder {date, time, items:[{name,quantity}], customerName, phone?, email?, note?} — create a REAL food preorder request. Item names must come from the live menu. Date/time is the requested food pickup time in Asia/Bangkok.
+8. save_journey {}, favorite_experience {experienceId}, unfavorite_experience {experienceId}, mark_visited {experienceId}, request_handoff {reasonCode} keep their prior meanings.
 If TOOL RESULTS below are non-empty, those actions already ran. Do not repeat them in the same turn; compose the final answer from their success/failure.
 
 CHANNEL
@@ -422,6 +428,21 @@ function normalizeToolCalls(value: unknown, toolResultsPresent: boolean): BrainT
       ...(safeString(args.note,1000) ? { note: safeString(args.note,1000) } : {}),
     }}); continue;
   }
+    if (name === 'list_restaurant_menu') { calls.push({ name, args: {} }); continue; }
+    if (name === 'create_restaurant_preorder') {
+      const date = dateString(args.date); const time = timeString(args.time);
+      const customerName = safeString(args.customerName,120);
+      const rawItems = Array.isArray(args.items) ? args.items : [];
+      const items = rawItems.slice(0,20).map(item => item && typeof item === 'object' ? item as Record<string,unknown> : {})
+        .map(item => ({ name:safeString(item.name,160), quantity:safeNumber(item.quantity,1,50) ?? 1 }))
+        .filter((item): item is {name:string;quantity:number} => Boolean(item.name));
+      if (!date || !time || !customerName || !items.length) continue;
+      calls.push({ name, args: { date,time,items,customerName,
+        ...(safeString(args.phone,30) ? {phone:safeString(args.phone,30)} : {}),
+        ...(safeString(args.email,160) ? {email:safeString(args.email,160)} : {}),
+        ...(safeString(args.note,1000) ? {note:safeString(args.note,1000)} : {}),
+      }}); continue;
+    }
     if (name === 'create_cafe_inquiry') {
       const question = safeString(args.question,2000); if (!question) continue;
       calls.push({ name, args: {

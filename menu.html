@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>เมนู ตำมา-ชาติ</title>
+<meta name="description" content="เมนูจริงและสถานะวัตถุดิบล่าสุดของร้าน ตำมา-ชาติ">
+<style>
+:root{--paper:#f7f0df;--ink:#3b2014;--muted:#816f61;--green:#4f6538;--line:#d8c7aa;--card:#fffaf0;--danger:#9b352b}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Noto Sans Thai","Tahoma",sans-serif}.wrap{max-width:1100px;margin:auto;padding:20px 16px 60px}.hero{text-align:center;padding:22px 8px 20px;border-bottom:1px solid var(--line)}.brand{font-family:Georgia,"Noto Serif Thai",serif;font-size:clamp(42px,8vw,76px);font-weight:800;line-height:1}.sub{margin-top:8px;color:var(--muted)}.truth{display:inline-flex;align-items:center;gap:7px;margin-top:13px;padding:8px 12px;border:1px solid #b9c3a3;border-radius:999px;background:#f3f6eb;color:#465735;font-size:13px}.bar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:16px 0}.status{font-size:14px;color:var(--muted)}.chat{display:inline-block;text-decoration:none;background:var(--green);color:white;padding:11px 16px;border-radius:12px;font-weight:700}.categories{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}@media(max-width:720px){.categories{grid-template-columns:1fr}}.category{background:rgba(255,250,240,.68);border:1px solid var(--line);border-radius:18px;padding:18px}.category h2{font-family:Georgia,"Noto Serif Thai",serif;margin:0 0 8px;font-size:25px;border-bottom:1px solid var(--line);padding-bottom:9px}.item{padding:12px 0;border-bottom:1px dashed #ddceb7}.item:last-child{border-bottom:0}.top{display:flex;gap:12px;align-items:flex-start}.name{font-weight:750;flex:1;min-width:0}.star{color:#806328}.price{font-family:Georgia,serif;font-weight:700;white-space:nowrap}.meta{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.45}.sold .name,.sold .price{color:#958a7f;text-decoration:line-through}.badge{display:inline-block;margin-top:7px;padding:4px 8px;border-radius:8px;font-size:12px;font-weight:700}.ok{background:#edf3e5;color:#52663c}.no{background:#f8e7e2;color:var(--danger)}.empty{text-align:center;padding:50px;color:var(--muted)}.foot{text-align:center;color:var(--muted);font-size:12px;margin-top:24px;line-height:1.6}.retry{border:1px solid var(--line);background:white;border-radius:10px;padding:10px 14px;color:var(--ink);font-weight:700}</style>
+</head>
+<body>
+<main class="wrap">
+<header class="hero">
+<div class="brand">ตำมา-ชาติ</div>
+<div class="sub">เมนูจริง · อัปเดตจากวัตถุดิบและสต๊อกของร้าน</div>
+<div class="truth">● Source of Truth — ราคาและสถานะเมนูจากหลังบ้านเดียวกัน</div>
+</header>
+<div class="bar"><div id="status" class="status">กำลังโหลดเมนูล่าสุด…</div><a class="chat" href="./">คุยกับทองไทย / สั่งล่วงหน้า</a></div>
+<div id="menu" class="categories" aria-live="polite"></div>
+<div class="foot">เมนูที่ขึ้น “หมดชั่วคราว” จะกลับมาสั่งได้อัตโนมัติเมื่อทีมงานอัปเดตวัตถุดิบเข้า<br>สูตรและปริมาณวัตถุดิบเป็นข้อมูลปฏิบัติงานของร้านและอาจมีการปรับปรุง</div>
+</main>
+<script>
+const root=document.getElementById('menu'),statusEl=document.getElementById('status');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function render(data){const groups=new Map();for(const item of data.items||[]){if(!groups.has(item.category_name))groups.set(item.category_name,[]);groups.get(item.category_name).push(item)}root.innerHTML='';for(const [category,items] of groups){const section=document.createElement('section');section.className='category';section.innerHTML=`<h2>${esc(category)}</h2>`;for(const item of items){const el=document.createElement('article');el.className='item '+(item.is_orderable?'':'sold');const ingredients=(item.ingredient_names||[]).slice(0,8).join(' · ');const unavailable=(item.unavailable_ingredients||[]).join(', ');el.innerHTML=`<div class="top"><div class="name">${esc(item.name)} ${item.is_signature?'<span class="star">★</span>':''}</div><div class="price">${Number(item.selling_price).toFixed(0)} ฿</div></div><div class="meta">วัตถุดิบหลัก: ${esc(ingredients||'—')}</div>${item.is_orderable?`<span class="badge ok">พร้อมสั่ง</span>`:`<span class="badge no">หมดชั่วคราว${unavailable?' · '+esc(unavailable):''}</span>`}`;section.appendChild(el)}root.appendChild(section)}const updated=new Date(data.updatedAt);statusEl.textContent=`${data.count||0} เมนู · อัปเดตล่าสุด ${Number.isNaN(updated.valueOf())?'จากหลังบ้าน':updated.toLocaleString('th-TH',{dateStyle:'medium',timeStyle:'short'})}`}
+async function load(){statusEl.textContent='กำลังโหลดเมนูล่าสุด…';root.innerHTML='';try{const r=await fetch('/.netlify/functions/restaurant-menu',{cache:'no-store'});if(!r.ok)throw new Error('load');render(await r.json())}catch(e){statusEl.textContent='โหลดเมนูไม่สำเร็จ';root.innerHTML='<div class="empty">ตอนนี้เปิดเมนูไม่ได้ชั่วคราว<br><br><button class="retry" type="button">ลองใหม่</button></div>';root.querySelector('button').addEventListener('click',load)}}
+load();
+</script>
+</body>
+</html>
