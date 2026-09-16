@@ -160,6 +160,36 @@ function mergeAfterTools(first: BrainResponse, second: BrainResponse): BrainResp
   };
 }
 
+function duplicateRestaurantPreorderMessage(
+  language: BrainRequest['language'],
+  toolResults: Array<{ name: string; ok: boolean; detail: string }>,
+): string | null {
+  const result = toolResults.find(item => item.name === 'create_restaurant_preorder' && item.ok);
+  if (!result) return null;
+  try {
+    const detail = JSON.parse(result.detail) as Record<string, unknown>;
+    if (detail.duplicate !== true || typeof detail.preorderCode !== 'string') return null;
+    const code = detail.preorderCode;
+    const messages: Record<BrainRequest['language'], string> = {
+      th: [
+        'รายการนี้มีอยู่แล้วครับ ✅',
+        'ทองไทยไม่ได้สร้างออเดอร์ซ้ำ',
+        `รหัสเดิม: ${code}`,
+        'สถานะ: รอร้านรับออเดอร์',
+        '',
+        'ระบบใช้คำขอเดิมของคุณครับ รอทีมร้านกดรับออเดอร์ได้เลย',
+      ].join('\n'),
+      en: `This preorder already exists ✅\nNo duplicate order was created.\nExisting code: ${code}\nStatus: waiting for the restaurant to accept.`,
+      zh: `这笔预订单已经存在 ✅\n系统没有重复创建订单。\n原订单号：${code}\n状态：等待餐厅接单。`,
+      lo: `ລາຍການນີ້ມີຢູ່ແລ້ວ ✅\nລະບົບບໍ່ໄດ້ສ້າງອໍເດີຊ້ຳ\nລະຫັດເດີມ: ${code}\nສະຖານະ: ລໍຖ້າຮ້ານຮັບອໍເດີ`,
+      vi: `Đơn đặt trước này đã tồn tại ✅\nHệ thống không tạo đơn trùng.\nMã cũ: ${code}\nTrạng thái: đang chờ nhà hàng nhận đơn.`,
+    };
+    return messages[language];
+  } catch {
+    return null;
+  }
+}
+
 export const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
@@ -241,23 +271,35 @@ export const handler: Handler = async (event: HandlerEvent) => {
       firstResponse,
       request,
     );
-    try {
-      const afterTools = await runThongthaiBrain(
-        request,
-        communityOfferings,
-        messages,
-        { ...runtime, toolResults },
-      );
-      finalResponse = mergeAfterTools(firstResponse, afterTools);
-    } catch (error) {
-      console.error('THONGTHAI_BRAIN_POST_TOOL_ERROR', error);
+    const duplicatePreorderNotice = duplicateRestaurantPreorderMessage(request.language, toolResults);
+    if (duplicatePreorderNotice) {
+      // This is an idempotent replay of an existing preorder. Answer deterministically so
+      // the customer is never told a duplicate request was newly accepted.
       finalResponse = {
         ...firstResponse,
         toolCalls: [],
-        message: toolResults.every(result => result.ok)
-          ? firstResponse.message
-          : `${firstResponse.message}\n\nมีบางอย่างที่ทองไทยยังทำให้ไม่สำเร็จครับ ลองอีกครั้งได้เลย`,
+        suggestedActions: [],
+        message: duplicatePreorderNotice,
       };
+    } else {
+      try {
+        const afterTools = await runThongthaiBrain(
+          request,
+          communityOfferings,
+          messages,
+          { ...runtime, toolResults },
+        );
+        finalResponse = mergeAfterTools(firstResponse, afterTools);
+      } catch (error) {
+        console.error('THONGTHAI_BRAIN_POST_TOOL_ERROR', error);
+        finalResponse = {
+          ...firstResponse,
+          toolCalls: [],
+          message: toolResults.every(result => result.ok)
+            ? firstResponse.message
+            : `${firstResponse.message}\n\nมีบางอย่างที่ทองไทยยังทำให้ไม่สำเร็จครับ ลองอีกครั้งได้เลย`,
+        };
+      }
     }
   }
 
