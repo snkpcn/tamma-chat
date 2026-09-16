@@ -1,3 +1,4 @@
+import { handleBookingOpsCommand } from './_ops-booking-actions';
 import { decryptPii, encryptPii, piiHash } from './_operations-db';
 
 export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all';
@@ -663,6 +664,12 @@ export async function handleLineOpsGroupMessage(input: {
   text: string;
 }): Promise<string | null> {
   const text = input.text.trim();
+  const bookingAction = await handleBookingOpsCommand({
+    targetId: input.targetId,
+    userId: input.userId,
+    text,
+  });
+  if (bookingAction.handled) return bookingAction.reply;
   const confirmMatch = text.match(/^ยืนยัน\s+(BK-\d{6}-[A-Z0-9]{8})$/iu);
   if (confirmMatch) {
     const binding = await currentBindingForTarget(input.targetId);
