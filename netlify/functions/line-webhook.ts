@@ -1,14 +1,51 @@
-import type { Handler } from '@netlify/functions';
-import { createHash } from 'node:crypto';
+import type { Handler, HandlerEvent } from '@netlify/functions';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handler as coreHandler } from './_line-webhook-core';
 import { registerLineContact } from './_operations-db';
+import { handleLineOpsGroupMessage } from './_ops-notifications';
 
-/**
- * Stable UUID-shaped anonymous id used everywhere in Thongthai memory.
- * The raw LINE user id never enters chat memory, semantic memory, logs, or model prompts.
- * For operational service follow-up only, the wrapper may store the raw provider id
- * encrypted server-side in customer_channel_contacts after the signed webhook succeeds.
- */
+type LineSource = {
+  type?: 'user' | 'group' | 'room';
+  userId?: string;
+  groupId?: string;
+  roomId?: string;
+};
+
+type LineWebhookEvent = {
+  type?: string;
+  replyToken?: string;
+  source?: LineSource;
+  message?: { type?: string; text?: string };
+};
+
+type LineWebhookBody = {
+  destination?: string;
+  events?: LineWebhookEvent[];
+};
+
+const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
+
+function getHeader(event: HandlerEvent, name: string): string | undefined {
+  const target = name.toLowerCase();
+  return Object.entries(event.headers ?? {}).find(([key]) => key.toLowerCase() === target)?.[1];
+}
+
+function verifyLineSignature(rawBody: string, signature: string | undefined, channelSecret: string): boolean {
+  if (!signature) return false;
+  try {
+    const expected = createHmac('sha256', channelSecret).update(rawBody, 'utf8').digest();
+    const received = Buffer.from(signature, 'base64');
+    return received.length === expected.length && timingSafeEqual(received, expected);
+  } catch {
+    return false;
+  }
+}
+
+function signInternalBody(rawBody: string, channelSecret: string): string {
+  return createHmac('sha256', channelSecret).update(rawBody, 'utf8').digest('base64');
+}
+
+/** Stable UUID-shaped anonymous id used everywhere in Thongthai memory. */
 function lineGuestId(userId: string): string {
   const hex = createHash('sha256')
     .update('tamma-line:' + userId, 'utf8')
@@ -22,28 +59,101 @@ function lineGuestId(userId: string): string {
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20, 32)}`;
 }
 
+async function replyToLine(replyToken: string, text: string, accessToken: string): Promise<void> {
+  const response = await fetch(LINE_REPLY_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ replyToken, messages: [{ type: 'text', text: text.slice(0, 4900) }] }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`LINE ops reply failed ${response.status}: ${body.slice(0, 220)}`);
+  }
+}
+
+async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Promise<void> {
+  const sourceType = event.source?.type;
+  if (sourceType !== 'group' && sourceType !== 'room') return;
+  if (event.type !== 'message' || event.message?.type !== 'text' || typeof event.message.text !== 'string') return;
+  if (!event.replyToken) return;
+  const targetId = sourceType === 'group' ? event.source?.groupId : event.source?.roomId;
+  if (!targetId) return;
+
+  const reply = await handleLineOpsGroupMessage({
+    targetType: sourceType,
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+  });
+  if (reply) await replyToLine(event.replyToken, reply, accessToken);
+}
+
 export const handler: Handler = async (event, context) => {
-  const response = await coreHandler(event, context);
+  if (event.httpMethod !== 'POST') return coreHandler(event, context);
+
+  const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!channelSecret || !accessToken) {
+    console.error('LINE_WEBHOOK_CONFIGURATION_MISSING');
+    return { statusCode: 500, body: 'LINE configuration missing' };
+  }
+
+  const rawBody = event.body ?? '';
+  if (!verifyLineSignature(rawBody, getHeader(event, 'x-line-signature'), channelSecret)) {
+    console.error('LINE_WEBHOOK_SIGNATURE_INVALID');
+    return { statusCode: 401, body: 'Invalid signature' };
+  }
+
+  let payload: LineWebhookBody;
+  try {
+    payload = JSON.parse(rawBody) as LineWebhookBody;
+  } catch {
+    return { statusCode: 400, body: 'Invalid JSON' };
+  }
+
+  const allEvents = Array.isArray(payload.events) ? payload.events : [];
+  const opsEvents = allEvents.filter(item => item.source?.type === 'group' || item.source?.type === 'room');
+  const customerEvents = allEvents.filter(item => item.source?.type !== 'group' && item.source?.type !== 'room');
+
+  if (opsEvents.length) {
+    const results = await Promise.allSettled(opsEvents.map(item => handleOpsEvent(item, accessToken)));
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        const message = result.reason instanceof Error ? result.reason.message : 'Unknown LINE ops group error';
+        console.error('LINE_OPS_GROUP_ERROR', message.slice(0, 300));
+      }
+    }
+  }
+
+  let response: Awaited<ReturnType<typeof coreHandler>> = { statusCode: 200, body: 'OK' };
+  if (customerEvents.length) {
+    const customerBody = JSON.stringify({ ...payload, events: customerEvents });
+    const headers = Object.fromEntries(
+      Object.entries(event.headers ?? {}).filter(([key]) => key.toLowerCase() !== 'x-line-signature'),
+    );
+    headers['x-line-signature'] = signInternalBody(customerBody, channelSecret);
+    const customerEvent: HandlerEvent = { ...event, headers, body: customerBody };
+    response = await coreHandler(customerEvent, context);
+  }
+
   if (!response) {
     console.error('LINE_WEBHOOK_EMPTY_RESPONSE');
     return { statusCode: 500, body: 'LINE webhook failed' };
   }
 
-  // Only persist operational contact linkage after the core webhook has accepted
-  // the signed LINE request. This keeps invalid/spoofed requests out of customer data.
-  if (event.httpMethod === 'POST' && response?.statusCode === 200 && event.body) {
+  // Persist customer linkage only for direct-user events. Staff group senders stay out of customer memory/CRM.
+  if (response.statusCode === 200 && customerEvents.length) {
     try {
-      const payload = JSON.parse(event.body) as {
-        events?: Array<{ source?: { userId?: string } }>;
-      };
       const userIds = [...new Set(
-        (payload.events ?? [])
+        customerEvents
+          .filter(item => item.source?.type === 'user')
           .map(item => item.source?.userId)
           .filter((value): value is string => typeof value === 'string' && value.length > 0 && value.length <= 160),
       )];
       for (const userId of userIds) {
-        // Never log userId. registerLineContact encrypts the provider id at rest
-        // and stores a one-way hash only for lookup/deduplication.
         await registerLineContact(lineGuestId(userId), userId);
       }
     } catch (error) {

@@ -7,3 +7,7 @@
 
 [functions."thongthai-chat"]
   included_files = ["src/data/experiences.ts"]
+
+# Netlify schedules are UTC. 00:00 UTC = 07:00 Asia/Bangkok.
+[functions."ops-daily-schedule"]
+  schedule = "0 0 * * *"
