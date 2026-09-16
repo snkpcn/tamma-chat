@@ -14,4 +14,4 @@ jobs:
           ref: staff-flex-ux
       - run: npm ci
       - run: npx tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck netlify/functions/_ops-line-ui.ts netlify/functions/_ops-booking-notify-flex.ts netlify/functions/line-webhook.ts netlify/functions/ops-notify.ts netlify/functions/_ops-booking-actions.ts
-# rerun after handler type fix
+# rerun after explicit HandlerResponse fix
