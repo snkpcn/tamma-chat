@@ -353,6 +353,7 @@ async function insertFuelLog(input: {
 }): Promise<'saved' | 'duplicate'> {
   if (await existingFuelByMessage(input.messageId)) return 'duplicate';
   const x = input.extraction;
+  if (!x.is_fuel_receipt) throw new Error('not_fuel_receipt');
   if (!extractionHasLedgerValue(x)) throw new Error('receipt_has_no_ledger_value');
   const noteParts = [
     x.note,
@@ -437,6 +438,10 @@ export async function handleLineFuelText(input: {
     }
     const extraction = pendingExtraction(session);
     if (extraction && session?.pending_line_message_id && session.pending_received_at) {
+      if (!extraction.is_fuel_receipt) {
+        await clearSession(input.targetId, input.userId);
+        return `รูปที่ส่งมาไม่ใช่สลิปเติมน้ำมันครับ${extraction.merchant ? ` — อ่านได้ว่าเป็น ${extraction.merchant}` : ''}\nไม่ได้บันทึกลงตารางน้ำมัน`;
+      }
       if (!extractionHasLedgerValue(extraction)) {
         await saveSession(input.targetId, input.userId, {
           selectedAssetId: asset.id,
@@ -512,6 +517,10 @@ export async function handleLineFuelImage(input: {
   }
 
   const extractionForSession = { ...extraction, receipt_sha256: image.sha256 } as unknown as Record<string, unknown>;
+  if (!extraction.is_fuel_receipt) {
+    await clearSession(input.targetId, input.userId);
+    return `รูปที่ส่งมาไม่ใช่สลิปเติมน้ำมันครับ${extraction.merchant ? ` — อ่านได้ว่าเป็น ${extraction.merchant}` : ''}\nไม่ได้บันทึกลงตารางน้ำมัน`;
+  }
   if (!extractionHasLedgerValue(extraction)) {
     await saveSession(input.targetId, input.userId, {
       pendingLineMessageId: input.messageId,
