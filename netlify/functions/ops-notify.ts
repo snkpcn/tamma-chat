@@ -43,7 +43,12 @@ export const handler: Handler = async (event: HandlerEvent) => {
       body: JSON.stringify({ ok: true, entity, id: body.id, status }),
     };
   } catch (error) {
-    console.error('OPS_NOTIFICATION_DISPATCH_ERROR', error instanceof Error ? error.message.slice(0, 300) : 'unknown');
-    return { statusCode: 500, body: 'Notification dispatch failed' };
+    const detail = error instanceof Error ? error.message.slice(0, 300) : 'unknown';
+    console.error('OPS_NOTIFICATION_DISPATCH_ERROR', detail);
+    return {
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: false, error: detail }),
+    };
   }
 };
