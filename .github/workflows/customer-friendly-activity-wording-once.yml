@@ -16,25 +16,11 @@ jobs:
           from pathlib import Path
           p = Path('netlify/functions/_ops-booking-actions.ts')
           s = p.read_text()
-          marker = "function bookingCustomerText(booking: BookingRow, title: string, units: UnitRow[] = []): string {\n"
-          helper = """function customerUnitLabel(units: UnitRow[]): string {
-  const activityCode = String(units[0]?.metadata?.activity_code ?? '');
-  if (activityCode === 'horse') return 'น้อง';
-  if (activityCode === 'atv') return 'รถ';
-  if (activityCode === 'archery') return 'ช่องยิง';
-  return 'รายการที่จัด';
-}
-
-""" + marker
-          if marker not in s:
-              raise SystemExit('bookingCustomerText marker not found')
-          s = s.replace(marker, helper, 1)
           old = "    units.length ? `ทรัพยากร: ${units.map(unit => unit.name).join(', ')}` : '',\n"
-          new = "    units.length ? `${customerUnitLabel(units)}: ${units.map(unit => unit.name).join(', ')}` : '',\n"
+          new = "    units.length ? `${String(units[0]?.metadata?.activity_code ?? '') === 'horse' ? 'น้อง' : String(units[0]?.metadata?.activity_code ?? '') === 'atv' ? 'รถ' : String(units[0]?.metadata?.activity_code ?? '') === 'archery' ? 'ช่องยิง' : 'รายการที่จัด'}: ${units.map(unit => unit.name).join(', ')}` : '',\n"
           if old not in s:
               raise SystemExit('customer resource label marker not found')
-          s = s.replace(old, new, 1)
-          p.write_text(s)
+          p.write_text(s.replace(old, new, 1))
           PY
       - run: npm ci
       - name: Typecheck booking actions
