@@ -151,7 +151,10 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
 }
 
 export const handler: Handler = async (event, context) => {
-  if (event.httpMethod !== 'POST') return coreHandler(event, context);
+  if (event.httpMethod !== 'POST') {
+    const coreResponse = await coreHandler(event, context);
+    return coreResponse ?? { statusCode: 500, body: 'LINE core handler returned no response' };
+  }
 
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
   const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
