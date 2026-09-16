@@ -14,28 +14,7 @@ jobs:
           ref: main
       - name: Wire booking action handler
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('netlify/functions/_ops-notifications.ts')
-          s = p.read_text()
-          imp = "import { handleBookingOpsCommand } from './_ops-booking-actions';\n"
-          if imp not in s:
-              s = imp + s
-          marker = "  const text = input.text.trim();\n"
-          hook = """  const text = input.text.trim();
-  const bookingAction = await handleBookingOpsCommand({
-    targetId: input.targetId,
-    userId: input.userId,
-    text,
-  });
-  if (bookingAction.handled) return bookingAction.reply;
-"""
-          if hook not in s:
-              if marker not in s:
-                  raise SystemExit('handler marker not found')
-              s = s.replace(marker, hook, 1)
-          p.write_text(s)
-          PY
+          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCnAgPSBQYXRoKCJuZXRsaWZ5L2Z1bmN0aW9ucy9fb3BzLW5vdGlmaWNhdGlvbnMudHMiKQpzID0gcC5yZWFkX3RleHQoKQppbXAgPSAiaW1wb3J0IHsgaGFuZGxlQm9va2luZ09wc0NvbW1hbmQgfSBmcm9tICcuL19vcHMtYm9va2luZy1hY3Rpb25zJztcbiIKaWYgaW1wIG5vdCBpbiBzOgogICAgcyA9IGltcCArIHMKbWFya2VyID0gIiAgY29uc3QgdGV4dCA9IGlucHV0LnRleHQudHJpbSgpO1xuIgpob29rID0gIiIiICBjb25zdCB0ZXh0ID0gaW5wdXQudGV4dC50cmltKCk7CiAgY29uc3QgYm9va2luZ0FjdGlvbiA9IGF3YWl0IGhhbmRsZUJvb2tpbmdPcHNDb21tYW5kKHsKICAgIHRhcmdldElkOiBpbnB1dC50YXJnZXRJZCwKICAgIHVzZXJJZDogaW5wdXQudXNlcklkLAogICAgdGV4dCwKICB9KTsKICBpZiAoYm9va2luZ0FjdGlvbi5oYW5kbGVkKSByZXR1cm4gYm9va2luZ0FjdGlvbi5yZXBseTsKIiIiCmlmIGhvb2sgbm90IGluIHM6CiAgICBpZiBtYXJrZXIgbm90IGluIHM6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiaGFuZGxlciBtYXJrZXIgbm90IGZvdW5kIikKICAgIHMgPSBzLnJlcGxhY2UobWFya2VyLCBob29rLCAxKQpwLndyaXRlX3RleHQocykK' | base64 -d | python
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add netlify/functions/_ops-notifications.ts
