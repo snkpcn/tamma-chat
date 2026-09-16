@@ -1,0 +1,48 @@
+name: Add Ops Command Help Once
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/add-ops-command-help-once.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Add command help
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('netlify/functions/_ops-booking-actions.ts')
+          s=p.read_text()
+          needle="  const text = input.text.trim();\n  const patterns = {"
+          repl="""  const text = input.text.trim();
+  if (/^(?:คำสั่ง|ช่วย|help)$/iu.test(text)) {
+    return { handled: true, reply: [
+      'คำสั่งจัดการ Booking ในกลุ่มนี้',
+      '• ยืนยัน BK-...',
+      '• ทรัพยากร BK-...',
+      '• เปลี่ยนทรัพยากร BK-... ATV 1, ATV 3',
+      '• เลื่อน BK-... 11:00',
+      '• เลื่อน BK-... 18/09 11:00',
+      '• ยกเลิก BK-...',
+      '• เสร็จงาน BK-...',
+      '',
+      'ดูตาราง: ตารางวันนี้ / ตารางพรุ่งนี้',
+    ].join('\\n') };
+  }
+  const patterns = {"""
+          if repl not in s:
+              if needle not in s: raise SystemExit('marker missing')
+              s=s.replace(needle,repl,1)
+          p.write_text(s)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add netlify/functions/_ops-booking-actions.ts
+          git rm .github/workflows/add-ops-command-help-once.yml
+          git commit -m 'Add LINE ops command help'
+          git push origin main
