@@ -1,0 +1,25 @@
+name: Restaurant Preorder Idempotency V2 Once
+on:
+  push:
+    branches: [restaurant-preorder-idempotency-v2]
+    paths:
+      - .github/workflows/restaurant-preorder-idempotency-v2-once.yml
+permissions:
+  contents: write
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python .github/scripts/patch_restaurant_preorder_idempotency_v2.py
+      - run: npm ci
+      - name: Typecheck preorder hotfix
+        run: npx tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck netlify/functions/_restaurant-sot.ts netlify/functions/_thongthai-runtime-v3.ts netlify/functions/thongthai-chat.ts netlify/functions/line-webhook.ts
+      - name: Commit tested hotfix
+        run: |
+          rm .github/workflows/restaurant-preorder-idempotency-v2-once.yml .github/scripts/patch_restaurant_preorder_idempotency_v2.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add netlify/functions/_restaurant-sot.ts .github/workflows/restaurant-preorder-idempotency-v2-once.yml .github/scripts/patch_restaurant_preorder_idempotency_v2.py
+          git commit -m 'Make restaurant preorders idempotent [skip netlify]'
+          git push origin restaurant-preorder-idempotency-v2
