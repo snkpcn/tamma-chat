@@ -178,7 +178,7 @@ function bookingCustomerText(booking: BookingRow, title: string, units: UnitRow[
     `เลขที่: ${booking.booking_code}`,
     `วันเวลา: ${thaiDateTime(booking.start_at)} → ${thaiDateTime(booking.end_at)}`,
     `จำนวน: ${amount}`,
-    units.length ? `ทรัพยากร: ${units.map(unit => unit.name).join(', ')}` : '',
+    units.length ? `${String(units[0]?.metadata?.activity_code ?? '') === 'horse' ? 'น้อง' : String(units[0]?.metadata?.activity_code ?? '') === 'atv' ? 'รถ' : String(units[0]?.metadata?.activity_code ?? '') === 'archery' ? 'ช่องยิง' : 'รายการที่จัด'}: ${units.map(unit => unit.name).join(', ')}` : '',
   ].filter(Boolean).join('\n');
 }
 
