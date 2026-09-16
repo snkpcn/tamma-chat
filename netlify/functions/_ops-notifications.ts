@@ -583,6 +583,79 @@ export async function sendDailyOpsSummaries(localDate = isoLocalDate()): Promise
   return results;
 }
 
+
+async function customerLineTarget(customerId: string | null): Promise<string | null> {
+  if (!customerId) return null;
+  const response = await dbFetch(
+    `customer_channel_contacts?customer_id=eq.${customerId}&provider=eq.line&reachable=eq.true&verified=eq.true`
+    + '&select=external_id_enc&order=last_seen_at.desc&limit=1',
+  );
+  const row = (await response.json() as Array<{ external_id_enc: string }>)[0];
+  return decryptPii(row?.external_id_enc) ?? null;
+}
+
+async function confirmBookingFromOpsGroup(input: {
+  binding: NotificationChannel;
+  bookingCode: string;
+  userId?: string | null;
+}): Promise<string> {
+  const response = await dbFetch(
+    `bookings?booking_code=eq.${encodeURIComponent(input.bookingCode)}`
+    + '&select=id,booking_code,customer_id,service_type,resource_id,start_at,end_at,party_size,quantity,status,staff_note,environment&limit=1',
+  );
+  const booking = (await response.json() as Array<{
+    id: string; booking_code: string; customer_id: string | null; service_type: string; resource_id: string;
+    start_at: string; end_at: string; party_size: number | null; quantity: number; status: string;
+    staff_note: string | null; environment: string;
+  }>)[0];
+  if (!booking) return `ไม่พบเลขที่ ${input.bookingCode} ครับ`;
+  if (input.binding.team_code === 'all' || booking.service_type !== input.binding.team_code) {
+    return `รายการ ${booking.booking_code} เป็นงานทีม ${booking.service_type} ไม่ใช่กลุ่ม ${TEAM_LABELS[input.binding.team_code]} ครับ`;
+  }
+  if (booking.status === 'confirmed') return `✅ ${booking.booking_code} ยืนยันแล้วอยู่แล้วครับ`;
+  if (booking.status !== 'requested') return `รายการ ${booking.booking_code} อยู่สถานะ ${booking.status} จึงยืนยันไม่ได้ครับ`;
+
+  const actorHash = input.userId ? piiHash(input.userId)?.slice(0, 12) : null;
+  const auditLine = `ยืนยันผ่าน LINE กลุ่ม ${TEAM_LABELS[input.binding.team_code]}${actorHash ? ` · staff:${actorHash}` : ''} · ${new Date().toISOString()}`;
+  const staffNote = [booking.staff_note?.trim(), auditLine].filter(Boolean).join('\n').slice(0, 4000);
+  await dbFetch(`bookings?id=eq.${booking.id}`, {
+    method: 'PATCH', headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ status: 'confirmed', contact_status: 'pending', staff_note: staffNote, updated_at: new Date().toISOString() }),
+  });
+
+  const resourceResponse = await dbFetch(`service_resources?id=eq.${booking.resource_id}&select=name&limit=1`);
+  const resource = (await resourceResponse.json() as Array<{ name: string }>)[0];
+  const amount = booking.service_type === 'stay'
+    ? `${booking.quantity || 1} หลัง${booking.party_size ? ` / ${booking.party_size} คน` : ''}`
+    : `${booking.party_size ?? booking.quantity ?? 1} คน`;
+  const prefix = booking.environment === 'test' ? '🧪 TEST — ' : '';
+  const customerText = [
+    `${prefix}✅ ทองไทยยืนยันการจองแล้วครับ`,
+    `เลขที่: ${booking.booking_code}`,
+    `รายการ: ${resource?.name ?? booking.service_type}`,
+    `วันเวลา: ${thaiDateTime(booking.start_at)} → ${thaiDateTime(booking.end_at)}`,
+    `จำนวน: ${amount}`,
+    'สถานะ: ยืนยันแล้ว',
+    '',
+    'ทีมงานรับรายการเรียบร้อยแล้วครับ หากต้องการแก้ไข สามารถตอบกลับทาง LINE นี้ได้เลย',
+  ].join('\n');
+
+  const target = await customerLineTarget(booking.customer_id);
+  if (!target) {
+    return `⚠️ ยืนยัน ${booking.booking_code} แล้ว แต่ไม่พบ LINE ลูกค้าที่ติดต่อได้ กรุณาติดต่อจากข้อมูลหลังบ้านครับ`;
+  }
+  try {
+    await linePush(target, customerText);
+    await dbFetch(`bookings?id=eq.${booking.id}`, {
+      method: 'PATCH', headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ contact_status: 'contacted', updated_at: new Date().toISOString() }),
+    });
+    return `✅ ยืนยัน ${booking.booking_code} แล้ว\nทองไทยแจ้งลูกค้ากลับทาง LINE สำเร็จครับ`;
+  } catch {
+    return `⚠️ ยืนยัน ${booking.booking_code} แล้ว แต่ส่ง LINE หาลูกค้าไม่สำเร็จ กรุณาติดต่อจากหลังบ้านครับ`;
+  }
+}
+
 export async function handleLineOpsGroupMessage(input: {
   targetType: TargetType;
   targetId: string;
@@ -590,6 +663,13 @@ export async function handleLineOpsGroupMessage(input: {
   text: string;
 }): Promise<string | null> {
   const text = input.text.trim();
+  const confirmMatch = text.match(/^ยืนยัน\s+(BK-\d{6}-[A-Z0-9]{8})$/iu);
+  if (confirmMatch) {
+    const binding = await currentBindingForTarget(input.targetId);
+    if (!binding) return 'กลุ่มนี้ยังไม่ได้ผูกทีมครับ';
+    return confirmBookingFromOpsGroup({ binding, bookingCode: confirmMatch[1].toUpperCase(), userId: input.userId });
+  }
+
   const bindMatch = text.match(/^ผูกทีม\s+(.+)$/iu);
   if (bindMatch) {
     const teamCode = parseTeamCode(bindMatch[1]);
