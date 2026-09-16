@@ -5,6 +5,7 @@ import { registerLineContact } from './_operations-db';
 import { handleLineOpsGroupMessage } from './_ops-notifications';
 import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
 import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
+import { handleStaffBookingPostback, type LineMessage } from './_ops-line-ui';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -19,6 +20,10 @@ type LineWebhookEvent = {
   timestamp?: number;
   source?: LineSource;
   message?: { id?: string; type?: string; text?: string };
+  postback?: {
+    data?: string;
+    params?: { datetime?: string; date?: string; time?: string };
+  };
 };
 
 type LineWebhookBody = {
@@ -62,14 +67,23 @@ function lineGuestId(userId: string): string {
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20, 32)}`;
 }
 
-async function replyToLine(replyToken: string, text: string, accessToken: string): Promise<void> {
+function normalizeReplyMessages(input: string | LineMessage | LineMessage[]): LineMessage[] {
+  if (typeof input === 'string') return [{ type: 'text', text: input.slice(0, 4900) }];
+  return Array.isArray(input) ? input.slice(0, 5) : [input];
+}
+
+async function replyToLine(
+  replyToken: string,
+  reply: string | LineMessage | LineMessage[],
+  accessToken: string,
+): Promise<void> {
   const response = await fetch(LINE_REPLY_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ replyToken, messages: [{ type: 'text', text: text.slice(0, 4900) }] }),
+    body: JSON.stringify({ replyToken, messages: normalizeReplyMessages(reply) }),
   });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -80,9 +94,23 @@ async function replyToLine(replyToken: string, text: string, accessToken: string
 async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Promise<void> {
   const sourceType = event.source?.type;
   if (sourceType !== 'group' && sourceType !== 'room') return;
-  if (event.type !== 'message' || !event.replyToken) return;
+  if (!event.replyToken) return;
   const targetId = sourceType === 'group' ? event.source?.groupId : event.source?.roomId;
   if (!targetId) return;
+
+  // Staff buttons use LINE postback events. They never enter customer chat/memory.
+  if (event.type === 'postback' && typeof event.postback?.data === 'string') {
+    const messages = await handleStaffBookingPostback({
+      targetId,
+      userId: event.source?.userId ?? null,
+      data: event.postback.data,
+      params: event.postback.params ?? null,
+    });
+    if (messages?.length) await replyToLine(event.replyToken, messages, accessToken);
+    return;
+  }
+
+  if (event.type !== 'message') return;
 
   if (event.message?.type === 'image' && event.message.id) {
     // Only treat an image as a fuel receipt after that staff member has named the ATV.
