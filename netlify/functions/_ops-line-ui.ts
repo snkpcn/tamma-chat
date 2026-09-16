@@ -155,25 +155,20 @@ function bookingFooter(input: BookingCardInput): Record<string, unknown>[] {
   } else if (input.status === 'confirmed') {
     rows.push(actionButton('✅ เสร็จงาน', {
       type: 'postback',
-      data: postbackData('complete', input.bookingCode),
+      data: postbackData('complete_prompt', input.bookingCode),
       displayText: 'เสร็จงาน',
     }, true));
   }
 
   if (input.activityCode) {
     const noun = activityNoun(input.activityCode);
-    rows.push({
-      type: 'box', layout: 'horizontal', spacing: 'sm',
-      contents: [
-        actionButton(`🔄 ${noun.change}`, {
-          type: 'postback', data: postbackData('choose_units', input.bookingCode), displayText: noun.change,
-        }),
-        actionButton('🕒 เลื่อนเวลา', {
-          type: 'datetimepicker', data: postbackData('reschedule', input.bookingCode), mode: 'datetime',
-          initial: localDateTime(input.startAt),
-        }),
-      ],
-    });
+    rows.push(actionButton(`🔄 ${noun.change}`, {
+      type: 'postback', data: postbackData('choose_units', input.bookingCode), displayText: noun.change,
+    }));
+    rows.push(actionButton('🕒 เลื่อนเวลา', {
+      type: 'datetimepicker', data: postbackData('reschedule', input.bookingCode), mode: 'datetime',
+      initial: localDateTime(input.startAt),
+    }));
   }
 
   rows.push(actionButton('❌ ยกเลิกงาน', {
@@ -409,6 +404,21 @@ async function unitChoiceMessage(booking: BookingUiRow): Promise<LineMessage> {
   };
 }
 
+function completeConfirmMessage(booking: BookingUiRow, serviceName: string): LineMessage {
+  return {
+    type: 'template',
+    altText: `ยืนยันเสร็จงาน ${serviceName}`,
+    template: {
+      type: 'confirm',
+      text: `งาน ${serviceName} เสร็จแล้วใช่ไหม?\n${thaiDate(booking.start_at)} ${thaiTime(booking.start_at)}`,
+      actions: [
+        { type: 'postback', label: 'ใช่ เสร็จแล้ว', data: postbackData('complete_do', booking.booking_code), displayText: 'ยืนยันเสร็จงาน' },
+        { type: 'postback', label: 'ยังไม่เสร็จ', data: postbackData('complete_no', booking.booking_code), displayText: 'ยังไม่เสร็จ' },
+      ],
+    },
+  };
+}
+
 function cancelConfirmMessage(booking: BookingUiRow, serviceName: string): LineMessage {
   return {
     type: 'template',
@@ -454,6 +464,12 @@ export async function handleStaffBookingPostback(input: {
     if (booking.service_type !== 'activity') return [textMessage('งานนี้ไม่มีรถ/ม้า/ช่องยิงให้เลือกครับ')];
     return [await unitChoiceMessage(booking)];
   }
+  if (action === 'complete' || action === 'complete_prompt') {
+    if (booking.status === 'completed') return [textMessage('งานนี้ปิดเรียบร้อยแล้วครับ'), await compactManageCard(booking)];
+    if (booking.status !== 'confirmed') return [textMessage(`งานนี้อยู่สถานะ ${statusLabel(booking.status)} ครับ`), await compactManageCard(booking)];
+    return [completeConfirmMessage(booking, info.name)];
+  }
+  if (action === 'complete_no') return [textMessage('โอเคครับ งานยังไม่ถูกปิด')];
   if (action === 'cancel_prompt') return [cancelConfirmMessage(booking, info.name)];
   if (action === 'cancel_no') return [textMessage('โอเคครับ งานยังอยู่เหมือนเดิม')];
 
@@ -469,10 +485,14 @@ export async function handleStaffBookingPostback(input: {
       ];
     }
 
-    if (action === 'complete') {
+    if (action === 'complete_do') {
       const result = await handleBookingOpsCommand({ targetId: input.targetId, userId: input.userId, text: `เสร็จงาน ${code}` });
       if (!result.reply?.startsWith('✅')) return [textMessage(result.reply ?? 'ปิดงานไม่สำเร็จครับ')];
-      return [simpleSuccess('ปิดงานเรียบร้อยแล้ว')];
+      const fresh = await bookingByCode(code);
+      return [
+        simpleSuccess('ปิดงานเรียบร้อยแล้ว', 'คิวถูกคืนให้ระบบแล้ว'),
+        fresh ? await compactManageCard(fresh) : textMessage('ปิดงานแล้วครับ'),
+      ];
     }
 
     if (action === 'cancel_do') {
@@ -480,7 +500,11 @@ export async function handleStaffBookingPostback(input: {
       if (!result.reply?.startsWith('✅') && !result.reply?.startsWith('ℹ️')) {
         return [textMessage(result.reply ?? 'ยกเลิกไม่สำเร็จครับ')];
       }
-      return [simpleSuccess('ยกเลิกงานแล้ว', 'คืนคิวและแจ้งลูกค้าแล้ว')];
+      const fresh = await bookingByCode(code);
+      return [
+        simpleSuccess('ยกเลิกงานแล้ว', 'คืนคิวและแจ้งลูกค้าแล้ว'),
+        fresh ? await compactManageCard(fresh) : textMessage('ยกเลิกงานแล้วครับ'),
+      ];
     }
 
     if (action === 'set_units') {
