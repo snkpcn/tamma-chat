@@ -4,6 +4,7 @@ import { handler as coreHandler } from './_line-webhook-core';
 import { registerLineContact } from './_operations-db';
 import { handleLineOpsGroupMessage } from './_ops-notifications';
 import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
+import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -84,6 +85,10 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   if (!targetId) return;
 
   if (event.message?.type === 'image' && event.message.id) {
+    // Only treat an image as a fuel receipt after that staff member has named the ATV.
+    // This prevents normal activity photos in the group from being OCR'd or written to the fuel ledger.
+    const pendingFuel = await hasPendingLineFuelSession(targetId, event.source?.userId ?? null);
+    if (!pendingFuel) return;
     const fuelReply = await handleLineFuelImage({
       targetType: sourceType,
       targetId,
