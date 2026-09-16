@@ -288,11 +288,29 @@ async function extractWithOpenAI(bytes: Buffer, mimeType: string): Promise<Recei
 }
 
 async function extractReceipt(bytes: Buffer, mimeType: string): Promise<ReceiptExtraction> {
+  let geminiLastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await extractWithGemini(bytes, mimeType);
+    } catch (geminiError) {
+      geminiLastError = geminiError;
+      console.error(
+        'LINE_FUEL_RECEIPT_GEMINI_ERROR',
+        `attempt=${attempt}`,
+        geminiError instanceof Error ? geminiError.message.slice(0, 180) : 'unknown',
+      );
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 450));
+    }
+  }
   try {
-    return await extractWithGemini(bytes, mimeType);
-  } catch (geminiError) {
-    console.error('LINE_FUEL_RECEIPT_GEMINI_ERROR', geminiError instanceof Error ? geminiError.message.slice(0, 180) : 'unknown');
-    return extractWithOpenAI(bytes, mimeType);
+    return await extractWithOpenAI(bytes, mimeType);
+  } catch (openaiError) {
+    console.error(
+      'LINE_FUEL_RECEIPT_OPENAI_ERROR',
+      openaiError instanceof Error ? openaiError.message.slice(0, 180) : 'unknown',
+      geminiLastError instanceof Error ? `gemini=${geminiLastError.message.slice(0, 120)}` : '',
+    );
+    throw new Error('receipt_extraction_unavailable');
   }
 }
 
@@ -513,7 +531,7 @@ export async function handleLineFuelImage(input: {
     extraction = await extractReceipt(image.bytes, image.mimeType);
   } catch (error) {
     console.error('LINE_FUEL_RECEIPT_EXTRACTION_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return 'ทองไทยอ่านสลิปไม่สำเร็จครับ ลองถ่ายให้เห็นวันที่ จำนวนลิตร และยอดเงินชัด ๆ แล้วส่งใหม่อีกครั้ง';
+    return 'ระบบอ่านสลิปขัดข้องชั่วคราวครับ — ยังไม่ได้บันทึกอะไรลงหลังบ้าน รูปเดิมใช้ได้ ลองส่งรูปเดิมอีกครั้งได้เลย';
   }
 
   const extractionForSession = { ...extraction, receipt_sha256: image.sha256 } as unknown as Record<string, unknown>;
