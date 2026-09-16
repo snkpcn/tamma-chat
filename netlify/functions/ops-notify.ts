@@ -1,6 +1,7 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { dispatchEntityNotification, type OpsNotificationEntity } from './_ops-notifications';
+import { dispatchBookingFlexNotification } from './_ops-booking-notify-flex';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPS_NOTIFICATION_WEBHOOK_SECRET_SHA256 = '0c99ca5d870b02c4b58b485c0cdf8d88158fe18ea86ba126751cc72715f506d5';
@@ -36,7 +37,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (!body.id || !UUID_RE.test(body.id)) return { statusCode: 400, body: 'Invalid id' };
 
   try {
-    const status = await dispatchEntityNotification(entity, body.id);
+    const status = entity === 'booking'
+      ? await dispatchBookingFlexNotification(body.id)
+      : await dispatchEntityNotification(entity, body.id);
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
