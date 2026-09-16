@@ -194,6 +194,44 @@ async function askThongthai(message: string, userId: string): Promise<ThongthaiR
   return await response.json() as ThongthaiResponse;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function askThongthaiReliably(message: string, userId: string): Promise<ThongthaiResponse> {
+  try {
+    return await askThongthai(message, userId);
+  } catch (firstError) {
+    console.error(
+      'LINE_THONGTHAI_FIRST_ATTEMPT_ERROR',
+      firstError instanceof Error ? firstError.message.slice(0, 240) : 'unknown',
+    );
+  }
+
+  // A retry is safe for write actions because operational creates (including restaurant preorders)
+  // are idempotent at the database layer. This closes the failure window where a write succeeds
+  // but the model/final response times out and the customer otherwise sees silence.
+  await delay(250);
+  try {
+    return await askThongthai(message, userId);
+  } catch (secondError) {
+    console.error(
+      'LINE_THONGTHAI_SECOND_ATTEMPT_ERROR',
+      secondError instanceof Error ? secondError.message.slice(0, 240) : 'unknown',
+    );
+    return {
+      message: [
+        'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
+        'หากเป็นคำสั่งเดิมที่เพิ่งส่งซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
+        'ลองส่งข้อความเดิมอีกครั้งได้เลย หรือพิมพ์ “ดูออเดอร์ล่าสุด” เพื่อให้ทองไทยตรวจให้อีกครั้งครับ',
+      ].join('\n'),
+      intent: 'support',
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [{ label: 'ลองอีกครั้ง', action: message.slice(0, 180) }],
+    };
+  }
+}
+
 function splitText(value: string): string[] {
   const text = value.trim();
   if (!text) return [];
@@ -436,7 +474,7 @@ async function handleEvent(
   } catch (error) {
     console.error('LINE_BOOKING_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
   }
-  const result = await askThongthai(message, userId);
+  const result = await askThongthaiReliably(message, userId);
 
   try {
     await reinforceStructuredMemory(message, userId, language);
