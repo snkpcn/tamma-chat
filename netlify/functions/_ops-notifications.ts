@@ -350,7 +350,8 @@ async function notifyBooking(id: string): Promise<'sent' | 'duplicate' | 'not_bo
     start_at: string; end_at: string; party_size: number | null; quantity: number; status: string;
     source_channel: string; customer_note: string | null; environment: string;
   }>)[0];
-  if (!booking || booking.environment !== 'live') return 'ignored';
+  if (!booking || !['live', 'test'].includes(booking.environment)) return 'ignored';
+  const environmentPrefix = booking.environment === 'test' ? '🧪 TEST — ' : '';
   if (!['restaurant', 'stay', 'activity'].includes(booking.service_type)) return 'ignored';
   const teamCode = booking.service_type as OpsTeamCode;
 
@@ -363,7 +364,7 @@ async function notifyBooking(id: string): Promise<'sent' | 'duplicate' | 'not_bo
     ? `${booking.quantity || 1} หลัง${booking.party_size ? ` / ${booking.party_size} คน` : ''}`
     : `${booking.party_size ?? booking.quantity ?? 1} คน`;
   const lines = [
-    `🔔 งานใหม่ — ${TEAM_LABELS[teamCode]}`,
+    `${environmentPrefix}🔔 งานใหม่ — ${TEAM_LABELS[teamCode]}`,
     `เลขที่: ${booking.booking_code}`,
     'สถานะ: รอทีมงานยืนยัน',
     customer.name ? `ลูกค้า: ${customer.name}` : '',
@@ -397,10 +398,11 @@ async function notifyCafeInquiry(id: string): Promise<'sent' | 'duplicate' | 'no
     id: string; inquiry_code: string; customer_id: string | null; question: string; status: string;
     source_channel: string; environment: string;
   }>)[0];
-  if (!inquiry || inquiry.environment !== 'live') return 'ignored';
+  if (!inquiry || !['live', 'test'].includes(inquiry.environment)) return 'ignored';
+  const environmentPrefix = inquiry.environment === 'test' ? '🧪 TEST — ' : '';
   const customer = await customerInfo(inquiry.customer_id);
   const lines = [
-    `☕ งานใหม่ — ${TEAM_LABELS.cafe}`,
+    `${environmentPrefix}☕ งานใหม่ — ${TEAM_LABELS.cafe}`,
     `เลขที่: ${inquiry.inquiry_code}`,
     `สถานะ: ${inquiry.status}`,
     customer.name ? `ลูกค้า: ${customer.name}` : '',
@@ -429,7 +431,8 @@ async function notifyOtopOrder(id: string): Promise<'sent' | 'duplicate' | 'not_
     id: string; order_code: string; customer_id: string | null; status: string; source_channel: string;
     fulfillment_type: string; customer_note: string | null; total_amount: number | string; environment: string;
   }>)[0];
-  if (!order || order.environment !== 'live') return 'ignored';
+  if (!order || !['live', 'test'].includes(order.environment)) return 'ignored';
+  const environmentPrefix = order.environment === 'test' ? '🧪 TEST — ' : '';
   const [customer, itemsResponse] = await Promise.all([
     customerInfo(order.customer_id),
     dbFetch(`otop_order_items?order_id=eq.${order.id}&select=product_id,quantity,unit_price,line_total`),
@@ -449,7 +452,7 @@ async function notifyOtopOrder(id: string): Promise<'sent' | 'duplicate' | 'not_
     : 'ดูรายละเอียดในหลังบ้าน';
   const total = Number(order.total_amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   const lines = [
-    `🛍️ ออเดอร์ใหม่ — ${TEAM_LABELS.otop}`,
+    `${environmentPrefix}🛍️ ออเดอร์ใหม่ — ${TEAM_LABELS.otop}`,
     `เลขที่: ${order.order_code}`,
     `สถานะ: ${order.status}`,
     customer.name ? `ลูกค้า: ${customer.name}` : '',
