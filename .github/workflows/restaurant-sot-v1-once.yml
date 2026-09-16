@@ -12,6 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python .github/scripts/patch_restaurant_sot_v1.py
+      - name: Fix template-string wording
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('netlify/functions/_thongthai-brain-v3.ts')
+          s=p.read_text().replace('`restaurant_menu_live`','restaurant_menu_live').replace('`orderable=false`','orderable=false').replace('`menuUrl`','menuUrl')
+          p.write_text(s)
+          PY
       - run: npm ci
       - name: Typecheck restaurant integration
         run: npx tsc --noEmit --target ES2022 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck netlify/functions/_restaurant-sot.ts netlify/functions/restaurant-menu.ts netlify/functions/_thongthai-brain-v3.ts netlify/functions/_thongthai-runtime-v3.ts netlify/functions/line-webhook.ts
