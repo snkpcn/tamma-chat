@@ -275,6 +275,11 @@ function currentRestaurantSet(runtime: { agentState: Record<string, unknown> }):
 export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): boolean {
   const text = normThai(request.message);
   if (/(ขี่ม้า|atv|เอทีวี|ยิงธนู|ห้องพัก|ที่พัก|เฮือน|otop|กาแฟ|คาเฟ่)/iu.test(text)) return false;
+  // A promotion mention must always reach the LLM brain's redeem_promotion tool --
+  // this deterministic shortcut has no knowledge of active_promotions_live and
+  // would otherwise intercept "เอาโปรตำไทย..." before the promo could ever be redeemed.
+  // Negative lookahead excludes "โปรด" (please/kindly), an unrelated polite word.
+  if (/โปร(?!ด)/u.test(text)) return false;
   const proposedSet = currentRestaurantSet(runtime);
   if (proposedSet?.preorderDraft) return true;
   if (RESTAURANT_SET_ACCEPT_RE.test(text) && proposedSet) return true;
