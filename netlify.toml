@@ -1,5 +1,5 @@
 [build]
-  command = "node scripts/apply-chat-polish.mjs"
+  command = "node scripts/apply-chat-polish.mjs && node scripts/apply-restaurant-constraint-copy.mjs"
   publish = "."
   functions = "netlify/functions"
 
