@@ -60,3 +60,17 @@ test('pending preorder keeps date time and name replies inside restaurant flow',
   assert.equal(isRestaurantAdvisorTurn(request('พรุ่งนี้ 14:00'), runtime), true);
   assert.equal(isRestaurantAdvisorTurn(request('นุ๊ก'), runtime), true);
 });
+
+// Promotion OS Phase 2: a promotion mention must always reach the LLM brain's
+// redeem_promotion tool, never this deterministic advisor shortcut -- it has
+// no knowledge of active_promotions_live, so it would silently answer a
+// generic menu recommendation instead of ever redeeming the promo.
+test('a promotion mention is never intercepted by the deterministic restaurant advisor, even with menu item names in it', () => {
+  assert.equal(isRestaurantAdvisorTurn(request('เอาโปรตำไทย+ข้าวเหนียวค่ะ พรุ่งนี้ 14:00 ชื่อนุ๊ก'), {agentState:{}}), false);
+  assert.equal(isRestaurantAdvisorTurn(request('มีโปรอะไรบ้างไหม'), {agentState:{}}), false);
+  assert.equal(isRestaurantAdvisorTurn(request('อยากรับโปรโมชันชุดตำไทย+ข้าวเหนียว'), {agentState:{}}), false);
+});
+
+test('a polite "โปรด" (please) message is not mistaken for a promotion mention', () => {
+  assert.equal(isRestaurantAdvisorTurn(request('โปรดแนะนำเมนูที่ร้านหน่อยครับ'), {agentState:{}}), true);
+});
