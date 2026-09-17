@@ -629,9 +629,24 @@ function activityResourceFromText(text: string): string | null {
 }
 
 function activityDurationFromText(text: string): 30 | 60 | 90 | null {
+  if (/(?:ครึ่ง\s*ชั่วโมง|half\s*(?:an\s*)?hour)/iu.test(text)) return 30;
+  if (/(?:ชั่วโมง\s*ครึ่ง|one\s*and\s*a\s*half\s*hours?)/iu.test(text)) return 90;
+  if (/(?:1|หนึ่ง)\s*(?:ชั่วโมง|ชม\.?|hour)/iu.test(text)) return 60;
   const m = text.match(/(?:^|\s)(30|60|90)\s*(?:นาที|min(?:ute)?s?)(?:\s|$)/iu);
   const n = Number(m?.[1]);
   return n === 30 || n === 60 || n === 90 ? n : null;
+}
+
+function activityDurationFromSession(session: LineBookingSession | null): 30 | 60 | 90 | null {
+  const fromQuantity = Number(session?.quantity);
+  if (fromQuantity === 30 || fromQuantity === 60 || fromQuantity === 90) return fromQuantity;
+  const fromNote = session?.special_request?.match(/^activity_duration:(30|60|90)$/)?.[1];
+  const n = Number(fromNote);
+  return n === 30 || n === 60 || n === 90 ? n : null;
+}
+
+function activitySessionMarker(durationMinutes: 30 | 60 | 90 | null): string | null {
+  return durationMinutes ? `activity_duration:${durationMinutes}` : null;
 }
 
 function activityTimeFromText(text: string): string | null {
@@ -667,16 +682,31 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   let session = await loadLineBookingSession(identity.guestDbId);
   let lineOnlyContact = false;
 
+  const activitySession = session?.service_type === 'activity' && session.status === 'collecting' ? session : null;
   const activityIntent = /(?:จอง|สำรอง).{0,24}(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)|(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู).{0,24}(?:จอง|สำรอง)/iu.test(text);
-  if (activityIntent) {
-    const resourceCode = activityResourceFromText(text);
-    const durationMinutes = activityDurationFromText(text);
-    const requestedDate = activityDateFromText(text);
-    const requestedTime = activityTimeFromText(text);
-    const partySize = partySizeFromText(text);
+  if (activityIntent || (activitySession && !startIntent)) {
+    const resourceCode = activityResourceFromText(text) ?? activitySession?.resource_code ?? null;
+    const durationMinutes = activityDurationFromText(text) ?? activityDurationFromSession(activitySession);
+    const requestedDate = activityDateFromText(text) ?? activitySession?.requested_date ?? null;
+    const requestedTime = activityTimeFromText(text) ?? activitySession?.requested_time ?? null;
+    const partySize = partySizeFromText(text) ?? activitySession?.party_size ?? null;
     const suppliedName = activityGuestNameFromText(text) ?? primaryGuestNameFromText(text);
     const suppliedPhone = phoneFromText(text);
     const lineOnly = /(?:ติดต่อ|ใช้).{0,16}(?:LINE|ไลน์).{0,12}(?:นี้)?|(?:LINE|ไลน์)\s*นี้/iu.test(text);
+
+    const saveActivityProgress = async (): Promise<void> => {
+      await saveLineBookingSession(identity.guestDbId, environment, {
+        service_type: 'activity',
+        resource_code: resourceCode,
+        requested_date: requestedDate,
+        requested_time: requestedTime,
+        party_size: partySize,
+        quantity: durationMinutes ?? activitySession?.quantity ?? 1,
+        special_request: activitySessionMarker(durationMinutes),
+        status: 'collecting',
+        booking_code: null,
+      });
+    };
 
     if (suppliedName || suppliedPhone) {
       await upsertCustomerAccount({
@@ -687,6 +717,7 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
       });
     }
     const contact = await lineBookingContact(identity.customerId);
+    await saveActivityProgress();
     if (!resourceCode) return 'ได้ครับ เลือกกิจกรรมก่อนนะครับ: ATV, ขี่ม้า หรือยิงธนู';
     if (!durationMinutes) return `รับกิจกรรม ${activityLabel(resourceCode)} แล้วครับ เลือกระยะเวลา 30, 60 หรือ 90 นาทีได้เลย`;
     if (!requestedDate) return 'ขอวันที่ต้องการเล่นครับ เช่น “พรุ่งนี้” หรือ “17/09”';
