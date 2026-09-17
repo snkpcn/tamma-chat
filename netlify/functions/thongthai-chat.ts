@@ -27,6 +27,7 @@ import {
   registerGuestIdentity,
 } from './_thongthai-runtime-v3';
 import { restaurantMenuAdvice } from './_restaurant-sot';
+import { polishCustomerMessage } from './_chat-copy-style';
 import {
   clearRestaurantPreorderDraft,
   formatRestaurantSetPrompt,
@@ -205,6 +206,11 @@ function mergeAfterTools(first: BrainResponse, second: BrainResponse, toolResult
     semanticMemoryUpdates: first.semanticMemoryUpdates,
     toolCalls: [],
   };
+}
+
+function polishedResponse(response: BrainResponse, channel: BrainChannel): BrainResponse {
+  const message = polishCustomerMessage(response.message, channel);
+  return { ...response, message: message || response.message.trim() };
 }
 
 function duplicateRestaurantPreorderMessage(
@@ -557,13 +563,14 @@ export const handler: Handler = async (event: HandlerEvent) => {
     return null;
   });
   if (deterministicRestaurant) {
-    await persistBrainRuntime(guestDbId, channel, deterministicRestaurant);
+    const polished = polishedResponse(deterministicRestaurant, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
     return json(200, {
-      message: deterministicRestaurant.message,
-      intent: deterministicRestaurant.intent,
-      contextUpdates: deterministicRestaurant.contextUpdates,
-      journeyAction: deterministicRestaurant.journeyAction,
-      suggestedActions: deterministicRestaurant.suggestedActions,
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
     });
   }
 
@@ -575,7 +582,10 @@ export const handler: Handler = async (event: HandlerEvent) => {
     if (error instanceof ProviderNotConfiguredError) {
       return json(503, { error: 'AI provider not configured', message: 'This deployment has no LLM API key configured.' });
     }
-    if (error instanceof LLMAvailabilityError) return json(200, availabilityBrainResponse());
+    if (error instanceof LLMAvailabilityError) {
+      const fallback = polishedResponse(availabilityBrainResponse(), channel);
+      return json(200, fallback);
+    }
     return json(502, { error: 'Thongthai brain request failed. Please try again.' });
   }
 
@@ -621,6 +631,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
     }
   }
 
+  finalResponse = polishedResponse(finalResponse, channel);
   await persistBrainRuntime(guestDbId, channel, finalResponse);
 
   return json(200, {
