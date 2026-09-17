@@ -230,13 +230,16 @@ function normThai(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): boolean {
+export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): boolean {
   const text = normThai(request.message);
   if (/(ขี่ม้า|atv|เอทีวี|ยิงธนู|ห้องพัก|ที่พัก|เฮือน|otop|กาแฟ|คาเฟ่)/iu.test(text)) return false;
   if (/(เอาชุด|ชุดเมื่อกี้|ตามนี้|โอเคชุดนี้)/u.test(text) && runtime.agentState.restaurantProposedSet) return true;
-  if (/(ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เมนู|อาหาร|กิน|งบ|แพ้|ไม่กิน|ไม่เอา|เผ็ด|ปลาร้า|ถั่ว|กุ้ง|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน)/u.test(text)) return true;
-  if (/มาครั้งแรก|ครั้งแรก|อะไรแนะนำ|อะไรอร่อย|วันนี้กินอะไรดี/u.test(text)) return true;
-  return request.chatHistory.slice(-6).some(turn => /(ตำลาว|ตำไทย|ชุดอาหาร|ร้านอาหาร|เมนู|สั่งอาหาร|แพ้ถั่ว|ไม่เอาหมู)/u.test(turn.content));
+  const hasRestaurantHistory = request.chatHistory.slice(-6).some(turn =>
+    /(ตำลาว|ตำไทย|ชุดอาหาร|ร้านอาหาร|ตำมา-ชาติ|เมนู|สั่งอาหาร|แพ้ถั่ว|ไม่เอาหมู)/u.test(turn.content));
+  const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง)/u.test(text);
+  if (explicitFood) return true;
+  const restaurantFollowUp = /(งบ|แพ้|ไม่กิน|ไม่เอา|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน|เอาชุด|ชุดเมื่อกี้)/u.test(text);
+  return hasRestaurantHistory && restaurantFollowUp;
 }
 
 function formatMoney(value: unknown): string {
