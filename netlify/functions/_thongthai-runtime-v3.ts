@@ -5,7 +5,7 @@ import {
   createBooking, createCafeInquiry, createOtopOrder, listBookingOptions, listOtopProducts,
   type OpsChannel, type ServiceType,
 } from './_operations-db';
-import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts } from './_restaurant-sot';
+import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts, restaurantMenuAdvice } from './_restaurant-sot';
 
 const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
@@ -139,6 +139,14 @@ function toolErrorDetail(error: unknown): string {
   return 'execution_failed';
 }
 
+function knownPartySize(request: BrainRequest): number | null {
+  const values = [request.guestContext.group.adults, request.guestContext.group.children, request.guestContext.group.elderly]
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0);
+  if (!values.length) return null;
+  const total = values.reduce((sum,value)=>sum+value,0);
+  return total > 0 ? total : null;
+}
+
 export async function executeBrainTools(
   guestDbId: string | null,
   channel: BrainChannel,
@@ -217,8 +225,21 @@ export async function executeBrainTools(
         continue;
       }
       if (call.name === 'list_restaurant_menu') {
-        const menu = await listRestaurantMenu();
-        results.push({name:call.name,ok:true,detail:JSON.stringify({menuUrl:'https://tamma-chat.netlify.app/menu.html',items:menu.map(item=>({name:item.name,category:item.category_name,price:item.selling_price,orderable:item.is_orderable,availableServings:item.available_servings,ingredients:item.ingredient_names,unavailableIngredients:item.unavailable_ingredients}))})});
+        const [menu, advice] = await Promise.all([
+          listRestaurantMenu(),
+          restaurantMenuAdvice({
+            query:request.message,
+            partySize:knownPartySize(request),
+            budget:typeof request.guestContext.budget === 'number' ? request.guestContext.budget : null,
+            constraints:request.guestContext.constraints,
+            recentMessages:request.chatHistory.slice(-6).map(turn=>turn.content),
+          }),
+        ]);
+        results.push({name:call.name,ok:true,detail:JSON.stringify({
+          menuUrl:'https://tamma-chat.netlify.app/menu.html',
+          advisor:advice,
+          items:menu.map(item=>({name:item.name,category:item.category_name,price:item.selling_price,description:item.description,signature:item.is_signature,orderable:item.is_orderable,availableServings:item.available_servings,ingredients:item.ingredient_names,unavailableIngredients:item.unavailable_ingredients})),
+        })});
         continue;
       }
       if (call.name === 'create_restaurant_preorder') {
