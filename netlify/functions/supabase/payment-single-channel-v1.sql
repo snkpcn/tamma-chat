@@ -367,7 +367,7 @@ insert into public.world_facts (
     'accepted_method', 'promptpay_owner_qr',
     'single_channel', true,
     'account_name', 'นาย ชานนท์ ปรีชานนท์',
-    'qr_asset_url', 'https://tamma-chat.netlify.app/assets/payment/tamma-promptpay.jpg',
+    'qr_asset_url', 'https://tamma-chat.netlify.app/assets/payment/tamma-promptpay-poster.png',
     'rules', jsonb_build_array(
       'When payment is requested, offer only the verified owner PromptPay QR. Do not invent cash, card, transfer accounts, or alternative QR codes.',
       'For restaurant preorder and OTOP orders with a known total, request payment using this QR and ask the customer to return the slip in LINE.',

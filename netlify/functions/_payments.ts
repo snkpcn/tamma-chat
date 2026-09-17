@@ -29,7 +29,7 @@ type DeliveryRow = { id: string; status: string };
 
 const LINE_PUSH_ENDPOINT = 'https://api.line.me/v2/bot/message/push';
 const LINE_CONTENT_BASE = 'https://api-data.line.me/v2/bot/message';
-const QR_IMAGE_URL = 'https://tamma-chat.netlify.app/assets/payment/tamma-promptpay.jpg';
+const QR_IMAGE_URL = 'https://tamma-chat.netlify.app/assets/payment/tamma-promptpay-poster.png';
 const BACKOFFICE_URL = 'https://tamma-backoffice.netlify.app/';
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
