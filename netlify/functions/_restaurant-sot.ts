@@ -1,5 +1,9 @@
 import { decryptPii, piiHash } from './_operations-db';
 import { createHash } from 'node:crypto';
+import {
+  adviseRestaurantMenu, normalizeRestaurantProfile,
+  type RestaurantAdvisorInput, type RestaurantAdvisorItem,
+} from './_restaurant-intelligence';
 
 const RESTAURANT_SCHEMA = 'tamma_chart_os';
 const RESTAURANT_NAME = 'ตำมา-ชาติ';
@@ -37,12 +41,14 @@ type PreorderRow = {
 };
 type PreorderItemRow = { menu_name: string; quantity: number; unit_price: number; line_total: number };
 type NotificationChannel = { id: string; target_id_enc: string };
+type MenuProfileRow = { menu_item_id: string; profile: unknown; updated_at: string };
 
 type PreorderCreateResult = {
   id: string; preorderCode: string; totalAmount: number; status: string;
   items: Array<{ name: string; quantity: number }>;
   requestedFor: string; environment: string; duplicate?: boolean;
 };
+type PaymentRequestRow = { id: string; status: string };
 
 function config(): { url: string; key: string } {
   const url = process.env.SUPABASE_URL;
@@ -116,18 +122,52 @@ export async function listRestaurantMenu(): Promise<RestaurantMenuItem[]> {
   }));
 }
 
+async function restaurantMenuProfiles(rid: string): Promise<{ rows: MenuProfileRow[]; map: Map<string, MenuProfileRow> }> {
+  try {
+    const response = await chartDbFetch(
+      `restaurant_menu_intelligence_profiles?restaurant_id=eq.${rid}&select=menu_item_id,profile,updated_at`,
+    );
+    const rows = await response.json() as MenuProfileRow[];
+    return { rows, map:new Map(rows.map(row => [String(row.menu_item_id), row])) };
+  } catch (error) {
+    console.error('RESTAURANT_MENU_PROFILE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return { rows:[], map:new Map() };
+  }
+}
+
+async function advisorItems(menu: RestaurantMenuItem[]): Promise<RestaurantAdvisorItem[]> {
+  const rid = await restaurantId();
+  const profiles = await restaurantMenuProfiles(rid);
+  return menu.map(item => ({
+    id:item.menu_item_id, name:item.name, category:item.category_name, price:item.selling_price,
+    signature:item.is_signature, orderable:item.is_orderable, availableServings:item.available_servings,
+    ingredients:item.ingredient_names, unavailableIngredients:item.unavailable_ingredients,
+    profile:normalizeRestaurantProfile(profiles.map.get(item.menu_item_id)?.profile),
+  }));
+}
+
+export async function restaurantMenuAdvice(input: RestaurantAdvisorInput) {
+  const menu = await listRestaurantMenu();
+  return adviseRestaurantMenu(await advisorItems(menu), input);
+}
+
 export async function loadRestaurantWorldFacts(): Promise<Array<{ fact_key: string; category: string; fact_value: unknown; source: string; updated_at: string }>> {
   try {
     const menu = await listRestaurantMenu();
-    const updatedAt = menu.reduce((latest, item) => item.source_updated_at > latest ? item.source_updated_at : latest, new Date(0).toISOString());
+    const rid = await restaurantId();
+    const profiles = await restaurantMenuProfiles(rid);
+    const updatedAt = [...menu.map(item => item.source_updated_at), ...profiles.rows.map(row => String(row.updated_at))]
+      .reduce((latest, value) => value > latest ? value : latest, new Date(0).toISOString());
     return [{
-      fact_key: 'restaurant_menu_live', category: 'operations', source: 'tamma_chart_os.restaurant_menu_live', updated_at: updatedAt,
+      fact_key: 'restaurant_menu_live', category: 'operations', source: 'tamma_chart_os.restaurant_menu_live+restaurant_menu_intelligence_profiles', updated_at: updatedAt,
       fact_value: {
         restaurant: RESTAURANT_NAME, menuUrl: RESTAURANT_MENU_URL, sourceOfTruth: true,
+        recommendationProfileVersion:'v1',
         items: menu.map(item => ({
           id: item.menu_item_id, category: item.category_name, name: item.name, price: item.selling_price,
           signature: item.is_signature, orderable: item.is_orderable, availableServings: item.available_servings,
           ingredients: item.ingredient_names, unavailableIngredients: item.unavailable_ingredients,
+          profile: normalizeRestaurantProfile(profiles.map.get(item.menu_item_id)?.profile),
         })),
       },
     }];
@@ -309,7 +349,20 @@ export async function createRestaurantPreorder(input: {
   await notifyRestaurantPreorderTeam(created.id).catch(error => {
     console.error('RESTAURANT_PREORDER_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
   });
+  await dispatchRestaurantPreorderPayment(created.id).catch(error => {
+    console.error('RESTAURANT_PREORDER_PAYMENT_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+  });
   return result;
+}
+
+async function dispatchRestaurantPreorderPayment(preorderId: string): Promise<void> {
+  const response = await publicDbFetch(
+    `payment_requests?entity_type=eq.restaurant_preorder&entity_id=eq.${preorderId}&select=id,status&order=created_at.desc&limit=1`,
+  );
+  const payment = (await response.json() as PaymentRequestRow[])[0];
+  if (!payment || payment.status !== 'awaiting_payment') return;
+  const { dispatchPaymentNotification } = await import('./_payments');
+  await dispatchPaymentNotification(payment.id);
 }
 
 async function preorderById(id: string): Promise<PreorderRow | null> {
