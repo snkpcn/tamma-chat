@@ -34,6 +34,17 @@ test('markdown tables become compact plain text instead of raw pipe syntax', () 
   );
 });
 
+test('operational labels get restrained useful emoji without decorating every bullet', () => {
+  const value = ['รายการ', '- เมนูหนึ่ง', '- เมนูสอง', 'สถานะ: รอร้านยืนยัน', 'รวม 587 บาท'].join('\n');
+  const polished = polishCustomerMessage(value, 'line');
+  assert.match(polished, /• เมนูหนึ่ง/);
+  assert.match(polished, /• เมนูสอง/);
+  assert.match(polished, /📌 สถานะ: รอร้านยืนยัน/);
+  assert.match(polished, /💰 รวม 587 บาท/);
+  assert.equal((polished.match(/📌/g) ?? []).length, 1);
+  assert.equal((polished.match(/💰/g) ?? []).length, 1);
+});
+
 test('LINE splitting favours paragraph boundaries and never drops content', () => {
   const paragraphs = Array.from({length:8}, (_, index) => `ส่วนที่ ${index + 1} ${'ข้อมูล'.repeat(90)}`);
   const input = paragraphs.join('\n\n');
@@ -41,7 +52,15 @@ test('LINE splitting favours paragraph boundaries and never drops content', () =
   const chunks = splitCustomerMessageForLine(input, 700, 5);
   assert.ok(chunks.length > 1);
   assert.ok(chunks.every(chunk => chunk.length > 0));
+  assert.ok(chunks.every(chunk => chunk.length <= 4900));
   assert.equal(chunks.join('\n\n').replace(/\n{3,}/g,'\n\n'), polished);
+});
+
+test('callers cannot inflate ordinary LINE bubbles past the phone readability cap', () => {
+  const input = Array.from({length:18}, (_, index) => `ช่วง ${index + 1} ${'ข้อความอ่านง่าย '.repeat(8)}`).join('\n\n');
+  const chunks = splitCustomerMessageForLine(input, 1800, 5);
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every(chunk => chunk.length <= 1100));
 });
 
 test('short LINE replies stay one bubble', () => {
