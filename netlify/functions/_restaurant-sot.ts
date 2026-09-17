@@ -38,8 +38,11 @@ type PreorderRow = {
   customer_name: string; phone: string | null; email: string | null; requested_for: string;
   source_channel: string; customer_note: string | null; status: string; total_amount: number;
   environment: string; created_at: string; updated_at: string;
+  promotion_campaign_id: string | null; promotion_redemption_id: string | null;
+  normal_total_amount: number | null; discount_amount: number; pricing_source: 'menu' | 'promotion';
 };
 type PreorderItemRow = { menu_name: string; quantity: number; unit_price: number; line_total: number };
+type PromotionCampaignLabel = { campaign_code: string; title: string };
 type NotificationChannel = { id: string; target_id_enc: string };
 type MenuProfileRow = { menu_item_id: string; profile: unknown; updated_at: string };
 
@@ -48,6 +51,7 @@ type PreorderCreateResult = {
   items: Array<{ name: string; quantity: number }>;
   requestedFor: string; environment: string; duplicate?: boolean;
 };
+type PromotionPreorderCreateResult = PreorderCreateResult & { normalTotalAmount: number; discountAmount: number };
 type PaymentRequestRow = { id: string; status: string };
 
 function config(): { url: string; key: string } {
@@ -355,6 +359,84 @@ export async function createRestaurantPreorder(input: {
   return result;
 }
 
+/**
+ * Deterministic idempotency key for a promotion-priced preorder: identical
+ * inputs (same guest, requested time, items, customer name, note, promo
+ * campaign and pricing) always hash to the same key, so a duplicate webhook
+ * delivery or a repeated redeem_promotion tool call replays into the SAME
+ * database advisory lock and create_restaurant_preorder_v3 returns the
+ * existing preorder (duplicate:true) instead of creating a second one.
+ * Exported (pure, no I/O) so this guarantee is unit-testable directly.
+ */
+export function restaurantPreorderPromotionIdempotencyKey(input: {
+  guestDbId: string; requestedForIso: string;
+  items: Array<{ menuItemId: string; quantity: number }>;
+  customerName: string; note: string; environment: 'live' | 'test';
+  promotionCampaignId: string; pricingOverride: Record<string, number>;
+}): string {
+  const canonicalItems = [...input.items].sort((a, b) => a.menuItemId.localeCompare(b.menuItemId));
+  return 'restaurant-preorder-promo:v3:' + createHash('sha256').update(JSON.stringify({
+    guestDbId: input.guestDbId, requestedFor: input.requestedForIso, items: canonicalItems,
+    customerName: input.customerName.trim().toLowerCase(), note: input.note.trim(), environment: input.environment,
+    promotionCampaignId: input.promotionCampaignId, pricingOverride: input.pricingOverride,
+  })).digest('hex');
+}
+
+/**
+ * Promotion-priced sibling of createRestaurantPreorder. Reuses the exact
+ * same menu resolution / availability check, but calls
+ * create_restaurant_preorder_v3 with a pricingOverride the caller
+ * (redeemPromotion) must have already built from real, currently-stored
+ * promotion_items.promo_price rows for an independently re-validated active
+ * promotion -- never an arbitrary caller-supplied amount. The RPC itself
+ * also refuses any override price above the live menu price as defense in
+ * depth. createRestaurantPreorder (the plain, non-promo path) is completely
+ * untouched by this function's existence.
+ */
+export async function createRestaurantPreorderWithPromotion(input: {
+  guestDbId: string; channel: string; date: string; time: string;
+  items: Array<{ name: string; quantity: number }>;
+  customerName: string; phone?: string | null; email?: string | null; note?: string | null;
+  promotionCampaignId: string; pricingOverride: Record<string, number>;
+}): Promise<PromotionPreorderCreateResult> {
+  const requestedFor = new Date(`${input.date}T${input.time}:00+07:00`);
+  if (Number.isNaN(requestedFor.valueOf())) throw new Error('invalid_requested_time');
+  const menu = await listRestaurantMenu();
+  const resolved = input.items.map(item => ({ menu: resolveMenuName(item.name, menu), quantity: Math.max(1, Math.min(50, Math.floor(item.quantity || 1))) }));
+  if (resolved.some(item => !item.menu)) throw new Error('menu_item_not_found');
+  for (const item of resolved) {
+    if (!item.menu!.is_orderable || item.menu!.available_servings < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);
+  }
+  const environment = await guestEnvironment(input.guestDbId);
+  const canonicalItems = resolved
+    .map(item => ({ menuItemId:item.menu!.menu_item_id, quantity:item.quantity }))
+    .sort((a,b) => a.menuItemId.localeCompare(b.menuItemId));
+  const idempotencyKey = restaurantPreorderPromotionIdempotencyKey({
+    guestDbId: input.guestDbId, requestedForIso: requestedFor.toISOString(), items: canonicalItems,
+    customerName: input.customerName, note: input.note ?? '', environment,
+    promotionCampaignId: input.promotionCampaignId, pricingOverride: input.pricingOverride,
+  });
+  const rid = await restaurantId();
+  const created = await rpc<{ id:string; preorderCode:string; totalAmount:number; normalTotalAmount:number; discountAmount:number; status:string; duplicate?:boolean }>('create_restaurant_preorder_v3', {
+    p_restaurant_id: rid, p_requested_for: requestedFor.toISOString(), p_customer_name: input.customerName,
+    p_phone: input.phone ?? '', p_email: input.email ?? '', p_source_channel: input.channel,
+    p_customer_note: input.note ?? '', p_items: canonicalItems, p_guest_id:input.guestDbId,
+    p_environment:environment, p_idempotency_key:idempotencyKey,
+    p_promotion_campaign_id:input.promotionCampaignId, p_pricing_override:input.pricingOverride,
+  });
+  const result: PromotionPreorderCreateResult = {
+    ...created, items: resolved.map(item => ({ name:item.menu!.name, quantity:item.quantity })),
+    requestedFor: requestedFor.toISOString(), environment,
+  };
+  await notifyRestaurantPreorderTeam(created.id).catch(error => {
+    console.error('RESTAURANT_PREORDER_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+  });
+  await dispatchRestaurantPreorderPayment(created.id).catch(error => {
+    console.error('RESTAURANT_PREORDER_PAYMENT_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+  });
+  return result;
+}
+
 async function dispatchRestaurantPreorderPayment(preorderId: string): Promise<void> {
   const response = await publicDbFetch(
     `payment_requests?entity_type=eq.restaurant_preorder&entity_id=eq.${preorderId}&select=id,status&order=created_at.desc&limit=1`,
@@ -374,22 +456,36 @@ async function preorderItems(id: string): Promise<PreorderItemRow[]> {
   return await response.json() as PreorderItemRow[];
 }
 
+async function promotionCampaignLabel(campaignId: string): Promise<PromotionCampaignLabel | null> {
+  const response = await publicDbFetch(`promotion_campaigns?id=eq.${campaignId}&select=campaign_code,title&limit=1`);
+  return (await response.json() as PromotionCampaignLabel[])[0] ?? null;
+}
+
 /**
  * Item-breakdown + pickup-time composition for the generic _payments.ts
  * customer message — used only when payment_requests.entity_type =
  * 'restaurant_preorder'. Reuses preorderById/preorderItems/thaiDateTime
  * (the same queries and formatting the restaurant team's order card already
  * uses) rather than duplicating a second read of the same source of truth.
+ * When the preorder was priced from a promotion, also returns the real
+ * normal/discount numbers so the customer sees the honest before/after —
+ * never just the discounted total with no explanation.
  */
 export async function restaurantPreorderPaymentSummary(
   preorderId: string,
-): Promise<{ itemLines: string[]; pickupText: string } | null> {
+): Promise<{ itemLines: string[]; pickupText: string; promo: { title: string; normalTotal: number; discountAmount: number } | null } | null> {
   const preorder = await preorderById(preorderId);
   if (!preorder) return null;
   const items = await preorderItems(preorderId);
+  const promo = preorder.pricing_source === 'promotion' && preorder.promotion_campaign_id
+    ? await promotionCampaignLabel(preorder.promotion_campaign_id).then(label => label ? {
+        title: label.title, normalTotal: Number(preorder.normal_total_amount ?? preorder.total_amount), discountAmount: Number(preorder.discount_amount),
+      } : null)
+    : null;
   return {
     itemLines: items.map(item => `${item.menu_name} × ${item.quantity} = ${Number(item.line_total).toFixed(0)} บาท`),
     pickupText: thaiDateTime(preorder.requested_for),
+    promo,
   };
 }
 
@@ -424,9 +520,12 @@ function paymentStatusLine(payment: { status: string; amount: number | null } | 
 }
 
 async function preorderFlex(preorder: PreorderRow): Promise<Json> {
-  const [items, payment] = await Promise.all([
+  const [items, payment, promotion] = await Promise.all([
     preorderItems(preorder.id),
     preorderPaymentStatus(preorder.id).catch(() => null),
+    preorder.pricing_source === 'promotion' && preorder.promotion_campaign_id
+      ? promotionCampaignLabel(preorder.promotion_campaign_id).catch(() => null)
+      : Promise.resolve(null),
   ]);
   const paymentLine = paymentStatusLine(payment);
   const buttons: Json[] = [];
@@ -444,6 +543,7 @@ async function preorderFlex(preorder: PreorderRow): Promise<Json> {
       {type:'text',text:`${prefix}📦 ออเดอร์: ${statusLabel(preorder.status)}`,color:'#FFFFFF',weight:'bold',size:'lg'},
       {type:'text',text:'ตำมา-ชาติ',color:'#F4EEDC',size:'sm',margin:'sm'},
     ]},body:{type:'box',layout:'vertical',spacing:'md',paddingAll:'18px',contents:[
+      ...(promotion ? [{type:'text',text:`💡 Promotion: ${promotion.title} (${promotion.campaign_code})`,weight:'bold',wrap:true,color:'#B36B00'}] : []),
       ...(paymentLine ? [{type:'text',text:`💳 ${paymentLine}`,weight:'bold',wrap:true}] : []),
       {type:'text',text:`รับอาหาร: ${thaiDateTime(preorder.requested_for)}`,weight:'bold',wrap:true},
       {type:'text',text:`ลูกค้า: ${preorder.customer_name}`,wrap:true},
@@ -451,6 +551,10 @@ async function preorderFlex(preorder: PreorderRow): Promise<Json> {
       {type:'separator'},
       ...items.map(item => ({type:'text',text:`${item.quantity} × ${item.menu_name}  ${Number(item.line_total).toFixed(0)} บาท`,wrap:true,size:'sm'})),
       {type:'separator'},
+      ...(promotion ? [
+        {type:'text',text:`ราคาปกติ ${Number(preorder.normal_total_amount ?? preorder.total_amount).toFixed(0)} บาท`,size:'sm',wrap:true,color:'#6B6B6B'},
+        {type:'text',text:`ส่วนลด ${Number(preorder.discount_amount).toFixed(0)} บาท`,size:'sm',wrap:true,color:'#6B6B6B'},
+      ] : []),
       {type:'text',text:`รวม ${Number(preorder.total_amount).toFixed(0)} บาท`,weight:'bold',align:'end'},
       ...(preorder.customer_note ? [{type:'text',text:`หมายเหตุ: ${preorder.customer_note}`,size:'sm',wrap:true,color:'#6B6B6B'}] : []),
       {type:'text',text:`อ้างอิง ${preorder.preorder_code}`,size:'xs',color:'#999999'},
