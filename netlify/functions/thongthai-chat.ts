@@ -6,6 +6,7 @@ import {
   getBrainChannel,
   runThongthaiBrain,
   type AgentStateUpdate,
+  type BrainChannel,
   type BrainRequest,
   type BrainResponse,
   type BrainToolResult,
@@ -26,6 +27,15 @@ import {
   registerGuestIdentity,
 } from './_thongthai-runtime-v3';
 import { restaurantMenuAdvice } from './_restaurant-sot';
+import {
+  clearRestaurantPreorderDraft,
+  formatRestaurantSetPrompt,
+  mergeRestaurantPreorderDraft,
+  missingRestaurantPreorderFields,
+  parseRestaurantPreorderTurn,
+  type RestaurantPreorderDraft,
+  type RestaurantProposedSetState,
+} from './_restaurant-preorder-dialog';
 
 export type {
   BrainRequest as ChatRequest,
@@ -36,6 +46,7 @@ export type {
 } from './_thongthai-brain-v3';
 
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
+const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
 
 function emptyGuestContext(): GuestContext {
   return {
@@ -230,10 +241,43 @@ function normThai(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function currentRestaurantSet(runtime: { agentState: Record<string, unknown> }): RestaurantProposedSetState | null {
+  const raw = runtime.agentState.restaurantProposedSet;
+  if (!isObject(raw) || !Array.isArray(raw.items)) return null;
+  const items = raw.items
+    .filter(isObject)
+    .map(item => ({
+      name: typeof item.name === 'string' ? item.name.trim() : '',
+      quantity: typeof item.quantity === 'number' && Number.isFinite(item.quantity) ? Math.max(1, Math.floor(item.quantity)) : 1,
+    }))
+    .filter(item => item.name);
+  if (!items.length) return null;
+  const draftRaw = isObject(raw.preorderDraft) ? raw.preorderDraft : null;
+  const preorderDraft: RestaurantPreorderDraft | undefined = draftRaw ? {
+    date: typeof draftRaw.date === 'string' ? draftRaw.date : null,
+    time: typeof draftRaw.time === 'string' ? draftRaw.time : null,
+    customerName: typeof draftRaw.customerName === 'string' ? draftRaw.customerName : null,
+    phone: typeof draftRaw.phone === 'string' ? draftRaw.phone : null,
+    email: typeof draftRaw.email === 'string' ? draftRaw.email : null,
+    acceptedAt: typeof draftRaw.acceptedAt === 'string' ? draftRaw.acceptedAt : new Date().toISOString(),
+  } : undefined;
+  return {
+    source: typeof raw.source === 'string' ? raw.source : 'restaurant_menu_advisor_v1',
+    items,
+    total: typeof raw.total === 'number' ? raw.total : undefined,
+    budget: typeof raw.budget === 'number' ? raw.budget : null,
+    partySize: typeof raw.partySize === 'number' ? raw.partySize : null,
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : undefined,
+    preorderDraft,
+  };
+}
+
 export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): boolean {
   const text = normThai(request.message);
   if (/(ขี่ม้า|atv|เอทีวี|ยิงธนู|ห้องพัก|ที่พัก|เฮือน|otop|กาแฟ|คาเฟ่)/iu.test(text)) return false;
-  if (/(เอาชุด|ชุดเมื่อกี้|ตามนี้|โอเคชุดนี้)/u.test(text) && runtime.agentState.restaurantProposedSet) return true;
+  const proposedSet = currentRestaurantSet(runtime);
+  if (proposedSet?.preorderDraft) return true;
+  if (RESTAURANT_SET_ACCEPT_RE.test(text) && proposedSet) return true;
   const hasRestaurantHistory = request.chatHistory.slice(-6).some(turn =>
     /(ตำลาว|ตำไทย|ชุดอาหาร|ร้านอาหาร|ตำมา-ชาติ|เมนู|สั่งอาหาร|แพ้ถั่ว|ไม่เอาหมู)/u.test(turn.content));
   const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง)/u.test(text);
@@ -252,43 +296,48 @@ function formatAdvisorMessage(advisor: any): string {
   if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
     const [first, second] = advisor.comparison;
     const lines = advisor.comparison.slice(0, 4).map((row: any) => {
-      const tags = [row.summary, `ราคา ${formatMoney(row.price)}`, row.signature ? 'เมนูเด่นร้าน' : null]
+      const details = [row.summary, `ราคา ${formatMoney(row.price)}`, row.signature ? 'เมนูเด่นร้าน' : null]
         .filter(Boolean).join(' · ');
-      return `• ${row.name}: ${tags}`;
+      return `• ${row.name}\n  ${details}`;
     });
     return [
-      first && second ? `${first.name} กับ ${second.name} ต่างกันตามข้อมูลเมนูจริงแบบนี้ครับ` : 'เทียบจากเมนูจริงให้ครับ',
+      first && second ? `🍽️ ${first.name} vs ${second.name}` : '🍽️ เทียบจากเมนูจริง',
+      '',
       ...lines,
-      notices[0] ? `\nหมายเหตุ: ${notices[0]}` : '',
+      notices[0] ? `\n⚠️ ${notices[0]}` : '',
     ].filter(Boolean).join('\n');
   }
   if (advisor?.mode === 'compose_set' && advisor.set?.items?.length) {
     const set = advisor.set;
-    const lines = set.items.map((line: any, index: number) =>
-      `${index + 1}. ${line.name} x${line.quantity} — ${formatMoney(line.lineTotal)}${line.reason ? ` · ${line.reason}` : ''}`);
+    const lines = set.items.map((line: any) =>
+      `• ${line.name} ×${line.quantity} — ${formatMoney(line.lineTotal)}`);
     return [
-      `จัดชุดให้ตามเมนูจริงของตำมา-ชาติครับ`,
+      '🍽️ ชุดที่ทองไทยแนะนำ',
+      '',
       ...lines,
-      `รวม ${formatMoney(set.total)}${set.budget != null ? ` จากงบ ${formatMoney(set.budget)}` : ''}`,
-      set.remainingBudget != null ? `เหลืองบ ${formatMoney(set.remainingBudget)}` : '',
-      set.limitedByBudget ? 'งบค่อนข้างตึง เลยจัดให้เน้นบทบาทหลักโดยไม่ให้เกินงบครับ' : '',
-      set.optionalDessert ? `ถ้าอยากปิดท้าย ยังเพิ่ม ${set.optionalDessert.name} (${formatMoney(set.optionalDessert.price)}) ได้ครับ` : '',
-      notices[0] ? `หมายเหตุ: ${notices[0]}` : '',
-      'ถ้าเอาชุดนี้ บอกวันเวลาได้เลยครับ',
+      '',
+      `💰 รวม ${formatMoney(set.total)}${set.budget != null ? ` / งบ ${formatMoney(set.budget)}` : ''}`,
+      set.remainingBudget != null && set.remainingBudget > 0 ? `เหลืองบ ${formatMoney(set.remainingBudget)}` : '',
+      set.limitedByBudget ? 'จัดให้พอดีงบ โดยเก็บเมนูหลักไว้ก่อนครับ' : '',
+      set.optionalDessert ? `🍨 เพิ่มได้: ${set.optionalDessert.name} ${formatMoney(set.optionalDessert.price)}` : '',
+      notices[0] ? `⚠️ ${notices[0]}` : '',
+      '',
+      'ถ้าชุดนี้โอเค พิมพ์ “เอาชุดนี้” ได้เลยครับ',
     ].filter(Boolean).join('\n');
   }
-  const rows = Array.isArray(advisor?.recommendations) ? advisor.recommendations.slice(0, advisor.mode === 'pairing' ? 3 : 5) : [];
+  const rows = Array.isArray(advisor?.recommendations) ? advisor.recommendations.slice(0, advisor.mode === 'pairing' ? 3 : 4) : [];
   if (rows.length) {
     const intro = advisor?.mode === 'pairing'
-      ? 'มีตำลาวแล้ว เพิ่มแบบนี้จะบาลานซ์โต๊ะได้ดีครับ'
-      : 'ทองไทยแนะนำจากเมนูจริง ราคาและสต๊อกล่าสุดครับ';
+      ? '🍽️ มีเมนูนี้แล้ว เพิ่มอีกนิดจะบาลานซ์โต๊ะกำลังดีครับ'
+      : '🍽️ เมนูที่น่าลองตอนนี้';
     return [
       intro,
-      ...rows.map((row: any, index: number) => {
-        const reason = Array.isArray(row.reasons) && row.reasons.length ? ` · ${row.reasons[0]}` : row.summary ? ` · ${row.summary}` : '';
-        return `${index + 1}. ${row.name} — ${formatMoney(row.price)}${reason}`;
+      '',
+      ...rows.map((row: any) => {
+        const reason = Array.isArray(row.reasons) && row.reasons.length ? row.reasons[0] : row.summary;
+        return `• ${row.name} — ${formatMoney(row.price)}${reason ? `\n  ${reason}` : ''}`;
       }),
-      notices[0] ? `\nหมายเหตุ: ${notices[0]}` : '',
+      notices[0] ? `\n⚠️ ${notices[0]}` : '',
     ].filter(Boolean).join('\n');
   }
   return notices[0] ?? 'ตอนนี้ยังไม่มีเมนูที่ตรงเงื่อนไขและพร้อมขายในสต๊อกครับ';
@@ -308,34 +357,119 @@ function proposedSetFromAdvisor(advisor: any): AgentStateUpdate | undefined {
   };
 }
 
-function restaurantSetAcceptanceMessage(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): BrainResponse | null {
-  if (!/(เอาชุด|ชุดเมื่อกี้|ตามนี้|โอเคชุดนี้)/u.test(request.message)) return null;
-  const set = runtime.agentState.restaurantProposedSet as { items?: Array<{ name:string; quantity:number }>; total?: number } | undefined;
-  if (!set?.items?.length) return null;
-  const itemLines = set.items.map(item => `• ${item.name} x${item.quantity}`);
+function formatPreorderPickup(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return value;
+  return new Intl.DateTimeFormat('th-TH', {
+    timeZone:'Asia/Bangkok', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', hour12:false,
+  }).format(date);
+}
+
+function preorderFailureMessage(detail: string): string {
+  if (detail === 'menu_item_unavailable') return 'มีบางเมนูในชุดนี้เพิ่งไม่พร้อมขายครับ เดี๋ยวทองไทยจัดชุดใหม่จากของที่พร้อมให้ได้เลย';
+  if (detail === 'menu_item_not_found') return 'ชุดเดิมมีเมนูที่หาไม่เจอในรายการล่าสุดครับ เดี๋ยวทองไทยจัดใหม่จากเมนูจริงให้';
+  if (detail === 'invalid_requested_time') return 'เวลารับอาหารยังไม่ชัดครับ ลองพิมพ์ใหม่แบบ “พรุ่งนี้ 14:00” ได้เลย';
+  return 'ตอนนี้ระบบสร้างออเดอร์ให้ยังไม่สำเร็จครับ ข้อมูลชุดเดิมยังอยู่ ลองส่งวัน เวลา หรือชื่ออีกครั้งได้เลย';
+}
+
+async function restaurantPreorderDialogResponse(
+  request: BrainRequest,
+  runtime: { agentState: Record<string, unknown> },
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  const set = currentRestaurantSet(runtime);
+  if (!set) return null;
+  const acceptedNow = RESTAURANT_SET_ACCEPT_RE.test(normThai(request.message));
+  if (!acceptedNow && !set.preorderDraft) return null;
+
+  const parsed = parseRestaurantPreorderTurn(request.message, set.preorderDraft ?? {});
+  const draft = mergeRestaurantPreorderDraft(set.preorderDraft, parsed);
+  const pendingSet: RestaurantProposedSetState = { ...set, preorderDraft:draft };
+  const missing = missingRestaurantPreorderFields(draft);
+
+  if (missing.length || !guestDbId) {
+    return {
+      message: !guestDbId
+        ? 'ทองไทยจำชุดนี้ไว้แล้วครับ แต่ตอนนี้ยังเปิดรายการในระบบไม่ได้ ลองส่งข้อความอีกครั้งได้เลย'
+        : formatRestaurantSetPrompt(pendingSet, draft),
+      intent:'order',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{ restaurantProposedSet: pendingSet as AgentStateUpdate['restaurantProposedSet'] },
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+
+  const firstResponse: BrainResponse = {
+    message:'', intent:'order', contextUpdates:{}, journeyAction:{type:'none',journey:null},
+    suggestedActions:[], responseStyle:'direct',
+    agentStateUpdate:{ restaurantProposedSet: pendingSet as AgentStateUpdate['restaurantProposedSet'] },
+    semanticMemoryUpdates:[], toolCalls:[],
+  };
+  const toolResults = await executeBrainTools(
+    guestDbId,
+    channel,
+    [{
+      name:'create_restaurant_preorder',
+      args:{
+        date:draft.date,
+        time:draft.time,
+        items:set.items,
+        customerName:draft.customerName,
+        phone:draft.phone,
+        email:draft.email,
+      },
+    }],
+    firstResponse,
+    request,
+  );
+  const result = toolResults[0];
+  if (!result?.ok) {
+    return {
+      ...firstResponse,
+      message: preorderFailureMessage(result?.detail ?? 'execution_failed'),
+      agentStateUpdate:{ restaurantProposedSet: pendingSet as AgentStateUpdate['restaurantProposedSet'] },
+    };
+  }
+
+  let detail: Record<string, unknown> = {};
+  try { detail = JSON.parse(result.detail) as Record<string, unknown>; } catch { /* keep safe defaults */ }
+  const duplicate = detail.duplicate === true;
+  const code = typeof detail.preorderCode === 'string' ? detail.preorderCode : '';
+  const pickup = typeof detail.requestedFor === 'string' ? formatPreorderPickup(detail.requestedFor) : `${draft.date} ${draft.time}`;
+  const total = typeof detail.totalAmount === 'number' ? detail.totalAmount : set.total;
+  const clearedSet = clearRestaurantPreorderDraft(set);
+
   return {
+    ...firstResponse,
     message: [
-      'ได้ครับ ทองไทยใช้ชุดล่าสุดนี้ต่อให้เลย ไม่ต้องพิมพ์ชื่อเมนูซ้ำ',
-      ...itemLines,
-      set.total ? `รวมประมาณ ${formatMoney(set.total)}` : '',
+      duplicate ? 'รายการนี้มีอยู่แล้วครับ ✅' : 'เรียบร้อยครับ ✅',
+      code ? `🍽️ ออเดอร์ ${code}` : '🍽️ ตำมา-ชาติ',
+      `🕑 รับอาหาร ${pickup}`,
+      typeof total === 'number' ? `💰 รวม ${Math.round(total)} บาท` : '',
+      '📌 สถานะ: รอร้านรับออเดอร์',
       '',
-      'ขอชื่อผู้สั่งก่อนครับ แล้วทองไทยจะทำรายการพรีออเดอร์ให้ต่อทันที',
+      duplicate
+        ? 'ทองไทยใช้รายการเดิมให้ ไม่ได้สร้างซ้ำครับ'
+        : 'ส่งเข้าหลังร้านและแจ้งทีมแล้วครับ',
     ].filter(Boolean).join('\n'),
-    intent:'order',
-    contextUpdates:{},
-    journeyAction:{type:'none',journey:null},
-    suggestedActions:[],
-    responseStyle:'direct',
-    agentStateUpdate:{ restaurantProposedSet: set as AgentStateUpdate['restaurantProposedSet'] },
-    semanticMemoryUpdates:[],
-    toolCalls:[],
+    agentStateUpdate:{ restaurantProposedSet: clearedSet as AgentStateUpdate['restaurantProposedSet'] },
   };
 }
 
-async function deterministicRestaurantResponse(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): Promise<BrainResponse | null> {
+async function deterministicRestaurantResponse(
+  request: BrainRequest,
+  runtime: { agentState: Record<string, unknown> },
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
   if (!isRestaurantAdvisorTurn(request, runtime)) return null;
-  const accept = restaurantSetAcceptanceMessage(request, runtime);
-  if (accept) return accept;
+  const preorderDialog = await restaurantPreorderDialogResponse(request, runtime, guestDbId, channel);
+  if (preorderDialog) return preorderDialog;
   const advice = await restaurantMenuAdvice({
     query: request.message,
     partySize: null,
@@ -413,7 +547,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
     ? history
     : [...history, { role: 'user', content: request.message }];
 
-  const deterministicRestaurant = await deterministicRestaurantResponse(request, runtime).catch(error => {
+  const deterministicRestaurant = await deterministicRestaurantResponse(request, runtime, guestDbId, channel).catch(error => {
     console.error('THONGTHAI_RESTAURANT_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
   });
@@ -454,8 +588,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
     );
     const duplicatePreorderNotice = duplicateRestaurantPreorderMessage(request.language, toolResults);
     if (duplicatePreorderNotice) {
-      // This is an idempotent replay of an existing preorder. Answer deterministically so
-      // the customer is never told a duplicate request was newly accepted.
       finalResponse = {
         ...firstResponse,
         toolCalls: [],

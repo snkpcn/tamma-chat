@@ -39,3 +39,24 @@ test('restaurant follow-up can use prior restaurant context', () => {
   ];
   assert.equal(isRestaurantAdvisorTurn(request('ไม่เอาหมูด้วย', history), {agentState:{}}), true);
 });
+
+test('pending preorder keeps date time and name replies inside restaurant flow', () => {
+  const runtime = {
+    agentState:{
+      restaurantProposedSet:{
+        source:'restaurant_menu_advisor_v1',
+        items:[{name:'ลาบปลาช่อน',quantity:1}],
+        total:189,
+        budget:700,
+        partySize:3,
+        createdAt:'2026-09-18T01:20:00.000Z',
+        preorderDraft:{
+          date:null,time:null,customerName:null,phone:null,email:null,
+          acceptedAt:'2026-09-18T01:30:00.000Z',
+        },
+      },
+    },
+  };
+  assert.equal(isRestaurantAdvisorTurn(request('พรุ่งนี้ 14:00'), runtime), true);
+  assert.equal(isRestaurantAdvisorTurn(request('นุ๊ก'), runtime), true);
+});
