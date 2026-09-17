@@ -1,6 +1,7 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handleLineBookingMessage, handleLineMembershipMessage } from './_operations-db';
+import { formatCustomerCopy, splitCustomerCopyForLine } from './_customer-copy';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -65,7 +66,6 @@ const CUSTOMER_MEMORY_ENDPOINT = '/.netlify/functions/customer-memory';
 const LINE_LINK_ENDPOINT = '/.netlify/functions/line-link';
 const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
 const OFFICIAL_MAP_URL = 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic';
-const MAX_LINE_TEXT = 4500;
 const MAX_LINE_MESSAGES = 5;
 const LINK_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -221,9 +221,10 @@ async function askThongthaiReliably(message: string, userId: string): Promise<Th
     );
     return {
       message: [
-        'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
-        'หากเป็นคำสั่งเดิมที่เพิ่งส่งซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
-        'ลองส่งข้อความเดิมอีกครั้งได้เลย หรือพิมพ์ “ดูออเดอร์ล่าสุด” เพื่อให้ทองไทยตรวจให้อีกครั้งครับ',
+        '⚠️ ทองไทยรับข้อความแล้ว แต่ระบบตอบกลับไม่ทันรอบนี้ครับ',
+        '',
+        'ถ้าเป็นคำสั่งเดิม ระบบจะไม่สร้างออเดอร์ซ้ำ',
+        'ลองส่งข้อความเดิมอีกครั้ง หรือพิมพ์ “ดูออเดอร์ล่าสุด” ได้เลยครับ',
       ].join('\n'),
       intent: 'support',
       journeyAction: { type: 'none', journey: null },
@@ -232,22 +233,11 @@ async function askThongthaiReliably(message: string, userId: string): Promise<Th
   }
 }
 
-function splitText(value: string): string[] {
-  const text = value.trim();
-  if (!text) return [];
-  if (text.length <= MAX_LINE_TEXT) return [text];
-
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > MAX_LINE_TEXT && chunks.length < MAX_LINE_MESSAGES - 1) {
-    let cut = remaining.lastIndexOf('\n', MAX_LINE_TEXT);
-    if (cut < MAX_LINE_TEXT * 0.6) cut = remaining.lastIndexOf(' ', MAX_LINE_TEXT);
-    if (cut < MAX_LINE_TEXT * 0.6) cut = MAX_LINE_TEXT;
-    chunks.push(remaining.slice(0, cut).trim());
-    remaining = remaining.slice(cut).trim();
-  }
-  if (remaining) chunks.push(remaining.slice(0, MAX_LINE_TEXT));
-  return chunks.slice(0, MAX_LINE_MESSAGES);
+function splitText(value: string, maxMessages = MAX_LINE_MESSAGES): string[] {
+  return splitCustomerCopyForLine(value, {
+    maxChars: 1050,
+    maxMessages,
+  });
 }
 
 function createLinkToken(userId: string, channelSecret: string): string {
@@ -259,7 +249,9 @@ function createLinkToken(userId: string, channelSecret: string): string {
 }
 
 function buildJourneyFlex(result: ThongthaiResponse, userId: string, channelSecret: string): LineFlexMessage {
-  const summaryRaw = typeof result.message === 'string' ? result.message.replace(/\s+/g, ' ').trim() : '';
+  const summaryRaw = typeof result.message === 'string'
+    ? formatCustomerCopy(result.message, { channel:'line', decorate:false }).replace(/\s+/g, ' ').trim()
+    : '';
   const summary = summaryRaw.length > 260 ? summaryRaw.slice(0, 257) + '…' : summaryRaw;
   const linkToken = encodeURIComponent(createLinkToken(userId, channelSecret));
   const linkedJourneyUrl = `${TAMMA_SITE_URL}${LINE_LINK_ENDPOINT}?token=${linkToken}&next=journey`;
@@ -289,7 +281,7 @@ function buildJourneyFlex(result: ThongthaiResponse, userId: string, channelSecr
         contents: [
           { type: 'text', text: summary || 'แผนของคุณพร้อมแล้วครับ', wrap: true, color: '#4A4039', size: 'sm' },
           { type: 'separator', margin: 'lg', color: '#E8E0D7' },
-          { type: 'text', text: 'ปรับแผนได้ต่อในแชตนี้ และความจำของทองไทยจะตามไปบนเว็บเมื่อเปิดแผนเต็ม', wrap: true, color: '#7B6C61', size: 'xs', margin: 'lg' },
+          { type: 'text', text: 'ปรับแผนต่อในแชตได้ และเปิดแผนเต็มบนเว็บได้ทุกเมื่อ', wrap: true, color: '#7B6C61', size: 'xs', margin: 'lg' },
         ],
       },
       footer: {
@@ -322,8 +314,8 @@ function buildJourneyFlex(result: ThongthaiResponse, userId: string, channelSecr
 
 function buildReplyMessages(result: ThongthaiResponse, userId: string, channelSecret: string): LineReplyMessage[] {
   const baseText = typeof result.message === 'string' && result.message.trim()
-    ? result.message.trim()
-    : 'ทองไทยได้รับข้อความแล้วครับ ลองพิมพ์ใหม่อีกครั้งได้เลยครับ';
+    ? formatCustomerCopy(result.message, { channel:'line' })
+    : 'ทองไทยได้รับข้อความแล้วครับ ลองพิมพ์ใหม่อีกครั้งได้เลย';
 
   const isJourney = Boolean(
     result.journeyAction?.type
@@ -332,7 +324,7 @@ function buildReplyMessages(result: ThongthaiResponse, userId: string, channelSe
   );
 
   const textLimit = isJourney ? MAX_LINE_MESSAGES - 1 : MAX_LINE_MESSAGES;
-  const messages: LineReplyMessage[] = splitText(baseText)
+  const messages: LineReplyMessage[] = splitText(baseText, textLimit)
     .slice(0, textLimit)
     .map(text => ({ type: 'text', text }));
 
@@ -406,13 +398,18 @@ async function saveLatestJourney(userId: string): Promise<'saved' | 'already_sav
 
 async function replyToLine(replyToken: string, messages: LineReplyMessage[], accessToken: string): Promise<void> {
   if (!messages.length) return;
+  const polished = messages
+    .map(message => message.type === 'text'
+      ? { ...message, text:formatCustomerCopy(message.text, { channel:'line' }) }
+      : message)
+    .filter(message => message.type !== 'text' || Boolean(message.text));
   const response = await fetch(LINE_REPLY_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ replyToken, messages: messages.slice(0, MAX_LINE_MESSAGES) }),
+    body: JSON.stringify({ replyToken, messages: polished.slice(0, MAX_LINE_MESSAGES) }),
   });
 
   if (!response.ok) {
@@ -435,22 +432,19 @@ async function handleEvent(
   if (event.type === 'postback' && event.postback?.data === 'action=save_journey') {
     const status = await saveLatestJourney(userId);
     const text = status === 'saved'
-      ? 'บันทึก Journey นี้ให้แล้วครับ ✅ กลับมาคุยกับทองไทยเมื่อไรก็เรียกแผนนี้ต่อได้ครับ'
+      ? '✅ บันทึก Journey ให้แล้วครับ\n\nกลับมาคุยกับทองไทยเมื่อไรก็เรียกแผนนี้ต่อได้เลย'
       : status === 'already_saved'
-        ? 'Journey นี้ถูกบันทึกไว้แล้วครับ ✅'
-        : 'ยังไม่พบ Journey ล่าสุดให้บันทึกครับ ลองให้ทองไทยวางแผนก่อนนะครับ';
-    await replyToLine(replyToken, [{ type: 'text', text }], accessToken);
+        ? '✅ Journey นี้บันทึกไว้แล้วครับ'
+        : 'ยังไม่พบ Journey ล่าสุดครับ\n\nลองให้ทองไทยวางแผนก่อน แล้วค่อยกดบันทึกได้เลย';
+    await replyToLine(replyToken, splitText(text).map(item => ({ type: 'text', text:item })), accessToken);
     return;
   }
 
   if (event.type !== 'message') return;
 
   if (event.message?.type !== 'text' || typeof event.message.text !== 'string') {
-    await replyToLine(
-      replyToken,
-      [{ type: 'text', text: 'ตอนนี้ทองไทยคุยผ่านข้อความตัวอักษรก่อนนะครับ พิมพ์สิ่งที่อยากรู้หรือให้ช่วยวาง Journey มาได้เลยครับ' }],
-      accessToken,
-    );
+    const text = 'ตอนนี้ทองไทยรับข้อความตัวอักษรก่อนนะครับ 🙂\n\nพิมพ์สิ่งที่อยากรู้ หรือให้ช่วยวาง Journey มาได้เลย';
+    await replyToLine(replyToken, splitText(text).map(item => ({ type:'text', text:item })), accessToken);
     return;
   }
 
