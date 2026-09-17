@@ -83,3 +83,13 @@ export async function paymentConfirmationGuard(postbackData: string): Promise<st
 
   return null;
 }
+
+export async function paymentTypedConfirmationGuard(text: string): Promise<string | null> {
+  const clean = text.trim().replace(/\s+/g, ' ');
+  const match = clean.match(/^ยืนยัน\s+(BK-\d{6}-[A-Z0-9]{8})$/iu);
+  if (!match) return null;
+  const code = match[1].toUpperCase();
+  const row = await byEntityCode(code);
+  if (!row) return `⛔ ยังรับงาน ${code} ไม่ได้ เพราะยังไม่พบรายการชำระเงินครับ`;
+  return row.status === 'verified' ? null : blockedText(row);
+}
