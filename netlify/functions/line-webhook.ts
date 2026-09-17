@@ -7,6 +7,13 @@ import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
 import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
 import { handleStaffBookingPostback, type LineMessage } from './_ops-line-ui';
 import { handleRestaurantPreorderPostback, handleRestaurantStockText } from './_restaurant-sot';
+import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
+import {
+  handleCustomerPaymentSlip,
+  handleCustomerPaymentText,
+  handleLinePaymentGroupText,
+  handleLinePaymentPostback,
+} from './_payments';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -101,6 +108,30 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
 
   // Staff buttons use LINE postback events. They never enter customer chat/memory.
   if (event.type === 'postback' && typeof event.postback?.data === 'string') {
+    const paymentMessages = await handleLinePaymentPostback({
+      targetId,
+      userId: event.source?.userId ?? null,
+      data: event.postback.data,
+    });
+    if (paymentMessages?.length) {
+      const replies = [...paymentMessages] as LineMessage[];
+      const paymentParams = new URLSearchParams(event.postback.data);
+      if (paymentParams.get('ops') === 'payment' && paymentParams.get('action') === 'verify') {
+        replies.push({
+          type: 'text',
+          text: '📌 หลังยืนยันรับเงินแล้ว กรุณาส่ง EDC/หลักฐานรายการในกลุ่มนี้ เพื่อให้เจ้าของดำเนินการชำระคืนบริษัทด้วยครับ',
+        });
+      }
+      await replyToLine(event.replyToken, replies, accessToken);
+      return;
+    }
+
+    const paymentBlock = await paymentConfirmationGuard(event.postback.data);
+    if (paymentBlock) {
+      await replyToLine(event.replyToken, paymentBlock, accessToken);
+      return;
+    }
+
     const preorderMessages = await handleRestaurantPreorderPostback({ targetId, data: event.postback.data });
     if (preorderMessages?.length) {
       await replyToLine(event.replyToken, preorderMessages as LineMessage[], accessToken);
@@ -136,6 +167,22 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
 
   if (event.message?.type !== 'text' || typeof event.message.text !== 'string') return;
 
+  const paymentReply = await handleLinePaymentGroupText({
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+  });
+  if (paymentReply) {
+    await replyToLine(event.replyToken, paymentReply, accessToken);
+    return;
+  }
+
+  const typedPaymentBlock = await paymentTypedConfirmationGuard(event.message.text);
+  if (typedPaymentBlock) {
+    await replyToLine(event.replyToken, typedPaymentBlock, accessToken);
+    return;
+  }
+
   const fuelReply = await handleLineFuelText({
     targetType: sourceType,
     targetId,
@@ -160,6 +207,57 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     text: event.message.text,
   });
   if (reply) await replyToLine(event.replyToken, reply, accessToken);
+}
+
+async function registerDirectUsers(events: LineWebhookEvent[]): Promise<void> {
+  const userIds = [...new Set(
+    events
+      .filter(item => item.source?.type === 'user')
+      .map(item => item.source?.userId)
+      .filter((value): value is string => typeof value === 'string' && value.length > 0 && value.length <= 160),
+  )];
+  for (const userId of userIds) await registerLineContact(lineGuestId(userId), userId);
+}
+
+async function handleCustomerPaymentEvent(
+  item: LineWebhookEvent,
+  accessToken: string,
+): Promise<boolean> {
+  if (item.source?.type !== 'user' || !item.source.userId || !item.replyToken) return false;
+  const anonymousId = lineGuestId(item.source.userId);
+
+  if (item.type === 'message' && item.message?.type === 'image' && item.message.id) {
+    try {
+      const reply = await handleCustomerPaymentSlip({
+        anonymousId,
+        rawLineUserId: item.source.userId,
+        messageId: item.message.id,
+      });
+      await replyToLine(item.replyToken, reply as LineMessage[], accessToken);
+    } catch (error) {
+      console.error('LINE_PAYMENT_SLIP_ERROR', error instanceof Error ? error.message.slice(0, 300) : 'unknown');
+      await replyToLine(
+        item.replyToken,
+        'รับรูปแล้วครับ แต่ระบบบันทึกสลิปไม่สำเร็จ กรุณาส่งรูปสลิปเดิมอีกครั้งในอีกสักครู่ครับ',
+        accessToken,
+      );
+    }
+    return true;
+  }
+
+  if (item.type === 'message' && item.message?.type === 'text' && typeof item.message.text === 'string') {
+    try {
+      const reply = await handleCustomerPaymentText(anonymousId, item.message.text);
+      if (!reply?.length) return false;
+      await replyToLine(item.replyToken, reply as LineMessage[], accessToken);
+      return true;
+    } catch (error) {
+      console.error('LINE_PAYMENT_TEXT_ERROR', error instanceof Error ? error.message.slice(0, 300) : 'unknown');
+      return false;
+    }
+  }
+
+  return false;
 }
 
 export const handler: Handler = async (event, context) => {
@@ -191,7 +289,18 @@ export const handler: Handler = async (event, context) => {
 
   const allEvents = Array.isArray(payload.events) ? payload.events : [];
   const opsEvents = allEvents.filter(item => item.source?.type === 'group' || item.source?.type === 'room');
-  const customerEvents = allEvents.filter(item => item.source?.type !== 'group' && item.source?.type !== 'room');
+  const customerCandidates = allEvents.filter(item => item.source?.type !== 'group' && item.source?.type !== 'room');
+
+  // Link the LINE identity before customer payment handling. This closes the race where a newly-created
+  // payment request tries to push a QR before the customer channel contact exists.
+  try {
+    await registerDirectUsers(customerCandidates);
+  } catch (error) {
+    console.error(
+      'LINE_OPERATIONAL_CONTACT_LINK_ERROR',
+      error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+    );
+  }
 
   if (opsEvents.length) {
     const results = await Promise.allSettled(opsEvents.map(item => handleOpsEvent(item, accessToken)));
@@ -201,6 +310,12 @@ export const handler: Handler = async (event, context) => {
         console.error('LINE_OPS_GROUP_ERROR', message.slice(0, 300));
       }
     }
+  }
+
+  const customerEvents: LineWebhookEvent[] = [];
+  for (const item of customerCandidates) {
+    const handled = await handleCustomerPaymentEvent(item, accessToken);
+    if (!handled) customerEvents.push(item);
   }
 
   let response: HandlerResponse = { statusCode: 200, body: 'OK' };
@@ -217,26 +332,6 @@ export const handler: Handler = async (event, context) => {
       return { statusCode: 500, body: 'LINE webhook failed' };
     }
     response = coreResponse;
-  }
-
-  // Persist customer linkage only for direct-user events. Staff group senders stay out of customer memory/CRM.
-  if (response.statusCode === 200 && customerEvents.length) {
-    try {
-      const userIds = [...new Set(
-        customerEvents
-          .filter(item => item.source?.type === 'user')
-          .map(item => item.source?.userId)
-          .filter((value): value is string => typeof value === 'string' && value.length > 0 && value.length <= 160),
-      )];
-      for (const userId of userIds) {
-        await registerLineContact(lineGuestId(userId), userId);
-      }
-    } catch (error) {
-      console.error(
-        'LINE_OPERATIONAL_CONTACT_LINK_ERROR',
-        error instanceof Error ? error.message.slice(0, 180) : 'unknown',
-      );
-    }
   }
 
   return response;
