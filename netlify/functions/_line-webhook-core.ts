@@ -1,6 +1,7 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handleLineBookingMessage, handleLineMembershipMessage } from './_operations-db';
+import { splitCustomerMessageForLine } from './_chat-copy-style';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -65,7 +66,6 @@ const CUSTOMER_MEMORY_ENDPOINT = '/.netlify/functions/customer-memory';
 const LINE_LINK_ENDPOINT = '/.netlify/functions/line-link';
 const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
 const OFFICIAL_MAP_URL = 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic';
-const MAX_LINE_TEXT = 4500;
 const MAX_LINE_MESSAGES = 5;
 const LINK_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -222,8 +222,9 @@ async function askThongthaiReliably(message: string, userId: string): Promise<Th
     return {
       message: [
         'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
-        'หากเป็นคำสั่งเดิมที่เพิ่งส่งซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
-        'ลองส่งข้อความเดิมอีกครั้งได้เลย หรือพิมพ์ “ดูออเดอร์ล่าสุด” เพื่อให้ทองไทยตรวจให้อีกครั้งครับ',
+        '',
+        'ถ้าเพิ่งส่งคำสั่งเดิมซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
+        'ลองส่งข้อความเดิมอีกครั้ง หรือพิมพ์ “ดูออเดอร์ล่าสุด” ได้เลย',
       ].join('\n'),
       intent: 'support',
       journeyAction: { type: 'none', journey: null },
@@ -233,21 +234,7 @@ async function askThongthaiReliably(message: string, userId: string): Promise<Th
 }
 
 function splitText(value: string): string[] {
-  const text = value.trim();
-  if (!text) return [];
-  if (text.length <= MAX_LINE_TEXT) return [text];
-
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > MAX_LINE_TEXT && chunks.length < MAX_LINE_MESSAGES - 1) {
-    let cut = remaining.lastIndexOf('\n', MAX_LINE_TEXT);
-    if (cut < MAX_LINE_TEXT * 0.6) cut = remaining.lastIndexOf(' ', MAX_LINE_TEXT);
-    if (cut < MAX_LINE_TEXT * 0.6) cut = MAX_LINE_TEXT;
-    chunks.push(remaining.slice(0, cut).trim());
-    remaining = remaining.slice(cut).trim();
-  }
-  if (remaining) chunks.push(remaining.slice(0, MAX_LINE_TEXT));
-  return chunks.slice(0, MAX_LINE_MESSAGES);
+  return splitCustomerMessageForLine(value, 1800, MAX_LINE_MESSAGES);
 }
 
 function createLinkToken(userId: string, channelSecret: string): string {
@@ -332,8 +319,7 @@ function buildReplyMessages(result: ThongthaiResponse, userId: string, channelSe
   );
 
   const textLimit = isJourney ? MAX_LINE_MESSAGES - 1 : MAX_LINE_MESSAGES;
-  const messages: LineReplyMessage[] = splitText(baseText)
-    .slice(0, textLimit)
+  const messages: LineReplyMessage[] = splitCustomerMessageForLine(baseText, 1800, textLimit)
     .map(text => ({ type: 'text', text }));
 
   if (isJourney) messages.push(buildJourneyFlex(result, userId, channelSecret));
@@ -435,11 +421,11 @@ async function handleEvent(
   if (event.type === 'postback' && event.postback?.data === 'action=save_journey') {
     const status = await saveLatestJourney(userId);
     const text = status === 'saved'
-      ? 'บันทึก Journey นี้ให้แล้วครับ ✅ กลับมาคุยกับทองไทยเมื่อไรก็เรียกแผนนี้ต่อได้ครับ'
+      ? 'บันทึก Journey นี้ให้แล้วครับ ✅\nกลับมาคุยกับทองไทยเมื่อไรก็เรียกแผนนี้ต่อได้ครับ'
       : status === 'already_saved'
         ? 'Journey นี้ถูกบันทึกไว้แล้วครับ ✅'
-        : 'ยังไม่พบ Journey ล่าสุดให้บันทึกครับ ลองให้ทองไทยวางแผนก่อนนะครับ';
-    await replyToLine(replyToken, [{ type: 'text', text }], accessToken);
+        : 'ยังไม่พบ Journey ล่าสุดให้บันทึกครับ\nลองให้ทองไทยวางแผนก่อนนะครับ';
+    await replyToLine(replyToken, splitText(text).map(value => ({ type: 'text', text:value })), accessToken);
     return;
   }
 
@@ -448,7 +434,7 @@ async function handleEvent(
   if (event.message?.type !== 'text' || typeof event.message.text !== 'string') {
     await replyToLine(
       replyToken,
-      [{ type: 'text', text: 'ตอนนี้ทองไทยคุยผ่านข้อความตัวอักษรก่อนนะครับ พิมพ์สิ่งที่อยากรู้หรือให้ช่วยวาง Journey มาได้เลยครับ' }],
+      [{ type: 'text', text: 'ตอนนี้ทองไทยคุยผ่านข้อความตัวอักษรก่อนนะครับ\nพิมพ์สิ่งที่อยากรู้ หรือให้ทองไทยช่วยวาง Journey ได้เลยครับ' }],
       accessToken,
     );
     return;
