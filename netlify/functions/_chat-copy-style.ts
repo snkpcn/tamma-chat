@@ -5,6 +5,7 @@ const MARKDOWN_BULLET = /^\s*[-*]\s+/;
 const MARKDOWN_RULE = /^\s*(?:[-*_]\s*){3,}$/;
 const MARKDOWN_TABLE_DIVIDER = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/;
 const BULLET_LINE = /^\s*•\s+/;
+const LINE_PLATFORM_TEXT_LIMIT = 4900;
 
 function plainInlineMarkdown(value: string): string {
   return value
@@ -131,7 +132,7 @@ function bestReadableCut(text: string, limit: number): number {
 /**
  * LINE supports very long text messages, but a single near-limit bubble is
  * unpleasant to scan on a phone. Split only when necessary, favouring paragraph
- * and line boundaries. Never silently drops the tail.
+ * and line boundaries. Never silently drops the tail for normal Thongthai output.
  */
 export function splitCustomerMessageForLine(
   input: string,
@@ -140,28 +141,29 @@ export function splitCustomerMessageForLine(
 ): string[] {
   const text = polishCustomerMessage(input, 'line');
   if (!text) return [];
-  if (text.length <= maxChars) return [text];
+
+  const messageBudget = Math.max(1, Math.min(5, Math.floor(maxMessages)));
+  const readabilityTarget = Math.max(200, Math.min(LINE_PLATFORM_TEXT_LIMIT, Math.floor(maxChars)));
+  const requiredTarget = Math.ceil(text.length / messageBudget);
+  const target = Math.min(LINE_PLATFORM_TEXT_LIMIT, Math.max(readabilityTarget, requiredTarget));
+
+  if (text.length <= target) return [text];
 
   const chunks: string[] = [];
   let remaining = text;
-  while (remaining && chunks.length < Math.max(1, maxMessages - 1)) {
-    if (remaining.length <= maxChars) break;
-    const cut = bestReadableCut(remaining, maxChars);
+  while (remaining.length > target && chunks.length < messageBudget - 1) {
+    const cut = bestReadableCut(remaining, target);
     const chunk = remaining.slice(0, cut).trim();
     if (!chunk) break;
     chunks.push(chunk);
     remaining = remaining.slice(cut).trim();
   }
+  if (remaining) chunks.push(remaining);
 
-  if (remaining) {
-    if (remaining.length <= maxChars) {
-      chunks.push(remaining);
-    } else {
-      // Preserve all content when the configured message budget is exhausted.
-      // The final chunk may be longer than the readability target but remains
-      // below LINE's actual platform limit in normal Thongthai responses.
-      chunks.push(remaining);
-    }
+  // This can only be false for an abnormally huge response (> 5 × LINE's real
+  // per-message limit). Thongthai's model output cap is well below that ceiling.
+  if (chunks.some(chunk => chunk.length > LINE_PLATFORM_TEXT_LIMIT)) {
+    throw new Error('line_message_exceeds_platform_limit');
   }
-  return chunks.slice(0, maxMessages);
+  return chunks;
 }
