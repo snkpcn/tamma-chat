@@ -1,4 +1,4 @@
-import { createRestaurantPreorder, listRestaurantMenu } from './_restaurant-sot';
+import { createRestaurantPreorderWithPromotion, listRestaurantMenu } from './_restaurant-sot';
 import type { BrainChannel } from './_thongthai-brain-v3';
 
 export type PromotionCampaignRow = {
@@ -10,6 +10,7 @@ export type PromotionCampaignRow = {
 };
 export type PromotionItemRow = {
   business_unit: string; entity_id: string; name_snapshot: string; quantity: number;
+  promo_price?: number | null; cost_basis?: number | null;
 };
 
 function config(): { url: string; key: string } {
@@ -75,6 +76,26 @@ export function isRestaurantItemAvailable(
 /** Item/qty fidelity: the preorder must use exactly the promo's stored items, never a re-derived or re-typed list. */
 export function preorderItemsFromPromotionItems(items: PromotionItemRow[]): Array<{ name: string; quantity: number }> {
   return items.map(item => ({ name: item.name_snapshot, quantity: item.quantity }));
+}
+
+/**
+ * The ONLY place a per-item promo price is ever assembled for the payment
+ * RPC -- built exclusively from real, currently-stored promotion_items rows
+ * fetched fresh inside redeemPromotion. There is no code path from a tool
+ * call's args (or any other caller-supplied value) into this map; the brain
+ * tool's redeem_promotion args carry no price field at all. A restaurant
+ * item with no stored promo_price is simply left out of the map, so the RPC
+ * falls back to the live menu price for that line -- never invented, never
+ * zero by accident.
+ */
+export function buildPricingOverride(items: PromotionItemRow[]): Record<string, number> {
+  const override: Record<string, number> = {};
+  for (const item of items) {
+    if (item.business_unit === 'restaurant' && typeof item.promo_price === 'number' && item.promo_price >= 0) {
+      override[item.entity_id] = item.promo_price;
+    }
+  }
+  return override;
 }
 
 async function fetchEligibleCampaigns(nowIso: string): Promise<PromotionCampaignRow[]> {
@@ -178,12 +199,15 @@ function eligibilityRejectionError(reason: EligibilityRejectionReason): Error {
 }
 
 /**
- * Reuses createRestaurantPreorder verbatim for restaurant-scope promos, with the
- * promo's exact stored items/qty -- never a parallel order system. Re-checks every
- * eligibility rule server-side (never trusts the LLM's earlier read of world facts).
- * Non-restaurant scopes (including cross_business, where multi-entity settlement
- * split is not implemented) only record a reserved redemption for staff follow-up --
- * never a fabricated completed booking.
+ * Reuses the real restaurant order path (createRestaurantPreorderWithPromotion,
+ * itself a thin promo-priced sibling of createRestaurantPreorder) for
+ * restaurant-scope promos, with the promo's exact stored items/qty and real
+ * promo price -- never a parallel order system, never an invented amount.
+ * Re-checks every eligibility rule server-side (never trusts the LLM's
+ * earlier read of world facts). Non-restaurant scopes (including
+ * cross_business, where multi-entity settlement split is not implemented)
+ * only record a reserved redemption for staff follow-up -- never a
+ * fabricated completed booking.
  */
 export async function redeemPromotion(input: {
   guestDbId: string; channel: BrainChannel; campaignId: string;
@@ -198,39 +222,51 @@ export async function redeemPromotion(input: {
   if (eligibility.ok === false) throw eligibilityRejectionError(eligibility.reason);
   if (!channelMatches(campaign!.channel_scope, input.channel)) throw new Error('promotion_channel_not_allowed');
 
-  const itemsRes = await publicDbFetch(`promotion_items?campaign_id=eq.${campaign!.id}&select=business_unit,entity_id,name_snapshot,quantity`);
+  const itemsRes = await publicDbFetch(`promotion_items?campaign_id=eq.${campaign!.id}&select=business_unit,entity_id,name_snapshot,quantity,promo_price,cost_basis`);
   const items = await itemsRes.json() as PromotionItemRow[];
   if (!items.length) throw new Error('promotion_has_no_items');
 
   const snapshot = campaign!.financial_snapshot && typeof campaign!.financial_snapshot === 'object'
     ? campaign!.financial_snapshot as Record<string, unknown> : {};
-  const ledgerFields = {
-    normal_total: snapshot.normalTotal ?? null, promo_total: snapshot.promoTotal ?? null,
-    cost_total: snapshot.costTotal ?? null, gross_profit: snapshot.grossProfit ?? null, margin_pct: snapshot.marginPct ?? null,
-  };
 
   let result: RedeemPromotionResult;
   if (campaign!.business_scope === 'restaurant') {
     if (!input.date || !input.time) throw new Error('promotion_requires_date_time');
-    const created = await createRestaurantPreorder({
+    const created = await createRestaurantPreorderWithPromotion({
       guestDbId: input.guestDbId, channel: input.channel,
       date: input.date, time: input.time,
       items: preorderItemsFromPromotionItems(items),
       customerName: input.customerName, phone: input.phone, email: input.email,
       note: [input.note, `PROMO:${campaign!.campaign_code}`].filter(Boolean).join(' | '),
+      promotionCampaignId: campaign!.id,
+      pricingOverride: buildPricingOverride(items),
     });
+    if (created.duplicate) {
+      // The preorder already existed (same idempotency key) -- skip inserting a
+      // second promotion_redemptions row and skip incrementing redemption_count
+      // again. This is what makes a duplicate webhook delivery or a repeated
+      // tool call safe: no double charge, no double-counted redemption.
+      return {
+        campaignId: campaign!.id, campaignCode: campaign!.campaign_code, status: 'redeemed',
+        businessScope: campaign!.business_scope,
+        preorder: { id: created.id, preorderCode: created.preorderCode, items: created.items },
+        note: 'duplicate_redemption_request_returned_existing_preorder_no_new_charge_created',
+      };
+    }
     await publicDbFetch('promotion_redemptions', {
       method: 'POST', headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({
         campaign_id: campaign!.id, guest_id: input.guestDbId, source_channel: input.channel,
         related_entity_type: 'restaurant_preorder', related_entity_id: created.id,
-        ...ledgerFields, status: 'redeemed', environment: 'live',
+        normal_total: created.normalTotalAmount, promo_total: created.totalAmount,
+        cost_total: snapshot.costTotal ?? null, gross_profit: snapshot.grossProfit ?? null, margin_pct: snapshot.marginPct ?? null,
+        status: 'redeemed', environment: 'live',
       }),
     });
     result = {
       campaignId: campaign!.id, campaignCode: campaign!.campaign_code, status: 'redeemed', businessScope: campaign!.business_scope,
       preorder: { id: created.id, preorderCode: created.preorderCode, items: created.items },
-      note: 'preorder_created_with_promo_items_at_live_menu_price; promo_discount_not_yet_threaded_into_payment_total_staff_must_apply_manually',
+      note: `preorder_created_at_real_promo_price; normalTotal=${created.normalTotalAmount} promoTotal=${created.totalAmount} discount=${created.discountAmount}`,
     };
   } else {
     await publicDbFetch('promotion_redemptions', {
@@ -238,7 +274,9 @@ export async function redeemPromotion(input: {
       body: JSON.stringify({
         campaign_id: campaign!.id, guest_id: input.guestDbId, source_channel: input.channel,
         related_entity_type: null, related_entity_id: null,
-        ...ledgerFields, status: 'reserved', environment: 'live',
+        normal_total: snapshot.normalTotal ?? null, promo_total: snapshot.promoTotal ?? null,
+        cost_total: snapshot.costTotal ?? null, gross_profit: snapshot.grossProfit ?? null, margin_pct: snapshot.marginPct ?? null,
+        status: 'reserved', environment: 'live',
       }),
     });
     result = {

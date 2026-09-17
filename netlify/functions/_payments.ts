@@ -120,7 +120,15 @@ async function paymentText(request: PaymentRequest): Promise<string> {
     : null;
 
   if (summary) {
-    lines.push('', ...summary.itemLines, '', `รวม ${money(request.amount)}`, `รับวันที่ ${summary.pickupText}`);
+    lines.push('', ...summary.itemLines, '');
+    if (summary.promo) {
+      lines.push(
+        `💡 ใช้โปรโมชัน: ${summary.promo.title}`,
+        `ราคาปกติ ${money(summary.promo.normalTotal)}`,
+        `ส่วนลด ${money(summary.promo.discountAmount)}`,
+      );
+    }
+    lines.push(`รวม ${money(request.amount)}`, `รับวันที่ ${summary.pickupText}`);
   } else {
     lines.push(`ยอด: ${money(request.amount)}`);
   }

@@ -425,7 +425,7 @@ function dateString(value: unknown): string | undefined {
 function timeString(value: unknown): string | undefined {
   const s = safeString(value, 5); return s && /^([01]\d|2[0-3]):[0-5]\d$/.test(s) ? s : undefined;
 }
-function normalizeToolCalls(value: unknown, toolResultsPresent: boolean, runtime: BrainRuntimeContext): BrainToolCall[] {
+export function normalizeToolCalls(value: unknown, toolResultsPresent: boolean, runtime: BrainRuntimeContext): BrainToolCall[] {
   if (toolResultsPresent || !Array.isArray(value)) return [];
   const experienceIds = new Set(EXPERIENCES.map(item => item.id));
   const calls: BrainToolCall[] = [];
