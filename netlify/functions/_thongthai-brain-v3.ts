@@ -55,6 +55,16 @@ export interface AgentStateUpdate {
     partySize: number | null;
     createdAt: string;
   };
+  restaurantPreorderDraft?: {
+    source: 'restaurant_set_acceptance_v1';
+    items: Array<{ name: string; quantity: number }>;
+    total: number | null;
+    date: string;
+    time: string;
+    note: string | null;
+    createdAt: string;
+  };
+  clearRestaurantPreorderDraft?: boolean;
 }
 export interface SemanticMemoryUpdate { key: string; value: string | string[]; confidence: number }
 export interface BrainRuntimeContext {
@@ -353,7 +363,7 @@ Return ONLY one JSON object:
   "journeyAction": {"type":"none"|"create"|"modify"|"replace","journey":object|null},
   "suggestedActions": [{"label":string,"action":string}],
   "responseStyle": "direct"|"story"|"contrast"|"curious"|"reflective"|"planner",
-  "agentStateUpdate": {"activeTopic"?:string,"travelContextSummary"?:string,"unresolvedNeed"?:string,"clearUnresolvedNeed"?:boolean,"restaurantProposedSet"?:object},
+  "agentStateUpdate": {"activeTopic"?:string,"travelContextSummary"?:string,"unresolvedNeed"?:string,"clearUnresolvedNeed"?:boolean,"restaurantProposedSet"?:object,"restaurantPreorderDraft"?:object,"clearRestaurantPreorderDraft"?:boolean},
   "semanticMemoryUpdates": [{"key":string,"value":string|string[],"confidence":number}],
   "toolCalls": [{"name":string,"args":object}]
 }`;
@@ -380,6 +390,9 @@ function normalizeAgentState(value: unknown): AgentStateUpdate | undefined {
   if (raw.clearUnresolvedNeed === true) out.clearUnresolvedNeed = true;
   const proposed = sanitizeRestaurantProposedSet(raw.restaurantProposedSet);
   if (proposed) out.restaurantProposedSet = proposed;
+  const draft = sanitizeRestaurantPreorderDraft(raw.restaurantPreorderDraft);
+  if (draft) out.restaurantPreorderDraft = draft;
+  if (raw.clearRestaurantPreorderDraft === true) out.clearRestaurantPreorderDraft = true;
   return Object.keys(out).length ? out : undefined;
 }
 function sanitizeRestaurantProposedSet(value: unknown): AgentStateUpdate['restaurantProposedSet'] | undefined {
@@ -400,6 +413,28 @@ function sanitizeRestaurantProposedSet(value: unknown): AgentStateUpdate['restau
     total,
     budget,
     partySize,
+    createdAt:isNonEmptyString(raw.createdAt) ? String(raw.createdAt).slice(0,40) : new Date().toISOString(),
+  };
+}
+function sanitizeRestaurantPreorderDraft(value: unknown): AgentStateUpdate['restaurantPreorderDraft'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const rawItems = Array.isArray(raw.items) ? raw.items : [];
+  const items = rawItems.slice(0,20)
+    .map(item => item && typeof item === 'object' ? item as Record<string, unknown> : {})
+    .map(item => ({ name:safeString(item.name,160), quantity:safeNumber(item.quantity,1,50) ?? 1 }))
+    .filter((item): item is { name:string; quantity:number } => Boolean(item.name));
+  const date = dateString(raw.date);
+  const time = timeString(raw.time);
+  if (!items.length || !date || !time) return undefined;
+  const total = typeof raw.total === 'number' && Number.isFinite(raw.total) ? Math.max(0, Math.floor(raw.total)) : null;
+  return {
+    source:'restaurant_set_acceptance_v1',
+    items,
+    total,
+    date,
+    time,
+    note:safeString(raw.note,220) ?? null,
     createdAt:isNonEmptyString(raw.createdAt) ? String(raw.createdAt).slice(0,40) : new Date().toISOString(),
   };
 }
