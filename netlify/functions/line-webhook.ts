@@ -15,6 +15,10 @@ import {
   handleLinePaymentPostback,
 } from './_payments';
 import { handleSettlementPostback } from './_settlements';
+import {
+  handleSettlementTransferProofImage,
+  handleSettlementTransferProofPostback,
+} from './_settlement-line-proof';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -125,6 +129,16 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       return;
     }
 
+    const settlementProofMessages = await handleSettlementTransferProofPostback({
+      targetId,
+      userId: event.source?.userId ?? null,
+      data: event.postback.data,
+    });
+    if (settlementProofMessages?.length) {
+      await replyToLine(event.replyToken, settlementProofMessages as LineMessage[], accessToken);
+      return;
+    }
+
     const settlementMessages = await handleSettlementPostback({ targetId, data: event.postback.data });
     if (settlementMessages?.length) {
       await replyToLine(event.replyToken, settlementMessages as LineMessage[], accessToken);
@@ -149,6 +163,20 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   if (event.type !== 'message') return;
 
   if (event.message?.type === 'image' && event.message.id) {
+    // Settlement transfer proof is a normal image sent in the team's bound
+    // LINE group. If there is a pending settlement, bind the image to that
+    // settlement context and ask for one-tap confirmation. Only fall through
+    // to the fuel-photo flow when this group has no pending settlement work.
+    const settlementReply = await handleSettlementTransferProofImage({
+      targetId,
+      userId: event.source?.userId ?? null,
+      messageId: event.message.id,
+    });
+    if (settlementReply?.length) {
+      await replyToLine(event.replyToken, settlementReply as LineMessage[], accessToken);
+      return;
+    }
+
     // Only treat an image as a fuel receipt after that staff member has named the ATV.
     // This prevents normal activity photos in the group from being OCR'd or written to the fuel ledger.
     const pendingFuel = await hasPendingLineFuelSession(targetId, event.source?.userId ?? null);
