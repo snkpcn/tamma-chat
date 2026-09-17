@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { decryptPii, piiHash } from './_operations-db';
-import { restaurantPreorderPaymentSummary } from './_restaurant-sot';
+import { restaurantPreorderPaymentSummary, restaurantPreorderFollowUpCard } from './_restaurant-sot';
 
 export type PaymentLineMessage = { type: string; [key: string]: unknown };
 export type PaymentStatus = 'quote_required' | 'awaiting_payment' | 'proof_submitted' | 'verified' | 'rejected' | 'cancelled';
@@ -27,6 +27,15 @@ export type PaymentRequest = {
 
 type Binding = { id: string; team_code: TeamCode; target_id_enc: string };
 type DeliveryRow = { id: string; status: string };
+
+// Payment verify has no EDC/reimbursement follow-up for any team — every
+// payment_requests row is collected through the same owner PromptPay QR, so
+// there is no "staff EDC device needs reimbursing" case anywhere in this
+// flow (see docs/payment-flow-v1.md). The only entity-specific follow-up
+// after verify is the restaurant order-acceptance card.
+export function shouldAttachRestaurantFollowUpCard(entityType: string): boolean {
+  return entityType === 'restaurant_preorder';
+}
 
 const LINE_PUSH_ENDPOINT = 'https://api.line.me/v2/bot/message/push';
 const LINE_CONTENT_BASE = 'https://api-data.line.me/v2/bot/message';
@@ -507,6 +516,21 @@ export async function dispatchPaymentNotification(id: string): Promise<string> {
         'ทีมงานจะดำเนินการรายการ/การจองต่อจากสถานะนี้ครับ',
       ].join('\n'),
     }]);
+    // "จ่ายเงินแล้ว" is not "ร้านรับงานแล้ว" — push the refreshed order-accept
+    // card back into the same restaurant group right after verify, so staff
+    // don't have to scroll for the original card. Runs through this shared
+    // dispatch (not the interactive LINE-button handler alone) so it also
+    // fires when a payment is verified from the backoffice, and gets the
+    // same idempotent delivery tracking as every other team push here.
+    if (shouldAttachRestaurantFollowUpCard(request.entity_type)) {
+      const followUpCard = await restaurantPreorderFollowUpCard(request.entity_id).catch(error => {
+        console.error('PAYMENT_VERIFY_FOLLOWUP_CARD_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+        return null;
+      });
+      if (followUpCard) await sendTeam(request, [followUpCard as PaymentLineMessage]).catch(error => {
+        console.error('PAYMENT_VERIFY_FOLLOWUP_CARD_SEND_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+      });
+    }
     return sent ? 'customer_verified_sent' : 'customer_not_reachable';
   }
 

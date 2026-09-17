@@ -348,8 +348,34 @@ function statusLabel(status: string): string {
 }
 function postback(action: string, id: string): string { return `rpo=${action}&id=${encodeURIComponent(id)}`; }
 
+async function preorderPaymentStatus(preorderId: string): Promise<{ status: string; amount: number | null } | null> {
+  const response = await publicDbFetch(
+    `payment_requests?entity_type=eq.restaurant_preorder&entity_id=eq.${preorderId}&select=status,amount&limit=1`,
+  );
+  return (await response.json() as Array<{ status: string; amount: number | null }>)[0] ?? null;
+}
+
+// "จ่ายเงินแล้ว" is a different state from "ร้านรับงานแล้ว" — this line makes the
+// payment state visible on the same card as the order-acceptance button, instead
+// of staff having to cross-reference the separate payment review card.
+function paymentStatusLine(payment: { status: string; amount: number | null } | null): string | null {
+  if (!payment) return null;
+  const amountText = payment.amount != null ? `${Number(payment.amount).toFixed(0)} บาท` : '';
+  switch (payment.status) {
+    case 'verified': return `✅ ชำระแล้ว ${amountText}`;
+    case 'proof_submitted': return '🧾 ได้รับสลิปแล้ว รอตรวจสอบ';
+    case 'rejected': return '⚠️ สลิปไม่ผ่าน รอลูกค้าส่งใหม่';
+    case 'awaiting_payment': return `⏳ รอลูกค้าชำระ ${amountText}`;
+    default: return null;
+  }
+}
+
 async function preorderFlex(preorder: PreorderRow): Promise<Json> {
-  const items = await preorderItems(preorder.id);
+  const [items, payment] = await Promise.all([
+    preorderItems(preorder.id),
+    preorderPaymentStatus(preorder.id).catch(() => null),
+  ]);
+  const paymentLine = paymentStatusLine(payment);
   const buttons: Json[] = [];
   const button = (label:string, action:string, style:'primary'|'secondary'='secondary'):Json => ({
     type:'button',style,margin:'sm',height:'sm',action:{type:'postback',label,data:postback(action,preorder.id),displayText:label},
@@ -362,9 +388,10 @@ async function preorderFlex(preorder: PreorderRow): Promise<Json> {
   return {
     type:'flex',altText:`${prefix}ออเดอร์ล่วงหน้า ${preorder.preorder_code}`,
     contents:{type:'bubble',header:{type:'box',layout:'vertical',backgroundColor:'#6B7A4E',paddingAll:'18px',contents:[
-      {type:'text',text:`${prefix}🍽️ ${statusLabel(preorder.status)}`,color:'#FFFFFF',weight:'bold',size:'lg'},
+      {type:'text',text:`${prefix}📦 ออเดอร์: ${statusLabel(preorder.status)}`,color:'#FFFFFF',weight:'bold',size:'lg'},
       {type:'text',text:'ตำมา-ชาติ',color:'#F4EEDC',size:'sm',margin:'sm'},
     ]},body:{type:'box',layout:'vertical',spacing:'md',paddingAll:'18px',contents:[
+      ...(paymentLine ? [{type:'text',text:`💳 ${paymentLine}`,weight:'bold',wrap:true}] : []),
       {type:'text',text:`รับอาหาร: ${thaiDateTime(preorder.requested_for)}`,weight:'bold',wrap:true},
       {type:'text',text:`ลูกค้า: ${preorder.customer_name}`,wrap:true},
       ...(preorder.phone ? [{type:'text',text:`โทร: ${preorder.phone}`,size:'sm',wrap:true}] : []),
@@ -376,6 +403,19 @@ async function preorderFlex(preorder: PreorderRow): Promise<Json> {
       {type:'text',text:`อ้างอิง ${preorder.preorder_code}`,size:'xs',color:'#999999'},
     ]},...(buttons.length ? {footer:{type:'box',layout:'vertical',spacing:'sm',paddingAll:'14px',contents:buttons}} : {})},
   };
+}
+
+/**
+ * Follow-up order card for _payments.ts to push into the restaurant group
+ * right after a restaurant_preorder payment is verified there — reuses the
+ * exact same preorderById/preorderFlex the team's order-acceptance card
+ * already uses, just re-sent so staff don't have to scroll for the
+ * original message. Returns null if the preorder can't be found.
+ */
+export async function restaurantPreorderFollowUpCard(preorderId: string): Promise<Json | null> {
+  const preorder = await preorderById(preorderId);
+  if (!preorder) return null;
+  return preorderFlex(preorder);
 }
 
 async function restaurantChannel(): Promise<NotificationChannel | null> {

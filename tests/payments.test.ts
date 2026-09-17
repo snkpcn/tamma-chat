@@ -16,7 +16,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { choosePaymentForReceipt, type PaymentRequest } from '../netlify/functions/_payments';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { choosePaymentForReceipt, shouldAttachRestaurantFollowUpCard, type PaymentRequest } from '../netlify/functions/_payments';
 
 function fakeRequest(overrides: Partial<PaymentRequest>): PaymentRequest {
   return {
@@ -105,4 +108,38 @@ test('a single payable candidate is chosen directly with no delivery lookup need
 test('no payable candidates at all resolves to none, not an error or a guess', () => {
   const result = choosePaymentForReceipt([], null);
   assert.equal(result.kind, 'none');
+});
+
+// Regression tests for the "wrong EDC message after restaurant payment
+// verify" bug: line-webhook.ts used to append a global EDC/company-
+// reimbursement reminder after every ops=payment&action=verify postback,
+// regardless of team/entity_type. Fixed by removing that unconditional
+// append and instead attaching a restaurant-specific follow-up card only
+// when the verified payment is actually a restaurant_preorder.
+
+const lineWebhookSource = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../netlify/functions/line-webhook.ts'),
+  'utf8',
+);
+
+test('A. restaurant payment verify: no EDC message anywhere in the postback handler, follow-up card action is available', () => {
+  assert.doesNotMatch(lineWebhookSource, /EDC/);
+  assert.doesNotMatch(lineWebhookSource, /ชำระคืนบริษัท/);
+  assert.equal(shouldAttachRestaurantFollowUpCard('restaurant_preorder'), true);
+});
+
+test('B. activity/stay normal customer payment verify: no unrelated EDC follow-up attached', () => {
+  assert.equal(shouldAttachRestaurantFollowUpCard('booking'), false);
+  assert.equal(shouldAttachRestaurantFollowUpCard('otop_order'), false);
+  assert.equal(shouldAttachRestaurantFollowUpCard('cafe_order'), false);
+});
+
+test('C. fuel/reimbursement workflow is untouched: its own handlers are still wired into line-webhook.ts', () => {
+  // Fuel receipts never went through payment_requests/ops=payment at all —
+  // they're a separate image-upload flow gated by hasPendingLineFuelSession.
+  // This just guards that removing the EDC append didn't also remove or
+  // detach that unrelated flow.
+  assert.match(lineWebhookSource, /handleLineFuelImage/);
+  assert.match(lineWebhookSource, /handleLineFuelText/);
+  assert.match(lineWebhookSource, /hasPendingLineFuelSession/);
 });

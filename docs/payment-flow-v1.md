@@ -12,6 +12,6 @@ Flow:
 7. The bound team LINE group receives the slip with Verify/Reject controls.
 8. Only after Verify does the payment become `verified`; customer is notified automatically.
 9. Booking/order acceptance is guarded until payment is verified.
-10. Staff also receives the existing EDC/company reimbursement reminder after payment verification.
+10. For a `restaurant_preorder`, verification pushes a refreshed order card into the same restaurant group so staff can accept the order without scrolling for the original card (see `preorderFlex()` in `_restaurant-sot.ts`, which now also shows current payment status).
 
 Backoffice payment review is available at `https://tamma-backoffice.netlify.app/payments.html`.
