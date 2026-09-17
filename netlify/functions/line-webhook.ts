@@ -19,6 +19,7 @@ import {
   handleSettlementTransferProofImage,
   handleSettlementTransferProofPostback,
 } from './_settlement-line-proof';
+import { splitCustomerCopyForLine } from './_customer-copy';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -45,6 +46,7 @@ type LineWebhookBody = {
 };
 
 const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
+const MAX_LINE_MESSAGES = 5;
 
 function getHeader(event: HandlerEvent, name: string): string | undefined {
   const target = name.toLowerCase();
@@ -81,8 +83,30 @@ function lineGuestId(userId: string): string {
 }
 
 function normalizeReplyMessages(input: string | LineMessage | LineMessage[]): LineMessage[] {
-  if (typeof input === 'string') return [{ type: 'text', text: input.slice(0, 4900) }];
-  return Array.isArray(input) ? input.slice(0, 5) : [input];
+  const raw: LineMessage[] = typeof input === 'string'
+    ? [{ type:'text', text:input } as LineMessage]
+    : Array.isArray(input) ? input.slice(0, MAX_LINE_MESSAGES) : [input];
+  const out: LineMessage[] = [];
+
+  for (let index = 0; index < raw.length && out.length < MAX_LINE_MESSAGES; index += 1) {
+    const message = raw[index] as LineMessage & { text?: string };
+    if (message.type !== 'text' || typeof message.text !== 'string') {
+      out.push(message);
+      continue;
+    }
+
+    const remainingNonText = raw.slice(index + 1).filter(item => item.type !== 'text').length;
+    const availableTextSlots = Math.max(1, MAX_LINE_MESSAGES - out.length - remainingNonText);
+    const chunks = splitCustomerCopyForLine(message.text, {
+      maxChars:1050,
+      maxMessages:availableTextSlots,
+    });
+    for (const chunk of chunks) {
+      if (out.length >= MAX_LINE_MESSAGES - remainingNonText) break;
+      out.push({ ...message, type:'text', text:chunk } as LineMessage);
+    }
+  }
+  return out.slice(0, MAX_LINE_MESSAGES);
 }
 
 async function replyToLine(
@@ -265,7 +289,7 @@ async function handleCustomerPaymentEvent(
       console.error('LINE_PAYMENT_SLIP_ERROR', error instanceof Error ? error.message.slice(0, 300) : 'unknown');
       await replyToLine(
         item.replyToken,
-        'รับรูปแล้วครับ แต่ระบบบันทึกสลิปไม่สำเร็จ กรุณาส่งรูปสลิปเดิมอีกครั้งในอีกสักครู่ครับ',
+        '⚠️ รับรูปแล้วครับ แต่บันทึกสลิปยังไม่สำเร็จ\n\nรอสักครู่แล้วส่งรูปเดิมอีกครั้งได้เลย',
         accessToken,
       );
     }
