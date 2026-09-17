@@ -30,7 +30,7 @@ function normalizeLine(line: string): string {
   return trimmed;
 }
 
-function softBreakLongParagraph(paragraph: string, target = 220): string[] {
+function softBreakLongParagraph(paragraph: string, target = 180): string[] {
   if (paragraph.length <= target || BULLET_RE.test(paragraph)) return [paragraph];
 
   const protectedValue = protectUrls(paragraph);
@@ -60,9 +60,9 @@ function softBreakLongParagraph(paragraph: string, target = 220): string[] {
 function addUsefulEmoji(line: string): string {
   if (!line || EMOJI_RE.test(line) || BULLET_RE.test(line)) return line;
   if (/^(?:สถานะ|status)\s*:/iu.test(line)) return `📌 ${line}`;
-  if (/^(?:รวม|ยอด|ราคา|ค่าใช้จ่าย|total|price)\b/iu.test(line)) return `💰 ${line}`;
-  if (/^(?:รับอาหาร|เช็กอิน|เช็คอิน|check[- ]?in|เวลา|time)\b/iu.test(line)) return `🕑 ${line}`;
-  if (/^(?:ที่ตั้ง|พิกัด|แผนที่|location|map)\b/iu.test(line)) return `📍 ${line}`;
+  if (/^(?:รวม|ยอด|ราคา|ค่าใช้จ่าย|total|price)(?:\s|:|$)/iu.test(line)) return `💰 ${line}`;
+  if (/^(?:รับอาหาร|เช็กอิน|เช็คอิน|check[- ]?in|เวลา|time)(?:\s|:|$)/iu.test(line)) return `🕑 ${line}`;
+  if (/^(?:ที่ตั้ง|พิกัด|แผนที่|location|map)(?:\s|:|$)/iu.test(line)) return `📍 ${line}`;
   return line;
 }
 
@@ -103,7 +103,7 @@ export function formatCustomerCopy(
     .split('\n')
     .map(normalizeLine);
 
-  const expanded = rawLines.flatMap(line => line ? softBreakLongParagraph(line, channel === 'line' ? 210 : 260) : ['']);
+  const expanded = rawLines.flatMap(line => line ? softBreakLongParagraph(line, channel === 'line' ? 150 : 220) : ['']);
   const decorated = expanded.map(line => decorate ? addUsefulEmoji(line) : line);
   return normalizeSpacing(decorated).join('\n').trim();
 }
