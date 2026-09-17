@@ -324,8 +324,9 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   const query = norm(input.query);
   const named = items.filter(item => query.includes(norm(item.name)));
   const compareMode = named.length >= 2 && /ต่าง|เทียบ|compare|อันไหน|ไหนดีกว่า|เลือกอะไร/u.test(query);
-  const composeMode = !compareMode && (pref.partySize != null || pref.budget != null || /จัด.*(?:ชุด|โต๊ะ)|เซ็ต|set|ครบโต๊ะ|กินกัน/u.test(query));
-  const pairingMode = !compareMode && !composeMode && pref.selectedNames.length > 0 && /เพิ่มอะไร|กินคู่|เข้ากับ|คู่กับ|ต่ออะไร/u.test(query);
+  const pairingRequested = pref.selectedNames.length > 0 && /เพิ่มอะไร|กินคู่|เข้ากับ|คู่กับ|ต่ออะไร/u.test(query);
+  const composeMode = !compareMode && !pairingRequested && (pref.partySize != null || pref.budget != null || /จัด.*(?:ชุด|โต๊ะ)|เซ็ต|set|ครบโต๊ะ|กินกัน/u.test(query));
+  const pairingMode = !compareMode && pairingRequested;
 
   const notices: string[] = [];
   if (pref.allergenFlags.length) notices.push('ตรวจจากวัตถุดิบที่บันทึกไว้และตัดเมนูที่มีสารก่อภูมิแพ้ตรงตัวออกแล้ว แต่ร้านยังไม่มีข้อมูลยืนยันเรื่องการปนเปื้อนข้ามอุปกรณ์/ครัว');
