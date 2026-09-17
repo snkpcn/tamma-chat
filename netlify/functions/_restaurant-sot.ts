@@ -321,6 +321,25 @@ async function preorderItems(id: string): Promise<PreorderItemRow[]> {
   return await response.json() as PreorderItemRow[];
 }
 
+/**
+ * Item-breakdown + pickup-time composition for the generic _payments.ts
+ * customer message — used only when payment_requests.entity_type =
+ * 'restaurant_preorder'. Reuses preorderById/preorderItems/thaiDateTime
+ * (the same queries and formatting the restaurant team's order card already
+ * uses) rather than duplicating a second read of the same source of truth.
+ */
+export async function restaurantPreorderPaymentSummary(
+  preorderId: string,
+): Promise<{ itemLines: string[]; pickupText: string } | null> {
+  const preorder = await preorderById(preorderId);
+  if (!preorder) return null;
+  const items = await preorderItems(preorderId);
+  return {
+    itemLines: items.map(item => `${item.menu_name} × ${item.quantity} = ${Number(item.line_total).toFixed(0)} บาท`),
+    pickupText: thaiDateTime(preorder.requested_for),
+  };
+}
+
 function thaiDateTime(value: string): string {
   return new Intl.DateTimeFormat('th-TH',{ timeZone:'Asia/Bangkok',day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false }).format(new Date(value));
 }

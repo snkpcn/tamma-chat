@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { decryptPii, piiHash } from './_operations-db';
+import { restaurantPreorderPaymentSummary } from './_restaurant-sot';
 
 export type PaymentLineMessage = { type: string; [key: string]: unknown };
 type PaymentStatus = 'quote_required' | 'awaiting_payment' | 'proof_submitted' | 'verified' | 'rejected' | 'cancelled';
@@ -95,20 +96,39 @@ function statusLabel(status: PaymentStatus): string {
   } as Record<PaymentStatus, string>)[status];
 }
 
-function paymentText(request: PaymentRequest): string {
-  return [
-    `💳 ชำระเงิน ${request.entity_code}`,
-    `ยอด: ${money(request.amount)}`,
+// Restaurant preorders carry real item-level detail (resolved from
+// restaurant_preorder_items — never hardcoded); other entity types
+// (booking/otop_order/cafe_order) keep the original single-line summary
+// since they have no equivalent line-item breakdown to show.
+async function paymentText(request: PaymentRequest): Promise<string> {
+  const lines = [`💳 ชำระเงิน ${request.entity_code}`];
+
+  const summary = request.entity_type === 'restaurant_preorder'
+    ? await restaurantPreorderPaymentSummary(request.entity_id).catch(error => {
+        console.error('PAYMENT_RESTAURANT_SUMMARY_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+        return null;
+      })
+    : null;
+
+  if (summary) {
+    lines.push('', ...summary.itemLines, '', `รวม ${money(request.amount)}`, `รับวันที่ ${summary.pickupText}`);
+  } else {
+    lines.push(`ยอด: ${money(request.amount)}`);
+  }
+
+  lines.push(
+    '',
     'ช่องทางชำระเดียวของทำมา-ชาติ: PromptPay QR ด้านล่าง',
     'ชื่อบัญชี: นาย ชานนท์ ปรีชานนท์',
     '',
     'หลังโอนแล้ว ส่งรูปสลิปกลับมาในแชต LINE นี้ได้เลยครับ ทองไทยจะส่งให้ทีมงานตรวจสอบ',
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
-function qrMessages(request: PaymentRequest): PaymentLineMessage[] {
+async function qrMessages(request: PaymentRequest): Promise<PaymentLineMessage[]> {
   return [
-    { type: 'text', text: paymentText(request) },
+    { type: 'text', text: await paymentText(request) },
     { type: 'image', originalContentUrl: QR_IMAGE_URL, previewImageUrl: QR_IMAGE_URL },
   ];
 }
@@ -397,7 +417,7 @@ export async function dispatchPaymentNotification(id: string): Promise<string> {
 
   if (request.status === 'awaiting_payment') {
     if (request.amount === null || request.amount <= 0) return 'invalid_amount';
-    return (await sendCustomer(request, qrMessages(request))) ? 'customer_qr_sent' : 'customer_not_reachable';
+    return (await sendCustomer(request, await qrMessages(request))) ? 'customer_qr_sent' : 'customer_not_reachable';
   }
 
   if (request.status === 'proof_submitted') {
@@ -539,7 +559,7 @@ export async function handleCustomerPaymentText(anonymousId: string, text: strin
   const guestId = await guestDbId(anonymousId);
   if (!guestId || request.guest_id !== guestId) return [{ type: 'text', text: 'ไม่พบรายการชำระเงินของบัญชี LINE นี้ครับ' }];
   if (request.status === 'quote_required') return [{ type: 'text', text: `รายการ ${request.entity_code} รอทีมงานกำหนดยอดอยู่ครับ ทองไทยจะส่ง QR ให้ทันทีเมื่อยอดพร้อม` }];
-  if (request.status === 'awaiting_payment' || request.status === 'rejected') return qrMessages(request);
+  if (request.status === 'awaiting_payment' || request.status === 'rejected') return await qrMessages(request);
   if (request.status === 'proof_submitted') return [{ type: 'text', text: `สลิปของ ${request.entity_code} ถูกส่งแล้วครับ กำลังรอทีมงานตรวจสอบ` }];
   if (request.status === 'verified') return [{ type: 'text', text: `✅ ${request.entity_code} ชำระแล้ว ${money(request.amount)} ครับ` }];
   return [{ type: 'text', text: `สถานะชำระ ${request.entity_code}: ${statusLabel(request.status)}` }];
@@ -594,7 +614,7 @@ export async function handleLinePaymentGroupText(input: {
     if (!request.amount || request.amount <= 0) return `รายการ ${request.entity_code} ยังไม่ได้กำหนดยอดครับ`;
     const target = await customerLineTarget(request);
     if (!target) return 'ยังติดต่อ LINE ลูกค้ารายนี้ไม่ได้ครับ';
-    await linePush(target, qrMessages(request));
+    await linePush(target, await qrMessages(request));
     return `✅ ส่ง QR ให้ลูกค้า ${request.entity_code} อีกครั้งแล้วครับ`;
   }
 
