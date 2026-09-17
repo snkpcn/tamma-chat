@@ -48,6 +48,7 @@ type PreorderCreateResult = {
   items: Array<{ name: string; quantity: number }>;
   requestedFor: string; environment: string; duplicate?: boolean;
 };
+type PaymentRequestRow = { id: string; status: string };
 
 function config(): { url: string; key: string } {
   const url = process.env.SUPABASE_URL;
@@ -348,7 +349,20 @@ export async function createRestaurantPreorder(input: {
   await notifyRestaurantPreorderTeam(created.id).catch(error => {
     console.error('RESTAURANT_PREORDER_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
   });
+  await dispatchRestaurantPreorderPayment(created.id).catch(error => {
+    console.error('RESTAURANT_PREORDER_PAYMENT_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+  });
   return result;
+}
+
+async function dispatchRestaurantPreorderPayment(preorderId: string): Promise<void> {
+  const response = await publicDbFetch(
+    `payment_requests?entity_type=eq.restaurant_preorder&entity_id=eq.${preorderId}&select=id,status&order=created_at.desc&limit=1`,
+  );
+  const payment = (await response.json() as PaymentRequestRow[])[0];
+  if (!payment || payment.status !== 'awaiting_payment') return;
+  const { dispatchPaymentNotification } = await import('./_payments');
+  await dispatchPaymentNotification(payment.id);
 }
 
 async function preorderById(id: string): Promise<PreorderRow | null> {

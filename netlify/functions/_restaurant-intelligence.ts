@@ -43,6 +43,7 @@ type ParsedPreferences = {
   partySize: number | null;
   budget: number | null;
   spice: 'none' | 'mild' | 'medium' | 'hot' | null;
+  vegetarian: boolean;
   avoidProteins: string[];
   preferProteins: string[];
   avoidIngredients: string[];
@@ -83,13 +84,52 @@ function readNumber(text: string, pattern: RegExp): number | null {
   const n = Number(String(match[1]).replace(/,/g, '')); return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+const FOOD_CONSTRAINT_ALIASES: Record<string, Partial<Pick<ParsedPreferences,'spice'|'vegetarian'>> & {
+  avoidProteins?: string[]; avoidIngredients?: string[]; allergenFlags?: string[]; goals?: string[];
+}> = {
+  no_pork:{avoidProteins:['pork']}, no_beef:{avoidProteins:['beef']}, no_chicken:{avoidProteins:['chicken']},
+  no_fish:{avoidProteins:['fish']}, no_egg:{avoidProteins:['egg']}, no_plara:{avoidIngredients:['น้ำปลาร้า']},
+  no_peanut:{avoidIngredients:['ถั่วลิสงคั่ว']}, no_shrimp:{avoidIngredients:['กุ้งแห้ง']},
+  peanut_allergy:{allergenFlags:['peanut']}, shrimp_allergy:{allergenFlags:['shrimp']},
+  fish_allergy:{allergenFlags:['fish']}, egg_allergy:{allergenFlags:['egg']},
+  no_spicy:{spice:'none'}, mild_spice:{spice:'mild'}, vegetarian:{vegetarian:true},
+  authentic_isan:{goals:['authentic']}, beginner_friendly:{goals:['beginner']}, kid_friendly:{goals:['kid']},
+};
+
+function thaiAmount(text: string): number | null {
+  const digit = readNumber(text, /(?:งบ(?:ประมาณ)?|ไม่เกิน|budget)\s*(?:สัก|ประมาณ|ราวๆ|ราว|ไม่เกิน)?\s*([0-9,]{2,7})/i)
+    ?? readNumber(text, /([0-9,]{2,7})\s*บาท\s*(?:พอ|ทั้งหมด|รวม|ไม่เกิน|ได้ไหม|จัดให้)/i);
+  if (digit) return digit;
+  const units: Record<string, number> = {
+    หนึ่ง:1, นึง:1, เอ็ด:1, สอง:2, สาม:3, สี่:4, ห้า:5, หก:6, เจ็ด:7, แปด:8, เก้า:9,
+  };
+  for (const [word, value] of Object.entries(units)) {
+    if (new RegExp(`(?:งบ|ไม่เกิน|สัก|ประมาณ)?\\s*${word}ร้อย`, 'u').test(text)) return value * 100;
+  }
+  if (/(?:งบ|ไม่เกิน|สัก|ประมาณ)?\s*พัน(?:นึง|หนึ่ง)?/u.test(text)) return 1000;
+  return null;
+}
+
+function hasNegative(text: string, word: string): boolean {
+  return new RegExp(`(?:ไม่กิน|ไม่เอา|งด|เลี่ยง|ไม่ชอบ|แพ้)\\s*${word}`, 'u').test(text);
+}
+
+function hasAllergy(text: string, word: string): boolean {
+  return new RegExp(`(?:แพ้\\s*${word}|allerg(?:y|ic).*?${word})`, 'iu').test(text);
+}
+
+function hasAffirmative(current: string, word: string): boolean {
+  return new RegExp(`(?:อยากกิน|ชอบ|เอา|ขอ)\\s*${word}`, 'u').test(current);
+}
+
 function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdvisorItem[]): ParsedPreferences {
   const history = [...(input.recentMessages ?? []).slice(-6), input.query].join(' ');
   const text = norm(history);
   const current = norm(input.query);
   const partyFromText = readNumber(current, /(\d{1,2})\s*(?:คน|ท่าน|persons?|people)/i);
-  const budgetFromText = readNumber(current, /(?:งบ(?:ประมาณ)?|ไม่เกิน|budget)\s*(?:ประมาณ|ราวๆ|ราว|ไม่เกิน)?\s*([0-9,]{2,7})/i)
-    ?? readNumber(current, /([0-9,]{2,7})\s*บาท\s*(?:พอ|ทั้งหมด|รวม|ไม่เกิน)/i);
+  const partyFromHistory = readNumber(text, /(\d{1,2})\s*(?:คน|ท่าน|persons?|people)/i);
+  const budgetFromText = thaiAmount(current);
+  const budgetFromHistory = thaiAmount(text);
 
   let spice: ParsedPreferences['spice'] = null;
   if (includesAny(text, [/ไม่เผ็ด/u,/เผ็ดไม่ได้/u,/ไม่กินเผ็ด/u,/no spicy/i])) spice = 'none';
@@ -101,32 +141,45 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
   const preferProteins: string[] = [];
   const avoidIngredients: string[] = [];
   const allergenFlags: string[] = [];
-  const negative = (word: string) => new RegExp(`(?:ไม่กิน|ไม่เอา|งด|เลี่ยง|ไม่ชอบ)\\s*${word}`, 'u').test(text);
-  const allergic = (word: string) => new RegExp(`(?:แพ้|allerg(?:y|ic).*?)\\s*${word}`, 'iu').test(text);
+  let vegetarian = /มังสวิรัติ|vegetarian/i.test(text);
 
-  if (negative('หมู')) avoidProteins.push('pork'); else if (/หมู/u.test(current)) preferProteins.push('pork');
-  if (negative('เนื้อ(?:วัว)?')) avoidProteins.push('beef'); else if (/เนื้อ(?:วัว)?/u.test(current)) preferProteins.push('beef');
-  if (negative('ไก่')) avoidProteins.push('chicken'); else if (/ไก่/u.test(current)) preferProteins.push('chicken');
-  if (negative('ปลา')) avoidProteins.push('fish'); else if (/ปลา/u.test(current)) preferProteins.push('fish');
-  if (negative('ไข่')) avoidProteins.push('egg');
-  if (negative('ปลาร้า')) avoidIngredients.push('น้ำปลาร้า');
-  if (negative('กุ้งแห้ง')) avoidIngredients.push('กุ้งแห้ง');
-  if (negative('ถั่ว(?:ลิสง)?')) avoidIngredients.push('ถั่วลิสงคั่ว');
-  if (allergic('ถั่ว(?:ลิสง)?')) allergenFlags.push('peanut');
-  if (allergic('กุ้ง')) allergenFlags.push('shrimp');
-  if (allergic('ไข่')) allergenFlags.push('egg');
-  if (allergic('ปลา')) allergenFlags.push('fish');
+  if (hasNegative(text,'หมู')) avoidProteins.push('pork'); else if (hasAffirmative(current,'หมู')) preferProteins.push('pork');
+  if (hasNegative(text,'เนื้อ(?:วัว)?')) avoidProteins.push('beef'); else if (hasAffirmative(current,'เนื้อ(?:วัว)?')) preferProteins.push('beef');
+  if (hasNegative(text,'ไก่')) avoidProteins.push('chicken'); else if (hasAffirmative(current,'ไก่')) preferProteins.push('chicken');
+  if (hasNegative(text,'ปลา')) avoidProteins.push('fish'); else if (hasAffirmative(current,'ปลา')) preferProteins.push('fish');
+  if (hasNegative(text,'ไข่')) avoidProteins.push('egg');
+  if (hasNegative(text,'ปลาร้า')) avoidIngredients.push('น้ำปลาร้า');
+  if (hasNegative(text,'กุ้ง(?:แห้ง)?')) avoidIngredients.push('กุ้งแห้ง');
+  if (hasNegative(text,'ถั่ว(?:ลิสง)?')) avoidIngredients.push('ถั่วลิสงคั่ว');
+  if (hasAllergy(text,'ถั่ว(?:ลิสง)?')) allergenFlags.push('peanut');
+  if (hasAllergy(text,'กุ้ง')) allergenFlags.push('shrimp');
+  if (hasAllergy(text,'ไข่')) allergenFlags.push('egg');
+  if (hasAllergy(text,'ปลา')) allergenFlags.push('fish');
 
   const constraintsText = norm((input.constraints ?? []).join(' '));
+
+  const goals: string[] = [];
+  for (const raw of input.constraints ?? []) {
+    const key = norm(raw).replace(/\s+/g,'_');
+    const aliased = FOOD_CONSTRAINT_ALIASES[key];
+    if (!aliased) continue;
+    if (aliased.avoidProteins) avoidProteins.push(...aliased.avoidProteins);
+    if (aliased.avoidIngredients) avoidIngredients.push(...aliased.avoidIngredients);
+    if (aliased.allergenFlags) allergenFlags.push(...aliased.allergenFlags);
+    if (aliased.goals) goals.push(...aliased.goals);
+    if (aliased.spice && spice == null) spice = aliased.spice;
+    if (aliased.vegetarian) vegetarian = true;
+  }
   if (/ไม่กินหมู|งดหมู/u.test(constraintsText)) avoidProteins.push('pork');
   if (/ไม่กินเนื้อ|งดเนื้อ/u.test(constraintsText)) avoidProteins.push('beef');
+  if (/ไม่กินไก่|งดไก่/u.test(constraintsText)) avoidProteins.push('chicken');
   if (/ไม่กินปลา|งดปลา/u.test(constraintsText)) avoidProteins.push('fish');
+  if (/ไม่กินไข่|งดไข่/u.test(constraintsText)) avoidProteins.push('egg');
   if (/ไม่เอาปลาร้า|ไม่กินปลาร้า/u.test(constraintsText)) avoidIngredients.push('น้ำปลาร้า');
   if (/แพ้ถั่ว/u.test(constraintsText)) allergenFlags.push('peanut');
   if (/แพ้กุ้ง/u.test(constraintsText)) allergenFlags.push('shrimp');
   if (/แพ้ไข่/u.test(constraintsText)) allergenFlags.push('egg');
 
-  const goals: string[] = [];
   if (includesAny(text, [/มาครั้งแรก/u,/ครั้งแรก/u,/signature/i,/ซิกเนเจอร์/u,/ขึ้นชื่อ/u,/แนะนำ.*ร้าน/u])) goals.push('signature');
   if (includesAny(text, [/อีสานแท้/u,/พื้นบ้าน/u,/local/u,/authentic/i])) goals.push('authentic');
   if (includesAny(text, [/กินง่าย/u,/ฝรั่ง/u,/มือใหม่/u,/beginner/i])) goals.push('beginner');
@@ -143,20 +196,21 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
   }).map(item => item.name);
 
   return {
-    partySize: input.partySize ?? partyFromText ?? null,
-    budget: input.budget ?? budgetFromText ?? null,
-    spice, avoidProteins: uniq(avoidProteins), preferProteins: uniq(preferProteins),
+    partySize: input.partySize ?? partyFromText ?? partyFromHistory ?? null,
+    budget: input.budget ?? budgetFromText ?? budgetFromHistory ?? null,
+    spice, vegetarian, avoidProteins: uniq(avoidProteins), preferProteins: uniq(preferProteins),
     avoidIngredients: uniq(avoidIngredients), allergenFlags: uniq(allergenFlags), goals: uniq(goals), selectedNames: uniq(selectedNames),
   };
 }
 
 function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): boolean {
   if (!item.orderable || item.availableServings <= 0 || item.unavailableIngredients.length) return true;
+  if (pref.vegetarian && item.profile.proteinTags.some(tag => ['pork','beef','chicken','fish','shrimp'].includes(tag))) return true;
   if (item.profile.proteinTags.some(tag => pref.avoidProteins.includes(tag))) return true;
   if (item.profile.allergenFlags.some(tag => pref.allergenFlags.includes(tag))) return true;
   const ingredients = item.ingredients.map(norm);
   if (pref.avoidIngredients.some(avoid => ingredients.some(ingredient => ingredient.includes(norm(avoid))))) return true;
-  if (pref.spice === 'none' && item.profile.spiceLevel >= 4) return true;
+  if (pref.spice === 'none' && item.profile.spiceLevel >= 3) return true;
   return false;
 }
 
@@ -179,7 +233,7 @@ function scoreItem(item: RestaurantAdvisorItem, pref: ParsedPreferences, selecte
   if (pref.spice === 'medium') score += Math.max(0, 3 - Math.abs(p.spiceLevel - 2)) * .7;
   if (pref.spice === 'hot') score += p.spiceLevel * .8;
   if (!pref.goals.length && !pref.preferProteins.length && !pref.spice) {
-    score += (item.signature ? 2 : 0) + p.shareability * .25 + p.beginnerFriendly * .4;
+    score += (item.signature ? 2 : 0) + p.shareability * .25 + (p.beginnerFriendly ? .4 : 0);
   }
   if (selectedRoles.length && p.pairingTags.some(role => selectedRoles.includes(role))) { score += 3; reasons.push('ช่วยเติมบทบาทที่เข้าคู่กับของที่เลือกแล้ว'); }
   if (pref.selectedNames.includes(item.name)) score -= 8;
@@ -220,6 +274,7 @@ function composeSet(candidates: Scored[], pref: ParsedPreferences) {
   let total = 0;
   const add = (row: Scored | null, role: string, quantity = 1) => {
     if (!row || used.has(row.item.name)) return false;
+    quantity = Math.max(1, Math.min(quantity, row.item.availableServings));
     const cost = row.item.price * quantity;
     if (budget != null && total + cost > budget) return false;
     used.add(row.item.name); total += cost;
@@ -257,6 +312,7 @@ function composeSet(candidates: Scored[], pref: ParsedPreferences) {
     optionalDessert: optionalDessert && (remainingBudget == null || optionalDessert.item.price <= remainingBudget)
       ? {name:optionalDessert.item.name,price:optionalDessert.item.price} : null,
     balancedRoles: uniq(lines.map(line=>line.role)),
+    limitedByBudget: budget != null && lines.length < (party >= 3 ? 4 : 2),
   };
 }
 

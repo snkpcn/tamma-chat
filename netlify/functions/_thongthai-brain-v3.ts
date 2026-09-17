@@ -47,6 +47,14 @@ export interface AgentStateUpdate {
   travelContextSummary?: string;
   unresolvedNeed?: string;
   clearUnresolvedNeed?: boolean;
+  restaurantProposedSet?: {
+    source: 'restaurant_menu_advisor_v1';
+    items: Array<{ name: string; quantity: number }>;
+    total: number;
+    budget: number | null;
+    partySize: number | null;
+    createdAt: string;
+  };
 }
 export interface SemanticMemoryUpdate { key: string; value: string | string[]; confidence: number }
 export interface BrainRuntimeContext {
@@ -282,6 +290,13 @@ You can now perform REAL operational work. Do not pretend a booking/order exists
 - Stay special request is part of the booking itself, not a separate generic handoff. Once required stay details are complete, ask once naturally whether the guest needs anything prepared or noted for the stay (examples: extra pillows, child/elderly needs, accessibility, allergy/food concern, celebration setup, arrival timing, housekeeping preference). This question is optional and must not become a loop. If the guest already gave a request, do not ask again. If the guest says none/no, proceed immediately.
 - Put the guest's operational special request into create_booking.note so it travels with the Booking to backoffice and the stay team. Preserve the meaning faithfully; summarize only enough to be clear. Never promise the request is guaranteed. Say the team will review/confirm it with the booking when fulfillment is not already verified.
 - Restaurant MENU source of truth is verified world fact restaurant_menu_live, backed by tamma_chart_os menu + recipes + live stock. For food/menu/price/ingredient/availability questions, use ONLY this live source. Never rely on an old poster, memory, or invented dish. If orderable=false, say the dish is temporarily unavailable and, when useful, name the unavailable ingredient. The customer menu page is the menuUrl in that fact.
+- For restaurant recommendation, comparison, budget/set building, pairing, substitution, constraints, allergy/avoidance, or "what should I eat" requests, CALL list_restaurant_menu. The tool returns advisor: deterministic grounded selection/scoring/set math. Compose your language from advisor; do not choose/invent items yourself from memory.
+- Do not surface internal menu descriptions that look like placeholders/backoffice copy. Prefer advisor summaries/profile dimensions and live prices.
+- If advisor.notices mentions allergy/cross-contact, include the warning naturally. Never claim an allergy is 100% safe or cross-contamination-free.
+- When the guest asks for a budget/table/set, answer with the advisor set only: items, quantities, line totals, total, remaining budget if useful, and any budget limitation. Do not exceed advisor.set.total or add dishes not in advisor.
+- When the guest changes constraints after a previous restaurant set (e.g. "ไม่เอาหมู", "เผ็ดไป"), call list_restaurant_menu again and use the recomposed advisor result.
+- If the guest explicitly accepts the latest restaurant set ("เอาชุดนี้", "ตามนี้", "โอเคชุดนี้"), use Travel-only working state.restaurantProposedSet as the exact preorder items. Do not make the guest retype menu names. If date/time/name are missing, collect only missing fields. Once complete, call create_restaurant_preorder with those exact items.
+- If list_restaurant_menu TOOL RESULT advisor.mode is compose_set and advisor.set.items exist, include agentStateUpdate.restaurantProposedSet with those item names/quantities/total/budget/partySize/source so the next turn can create a preorder from "เอาชุดนี้".
 - Restaurant PREORDER is different from a restaurant/table booking. For food ordered ahead, collect exact menu items + quantity, pickup date, pickup time, customer name, and contact if the channel itself is not reachable. Then use create_restaurant_preorder. A successful preorder is REQUESTED until staff accepts it in the restaurant LINE group. Never claim staff accepted it before the tool result says so.
 - If create_restaurant_preorder TOOL RESULT contains duplicate=true, this is an EXISTING preorder, not a new one. Explicitly say no duplicate was created, show the existing preorder code, and keep its existing status. Never say the duplicate request was newly accepted/recorded.
 - Activity booking is inventory-backed. The verified world facts contain the current real catalog, prices and active inventory. Never invent them.
@@ -300,7 +315,7 @@ TOOL USE
 3. create_cafe_inquiry {question, customerName?, phone?, email?} — create a real staff follow-up item when the café question cannot be answered from verified facts or human contact is requested.
 4. list_otop_products {} — list current real orderable OTOP products and stock-safe product information.
 5. create_otop_order {sku, quantity, customerName?, phone?, email?, fulfillmentType?, shippingAddress?, note?} — create a REAL requested order after explicit choice.
-6. list_restaurant_menu {} — read the current real ตำมา-ชาติ menu, prices, ingredients and live availability from the restaurant source of truth. Use it when a fresh explicit menu lookup is helpful.
+6. list_restaurant_menu {} — read the current real ตำมา-ชาติ menu, prices, ingredients and live availability from the restaurant source of truth. Required for restaurant recommendations, comparisons, budget sets, pairings, substitutions and food constraints.
 7. create_restaurant_preorder {date, time, items:[{name,quantity}], customerName, phone?, email?, note?} — create a REAL food preorder request. Item names must come from the live menu. Date/time is the requested food pickup time in Asia/Bangkok.
 8. save_journey {}, favorite_experience {experienceId}, unfavorite_experience {experienceId}, mark_visited {experienceId}, request_handoff {reasonCode} keep their prior meanings.
 If TOOL RESULTS below are non-empty, those actions already ran. Do not repeat them in the same turn; compose the final answer from their success/failure.
@@ -321,6 +336,7 @@ TOOL RESULTS: ${runtime.toolResults.length ? JSON.stringify(runtime.toolResults)
 MEMORY / PRIVACY
 Structured travel context is authoritative. Semantic memory may store only durable travel/experience preferences. Never store names, phone, email, address, payments, raw chat text or unrelated personal information there.
 Allowed semantic keys: discovery_style, preferred_moods, experience_preferences, stay_preferences, activity_preferences, avoid_experiences.
+Food preferences/avoidances may be carried only as structured guestContext.constraints, never raw text or health diagnosis. Allowed food constraint codes include: no_pork, no_beef, no_chicken, no_fish, no_egg, no_plara, no_peanut, no_shrimp, vegetarian, no_spicy, mild_spice, peanut_allergy, shrimp_allergy, fish_allergy, egg_allergy, authentic_isan, beginner_friendly, kid_friendly.
 
 JOURNEY
 Casual/factual questions do not change a Journey. Create/modify only when the CURRENT request asks for planning. Respect mobility, children, elderly and pace constraints. Journey IDs must come from the catalog.
@@ -335,7 +351,7 @@ Return ONLY one JSON object:
   "journeyAction": {"type":"none"|"create"|"modify"|"replace","journey":object|null},
   "suggestedActions": [{"label":string,"action":string}],
   "responseStyle": "direct"|"story"|"contrast"|"curious"|"reflective"|"planner",
-  "agentStateUpdate": {"activeTopic"?:string,"travelContextSummary"?:string,"unresolvedNeed"?:string,"clearUnresolvedNeed"?:boolean},
+  "agentStateUpdate": {"activeTopic"?:string,"travelContextSummary"?:string,"unresolvedNeed"?:string,"clearUnresolvedNeed"?:boolean,"restaurantProposedSet"?:object},
   "semanticMemoryUpdates": [{"key":string,"value":string|string[],"confidence":number}],
   "toolCalls": [{"name":string,"args":object}]
 }`;
@@ -360,7 +376,30 @@ function normalizeAgentState(value: unknown): AgentStateUpdate | undefined {
   if (isNonEmptyString(raw.travelContextSummary)) out.travelContextSummary = raw.travelContextSummary.slice(0,600);
   if (isNonEmptyString(raw.unresolvedNeed)) out.unresolvedNeed = raw.unresolvedNeed.slice(0,220);
   if (raw.clearUnresolvedNeed === true) out.clearUnresolvedNeed = true;
+  const proposed = sanitizeRestaurantProposedSet(raw.restaurantProposedSet);
+  if (proposed) out.restaurantProposedSet = proposed;
   return Object.keys(out).length ? out : undefined;
+}
+function sanitizeRestaurantProposedSet(value: unknown): AgentStateUpdate['restaurantProposedSet'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  const rawItems = Array.isArray(raw.items) ? raw.items : [];
+  const items = rawItems.slice(0,20)
+    .map(item => item && typeof item === 'object' ? item as Record<string, unknown> : {})
+    .map(item => ({ name:safeString(item.name,160), quantity:safeNumber(item.quantity,1,50) ?? 1 }))
+    .filter((item): item is { name:string; quantity:number } => Boolean(item.name));
+  if (!items.length) return undefined;
+  const total = typeof raw.total === 'number' && Number.isFinite(raw.total) ? Math.max(0, Math.floor(raw.total)) : 0;
+  const budget = typeof raw.budget === 'number' && Number.isFinite(raw.budget) ? Math.max(0, Math.floor(raw.budget)) : null;
+  const partySize = typeof raw.partySize === 'number' && Number.isFinite(raw.partySize) ? Math.max(1, Math.floor(raw.partySize)) : null;
+  return {
+    source:'restaurant_menu_advisor_v1',
+    items,
+    total,
+    budget,
+    partySize,
+    createdAt:isNonEmptyString(raw.createdAt) ? String(raw.createdAt).slice(0,40) : new Date().toISOString(),
+  };
 }
 function normalizeSemanticUpdates(value: unknown): SemanticMemoryUpdate[] {
   if (!Array.isArray(value)) return [];
@@ -384,7 +423,7 @@ function dateString(value: unknown): string | undefined {
 function timeString(value: unknown): string | undefined {
   const s = safeString(value, 5); return s && /^([01]\d|2[0-3]):[0-5]\d$/.test(s) ? s : undefined;
 }
-function normalizeToolCalls(value: unknown, toolResultsPresent: boolean): BrainToolCall[] {
+function normalizeToolCalls(value: unknown, toolResultsPresent: boolean, runtime: BrainRuntimeContext): BrainToolCall[] {
   if (toolResultsPresent || !Array.isArray(value)) return [];
   const experienceIds = new Set(EXPERIENCES.map(item => item.id));
   const calls: BrainToolCall[] = [];
@@ -434,9 +473,12 @@ function normalizeToolCalls(value: unknown, toolResultsPresent: boolean): BrainT
       const date = dateString(args.date); const time = timeString(args.time);
       const customerName = safeString(args.customerName,120);
       const rawItems = Array.isArray(args.items) ? args.items : [];
-      const items = rawItems.slice(0,20).map(item => item && typeof item === 'object' ? item as Record<string,unknown> : {})
+      let items = rawItems.slice(0,20).map(item => item && typeof item === 'object' ? item as Record<string,unknown> : {})
         .map(item => ({ name:safeString(item.name,160), quantity:safeNumber(item.quantity,1,50) ?? 1 }))
         .filter((item): item is {name:string;quantity:number} => Boolean(item.name));
+      if (!items.length && args.useLastRestaurantSet === true) {
+        items = sanitizeRestaurantProposedSet(runtime.agentState.restaurantProposedSet)?.items ?? [];
+      }
       if (!date || !time || !customerName || !items.length) continue;
       calls.push({ name, args: { date,time,items,customerName,
         ...(safeString(args.phone,30) ? {phone:safeString(args.phone,30)} : {}),
@@ -490,7 +532,7 @@ function validateBrainResponse(data: unknown, runtime: BrainRuntimeContext): Bra
     responseStyle: VALID_STYLES.includes(raw.responseStyle as ResponseStyle) ? raw.responseStyle as ResponseStyle : 'direct',
     agentStateUpdate: normalizeAgentState(raw.agentStateUpdate),
     semanticMemoryUpdates: normalizeSemanticUpdates(raw.semanticMemoryUpdates),
-    toolCalls: normalizeToolCalls(raw.toolCalls, runtime.toolResults.length > 0),
+    toolCalls: normalizeToolCalls(raw.toolCalls, runtime.toolResults.length > 0, runtime),
   };
 }
 function stripCodeFences(text: string): string { return text.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/```\s*$/i,'').trim(); }

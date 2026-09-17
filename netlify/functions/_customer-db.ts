@@ -96,6 +96,10 @@ const INTERESTS = new Set([
 const CONSTRAINTS = new Set([
   'limited_walking', 'wheelchair_access', 'elderly_friendly', 'child_friendly',
   'vegetarian', 'no_spicy', 'rain_sensitive',
+  'no_pork', 'no_beef', 'no_chicken', 'no_fish', 'no_egg',
+  'no_plara', 'no_peanut', 'no_shrimp', 'mild_spice',
+  'peanut_allergy', 'shrimp_allergy', 'fish_allergy', 'egg_allergy',
+  'authentic_isan', 'beginner_friendly', 'kid_friendly',
 ]);
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

@@ -8,6 +8,7 @@ import {
   type AgentStateUpdate,
   type BrainRequest,
   type BrainResponse,
+  type BrainToolResult,
   type ChatTurn,
   type GuestContext,
   type JourneyContext,
@@ -148,13 +149,47 @@ function mergeAgentState(
   return Object.keys(merged).length ? merged : undefined;
 }
 
-function mergeAfterTools(first: BrainResponse, second: BrainResponse): BrainResponse {
+function restaurantSetFromToolResults(toolResults: BrainToolResult[]): AgentStateUpdate | undefined {
+  for (const result of toolResults) {
+    if (result.name !== 'list_restaurant_menu' || !result.ok) continue;
+    try {
+      const detail = JSON.parse(result.detail) as Record<string, unknown>;
+      const advisor = detail.advisor && typeof detail.advisor === 'object' ? detail.advisor as Record<string, unknown> : {};
+      const set = advisor.set && typeof advisor.set === 'object' ? advisor.set as Record<string, unknown> : null;
+      const rawItems = set && Array.isArray(set.items) ? set.items : [];
+      const items = rawItems.slice(0,20)
+        .map(item => item && typeof item === 'object' ? item as Record<string, unknown> : {})
+        .map(item => ({
+          name: typeof item.name === 'string' ? item.name.slice(0,160) : '',
+          quantity: typeof item.quantity === 'number' && Number.isFinite(item.quantity) ? Math.max(1, Math.floor(item.quantity)) : 1,
+        }))
+        .filter(item => item.name);
+      if (advisor.mode === 'compose_set' && items.length) {
+        return {
+          restaurantProposedSet: {
+            source: 'restaurant_menu_advisor_v1',
+            items,
+            total: typeof set?.total === 'number' && Number.isFinite(set.total) ? Math.max(0, Math.floor(set.total)) : 0,
+            budget: typeof set?.budget === 'number' && Number.isFinite(set.budget) ? Math.max(0, Math.floor(set.budget)) : null,
+            partySize: typeof set?.partySize === 'number' && Number.isFinite(set.partySize) ? Math.max(1, Math.floor(set.partySize)) : null,
+            createdAt: new Date().toISOString(),
+          },
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+function mergeAfterTools(first: BrainResponse, second: BrainResponse, toolResults: BrainToolResult[]): BrainResponse {
   return {
     ...first,
     message: second.message,
     responseStyle: second.responseStyle,
     suggestedActions: second.suggestedActions.length ? second.suggestedActions : first.suggestedActions,
-    agentStateUpdate: mergeAgentState(first.agentStateUpdate, second.agentStateUpdate),
+    agentStateUpdate: mergeAgentState(mergeAgentState(first.agentStateUpdate, second.agentStateUpdate), restaurantSetFromToolResults(toolResults)),
     semanticMemoryUpdates: first.semanticMemoryUpdates,
     toolCalls: [],
   };
@@ -289,7 +324,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
           messages,
           { ...runtime, toolResults },
         );
-        finalResponse = mergeAfterTools(firstResponse, afterTools);
+        finalResponse = mergeAfterTools(firstResponse, afterTools, toolResults);
       } catch (error) {
         console.error('THONGTHAI_BRAIN_POST_TOOL_ERROR', error);
         finalResponse = {
