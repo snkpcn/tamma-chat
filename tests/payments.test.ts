@@ -5,13 +5,18 @@
 // (node --test) — no new dependency, matching this repo's existing
 // package.json (no test framework was installed before this).
 //
-// Run with: node --test --import tsx netlify/functions/_payments.test.ts
+// Run with: node --test --import tsx tests/payments.test.ts
 // (or transpile first; any TS-aware `node --test` runner works since this
 // file only imports the pure, I/O-free choosePaymentForReceipt function.)
+//
+// Lives outside netlify/functions/ deliberately — Netlify's function
+// bundler discovers entry points from that directory, and a *.test.ts file
+// there (even underscore-prefixed) risks being picked up and failing the
+// bundle on its node:test/node:assert imports.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { choosePaymentForReceipt, type PaymentRequest } from './_payments';
+import { choosePaymentForReceipt, type PaymentRequest } from '../netlify/functions/_payments';
 
 function fakeRequest(overrides: Partial<PaymentRequest>): PaymentRequest {
   return {
