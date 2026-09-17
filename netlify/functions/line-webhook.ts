@@ -19,6 +19,7 @@ import {
   handleSettlementTransferProofImage,
   handleSettlementTransferProofPostback,
 } from './_settlement-line-proof';
+import { splitCustomerMessageForLine } from './_chat-copy-style';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -45,6 +46,7 @@ type LineWebhookBody = {
 };
 
 const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
+const MAX_LINE_MESSAGES = 5;
 
 function getHeader(event: HandlerEvent, name: string): string | undefined {
   const target = name.toLowerCase();
@@ -81,8 +83,29 @@ function lineGuestId(userId: string): string {
 }
 
 function normalizeReplyMessages(input: string | LineMessage | LineMessage[]): LineMessage[] {
-  if (typeof input === 'string') return [{ type: 'text', text: input.slice(0, 4900) }];
-  return Array.isArray(input) ? input.slice(0, 5) : [input];
+  const raw: LineMessage[] = typeof input === 'string'
+    ? [{ type:'text', text:input } as LineMessage]
+    : Array.isArray(input) ? input.slice(0, MAX_LINE_MESSAGES) : [input];
+  const out: LineMessage[] = [];
+
+  for (let index = 0; index < raw.length && out.length < MAX_LINE_MESSAGES; index += 1) {
+    const message = raw[index] as LineMessage & { text?: string };
+    if (message.type !== 'text' || typeof message.text !== 'string') {
+      out.push(message);
+      continue;
+    }
+
+    // Keep at least one slot for every later message (including QR/Flex cards),
+    // then use any remaining slots to split this text into phone-sized bubbles.
+    const remainingMessages = raw.length - index - 1;
+    const availableTextSlots = Math.max(1, MAX_LINE_MESSAGES - out.length - remainingMessages);
+    const chunks = splitCustomerMessageForLine(message.text, 1100, availableTextSlots);
+    for (const chunk of chunks) {
+      if (out.length >= MAX_LINE_MESSAGES - remainingMessages) break;
+      out.push({ ...message, type:'text', text:chunk } as LineMessage);
+    }
+  }
+  return out.slice(0, MAX_LINE_MESSAGES);
 }
 
 async function replyToLine(
@@ -111,7 +134,6 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   const targetId = sourceType === 'group' ? event.source?.groupId : event.source?.roomId;
   if (!targetId) return;
 
-  // Staff buttons use LINE postback events. They never enter customer chat/memory.
   if (event.type === 'postback' && typeof event.postback?.data === 'string') {
     const paymentMessages = await handleLinePaymentPostback({
       targetId,
@@ -163,10 +185,6 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   if (event.type !== 'message') return;
 
   if (event.message?.type === 'image' && event.message.id) {
-    // Settlement transfer proof is a normal image sent in the team's bound
-    // LINE group. If there is a pending settlement, bind the image to that
-    // settlement context and ask for one-tap confirmation. Only fall through
-    // to the fuel-photo flow when this group has no pending settlement work.
     const settlementReply = await handleSettlementTransferProofImage({
       targetId,
       userId: event.source?.userId ?? null,
@@ -177,8 +195,6 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       return;
     }
 
-    // Only treat an image as a fuel receipt after that staff member has named the ATV.
-    // This prevents normal activity photos in the group from being OCR'd or written to the fuel ledger.
     const pendingFuel = await hasPendingLineFuelSession(targetId, event.source?.userId ?? null);
     if (!pendingFuel) return;
     const fuelReply = await handleLineFuelImage({
@@ -265,7 +281,7 @@ async function handleCustomerPaymentEvent(
       console.error('LINE_PAYMENT_SLIP_ERROR', error instanceof Error ? error.message.slice(0, 300) : 'unknown');
       await replyToLine(
         item.replyToken,
-        'รับรูปแล้วครับ แต่ระบบบันทึกสลิปไม่สำเร็จ กรุณาส่งรูปสลิปเดิมอีกครั้งในอีกสักครู่ครับ',
+        '⚠️ รับรูปแล้วครับ แต่บันทึกสลิปยังไม่สำเร็จ\n\nรอสักครู่แล้วส่งรูปเดิมอีกครั้งได้เลย',
         accessToken,
       );
     }
@@ -318,8 +334,6 @@ export const handler: Handler = async (event, context) => {
   const opsEvents = allEvents.filter(item => item.source?.type === 'group' || item.source?.type === 'room');
   const customerCandidates = allEvents.filter(item => item.source?.type !== 'group' && item.source?.type !== 'room');
 
-  // Link the LINE identity before customer payment handling. This closes the race where a newly-created
-  // payment request tries to push a QR before the customer channel contact exists.
   try {
     await registerDirectUsers(customerCandidates);
   } catch (error) {
