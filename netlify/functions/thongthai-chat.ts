@@ -25,6 +25,7 @@ import {
   persistBrainRuntime,
   registerGuestIdentity,
 } from './_thongthai-runtime-v3';
+import { restaurantMenuAdvice } from './_restaurant-sot';
 
 export type {
   BrainRequest as ChatRequest,
@@ -225,6 +226,133 @@ function duplicateRestaurantPreorderMessage(
   }
 }
 
+function normThai(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): boolean {
+  const text = normThai(request.message);
+  if (/(ขี่ม้า|atv|เอทีวี|ยิงธนู|ห้องพัก|ที่พัก|เฮือน|otop|กาแฟ|คาเฟ่)/iu.test(text)) return false;
+  if (/(เอาชุด|ชุดเมื่อกี้|ตามนี้|โอเคชุดนี้)/u.test(text) && runtime.agentState.restaurantProposedSet) return true;
+  if (/(ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เมนู|อาหาร|กิน|งบ|แพ้|ไม่กิน|ไม่เอา|เผ็ด|ปลาร้า|ถั่ว|กุ้ง|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน)/u.test(text)) return true;
+  if (/มาครั้งแรก|ครั้งแรก|อะไรแนะนำ|อะไรอร่อย|วันนี้กินอะไรดี/u.test(text)) return true;
+  return request.chatHistory.slice(-6).some(turn => /(ตำลาว|ตำไทย|ชุดอาหาร|ร้านอาหาร|เมนู|สั่งอาหาร|แพ้ถั่ว|ไม่เอาหมู)/u.test(turn.content));
+}
+
+function formatMoney(value: unknown): string {
+  const n = Number(value);
+  return Number.isFinite(n) ? `${Math.round(n)} บาท` : '-';
+}
+
+function formatAdvisorMessage(advisor: any): string {
+  const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
+  if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
+    const [first, second] = advisor.comparison;
+    const lines = advisor.comparison.slice(0, 4).map((row: any) => {
+      const tags = [row.summary, `ราคา ${formatMoney(row.price)}`, row.signature ? 'เมนูเด่นร้าน' : null]
+        .filter(Boolean).join(' · ');
+      return `• ${row.name}: ${tags}`;
+    });
+    return [
+      first && second ? `${first.name} กับ ${second.name} ต่างกันตามข้อมูลเมนูจริงแบบนี้ครับ` : 'เทียบจากเมนูจริงให้ครับ',
+      ...lines,
+      notices[0] ? `\nหมายเหตุ: ${notices[0]}` : '',
+    ].filter(Boolean).join('\n');
+  }
+  if (advisor?.mode === 'compose_set' && advisor.set?.items?.length) {
+    const set = advisor.set;
+    const lines = set.items.map((line: any, index: number) =>
+      `${index + 1}. ${line.name} x${line.quantity} — ${formatMoney(line.lineTotal)}${line.reason ? ` · ${line.reason}` : ''}`);
+    return [
+      `จัดชุดให้ตามเมนูจริงของตำมา-ชาติครับ`,
+      ...lines,
+      `รวม ${formatMoney(set.total)}${set.budget != null ? ` จากงบ ${formatMoney(set.budget)}` : ''}`,
+      set.remainingBudget != null ? `เหลืองบ ${formatMoney(set.remainingBudget)}` : '',
+      set.limitedByBudget ? 'งบค่อนข้างตึง เลยจัดให้เน้นบทบาทหลักโดยไม่ให้เกินงบครับ' : '',
+      set.optionalDessert ? `ถ้าอยากปิดท้าย ยังเพิ่ม ${set.optionalDessert.name} (${formatMoney(set.optionalDessert.price)}) ได้ครับ` : '',
+      notices[0] ? `หมายเหตุ: ${notices[0]}` : '',
+      'ถ้าเอาชุดนี้ บอกวันเวลาได้เลยครับ',
+    ].filter(Boolean).join('\n');
+  }
+  const rows = Array.isArray(advisor?.recommendations) ? advisor.recommendations.slice(0, advisor.mode === 'pairing' ? 3 : 5) : [];
+  if (rows.length) {
+    const intro = advisor?.mode === 'pairing'
+      ? 'มีตำลาวแล้ว เพิ่มแบบนี้จะบาลานซ์โต๊ะได้ดีครับ'
+      : 'ทองไทยแนะนำจากเมนูจริง ราคาและสต๊อกล่าสุดครับ';
+    return [
+      intro,
+      ...rows.map((row: any, index: number) => {
+        const reason = Array.isArray(row.reasons) && row.reasons.length ? ` · ${row.reasons[0]}` : row.summary ? ` · ${row.summary}` : '';
+        return `${index + 1}. ${row.name} — ${formatMoney(row.price)}${reason}`;
+      }),
+      notices[0] ? `\nหมายเหตุ: ${notices[0]}` : '',
+    ].filter(Boolean).join('\n');
+  }
+  return notices[0] ?? 'ตอนนี้ยังไม่มีเมนูที่ตรงเงื่อนไขและพร้อมขายในสต๊อกครับ';
+}
+
+function proposedSetFromAdvisor(advisor: any): AgentStateUpdate | undefined {
+  if (advisor?.mode !== 'compose_set' || !Array.isArray(advisor.set?.items) || !advisor.set.items.length) return undefined;
+  return {
+    restaurantProposedSet: {
+      source: 'restaurant_menu_advisor_v1',
+      items: advisor.set.items.map((line: any) => ({ name: String(line.name), quantity: Math.max(1, Number(line.quantity) || 1) })),
+      total: Math.max(0, Math.floor(Number(advisor.set.total) || 0)),
+      budget: typeof advisor.set.budget === 'number' ? Math.max(0, Math.floor(advisor.set.budget)) : null,
+      partySize: typeof advisor.set.partySize === 'number' ? Math.max(1, Math.floor(advisor.set.partySize)) : null,
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
+function restaurantSetAcceptanceMessage(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): BrainResponse | null {
+  if (!/(เอาชุด|ชุดเมื่อกี้|ตามนี้|โอเคชุดนี้)/u.test(request.message)) return null;
+  const set = runtime.agentState.restaurantProposedSet as { items?: Array<{ name:string; quantity:number }>; total?: number } | undefined;
+  if (!set?.items?.length) return null;
+  const itemLines = set.items.map(item => `• ${item.name} x${item.quantity}`);
+  return {
+    message: [
+      'ได้ครับ ทองไทยใช้ชุดล่าสุดนี้ต่อให้เลย ไม่ต้องพิมพ์ชื่อเมนูซ้ำ',
+      ...itemLines,
+      set.total ? `รวมประมาณ ${formatMoney(set.total)}` : '',
+      '',
+      'ขอชื่อผู้สั่งก่อนครับ แล้วทองไทยจะทำรายการพรีออเดอร์ให้ต่อทันที',
+    ].filter(Boolean).join('\n'),
+    intent:'order',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    agentStateUpdate:{ restaurantProposedSet: set as AgentStateUpdate['restaurantProposedSet'] },
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
+async function deterministicRestaurantResponse(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): Promise<BrainResponse | null> {
+  if (!isRestaurantAdvisorTurn(request, runtime)) return null;
+  const accept = restaurantSetAcceptanceMessage(request, runtime);
+  if (accept) return accept;
+  const advice = await restaurantMenuAdvice({
+    query: request.message,
+    partySize: null,
+    budget: typeof request.guestContext.budget === 'number' ? request.guestContext.budget : null,
+    constraints: request.guestContext.constraints,
+    recentMessages: request.chatHistory.slice(-6).map(turn => turn.content),
+  });
+  return {
+    message: formatAdvisorMessage(advice),
+    intent: advice.mode === 'compare' ? 'information' : 'recommendation',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    agentStateUpdate: proposedSetFromAdvisor(advice),
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 export const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
@@ -281,6 +409,21 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const messages: ChatTurn[] = currentAlreadyIncluded
     ? history
     : [...history, { role: 'user', content: request.message }];
+
+  const deterministicRestaurant = await deterministicRestaurantResponse(request, runtime).catch(error => {
+    console.error('THONGTHAI_RESTAURANT_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (deterministicRestaurant) {
+    await persistBrainRuntime(guestDbId, channel, deterministicRestaurant);
+    return json(200, {
+      message: deterministicRestaurant.message,
+      intent: deterministicRestaurant.intent,
+      contextUpdates: deterministicRestaurant.contextUpdates,
+      journeyAction: deterministicRestaurant.journeyAction,
+      suggestedActions: deterministicRestaurant.suggestedActions,
+    });
+  }
 
   let firstResponse: BrainResponse;
   try {
