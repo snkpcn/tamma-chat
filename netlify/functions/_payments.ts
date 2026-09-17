@@ -3,10 +3,10 @@ import { decryptPii, piiHash } from './_operations-db';
 import { restaurantPreorderPaymentSummary } from './_restaurant-sot';
 
 export type PaymentLineMessage = { type: string; [key: string]: unknown };
-type PaymentStatus = 'quote_required' | 'awaiting_payment' | 'proof_submitted' | 'verified' | 'rejected' | 'cancelled';
+export type PaymentStatus = 'quote_required' | 'awaiting_payment' | 'proof_submitted' | 'verified' | 'rejected' | 'cancelled';
 type TeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all';
 
-type PaymentRequest = {
+export type PaymentRequest = {
   id: string;
   payment_code: string;
   entity_type: string;
@@ -172,6 +172,75 @@ async function latestPaymentForGuest(anonymousId: string, includeFinished = fals
     `payment_requests?guest_id=eq.${guestId}${statusFilter}&select=*&order=created_at.desc&limit=1`,
   );
   return (await response.json() as PaymentRequest[])[0] ?? null;
+}
+
+// Only awaiting_payment/rejected requests can legitimately receive a slip
+// image — quote_required has no amount/QR yet, so a slip could never
+// belong to it; proof_submitted/verified/cancelled are already past the
+// point where a new slip should auto-attach.
+async function payableCandidatesForGuest(guestId: string): Promise<PaymentRequest[]> {
+  const response = await dbFetch(
+    `payment_requests?guest_id=eq.${guestId}&status=in.(awaiting_payment,rejected)&select=*&order=created_at.desc`,
+  );
+  return await response.json() as PaymentRequest[];
+}
+
+// Which of several payable candidates the customer was actually just shown
+// payment instructions for — i.e. which QR/rejection-notice they most
+// recently received — not which entity_code was created most recently. A
+// guest can have a restaurant preorder and an activity booking open at the
+// same time; created_at order says nothing about which one the customer is
+// looking at when they send a slip a few minutes later.
+async function mostRecentlyDeliveredCandidateId(candidateIds: string[]): Promise<string | null> {
+  if (!candidateIds.length) return null;
+  const idsFilter = candidateIds.join(',');
+  const response = await dbFetch(
+    `ops_notification_deliveries?entity_type=eq.payment_request&entity_id=in.(${idsFilter})`
+      + '&delivery_type=like.payment_*_customer&status=eq.sent&select=entity_id,created_at&order=created_at.desc&limit=1',
+  );
+  const rows = await response.json() as Array<{ entity_id: string }>;
+  return rows[0]?.entity_id ?? null;
+}
+
+export type ReceiptResolution =
+  | { kind: 'none' }
+  | { kind: 'resolved'; request: PaymentRequest }
+  | { kind: 'ambiguous'; candidates: PaymentRequest[] };
+
+// Pure decision logic, deliberately separated from the I/O above so it can
+// be unit tested without a database: given the guest's payable
+// (awaiting_payment/rejected) payment requests and which one (if any) was
+// most recently confirmed delivered to the customer, decide which payment
+// an incoming slip image belongs to. Never guesses by created_at order.
+export function choosePaymentForReceipt(
+  candidates: PaymentRequest[],
+  mostRecentlyDeliveredCandidateId: string | null,
+): ReceiptResolution {
+  if (candidates.length === 0) return { kind: 'none' };
+  if (candidates.length === 1) return { kind: 'resolved', request: candidates[0] };
+
+  const delivered = mostRecentlyDeliveredCandidateId
+    ? candidates.find(c => c.id === mostRecentlyDeliveredCandidateId)
+    : undefined;
+  if (delivered) return { kind: 'resolved', request: delivered };
+
+  // Genuinely ambiguous — never auto-attach a guess.
+  return { kind: 'ambiguous', candidates };
+}
+
+// The single place an incoming slip image is matched to a payment — replaces
+// the old latestPaymentForGuest()-by-created_at lookup, which let an
+// unrelated business's payment request (e.g. a just-created activity
+// booking still quote_required) steal a slip that actually belonged to an
+// older-but-currently-payable restaurant preorder.
+async function resolvePaymentForIncomingReceipt(anonymousId: string): Promise<ReceiptResolution> {
+  const guestId = await guestDbId(anonymousId);
+  if (!guestId) return { kind: 'none' };
+  const candidates = await payableCandidatesForGuest(guestId);
+  if (candidates.length === 0) return { kind: 'none' };
+
+  const deliveredId = candidates.length > 1 ? await mostRecentlyDeliveredCandidateId(candidates.map(c => c.id)) : null;
+  return choosePaymentForReceipt(candidates, deliveredId);
 }
 
 async function bindingForTarget(targetId: string): Promise<Binding | null> {
@@ -502,19 +571,35 @@ export async function handleCustomerPaymentSlip(input: {
   rawLineUserId: string;
   messageId: string;
 }): Promise<PaymentLineMessage[]> {
-  const request = await latestPaymentForGuest(input.anonymousId);
-  if (!request) {
-    return [{ type: 'text', text: 'ตอนนี้ยังไม่มีรายการรอชำระในบัญชีนี้ครับ ถ้าต้องการจ่ายรายการไหน พิมพ์ “ชำระเงิน” ให้ทองไทยตรวจรายการล่าสุดได้เลยครับ' }];
+  const resolution = await resolvePaymentForIncomingReceipt(input.anonymousId);
+
+  if (resolution.kind === 'none') {
+    // No awaiting_payment/rejected candidate — fall back to the broader
+    // lookup purely to give an accurate status message (still
+    // quote_required, or already proof_submitted) instead of a generic
+    // "nothing pending" when something exists but just isn't payable yet.
+    const anyRequest = await latestPaymentForGuest(input.anonymousId);
+    if (!anyRequest) {
+      return [{ type: 'text', text: 'ตอนนี้ยังไม่มีรายการรอชำระในบัญชีนี้ครับ ถ้าต้องการจ่ายรายการไหน พิมพ์ “ชำระเงิน” ให้ทองไทยตรวจรายการล่าสุดได้เลยครับ' }];
+    }
+    if (anyRequest.status === 'quote_required') {
+      return [{ type: 'text', text: `รายการ ${anyRequest.entity_code} ยังรอทีมงานกำหนดยอดครับ ยังไม่ต้องโอนตอนนี้ ทองไทยจะส่ง QR ให้ทันทีเมื่อยอดพร้อม` }];
+    }
+    if (anyRequest.status === 'proof_submitted') {
+      return [{ type: 'text', text: `ได้รับสลิปของ ${anyRequest.entity_code} แล้วครับ กำลังรอทีมงานตรวจสอบ ไม่ต้องส่งซ้ำครับ` }];
+    }
+    return [{ type: 'text', text: `รายการ ${anyRequest.entity_code} อยู่สถานะ “${statusLabel(anyRequest.status)}” ครับ` }];
   }
-  if (request.status === 'quote_required') {
-    return [{ type: 'text', text: `รายการ ${request.entity_code} ยังรอทีมงานกำหนดยอดครับ ยังไม่ต้องโอนตอนนี้ ทองไทยจะส่ง QR ให้ทันทีเมื่อยอดพร้อม` }];
+
+  if (resolution.kind === 'ambiguous') {
+    const list = resolution.candidates.map(c => `${c.entity_code} (${money(c.amount)})`).join('\n');
+    return [{
+      type: 'text',
+      text: `พบรายการรอชำระมากกว่า 1 รายการครับ\nสลิปนี้เป็นของรายการไหน?\n\n${list}\n\nพิมพ์เลขที่รายการแล้วส่งรูปสลิปนี้ให้ทองไทยอีกครั้งได้เลยครับ`,
+    }];
   }
-  if (request.status === 'proof_submitted') {
-    return [{ type: 'text', text: `ได้รับสลิปของ ${request.entity_code} แล้วครับ กำลังรอทีมงานตรวจสอบ ไม่ต้องส่งซ้ำครับ` }];
-  }
-  if (!['awaiting_payment', 'rejected'].includes(request.status)) {
-    return [{ type: 'text', text: `รายการ ${request.entity_code} อยู่สถานะ “${statusLabel(request.status)}” ครับ` }];
-  }
+
+  const request = resolution.request;
 
   const existing = await dbFetch(
     `payment_receipts?source_provider=eq.line&source_message_id=eq.${encodeURIComponent(input.messageId)}&select=id&limit=1`,
