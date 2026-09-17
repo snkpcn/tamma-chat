@@ -114,15 +114,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       data: event.postback.data,
     });
     if (paymentMessages?.length) {
-      const replies = [...paymentMessages] as LineMessage[];
-      const paymentParams = new URLSearchParams(event.postback.data);
-      if (paymentParams.get('ops') === 'payment' && paymentParams.get('action') === 'verify') {
-        replies.push({
-          type: 'text',
-          text: '📌 หลังยืนยันรับเงินแล้ว กรุณาส่ง EDC/หลักฐานรายการในกลุ่มนี้ เพื่อให้เจ้าของดำเนินการชำระคืนบริษัทด้วยครับ',
-        });
-      }
-      await replyToLine(event.replyToken, replies, accessToken);
+      await replyToLine(event.replyToken, paymentMessages as LineMessage[], accessToken);
       return;
     }
 
