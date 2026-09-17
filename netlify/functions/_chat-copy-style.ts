@@ -4,6 +4,7 @@ const MARKDOWN_HEADING = /^\s*#{1,6}\s+/;
 const MARKDOWN_BULLET = /^\s*[-*]\s+/;
 const MARKDOWN_RULE = /^\s*(?:[-*_]\s*){3,}$/;
 const MARKDOWN_TABLE_DIVIDER = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/;
+const BULLET_LINE = /^\s*•\s+/;
 
 function plainInlineMarkdown(value: string): string {
   return value
@@ -23,6 +24,45 @@ function plainTableLine(value: string): string {
     .map(cell => cell.trim())
     .filter(Boolean);
   return cells.join(' · ');
+}
+
+function wrapLongPlainLine(value: string, softLimit = 360): string[] {
+  const line = value.trim();
+  if (!line || line.length <= softLimit || /^https?:\/\/\S+$/i.test(line) || BULLET_LINE.test(line)) return [value];
+
+  const words = line.split(/\s+/).filter(Boolean);
+  if (words.length < 3) return [value];
+
+  const chunks: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (current && next.length > softLimit) {
+      chunks.push(current);
+      current = word;
+    } else {
+      current = next;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 1 ? chunks : [value];
+}
+
+function addStructuralSpacing(lines: string[]): string[] {
+  const out: string[] = [];
+  for (const sourceLine of lines) {
+    for (const line of wrapLongPlainLine(sourceLine)) {
+      const previous = out.length ? out[out.length - 1] : '';
+      const previousIsBullet = BULLET_LINE.test(previous);
+      const currentIsBullet = BULLET_LINE.test(line);
+      const previousIsContent = Boolean(previous.trim());
+      const currentIsContent = Boolean(line.trim());
+
+      if (previousIsContent && currentIsContent && previousIsBullet !== currentIsBullet) out.push('');
+      out.push(line);
+    }
+  }
+  return out;
 }
 
 /**
@@ -56,7 +96,8 @@ export function polishCustomerMessage(
     return line;
   });
 
-  return lines
+  const structured = plainTextChannel ? addStructuralSpacing(lines) : lines;
+  return structured
     .join('\n')
     .replace(/\n[ \t]+/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
