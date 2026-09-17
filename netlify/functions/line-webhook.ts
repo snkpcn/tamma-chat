@@ -7,7 +7,7 @@ import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
 import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
 import { handleStaffBookingPostback, type LineMessage } from './_ops-line-ui';
 import { handleRestaurantPreorderPostback, handleRestaurantStockText } from './_restaurant-sot';
-import { paymentConfirmationGuard } from './_payment-guard';
+import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
   handleCustomerPaymentSlip,
   handleCustomerPaymentText,
@@ -174,6 +174,12 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   });
   if (paymentReply) {
     await replyToLine(event.replyToken, paymentReply, accessToken);
+    return;
+  }
+
+  const typedPaymentBlock = await paymentTypedConfirmationGuard(event.message.text);
+  if (typedPaymentBlock) {
+    await replyToLine(event.replyToken, typedPaymentBlock, accessToken);
     return;
   }
 
