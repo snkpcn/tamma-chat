@@ -14,6 +14,7 @@ import {
   handleLinePaymentGroupText,
   handleLinePaymentPostback,
 } from './_payments';
+import { handleSettlementPostback } from './_settlements';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -121,6 +122,12 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     const paymentBlock = await paymentConfirmationGuard(event.postback.data);
     if (paymentBlock) {
       await replyToLine(event.replyToken, paymentBlock, accessToken);
+      return;
+    }
+
+    const settlementMessages = await handleSettlementPostback({ targetId, data: event.postback.data });
+    if (settlementMessages?.length) {
+      await replyToLine(event.replyToken, settlementMessages as LineMessage[], accessToken);
       return;
     }
 
