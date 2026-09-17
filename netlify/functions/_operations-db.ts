@@ -683,7 +683,16 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   let lineOnlyContact = false;
 
   const activitySession = session?.service_type === 'activity' && session.status === 'collecting' ? session : null;
-  const activityIntent = /(?:จอง|สำรอง).{0,24}(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)|(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู).{0,24}(?:จอง|สำรอง)/iu.test(text);
+  const activityKeyword = /(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)/iu;
+  const activityIntent = (
+    /(?:จอง|สำรอง).{0,24}(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)|(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู).{0,24}(?:จอง|สำรอง)/iu.test(text)
+    || (
+      activityKeyword.test(text)
+      && (
+        /(?:อยาก|ขอ|จะ|ต้องการ|เล่น|เอา).{0,24}(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)|(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู).{0,24}(?:ครึ่ง\s*ชั่วโมง|ชั่วโมง|30|60|90|\d{1,2}\s*(?:คน|ท่าน))/iu.test(text)
+      )
+    )
+  );
   if (activityIntent || (activitySession && !startIntent)) {
     const resourceCode = activityResourceFromText(text) ?? activitySession?.resource_code ?? null;
     const durationMinutes = activityDurationFromText(text) ?? activityDurationFromSession(activitySession);
