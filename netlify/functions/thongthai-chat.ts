@@ -401,7 +401,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   const [communityOfferings, runtime] = await Promise.all([
     loadVerifiedCommunityOfferings(),
-    loadBrainRuntime(guestDbId),
+    loadBrainRuntime(guestDbId, channel),
   ]);
 
   const history = request.chatHistory.slice(-16);

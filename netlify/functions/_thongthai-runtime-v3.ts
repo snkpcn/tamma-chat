@@ -6,6 +6,7 @@ import {
   type OpsChannel, type ServiceType,
 } from './_operations-db';
 import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts, restaurantMenuAdvice } from './_restaurant-sot';
+import { loadActivePromotionsWorldFact, redeemPromotion } from './_promotions-runtime';
 
 const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
@@ -90,7 +91,7 @@ export async function registerGuestIdentity(guestDbId: string | null, channel: B
   } catch (error) { console.error('THONGTHAI_IDENTITY_ERROR', error instanceof Error ? error.message.slice(0,180) : 'unknown'); }
 }
 
-export async function loadBrainRuntime(guestDbId: string | null): Promise<BrainRuntimeContext> {
+export async function loadBrainRuntime(guestDbId: string | null, channel: BrainChannel): Promise<BrainRuntimeContext> {
   const fallback: BrainRuntimeContext = { agentState:{}, semanticMemory:[], worldFacts:[], toolResults:[] };
   if (!configuration()) return fallback;
   try {
@@ -98,7 +99,8 @@ export async function loadBrainRuntime(guestDbId: string | null): Promise<BrainR
     dbFetch('world_facts?active=eq.true&verified=eq.true&select=fact_key,category,fact_value,source,updated_at&order=fact_key.asc').then(r => r.json() as Promise<WorldFactRow[]>),
     loadActivityWorldFacts(),
     loadRestaurantWorldFacts(),
-  ]).then(([baseFacts, activityFacts, restaurantFacts]) => [...baseFacts, ...activityFacts, ...restaurantFacts]);
+    loadActivePromotionsWorldFact(channel),
+  ]).then(([baseFacts, activityFacts, restaurantFacts, promotionFacts]) => [...baseFacts, ...activityFacts, ...restaurantFacts, ...promotionFacts]);
     if (!guestDbId) return { ...fallback, worldFacts:await worldPromise };
     const [states, memories, worldFacts] = await Promise.all([
       dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`).then(r => r.json() as Promise<Array<{state:Record<string,unknown>}>>),
@@ -136,6 +138,14 @@ function toolErrorDetail(error: unknown): string {
   if (message.includes('menu_item_not_found')) return 'menu_item_not_found';
   if (message.includes('menu_item_unavailable')) return 'menu_item_unavailable';
   if (message.includes('invalid_requested_time')) return 'invalid_requested_time';
+  if (message.includes('promotion_not_found')) return 'promotion_not_found';
+  if (message.includes('promotion_not_active')) return 'promotion_not_active';
+  if (message.includes('promotion_not_started')) return 'promotion_not_started';
+  if (message.includes('promotion_expired')) return 'promotion_expired';
+  if (message.includes('promotion_redemption_limit_reached')) return 'promotion_redemption_limit_reached';
+  if (message.includes('promotion_channel_not_allowed')) return 'promotion_channel_not_allowed';
+  if (message.includes('promotion_has_no_items')) return 'promotion_has_no_items';
+  if (message.includes('promotion_requires_date_time')) return 'promotion_requires_date_time';
   return 'execution_failed';
 }
 
@@ -271,6 +281,22 @@ export async function executeBrainTools(
       if (call.name === 'list_otop_products') {
         const products = await listOtopProducts('live');
         results.push({name:call.name,ok:true,detail:JSON.stringify({products:products.slice(0,20)})}); continue;
+      }
+      if (call.name === 'redeem_promotion') {
+        try {
+          const created = await redeemPromotion({
+            guestDbId, channel, campaignId: String(call.args.campaignId ?? ''),
+            date: typeof call.args.date === 'string' ? call.args.date : null,
+            time: typeof call.args.time === 'string' ? call.args.time : null,
+            customerName: String(call.args.customerName ?? ''),
+            phone: typeof call.args.phone === 'string' ? call.args.phone : null,
+            email: typeof call.args.email === 'string' ? call.args.email : null,
+            note: typeof call.args.note === 'string' ? call.args.note : null,
+          });
+          await insertEvent(guestDbId,'agent_action','order',{action:'redeem_promotion',campaignCode:created.campaignCode,status:created.status,channel});
+          results.push({name:call.name,ok:true,detail:JSON.stringify(created)});
+        } catch (error) { results.push({name:call.name,ok:false,detail:toolErrorDetail(error)}); }
+        continue;
       }
       if (call.name === 'create_otop_order') {
         const created = await createOtopOrder({

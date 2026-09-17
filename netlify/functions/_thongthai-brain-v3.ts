@@ -39,7 +39,7 @@ export type BrainToolName =
   | 'save_journey' | 'favorite_experience' | 'unfavorite_experience' | 'mark_visited'
   | 'request_handoff' | 'list_booking_options' | 'create_booking'
   | 'create_cafe_inquiry' | 'list_otop_products' | 'create_otop_order'
-  | 'list_restaurant_menu' | 'create_restaurant_preorder';
+  | 'list_restaurant_menu' | 'create_restaurant_preorder' | 'redeem_promotion';
 export interface BrainToolCall { name: BrainToolName; args: Record<string, unknown> }
 export interface BrainToolResult { name: BrainToolName; ok: boolean; detail: string }
 export interface AgentStateUpdate {
@@ -98,7 +98,7 @@ const VALID_STYLES: ResponseStyle[] = ['direct','story','contrast','curious','re
 const VALID_TOOLS: BrainToolName[] = [
   'save_journey','favorite_experience','unfavorite_experience','mark_visited','request_handoff',
   'list_booking_options','create_booking','create_cafe_inquiry','list_otop_products','create_otop_order',
-  'list_restaurant_menu','create_restaurant_preorder',
+  'list_restaurant_menu','create_restaurant_preorder','redeem_promotion',
 ];
 const VALID_TRIP_DURATIONS = ['short','half','full','overnight','2d1n','3d2n'];
 const VALID_TRAVELER_TYPES = ['solo','couple','family','friends'];
@@ -306,6 +306,7 @@ You can now perform REAL operational work. Do not pretend a booking/order exists
 - Café questions: answer verified facts directly. If the requested fact is not verified or the customer asks staff to contact them, create a café inquiry rather than inventing an answer.
 - OTOP: list real orderable products first. Create an order only after the guest explicitly selects a product/quantity and provides enough contact/fulfillment details.
 - A booking/order initially means REQUESTED, not confirmed. Staff confirmation happens in backoffice. Say that clearly without sounding bureaucratic.
+- Promotions: verified world fact active_promotions_live is the ONLY source of real, currently-live promotions for this channel. It already excludes draft/pending_review/paused/ended/cancelled/test, expired or not-yet-started windows, wrong channel, over-redeemed, and any promo with an unavailable item. Never mention, invent, or offer a promotion that is not in this list. Quote only the items, quantities and prices it contains — never recompute a discount or margin yourself. If a guest asks about a deal/promotion/discount that is not in this list, say there is no such active promotion right now rather than guessing. To redeem one, call redeem_promotion with its campaignId. businessScope "restaurant" also needs pickup date/time and a customer name (same as a preorder) before calling. Any other businessScope has no automated booking yet — after redeem_promotion succeeds, tell the guest staff will follow up to arrange it; never claim it is fully booked.
 - Never invent availability, price, stock, opening hours or confirmation.
 - Never store contact data in semanticMemory or agentState. Contact data may appear only in an operational tool call that the guest explicitly provided for the transaction.
 
@@ -317,7 +318,8 @@ TOOL USE
 5. create_otop_order {sku, quantity, customerName?, phone?, email?, fulfillmentType?, shippingAddress?, note?} — create a REAL requested order after explicit choice.
 6. list_restaurant_menu {} — read the current real ตำมา-ชาติ menu, prices, ingredients and live availability from the restaurant source of truth. Required for restaurant recommendations, comparisons, budget sets, pairings, substitutions and food constraints.
 7. create_restaurant_preorder {date, time, items:[{name,quantity}], customerName, phone?, email?, note?} — create a REAL food preorder request. Item names must come from the live menu. Date/time is the requested food pickup time in Asia/Bangkok.
-8. save_journey {}, favorite_experience {experienceId}, unfavorite_experience {experienceId}, mark_visited {experienceId}, request_handoff {reasonCode} keep their prior meanings.
+8. redeem_promotion {campaignId, date?, time?, customerName, phone?, email?, note?} — redeem one entry from verified world fact active_promotions_live by its campaignId. date/time are required only when that promotion's businessScope is "restaurant". Never call with a campaignId not present in active_promotions_live.
+9. save_journey {}, favorite_experience {experienceId}, unfavorite_experience {experienceId}, mark_visited {experienceId}, request_handoff {reasonCode} keep their prior meanings.
 If TOOL RESULTS below are non-empty, those actions already ran. Do not repeat them in the same turn; compose the final answer from their success/failure.
 
 CHANNEL
@@ -493,6 +495,18 @@ function normalizeToolCalls(value: unknown, toolResultsPresent: boolean, runtime
         ...(safeString(args.customerName,120) ? { customerName: safeString(args.customerName,120) } : {}),
         ...(safeString(args.phone,30) ? { phone: safeString(args.phone,30) } : {}),
         ...(safeString(args.email,160) ? { email: safeString(args.email,160) } : {}),
+      }}); continue;
+    }
+    if (name === 'redeem_promotion') {
+      const campaignId = safeString(args.campaignId,64);
+      const customerName = safeString(args.customerName,120);
+      if (!campaignId || !/^[0-9a-f-]{8,64}$/i.test(campaignId) || !customerName) continue;
+      calls.push({ name, args: { campaignId, customerName,
+        ...(dateString(args.date) ? { date: dateString(args.date) } : {}),
+        ...(timeString(args.time) ? { time: timeString(args.time) } : {}),
+        ...(safeString(args.phone,30) ? { phone: safeString(args.phone,30) } : {}),
+        ...(safeString(args.email,160) ? { email: safeString(args.email,160) } : {}),
+        ...(safeString(args.note,1000) ? { note: safeString(args.note,1000) } : {}),
       }}); continue;
     }
     if (name === 'list_otop_products') { calls.push({ name, args: {} }); continue; }
