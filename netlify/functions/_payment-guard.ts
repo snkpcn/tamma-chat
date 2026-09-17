@@ -33,7 +33,8 @@ function blockedText(row: PaymentRow): string {
   if (row.status === 'quote_required') {
     return [
       `⛔ ยังรับงาน ${row.entity_code} ไม่ได้ เพราะยังไม่ได้กำหนดยอดชำระ`,
-      `พิมพ์: ตั้งยอด ${row.entity_code} <จำนวนบาท>`,
+      'พิมพ์ราคาในกลุ่มนี้ได้เลย เช่น 300 หรือ 300 บาท รับงาน',
+      `ถ้ามีหลายงานค้างอยู่ ค่อยใช้: ตั้งยอด ${row.entity_code} 300`,
       'เมื่อกำหนดยอดแล้ว ทองไทยจะส่ง QR PromptPay ช่องทางเดียวให้ลูกค้าอัตโนมัติครับ',
     ].join('\n');
   }

@@ -79,6 +79,11 @@ function money(value: number | null): string {
   return `${Number(value).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} บาท`;
 }
 
+function parseAmount(raw: string): number | null {
+  const amount = Number(raw.replace(/,/g, ''));
+  return Number.isFinite(amount) && amount > 0 && amount <= 10_000_000 ? amount : null;
+}
+
 function statusLabel(status: PaymentStatus): string {
   return ({
     quote_required: 'รอทีมงานกำหนดยอด',
@@ -119,6 +124,14 @@ async function paymentRequestByCode(code: string): Promise<PaymentRequest | null
   if (!ENTITY_CODE_RE.test(normalized)) return null;
   const response = await dbFetch(
     `payment_requests?entity_code=eq.${encodeURIComponent(normalized)}&select=*&order=created_at.desc&limit=1`,
+  );
+  return (await response.json() as PaymentRequest[])[0] ?? null;
+}
+
+async function latestQuoteRequiredForTeam(binding: Binding): Promise<PaymentRequest | null> {
+  if (binding.team_code === 'all') return null;
+  const response = await dbFetch(
+    `payment_requests?team_code=eq.${binding.team_code}&status=eq.quote_required&select=*&order=updated_at.desc&limit=1`,
   );
   return (await response.json() as PaymentRequest[])[0] ?? null;
 }
@@ -328,6 +341,19 @@ async function sendTeam(request: PaymentRequest, messages: PaymentLineMessage[])
   }
 }
 
+async function setPaymentAmount(request: PaymentRequest, amount: number): Promise<void> {
+  await dbFetch(`payment_requests?id=eq.${request.id}`, {
+    method: 'PATCH', headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      amount,
+      status: 'awaiting_payment',
+      quoted_at: new Date().toISOString(),
+      submitted_at: null,
+      rejected_at: null,
+    }),
+  });
+}
+
 export async function dispatchPaymentNotification(id: string): Promise<string> {
   const request = await paymentRequestById(id);
   if (!request) return 'missing';
@@ -336,15 +362,35 @@ export async function dispatchPaymentNotification(id: string): Promise<string> {
   if (request.status === 'quote_required') {
     const prefix = request.environment === 'test' ? '🧪 TEST • ' : '';
     const sent = await sendTeam(request, [{
-      type: 'text',
-      text: [
-        `${prefix}💳 ต้องกำหนดยอดชำระ`,
-        `รายการ: ${request.entity_code}`,
-        'พิมพ์ในกลุ่มนี้:',
-        `ตั้งยอด ${request.entity_code} 1500`,
-        '',
-        'ระบบจะส่ง QR PromptPay ช่องทางเดียวให้ลูกค้าอัตโนมัติทันทีที่ตั้งยอด',
-      ].join('\n'),
+      type: 'flex',
+      altText: `${prefix}ต้องกำหนดยอดชำระ ${request.entity_code}`,
+      contents: {
+        type: 'bubble', size: 'kilo',
+        header: {
+          type: 'box', layout: 'vertical', backgroundColor: '#7A5A32', paddingAll: '16px',
+          contents: [
+            { type: 'text', text: `${prefix}💳 ใส่ราคาก่อนรับงาน`, color: '#FFFFFF', weight: 'bold', size: 'lg', wrap: true },
+            { type: 'text', text: request.entity_code, color: '#F4E9D7', size: 'sm', margin: 'sm' },
+          ],
+        },
+        body: {
+          type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '16px',
+          contents: [
+            { type: 'text', text: 'พิมพ์ราคาในกลุ่มนี้ได้เลย', weight: 'bold', wrap: true },
+            { type: 'text', text: 'เช่น 300 หรือ 300 บาท รับงาน', size: 'sm', color: '#6A625C', wrap: true },
+            { type: 'text', text: 'ทองไทยจะส่ง QR PromptPay ให้ลูกค้าอัตโนมัติทันทีที่ตั้งยอด', size: 'xs', color: '#857A70', wrap: true },
+          ],
+        },
+        footer: {
+          type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '14px',
+          contents: [
+            {
+              type: 'button', style: 'primary', color: '#7A5A32',
+              action: { type: 'postback', label: 'ใส่ราคา/รับงาน', data: `ops=payment&action=quote_prompt&id=${request.id}`, displayText: 'รับงาน' },
+            },
+          ],
+        },
+      },
     }]);
     return sent ? 'team_notified' : 'team_not_bound';
   }
@@ -508,24 +554,27 @@ export async function handleLinePaymentGroupText(input: {
   if (!binding) return null;
   const clean = input.text.trim().replace(/\s+/g, ' ');
 
+  const easyQuote = clean.match(/^(?:ราคา\s*)?([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:บาท)?(?:\s*(?:รับงาน|ตั้งยอด|จ่าย))?$/iu);
+  if (easyQuote) {
+    const amount = parseAmount(easyQuote[1]);
+    const hasIntentWord = /บาท|รับงาน|ตั้งยอด|ราคา|จ่าย/iu.test(clean);
+    if (amount && amount >= 20 && (hasIntentWord || amount >= 50)) {
+      const request = await latestQuoteRequiredForTeam(binding);
+      if (!request) return null;
+      await setPaymentAmount(request, amount);
+      return `✅ ตั้งยอด ${request.entity_code} = ${money(amount)} แล้ว\nทองไทยจะส่ง QR PromptPay ช่องทางเดียวให้ลูกค้าอัตโนมัติครับ`;
+    }
+  }
+
   const quote = clean.match(/^(?:ตั้งยอด|ยอดชำระ)\s+((?:BK|PO|OR)-\d{6}-[A-Z0-9]{8})\s+([0-9][0-9,]*(?:\.[0-9]{1,2})?)$/iu);
   if (quote) {
     const request = await paymentRequestByCode(quote[1]);
     if (!request) return 'ไม่พบรายการชำระนี้ครับ';
     if (!teamMatches(binding, request)) return 'รายการนี้ไม่ใช่ของทีมในกลุ่มนี้ครับ';
-    const amount = Number(quote[2].replace(/,/g, ''));
-    if (!Number.isFinite(amount) || amount <= 0 || amount > 10_000_000) return 'ยอดชำระไม่ถูกต้องครับ';
+    const amount = parseAmount(quote[2]);
+    if (!amount) return 'ยอดชำระไม่ถูกต้องครับ';
     if (request.status === 'verified') return `✅ ${request.entity_code} ชำระแล้ว ${money(request.amount)} ไม่ควรเปลี่ยนยอดครับ`;
-    await dbFetch(`payment_requests?id=eq.${request.id}`, {
-      method: 'PATCH', headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify({
-        amount,
-        status: 'awaiting_payment',
-        quoted_at: new Date().toISOString(),
-        submitted_at: null,
-        rejected_at: null,
-      }),
-    });
+    await setPaymentAmount(request, amount);
     return `✅ ตั้งยอด ${request.entity_code} = ${money(amount)} แล้ว\nทองไทยจะส่ง QR PromptPay ช่องทางเดียวให้ลูกค้าอัตโนมัติครับ`;
   }
 
@@ -565,6 +614,22 @@ export async function handleLinePaymentPostback(input: {
   if (!binding) return [{ type: 'text', text: 'กลุ่มนี้ยังไม่ได้ผูกทีมครับ' }];
   if (!request) return [{ type: 'text', text: 'ไม่พบรายการชำระนี้ครับ' }];
   if (!teamMatches(binding, request)) return [{ type: 'text', text: 'รายการนี้ไม่ใช่ของทีมในกลุ่มนี้ครับ' }];
+
+  if (action === 'quote_prompt') {
+    if (request.status === 'verified') return [{ type: 'text', text: `✅ ${request.entity_code} ชำระแล้ว ${money(request.amount)} ครับ` }];
+    if (request.status === 'awaiting_payment' || request.status === 'rejected') {
+      return [{ type: 'text', text: `รายการ ${request.entity_code} ตั้งยอดไว้แล้ว: ${money(request.amount)}\nถ้าต้องการส่ง QR ใหม่ พิมพ์ “ส่ง QR ${request.entity_code}”` }];
+    }
+    if (request.status !== 'quote_required') return [{ type: 'text', text: `ตอนนี้ ${request.entity_code} อยู่สถานะ ${statusLabel(request.status)} ครับ` }];
+    return [{
+      type: 'text',
+      text: [
+        `เลือก ${request.entity_code} แล้วครับ`,
+        'พิมพ์ราคาในกลุ่มนี้ได้เลย เช่น 300 หรือ 300 บาท รับงาน',
+        'ทองไทยจะส่ง QR PromptPay ให้ลูกค้าอัตโนมัติหลังตั้งยอด',
+      ].join('\n'),
+    }];
+  }
 
   if (action === 'verify') {
     if (request.status === 'verified') return [{ type: 'text', text: `✅ ${request.entity_code} ยืนยันชำระแล้วอยู่แล้วครับ` }];

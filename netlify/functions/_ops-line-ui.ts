@@ -147,7 +147,7 @@ function bookingFooter(input: BookingCardInput): Record<string, unknown>[] {
 
   const rows: Record<string, unknown>[] = [];
   if (input.status === 'requested') {
-    rows.push(actionButton('✅ รับงาน', {
+    rows.push(actionButton('💰 ใส่ราคา/รับงาน', {
       type: 'postback',
       data: postbackData('confirm', input.bookingCode),
       displayText: 'รับงาน',
