@@ -1,0 +1,46 @@
+import type { Handler, HandlerEvent } from '@netlify/functions';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { dispatchSettlementNotification } from './_settlements';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Same ops_notification_webhook_secret this repo already uses for
+// ops-payment-notify.ts -- verified by hash, not by holding the plaintext
+// secret in a second place.
+const OPS_NOTIFICATION_WEBHOOK_SECRET_SHA256 = '0c99ca5d870b02c4b58b485c0cdf8d88158fe18ea86ba126751cc72715f506d5';
+
+function header(event: HandlerEvent, name: string): string | undefined {
+  const key = name.toLowerCase();
+  return Object.entries(event.headers ?? {}).find(([value]) => value.toLowerCase() === key)?.[1];
+}
+
+function secretMatches(actual: string | undefined): boolean {
+  if (!actual) return false;
+  const actualHash = createHash('sha256').update(actual, 'utf8').digest();
+  const expectedHash = Buffer.from(OPS_NOTIFICATION_WEBHOOK_SECRET_SHA256, 'hex');
+  return actualHash.length === expectedHash.length && timingSafeEqual(actualHash, expectedHash);
+}
+
+export const handler: Handler = async (event: HandlerEvent) => {
+  if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
+  if (!secretMatches(header(event, 'x-ops-notification-secret'))) return { statusCode: 401, body: 'Unauthorized' };
+
+  let body: { id?: string };
+  try {
+    body = JSON.parse(event.body ?? '{}') as { id?: string };
+  } catch {
+    return { statusCode: 400, body: 'Invalid JSON' };
+  }
+  if (!body.id || !UUID_RE.test(body.id)) return { statusCode: 400, body: 'Invalid id' };
+
+  try {
+    const status = await dispatchSettlementNotification(body.id);
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ ok: true, id: body.id, status }),
+    };
+  } catch (error) {
+    console.error('SETTLEMENT_NOTIFICATION_ERROR', error instanceof Error ? error.message.slice(0, 320) : 'unknown');
+    return { statusCode: 500, body: 'Settlement notification failed' };
+  }
+};
