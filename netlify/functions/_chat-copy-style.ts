@@ -5,6 +5,7 @@ const MARKDOWN_BULLET = /^\s*[-*]\s+/;
 const MARKDOWN_RULE = /^\s*(?:[-*_]\s*){3,}$/;
 const MARKDOWN_TABLE_DIVIDER = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/;
 const BULLET_LINE = /^\s*•\s+/;
+const EMOJI_RE = /[\p{Extended_Pictographic}\uFE0F]/u;
 const LINE_PLATFORM_TEXT_LIMIT = 4900;
 
 function plainInlineMarkdown(value: string): string {
@@ -27,7 +28,17 @@ function plainTableLine(value: string): string {
   return cells.join(' · ');
 }
 
-function wrapLongPlainLine(value: string, softLimit = 360): string[] {
+function decorateOperationalLabel(value: string): string {
+  const line = value.trim();
+  if (!line || EMOJI_RE.test(line) || BULLET_LINE.test(line)) return value;
+  if (/^(?:สถานะ|status)\s*:/iu.test(line)) return `📌 ${line}`;
+  if (/^(?:รวม|ยอด|ราคา|ค่าใช้จ่าย|total|price)(?:\s|:|$)/iu.test(line)) return `💰 ${line}`;
+  if (/^(?:รับอาหาร|เช็กอิน|เช็คอิน|เวลา|time|check[- ]?in)(?:\s|:|$)/iu.test(line)) return `🕑 ${line}`;
+  if (/^(?:ที่ตั้ง|พิกัด|แผนที่|location|map)(?:\s|:|$)/iu.test(line)) return `📍 ${line}`;
+  return value;
+}
+
+function wrapLongPlainLine(value: string, softLimit: number): string[] {
   const line = value.trim();
   if (!line || line.length <= softLimit || /^https?:\/\/\S+$/i.test(line) || BULLET_LINE.test(line)) return [value];
 
@@ -49,10 +60,10 @@ function wrapLongPlainLine(value: string, softLimit = 360): string[] {
   return chunks.length > 1 ? chunks : [value];
 }
 
-function addStructuralSpacing(lines: string[]): string[] {
+function addStructuralSpacing(lines: string[], softLimit: number): string[] {
   const out: string[] = [];
   for (const sourceLine of lines) {
-    for (const line of wrapLongPlainLine(sourceLine)) {
+    for (const line of wrapLongPlainLine(sourceLine, softLimit)) {
       const previous = out.length ? out[out.length - 1] : '';
       const previousIsBullet = BULLET_LINE.test(previous);
       const currentIsBullet = BULLET_LINE.test(line);
@@ -69,8 +80,8 @@ function addStructuralSpacing(lines: string[]): string[] {
 /**
  * Last-mile presentation cleanup for customer-facing Thongthai copy.
  * It does not rewrite facts, URLs, prices, names or operational status.
- * Its only job is to make model/deterministic copy render consistently
- * as clean plain text across the website, LINE and Messenger.
+ * It only normalizes presentation: plain text, spacing, restrained emoji,
+ * and phone-friendly line length.
  */
 export function polishCustomerMessage(
   input: string,
@@ -93,11 +104,13 @@ export function polishCustomerMessage(
       if (MARKDOWN_RULE.test(line)) return '';
       line = plainTableLine(line);
       line = line.replace(MARKDOWN_BULLET, '• ');
+      line = decorateOperationalLabel(line);
     }
     return line;
   });
 
-  const structured = plainTextChannel ? addStructuralSpacing(lines) : lines;
+  const softLimit = channel === 'line' ? 180 : 260;
+  const structured = plainTextChannel ? addStructuralSpacing(lines, softLimit) : lines;
   return structured
     .join('\n')
     .replace(/\n[ \t]+/g, '\n')
@@ -130,22 +143,23 @@ function bestReadableCut(text: string, limit: number): number {
 }
 
 /**
- * LINE supports very long text messages, but a single near-limit bubble is
- * unpleasant to scan on a phone. Split only when necessary, favouring paragraph
- * and line boundaries. Never silently drops the tail for normal Thongthai output.
+ * Split LINE copy into readable phone-sized bubbles while always staying under
+ * LINE's real text limit. A caller can ask for a larger target, but customer
+ * bubbles are capped at 1100 characters unless more space is mathematically
+ * necessary to preserve all content within the five-message platform budget.
  */
 export function splitCustomerMessageForLine(
   input: string,
-  maxChars = 1800,
+  maxChars = 1100,
   maxMessages = 5,
 ): string[] {
   const text = polishCustomerMessage(input, 'line');
   if (!text) return [];
 
   const messageBudget = Math.max(1, Math.min(5, Math.floor(maxMessages)));
-  const readabilityTarget = Math.max(200, Math.min(LINE_PLATFORM_TEXT_LIMIT, Math.floor(maxChars)));
+  const requestedTarget = Math.max(200, Math.min(1100, Math.floor(maxChars)));
   const requiredTarget = Math.ceil(text.length / messageBudget);
-  const target = Math.min(LINE_PLATFORM_TEXT_LIMIT, Math.max(readabilityTarget, requiredTarget));
+  const target = Math.min(LINE_PLATFORM_TEXT_LIMIT, Math.max(requestedTarget, requiredTarget));
 
   if (text.length <= target) return [text];
 
@@ -160,8 +174,6 @@ export function splitCustomerMessageForLine(
   }
   if (remaining) chunks.push(remaining);
 
-  // This can only be false for an abnormally huge response (> 5 × LINE's real
-  // per-message limit). Thongthai's model output cap is well below that ceiling.
   if (chunks.some(chunk => chunk.length > LINE_PLATFORM_TEXT_LIMIT)) {
     throw new Error('line_message_exceeds_platform_limit');
   }
