@@ -110,6 +110,15 @@ test('pairing mode does not recommend the already selected dish again', () => {
   assert.equal(result.recommendations.some((row:any)=>row.name==='ตำลาว'), false);
 });
 
+test('current pairing intent beats prior budget-set context', () => {
+  const result:any = adviseRestaurantMenu(menu,{
+    query:'มีตำลาวแล้ว เพิ่มอะไรดี',
+    recentMessages:['มากัน 3 คน งบไม่เกิน 700 จัดชุดให้หน่อย'],
+  });
+  assert.equal(result.mode,'pairing');
+  assert.equal(result.recommendations.some((row:any)=>row.name==='ตำลาว'), false);
+});
+
 test('no pla-ra excludes direct pla-ra ingredient dishes', () => {
   const result = adviseRestaurantMenu(menu,{query:'ไม่เอาปลาร้า มีอะไรแนะนำ'});
   assert.equal(result.recommendations.some((row:any)=>row.ingredients.includes('น้ำปลาร้า')), false);
