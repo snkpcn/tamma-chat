@@ -124,7 +124,7 @@ function stripKnownFields(message: string): string {
     .replace(/\b(?:20\d{2}|25\d{2})-\d{1,2}-\d{1,2}\b/gu, ' ')
     .replace(/(?:^|\s)\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?(?=$|\s)/gu, ' ')
     .replace(/(?:^|\s)(?:[01]?\d|2[0-3])[:.]\d{2}(?=$|\s|น\.?)/gu, ' ')
-    .replace(/(?:เอาชุดนี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|ตามนี้|โอเคชุดนี้|โอเค|พรุ่งนี้|วันนี้|มะรืน|เวลา|รับอาหาร|รับ|ตอน|ประมาณ|ชื่อผู้สั่ง|ชื่อลูกค้า|ผมชื่อ|ฉันชื่อ|ชื่อ)/gu, ' ')
+    .replace(/(?:เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย|โอเค|พรุ่งนี้|วันนี้|มะรืน|เวลา|รับอาหาร|รับ|ตอน|ประมาณ|ชื่อผู้สั่ง|ชื่อลูกค้า|ผมชื่อ|ฉันชื่อ|ชื่อ)/gu, ' ')
     .replace(/(?:บ่าย\s*(?:หนึ่ง|สอง|สาม|สี่|ห้า|\d{1,2})(?:\s*โมง)?|(?:หนึ่ง|สอง|สาม|สี่|ห้า|\d{1,2})\s*ทุ่ม|เที่ยงครึ่ง|เที่ยง|(?:[01]?\d|2[0-3])\s*(?:โมง|นาฬิกา))/gu, ' ')
     .replace(/[,:;|•·]+/g, ' ')
     .replace(/\b(?:ครับ|ค่ะ|คะ|จ้า|จ้ะ)\b/gu, ' ')
@@ -141,7 +141,7 @@ function extractName(message: string, allowLoose: boolean): string | null {
   if (!allowLoose) return null;
   const residual = stripKnownFields(message);
   if (!residual || residual.length > 60) return null;
-  if (/(บาท|เมนู|อาหาร|เผ็ด|ไม่เอา|แพ้|งบ|เพิ่ม|ลด|เปลี่ยน)/u.test(residual)) return null;
+  if (/(บาท|เมนู|อาหาร|เผ็ด|ไม่เอา|แพ้|งบ|เพิ่ม|ลด|เปลี่ยน|ยกเลิก|ไม่สั่ง)/u.test(residual)) return null;
   return residual;
 }
 
@@ -154,7 +154,7 @@ export function parseRestaurantPreorderTurn(
   const email = extractEmail(message);
   const date = extractDate(message, now);
   const time = extractTime(message);
-  const allowLooseName = !current.customerName && Boolean(phone || (!date && !time && message.trim().length <= 60));
+  const allowLooseName = !current.customerName && message.trim().length <= 80;
   const customerName = extractName(message, allowLooseName);
   return { date, time, customerName, phone, email };
 }
@@ -191,11 +191,10 @@ function formatPickupDate(date: string): string {
 }
 
 export function formatRestaurantSetPrompt(set: RestaurantProposedSetState, draft: RestaurantPreorderDraft): string {
-  const itemLines = set.items.slice(0, 8).map(item => `• ${item.name} ×${item.quantity}`);
   const missing = missingRestaurantPreorderFields(draft);
-  const lines = ['🍽️ ชุดนี้', ...itemLines];
-  if (typeof set.total === 'number' && Number.isFinite(set.total)) lines.push(`💰 รวม ${Math.round(set.total)} บาท`);
-  if (draft.date && draft.time) lines.push(`🕑 รับอาหาร ${formatPickupDate(draft.date)} · ${draft.time}`);
+  const lines = ['🍽️ รับชุดนี้ครับ'];
+  if (typeof set.total === 'number' && Number.isFinite(set.total)) lines.push(`💰 ${Math.round(set.total)} บาท`);
+  if (draft.date && draft.time) lines.push(`🕑 ${formatPickupDate(draft.date)} · ${draft.time}`);
   lines.push('');
 
   if (missing.includes('date') || missing.includes('time')) {
