@@ -180,25 +180,15 @@ function nextConversationContext(
   }, now);
 }
 
-/** Canonical One-Mind turn orchestrator. In G.1 this is invoked by tests and
- * shadow/integration paths only. It cannot execute a transaction: the deepest
- * action it can return is DialogDecision.actionProposal. */
-export async function processThongthaiOneMindTurn(
+async function computeOneMindTurnFromState(
   input: OneMindTurnInput,
-  dependencies: Partial<OneMindDependencies> = {},
-  now: Date = new Date(),
+  identity: OneMindIdentity,
+  conversationContextBefore: ConversationContextState,
+  taskStateBefore: TaskStateContainer,
+  deps: OneMindDependencies,
+  now: Date,
 ): Promise<OneMindTurnResult> {
-  const deps: OneMindDependencies = { ...REAL_DEPENDENCIES, ...dependencies };
   const message = normalizeMessage(input.message);
-  if (!message) throw new Error('one_mind_message_required');
-  if (!input.eventId.trim()) throw new Error('one_mind_event_id_required');
-
-  const identity = await resolveOneMindIdentity(input, deps);
-  const [conversationContextBefore, taskStateBefore] = await Promise.all([
-    deps.loadConversationContext(identity.guestDbId, now),
-    deps.loadTaskState(identity.guestDbId),
-  ]);
-
   const semanticContext = buildSemanticContext(conversationContextBefore, now);
   const semanticTurn = await deps.interpretSemanticTurn(message, semanticContext);
   const adapters = deps.buildKnowledgeAdapters(input.channel, {
@@ -222,17 +212,6 @@ export async function processThongthaiOneMindTurn(
     dialog.decision,
     now,
   );
-
-  const persistState = input.persistState === true;
-  if (persistState) {
-    // Bounded conversational/task state only. No booking/order/payment writes.
-    // Persist sequentially because both Phase C and Phase D currently share
-    // guest_agent_state.state via read-modify-write wrappers. Parallel writes
-    // could each read the same old JSON object and then clobber the sibling
-    // field written by the other call.
-    await deps.persistConversationContext(identity.guestDbId, conversationContextAfter);
-    await deps.persistTaskState(identity.guestDbId, taskStateAfter);
-  }
 
   return {
     identity,
@@ -259,11 +238,123 @@ export async function processThongthaiOneMindTurn(
         status: source.status,
       }))),
       actionProposed: Boolean(dialog.decision.actionProposal),
-      statePersisted: persistState,
+      statePersisted: false,
+      stateConflictRetries: 0,
     },
   };
 }
 
+/** Canonical One-Mind turn orchestrator. This compatibility form preserves the
+ * original Phase G.1 dependency-injection surface for network-free tests and
+ * shadow work. G.2 customer-authoritative traffic uses
+ * processThongthaiOneMindTurnAuthoritative() below so concurrent requests
+ * cannot overwrite each other's context/task state. */
+export async function processThongthaiOneMindTurn(
+  input: OneMindTurnInput,
+  dependencies: Partial<OneMindDependencies> = {},
+  now: Date = new Date(),
+): Promise<OneMindTurnResult> {
+  const deps: OneMindDependencies = { ...REAL_DEPENDENCIES, ...dependencies };
+  const message = normalizeMessage(input.message);
+  if (!message) throw new Error('one_mind_message_required');
+  if (!input.eventId.trim()) throw new Error('one_mind_event_id_required');
+
+  const identity = await resolveOneMindIdentity(input, deps);
+  const [conversationContextBefore, taskStateBefore] = await Promise.all([
+    deps.loadConversationContext(identity.guestDbId, now),
+    deps.loadTaskState(identity.guestDbId),
+  ]);
+  const result = await computeOneMindTurnFromState(
+    input, identity, conversationContextBefore, taskStateBefore, deps, now,
+  );
+
+  const persistState = input.persistState === true;
+  if (persistState) {
+    await deps.persistConversationContext(identity.guestDbId, result.conversationContextAfter);
+    await deps.persistTaskState(identity.guestDbId, result.taskStateAfter);
+  }
+  return {
+    ...result,
+    trace:{ ...result.trace, statePersisted:persistState },
+  };
+}
+
+export type AuthoritativeStateDependencies = {
+  loadSnapshot: typeof loadGuestAgentStateSnapshot;
+  compareAndSwap: typeof compareAndSwapGuestAgentState;
+};
+
+const REAL_AUTHORITATIVE_STATE_DEPENDENCIES: AuthoritativeStateDependencies = {
+  loadSnapshot:loadGuestAgentStateSnapshot,
+  compareAndSwap:compareAndSwapGuestAgentState,
+};
+
+/** G.2-safe authoritative variant.
+ *
+ * It reads ConversationContext + TaskState from ONE row snapshot, computes the
+ * turn, then atomically CAS-writes both sibling keys against that same
+ * updated_at revision. If another web/LINE/runtime request changed the row
+ * meanwhile, the entire turn is reloaded and recomputed from the newer state.
+ * This prevents lost fast-message updates across server instances without
+ * holding a database lock while a model/source call is in flight. */
+export async function processThongthaiOneMindTurnAuthoritative(
+  input: OneMindTurnInput,
+  dependencies: Partial<OneMindDependencies> = {},
+  stateDependencies: Partial<AuthoritativeStateDependencies> = {},
+  now: Date = new Date(),
+  maxAttempts = 4,
+): Promise<OneMindTurnResult> {
+  const deps: OneMindDependencies = { ...REAL_DEPENDENCIES, ...dependencies };
+  const stateDeps: AuthoritativeStateDependencies = {
+    ...REAL_AUTHORITATIVE_STATE_DEPENDENCIES,
+    ...stateDependencies,
+  };
+  const message = normalizeMessage(input.message);
+  if (!message) throw new Error('one_mind_message_required');
+  if (!input.eventId.trim()) throw new Error('one_mind_event_id_required');
+
+  const identity = await resolveOneMindIdentity(input, deps);
+  const attempts = Math.max(1, Math.min(8, Math.floor(maxAttempts)));
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const snapshot: GuestAgentStateSnapshot = await stateDeps.loadSnapshot(identity.guestDbId);
+    const conversationContextBefore = parseConversationContextState(snapshot.state.conversationContext, now);
+    const taskStateBefore = parseTaskState(snapshot.state.taskState);
+    const result = await computeOneMindTurnFromState(
+      input, identity, conversationContextBefore, taskStateBefore, deps, now,
+    );
+
+    if (input.persistState !== true || !identity.guestDbId) {
+      return {
+        ...result,
+        trace:{ ...result.trace, statePersisted:false, stateConflictRetries:attempt },
+      };
+    }
+
+    const write = await stateDeps.compareAndSwap(identity.guestDbId, snapshot, {
+      set:{
+        conversationContext:result.conversationContextAfter,
+        taskState:result.taskStateAfter,
+      },
+    }, now);
+
+    if (write.status === 'applied') {
+      return {
+        ...result,
+        trace:{ ...result.trace, statePersisted:true, stateConflictRetries:attempt },
+      };
+    }
+    if (write.status === 'unconfigured') {
+      return {
+        ...result,
+        trace:{ ...result.trace, statePersisted:false, stateConflictRetries:attempt },
+      };
+    }
+    // conflict => loop, reload the newer canonical state, and recompute.
+  }
+
+  throw new Error('one_mind_state_conflict_exhausted');
+}
 
 export type OneMindResilientOptions = {
   /** Set only by a trusted compatibility layer that has already determined an
