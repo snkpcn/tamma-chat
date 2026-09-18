@@ -396,13 +396,30 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
 // injected adapters, exactly like _knowledge-resolver.ts).
 // ---------------------------------------------------------------------------
 
-export async function processDialogTurn(input: DialogInput, adapters: KnowledgeSourceAdapters, now: Date = new Date()): Promise<DialogDecision> {
+export type DialogTurnResult = {
+  plan: DialogPlan;
+  bundles: KnowledgeBundle[];
+  decision: DialogDecision;
+};
+
+/** Detailed form used by the One-Mind orchestrator and, later, the Response
+ * Composer. It resolves knowledge exactly once and returns the grounded
+ * bundles alongside the final decision so downstream layers never have to
+ * re-query live sources just to compose a reply. */
+export async function processDialogTurnDetailed(
+  input: DialogInput,
+  adapters: KnowledgeSourceAdapters,
+  now: Date = new Date(),
+): Promise<DialogTurnResult> {
   const plan = planDialogTurn(input, now);
-  if (plan.mode === 'clarify' || !plan.knowledgeRequests.length) {
-    return resolveDialogDecision(plan, []);
-  }
-  const bundles = await Promise.all(plan.knowledgeRequests.map(request => resolveKnowledge(request, adapters, now)));
-  return resolveDialogDecision(plan, bundles);
+  const bundles = (plan.mode === 'clarify' || !plan.knowledgeRequests.length)
+    ? []
+    : await Promise.all(plan.knowledgeRequests.map(request => resolveKnowledge(request, adapters, now)));
+  return { plan, bundles, decision: resolveDialogDecision(plan, bundles) };
+}
+
+export async function processDialogTurn(input: DialogInput, adapters: KnowledgeSourceAdapters, now: Date = new Date()): Promise<DialogDecision> {
+  return (await processDialogTurnDetailed(input, adapters, now)).decision;
 }
 
 export { getGroundedFactValue };
