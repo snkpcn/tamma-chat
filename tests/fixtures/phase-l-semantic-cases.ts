@@ -168,6 +168,18 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-journey-07','follow_up','journey','ช่วยต่อจากเมื่อกี้ให้หน่อย','ask','resume_journey',{},JOURNEY_CONTEXT),
   c('l-support-01','ambiguous','support','ไม่เข้าใจ ช่วยหน่อย','unknown','vague_support',{},undefined,[],true),
   c('l-support-02','formal','support','ขอคุยกับทีมงานได้ไหม','ask','request_human_support'),
+
+  // Extra Phase L breadth — cross-domain planning and less common customer goals.
+  c('l-journey-08','formal','journey','พาแม่มาเที่ยว ไม่อยากเดินเยอะ ช่วยจัดแผนให้หน่อย','recommend','recommend_low_walking_journey',{travelerType:'family'},undefined,['low_walking']),
+  c('l-journey-09','multi_intent','journey','มีอะไรทำแล้วไปกินข้าวต่อได้พอดี','recommend','recommend_activity_then_meal',{},undefined,['before_meal']),
+  c('l-journey-10','multi_intent','journey','อยากขี่ม้าแล้วพักค้างคืน ช่วยจัดให้หน่อย','recommend','recommend_horse_and_stay',{activityType:'horse',nights:1}),
+  c('l-topic-activity-01','topic_switch','activity','ไม่เอาห้องแล้ว ขอไปดูกิจกรรมแทน','discover','switch_from_stay_to_activity'),
+  c('l-promo-09','formal','promotion','โปรร้านอาหารกับที่พักใช้ร่วมกันได้ไหม','ask','ask_cross_business_promotion',{businessUnits:['restaurant','stay']}),
+  c('l-promo-10','formal','promotion','ถ้าเป็นสมาชิก ใช้โปรนี้ได้ไหม','ask','ask_member_promotion_eligibility',{membershipRequired:true},PROMO_CONTEXT),
+  c('l-payment-07','formal','payment','สลิปไม่ผ่าน ต้องทำยังไงต่อ','ask','ask_payment_rejection_next_step'),
+  c('l-otop-07','formal','otop','ของฝากอันไหนเหมาะซื้อเป็นของขวัญ','recommend','recommend_otop_gift'),
+  c('l-cafe-06','correction','cafe','แก้วเมื่อกี้เอาแบบไม่หวาน','modify','modify_cafe_preference',{sweetness:'none'},CAFE_CONTEXT,['no_sugar']),
+  c('l-journey-11','confirmation_gating','journey','เอาแผนนี้เลย','confirm','confirm_current_journey',{},JOURNEY_CONTEXT),
 ];
 
 export const PHASE_L_TOTAL_NEW_CASES=PHASE_L_SEMANTIC_CASES.length;
