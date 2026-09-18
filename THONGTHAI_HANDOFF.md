@@ -608,9 +608,66 @@ the same or next commit.
   - Latest branch CI run `35349060912`: **382/382 tests passing, 0 failed**.
   - Main remains `d37c56f44753bce2ec25d3091506cd3c0b703bdc`; production current deploy
     remains the pre-architecture ready deploy. No deploy occurred.
-- [ ] **Phase I — Response Composer. NOT STARTED. Exact next phase.**
-- [ ] **G.2 — Actual customer-visible LINE/Web cutover. NOT STARTED.**
-- [ ] Phase J — Observability (trace object, no chain-of-thought). NOT STARTED.
+- [x] **Phase I — Response Composer. DONE.**
+  - Added `netlify/functions/_response-composer.ts` as the ONE customer-facing wording owner.
+    Inputs are `DialogDecision + KnowledgeBundle[] + DegradationPlan + operational outcome +
+    Bible doctrine + channel/language`. It does not interpret intent, query DB, mutate task
+    state, or execute transactions.
+  - Normal composition uses the shared provider stack with a strict prompt containing ONLY
+    grounded facts/source states and explicit operational outcome. The returned
+    `usedFactKeys[]` is validated against the grounded fact keys; an invented key rejects the
+    model output.
+  - Operational truth guard blocks false success wording. An `ActionProposal` alone can never
+    become "booked/submitted/paid". `requested != confirmed`; confirmed wording requires a real
+    verified confirmed/completed/paid/settled outcome.
+  - EMPTY / SOURCE_UNAVAILABLE / FACT_UNKNOWN / MODEL_UNAVAILABLE each have distinct deterministic
+    copy. Model-down + available verified facts uses grounded deterministic rendering instead
+    of a generic apology.
+  - Deterministic grounded fallback covers current verified restaurant/activity/stay/OTOP names
+    and prices/capacity where those facts exist. Added missing verified activity/OTOP names to
+    the read-only source adapter instead of inventing display text.
+  - LINE/Web presentation still goes through the existing `_chat-copy-style.ts`; business
+    meaning is channel-independent.
+  - Added `netlify/functions/_thongthai-one-mind-response.ts`: canonical bridge from an
+    authoritative One-Mind turn to the Response Composer. Channel handlers do not own wording.
+  - `tests/response-composer.test.ts` + `tests/one-mind-response.test.ts` cover grounded-key
+    validation, false operational claims, requested-vs-confirmed, degraded truth classes,
+    grounded model-down answers, bounded missing-field questions, and response ownership.
+- [~] **G.2 — controlled LINE/Web cutover. READ-ONLY STRANGLER IMPLEMENTED, NOT ACTIVATED.**
+  - Resolved the previously-known shared-state concurrency risk before enabling any customer
+    authority:
+    - Added `_guest-agent-state-store.ts` with `updated_at` optimistic compare-and-swap.
+    - ConversationContext, TaskState and legacy Brain working-state writers now all use the
+      same CAS patch store, so sibling JSONB fields cannot silently clobber each other.
+    - Added `processThongthaiOneMindTurnAuthoritative()`: loads ConversationContext + TaskState
+      from ONE row snapshot, computes the whole turn, CAS-writes both sibling keys atomically,
+      and on conflict reloads + recomputes the ENTIRE turn. It never stale-overwrites a fast
+      concurrent Web/LINE message. Conflicts are bounded; exhaustion fails closed.
+    - Added a policy-gated commit predicate: a turn may be inspected without persisting if it
+      is outside the migrated slice. This prevents a legacy transactional flow from leaving a
+      stale One-Mind active task that would later block read-only cutover.
+  - Added initial read-only cutover gate in `_thongthai-one-mind-response.ts`:
+    task-free `ask/discover/recommend/compare/status` only, initially limited to
+    restaurant/activity/stay/promotion/OTOP. Transactions, active tasks, ecosystem/membership
+    and unproven domains stay legacy.
+  - `thongthai-chat.ts` now contains an OFF-BY-DEFAULT strangler gate:
+    `THONGTHAI_ONE_MIND_CUTOVER=1`. If enabled, eligible read-only turns return the canonical
+    One-Mind + Composer response; ineligible/error turns fall through to the unchanged legacy
+    path. The LINE channel handler remains transport-only and retains its legacy booking/
+    membership safety handlers.
+  - Event idempotence: LINE forwards its real `event.message.id`. Web uses a request-scope
+    Netlify request id when the client did not supply `eventId`; final server fallback is a
+    unique per-invocation id, never a hash of message text (so two intentional identical
+    messages are not collapsed).
+  - No One-Mind transaction executor is cut over yet. No legacy transaction code has been
+    deleted.
+  - Added `tests/g2-concurrency-and-cutover.test.ts` plus authoritative conflict tests in
+    `tests/one-mind-orchestrator.test.ts`.
+  - Latest branch CI at this checkpoint: **414/414 tests passing, 0 failed**.
+  - G.2 is **code-ready for the first read-only slice but NOT production-activated**. Per the
+    user's finish-first/deploy-once rule, do not turn on the env gate or deploy a branch preview
+    yet. Production remains on the legacy path.
+- [ ] **Phase J — Observability. NOT STARTED. Exact next phase.**
 - [ ] Phase K — Backoffice Control Plane (tamma-backoffice: health/diagnostics view +
   Conversation Inspector). NOT STARTED. Conversation Inspector must remain bounded/expiring,
   not permanent raw transcript storage.
@@ -622,35 +679,29 @@ the same or next commit.
 
 ## Exact next action
 
-Start **Phase I — Response Composer** on this SAME integration branch.
+Start **Phase J — Observability** on this SAME integration branch.
+
+Required shape:
+1. ONE safe trace envelope across Semantic Interpreter → Task/Context → Knowledge Resolver →
+   Dialog Manager → Degradation → Response Composer.
+2. No raw model reasoning / chain-of-thought. No raw PII/contact info. No raw chat transcript
+   persistence.
+3. Include only machine-safe metadata such as trace/request id, canonical guest surrogate/hash
+   if needed, channel, versions, domain/action/intent, source statuses, dialog mode/reason codes,
+   degradation condition/level, composer mode/used fact keys, action proposal presence,
+   transaction outcome code/status (when real), CAS conflict retry count, total/stage latency.
+4. Make the trace usable by Phase K's bounded Conversation Inspector without changing the
+   product's "no permanent raw chat storage" stance.
+5. Observability must never change customer behavior: logging/trace failure is non-blocking.
+6. Keep the current G.2 env gate OFF; do not deploy yet.
 
 Sequence remains:
-**G.1 → H → I → G.2 → J → K → L → M → N → O**.
-
-Phase I must be the ONE place that converts:
-`DialogDecision + KnowledgeBundle[] + DegradationPlan + Bible style doctrine + channel`
-into customer-facing text.
-
-Requirements carried forward:
-1. No business truth may be invented in prose. Copy can only use grounded values / explicit
-   verified empty / explicit unknown-unavailable state.
-2. EMPTY, UNAVAILABLE, UNKNOWN and MODEL_UNAVAILABLE must have different copy classes.
-3. Channel affects presentation only (LINE shorter/scan-friendly; Web can be slightly richer),
-   never business meaning.
-4. Do not put response wording back into LINE/Web handlers or Dialog Manager.
-5. Keep tasteful restrained emoji and mobile readability; avoid brochure-like dumping.
-6. The composer must never say booking/order/payment is confirmed/submitted unless the actual
-   operational result carries the required real code/status; an ActionProposal alone is NOT a
-   successful transaction.
-7. G.2 cutover remains blocked until Phase I is complete and tested.
-8. Before G.2, resolve the known cross-request concurrency risk in shared
-   `guest_agent_state.state` persistence (same-turn sequential write is fixed; two simultaneous
-   requests still need atomic/versioned/serialized protection).
-9. Café still has no verified live catalog SOT; composer must truthfully express unknown /
-   staff-follow-up path rather than inventing café offerings.
+**J → K → L → M → N → O** (G.2 production activation is deferred to O under the user's
+finish-first/deploy-once rule; its read-only code path is already present behind the gate).
 
 ## Last commit on this branch
 
-- Phase H code head before handoff update: `6fcd1edbea2ca0162b681f99d922cf07ed5ccf8b`.
-- Phases A, B, B.1, C, D, D.1, E, F, G.1, H complete and pushed.
-- Phase I is the exact next action.
+- Current tested code head before this handoff update: `ef6f4cfe438c225fc22c2aed17677883b60d9197`.
+- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I complete.
+- G.2 read-only strangler + concurrency hardening implemented behind OFF env gate.
+- Main/production untouched; no Netlify deploy performed.
