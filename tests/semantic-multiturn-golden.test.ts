@@ -96,13 +96,21 @@ test('golden scenario turn 4 ("เอาภาราดร") resolves unambiguou
 });
 
 test('replaying the whole scenario with duplicated eventIds (simulating retried webhook delivery) produces the SAME final state', () => {
+  // A fixed, shared clock -- not the real wall clock. Both traversals below
+  // must produce byte-identical turn timestamps to make the deepEqual below
+  // meaningful; using `new Date()` per call (the default) previously let two
+  // back-to-back real-time runs occasionally straddle a millisecond
+  // boundary, producing a flaky 1ms mismatch on an otherwise-identical
+  // turn -- a test-code bug (not in applyConversationContextUpdate itself),
+  // fixed here by pinning the clock.
+  const fixedNow = new Date('2026-09-18T10:00:00.000Z');
   function run(withDuplicates: boolean): ReturnType<typeof emptyConversationContextState> {
-    let state = emptyConversationContextState();
+    let state = emptyConversationContextState(fixedNow);
     for (const step of HORSE_BOOKING_SCENARIO) {
-      state = applyConversationContextUpdate(state, { ...step.contextUpdate, channel: step.channel, eventId: step.eventId, userMessage: step.message });
+      state = applyConversationContextUpdate(state, { ...step.contextUpdate, channel: step.channel, eventId: step.eventId, userMessage: step.message }, fixedNow);
       if (withDuplicates) {
         // redeliver the same event -- must be a no-op
-        state = applyConversationContextUpdate(state, { ...step.contextUpdate, channel: step.channel, eventId: step.eventId, userMessage: step.message });
+        state = applyConversationContextUpdate(state, { ...step.contextUpdate, channel: step.channel, eventId: step.eventId, userMessage: step.message }, fixedNow);
       }
     }
     return state;

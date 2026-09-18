@@ -189,10 +189,91 @@ the same or next commit.
     standalone (7.3kb). `thongthai-chat.ts`/`line-webhook.ts` bundles and diffs unaffected —
     Phase C does not wire continuity into the actual request-handling path yet (deliberate;
     see "Exact next action" below for why and what's left for Phase F/G).
-- [ ] Phase D — Working/Task State + Memory boundaries. NOT STARTED. (Note: audit found the
-  *existing* memory architecture — guest_memory / guest_semantic_memory / guest_agent_state /
-  operational tables — already maps cleanly onto the brief's 4-layer model. This phase is
-  likely more "formalize and connect to the new Dialog Manager" than "build from scratch.")
+- [x] Phase D — Working/Task State + Memory boundaries. **DONE.**
+  - **New module**: `netlify/functions/_task-state.ts`. Formalizes the 4-layer memory model as
+    documented boundaries (no new code needed for 3 of the 4 — they already exist):
+    1. **Conversation Continuity** = Phase C's `_conversation-context.ts` (recent turns, rolling
+       summary, active topic/domain, recent entities, open question, last recommendation).
+    2. **Working/Task State** = this phase's new `ActiveTask`/`TaskStateContainer` (current
+       goal, slots, missing fields, status).
+    3. **Durable Preference Memory** = existing `guest_semantic_memory`, gated by the existing
+       `SAFE_MEMORY_KEYS` allow-list in `_thongthai-runtime-v3.ts` (now exported for testing).
+    4. **Operational State** = existing `bookings`/`orders`/`preorders`/promotion
+       redemption/payment/settlement/membership tables — untouched, still the only source of
+       transactional truth.
+  - **Memory ownership matrix** (one authoritative owner per field, no duplication):
+    | Info | Owner |
+    |---|---|
+    | customer name/phone/email | operational contact fields on the booking/order/preorder row itself (never semantic memory, never task slots beyond the in-flight draft) |
+    | selected horse / requested date (mid-booking) | `ActiveTask.slots` (Working/Task State) |
+    | "likes quiet trips" | `guest_semantic_memory` via `SAFE_MEMORY_KEYS` (Durable Preference Memory) |
+    | "อันเมื่อกี้" (referent resolution) | `ConversationContextState.recentEntities` (Conversation Continuity) |
+    | booking confirmed / paid / settled | the operational table row's own `status` column ONLY |
+  - **`ActiveTask`/`TaskStateContainer`**: matches the brief's shape (`taskId`, `type`, `domain`,
+    `status`, `slots`, `missingFields`, `selectedEntities`, `constraints`, `sourceChannel`,
+    `createdAt`, `updatedAt`). Deliberately kept domain-agnostic in the core: `ActiveTaskType` is
+    only an identifier union and `TASK_TYPE_DOMAIN`/`TASK_TRANSITIONS` are plain data tables —
+    no per-domain business logic (e.g. "a horse booking needs X") lives inside the core. Required
+    fields are supplied BY THE CALLER per invocation (`requiredFields`), so the core never
+    invents a business rule about what a booking needs; that stays with domain code.
+  - **Transitions**: `collecting→{ready,cancelled}`, `ready→{executing,collecting,cancelled}`,
+    `executing→{requested,completed,failed,cancelled}`, `requested→{completed,failed,cancelled}`;
+    `completed`/`cancelled`/`failed` are all terminal (no outgoing edges) — reopening a finished
+    task is unsupported by design; a new task must be started instead. `requested→collecting`
+    and `completed→executing` are explicitly rejected, matching the brief's disallowed list.
+  - **Topic switch / suspend-resume**: one active task + exactly one suspended task (bounded, no
+    stack). `suspendActiveTask` moves active→suspended; if a task is already suspended it is
+    evicted (transitioned to `cancelled`) to make room — explicit, tested, not silent data loss.
+    `resumeSuspendedTask` swaps active↔suspended if both are occupied, so neither is destroyed.
+    Corrections update the SAME task (slot overwrite, since `slots` is a keyed object — no
+    duplication risk) rather than creating a new one; `startNewActiveTask` throws
+    `TaskStateError` if an unfinished task is already active, so a new task can never silently
+    contaminate/overwrite one still in progress.
+  - **Idempotence**: `applyTaskStateEvent(container, event, now)` — one dispatch point keyed on
+    `eventId`, mirroring Phase C's `applyConversationContextUpdate`; a replayed eventId is a
+    full no-op.
+  - **Legacy adapters** (one-directional, read-only, NOT wired into any request handler — same
+    strangler posture as Phase C): `adaptBookingSessionToTask` (LINE's `booking_sessions` row →
+    `ActiveTask`), `adaptRestaurantProposedSetToTask`, `adaptPendingPromotionRedemptionToTask`.
+    The latter two REUSE the existing real business logic (`missingRestaurantPreorderFields`,
+    `missingPromotionFields`) for `missingFields` rather than re-deriving a second copy of it —
+    "must not invent business facts" honored by reuse, not restatement. `booking_sessions`,
+    `restaurantProposedSet` and `pendingPromotionRedemption` are not read from or written to by
+    any other Phase D code path; they keep working exactly as today.
+  - **Horse multi-turn task-state result** (`tests/task-state-horse-scenario.test.ts`, same
+    canonical 6-turn fixture Phase C uses): no task exists through turns 1-3 (pure discovery);
+    turn 4 ("เอาภาราดร") creates the task with the horse selected; turn 5 ("พรุ่งนี้สองคน") merges
+    date+partySize into the SAME `taskId`; turn 6 ("บ่ายสามได้ปะ") merges the requested time into
+    the SAME task; `status` never leaves `'collecting'` — no real booking is executed, matching
+    the brief. A second test proves the topic-switch scenario end-to-end: starting the booking,
+    suspending it for a restaurant question, then recovering it fully via `resume`.
+  - **Correction tests**: horse selection replacement (ทองไทย→ภาราดร, not both), partySize
+    2→3, date พรุ่งนี้→วันเสาร์ (overwrite, not duplicate) — all same `taskId`.
+  - **Privacy/memory isolation tests**: `SAFE_MEMORY_KEYS` contains no transactional/PII-shaped
+    key; `ActiveTask` and `ConversationContextState` share no overlapping fields (structurally
+    cannot be confused for each other); a completed task's status is untouched by conversation
+    context expiry (independently serialized under sibling `guest_agent_state.state` keys); a
+    fresh task started after a prior one completes has empty slots (no cross-task leakage);
+    `addTaskConstraint` is bounded+deduplicated so corrections can never grow state unboundedly.
+  - **Real pre-existing bug found and fixed while stabilizing this checkpoint** (per "fix it now,
+    don't just ask" instruction): `tests/semantic-multiturn-golden.test.ts`'s duplicate-eventId
+    replay test called `applyConversationContextUpdate` without pinning `now`, defaulting to
+    real wall-clock time on every call. Two full 6-turn traversals run back-to-back could
+    straddle a millisecond boundary, producing a flaky ~1-in-10 failure (a turn's `at` field off
+    by 1ms) — verified via 15 consecutive `npm test` runs before (1 failure) and after (0
+    failures) the fix. Root cause was in the TEST, not in `_conversation-context.ts` itself;
+    fixed by pinning a shared `fixedNow` across both traversals. This was a genuine flake, not a
+    tolerated one — root-caused and fixed, not retried away.
+  - `npm test`: **258/258 passing** (221 baseline + 37 new: 32 in `task-state.test.ts`, 2 in
+    `task-state-horse-scenario.test.ts`, 3 in `task-state-no-cycle.test.ts`), verified
+    flake-free over 15 consecutive runs. New module bundles standalone cleanly (15.9kb).
+    `thongthai-chat.ts`/`line-webhook.ts` bundle sizes unchanged from Phase C (277.2kb/298.8kb)
+    — `_task-state.ts` is not imported by either yet (deliberate; not wired into request
+    handling, same posture as Phase C's conversation-context module).
+  - Static import-graph tests (`tests/task-state-no-cycle.test.ts`) prove `_task-state.ts` only
+    imports from `_semantic-interpreter.ts`/`_promotion-dialog.ts`/`_restaurant-preorder-dialog.ts`
+    (never the runtime/brain/model-provider layer), and that none of those three import back
+    from `_task-state.ts`.
 - [ ] Phase E — Knowledge Resolver / Source-of-Truth graph. NOT STARTED. (Note: audit found
   `world_facts` is a small 27-row policy/config table, NOT the live business database — live
   menu/activity/promotion/room data lives in dedicated domain tables/views. The resolver must
@@ -220,34 +301,33 @@ the same or next commit.
 
 ## Exact next action
 
-Start Phase D (Working/Task State + Memory boundaries). Read this file's Phase D bullet above
-first.
+Start Phase E (Knowledge Resolver / Source-of-Truth graph). Read this file's Phase D bullet
+above first, then re-read the Phase E note already recorded further down this file: `world_facts`
+is a small ~27-row policy/config table, NOT the live business database — live menu/activity/
+promotion/room data lives in dedicated domain tables/views (`activity_offerings`,
+`activity_assets`, restaurant menu tables, `promotions`/`promotion_items`, etc., the same ones
+`loadBrainRuntime`/`loadActivityWorldFacts`/`loadRestaurantWorldFacts`/
+`loadActivePromotionsWorldFact` already read in `_thongthai-runtime-v3.ts`). The resolver's job
+is to decide, per domain/question, WHICH of these existing sources is authoritative and route to
+it — not to force everything through `world_facts`, and not to invent a new unified facts table.
 
-**Known gap carried forward from Phase C, explicitly not closed yet (by design, not
-oversight)**: `_conversation-context.ts` exists and is fully tested, but is NOT wired into
-`thongthai-chat.ts`'s request handling or `_line-webhook-core.ts`'s `askThongthai()` yet. LINE
-still sends `chatHistory: []` in production today — that concrete bug is still live. This was
-a deliberate strangler-discipline call: wiring continuity into the actual request path is
-really a Phase F/G concern (the Dialog Manager needs to exist to decide what to DO with
-`SemanticContext`, and wiring it in half-finished risked exactly the kind of "partial change
-to production routing" the review has repeatedly warned about). Phase D/E/F should treat
-"wire `_conversation-context.ts` into `thongthai-chat.ts` for real, including finally fixing
-LINE's `chatHistory: []`" as a concrete, tracked task — do not let it get lost. It is NOT
-optional cleanup; it's the actual fix for one of Phase 0's seven confirmed findings.
-
-For Phase D itself:
-- Audit found the *existing* memory architecture (`guest_memory` / `guest_semantic_memory` /
-  `guest_agent_state` / operational tables) already maps cleanly onto the brief's 4-layer
-  model (Conversation Memory / Working State / Durable Preference Memory / Operational State).
-  This phase is likely more "formalize the boundary and document which layer owns what" than
-  "build new storage" — `_conversation-context.ts` (Phase C) already IS the Conversation
-  Memory layer; `guest_semantic_memory` already IS Durable Preference Memory; operational
-  tables already ARE Operational State. Check what's genuinely missing before adding anything.
-- Do not abuse `guest_semantic_memory` for operational state, and do not let
-  `_conversation-context.ts`'s bounded turns become a second copy of durable preferences.
+**Known gaps carried forward, explicitly not closed yet (by design, not oversight — do not let
+either get lost)**:
+1. `_conversation-context.ts` (Phase C) and `_task-state.ts` (Phase D) both exist and are fully
+   tested, but neither is wired into `thongthai-chat.ts`'s request handling or
+   `_line-webhook-core.ts`'s `askThongthai()` yet. LINE still sends `chatHistory: []` in
+   production today. Wiring both in for real (including finally fixing that) is a Phase F/G
+   concern — the Dialog Manager needs to exist to decide what to DO with a `SemanticTurn`
+   merged against an `ActiveTask`, and wiring either module in half-finished risks exactly the
+   "partial change to production routing" the review has repeatedly warned about.
+2. Phase D's `ActiveTask` required-fields are supplied by the CALLER (`requiredFields` param) —
+   the core deliberately does not hardcode per-domain business rules. Phase E/F's Knowledge
+   Resolver / deterministic domain layer is where the REAL required-fields-per-domain rule
+   should be authored once and then passed into `_task-state.ts`'s functions; Phase D's own
+   tests only supply an illustrative `requiredFields` list for the horse-booking scenario,
+   clearly commented as test-local, not authoritative.
 
 ## Last commit on this branch
 
-- Commit: `a400462` — "Phase C: server-side conversation continuity (bounded, expiring,
-  cross-channel)"
-- Phases A, B, B.1, C complete, pushed. Phase D not started.
+- Commit: `<update after next push>` — Phase D complete, pushed. Phases A, B, B.1, C also
+  complete. Phase E not started.

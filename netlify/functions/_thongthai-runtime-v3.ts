@@ -9,7 +9,7 @@ import {
 import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts, restaurantMenuAdvice } from './_restaurant-sot';
 import { loadActivePromotionsWorldFact, redeemPromotion } from './_promotions-runtime';
 
-const SAFE_MEMORY_KEYS = new Set([
+export const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
 ]);
 const EXPERIENCE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,119}$/i;
