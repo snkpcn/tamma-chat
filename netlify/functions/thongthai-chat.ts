@@ -41,6 +41,7 @@ import {
 } from './_restaurant-preorder-dialog';
 import { processThongthaiOneMindTurnResilient } from './_thongthai-one-mind-orchestrator';
 import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
+import { emitOneMindTrace } from './_one-mind-observability';
 import {
   buildPendingPromotionRedemption,
   decidePromotionFallback,
@@ -845,6 +846,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
         persistState:true,
       });
       if (oneMind.status === 'composed') {
+        emitOneMindTrace(oneMind.observability);
         console.log('THONGTHAI_ONE_MIND_CUTOVER', JSON.stringify({
           domain:oneMind.turn.semanticTurn.domain,
           action:oneMind.turn.semanticTurn.action,
@@ -864,6 +866,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
           suggestedActions:[],
         });
       }
+      emitOneMindTrace(oneMind.observability);
       console.log('THONGTHAI_ONE_MIND_LEGACY_REQUIRED', JSON.stringify({
         reason:oneMind.reason,
         domain:oneMind.turn.semanticTurn.domain,
