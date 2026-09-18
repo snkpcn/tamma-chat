@@ -757,59 +757,69 @@ the same or next commit.
   - Latest customer branch CI:
     run `35355393513`, **429/429 tests passing, 0 failed**.
   - Main/production untouched; no deploy performed.
-- [ ] **Phase M — Full E2E. NOT STARTED. Exact next phase.**
-- [ ] Phase N — Legacy cleanup. NOT STARTED.
+- [x] **Phase M — Full E2E. DONE for network-free/integration-branch acceptance.**
+  - Added `tests/phase-m-e2e.test.ts` (282 lines) exercising the REAL cross-module
+    One-Mind path with injected test-safe source/semantic boundaries:
+    canonical identity → server context/CAS → SemanticTurn → ActiveTask →
+    Knowledge Resolver → Dialog Manager → Response Composer → safe trace.
+  - E2E families covered:
+    1. restaurant read-only customer turn through final composed response
+    2. promotion VERIFIED_EMPTY truth
+    3. SOURCE_UNAVAILABLE != empty
+    4. activity booking explicit-commit ActionProposal
+    5. stay booking ActionProposal after verified availability
+    6. restaurant preorder proposal mapped to the existing deterministic executor contract
+    7. membership/payment/café unsupported transaction domains remain on legacy safety path
+    8. OTOP read-only cutover while order remains transactional legacy
+    9. promotion/OTOP/café deterministic executor support matrix
+    10. payment ambiguity + requested!=confirmed truth regressions
+    11. bounded observability ↔ backoffice control-plane contract
+  - Transactional test scenarios intentionally stop at ActionProposal and prove the proposal
+    maps to the ALREADY-EXISTING deterministic executor. CI never writes production data.
+  - One-Mind cutover remains a strangler: proven read-only domains can compose; transactional
+    / active-task turns still fall through to existing deterministic execution until final
+    production cutover policy is applied.
+  - Latest Phase M branch CI:
+    run `35355906121`, **440/440 tests passing, 0 failed**.
+  - Main/production untouched; no deploy performed.
+- [ ] **Phase N — Legacy cleanup. IN PROGRESS. Exact next phase.**
 - [ ] Phase O — Final production integration/deployment. NOT STARTED.
 
 ## Exact next action
 
-Start **Phase M — Full E2E** on the SAME integration branches.
+Complete **Phase N — Legacy Cleanup** on the SAME integration branch.
 
-Phase M must prove the canonical system across boundaries without deploying partial architecture.
+Goals:
+1. retire/demote superseded customer-intelligence paths without deleting proven deterministic
+   transaction executors or rollback safety
+2. remove stale architecture comments that still claim One-Mind is not wired
+3. demote Web local ConciergeProvider so a network/model failure cannot become a second
+   business-recommendation brain
+4. keep existing LINE staff/ops transports untouched
+5. keep customer transactional legacy handlers only where still required by the explicit
+   read-only strangler gate
+6. add architecture guards so new channel-specific semantic routing cannot grow silently
+7. produce the final Phase O production checklist and reconciliation report
 
-Required E2E families:
-1. customer turn → One-Mind semantic/context/task/knowledge/dialog/composer
-2. activity booking proposal → existing deterministic booking executor contract
-3. stay booking proposal → existing operational booking contract
-4. restaurant recommendation → proposed set → preorder contract
-5. promotion discovery → redemption contract
-6. payment lifecycle/status truth
-7. membership inquiry/state
-8. OTOP inquiry/order contract
-9. café UNKNOWN/verified-follow-up behavior (no invented catalog)
-10. Web/LINE linked continuity
-11. unlinked identity isolation
-12. duplicate/retry idempotence
-13. source outage degradation
-14. model outage + grounded deterministic answer
-15. requested != confirmed
-16. bounded safe trace → backoffice diagnostics contract
+Then Phase O:
+- inspect intervening main commits (currently none)
+- final branch CI
+- apply tracked migration(s) to the EXISTING Supabase project
+- merge customer + backoffice integration branches
+- set production One-Mind cutover env flag
+- trigger ONE final production deploy per affected site
+- production smoke Web / LINE gateway / status / booking truth / backoffice diagnostics
+- live-model semantic conformance acceptance
+- no duplicate transactions
+- requested != confirmed verification
 
-Use TEST environment / injected adapters / existing test-safe records where writes are required.
-Do not create a second database or new production system.
-Do not deploy yet.
-
-Also add an explicit Phase O smoke checklist for the first real production deployment:
-- apply tracked migrations
-- final main reconciliation
-- live-model semantic conformance
-- web smoke
-- LINE smoke
-- booking/status smoke
-- backoffice diagnostics smoke
-- verify no duplicate transactions
-- verify requested/confirmed wording
-
-Sequence remains:
-**M → N → O**.
+No production deploy before Phase N passes.
 
 ## Last commit on this branch
 
-- Customer Phase L tested head:
-  `20eaf670375743c17fb4e54ff6bf08670a7d8a6b` plus subsequent corpus expansion at
-  `583c034a2c5d70765a1b9c189c19b6786a810f73`.
-- Latest CI run: `35355393513`, 429/429 passing.
+- Phase M tested head: `65aef91d5e098318d623ff1ef5cc7ab9f6ee240d`.
+- Phase N diagnostic work may be ahead of this handoff checkpoint.
 - Backoffice Phase K head: `f51d56171138799246e17f47b01ae2c8bec19ba1`.
-- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I, J, K, L complete.
+- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I, J, K, L, M complete.
 - G.2 read-only strangler + CAS concurrency hardening remain behind OFF env gate.
 - Main/production untouched; no deploy performed.
