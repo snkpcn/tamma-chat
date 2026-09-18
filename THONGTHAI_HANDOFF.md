@@ -1064,3 +1064,10 @@ intentionally retained.
   at any point in this investigation; all UAT flows were real customer-equivalent messages sent
   to the live production gateway, consistent with the standing "read-only inquiry flows are
   safe, no fake transactions" rule.
+
+
+### Phase P diagnostic activation — 2026-09-19
+
+- Temporary production env `THONGTHAI_PHASE_P_DIAGNOSTIC_TOKEN` has been configured on the existing tamma-chat Netlify site as a secret.
+- This commit exists to trigger the required production rebuild so the authenticated diagnostic endpoint can run once.
+- After provider evidence is captured and the root cause is fixed, remove both the endpoint and this temporary env var.
