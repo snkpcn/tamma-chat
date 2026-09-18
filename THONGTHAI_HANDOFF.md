@@ -173,5 +173,6 @@ consume it without a rewrite. Concretely:
 
 ## Last commit on this branch
 
-- Commit: `<update after next push>` — Phase B complete, pushed. Phase A also complete.
-  Phase C not started.
+- Commit: `0022750` — "Phase B: one reusable semantic interpreter, beside existing routing
+  (not replacing it yet)"
+- Phases A and B complete, pushed. Phase C not started.
