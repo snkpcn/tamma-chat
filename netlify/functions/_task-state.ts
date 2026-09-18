@@ -414,7 +414,7 @@ export function adaptPendingPromotionRedemptionToTask(pending: PendingPromotionR
     type: 'promotion_redemption', domain: TASK_TYPE_DOMAIN.promotion_redemption, status: 'collecting',
     slots: {
       campaignId: pending.campaignId, campaignCode: pending.campaignCode, title: pending.title, items: pending.items,
-      promoTotal: pending.promoTotal, date: pending.draft.date, time: pending.draft.time,
+      promoTotal: pending.promoTotal, requiresDateTime: pending.requiresDateTime, date: pending.draft.date, time: pending.draft.time,
       customerName: pending.draft.customerName, phone: pending.draft.phone, email: pending.draft.email,
     },
     missingFields: missingPromotionFields(pending),

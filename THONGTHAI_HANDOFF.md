@@ -304,10 +304,91 @@ the same or next commit.
     test`: **261/261 passing**, verified flake-free over 5 consecutive runs. New module bundles
     standalone cleanly (16.4kb, was 15.9kb). Production bundles
     (`thongthai-chat.ts`/`line-webhook.ts`) unaffected — still not wired in.
-- [ ] Phase E — Knowledge Resolver / Source-of-Truth graph. NOT STARTED. (Note: audit found
-  `world_facts` is a small 27-row policy/config table, NOT the live business database — live
-  menu/activity/promotion/room data lives in dedicated domain tables/views. The resolver must
-  route by domain to those, not force everything through `world_facts`.)
+- [x] Phase E — Knowledge Resolver / Source-of-Truth graph. **DONE.**
+  - **New modules**: `netlify/functions/_knowledge-resolver.ts` (routing/orchestration core),
+    `netlify/functions/_ecosystem-entity-graph.ts` (structural entity graph), and
+    `netlify/functions/_domain-task-policy.ts` (Phase D's deferred required-fields policy,
+    authored here). Owns ZERO storage and makes ZERO direct DB calls of its own — proven by a
+    static test asserting no bare global `fetch(` call exists anywhere in
+    `_knowledge-resolver.ts`'s code. All real I/O is injected via `KnowledgeSourceAdapters`; in
+    a later production-wiring phase these would be thin wrappers around the ALREADY-EXISTING
+    functions (`listRestaurantMenu`, `loadActivityWorldFacts`, `listBookingOptions`,
+    `loadActivePromotionsWorldFact`, etc.) — no new unified facts table, no copy of live data
+    into `world_facts` or the Bible. Not wired into any request handler yet.
+  - **`KnowledgeRequest`/`KnowledgeBundle`**: match the brief's shapes. Every `GroundedFact`
+    carries `sourceId`/`sourceType`/`authoritative`/`fetchedAt` provenance — nothing in a bundle
+    is a resolver-synthesized value; everything traces back to a real `SourceResult` an adapter
+    returned.
+  - **Source registry**: `SOURCE_REGISTRY` documents ownership per `KnowledgeNeed`; the actual
+    dispatch is `routeNeed(domain, need, adapters)` — one (domain, need) pair maps to exactly
+    ONE adapter call, which is what makes "no overfetching" true structurally, not just by
+    convention (tested with call-count spies across every registered adapter).
+  - **Precedence**: `SOURCE_PRECEDENCE` ranks `booking_operational`/`order_operational`/
+    `payment_operational`/`membership_operational` (100) > `promotion_runtime` (90) >
+    `*_live` domain sources (80) > `bible` (50) > `conversation_memory` (10).
+    `pickByPrecedence` resolves conflicts deterministically — tested: a live promotion beats a
+    stale conversation-remembered price; an operational booking status beats a rolling summary.
+  - **EMPTY vs UNAVAILABLE vs UNKNOWN**: `SourceResult` has three distinct statuses
+    (`ok`/`empty`/`unavailable`); a genuinely empty authoritative result never lands in
+    `bundle.missing` (it's an answer, just zero records) while an `unavailable` source does
+    (real missing information) — kept structurally separate so a later phase (Phase H) can
+    phrase them differently instead of both collapsing into "ไม่มีสินค้า".
+  - **Anti-hallucination**: `getGroundedFactValue(bundle, key)` is the only correct way to ask
+    "do we have a verified value for X" — absence means `{status:'unverified'}`, never filled
+    in by guessing. Directly proven on the brief's own acceptance case: a fake
+    `activity_assets`-shaped source with real horse names/prices but NO temperament field —
+    `getGroundedFactValue(bundle, 'temperament:horse:paradon')` returns `unverified`, and no
+    fact anywhere in the bundle even mentions "temperament". Also proven for the null-price
+    case: a source explicitly reporting `price: null` grounds as `known` with value `null`
+    (a real fact — "not configured") — distinct from `unverified` (no source answered at all);
+    the resolver never invents a number either way.
+  - **Entity resolution**: `resolveEntityIdentity(conversational, candidates)` — exact match on
+    name/domain (or alias) → canonical; multiple matches → `ambiguous:true`, `canonicalId:null`
+    (never guessed); no match → honestly retained non-canonical, original name preserved, never
+    a fabricated id. Tested against a real `activity_assets`-shaped candidate list for
+    ทองไทย/ภาราดร/ATV/ยิงธนู, a restaurant, and an ambiguous two-candidate stay-room case.
+  - **Ecosystem entity graph**: `_ecosystem-entity-graph.ts` represents the business-unit →
+    activity-group → activity → resource-slot STRUCTURE (sourced from `THONGTHAI_BRAIN.md`'s
+    existing production-components section) but deliberately holds no specific named
+    instance/price — `resource_slot` nodes literally say "(from activity_assets, live)", not
+    "ทองไทย"/"ภาราดร". A static test asserts no resource_slot label ever hardcodes a name or a
+    price — Bible/doctrine structure is not allowed to become mutable inventory.
+  - **Domain task policy** (`_domain-task-policy.ts`, closes Phase D's deferred item):
+    `computeTaskMissingFields(task)` reuses the REAL existing `missingRestaurantPreorderFields`/
+    `missingPromotionFields` for `restaurant_preorder`/`promotion_redemption` (including
+    promotion's real `requiresDateTime` conditional — proven with a test where
+    `requiresDateTime:false` correctly demands nothing) rather than re-deriving a second copy.
+    For `activity_booking`/`stay_booking`/`restaurant_booking`, where no such function existed
+    yet, the required list is grounded directly in `createBooking`'s real validation in
+    `_operations-db.ts` (`resourceCode`+`durationMinutes` hard-thrown for activity; `date`
+    non-optional on the input type for all service types) — read off real code, not invented.
+    `_task-state.ts`'s `adaptPendingPromotionRedemptionToTask` gained one additive field
+    (`requiresDateTime` now carried into `slots`) so this recomputation is faithful.
+  - **No overfetching**: tested directly — a single-need `restaurant`/`catalog` request with
+    every domain's adapter registered (restaurant/activity/stay/promotion/otop/cafe/bible)
+    triggers exactly one call, to `restaurant.menu`, and nothing else.
+  - **Degraded-source honesty**: an adapter throwing is caught and converted to a structured
+    `unavailable` result (never an unhandled rejection, never silently reinterpreted as empty).
+  - **Architecture guards** (`tests/knowledge-resolver-no-cycle.test.ts`): Semantic Interpreter
+    does not import the resolver; the resolver imports no Response Composer (doesn't exist yet)
+    and no runtime/brain/model-provider layer; `_task-state.ts` still doesn't import either new
+    Phase E module (task core stays domain-agnostic); no circular dependency among the three new
+    modules or back into the modules they depend on.
+  - **Horse golden continuation** (`tests/knowledge-resolver-horse-scenario.test.ts`): the three
+    specific lines from the brief — "ตัวไหนนิสัยดีกว่า" returns unverified temperament for both
+    horses (not invented); "เอาภาราดร" resolves to a real canonical id; "บ่ายสามได้ปะ" routes to
+    the LIVE activity source (`freshness:'live'`), never Bible/static catalog, and no
+    transactional adapter is ever supplied or called — no booking is executed.
+  - **Total eval scenarios**: unchanged at 57 — Phase E added resolver/policy unit+architecture
+    coverage (36 new test cases: 20 in `knowledge-resolver.test.ts`, 3 in
+    `knowledge-resolver-horse-scenario.test.ts`, 7 in `knowledge-resolver-no-cycle.test.ts`, 6 in
+    `domain-task-policy.test.ts`), not new SemanticTurn corpus cases.
+  - `npm test`: **297/297 passing**, verified flake-free over 8 consecutive runs. New modules
+    bundle standalone cleanly (`_knowledge-resolver.ts`: 9.3kb).
+    `thongthai-chat.ts`/`line-webhook.ts` bundle sizes unchanged from Phase D
+    (277.2kb/298.8kb) — none of Phase E's modules are imported by either yet (deliberate; per
+    the user's explicit Phase E closing instruction, production request routing is not wired
+    until Phase F explicitly requires it).
 - [ ] Phase F — Universal Dialog Manager. NOT STARTED.
 - [ ] Phase G — Migrate channel intelligence to central Brain (LINE booking/membership
   handlers, web ConciergeProvider demotion). NOT STARTED.
@@ -331,34 +412,35 @@ the same or next commit.
 
 ## Exact next action
 
-Start Phase E (Knowledge Resolver / Source-of-Truth graph). Read this file's Phase D bullet
-above first, then re-read the Phase E note already recorded further down this file: `world_facts`
-is a small ~27-row policy/config table, NOT the live business database — live menu/activity/
-promotion/room data lives in dedicated domain tables/views (`activity_offerings`,
-`activity_assets`, restaurant menu tables, `promotions`/`promotion_items`, etc., the same ones
-`loadBrainRuntime`/`loadActivityWorldFacts`/`loadRestaurantWorldFacts`/
-`loadActivePromotionsWorldFact` already read in `_thongthai-runtime-v3.ts`). The resolver's job
-is to decide, per domain/question, WHICH of these existing sources is authoritative and route to
-it — not to force everything through `world_facts`, and not to invent a new unified facts table.
+Start Phase F (Universal Dialog Manager). This is the layer that actually MERGES a `SemanticTurn`
+(Phase B) into an `ActiveTask` (Phase D), decides what `KnowledgeRequest` the Resolver (Phase E)
+needs, and decides the next system action (ask for a missing field / call a real tool / hand off
+to the Response Composer). Read Phase B/C/D/E's bullets above first — all four are DONE and fully
+tested but NONE are wired together yet; Phase F is where they finally connect into one pipeline.
 
 **Known gaps carried forward, explicitly not closed yet (by design, not oversight — do not let
-either get lost)**:
-1. `_conversation-context.ts` (Phase C) and `_task-state.ts` (Phase D) both exist and are fully
-   tested, but neither is wired into `thongthai-chat.ts`'s request handling or
-   `_line-webhook-core.ts`'s `askThongthai()` yet. LINE still sends `chatHistory: []` in
-   production today. Wiring both in for real (including finally fixing that) is a Phase F/G
-   concern — the Dialog Manager needs to exist to decide what to DO with a `SemanticTurn`
-   merged against an `ActiveTask`, and wiring either module in half-finished risks exactly the
-   "partial change to production routing" the review has repeatedly warned about.
-2. Phase D's `ActiveTask` required-fields are supplied by the CALLER (`requiredFields` param) —
-   the core deliberately does not hardcode per-domain business rules. Phase E/F's Knowledge
-   Resolver / deterministic domain layer is where the REAL required-fields-per-domain rule
-   should be authored once and then passed into `_task-state.ts`'s functions; Phase D's own
-   tests only supply an illustrative `requiredFields` list for the horse-booking scenario,
-   clearly commented as test-local, not authoritative.
+any get lost)**:
+1. `_conversation-context.ts` (Phase C), `_task-state.ts` (Phase D), and `_knowledge-resolver.ts`
+   (Phase E) all exist and are fully tested, but NONE are wired into `thongthai-chat.ts`'s
+   request handling or `_line-webhook-core.ts`'s `askThongthai()` yet. LINE still sends
+   `chatHistory: []` in production today. This is squarely Phase F's job now — the Dialog
+   Manager is the thing that finally needs all three connected to make real decisions. Per the
+   user's explicit Phase E closing instruction: "Do not wire production request routing yet
+   unless Phase F explicitly requires it" — so Phase F should wire what it actually needs, not
+   defer further out of habit, but still without a premature/partial production cutover (keep
+   following strangler discipline: build Phase F beside the existing deterministic routing,
+   don't rip anything out until equivalence is proven).
+2. Phase E's `KnowledgeSourceAdapters` are currently only ever supplied as test mocks. Real
+   production adapters (thin wrappers around `listRestaurantMenu`/`loadActivityWorldFacts`/
+   `listBookingOptions`/`loadActivePromotionsWorldFact`/etc.) do not exist yet — Phase F or G
+   should author them once, reusing those exact existing functions, never re-querying the DB a
+   second way.
+3. `_domain-task-policy.ts`'s `computeTaskMissingFields` is not yet called from anywhere in a
+   live request path — it exists and is tested in isolation. Phase F is the natural place to
+   call it when merging a SemanticTurn's entities into an ActiveTask's slots.
 
 ## Last commit on this branch
 
-- Commit: `e5c21d4` — "D.1: distinguish system-evicted (superseded) tasks from customer
-  cancellation"
+- Commit: `<update after next push>` — Phase E complete, pushed. Phases A, B, B.1, C, D, D.1
+  also complete. Phase F not started.
 - Phases A, B, B.1, C, D, D.1 complete, pushed. Phase E not started.
