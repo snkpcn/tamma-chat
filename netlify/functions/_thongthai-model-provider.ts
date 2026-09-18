@@ -77,6 +77,28 @@ const TOTAL_PROVIDER_BUDGET_MS = 7_000;
 const PER_ATTEMPT_CAP_MS = 6_000;
 const MIN_ATTEMPT_BUDGET_MS = 1_200;
 
+// Phase P confirmed root cause: production 429s on EVERY attempt, Gemini and
+// OpenAI alike, each rejected in a few hundred ms -- a real rate-limit
+// condition, not a timeout. The old retry loop re-tried instantly with zero
+// delay, so a retry against the same still-exhausted quota window was
+// guaranteed to fail the same way every time. This backoff gives a
+// rate-limited quota window a real chance to roll over before the next
+// attempt, honoring the provider's own Retry-After header when given.
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 800;
+const MAX_RATE_LIMIT_BACKOFF_MS = 2_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(response: Response): number | null {
+  const header = response.headers.get('retry-after');
+  if (!header) return null;
+  const seconds = Number(header);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return seconds * 1000;
+}
+
 export function isAvailabilityHttpStatus(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
@@ -125,6 +147,15 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
         if (isAvailabilityHttpStatus(response.status)) {
           lastAvailabilityError = `Gemini ${response.status}`;
           attempts.push({ provider: 'gemini', model, outcome: classifyHttpOutcome(response.status), httpStatus: response.status, elapsedMs });
+          if (response.status === 429) {
+            const remainingAfterAttempt = deadlineAt - Date.now();
+            const backoffMs = Math.min(
+              parseRetryAfterMs(response) ?? DEFAULT_RATE_LIMIT_BACKOFF_MS,
+              MAX_RATE_LIMIT_BACKOFF_MS,
+              remainingAfterAttempt - MIN_ATTEMPT_BUDGET_MS,
+            );
+            if (backoffMs > 0) await sleep(backoffMs);
+          }
           continue;
         }
         attempts.push({ provider: 'gemini', model, outcome: 'request_error', httpStatus: response.status, elapsedMs });
