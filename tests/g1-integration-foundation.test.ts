@@ -86,10 +86,13 @@ test('G.1 shared state persistence is sequential, not Promise.all read-modify-wr
   assert.doesNotMatch(block, /Promise\.all/);
 });
 
-test('LINE legacy adapter still owns transport while One-Mind remains uncut-over in G.1', () => {
+test('LINE keeps transport responsibility while endpoint shadow-runs One-Mind behind an explicit gate', () => {
   const lineSource = readFileSync('netlify/functions/_line-webhook-core.ts', 'utf8');
   const chatSource = readFileSync('netlify/functions/thongthai-chat.ts', 'utf8');
   assert.match(lineSource, /chatHistory:\s*\[\]/, 'G.1 must prove server continuity without patching a LINE-local history array');
-  assert.doesNotMatch(lineSource, /_thongthai-one-mind-orchestrator/);
-  assert.doesNotMatch(chatSource, /_thongthai-one-mind-orchestrator/);
+  assert.match(lineSource, /event\.message\.id/, 'LINE must forward its stable transport event id for idempotence');
+  assert.doesNotMatch(lineSource, /_thongthai-one-mind-orchestrator/, 'channel adapter should not own semantic orchestration');
+  assert.match(chatSource, /_thongthai-one-mind-orchestrator/);
+  assert.match(chatSource, /THONGTHAI_ONE_MIND_SHADOW === '1'/);
+  assert.match(chatSource, /THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1'/);
 });
