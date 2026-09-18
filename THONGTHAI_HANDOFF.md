@@ -782,44 +782,71 @@ the same or next commit.
   - Latest Phase M branch CI:
     run `35355906121`, **440/440 tests passing, 0 failed**.
   - Main/production untouched; no deploy performed.
-- [ ] **Phase N — Legacy cleanup. IN PROGRESS. Exact next phase.**
-- [ ] Phase O — Final production integration/deployment. NOT STARTED.
+- [x] **Phase N — Legacy Cleanup. DONE.**
+  - Retired the active Web `ConciergeProvider.reply()` business-recommendation fallback.
+    The browser now treats canonical endpoint failure as presentation/network failure only and
+    shows a concise retry message; it no longer invents local itinerary/business recommendations.
+  - The old ConciergeProvider implementation may remain as dead compatibility code in
+    `index.html`, but there is NO active `ConciergeProvider.reply(` call site. A permanent
+    regression test enforces this.
+  - Removed the stale Web comment claiming no live AI endpoint exists.
+  - Marked `_experience-discovery.ts` explicitly as a frozen
+    **LEGACY COMPATIBILITY FALLBACK ONLY**. New customer phrasing must go through the canonical
+    Semantic Interpreter + golden corpus, not grow another regex list.
+  - Updated stale Dialog Manager documentation that still claimed it was not wired.
+  - Added `tests/phase-n-legacy-cleanup.test.ts` architecture guards:
+    - browser never invokes ConciergeProvider as a second business brain
+    - One-Mind cutover is attempted before legacy runtime/phrase fallbacks
+    - legacy phrase matcher is explicitly frozen
+    - LINE remains a transport adapter (no semantic/dialog/resolver/composer imports)
+    - deterministic transaction executors required by strangler safety remain present
+  - Temporary diagnostic tests and one-off index cleanup workflow/script were removed after
+    they completed; no temporary automation remains.
+  - Added `PHASE_O_PRODUCTION_CHECKLIST.md` with explicit migration, merge, cutover, smoke and
+    rollback steps.
+  - Final Phase N branch CI:
+    run `35357417413`, success. Previous permanent guard run `35357273502`:
+    **446/446 tests passing, 0 failed**.
+  - Main/production untouched; no deploy performed.
+- [ ] **Phase O — Final production integration/deployment. READY TO START.**
 
 ## Exact next action
 
-Complete **Phase N — Legacy Cleanup** on the SAME integration branch.
+Execute **Phase O** only after re-checking both mains.
 
-Goals:
-1. retire/demote superseded customer-intelligence paths without deleting proven deterministic
-   transaction executors or rollback safety
-2. remove stale architecture comments that still claim One-Mind is not wired
-3. demote Web local ConciergeProvider so a network/model failure cannot become a second
-   business-recommendation brain
-4. keep existing LINE staff/ops transports untouched
-5. keep customer transactional legacy handlers only where still required by the explicit
-   read-only strangler gate
-6. add architecture guards so new channel-specific semantic routing cannot grow silently
-7. produce the final Phase O production checklist and reconciliation report
+Production sequence:
+1. re-check customer/backoffice main SHAs and inspect every intervening commit
+2. run final integration-branch CI status checks
+3. apply the tracked additive One-Mind observability migration to the EXISTING
+   tamma-customer-data Supabase project
+4. set production `THONGTHAI_ONE_MIND_CUTOVER=1` only when merge/deploy is ready
+5. merge customer integration branch -> customer main
+6. merge backoffice integration branch -> backoffice main
+7. allow/trigger ONE final production deploy per affected existing site
+8. wait until both are ready and record deploy ids/SHAs
+9. production smoke:
+   - homepage JS alive
+   - brain status component versions
+   - Web natural-language discovery
+   - LINE gateway health
+   - source empty/unavailable truth
+   - requested != confirmed
+   - no duplicate write regression
+   - backoffice Thongthai Intelligence + bounded inspector
+10. run live-provider semantic acceptance if provider credentials are available in the
+    execution environment; otherwise perform the equivalent highest-value production-gateway
+    smoke set and record that exact limitation honestly
+11. update handoff with final evidence and known limitations
 
-Then Phase O:
-- inspect intervening main commits (currently none)
-- final branch CI
-- apply tracked migration(s) to the EXISTING Supabase project
-- merge customer + backoffice integration branches
-- set production One-Mind cutover env flag
-- trigger ONE final production deploy per affected site
-- production smoke Web / LINE gateway / status / booking truth / backoffice diagnostics
-- live-model semantic conformance acceptance
-- no duplicate transactions
-- requested != confirmed verification
-
-No production deploy before Phase N passes.
+Rollback first move:
+disable/delete `THONGTHAI_ONE_MIND_CUTOVER`; legacy deterministic transaction executors were
+intentionally retained.
 
 ## Last commit on this branch
 
-- Phase M tested head: `65aef91d5e098318d623ff1ef5cc7ab9f6ee240d`.
-- Phase N diagnostic work may be ahead of this handoff checkpoint.
-- Backoffice Phase K head: `f51d56171138799246e17f47b01ae2c8bec19ba1`.
-- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I, J, K, L, M complete.
-- G.2 read-only strangler + CAS concurrency hardening remain behind OFF env gate.
-- Main/production untouched; no deploy performed.
+- Phase N checklist head: `9ef93bc2d547c5203ebacab961840d87bf35a907`.
+- Customer integration CI green.
+- Backoffice Phase K head: `f51d56171138799246e17f47b01ae2c8bec19ba1`, CI 31/31 green.
+- Phases A through N complete.
+- Phase O is the only remaining phase.
+- Both production systems remain untouched as of this checkpoint.
