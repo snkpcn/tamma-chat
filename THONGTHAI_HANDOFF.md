@@ -511,59 +511,121 @@ the same or next commit.
     bundles: `thongthai-chat.ts` 277.9kb (small, expected increase from the `_activity-sot.ts`
     extraction's module-boundary crossing — no behavior change), `line-webhook.ts` 298.8kb
     unchanged — neither Phase F module is imported by either yet.
-- [ ] Phase G — Migrate channel intelligence to central Brain (LINE booking/membership
-  handlers, web ConciergeProvider demotion). NOT STARTED.
-- [ ] Phase H — Graceful degradation. NOT STARTED. (Note: promo + experience-discovery already
-  have deterministic LLM-down fallbacks; everything else still hits the generic apology.)
-- [ ] Phase I — Response composer. NOT STARTED.
+- [~] **Phase G — Channel migration. SPLIT INTERNALLY.**
+  - [x] **G.1 — Channel Integration Foundation. DONE.**
+    - Added the canonical server-side orchestration entrypoint:
+      `netlify/functions/_thongthai-one-mind-orchestrator.ts`.
+      It composes canonical identity → bounded server ConversationContext → Semantic Interpreter
+      → ActiveTask → real read-only Knowledge adapters → Dialog Manager, and returns a structured
+      `OneMindTurnResult` + safe trace metadata. It never writes a booking/order/payment and never
+      generates customer-facing prose.
+    - `processDialogTurnDetailed()` was added to `_dialog-manager.ts` so the canonical
+      orchestrator receives the exact grounded `KnowledgeBundle[]` used for the decision instead
+      of re-querying sources later.
+    - Completed the read-only source-adapter foundation by REUSING existing canonical functions:
+      restaurant menu, activity catalog, activity/stay availability via `listBookingOptions`,
+      stay resources via `listServiceResources`, active promotions, booking status via
+      `loadLatestBookingStatus`, membership status via `loadMembershipStatus`, and OTOP.
+      No transactional write is present in `_dialog-source-adapters.ts`. Café remains deliberately
+      without a fabricated live adapter: the current DB has inquiry workflow/policy but no verified
+      café-live catalog source equivalent to restaurant/activity/stay, so UNKNOWN is preferred over
+      invented truth.
+    - Added canonical read-only models to `_operations-db.ts` next to the existing owner of those
+      tables: `listServiceResources`, `loadLatestBookingStatus`, `loadMembershipStatus`.
+      Production create/update behavior was not changed.
+    - LINE still deliberately sends `chatHistory: []`; instead it now forwards the stable
+      `event.message.id` to `thongthai-chat` (including on retry). Server continuity, not a
+      LINE-local history array, is the authority.
+    - `thongthai-chat.ts` now has an **opt-in shadow hook only**:
+      `THONGTHAI_ONE_MIND_SHADOW=1` runs the One-Mind pipeline but its decision is NEVER used for
+      the customer response. Bounded state persistence additionally requires
+      `THONGTHAI_ONE_MIND_SHADOW_PERSIST=1` AND a real transport event id. With env flags absent
+      (the current production state), legacy behavior is unchanged.
+    - Cross-channel identity tests prove genuinely linked Web/LINE identities can share canonical
+      server context while unrelated/unlinked provider identities remain isolated.
+    - Replay/idempotence tests prove duplicate event ids do not duplicate bounded conversation/task
+      state or create an action. The orchestrator cannot call `executeBrainTools` or any create/
+      redeem transaction function.
+    - A real state-write race was found while building G.1: Phase C and D persist sibling fields
+      inside the same `guest_agent_state.state` JSON object using read-modify-write wrappers.
+      Parallel `Promise.all` persistence inside one turn could clobber one sibling field. G.1 now
+      persists conversation context then task state sequentially. **Known future cutover concern**:
+      two truly concurrent requests can still race at the shared JSON-object level; before G.2
+      enables authoritative persistence for customer traffic, add/verify an atomic/versioned
+      strategy or otherwise serialize canonical guest turns.
+    - Network-free tests added:
+      `tests/one-mind-orchestrator.test.ts` and
+      `tests/g1-integration-foundation.test.ts`, covering canonical identity, shadow/no-write
+      default, Web→LINE server continuity without client history, unlinked isolation, duplicate
+      event idempotence, availability shaping, adapter registry, architecture boundaries and
+      shadow gating.
+    - Added branch-only GitHub Actions CI:
+      `.github/workflows/one-mind-branch-ci.yml`, triggered ONLY on
+      `feature/thongthai-one-mind-architecture`; it performs `npm ci` + `npm test` and never
+      deploys. First run `35348457126` completed SUCCESS.
+    - Current test result: **369/369 passing, 0 failed** in GitHub Actions.
+    - G.1 implementation branch head before this handoff update:
+      `43d706d61b79eb6e06c642bb86ef11c4a9625c00`.
+    - `main` remains `d37c56f44753bce2ec25d3091506cd3c0b703bdc`.
+      Netlify production current deploy remains the same pre-architecture deployment; no G.1
+      production deploy occurred.
+  - [ ] **G.2 — Actual customer-visible LINE/Web cutover. NOT STARTED.**
+    Must wait until Phase H degradation + Phase I Response Composer are complete and tested.
+- [ ] **Phase H — Graceful Degradation. NOT STARTED.** Exact next phase.
+- [ ] **Phase I — Response Composer. NOT STARTED.**
 - [ ] Phase J — Observability (trace object, no chain-of-thought). NOT STARTED.
 - [ ] Phase K — Backoffice Control Plane (tamma-backoffice: health/diagnostics view +
-  Conversation Inspector). NOT STARTED. (Note: audit found tamma-backoffice is explicitly
-  built around "no raw chat storage" — README + in-app copy. Conversation Inspector must be a
-  deliberately bounded/expiring diagnostic view, not permanent transcript storage. This needs
-  explicit design, not a silent reversal of that stance.)
-- [ ] Phase L — Golden conversation eval (150+ cases). NOT STARTED as a suite, but the user
-  said start the corpus now / grow it every phase — Phase B should add its first real cases
-  when it lands, not wait.
+  Conversation Inspector). NOT STARTED. Conversation Inspector must remain bounded/expiring,
+  not permanent raw transcript storage.
+- [ ] Phase L — Golden conversation eval (150+ cases). NOT STARTED as final suite; corpus is
+  already being grown phase-by-phase (80 scenarios as of Phase F; G.1 focused on integration
+  foundation tests rather than padding the semantic corpus).
 - [ ] Phase M — Full E2E. NOT STARTED.
-- [ ] Phase N — Legacy cleanup (retire superseded regex modules only after equivalent
+- [ ] Phase N — Legacy cleanup (retire superseded regex/channel logic only after equivalent
   golden/E2E tests pass). NOT STARTED.
-- [ ] Phase O — Final production deployment (one merge, one deploy, after full integration
-  review). NOT STARTED.
+- [ ] Phase O — Final production integration/deployment. NOT STARTED.
 
 ## Exact next action
 
-Start Phase G (controlled channel migration/cutover). Phase F built a coherent, fully tested
-pipeline (SemanticTurn + ConversationContext + ActiveTask + KnowledgeBundle → DialogDecision)
-but it is a SHADOW path only — read Phase F's bullet above first. Phase G's job is the
-controlled cutover the brief describes: replacing legacy per-channel routing with calls into
-this pipeline, one channel/flow at a time, strangler-style, never a big-bang swap.
+Start **Phase H — Graceful Degradation** on this SAME integration branch.
 
-**Known gaps carried forward, explicitly not closed yet (by design, not oversight — do not let
-any get lost)**:
-1. NONE of `_conversation-context.ts` (Phase C), `_task-state.ts` (Phase D),
-   `_knowledge-resolver.ts` (Phase E), or `_dialog-manager.ts` (Phase F) are wired into
-   `thongthai-chat.ts`'s request handling or `_line-webhook-core.ts`'s `askThongthai()` yet.
-   LINE still sends `chatHistory: []` in production today. This is Phase G's actual job now —
-   the whole point of the shadow pipeline was to prove it works BEFORE touching production
-   routing, and Phase F's tests (horse/restaurant/stay/promo/cross-channel) constitute that
-   proof. Cutover must still be incremental: pick one flow (e.g. LINE's activity booking) or
-   one channel, wire it, verify live, THEN move to the next — never all at once, and legacy
-   code stays in place until equivalence is proven per-flow (never delete-then-verify).
-2. `_dialog-source-adapters.ts`'s real adapters are deliberately partial: restaurant/activity
-   (catalog only)/promotion/otop are wired to real functions; availability, booking-status,
-   stay, membership, and cafe adapters still need per-request argument mapping (date/
-   resourceCode/partySize/reference id) beyond a bare `KnowledgeRequest` — author these as
-   Phase G wires the flows that actually need them, reusing `listBookingOptions` and friends,
-   never a new duplicate query.
-3. A real Response Composer (turning a `DialogDecision` + grounded facts into actual
-   customer-facing Thai prose) does not exist yet — Phase I. Until then, Phase G's cutover (if
-   it starts before Phase I) would need EITHER a minimal composer stopgap OR to defer full
-   cutover until Phase I lands; do not invent ad hoc prose-generation logic inside the Dialog
-   Manager or a channel handler to route around this gap.
+Sequence is now deliberately:
+**G.1 → H → I → G.2 → J → K → L → M → N → O**.
+
+Reason: a customer-visible cutover before a canonical fallback policy and Response Composer exist
+would force ad-hoc prose/fallback logic back into LINE/Web handlers, recreating the fragmentation
+this architecture is removing.
+
+Phase H must be designed around the canonical One-Mind orchestrator, not around channel-specific
+fallback strings. Required degradation hierarchy:
+1. primary model provider
+2. secondary model provider
+3. validated semantic/task state + grounded deterministic knowledge
+4. deterministic transactional continuation only where already safe/validated
+5. graceful human handoff / final generic failure
+
+Keep these states distinct end-to-end:
+- MODEL_UNAVAILABLE
+- SOURCE_UNAVAILABLE
+- VERIFIED_EMPTY
+- FACT_UNKNOWN / UNVERIFIED
+
+Never turn source failure into "ไม่มี", and never turn unknown into an invented answer.
+
+**Known gaps carried forward**:
+1. G.1 shadow hook is OFF by default and not customer authoritative; this is intentional.
+2. The shared `guest_agent_state.state` persistence wrappers still need cross-request
+   concurrency hardening before G.2 customer cutover; sequential same-turn writes fixed only the
+   intra-turn clobber.
+3. Response Composer does not yet exist; do not add customer prose to Dialog Manager/orchestrator
+   during Phase H.
+4. Café has no verified live catalog SOT today; preserve UNKNOWN/hand-off behavior rather than
+   manufacturing a `cafe_live` source.
+5. Existing LINE membership/booking handlers and Web ConciergeProvider remain legacy-authoritative
+   until G.2; do not delete them during H/I.
 
 ## Last commit on this branch
 
-- Commit: `d695da9` — "Phase F: Universal Dialog Manager (shadow pipeline, not wired to
-  production)"
-- Phases A, B, B.1, C, D, D.1, E, F complete, pushed. Phase G not started.
+- G.1 CI head before handoff update: `43d706d61b79eb6e06c642bb86ef11c4a9625c00`.
+- Phases A, B, B.1, C, D, D.1, E, F, G.1 complete and pushed.
+- Phase H is the exact next action.
