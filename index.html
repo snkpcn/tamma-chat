@@ -4758,28 +4758,24 @@ async function handleUserMessage(text){
     return;
   }
 
-  // Fallback path — the existing, fully local engine. This is what actually
-  // runs today, since no live AI endpoint is deployed yet.
-  await new Promise(r=> setTimeout(r, 620 + Math.random()*450));
+  // Canonical endpoint unavailable — local business-intelligence fallback retired.
+  // Never let the browser become a second source of business recommendations,
+  // prices, availability, or itinerary truth. The server-side One-Mind is
+  // authoritative; browser fallback is presentation-only.
+  await new Promise(r=> setTimeout(r, 220));
   hideTyping();
-  const context = { section: sectionHint, currentPrefs };
-  const res = ConciergeProvider.reply(text, context);
-  const state = res.pose || 'default';
-  setStage(state);
-  const stack = addFlowMessage(res.text, res.flow, state);
-  window.JourneyProvider.pushChat('assistant', res.text);
+  const lang = window.I18N ? window.I18N.lang() : 'th';
+  const unavailableCopy = {
+    th:'ตอนนี้เชื่อมต่อทองไทยไม่ได้ชั่วคราวครับ ลองส่งอีกครั้งอีกสักครู่',
+    en:'Thongthai is temporarily unavailable. Please try again in a moment.',
+    zh:'Thongthai 暂时无法连接，请稍后再试。',
+    lo:'ຕອນນີ້ຍັງເຊື່ອມຕໍ່ທອງໄທບໍ່ໄດ້ ກະລຸນາລອງອີກຄັ້ງໃນອີກສັກຄູ່',
+    vi:'Thongthai tạm thời chưa kết nối được. Vui lòng thử lại sau ít phút.',
+  }[lang] || 'Thongthai is temporarily unavailable. Please try again in a moment.';
+  addMessage('bot', unavailableCopy);
+  window.JourneyProvider.pushChat('assistant', unavailableCopy);
   statusEl.textContent = t('chat_status_ready');
-  renderQuickActions(); // refresh chips now that currentPrefs may have changed
-  if(res.offerSave && res.flow){
-    window.__currentPlan = { time:currentPrefs.duration, who:currentPrefs.travelerType, mood:currentPrefs.mood, stops:res.flow, moodTag:'inthanin' };
-    const saveBtn = document.createElement('button');
-    saveBtn.className='btn btn-primary btn-sm'; saveBtn.style.marginTop='2px'; saveBtn.textContent=t('btn_save_this_journey');
-    saveBtn.onclick = async ()=>{ await window.JourneyProvider.savePlan(window.__currentPlan); addMessage('bot', t('notify_saved_confirm')); };
-    const wrap = document.createElement('div'); wrap.style.background='transparent'; wrap.style.border='none'; wrap.style.padding='0';
-    wrap.appendChild(saveBtn);
-    stack.appendChild(wrap);
-    body.scrollTop = body.scrollHeight;
-  }
+  renderQuickActions();
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
