@@ -441,6 +441,7 @@ any get lost)**:
 
 ## Last commit on this branch
 
-- Commit: `<update after next push>` — Phase E complete, pushed. Phases A, B, B.1, C, D, D.1
-  also complete. Phase F not started.
+- Commit: `041e5ee` — "Phase E: Knowledge Resolver / Source-of-Truth routing over existing
+  sources"
+- Phases A, B, B.1, C, D, D.1, E complete, pushed. Phase F not started.
 - Phases A, B, B.1, C, D, D.1 complete, pushed. Phase E not started.
