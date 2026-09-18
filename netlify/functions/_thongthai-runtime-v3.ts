@@ -338,6 +338,8 @@ export async function persistBrainRuntime(guestDbId: string | null, channel: Bra
     if (unresolved !== null) next.unresolved_need=unresolved;
     if (update.clearUnresolvedNeed === true) delete next.unresolved_need;
     if (update.restaurantProposedSet) next.restaurantProposedSet = update.restaurantProposedSet;
+    if (update.pendingPromotionRedemption) next.pendingPromotionRedemption = update.pendingPromotionRedemption;
+    if (update.clearPendingPromotionRedemption === true) delete next.pendingPromotionRedemption;
     await dbFetch('guest_agent_state?on_conflict=guest_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({guest_id:guestDbId,state:next,updated_at:now})});
 
     for (const memory of (response.semanticMemoryUpdates ?? []).slice(0,8)) {

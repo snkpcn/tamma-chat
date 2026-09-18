@@ -1,5 +1,6 @@
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
 import type { VerifiedCommunityOffering } from './_customer-db';
+import type { PendingPromotionRedemption } from './_promotion-dialog';
 
 export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-operations-v3-activity-inventory';
 
@@ -55,6 +56,11 @@ export interface AgentStateUpdate {
     partySize: number | null;
     createdAt: string;
   };
+  /** Deterministic promo-redemption-in-progress state -- set only by the
+   *  TS-native fallback dialog in thongthai-chat.ts, never by the LLM's own
+   *  JSON output (not part of the documented OUTPUT schema below). */
+  pendingPromotionRedemption?: PendingPromotionRedemption;
+  clearPendingPromotionRedemption?: boolean;
 }
 export interface SemanticMemoryUpdate { key: string; value: string | string[]; confidence: number }
 export interface BrainRuntimeContext {
