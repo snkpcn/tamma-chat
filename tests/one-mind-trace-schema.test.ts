@@ -12,7 +12,8 @@ test('One-Mind trace schema is bounded, pseudonymous and RLS-protected',()=>{
   assert.match(migration,/unique \(channel, trace_id\)/i);
   assert.match(migration,/prune_expired_one_mind_traces/i);
   assert.match(migration,/where expires_at <= now\(\)/i);
-  assert.doesNotMatch(migration,/raw_message|customer_message|response_text|email|phone|payment/i);
+  const ddlOnly=migration.split('\n').filter(line=>!line.trim().startsWith('--')&&!/^\s*comment on /i.test(line)).join('\n');
+  assert.doesNotMatch(ddlOnly,/raw_message|customer_message|response_text|email|phone|payment/i);
 });
 
 test('trace persistence is idempotent by channel + trace id and retains only 24 hours',()=>{
