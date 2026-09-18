@@ -267,13 +267,17 @@ function isConversationContextState(value: unknown): value is ConversationContex
   return Boolean(value) && typeof value === 'object' && (value as { schemaVersion?: unknown }).schemaVersion === CONVERSATION_CONTEXT_SCHEMA_VERSION;
 }
 
+export function parseConversationContextState(value: unknown, now: Date = new Date()): ConversationContextState {
+  return isConversationContextState(value) ? pruneExpired(value, now) : emptyConversationContextState(now);
+}
+
 export async function loadConversationContext(guestDbId: string | null, now: Date = new Date()): Promise<ConversationContextState> {
   if (!guestDbId || !configuration()) return emptyConversationContextState(now);
   try {
     const res = await dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`);
     const rows = await res.json() as Array<{ state?: Record<string, unknown> }>;
     const raw = rows[0]?.state?.conversationContext;
-    return isConversationContextState(raw) ? pruneExpired(raw, now) : emptyConversationContextState(now);
+    return parseConversationContextState(raw, now);
   } catch (error) {
     console.error('CONVERSATION_CONTEXT_LOAD_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
     return emptyConversationContextState(now);
