@@ -1071,3 +1071,5 @@ intentionally retained.
 - Temporary production env `THONGTHAI_PHASE_P_DIAGNOSTIC_TOKEN` has been configured on the existing tamma-chat Netlify site as a secret.
 - This commit exists to trigger the required production rebuild so the authenticated diagnostic endpoint can run once.
 - After provider evidence is captured and the root cause is fixed, remove both the endpoint and this temporary env var.
+
+- Phase P diagnostic token rotated after accidental on-screen exposure; production rebuild retriggered at 2026-09-19 01:37 ICT.
