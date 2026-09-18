@@ -60,6 +60,7 @@ async function activityCatalogAdapter(now: Date = new Date()): Promise<SourceRes
     for (const row of rows) {
       const value = row.fact_value as { activities?: Array<{ activityCode: string; resourceCode: string; name: string; durations: Array<{ durationMinutes: number; price: number | null }>; assets: Array<{ code: string; name: string; type: string }> }> };
       for (const activity of value.activities ?? []) {
+        facts.push({ key: `activity:${activity.activityCode}:name`, value: activity.name, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         facts.push({ key: `activity:${activity.activityCode}:resourceCode`, value: activity.resourceCode, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         for (const duration of activity.durations) {
           facts.push({ key: `activity:${activity.activityCode}:${duration.durationMinutes}min:price`, value: duration.price, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
@@ -94,6 +95,8 @@ async function otopCatalogAdapter(now: Date = new Date()): Promise<SourceResult>
   try {
     const products = await listOtopProducts('live');
     const facts: GroundedFact[] = products.flatMap(product => [
+      { key: `otop:${product.sku}:name`, value: product.name, domain: 'otop' as const, sourceId: 'otop_products_live', sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
+      { key: `otop:${product.sku}:description`, value: product.description, domain: 'otop' as const, sourceId: 'otop_products_live', sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
       { key: `otop:${product.sku}:price`, value: product.price, domain: 'otop' as const, sourceId: 'otop_products_live', sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
       { key: `otop:${product.sku}:stock`, value: product.stock, domain: 'otop' as const, sourceId: 'otop_products_live', sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
     ]);
