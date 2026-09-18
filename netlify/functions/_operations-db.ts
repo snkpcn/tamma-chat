@@ -1032,6 +1032,115 @@ export async function listBookingOptions(
   return output;
 }
 
+export interface ServiceResourceSnapshot {
+  code: string;
+  name: string;
+  description: string | null;
+  unitLabel: string | null;
+  defaultCapacity: number | null;
+  requiresSchedule: boolean;
+  metadata: Record<string, unknown>;
+  updatedAt: string;
+}
+
+/** Canonical read-only resource listing used by the One-Mind knowledge
+ * adapters. This deliberately lives next to listBookingOptions/createBooking
+ * so service-resource truth has one data-access owner. */
+export async function listServiceResources(serviceType: ServiceType): Promise<ServiceResourceSnapshot[]> {
+  const res = await dbFetch(
+    `service_resources?service_type=eq.${serviceType}&active=eq.true`
+    + '&select=code,name,description,unit_label,default_capacity,requires_schedule,metadata,updated_at&order=name.asc',
+  );
+  const rows = await res.json() as Array<{
+    code: string; name: string; description: string | null; unit_label: string | null;
+    default_capacity: number | null; requires_schedule: boolean; metadata: Record<string, unknown>; updated_at: string;
+  }>;
+  return rows.map(row => ({
+    code: row.code,
+    name: row.name,
+    description: row.description,
+    unitLabel: row.unit_label,
+    defaultCapacity: row.default_capacity == null ? null : Number(row.default_capacity),
+    requiresSchedule: Boolean(row.requires_schedule),
+    metadata: row.metadata ?? {},
+    updatedAt: row.updated_at,
+  }));
+}
+
+export interface BookingStatusSnapshot {
+  bookingCode: string;
+  serviceType: ServiceType;
+  startAt: string;
+  endAt: string;
+  partySize: number | null;
+  quantity: number | null;
+  status: string;
+  contactStatus: string | null;
+  updatedAt: string;
+}
+
+/** Read-only operational booking status. The caller must already hold the
+ * canonical guest DB id; an optional booking code narrows the lookup without
+ * ever exposing another guest's booking. */
+export async function loadLatestBookingStatus(
+  guestDbId: string | null,
+  bookingCode?: string | null,
+): Promise<BookingStatusSnapshot | null> {
+  if (!guestDbId || !UUID_RE.test(guestDbId)) return null;
+  const res = await dbFetch(
+    `bookings?guest_id=eq.${encodeURIComponent(guestDbId)}`
+    + (bookingCode ? `&booking_code=eq.${encodeURIComponent(bookingCode)}` : '')
+    + '&select=booking_code,service_type,start_at,end_at,party_size,quantity,status,contact_status,updated_at'
+    + '&order=created_at.desc&limit=1',
+  );
+  const rows = await res.json() as Array<{
+    booking_code: string; service_type: ServiceType; start_at: string; end_at: string;
+    party_size: number | null; quantity: number | null; status: string; contact_status: string | null; updated_at: string;
+  }>;
+  const row = rows[0];
+  return row ? {
+    bookingCode: row.booking_code,
+    serviceType: row.service_type,
+    startAt: row.start_at,
+    endAt: row.end_at,
+    partySize: row.party_size == null ? null : Number(row.party_size),
+    quantity: row.quantity == null ? null : Number(row.quantity),
+    status: row.status,
+    contactStatus: row.contact_status,
+    updatedAt: row.updated_at,
+  } : null;
+}
+
+export interface MembershipStatusSnapshot {
+  memberStatus: 'lead' | 'member' | 'inactive';
+  membershipStartedAt: string | null;
+  profileCompletedAt: string | null;
+  marketingOptIn: boolean;
+  researchOptIn: boolean;
+}
+
+/** Read-only membership status for the canonical guest. No encrypted/raw
+ * contact fields are selected, so the knowledge layer never receives PII. */
+export async function loadMembershipStatus(guestDbId: string | null): Promise<MembershipStatusSnapshot | null> {
+  if (!guestDbId || !UUID_RE.test(guestDbId)) return null;
+  const res = await dbFetch(
+    `customer_accounts?guest_id=eq.${encodeURIComponent(guestDbId)}`
+    + '&select=member_status,membership_started_at,profile_completed_at,marketing_opt_in,research_opt_in&limit=1',
+  );
+  const rows = await res.json() as Array<{
+    member_status: 'lead' | 'member' | 'inactive'; membership_started_at: string | null;
+    profile_completed_at: string | null; marketing_opt_in: boolean; research_opt_in: boolean;
+  }>;
+  const row = rows[0];
+  return row ? {
+    memberStatus: row.member_status,
+    membershipStartedAt: row.membership_started_at,
+    profileCompletedAt: row.profile_completed_at,
+    marketingOptIn: Boolean(row.marketing_opt_in),
+    researchOptIn: Boolean(row.research_opt_in),
+  } : null;
+}
+
 async function scheduleRowsForBooking(args: {
   serviceType: ServiceType;
   resourceCode?: string;
