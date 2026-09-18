@@ -18,6 +18,10 @@ import {
   type ComposedResponse,
   type ResponseLanguage,
 } from './_response-composer';
+import {
+  buildOneMindTraceEnvelope,
+  type OneMindTraceEnvelope,
+} from './_one-mind-observability';
 
 export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
@@ -33,11 +37,13 @@ export type OneMindCustomerTurnResult =
       status:'composed';
       turn:OneMindTurnResult;
       response:ComposedResponse;
+      observability:OneMindTraceEnvelope;
     }
   | {
       status:'legacy_required';
       turn:OneMindTurnResult;
       reason:'transactional_or_task_turn' | 'domain_not_cut_over';
+      observability:OneMindTraceEnvelope;
     };
 
 export function readOnlyCutoverEligibility(turn: OneMindTurnResult):
@@ -61,6 +67,7 @@ export async function processOneMindCustomerTurn(
   stateDependencies: Partial<AuthoritativeStateDependencies> = {},
   now: Date = new Date(),
 ): Promise<OneMindCustomerTurnResult> {
+  const totalStartedAt = Date.now();
   const turn = await processThongthaiOneMindTurnAuthoritative(
     { ...input, persistState:input.persistState !== false },
     dependencies,
@@ -71,9 +78,19 @@ export async function processOneMindCustomerTurn(
   );
   const eligibility = readOnlyCutoverEligibility(turn);
   if (!eligibility.eligible) {
-    return { status:'legacy_required', turn, reason:eligibility.reason };
+    return {
+      status:'legacy_required',
+      turn,
+      reason:eligibility.reason,
+      observability:buildOneMindTraceEnvelope({
+        turn,
+        response:null,
+        totalMs:Date.now() - totalStartedAt,
+      }),
+    };
   }
 
+  const composerStartedAt = Date.now();
   const response = await composeThongthaiResponse({
     channel:input.channel as BrainChannel,
     language:input.language,
@@ -83,5 +100,16 @@ export async function processOneMindCustomerTurn(
     degradation:turn.knowledgeDegradation,
     operationalOutcome:null,
   });
-  return { status:'composed', turn, response };
+  const composerMs = Date.now() - composerStartedAt;
+  return {
+    status:'composed',
+    turn,
+    response,
+    observability:buildOneMindTraceEnvelope({
+      turn,
+      response,
+      composerMs,
+      totalMs:Date.now() - totalStartedAt,
+    }),
+  };
 }
