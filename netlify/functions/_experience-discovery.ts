@@ -25,7 +25,7 @@ const DISCOVERY_CANONICAL = [
 
 function normalizeThaiDiscoveryText(message: string): string {
   let text = String(message ?? '')
-    .normalize('NFKC')
+    .normalize('NFC')
     .toLowerCase()
     .replace(/[!?！？….,，。/\\|()[\]{}"'“”‘’:_-]+/gu, ' ')
     .replace(/\s+/g, ' ')
