@@ -389,7 +389,128 @@ the same or next commit.
     (277.2kb/298.8kb) — none of Phase E's modules are imported by either yet (deliberate; per
     the user's explicit Phase E closing instruction, production request routing is not wired
     until Phase F explicitly requires it).
-- [ ] Phase F — Universal Dialog Manager. NOT STARTED.
+- [x] Phase F — Universal Dialog Manager. **DONE** (shadow/orchestration only, NOT wired into
+  production request routing).
+  - **New modules**: `netlify/functions/_dialog-manager.ts` (the orchestration core),
+    `netlify/functions/_dialog-source-adapters.ts` (real, read-only adapters wrapping existing
+    functions), `netlify/functions/_activity-sot.ts` (extraction, see below).
+  - **`DialogInput`/`DialogPlan`/`DialogDecision`**: match the brief's contracts.
+    `reasons`/`DialogReasonCode` are bounded machine codes only (e.g. `missing_field`,
+    `cannot_verify_comparison`, `task_suspended_for_topic_switch`) — never natural-language
+    reasoning or chain-of-thought.
+  - **Two-step plan/resolve**: `planDialogTurn` (pure, sync) does the SemanticTurn→ActiveTask
+    merge, missing-field computation, and knowledge-need planning. `resolveDialogDecision`
+    (pure, sync) takes the caller's already-resolved `KnowledgeBundle[]` and produces the final
+    decision. `processDialogTurn` is the ONLY function that performs I/O — it calls
+    `resolveKnowledge` (Phase E) via injected adapters between the two pure steps. Zero direct
+    DB calls of its own (static test: no bare global `fetch(` anywhere in the file).
+  - **SemanticTurn → ActiveTask merge**: generic, reused for provide_information/select/
+    correction/modify/cancel/confirm. Corrections overwrite the same task's slots (tested:
+    horse replacement, partySize 2→3). Every task mutation routes through
+    `_task-state.ts`'s `applyTaskStateEvent`, keyed on `` `${eventId}:<operation>` `` sub-ids —
+    **found and fixed a real idempotence bug** here: the original code derived a DIFFERENT
+    sub-id depending on whether a task already existed (`:start` vs `:update_slots`), so a
+    genuine duplicate-delivery replay (which naturally sees post-first-application state) took
+    a different branch and was never deduped. Fixed by giving each logical operation ONE stable
+    id (`:task_merge`, `:topic_transition`) regardless of which branch fires — since
+    `applyTaskStateEvent` dedups purely on the eventId string before even inspecting `kind`,
+    this makes a resent duplicate a true no-op again. Also threaded `now: Date` explicitly
+    through `planDialogTurn`/`mergeTaskState` (previously relied on `applyTaskStateEvent`'s
+    wall-clock default) — the same class of flaky-timestamp bug already found once in Phase C,
+    caught and fixed here before it could bite.
+  - **Domain policy, not hardcoded rules**: missing-field computation calls
+    `computeTaskMissingFields`/`DOMAIN_TASK_REQUIRED_FIELDS` from `_domain-task-policy.ts`
+    (Phase E) — the Dialog Manager itself contains no per-domain business rule.
+  - **Knowledge-need planning**: `planKnowledgeNeeds(turn, container)` — a small decision table
+    keyed on (domain, action), returning at most one `KnowledgeRequest` per implicated domain.
+    Tested: a single-need request triggers exactly the ONE matching adapter across every
+    registered adapter (no overfetch).
+  - **READY != EXECUTE**: only `book`/`order` actions count as `customerCommitPresent`
+    (`confirm`, e.g. "เอาภาราดร", is a selection, not a commitment). A proposal requires
+    commit present + zero missing fields + (if availability was requested) a verified
+    `available:true` fact — never merely "all fields happen to be filled in."
+  - **ActionProposal**: `{toolName, validatedArgs, requiresExplicitConfirmation,
+    customerCommitPresent, idempotencyKey}`. Phase F stops here — no transactional write
+    anywhere in this module or its tests.
+  - **Topic switch/resume**: reuses Phase D's bounded suspend/resume exactly. Tested: a domain
+    switch suspends the active task without destroying it; returning to the suspended domain
+    resumes the SAME taskId, never creating a new one.
+  - **Discovery never creates fake tasks**: `TASK_WORTHY_ACTIONS` excludes discover/ask/compare/
+    recommend/status — tested directly, including the exact original bug regression (repeated
+    "มีโปรอะไร" never creates or advances a task on either asking).
+  - **Ambiguity**: `needsClarification` or any `ambiguous` reference short-circuits straight to
+    `mode:'clarify'` before any task/knowledge work happens — never a guess.
+  - **Anti-hallucination**: for a `compare` action, checks the PRECISE fact key per candidate
+    entity (`` `${attribute}:${entityId}` ``) rather than a coarse "were any facts returned at
+    all" guess — a catalog answering with names/prices but no temperament is still correctly
+    treated as unverified (`responseIntent:'cannot_verify_comparison'`). A `null` (unconfigured)
+    price is flagged `known_unconfigured_price`, never coerced into an invented number.
+  - **EMPTY/UNAVAILABLE/UNKNOWN propagation**: an empty promotion-eligibility source produces
+    `responseIntent:'no_active_promotion'` (a valid answer); an unavailable source produces
+    `'source_unavailable_apology'` and `knowledge_unavailable` — kept structurally distinct,
+    tested directly.
+  - **Real read-only source adapters** (`_dialog-source-adapters.ts`): restaurant/activity/
+    promotion/otop catalogs, each a thin wrapper reusing the exact existing function
+    (`listRestaurantMenu`, `loadActivityWorldFacts`, `loadActivePromotionsWorldFact`,
+    `listOtopProducts`) — no duplicate queries. `loadActivityWorldFacts` was extracted out of
+    `_thongthai-runtime-v3.ts` into a new neutral module, `_activity-sot.ts` (mirroring the
+    existing `_restaurant-sot.ts` pattern) — importing it from the brain/runtime module would
+    have pulled the entire LLM-calling Brain in as a transitive dependency of the Dialog
+    Manager's adapters, which the architecture guards forbid. Availability/booking-status/stay/
+    membership/cafe real adapters are deliberately deferred (need per-request argument mapping
+    beyond a bare `KnowledgeRequest`) — tracked below, not silently dropped. Not network-tested
+    (matches this codebase's existing DB-I/O-wrapper convention); not wired into any handler.
+  - **Horse full-flow result** (all 7 turns, through the REAL pipeline — `parseSemanticTurnResponse`
+    + `applyConversationContextUpdate` + `processDialogTurn`, mock adapters only): no task
+    through turns 1-3; turn 3's "ตัวไหนนิสัยดีกว่า" returns `cannot_verify_comparison` (no
+    temperament source); turn 4 creates the task with ภาราดร selected, NOT a booking proposal;
+    turns 5-6 merge date/partySize/time into the SAME taskId; turn 6 correctly asks for the
+    still-missing `durationMinutes` (real domain policy) rather than proceeding; only after
+    duration is supplied AND an explicit "จองเลย" arrives does `mode:'propose_action'` fire,
+    with verified availability backing it — still the same taskId throughout.
+  - **Restaurant multi-turn result**: party size, budget, and a `no_pork` constraint all survive
+    intact across 5 turns on one task; selecting "เอาชุดเมื่อกี้" doesn't lose anything gathered.
+  - **Stay multi-turn result**: an availability inquiry alone creates no task; concrete
+    party-size/duration is task-worthy; selecting a resource completes the only real requirement
+    (`date`); fields-complete is proven NOT sufficient for a proposal; only "จองเลย" produces one.
+  - **Promo regression result**: repeated "มีโปรอะไร" (the ORIGINAL production bug from earlier
+    in this program) never creates a task on either asking, and both askings plan the identical
+    correct knowledge request — no drift toward name-collection. A genuine accept phrase after
+    discovery still correctly starts the redemption task.
+  - **Cross-channel continuity result**: web turn 1 → LINE turn 2 with `chatHistory: []` never
+    constructed at all — turn 2 is still correctly understood as continuing the same activity
+    task, driven entirely by server-loaded `conversationContext`/`taskState`. Concrete proof
+    Phase G needs before simplifying the channel adapters.
+  - **Idempotence**: replaying the identical eventId against post-first-application state
+    produces a byte-identical `taskStateContainer` (the bug described above, now fixed and
+    tested); `processDialogTurn` replayed end-to-end never produces a second/duplicate
+    `ActionProposal`.
+  - **Shadow-vs-legacy findings** (`tests/dialog-manager-shadow-comparison.test.ts`, extends
+    Phase B's harness): แถวนี้ทำไรดี and โปรมีไร — both classified `expected_improvement` (the
+    legacy stateless regex router still can't catch either, documented already in Phase B). A
+    bare contextual reference ("พรุ่งนี้สองคน") is classified `expected_improvement` — the
+    legacy router has literally no state to resolve it from; the new pipeline resolves it via
+    real `conversationContext.activeDomain`. A correction turn is classified similarly — the
+    legacy system has no correction concept at all. One `equivalent` case included (explicit
+    dish mention) to prove the classifier isn't just always claiming improvement.
+  - **Architecture guards**: Semantic Interpreter/Task core/Knowledge Resolver do not import the
+    Dialog Manager; the Dialog Manager imports no Response Composer, raw DB client, LINE
+    webhook, web frontend, or payment transport code, and only the 5 expected leaf modules; no
+    circular dependency anywhere in the new graph.
+  - **Eval corpus growth**: 51 → **74** corpus cases (+23, avoiding trivial wording duplicates;
+    2 originally-planned ids collided with pre-existing ones and were renamed, not silently
+    overwritten) across the 10 requested families (activity booking, restaurant
+    recommendation→preorder, stay availability→booking intent, promotion repeated discovery,
+    correction, topic switch, cancel, ambiguous reference, no-action informational,
+    explicit-confirmation gating). Total eval scenarios: 74 + 6 multi-turn = **80**, meeting the
+    Phase F target exactly. 3 new `SemanticEvalCategory` values added (`cancel`, `informational`,
+    `confirmation_gating`) since none of the 8 original categories honestly fit these shapes.
+  - `npm test`: **358/358 passing** (297 baseline (which already includes D.1) + 38 new Dialog
+    Manager test cases across the 8 new test files + 23 additional corpus-driven subtests from
+    the eval corpus growth), verified flake-free over 12 consecutive full-suite runs. Production
+    bundles: `thongthai-chat.ts` 277.9kb (small, expected increase from the `_activity-sot.ts`
+    extraction's module-boundary crossing — no behavior change), `line-webhook.ts` 298.8kb
+    unchanged — neither Phase F module is imported by either yet.
 - [ ] Phase G — Migrate channel intelligence to central Brain (LINE booking/membership
   handlers, web ConciergeProvider demotion). NOT STARTED.
 - [ ] Phase H — Graceful degradation. NOT STARTED. (Note: promo + experience-discovery already
@@ -412,35 +533,36 @@ the same or next commit.
 
 ## Exact next action
 
-Start Phase F (Universal Dialog Manager). This is the layer that actually MERGES a `SemanticTurn`
-(Phase B) into an `ActiveTask` (Phase D), decides what `KnowledgeRequest` the Resolver (Phase E)
-needs, and decides the next system action (ask for a missing field / call a real tool / hand off
-to the Response Composer). Read Phase B/C/D/E's bullets above first — all four are DONE and fully
-tested but NONE are wired together yet; Phase F is where they finally connect into one pipeline.
+Start Phase G (controlled channel migration/cutover). Phase F built a coherent, fully tested
+pipeline (SemanticTurn + ConversationContext + ActiveTask + KnowledgeBundle → DialogDecision)
+but it is a SHADOW path only — read Phase F's bullet above first. Phase G's job is the
+controlled cutover the brief describes: replacing legacy per-channel routing with calls into
+this pipeline, one channel/flow at a time, strangler-style, never a big-bang swap.
 
 **Known gaps carried forward, explicitly not closed yet (by design, not oversight — do not let
 any get lost)**:
-1. `_conversation-context.ts` (Phase C), `_task-state.ts` (Phase D), and `_knowledge-resolver.ts`
-   (Phase E) all exist and are fully tested, but NONE are wired into `thongthai-chat.ts`'s
-   request handling or `_line-webhook-core.ts`'s `askThongthai()` yet. LINE still sends
-   `chatHistory: []` in production today. This is squarely Phase F's job now — the Dialog
-   Manager is the thing that finally needs all three connected to make real decisions. Per the
-   user's explicit Phase E closing instruction: "Do not wire production request routing yet
-   unless Phase F explicitly requires it" — so Phase F should wire what it actually needs, not
-   defer further out of habit, but still without a premature/partial production cutover (keep
-   following strangler discipline: build Phase F beside the existing deterministic routing,
-   don't rip anything out until equivalence is proven).
-2. Phase E's `KnowledgeSourceAdapters` are currently only ever supplied as test mocks. Real
-   production adapters (thin wrappers around `listRestaurantMenu`/`loadActivityWorldFacts`/
-   `listBookingOptions`/`loadActivePromotionsWorldFact`/etc.) do not exist yet — Phase F or G
-   should author them once, reusing those exact existing functions, never re-querying the DB a
-   second way.
-3. `_domain-task-policy.ts`'s `computeTaskMissingFields` is not yet called from anywhere in a
-   live request path — it exists and is tested in isolation. Phase F is the natural place to
-   call it when merging a SemanticTurn's entities into an ActiveTask's slots.
+1. NONE of `_conversation-context.ts` (Phase C), `_task-state.ts` (Phase D),
+   `_knowledge-resolver.ts` (Phase E), or `_dialog-manager.ts` (Phase F) are wired into
+   `thongthai-chat.ts`'s request handling or `_line-webhook-core.ts`'s `askThongthai()` yet.
+   LINE still sends `chatHistory: []` in production today. This is Phase G's actual job now —
+   the whole point of the shadow pipeline was to prove it works BEFORE touching production
+   routing, and Phase F's tests (horse/restaurant/stay/promo/cross-channel) constitute that
+   proof. Cutover must still be incremental: pick one flow (e.g. LINE's activity booking) or
+   one channel, wire it, verify live, THEN move to the next — never all at once, and legacy
+   code stays in place until equivalence is proven per-flow (never delete-then-verify).
+2. `_dialog-source-adapters.ts`'s real adapters are deliberately partial: restaurant/activity
+   (catalog only)/promotion/otop are wired to real functions; availability, booking-status,
+   stay, membership, and cafe adapters still need per-request argument mapping (date/
+   resourceCode/partySize/reference id) beyond a bare `KnowledgeRequest` — author these as
+   Phase G wires the flows that actually need them, reusing `listBookingOptions` and friends,
+   never a new duplicate query.
+3. A real Response Composer (turning a `DialogDecision` + grounded facts into actual
+   customer-facing Thai prose) does not exist yet — Phase I. Until then, Phase G's cutover (if
+   it starts before Phase I) would need EITHER a minimal composer stopgap OR to defer full
+   cutover until Phase I lands; do not invent ad hoc prose-generation logic inside the Dialog
+   Manager or a channel handler to route around this gap.
 
 ## Last commit on this branch
 
-- Commit: `041e5ee` — "Phase E: Knowledge Resolver / Source-of-Truth routing over existing
-  sources"
-- Phases A, B, B.1, C, D, D.1, E complete, pushed. Phase F not started.
+- Commit: `<update after next push>` — Phase F complete, pushed. Phases A, B, B.1, C, D, D.1, E
+  also complete. Phase G not started.

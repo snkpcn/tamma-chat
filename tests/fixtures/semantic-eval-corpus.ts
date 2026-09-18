@@ -14,7 +14,10 @@ import type { SemanticAction, SemanticContext, SemanticDomain } from '../../netl
 
 export type SemanticEvalCategory =
   | 'formal' | 'colloquial' | 'typo' | 'follow_up' | 'correction'
-  | 'topic_switch' | 'ambiguous' | 'multi_intent';
+  | 'topic_switch' | 'ambiguous' | 'multi_intent'
+  // Added in Phase F while growing the corpus toward the Phase L target --
+  // these three scenario shapes didn't fit any existing category honestly.
+  | 'cancel' | 'informational' | 'confirmation_gating';
 
 export type SemanticEvalCase = {
   id: string;
@@ -56,6 +59,32 @@ const PROMO_CONTEXT: SemanticContext = {
     { id: 'promo:tomyum_bundle', type: 'promotion', name: 'ชุดต้มยำโปร', domain: 'promotion' },
   ],
   lastAction: 'discover',
+};
+
+const STAY_RECOMMENDED_CONTEXT: SemanticContext = {
+  activeDomain: 'stay',
+  recentEntities: [
+    { id: 'stay:room-a', type: 'room', name: 'ห้องแนะนำ', domain: 'stay' },
+  ],
+  lastAction: 'recommend',
+};
+
+const STAY_AMBIGUOUS_CONTEXT: SemanticContext = {
+  activeDomain: 'stay',
+  recentEntities: [
+    { id: 'stay:room-deluxe-a', type: 'room', name: 'ห้องดีลักซ์', domain: 'stay' },
+    { id: 'stay:room-deluxe-b', type: 'room', name: 'ห้องดีลักซ์', domain: 'stay' },
+  ],
+  lastAction: 'recommend',
+};
+
+const ACTIVITY_ACTIVE_TASK_CONTEXT: SemanticContext = {
+  activeDomain: 'activity',
+  recentEntities: [
+    { id: 'horse:paradon', type: 'horse', name: 'ภาราดร', domain: 'activity' },
+  ],
+  lastAction: 'provide_information',
+  openQuestion: undefined,
 };
 
 export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
@@ -337,6 +366,165 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     expected: { domain: 'activity', action: 'correct_previous' },
     simulatedModelOutput: { domain: 'activity', intent: 'correct_party_size', action: 'correct_previous',
       entities: { partySize: 3 }, references: [{ type: 'previous_turn', refersToPriorContext: true }], constraints: [], confidence: 0.88, needsClarification: false } },
+
+  // ==========================================================================
+  // Phase F growth: new scenario families (THONGTHAI_HANDOFF.md's Phase F
+  // eval-corpus target). Not trivial wording duplicates of existing cases --
+  // each covers a distinct scenario shape the Dialog Manager's tests exercise.
+  // ==========================================================================
+
+  // --- activity booking (beyond horse -- ATV/archery) ---
+  { id: 'activity-book-02', category: 'formal', domainArea: 'activity',
+    message: 'จองยิงธนูบ่ายนี้ 4 คนครับ',
+    expected: { domain: 'activity', action: 'book' },
+    simulatedModelOutput: { domain: 'activity', intent: 'book_archery_activity', action: 'book',
+      entities: { resourceCode: 'activity-archery', time: 'บ่ายนี้', partySize: 4 }, references: [], constraints: [], confidence: 0.88, needsClarification: false } },
+  { id: 'activity-book-03', category: 'colloquial', domainArea: 'activity',
+    message: 'อยากลอง ATV พรุ่งนี้เช้า มีไหม',
+    expected: { domain: 'activity', action: 'ask' },
+    simulatedModelOutput: { domain: 'activity', intent: 'ask_atv_availability', action: 'ask',
+      entities: { resourceCode: 'activity-atv', date: 'พรุ่งนี้', time: 'เช้า' }, references: [], constraints: [], confidence: 0.82, needsClarification: false } },
+
+  // --- restaurant recommendation -> preorder continuation ---
+  { id: 'restaurant-preorder-followup-01', category: 'follow_up', domainArea: 'restaurant',
+    message: 'เอาชุดนี้ พรุ่งนี้เที่ยง',
+    context: RESTAURANT_SET_CONTEXT,
+    expected: { domain: 'restaurant', action: 'provide_information' },
+    simulatedModelOutput: { domain: 'restaurant', intent: 'select_set_with_time', action: 'provide_information',
+      entities: { date: 'พรุ่งนี้', time: 'เที่ยง' }, references: [{ type: 'previous_selection', refersToPriorContext: true }], constraints: [], confidence: 0.87, needsClarification: false } },
+  { id: 'restaurant-preorder-followup-02', category: 'follow_up', domainArea: 'restaurant',
+    message: 'ชื่อสมชาย เบอร์ 0812345678 ครับ',
+    context: RESTAURANT_SET_CONTEXT,
+    expected: { domain: 'restaurant', action: 'provide_information' },
+    simulatedModelOutput: { domain: 'restaurant', intent: 'provide_contact_details', action: 'provide_information',
+      entities: { customerName: 'สมชาย', phone: '0812345678' }, references: [], constraints: [], confidence: 0.9, needsClarification: false } },
+
+  // --- stay availability -> booking intent ---
+  { id: 'stay-availability-01', category: 'colloquial', domainArea: 'stay',
+    message: 'มีห้องว่างพรุ่งนี้ไหม',
+    expected: { domain: 'stay', action: 'ask' },
+    simulatedModelOutput: { domain: 'stay', intent: 'check_availability', action: 'ask',
+      entities: { date: 'พรุ่งนี้' }, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
+  { id: 'stay-availability-02', category: 'follow_up', domainArea: 'stay',
+    message: 'สองคน คืนเดียว มีห้องแนะนำไหม',
+    context: { activeDomain: 'stay', recentEntities: [], lastAction: 'ask' },
+    expected: { domain: 'stay', action: 'ask' },
+    simulatedModelOutput: { domain: 'stay', intent: 'ask_recommended_room', action: 'ask',
+      entities: { partySize: 2, quantity: 1 }, references: [], constraints: [], confidence: 0.84, needsClarification: false } },
+  { id: 'stay-book-01', category: 'follow_up', domainArea: 'stay',
+    message: 'จองห้องที่แนะนำเลยค่ะ',
+    context: STAY_RECOMMENDED_CONTEXT,
+    expected: { domain: 'stay', action: 'book' },
+    simulatedModelOutput: { domain: 'stay', intent: 'book_recommended_room', action: 'book',
+      entities: {}, references: [{ type: 'previous_selection', refersToPriorContext: true, resolvedEntityId: 'stay:room-a' }], constraints: [], confidence: 0.9, needsClarification: false } },
+
+  // --- promotion repeated discovery (regression family) ---
+  { id: 'promotion-repeat-discovery-01', category: 'colloquial', domainArea: 'promotion',
+    message: 'มีโปรอะไรบ้างคะ',
+    expected: { domain: 'promotion', action: 'discover' },
+    simulatedModelOutput: { domain: 'promotion', intent: 'discover_promotions', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.86, needsClarification: false } },
+  { id: 'promotion-repeat-discovery-02', category: 'colloquial', domainArea: 'promotion',
+    message: 'โปรวันนี้มีไรมั่ง',
+    expected: { domain: 'promotion', action: 'discover' },
+    simulatedModelOutput: { domain: 'promotion', intent: 'discover_promotions', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.83, needsClarification: false } },
+
+  // --- correction (beyond the required set) ---
+  { id: 'correction-04', category: 'correction', domainArea: 'activity',
+    message: 'ไม่ใช่ภาราดร เอาทองไทยแทน',
+    context: ACTIVITY_ACTIVE_TASK_CONTEXT,
+    expected: { domain: 'activity', action: 'correct_previous' },
+    simulatedModelOutput: { domain: 'activity', intent: 'correct_horse_selection', action: 'correct_previous',
+      entities: { horseName: 'ทองไทย' }, references: [{ type: 'previous_selection', refersToPriorContext: true, resolvedEntityId: 'horse:paradon' }], constraints: [], confidence: 0.88, needsClarification: false } },
+  { id: 'correction-05', category: 'correction', domainArea: 'activity',
+    message: 'เปลี่ยนวันที่เป็นวันเสาร์',
+    context: ACTIVITY_ACTIVE_TASK_CONTEXT,
+    expected: { domain: 'activity', action: 'correct_previous' },
+    simulatedModelOutput: { domain: 'activity', intent: 'correct_date', action: 'correct_previous',
+      entities: { date: 'วันเสาร์' }, references: [], constraints: [], confidence: 0.87, needsClarification: false } },
+
+  // --- topic switch (suspend/resume) ---
+  { id: 'topic-switch-03', category: 'topic_switch', domainArea: 'restaurant',
+    message: 'เดี๋ยวก่อน ร้านมีไรกิน',
+    context: ACTIVITY_ACTIVE_TASK_CONTEXT,
+    expected: { domain: 'restaurant', action: 'discover' },
+    simulatedModelOutput: { domain: 'restaurant', intent: 'discover_menu_mid_flow', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
+  { id: 'topic-switch-04', category: 'topic_switch', domainArea: 'activity',
+    message: 'กลับมาจองม้าต่อ',
+    context: { activeDomain: 'restaurant', recentEntities: [], lastAction: 'discover' },
+    expected: { domain: 'activity', action: 'ask' },
+    simulatedModelOutput: { domain: 'activity', intent: 'resume_horse_booking', action: 'ask',
+      entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
+
+  // --- explicit cancel ---
+  { id: 'cancel-explicit-01', category: 'cancel', domainArea: 'activity',
+    message: 'ยกเลิกการจองม้านะครับ',
+    context: ACTIVITY_ACTIVE_TASK_CONTEXT,
+    expected: { domain: 'activity', action: 'cancel' },
+    simulatedModelOutput: { domain: 'activity', intent: 'cancel_horse_booking', action: 'cancel',
+      entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false } },
+  { id: 'cancel-explicit-02', category: 'cancel', domainArea: 'promotion',
+    message: 'ไม่เอาโปรนี้แล้ว ยกเลิกค่ะ',
+    context: PROMO_CONTEXT,
+    expected: { domain: 'promotion', action: 'cancel' },
+    simulatedModelOutput: { domain: 'promotion', intent: 'cancel_promotion_redemption', action: 'cancel',
+      entities: {}, references: [], constraints: [], confidence: 0.88, needsClarification: false } },
+
+  // --- ambiguous reference (never guess) ---
+  { id: 'ambiguous-vague-horse-01', category: 'ambiguous', domainArea: 'activity',
+    message: 'เอาตัวนั้นแหละ',
+    context: HORSE_CONTEXT,
+    expected: { domain: 'activity', needsClarification: true },
+    simulatedModelOutput: { domain: 'activity', intent: 'select_horse_vague', action: 'confirm',
+      entities: {}, references: [{ type: 'previous_selection', refersToPriorContext: true }], constraints: [], confidence: 0.6, needsClarification: true, clarificationReason: 'ambiguous_entity' } },
+  { id: 'ambiguous-vague-room-01', category: 'ambiguous', domainArea: 'stay',
+    message: 'เอาห้องนั้น',
+    context: STAY_AMBIGUOUS_CONTEXT,
+    expected: { domain: 'stay', needsClarification: true },
+    simulatedModelOutput: { domain: 'stay', intent: 'select_room_vague', action: 'confirm',
+      entities: {}, references: [{ type: 'previous_selection', refersToPriorContext: true }], constraints: [], confidence: 0.58, needsClarification: true, clarificationReason: 'ambiguous_entity' } },
+
+  // --- no-action informational request (must not create a task) ---
+  { id: 'informational-01', category: 'informational', domainArea: 'restaurant',
+    message: 'ร้านเปิดกี่โมงคะ',
+    expected: { domain: 'restaurant', action: 'ask' },
+    simulatedModelOutput: { domain: 'restaurant', intent: 'ask_opening_hours', action: 'ask',
+      entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
+  { id: 'informational-02', category: 'informational', domainArea: 'ecosystem',
+    message: 'ที่นี่มีกิจกรรมอะไรบ้าง',
+    expected: { domain: 'ecosystem', action: 'discover' },
+    simulatedModelOutput: { domain: 'ecosystem', intent: 'discover_ecosystem_activities', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.84, needsClarification: false } },
+
+  // --- explicit-confirmation gating (READY != EXECUTE) ---
+  { id: 'confirm-gating-01', category: 'confirmation_gating', domainArea: 'activity',
+    message: 'จองเลยครับ',
+    context: ACTIVITY_ACTIVE_TASK_CONTEXT,
+    expected: { domain: 'activity', action: 'book' },
+    simulatedModelOutput: { domain: 'activity', intent: 'confirm_booking_explicit', action: 'book',
+      entities: {}, references: [], constraints: [], confidence: 0.92, needsClarification: false } },
+  { id: 'confirm-gating-02', category: 'confirmation_gating', domainArea: 'activity',
+    message: 'เอาม้าตัวนี้',
+    context: HORSE_CONTEXT,
+    expected: { domain: 'activity', action: 'confirm' },
+    simulatedModelOutput: { domain: 'activity', intent: 'select_horse', action: 'confirm',
+      entities: { horseName: 'ภาราดร' }, references: [{ type: 'previous_selection', refersToPriorContext: true, resolvedEntityId: 'horse:paradon' }], constraints: [], confidence: 0.88, needsClarification: false } },
+  { id: 'confirm-gating-03', category: 'confirmation_gating', domainArea: 'otop',
+    message: 'สั่งเลยค่ะ',
+    context: { activeDomain: 'otop', recentEntities: [{ id: 'otop:honey-jar', type: 'product', name: 'น้ำผึ้งป่า', domain: 'otop' }], lastAction: 'recommend' },
+    expected: { domain: 'otop', action: 'order' },
+    simulatedModelOutput: { domain: 'otop', intent: 'confirm_order_explicit', action: 'order',
+      entities: {}, references: [{ type: 'previous_selection', refersToPriorContext: true, resolvedEntityId: 'otop:honey-jar' }], constraints: [], confidence: 0.9, needsClarification: false } },
+
+  // --- one more explicit cancel (stay) -- rounds the corpus up to comfortably clear the Phase F target ---
+  { id: 'cancel-explicit-03', category: 'cancel', domainArea: 'stay',
+    message: 'ขอยกเลิกการจองห้องพักด้วยค่ะ',
+    context: STAY_RECOMMENDED_CONTEXT,
+    expected: { domain: 'stay', action: 'cancel' },
+    simulatedModelOutput: { domain: 'stay', intent: 'cancel_stay_booking', action: 'cancel',
+      entities: {}, references: [], constraints: [], confidence: 0.89, needsClarification: false } },
 ];
 
 function emptyContextForTest(): SemanticContext {

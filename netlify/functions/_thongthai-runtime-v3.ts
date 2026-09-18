@@ -8,6 +8,7 @@ import {
 } from './_operations-db';
 import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts, restaurantMenuAdvice } from './_restaurant-sot';
 import { loadActivePromotionsWorldFact, redeemPromotion } from './_promotions-runtime';
+import { loadActivityWorldFacts } from './_activity-sot';
 
 export const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
@@ -28,39 +29,6 @@ async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> 
   });
   if (!res.ok) { const body = await res.text().catch(() => ''); throw new Error(`Supabase ${res.status}: ${body.slice(0,180)}`); }
   return res;
-}
-async function loadActivityWorldFacts(): Promise<WorldFactRow[]> {
-  try {
-    const [offerRes, assetRes] = await Promise.all([
-      dbFetch('activity_offerings?active=eq.true&select=activity_code,activity_name,duration_minutes,price,currency,metadata&order=sort_order.asc'),
-      dbFetch('activity_assets?active=eq.true&select=activity_code,asset_code,name,asset_type,metadata&order=sort_order.asc'),
-    ]);
-    const offerings = await offerRes.json() as Array<{ activity_code:string; activity_name:string; duration_minutes:number; price:number|null; currency:string; metadata:Record<string,unknown> }>;
-    const assets = await assetRes.json() as Array<{ activity_code:string; asset_code:string; name:string; asset_type:string; metadata:Record<string,unknown> }>;
-    const resourceCode = (code:string) => code === 'atv' ? 'activity-atv' : code === 'horse' ? 'activity-horse' : 'activity-archery';
-    const codes = [...new Set(offerings.map(row => row.activity_code))];
-    const activities = codes.map(code => {
-      const rows = offerings.filter(row => row.activity_code === code);
-      const physical = assets.filter(row => row.activity_code === code);
-      return {
-        activityCode: code,
-        resourceCode: resourceCode(code),
-        name: rows[0]?.activity_name ?? code,
-        durations: rows.map(row => ({ durationMinutes:Number(row.duration_minutes), price:row.price == null ? null : Number(row.price), currency:row.currency })),
-        activeInventory: physical.length,
-        assets: physical.map(row => ({ code:row.asset_code, name:row.name, type:row.asset_type })),
-      };
-    });
-    const now = new Date().toISOString();
-    return [{
-      fact_key:'activity_catalog_live', category:'operations',
-      fact_value:{ timezone:'Asia/Bangkok', serviceHours:{ start:'09:00', end:'17:00' }, bookingSlotMinutes:30, activities },
-      source:'activity_offerings+activity_assets', updated_at:now,
-    }];
-  } catch (error) {
-    console.error('THONGTHAI_ACTIVITY_FACTS_ERROR', error instanceof Error ? error.message.slice(0,180) : 'unknown');
-    return [];
-  }
 }
 
 function provider(channel: BrainChannel): OpsChannel { return channel === 'facebook' ? 'facebook' : channel; }
