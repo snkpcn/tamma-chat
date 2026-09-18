@@ -192,7 +192,7 @@ function channelPolicy(channel: BrainChannel): string {
   return 'WEBSITE: slightly more detail is fine; avoid duplicating rich UI.';
 }
 
-function buildBrainPrompt(req: BrainRequest, communityOfferings: VerifiedCommunityOffering[], runtime: BrainRuntimeContext): string {
+export function buildBrainPrompt(req: BrainRequest, communityOfferings: VerifiedCommunityOffering[], runtime: BrainRuntimeContext): string {
   const channel = getBrainChannel(req.pageContext.section);
   const hasElderly = (req.guestContext.group.elderly ?? 0) > 0 || req.guestContext.constraints.some(item => /elderly|mobility|walk/i.test(item));
   const hasChildren = (req.guestContext.group.children ?? 0) > 0;
