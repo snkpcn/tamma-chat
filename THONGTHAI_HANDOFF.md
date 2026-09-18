@@ -134,9 +134,6 @@ semantic equivalence group).
 
 ## Last commit on this branch
 
-(Update this line after every push.)
-
-- Commit: *(see `git log -1` on `feature/thongthai-one-mind-architecture` — this line is
-  updated immediately after each push, so trust `git log`, not stale prose here, if they ever
-  disagree)*
+- Commit: `e4220be` — "Phase A: Bible/Brain contract — one canonical doctrine source, actually
+  consumed at runtime"
 - Phase A complete, pushed. Phase B not started.
