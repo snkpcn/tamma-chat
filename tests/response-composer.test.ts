@@ -194,3 +194,32 @@ test('LINE presentation stays plain and scan-friendly (no markdown heading/bold 
   assert.doesNotMatch(response.message,/^#|\*\*/m);
   assert.ok(response.message.length < 500);
 });
+
+
+test('model outage with verified grounded data still answers deterministically instead of generic retry copy', () => {
+  const response=composeDeterministicResponse(input({
+    degradation:degradation({
+      condition:'model_unavailable',
+      level:'grounded_deterministic',
+      reasonCodes:['provider_stack_exhausted','deterministic_fallback_available'],
+      retryable:true,
+    }),
+  }));
+  assert.match(response.message,/ส้มตำไทย/);
+  assert.match(response.message,/89 บาท/);
+  assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้/);
+  assert.deepEqual(response.usedFactKeys.sort(), ['menu:m1:name','menu:m1:price'].sort());
+});
+
+test('model outage without verified facts remains the last-resort concise failure', () => {
+  const response=composeDeterministicResponse(input({
+    knowledgeBundles:[],
+    degradation:degradation({
+      condition:'model_unavailable',
+      level:'human_handoff',
+      reasonCodes:['provider_stack_exhausted','human_followup_required'],
+      retryable:true,
+    }),
+  }));
+  assert.match(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้/);
+});
