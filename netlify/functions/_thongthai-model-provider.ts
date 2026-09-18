@@ -26,6 +26,14 @@ export class LLMAvailabilityError extends LLMRequestError {
 const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'] as const;
 const OPENAI_MODEL = 'gpt-5.6-luna';
 
+export function isAvailabilityHttpStatus(status: number): boolean {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+export function shouldFallbackToSecondaryProvider(error: unknown): boolean {
+  return error instanceof LLMAvailabilityError || error instanceof ProviderNotConfiguredError;
+}
+
 async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabel: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ProviderNotConfiguredError();
@@ -48,7 +56,7 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
       });
       if (!response.ok) {
         const body = await response.text().catch(() => '');
-        if (response.status === 429 || response.status === 503) {
+        if (isAvailabilityHttpStatus(response.status)) {
           lastAvailabilityError = `Gemini ${response.status}`;
           continue;
         }
@@ -63,7 +71,8 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
     } catch (error) {
       if ((error as Error).name === 'AbortError') { lastAvailabilityError = 'Gemini timeout'; continue; }
       if (error instanceof LLMRequestError) throw error;
-      throw new LLMRequestError(`Gemini network error: ${(error as Error).message}`);
+      lastAvailabilityError = `Gemini network error: ${(error as Error).message}`;
+      continue;
     } finally { clearTimeout(timeout); }
   }
   throw new LLMAvailabilityError(lastAvailabilityError || 'Gemini unavailable');
@@ -88,7 +97,7 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
     });
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      if ([429,500,502,503,504].includes(response.status)) throw new LLMAvailabilityError(`OpenAI ${response.status}`);
+      if (isAvailabilityHttpStatus(response.status)) throw new LLMAvailabilityError(`OpenAI ${response.status}`);
       throw new LLMRequestError(`OpenAI ${response.status}: ${body.slice(0, 240)}`);
     }
     const data = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
@@ -103,8 +112,9 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
 }
 
 /**
- * Gemini first, OpenAI fallback on availability-class failure only (a bad
- * request/blocked/parse-failure from Gemini is NOT retried against OpenAI --
+ * Gemini first, OpenAI fallback on availability-class failure OR when Gemini
+ * is not configured (a bad request/blocked/parse-failure from Gemini is NOT
+ * retried against OpenAI --
  * same behavior as before this extraction). `callerLabel` is purely for log
  * correlation (e.g. 'thongthai-brain-v3', 'semantic-interpreter') and carries
  * no behavioral meaning -- this keeps the provider module ignorant of which
@@ -113,7 +123,7 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
 export async function callPreferredModel(systemPrompt: string, messages: ChatTurn[], callerLabel = 'unknown'): Promise<string> {
   try { return await callGemini(systemPrompt, messages, callerLabel); }
   catch (error) {
-    if (!(error instanceof LLMAvailabilityError)) throw error;
+    if (!shouldFallbackToSecondaryProvider(error)) throw error;
     console.log('THONGTHAI_MODEL_PROVIDER_FALLBACK', callerLabel, 'gemini', 'openai');
     return callOpenAI(systemPrompt, messages);
   }
