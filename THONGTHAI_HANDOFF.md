@@ -329,5 +329,5 @@ either get lost)**:
 
 ## Last commit on this branch
 
-- Commit: `<update after next push>` — Phase D complete, pushed. Phases A, B, B.1, C also
-  complete. Phase E not started.
+- Commit: `d4896e6` — "Phase D: Working/Task State + memory-ownership boundaries"
+- Phases A, B, B.1, C, D complete, pushed. Phase E not started.
