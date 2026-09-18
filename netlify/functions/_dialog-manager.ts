@@ -27,10 +27,9 @@
 // same turn (same top-level eventId) reproduces the exact same sub-ids,
 // which Phase D's own proven dedup mechanism no-ops on the second pass.
 //
-// NOT wired into any live request handler. This is a shadow/orchestration
-// path only -- see THONGTHAI_HANDOFF.md's Phase F section for why, and for
-// what Phase G (the controlled channel migration/cutover phase) still has
-// to do before any of this touches real customer traffic.
+// Wired through the canonical One-Mind orchestrator. Customer-visible use is
+// still controlled by the strangler/cutover gate in thongthai-chat.ts; this
+// module itself remains channel-agnostic and never executes transactions.
 import type { SemanticAction, SemanticContext, SemanticContextEntity, SemanticDomain, SemanticTurn } from './_semantic-interpreter';
 import type { ConversationContextState } from './_conversation-context';
 import {
