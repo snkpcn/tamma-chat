@@ -133,7 +133,8 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
 
   let spice: ParsedPreferences['spice'] = null;
   if (includesAny(text, [/ไม่เผ็ด/u,/เผ็ดไม่ได้/u,/ไม่กินเผ็ด/u,/no spicy/i])) spice = 'none';
-  else if (includesAny(text, [/เผ็ดน้อย/u,/เผ็ดนิด/u,/ไม่ค่อยเผ็ด/u,/mild/i])) spice = 'mild';
+// RESTAURANT_CONSTRAINT_COPY_FIX_V1
+  else if (includesAny(text, [/เผ็ดน้อย/u,/เผ็ดนิด/u,/ไม่ค่อยเผ็ด/u,/ไม่อยากเผ็ดมาก/u,/ไม่เอาเผ็ดมาก/u,/ขอไม่เผ็ดมาก/u,/เผ็ดไม่มาก/u,/mild/i])) spice = 'mild';
   else if (includesAny(text, [/เผ็ดกลาง/u,/medium spicy/i])) spice = 'medium';
   else if (includesAny(text, [/เผ็ดมาก/u,/เอาแซ่บ/u,/แซ่บๆ/u,/spicy/i])) spice = 'hot';
 

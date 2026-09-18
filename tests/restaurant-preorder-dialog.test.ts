@@ -25,24 +25,24 @@ const set: RestaurantProposedSetState = {
 test('acceptance turn can start with no preorder fields and asks only for pickup date/time', () => {
   const parsed = parseRestaurantPreorderTurn('เอาชุดนี้', {}, NOW);
   const draft = mergeRestaurantPreorderDraft(undefined, parsed, NOW);
-  assert.deepEqual(missingRestaurantPreorderFields(draft), ['date','time','customerName']);
+  assert.deepEqual(missingRestaurantPreorderFields(draft), ['date','time','customerName','phone']);
   const copy = formatRestaurantSetPrompt({...set,preorderDraft:draft}, draft);
   assert.match(copy, /ขอวัน \+ เวลารับอาหาร/);
   assert.match(copy, /พรุ่งนี้ 14:00/);
 });
 
-test('natural Thai date/time reply is remembered and next prompt asks only for name', () => {
+test('natural Thai date/time reply is remembered and next prompt asks for name and phone', () => {
   const first = mergeRestaurantPreorderDraft(undefined, parseRestaurantPreorderTurn('เอาชุดนี้', {}, NOW), NOW);
   const parsed = parseRestaurantPreorderTurn('พรุ่งนี้บ่ายสอง', first, NOW);
   const draft = mergeRestaurantPreorderDraft(first, parsed, NOW);
   assert.equal(draft.date, '2026-09-19');
   assert.equal(draft.time, '14:00');
-  assert.deepEqual(missingRestaurantPreorderFields(draft), ['customerName']);
+  assert.deepEqual(missingRestaurantPreorderFields(draft), ['customerName','phone']);
   const copy = formatRestaurantSetPrompt({...set,preorderDraft:draft}, draft);
-  assert.match(copy, /ขอชื่อผู้สั่ง/);
+  assert.match(copy, /ขอชื่อผู้สั่ง \+ เบอร์โทร/);
 });
 
-test('name-only reply completes a pending preorder draft', () => {
+test('name-only reply keeps phone pending in preorder draft', () => {
   const current = {
     date:'2026-09-19', time:'14:00', customerName:null, phone:null, email:null,
     acceptedAt:NOW.toISOString(),
@@ -50,7 +50,7 @@ test('name-only reply completes a pending preorder draft', () => {
   const parsed = parseRestaurantPreorderTurn('นุ๊ก', current, NOW);
   const draft = mergeRestaurantPreorderDraft(current, parsed, NOW);
   assert.equal(draft.customerName, 'นุ๊ก');
-  assert.deepEqual(missingRestaurantPreorderFields(draft), []);
+  assert.deepEqual(missingRestaurantPreorderFields(draft), ['phone']);
 });
 
 test('one natural turn can contain date time name and phone', () => {
