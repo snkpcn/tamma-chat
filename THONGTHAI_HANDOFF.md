@@ -359,5 +359,6 @@ either get lost)**:
 
 ## Last commit on this branch
 
-- Commit: `<update after next push>` — D.1 correction complete, pushed. Phases A, B, B.1, C, D
-  also complete. Phase E not started.
+- Commit: `e5c21d4` — "D.1: distinguish system-evicted (superseded) tasks from customer
+  cancellation"
+- Phases A, B, B.1, C, D, D.1 complete, pushed. Phase E not started.
