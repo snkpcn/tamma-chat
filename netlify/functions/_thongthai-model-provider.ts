@@ -61,6 +61,22 @@ export class LLMAvailabilityError extends LLMRequestError {
 const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'] as const;
 const OPENAI_MODEL = 'gpt-5.6-luna';
 
+// Phase P root cause: the old per-attempt timeouts (10s per Gemini model,
+// 8s for OpenAI) were each independent, so a full retry/fallback chain
+// could take up to ~28s -- comfortably longer than a serverless Function's
+// execution ceiling, especially after the caller's own earlier work
+// (Supabase loads, prompt building) already spent part of that budget. A
+// single isolated call (e.g. at build time, with no competing pipeline
+// steps) stays well clear of this and misleadingly looks healthy, while
+// real requests on the heavier legacy-brain path do not. These constants
+// now bound the ENTIRE callPreferredModel operation -- every attempt
+// across both providers -- to one shared wall-clock budget, so worst-case
+// total latency can never regress back past a safe ceiling regardless of
+// how many attempts are made.
+const TOTAL_PROVIDER_BUDGET_MS = 7_000;
+const PER_ATTEMPT_CAP_MS = 6_000;
+const MIN_ATTEMPT_BUDGET_MS = 1_200;
+
 export function isAvailabilityHttpStatus(status: number): boolean {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
@@ -75,7 +91,7 @@ export function shouldFallbackToSecondaryProvider(error: unknown): boolean {
   return error instanceof LLMAvailabilityError || error instanceof ProviderNotConfiguredError;
 }
 
-async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabel: string): Promise<string> {
+async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabel: string, deadlineAt: number): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ProviderNotConfiguredError([{ provider: 'gemini', model: 'n/a', outcome: 'not_configured', elapsedMs: 0 }]);
   const contents = messages.map(message => ({
@@ -84,8 +100,14 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
   let lastAvailabilityError = '';
   const attempts: ProviderAttemptDiagnostic[] = [];
   for (const model of GEMINI_MODELS) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs < MIN_ATTEMPT_BUDGET_MS) {
+      lastAvailabilityError = 'Gemini shared timeout budget exhausted';
+      attempts.push({ provider: 'gemini', model, outcome: 'timeout', elapsedMs: 0 });
+      continue;
+    }
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const timeout = setTimeout(() => controller.abort(), Math.min(PER_ATTEMPT_CAP_MS, remainingMs));
     const startedAt = Date.now();
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -138,11 +160,15 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
   throw new LLMAvailabilityError(lastAvailabilityError || 'Gemini unavailable', attempts);
 }
 
-async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
+async function callOpenAI(systemPrompt: string, messages: ChatTurn[], deadlineAt: number): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new LLMAvailabilityError('OpenAI fallback not configured', [{ provider: 'openai', model: OPENAI_MODEL, outcome: 'not_configured', elapsedMs: 0 }]);
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs < MIN_ATTEMPT_BUDGET_MS) {
+    throw new LLMAvailabilityError('OpenAI shared timeout budget exhausted', [{ provider: 'openai', model: OPENAI_MODEL, outcome: 'timeout', elapsedMs: 0 }]);
+  }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
+  const timeout = setTimeout(() => controller.abort(), Math.min(PER_ATTEMPT_CAP_MS, remainingMs));
   const startedAt = Date.now();
   try {
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -198,21 +224,25 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
  * no behavioral meaning -- this keeps the provider module ignorant of which
  * caller is using it.
  *
- * Phase P: does not change provider selection/order/timeout behavior at all.
- * It only accumulates a ProviderAttemptDiagnostic per attempt (Gemini's two
+ * Phase P: accumulates a ProviderAttemptDiagnostic per attempt (Gemini's two
  * models, then OpenAI if reached) and attaches the FULL combined trail to
  * whichever error ultimately propagates, so a caller that fails can report
- * exactly what happened at each step.
+ * exactly what happened at each step. It also bounds the ENTIRE operation
+ * (every attempt, across both providers) to one shared TOTAL_PROVIDER_BUDGET_MS
+ * wall-clock deadline -- see the comment above that constant for why: the old
+ * independent per-attempt timeouts could sum to ~28s worst case, comfortably
+ * exceeding a serverless Function's execution ceiling.
  */
 export async function callPreferredModel(systemPrompt: string, messages: ChatTurn[], callerLabel = 'unknown'): Promise<string> {
-  try { return await callGemini(systemPrompt, messages, callerLabel); }
+  const deadlineAt = Date.now() + TOTAL_PROVIDER_BUDGET_MS;
+  try { return await callGemini(systemPrompt, messages, callerLabel, deadlineAt); }
   catch (geminiError) {
     if (!shouldFallbackToSecondaryProvider(geminiError)) throw geminiError;
     console.log('THONGTHAI_MODEL_PROVIDER_FALLBACK', callerLabel, 'gemini', 'openai');
     const geminiAttempts = geminiError instanceof LLMRequestError || geminiError instanceof ProviderNotConfiguredError
       ? geminiError.attempts : [];
     try {
-      return await callOpenAI(systemPrompt, messages);
+      return await callOpenAI(systemPrompt, messages, deadlineAt);
     } catch (openaiError) {
       if (openaiError instanceof LLMRequestError) {
         openaiError.attempts = [...geminiAttempts, ...openaiError.attempts];
