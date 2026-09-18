@@ -9,7 +9,11 @@ import {
   parseRestaurantPreorderTurn,
 } from '../netlify/functions/_restaurant-preorder-dialog';
 
-function request(message: string, history: BrainRequest['chatHistory'] = []): BrainRequest {
+function request(
+  message: string,
+  history: BrainRequest['chatHistory'] = [],
+  section: string | null = 'line',
+): BrainRequest {
   return {
     guestId:'00000000-0000-4000-8000-000000000001',
     message,
@@ -25,12 +29,18 @@ function request(message: string, history: BrainRequest['chatHistory'] = []): Br
       constraints:[],
     },
     journeyContext:{currentPlan:null,savedPlan:null,visitedExperiences:[],favorites:[],journalEntries:[]},
-    pageContext:{section:'line'},
+    pageContext:{section},
   };
 }
 
 test('generic first-visit recommendation stays ecosystem-wide, not restaurant-only', () => {
   assert.equal(isRestaurantAdvisorTurn(request('มาครั้งแรก มีอะไรแนะนำ'), {agentState:{}}), false);
+});
+
+test('the same broad wording stays restaurant-scoped when chat opens from dining', () => {
+  assert.equal(isRestaurantAdvisorTurn(request('มาครั้งแรก มีอะไรแนะนำ', [], 'dining'), {agentState:{}}), true);
+  assert.equal(isRestaurantAdvisorTurn(request('มีอะไรบ้าง', [], 'dining'), {agentState:{}}), true);
+  assert.equal(isRestaurantAdvisorTurn(request('เริ่มจากอะไรดี', [], 'dining'), {agentState:{}}), true);
 });
 
 test('explicit restaurant or food recommendation uses restaurant advisor', () => {
