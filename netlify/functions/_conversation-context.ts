@@ -29,6 +29,7 @@
 // phases use the SemanticTurn). Layers stay separated.
 
 import type { SemanticAction, SemanticContext, SemanticContextEntity, SemanticDomain } from './_semantic-interpreter';
+import { patchGuestAgentState } from './_guest-agent-state-store';
 
 export const CONVERSATION_CONTEXT_SCHEMA_VERSION = 'conversation-context-v1';
 
@@ -287,14 +288,8 @@ export async function loadConversationContext(guestDbId: string | null, now: Dat
 export async function persistConversationContext(guestDbId: string | null, state: ConversationContextState): Promise<void> {
   if (!guestDbId || !configuration()) return;
   try {
-    const res = await dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`);
-    const rows = await res.json() as Array<{ state?: Record<string, unknown> }>;
-    const next = { ...(rows[0]?.state ?? {}), conversationContext: state };
-    await dbFetch('guest_agent_state?on_conflict=guest_id', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ guest_id: guestDbId, state: next, updated_at: state.updatedAt }),
-    });
+    const applied = await patchGuestAgentState(guestDbId, { set:{ conversationContext:state } });
+    if (!applied) throw new Error('guest_agent_state_cas_exhausted');
   } catch (error) {
     console.error('CONVERSATION_CONTEXT_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
   }
