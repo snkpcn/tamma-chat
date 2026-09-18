@@ -564,5 +564,6 @@ any get lost)**:
 
 ## Last commit on this branch
 
-- Commit: `<update after next push>` — Phase F complete, pushed. Phases A, B, B.1, C, D, D.1, E
-  also complete. Phase G not started.
+- Commit: `d695da9` — "Phase F: Universal Dialog Manager (shadow pipeline, not wired to
+  production)"
+- Phases A, B, B.1, C, D, D.1, E, F complete, pushed. Phase G not started.
