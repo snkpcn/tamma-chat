@@ -38,6 +38,11 @@ import {
   type RealKnowledgeAdapterOptions,
 } from './_dialog-source-adapters';
 import type { KnowledgeBundle, KnowledgeSourceAdapters } from './_knowledge-resolver';
+import {
+  planKnowledgeDegradation,
+  planModelDegradation,
+  type DegradationPlan,
+} from './_graceful-degradation';
 
 export const ONE_MIND_ORCHESTRATOR_VERSION = 'one-mind-g1-v1';
 
@@ -87,6 +92,7 @@ export type OneMindTurnResult = {
   dialogPlan: DialogPlan;
   dialogDecision: DialogDecision;
   groundedKnowledge: KnowledgeBundle[];
+  knowledgeDegradation: DegradationPlan;
   conversationContextBefore: ConversationContextState;
   conversationContextAfter: ConversationContextState;
   taskStateBefore: TaskStateContainer;
@@ -226,6 +232,7 @@ export async function processThongthaiOneMindTurn(
     dialogPlan: dialog.plan,
     dialogDecision: dialog.decision,
     groundedKnowledge: dialog.bundles,
+    knowledgeDegradation: planKnowledgeDegradation(dialog.bundles),
     conversationContextBefore,
     conversationContextAfter,
     taskStateBefore,
@@ -247,4 +254,57 @@ export async function processThongthaiOneMindTurn(
       statePersisted: persistState,
     },
   };
+}
+
+
+export type OneMindResilientOptions = {
+  /** Set only by a trusted compatibility layer that has already determined an
+   * existing tested deterministic fallback can understand this exact turn. */
+  deterministicFallbackAvailable?: boolean;
+  /** Set only when an existing deterministic transaction-continuation parser
+   * can safely continue the current active task without model interpretation. */
+  deterministicContinuationAvailable?: boolean;
+};
+
+export type OneMindResilientResult =
+  | { status: 'ok'; result: OneMindTurnResult }
+  | {
+      status: 'degraded';
+      identity: OneMindIdentity;
+      conversationContext: ConversationContextState;
+      taskState: TaskStateContainer;
+      degradation: DegradationPlan;
+    };
+
+/** Failure-safe wrapper for Phase H. Provider failover happens inside the
+ * neutral model-provider first. Only after that stack is exhausted does this
+ * return a structured degradation result. No customer prose and no writes are
+ * performed on the degraded path. */
+export async function processThongthaiOneMindTurnResilient(
+  input: OneMindTurnInput,
+  options: OneMindResilientOptions = {},
+  dependencies: Partial<OneMindDependencies> = {},
+  now: Date = new Date(),
+): Promise<OneMindResilientResult> {
+  const deps: OneMindDependencies = { ...REAL_DEPENDENCIES, ...dependencies };
+  try {
+    return { status: 'ok', result: await processThongthaiOneMindTurn(input, deps, now) };
+  } catch (error) {
+    const identity = await resolveOneMindIdentity(input, deps);
+    const [conversationContext, taskState] = await Promise.all([
+      deps.loadConversationContext(identity.guestDbId, now),
+      deps.loadTaskState(identity.guestDbId),
+    ]);
+    return {
+      status: 'degraded',
+      identity,
+      conversationContext,
+      taskState,
+      degradation: planModelDegradation(error, {
+        taskState,
+        deterministicFallbackAvailable: options.deterministicFallbackAvailable,
+        deterministicContinuationAvailable: options.deterministicContinuationAvailable,
+      }),
+    };
+  }
 }
