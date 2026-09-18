@@ -865,3 +865,23 @@ intentionally retained.
 - Phases A through N complete.
 - Phase O is the only remaining phase.
 - Both production systems remain untouched as of this checkpoint.
+
+
+## Phase O activation checkpoint — 2026-09-18
+
+- Customer One-Mind merge is already on main at `579cc6bd8f58a6cc3847e489bbecfe07f3398471`.
+- Backoffice control-plane merge is already on its main at `45655cb4c16b9213017abff4961f81bb13336bcc`.
+- Production customer deploy `6aad4e387323b50008e1ec0b` and backoffice deploy
+  `6aad4e43bfe37a0008d2b0c1` are ready on those merge commits.
+- The additive `one_mind_traces` migration is present in the existing Supabase project with
+  RLS enabled, zero read policies and the expiry trigger installed.
+- Post-merge smoke correctly found the remaining activation gap:
+  `oneMindCutoverConfigured=false`; therefore One-Mind was deployed but not authoritative.
+- Production env has now been set to:
+  `THONGTHAI_ONE_MIND_CUTOVER=1`,
+  `THONGTHAI_RUN_LIVE_EVAL_ON_BUILD=1`,
+  `LIVE_EVAL_PROFILE=production-smoke`,
+  `LIVE_EVAL_MIN_PASS_PCT=90`.
+- This checkpoint commit intentionally triggers the final customer rebuild so the live-provider
+  semantic build gate runs with production credentials and the runtime receives the cutover flag.
+- Do not declare Phase O complete until that deploy is READY and the production smoke passes.
