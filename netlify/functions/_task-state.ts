@@ -37,6 +37,7 @@
 import type { SemanticContextEntity, SemanticDomain } from './_semantic-interpreter';
 import { missingPromotionFields, type PendingPromotionRedemption } from './_promotion-dialog';
 import { missingRestaurantPreorderFields, type RestaurantProposedSetState } from './_restaurant-preorder-dialog';
+import { patchGuestAgentState } from './_guest-agent-state-store';
 
 export const TASK_STATE_SCHEMA_VERSION = 'task-state-v1';
 export const MAX_RECENT_EVENT_IDS = 8;
@@ -459,14 +460,8 @@ export async function loadTaskState(guestDbId: string | null): Promise<TaskState
 export async function persistTaskState(guestDbId: string | null, container: TaskStateContainer): Promise<void> {
   if (!guestDbId || !configuration()) return;
   try {
-    const res = await dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`);
-    const rows = await res.json() as Array<{ state?: Record<string, unknown> }>;
-    const next = { ...(rows[0]?.state ?? {}), taskState: container };
-    await dbFetch('guest_agent_state?on_conflict=guest_id', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ guest_id: guestDbId, state: next, updated_at: new Date().toISOString() }),
-    });
+    const applied = await patchGuestAgentState(guestDbId, { set:{ taskState:container } });
+    if (!applied) throw new Error('guest_agent_state_cas_exhausted');
   } catch (error) {
     console.error('TASK_STATE_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
   }
