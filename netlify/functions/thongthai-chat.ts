@@ -9,7 +9,6 @@ import {
   type BrainChannel,
   type BrainRequest,
   type BrainResponse,
-  type BrainRuntimeContext,
   type BrainToolResult,
   type ChatTurn,
   type GuestContext,
@@ -38,17 +37,6 @@ import {
   type RestaurantPreorderDraft,
   type RestaurantProposedSetState,
 } from './_restaurant-preorder-dialog';
-import {
-  buildPendingPromotionRedemption,
-  decidePromotionFallback,
-  formatPromotionClarificationMessage,
-  formatPromotionListMessage,
-  formatPromotionRedeemPrompt,
-  missingPromotionFields,
-  parsePendingPromotionRedemption,
-  type PendingPromotionRedemption,
-  type PromotionListItem,
-} from './_promotion-dialog';
 
 export type {
   BrainRequest as ChatRequest,
@@ -314,6 +302,37 @@ function formatMoney(value: unknown): string {
   return Number.isFinite(n) ? `${Math.round(n)} บาท` : '-';
 }
 
+// RESTAURANT_CONSTRAINT_COPY_FIX_V1
+function formatRestaurantConstraintAck(advisor: any): string {
+  const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
+  if (!parsed) return '';
+
+  const labels: string[] = [];
+  const avoidProteins = Array.isArray(parsed.avoidProteins) ? parsed.avoidProteins.map(String) : [];
+  const proteinLabels: Record<string, string> = {
+    pork:'ไม่มีหมู', beef:'ไม่มีเนื้อวัว', chicken:'ไม่มีไก่', fish:'ไม่มีปลา', egg:'ไม่มีไข่',
+  };
+  for (const protein of avoidProteins) if (proteinLabels[protein]) labels.push(proteinLabels[protein]);
+
+  if (parsed.vegetarian === true) labels.push('มังสวิรัติ');
+
+  const avoidIngredients = Array.isArray(parsed.avoidIngredients) ? parsed.avoidIngredients.map(String) : [];
+  if (avoidIngredients.some(value => value.includes('ปลาร้า'))) labels.push('ไม่มีปลาร้า');
+  if (avoidIngredients.some(value => value.includes('กุ้ง'))) labels.push('ไม่มีกุ้งแห้ง');
+  if (avoidIngredients.some(value => value.includes('ถั่ว'))) labels.push('ไม่มีถั่วลิสง');
+
+  const allergens = Array.isArray(parsed.allergenFlags) ? parsed.allergenFlags.map(String) : [];
+  const allergenLabels: Record<string, string> = { peanut:'เลี่ยงถั่ว', shrimp:'เลี่ยงกุ้ง', fish:'เลี่ยงปลา', egg:'เลี่ยงไข่' };
+  for (const allergen of allergens) if (allergenLabels[allergen]) labels.push(allergenLabels[allergen]);
+
+  if (parsed.spice === 'none') labels.push('ไม่เผ็ด');
+  else if (parsed.spice === 'mild') labels.push('ไม่เผ็ดจัด');
+  else if (parsed.spice === 'medium') labels.push('เผ็ดกลาง');
+
+  const unique = [...new Set(labels)];
+  return unique.length ? `✅ คัดเมนูตามที่บอกให้แล้วครับ: ${unique.join(' · ')}` : '';
+}
+
 function formatAdvisorMessage(advisor: any): string {
   const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
   if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
@@ -334,7 +353,9 @@ function formatAdvisorMessage(advisor: any): string {
     const set = advisor.set;
     const lines = set.items.map((line: any) =>
       `• ${line.name} ×${line.quantity} — ${formatMoney(line.lineTotal)}`);
+    const constraintAck = formatRestaurantConstraintAck(advisor);
     return [
+      constraintAck,
       '🍽️ ชุดที่ทองไทยแนะนำ',
       '',
       ...lines,
@@ -350,14 +371,16 @@ function formatAdvisorMessage(advisor: any): string {
   }
   const rows = Array.isArray(advisor?.recommendations) ? advisor.recommendations.slice(0, advisor.mode === 'pairing' ? 3 : 4) : [];
   if (rows.length) {
+    const constraintAck = formatRestaurantConstraintAck(advisor);
     const intro = advisor?.mode === 'pairing'
       ? '🍽️ มีเมนูนี้แล้ว เพิ่มอีกนิดจะบาลานซ์โต๊ะกำลังดีครับ'
-      : '🍽️ เมนูที่น่าลองตอนนี้';
+      : constraintAck ? '🍽️ จากเมนูที่มีตอนนี้ ทองไทยแนะนำ' : '🍽️ เมนูที่น่าลองตอนนี้';
     return [
+      constraintAck,
       intro,
       '',
       ...rows.map((row: any) => {
-        const reason = Array.isArray(row.reasons) && row.reasons.length ? row.reasons[0] : row.summary;
+        const reason = Array.isArray(row.reasons) && row.reasons.length ? row.reasons[0] : '';
         return `• ${row.name} — ${formatMoney(row.price)}${reason ? `\n  ${reason}` : ''}`;
       }),
       notices[0] ? `\n⚠️ ${notices[0]}` : '',
@@ -484,187 +507,6 @@ async function restaurantPreorderDialogResponse(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Promotion OS Phase 2.1: deterministic discovery/redemption dialog. Never
-// preempts a healthy LLM -- promotionDiscoveryFallbackResponse is only ever
-// called from the LLMAvailabilityError catch block in the handler below.
-// promotionContinuationResponse, like the restaurant preorder dialog, DOES
-// run unconditionally before the LLM once a redemption is already in
-// progress, so a multi-turn redemption reliably finishes even if the model
-// recovers or degrades mid-conversation.
-// ---------------------------------------------------------------------------
-
-function activePromotionsFromRuntime(runtime: BrainRuntimeContext): PromotionListItem[] {
-  const fact = runtime.worldFacts.find(item => item.fact_key === 'active_promotions_live');
-  const value = fact?.fact_value as { promotions?: unknown } | undefined;
-  const promotions = Array.isArray(value?.promotions) ? value!.promotions : [];
-  return promotions.filter((item): item is PromotionListItem =>
-    Boolean(item) && typeof item === 'object' && typeof (item as PromotionListItem).campaignId === 'string');
-}
-
-function promotionRedemptionFailureMessage(detail: string): string {
-  const messages: Record<string, string> = {
-    promotion_not_found: 'ขออภัยครับ หาโปรโมชันนี้ไม่เจอในระบบแล้ว',
-    promotion_not_active: 'โปรโมชันนี้ยังไม่เปิดใช้งานหรือปิดไปแล้วครับ',
-    promotion_not_started: 'โปรโมชันนี้ยังไม่เริ่มครับ',
-    promotion_expired: 'โปรโมชันนี้หมดเขตแล้วครับ',
-    promotion_redemption_limit_reached: 'โปรโมชันนี้มีคนใช้สิทธิ์ครบแล้วครับ',
-    promotion_channel_not_allowed: 'โปรโมชันนี้ไม่ได้เปิดให้ใช้ในช่องทางนี้ครับ',
-    promotion_has_no_items: 'โปรโมชันนี้ยังไม่มีรายการสินค้าที่ใช้งานได้ครับ',
-    menu_item_unavailable: 'มีเมนูในโปรนี้เพิ่งไม่พร้อมขายครับ รบกวนสอบถามทีมงานอีกครั้ง',
-    menu_item_not_found: 'มีเมนูในโปรนี้หาไม่เจอในรายการล่าสุดครับ รบกวนสอบถามทีมงานอีกครั้ง',
-    invalid_requested_time: 'เวลารับอาหารยังไม่ชัดครับ ลองพิมพ์ใหม่แบบ "พรุ่งนี้ 14:00" ได้เลย',
-  };
-  return messages[detail] ?? 'ตอนนี้ระบบรับสิทธิ์โปรโมชันให้ยังไม่สำเร็จครับ ข้อมูลเดิมยังอยู่ ลองส่งอีกครั้งได้เลย';
-}
-
-const PROMOTION_TERMINAL_FAILURES = new Set([
-  'promotion_not_found', 'promotion_not_active', 'promotion_not_started', 'promotion_expired',
-  'promotion_redemption_limit_reached', 'promotion_channel_not_allowed', 'promotion_has_no_items',
-]);
-
-async function resolvePromotionRedemption(
-  pending: PendingPromotionRedemption,
-  request: BrainRequest,
-  guestDbId: string | null,
-  channel: BrainChannel,
-): Promise<BrainResponse> {
-  const parsed = parseRestaurantPreorderTurn(request.message, pending.draft);
-  const draft: RestaurantPreorderDraft = mergeRestaurantPreorderDraft(pending.draft, parsed);
-  const updatedPending: PendingPromotionRedemption = { ...pending, draft };
-  const missing = missingPromotionFields(updatedPending);
-
-  if (missing.length || !guestDbId) {
-    return {
-      message: !guestDbId
-        ? 'ทองไทยจำโปรนี้ไว้แล้วครับ แต่ตอนนี้ยังเปิดรายการในระบบไม่ได้ ลองส่งข้อความอีกครั้งได้เลยครับ'
-        : formatPromotionRedeemPrompt(updatedPending),
-      intent:'booking',
-      contextUpdates:{},
-      journeyAction:{type:'none',journey:null},
-      suggestedActions:[],
-      responseStyle:'direct',
-      agentStateUpdate:{ pendingPromotionRedemption: updatedPending },
-      semanticMemoryUpdates:[],
-      toolCalls:[],
-    };
-  }
-
-  const firstResponse: BrainResponse = {
-    message:'', intent:'booking', contextUpdates:{}, journeyAction:{type:'none',journey:null},
-    suggestedActions:[], responseStyle:'direct',
-    agentStateUpdate:{ pendingPromotionRedemption: updatedPending },
-    semanticMemoryUpdates:[], toolCalls:[],
-  };
-  const toolResults = await executeBrainTools(
-    guestDbId,
-    channel,
-    [{
-      name:'redeem_promotion',
-      args:{
-        campaignId: updatedPending.campaignId,
-        customerName: draft.customerName,
-        ...(draft.date ? { date: draft.date } : {}),
-        ...(draft.time ? { time: draft.time } : {}),
-        ...(draft.phone ? { phone: draft.phone } : {}),
-        ...(draft.email ? { email: draft.email } : {}),
-      },
-    }],
-    firstResponse,
-    request,
-  );
-  const result = toolResults[0];
-  if (!result?.ok) {
-    const detail = result?.detail ?? 'execution_failed';
-    const terminal = PROMOTION_TERMINAL_FAILURES.has(detail);
-    return {
-      ...firstResponse,
-      message: promotionRedemptionFailureMessage(detail),
-      agentStateUpdate: terminal
-        ? { clearPendingPromotionRedemption: true }
-        : { pendingPromotionRedemption: updatedPending },
-    };
-  }
-
-  let detail: Record<string, unknown> = {};
-  try { detail = JSON.parse(result.detail) as Record<string, unknown>; } catch { /* keep safe defaults */ }
-  const status = typeof detail.status === 'string' ? detail.status : 'redeemed';
-  const preorder = detail.preorder && typeof detail.preorder === 'object' ? detail.preorder as Record<string, unknown> : null;
-  const code = preorder && typeof preorder.preorderCode === 'string' ? preorder.preorderCode : '';
-
-  const message = status === 'redeemed'
-    ? [
-        'รับสิทธิ์โปรโมชันเรียบร้อยครับ ✅',
-        `💡 ${updatedPending.title}`,
-        code ? `🍽️ ออเดอร์ ${code}` : '',
-        draft.date && draft.time ? `🕑 รับอาหาร ${formatPreorderPickup(`${draft.date}T${draft.time}:00+07:00`)}` : '',
-        typeof updatedPending.promoTotal === 'number' ? `💰 ราคาพิเศษ ${Math.round(updatedPending.promoTotal)} บาท` : '',
-        '📌 สถานะ: รอร้านรับออเดอร์',
-      ].filter(Boolean).join('\n')
-    : [
-        'ทองไทยบันทึกคำขอรับสิทธิ์โปรโมชันไว้แล้วครับ ✅',
-        `💡 ${updatedPending.title}`,
-        'ทีมงานจะติดต่อกลับเพื่อดำเนินการต่อครับ',
-      ].join('\n');
-
-  return { ...firstResponse, message, agentStateUpdate:{ clearPendingPromotionRedemption: true } };
-}
-
-async function promotionContinuationResponse(
-  request: BrainRequest,
-  runtime: BrainRuntimeContext,
-  guestDbId: string | null,
-  channel: BrainChannel,
-): Promise<BrainResponse | null> {
-  const pending = parsePendingPromotionRedemption(runtime.agentState.pendingPromotionRedemption);
-  if (!pending) return null;
-  return resolvePromotionRedemption(pending, request, guestDbId, channel);
-}
-
-/**
- * Only ever invoked when the LLM brain itself is unavailable (see the
- * LLMAvailabilityError catch in the handler). Resolves discovery/redemption
- * intent entirely from real, already-eligibility-filtered
- * active_promotions_live data already loaded into runtime.worldFacts --
- * never a fresh guess, never an invented promotion/price/item.
- */
-async function promotionDiscoveryFallbackResponse(
-  request: BrainRequest,
-  runtime: BrainRuntimeContext,
-  guestDbId: string | null,
-  channel: BrainChannel,
-): Promise<BrainResponse | null> {
-  const promotions = activePromotionsFromRuntime(runtime);
-  const decision = decidePromotionFallback(request.message, promotions);
-
-  if (decision.kind === 'not_promo_related') return null;
-  if (decision.kind === 'no_promotions') {
-    return {
-      message: formatPromotionListMessage([]), intent:'information', contextUpdates:{},
-      journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
-      semanticMemoryUpdates:[], toolCalls:[],
-    };
-  }
-  if (decision.kind === 'clarify') {
-    return {
-      message: formatPromotionClarificationMessage(decision.promotions), intent:'information', contextUpdates:{},
-      journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
-      semanticMemoryUpdates:[], toolCalls:[],
-    };
-  }
-  if (decision.kind === 'list') {
-    return {
-      message: formatPromotionListMessage(decision.promotions), intent:'recommendation', contextUpdates:{},
-      journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
-      agentStateUpdate: decision.promotions.length === 1
-        ? { pendingPromotionRedemption: buildPendingPromotionRedemption(decision.promotions[0]!) }
-        : {},
-      semanticMemoryUpdates:[], toolCalls:[],
-    };
-  }
-  return resolvePromotionRedemption(decision.pending, request, guestDbId, channel);
-}
-
 async function deterministicRestaurantResponse(
   request: BrainRequest,
   runtime: { agentState: Record<string, unknown> },
@@ -751,25 +593,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
     ? history
     : [...history, { role: 'user', content: request.message }];
 
-  // A promotion redemption already in progress must reliably finish
-  // regardless of LLM health -- checked unconditionally, before the LLM,
-  // same discipline as the restaurant preorder continuation below.
-  const promotionContinuation = await promotionContinuationResponse(request, runtime, guestDbId, channel).catch(error => {
-    console.error('THONGTHAI_PROMOTION_CONTINUATION_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return null;
-  });
-  if (promotionContinuation) {
-    const polished = polishedResponse(promotionContinuation, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
-      message: polished.message,
-      intent: polished.intent,
-      contextUpdates: polished.contextUpdates,
-      journeyAction: polished.journeyAction,
-      suggestedActions: polished.suggestedActions,
-    });
-  }
-
   const deterministicRestaurant = await deterministicRestaurantResponse(request, runtime, guestDbId, channel).catch(error => {
     console.error('THONGTHAI_RESTAURANT_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
@@ -795,25 +618,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
       return json(503, { error: 'AI provider not configured', message: 'This deployment has no LLM API key configured.' });
     }
     if (error instanceof LLMAvailabilityError) {
-      // The LLM itself is unavailable -- try the deterministic promo fallback
-      // before giving up with the generic "try again" message. Only engages
-      // for a message that actually mentions a promotion; anything else
-      // still gets the plain unavailability reply.
-      const promotionFallback = await promotionDiscoveryFallbackResponse(request, runtime, guestDbId, channel).catch(fallbackError => {
-        console.error('THONGTHAI_PROMOTION_FALLBACK_ERROR', fallbackError instanceof Error ? fallbackError.message.slice(0, 220) : 'unknown');
-        return null;
-      });
-      if (promotionFallback) {
-        const polished = polishedResponse(promotionFallback, channel);
-        await persistBrainRuntime(guestDbId, channel, polished);
-        return json(200, {
-          message: polished.message,
-          intent: polished.intent,
-          contextUpdates: polished.contextUpdates,
-          journeyAction: polished.journeyAction,
-          suggestedActions: polished.suggestedActions,
-        });
-      }
       const fallback = polishedResponse(availabilityBrainResponse(), channel);
       return json(200, fallback);
     }

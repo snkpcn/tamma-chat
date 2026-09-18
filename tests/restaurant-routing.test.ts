@@ -2,6 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isRestaurantAdvisorTurn } from '../netlify/functions/thongthai-chat';
 import type { BrainRequest } from '../netlify/functions/_thongthai-brain-v3';
+import {
+  formatRestaurantSetPrompt,
+  mergeRestaurantPreorderDraft,
+  missingRestaurantPreorderFields,
+  parseRestaurantPreorderTurn,
+} from '../netlify/functions/_restaurant-preorder-dialog';
 
 function request(message: string, history: BrainRequest['chatHistory'] = []): BrainRequest {
   return {
@@ -59,6 +65,27 @@ test('pending preorder keeps date time and name replies inside restaurant flow',
   };
   assert.equal(isRestaurantAdvisorTurn(request('พรุ่งนี้ 14:00'), runtime), true);
   assert.equal(isRestaurantAdvisorTurn(request('นุ๊ก'), runtime), true);
+  assert.equal(isRestaurantAdvisorTurn(request('นุ๊ก 0610169999'), runtime), true);
+});
+
+test('restaurant preorder draft requires phone and formats a short contact prompt', () => {
+  const draft = mergeRestaurantPreorderDraft(undefined, parseRestaurantPreorderTurn(
+    'เอาชุดเมื่อกี้ พรุ่งนี้ 14:00',
+    {},
+    new Date('2026-09-17T05:00:00.000Z'),
+  ), new Date('2026-09-17T05:00:00.000Z'));
+  assert.deepEqual(missingRestaurantPreorderFields(draft), ['customerName','phone']);
+  assert.match(formatRestaurantSetPrompt({
+    source:'restaurant_menu_advisor_v1',
+    items:[{name:'ตำลาว',quantity:1}],
+    total:79,
+    createdAt:'2026-09-17T05:00:00.000Z',
+  }, draft), /ขอชื่อผู้สั่ง \+ เบอร์โทร/);
+
+  const completed = mergeRestaurantPreorderDraft(draft, parseRestaurantPreorderTurn('นุ๊ก 0610169999', draft));
+  assert.deepEqual(missingRestaurantPreorderFields(completed), []);
+  assert.equal(completed.customerName, 'นุ๊ก');
+  assert.equal(completed.phone, '0610169999');
 });
 
 // Promotion OS Phase 2: a promotion mention must always reach the LLM brain's
