@@ -272,6 +272,110 @@ function deterministicMessages(language: ResponseLanguage) {
   };
 }
 
+function groundedValueMap(input: ResponseComposerInput): Map<string, unknown> {
+  const map = new Map<string, unknown>();
+  for (const fact of allFacts(input.knowledgeBundles)) map.set(fact.key, fact.value);
+  return map;
+}
+
+function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; keys: string[] } {
+  const facts = groundedValueMap(input);
+  const lines: string[] = [];
+  const keys: string[] = [];
+
+  const add = (line: string, used: string[]) => {
+    if (!line.trim() || lines.length >= 6) return;
+    lines.push(line);
+    keys.push(...used);
+  };
+
+  if (input.knowledgeBundles.some(bundle => bundle.domain === 'restaurant')) {
+    const ids = [...new Set([...facts.keys()].map(key => key.match(/^menu:([^:]+):name$/)?.[1]).filter(Boolean) as string[])];
+    for (const id of ids) {
+      const nameKey = `menu:${id}:name`;
+      const priceKey = `menu:${id}:price`;
+      const orderableKey = `menu:${id}:orderable`;
+      if (facts.get(orderableKey) === false) continue;
+      const name = facts.get(nameKey);
+      if (typeof name !== 'string' || !name) continue;
+      const price = facts.get(priceKey);
+      add(
+        typeof price === 'number' ? `• ${name} — ${Math.round(price)} บาท` : `• ${name}`,
+        typeof price === 'number' ? [nameKey, priceKey] : [nameKey],
+      );
+    }
+  }
+
+  if (!lines.length && input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) {
+    const ids = [...new Set([...facts.keys()].map(key => key.match(/^activity:([^:]+):name$/)?.[1]).filter(Boolean) as string[])];
+    for (const id of ids) {
+      const nameKey = `activity:${id}:name`;
+      const name = facts.get(nameKey);
+      if (typeof name === 'string' && name) add(`• ${name}`, [nameKey]);
+    }
+    if (!lines.length) {
+      for (const [key, value] of facts) {
+        if (/^activity_asset:.*:name$/.test(key) && typeof value === 'string') add(`• ${value}`, [key]);
+      }
+    }
+  }
+
+  if (!lines.length && input.knowledgeBundles.some(bundle => bundle.domain === 'stay')) {
+    const ids = [...new Set([...facts.keys()].map(key => key.match(/^stay:([^:]+):name$/)?.[1]).filter(Boolean) as string[])];
+    for (const id of ids) {
+      const nameKey = `stay:${id}:name`;
+      const capacityKey = `stay:${id}:capacity`;
+      const name = facts.get(nameKey);
+      const capacity = facts.get(capacityKey);
+      if (typeof name !== 'string' || !name) continue;
+      add(
+        typeof capacity === 'number' && capacity > 0 ? `• ${name} — รองรับ ${capacity} คน` : `• ${name}`,
+        typeof capacity === 'number' ? [nameKey, capacityKey] : [nameKey],
+      );
+    }
+  }
+
+  if (!lines.length && input.knowledgeBundles.some(bundle => bundle.domain === 'otop')) {
+    const ids = [...new Set([...facts.keys()].map(key => key.match(/^otop:([^:]+):name$/)?.[1]).filter(Boolean) as string[])];
+    for (const id of ids) {
+      const nameKey = `otop:${id}:name`;
+      const priceKey = `otop:${id}:price`;
+      const name = facts.get(nameKey);
+      const price = facts.get(priceKey);
+      if (typeof name !== 'string' || !name) continue;
+      add(typeof price === 'number' ? `• ${name} — ${Math.round(price)} บาท` : `• ${name}`,
+        typeof price === 'number' ? [nameKey, priceKey] : [nameKey]);
+    }
+  }
+
+  if (!lines.length) {
+    for (const [key, value] of facts) {
+      if (lines.length >= 5) break;
+      if (/:(?:name|title)$/.test(key) && typeof value === 'string' && value.trim()) add(`• ${value.trim()}`, [key]);
+    }
+  }
+
+  return { lines, keys:[...new Set(keys)] };
+}
+
+export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
+  const grounded = compactGroundedLines(input);
+  if (!grounded.lines.length) return null;
+  const intro = input.language === 'th'
+    ? 'ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้ครับ'
+    : 'Here is what I can verify right now:';
+  const message = [intro, '', ...grounded.lines].join('\n');
+  return {
+    message:polishCustomerMessage(message, input.channel),
+    mode:'deterministic',
+    usedFactKeys:grounded.keys,
+    composerVersion:RESPONSE_COMPOSER_VERSION,
+    bibleVersion:THONGTHAI_BIBLE_VERSION,
+    channel:input.channel,
+    language:input.language,
+  };
+}
+
 export function composeDeterministicResponse(input: ResponseComposerInput): ComposedResponse {
   const copy = deterministicMessages(input.language);
   const outcome = input.operationalOutcome;
@@ -300,6 +404,10 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
   } else if (input.degradation.condition === 'model_unavailable'
       || input.degradation.condition === 'model_invalid'
       || input.degradation.condition === 'internal_error') {
+    if (input.degradation.level === 'grounded_deterministic') {
+      const grounded = composeGroundedDeterministicResponse(input);
+      if (grounded) return grounded;
+    }
     message = copy.model;
   } else if (input.dialogDecision.responseIntent === 'cannot_verify_comparison') {
     message = copy.comparison;
@@ -368,7 +476,8 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
       language:input.language,
     };
   } catch (error) {
-    const degraded = planModelDegradation(error, { deterministicFallbackAvailable:true });
+    const groundedAvailable = allFacts(input.knowledgeBundles).length > 0;
+    const degraded = planModelDegradation(error, { deterministicFallbackAvailable:groundedAvailable });
     return composeDeterministicResponse({ ...input, degradation:degraded });
   }
 }
