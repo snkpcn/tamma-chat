@@ -248,5 +248,6 @@ For Phase D itself:
 
 ## Last commit on this branch
 
-- Commit: `<update after next push>` — Phase C complete, pushed. Phases A, B, B.1 also
-  complete. Phase D not started.
+- Commit: `a400462` — "Phase C: server-side conversation continuity (bounded, expiring,
+  cross-channel)"
+- Phases A, B, B.1, C complete, pushed. Phase D not started.
