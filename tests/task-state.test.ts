@@ -10,7 +10,7 @@ import {
   addTaskConstraint, adaptBookingSessionToTask, adaptPendingPromotionRedemptionToTask,
   adaptRestaurantProposedSetToTask, applyTaskStateEvent, canTransitionTask, createActiveTask,
   emptyTaskStateContainer, mergeTaskSlots, parseTaskState, resumeSuspendedTask, serializeTaskState,
-  setSelectedEntities, startNewActiveTask, suspendActiveTask, transitionTask, TaskStateError,
+  setSelectedEntities, startNewActiveTask, supersedeTask, suspendActiveTask, transitionTask, TaskStateError,
   TaskTransitionError, TASK_STATE_SCHEMA_VERSION, TASK_TYPE_DOMAIN,
   type ActiveTask, type LegacyBookingSessionRow, type TaskStateContainer,
 } from '../netlify/functions/_task-state';
@@ -147,7 +147,8 @@ test('resume while a different task is active swaps them (neither is destroyed)'
   assert.equal(container.suspendedTask?.type, 'restaurant_preorder');
 });
 
-test('suspending a second task while one is already suspended evicts (cancels) the older one rather than growing an unbounded stack', () => {
+// [D.1] system eviction vs customer cancellation must never be conflated.
+test('suspending a second task while one is already suspended evicts the older one as SUPERSEDED, never CANCELLED, and preserves it in lastSupersededTask rather than dropping it', () => {
   let container = startNewActiveTask(emptyTaskStateContainer(), { type: 'activity_booking', sourceChannel: 'web', now: NOW }, NOW);
   container = suspendActiveTask(container, NOW);
   const firstSuspendedId = container.suspendedTask!.taskId;
@@ -155,6 +156,33 @@ test('suspending a second task while one is already suspended evicts (cancels) t
   container = suspendActiveTask(container, NOW);
   assert.notEqual(container.suspendedTask!.taskId, firstSuspendedId, 'the suspended slot must hold the NEWER suspended task');
   assert.equal(container.suspendedTask!.type, 'restaurant_preorder');
+  assert.equal(container.lastSupersededTask?.taskId, firstSuspendedId, 'the evicted task must be preserved, not silently dropped');
+  assert.equal(container.lastSupersededTask?.status, 'superseded', 'a system eviction must NEVER be reported as customer cancellation');
+});
+
+test('D.1: customer-initiated cancellation stays CANCELLED; only the internal eviction path ever produces SUPERSEDED', () => {
+  const task = createActiveTask({ type: 'activity_booking', sourceChannel: 'web', now: NOW });
+  const customerCancelled = transitionTask(task, 'cancelled', NOW);
+  assert.equal(customerCancelled.status, 'cancelled');
+
+  // No entry in the generic transition graph can ever reach 'superseded' --
+  // it is reachable ONLY via supersedeTask/suspendActiveTask's internal
+  // eviction path, never via a caller-driven transitionTask call.
+  const allStatuses: Array<typeof task.status> = ['collecting', 'ready', 'executing', 'requested', 'completed', 'cancelled', 'failed', 'superseded'];
+  for (const from of allStatuses) assert.equal(canTransitionTask(from, 'superseded'), false, `no status may transition to 'superseded' via the generic graph (checked from "${from}")`);
+});
+
+test('D.1: supersedeTask is idempotent on an already-terminal task (never relabels a real cancellation as superseded)', () => {
+  const task = createActiveTask({ type: 'activity_booking', sourceChannel: 'web', now: NOW });
+  const cancelled = transitionTask(task, 'cancelled', NOW);
+  const result = supersedeTask(cancelled, NOW);
+  assert.equal(result.status, 'cancelled', 'supersedeTask must never overwrite an existing terminal status, including a real customer cancellation');
+});
+
+test('D.1: eviction never touches operational booking/order/payment state -- _task-state.ts only persists under guest_agent_state', async () => {
+  const source = await (await import('node:fs/promises')).readFile(new URL('../netlify/functions/_task-state.ts', import.meta.url), 'utf8');
+  const dbFetchTargets = [...source.matchAll(/dbFetch\(`([a-z_]+)\?/g)].map(match => match[1]);
+  for (const target of dbFetchTargets) assert.equal(target, 'guest_agent_state', `_task-state.ts must only read/write guest_agent_state, never an operational table directly (found: ${target})`);
 });
 
 test('suspend/resume are no-ops when there is nothing to act on', () => {
@@ -300,6 +328,7 @@ test('emptyTaskStateContainer has the expected shape', () => {
   const container: TaskStateContainer = emptyTaskStateContainer();
   assert.equal(container.activeTask, null);
   assert.equal(container.suspendedTask, null);
+  assert.equal(container.lastSupersededTask, null);
   assert.deepEqual(container.recentEventIds, []);
   assert.equal(container.schemaVersion, TASK_STATE_SCHEMA_VERSION);
 });

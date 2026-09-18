@@ -274,6 +274,36 @@ the same or next commit.
     imports from `_semantic-interpreter.ts`/`_promotion-dialog.ts`/`_restaurant-preorder-dialog.ts`
     (never the runtime/brain/model-provider layer), and that none of those three import back
     from `_task-state.ts`.
+- [x] **D.1 — correction: system eviction must never be reported as customer cancellation.
+  DONE.** User caught a real correctness bug in Phase D's `suspendActiveTask`: when a second
+  task got suspended while one was already suspended, the older one was transitioned to
+  `cancelled` — conflating "the customer explicitly cancelled" with "the system discarded
+  superseded conversational work to keep the bounded single-slot stack." Worse, that transition
+  result was computed and then discarded via `void evicted` — the evicted task's status was
+  never actually reachable anywhere, a dead-code artifact from the original implementation.
+  - Added a new distinct terminal `ActiveTaskStatus` value: `'superseded'`. It is NOT listed as
+    a valid target in `TASK_TRANSITIONS` from any status — the ONLY way to reach it is the new
+    internal `supersedeTask(task, now)` function, called exclusively from `suspendActiveTask`'s
+    eviction path. A caller can never reach `superseded` via `transitionTask` — a new test
+    (`canTransitionTask(from, 'superseded')`) proves this is false from every status.
+  - `supersedeTask` is idempotent on an already-terminal task (a real `cancelled` task passed
+    through it stays `cancelled` — it can never relabel a genuine customer cancellation).
+  - The evicted task is no longer silently dropped: `TaskStateContainer` gained a new field,
+    `lastSupersededTask` (holds only the most recent eviction, bounded, same posture as
+    `suspendedTask` itself — not a growing log), so the distinction is actually observable, not
+    just correctly named in code nobody could see.
+  - No operational booking/order/payment status is touched by any of this — a new static test
+    (`tests/task-state.test.ts`) regex-scans `_task-state.ts`'s `dbFetch` calls and asserts every
+    one targets `guest_agent_state` only, never an operational table.
+  - `parseTaskState`/`serializeTaskState` updated to carry `lastSupersededTask` through the
+    round-trip; defensive parsing unaffected (an invalid task in that slot falls back to `null`,
+    same as `activeTask`/`suspendedTask`).
+  - 3 new regression tests added (eviction produces `superseded` + is preserved, no
+    generic-graph path reaches `superseded`, `supersedeTask` never overwrites a real
+    `cancelled`/other terminal status) plus 1 static operational-table-isolation test. `npm
+    test`: **261/261 passing**, verified flake-free over 5 consecutive runs. New module bundles
+    standalone cleanly (16.4kb, was 15.9kb). Production bundles
+    (`thongthai-chat.ts`/`line-webhook.ts`) unaffected — still not wired in.
 - [ ] Phase E — Knowledge Resolver / Source-of-Truth graph. NOT STARTED. (Note: audit found
   `world_facts` is a small 27-row policy/config table, NOT the live business database — live
   menu/activity/promotion/room data lives in dedicated domain tables/views. The resolver must
@@ -329,5 +359,5 @@ either get lost)**:
 
 ## Last commit on this branch
 
-- Commit: `d4896e6` — "Phase D: Working/Task State + memory-ownership boundaries"
-- Phases A, B, B.1, C, D complete, pushed. Phase E not started.
+- Commit: `<update after next push>` — D.1 correction complete, pushed. Phases A, B, B.1, C, D
+  also complete. Phase E not started.

@@ -46,8 +46,12 @@ export type ActiveTaskType =
   | 'activity_booking' | 'stay_booking' | 'restaurant_booking' | 'restaurant_preorder'
   | 'promotion_redemption' | 'otop_order' | 'cafe_inquiry' | 'membership' | 'journey_planning';
 
+/** `superseded` is a distinct terminal status from `cancelled`: `cancelled`
+ *  means the CUSTOMER explicitly cancelled; `superseded` means the SYSTEM
+ *  evicted a bounded-stack suspended task to make room for a newer one. The
+ *  two must never be conflated -- see D.1 in THONGTHAI_HANDOFF.md. */
 export type ActiveTaskStatus =
-  | 'collecting' | 'ready' | 'executing' | 'requested' | 'completed' | 'cancelled' | 'failed';
+  | 'collecting' | 'ready' | 'executing' | 'requested' | 'completed' | 'cancelled' | 'failed' | 'superseded';
 
 export type ActiveTask = {
   taskId: string;
@@ -67,6 +71,11 @@ export type TaskStateContainer = {
   schemaVersion: typeof TASK_STATE_SCHEMA_VERSION;
   activeTask: ActiveTask | null;
   suspendedTask: ActiveTask | null;
+  /** The most recent task the system evicted from the (bounded, single-slot)
+   *  suspended position -- never the customer's own cancellation. Holds only
+   *  the latest one (not a growing log), same bounded-by-design posture as
+   *  suspendedTask itself. Null when nothing has ever been evicted. */
+  lastSupersededTask: ActiveTask | null;
   recentEventIds: string[];
 };
 
@@ -88,6 +97,11 @@ export const TASK_TYPE_DOMAIN: Record<ActiveTaskType, SemanticDomain> = {
  *  `cancelled` are all terminal: reopening a finished task is explicitly not
  *  supported here (create a new task instead), matching the Phase D brief's
  *  "do not allow requested -> collecting / completed -> executing" rule. */
+// `superseded` is deliberately NOT a listed target from any status here: the
+// only way a task becomes `superseded` is the internal eviction path in
+// suspendActiveTask (via supersedeTask below), never a caller-driven
+// transitionTask call -- so a customer-initiated action can never produce it,
+// and an eviction can never masquerade as a validated user transition.
 const TASK_TRANSITIONS: Record<ActiveTaskStatus, ActiveTaskStatus[]> = {
   collecting: ['ready', 'cancelled'],
   ready: ['executing', 'collecting', 'cancelled'],
@@ -96,6 +110,7 @@ const TASK_TRANSITIONS: Record<ActiveTaskStatus, ActiveTaskStatus[]> = {
   completed: [],
   cancelled: [],
   failed: [],
+  superseded: [],
 };
 
 export class TaskTransitionError extends Error {
@@ -120,7 +135,7 @@ function recomputeMissingFields(slots: Record<string, unknown>, requiredFields: 
 }
 
 export function emptyTaskStateContainer(): TaskStateContainer {
-  return { schemaVersion: TASK_STATE_SCHEMA_VERSION, activeTask: null, suspendedTask: null, recentEventIds: [] };
+  return { schemaVersion: TASK_STATE_SCHEMA_VERSION, activeTask: null, suspendedTask: null, lastSupersededTask: null, recentEventIds: [] };
 }
 
 export function createActiveTask(params: {
@@ -187,7 +202,18 @@ export function canTransitionTask(from: ActiveTaskStatus, to: ActiveTaskStatus):
   return TASK_TRANSITIONS[from].includes(to);
 }
 
-const TERMINAL_STATUSES: ReadonlySet<ActiveTaskStatus> = new Set(['completed', 'cancelled', 'failed']);
+const TERMINAL_STATUSES: ReadonlySet<ActiveTaskStatus> = new Set(['completed', 'cancelled', 'failed', 'superseded']);
+
+/** System-internal eviction transformation -- NOT exposed via transitionTask
+ *  and NOT reachable through TASK_TRANSITIONS. This is the ONLY function
+ *  that produces `superseded`, and it is only ever called from
+ *  suspendActiveTask when a bounded-stack eviction happens, never from a
+ *  customer-driven action. A task already terminal is returned unchanged
+ *  (idempotent, never resurrects or relabels a real customer cancellation). */
+export function supersedeTask(task: ActiveTask, now: Date = new Date()): ActiveTask {
+  if (TERMINAL_STATUSES.has(task.status)) return task;
+  return { ...task, status: 'superseded', updatedAt: now.toISOString() };
+}
 
 /** Starts a brand-new task. Throws if an unfinished (non-terminal) task is
  *  already active -- the caller must suspend or cancel it first, so an
@@ -207,16 +233,19 @@ export function startNewActiveTask(
 
 /** Suspends the active task (a topic switch). No-op if nothing is active.
  *  Bounded to exactly one suspended slot: if a task is already suspended, it
- *  is evicted (transitioned to cancelled) to make room, rather than growing
- *  an unlimited stack -- an explicit, tested, documented choice, not a
- *  silent data loss. */
+ *  is EVICTED -- transitioned to `superseded`, never `cancelled` -- to make
+ *  room, rather than growing an unlimited stack. This is a SYSTEM decision,
+ *  not the customer's; conflating it with a customer-initiated cancellation
+ *  would misreport intent (see D.1 in THONGTHAI_HANDOFF.md). The evicted
+ *  task is preserved (not silently dropped) as `lastSupersededTask`, so a
+ *  caller can still see what happened to it. */
 export function suspendActiveTask(container: TaskStateContainer, now: Date = new Date()): TaskStateContainer {
   if (!container.activeTask) return container;
-  const evicted = container.suspendedTask && !TERMINAL_STATUSES.has(container.suspendedTask.status)
-    ? transitionTask(container.suspendedTask, 'cancelled', now)
-    : container.suspendedTask;
-  void evicted;
-  return { ...container, activeTask: null, suspendedTask: container.activeTask };
+  const priorSuspended = container.suspendedTask;
+  const lastSupersededTask = priorSuspended && !TERMINAL_STATUSES.has(priorSuspended.status)
+    ? supersedeTask(priorSuspended, now)
+    : container.lastSupersededTask;
+  return { ...container, activeTask: null, suspendedTask: container.activeTask, lastSupersededTask };
 }
 
 /** Resumes the suspended task. No-op if nothing is suspended. If another
@@ -308,8 +337,9 @@ export function parseTaskState(raw: unknown): TaskStateContainer {
   if (candidate.schemaVersion !== TASK_STATE_SCHEMA_VERSION) return emptyTaskStateContainer();
   const activeTask = isValidActiveTask(candidate.activeTask) ? candidate.activeTask : null;
   const suspendedTask = isValidActiveTask(candidate.suspendedTask) ? candidate.suspendedTask : null;
+  const lastSupersededTask = isValidActiveTask(candidate.lastSupersededTask) ? candidate.lastSupersededTask : null;
   const recentEventIds = Array.isArray(candidate.recentEventIds) ? candidate.recentEventIds.filter((x): x is string => typeof x === 'string').slice(-MAX_RECENT_EVENT_IDS) : [];
-  return { schemaVersion: TASK_STATE_SCHEMA_VERSION, activeTask, suspendedTask, recentEventIds };
+  return { schemaVersion: TASK_STATE_SCHEMA_VERSION, activeTask, suspendedTask, lastSupersededTask, recentEventIds };
 }
 
 // ---------------------------------------------------------------------------
