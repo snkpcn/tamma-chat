@@ -42,6 +42,7 @@ import {
   buildPendingPromotionRedemption,
   decidePromotionFallback,
   formatPromotionClarificationMessage,
+  isPromotionDiscoveryIntent,
   formatPromotionListMessage,
   formatPromotionRedeemPrompt,
   missingPromotionFields,
@@ -653,6 +654,26 @@ async function promotionContinuationResponse(
 ): Promise<BrainResponse | null> {
   const pending = parsePendingPromotionRedemption(runtime.agentState.pendingPromotionRedemption);
   if (!pending) return null;
+
+  // A discovery question is not consent to redeem. Older builds could leave a
+  // pending promo behind after merely showing one active promotion; if the
+  // customer asks to see promotions again, clear that stale state instead of
+  // parsing the question text as their name/order details.
+  if (isPromotionDiscoveryIntent(request.message)) {
+    const promotions = activePromotionsFromRuntime(runtime);
+    return {
+      message: formatPromotionListMessage(promotions),
+      intent:'recommendation',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{ clearPendingPromotionRedemption:true },
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+
   return resolvePromotionRedemption(pending, request, guestDbId, channel);
 }
 
@@ -691,9 +712,9 @@ async function promotionDiscoveryFallbackResponse(
     return {
       message: formatPromotionListMessage(decision.promotions), intent:'recommendation', contextUpdates:{},
       journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
-      agentStateUpdate: decision.promotions.length === 1
-        ? { pendingPromotionRedemption: buildPendingPromotionRedemption(decision.promotions[0]!) }
-        : {},
+      // Showing promotions is discovery only. Never pre-seed redemption state;
+      // a real redemption starts only after an explicit accept/name selection.
+      agentStateUpdate:{ clearPendingPromotionRedemption:true },
       semanticMemoryUpdates:[], toolCalls:[],
     };
   }
