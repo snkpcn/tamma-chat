@@ -14,8 +14,10 @@ import {
   type AuthoritativeStateDependencies,
 } from './_thongthai-one-mind-orchestrator';
 import {
+  composeGroundedDeterministicResponse,
   composeThongthaiResponse,
   type ComposedResponse,
+  type ResponseComposerInput,
   type ResponseLanguage,
 } from './_response-composer';
 import {
@@ -27,6 +29,15 @@ export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
 const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','status']);
 const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop']);
+const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
+
+export function shouldPreferGroundedDeterministicResponse(
+  turn: OneMindTurnResult,
+  elapsedMs: number,
+): boolean {
+  return turn.semanticTurn.action === 'discover'
+    || elapsedMs >= COMPOSER_MODEL_BUDGET_CUTOFF_MS;
+}
 
 export type OneMindCustomerTurnInput = OneMindTurnInput & {
   language: ResponseLanguage;
@@ -91,7 +102,7 @@ export async function processOneMindCustomerTurn(
   }
 
   const composerStartedAt = Date.now();
-  const response = await composeThongthaiResponse({
+  const composerInput: ResponseComposerInput = {
     channel:input.channel as BrainChannel,
     language:input.language,
     userMessage:input.message,
@@ -99,7 +110,21 @@ export async function processOneMindCustomerTurn(
     knowledgeBundles:turn.groundedKnowledge,
     degradation:turn.knowledgeDegradation,
     operationalOutcome:null,
-  });
+  };
+  // Netlify's customer gateway has a finite request budget. Semantic
+  // interpretation already used the model once; a second LLM call for simple
+  // catalog discovery can push an otherwise-correct turn past the gateway
+  // timeout. Prefer the centralized grounded deterministic renderer for
+  // discovery, and whenever the orchestration phase has already consumed most
+  // of the request budget. This preserves One-Mind truth/wording ownership
+  // without falling back to channel-local business logic.
+  const groundedFastPath = shouldPreferGroundedDeterministicResponse(
+    turn,
+    composerStartedAt - totalStartedAt,
+  )
+    ? composeGroundedDeterministicResponse(composerInput)
+    : null;
+  const response = groundedFastPath ?? await composeThongthaiResponse(composerInput);
   const composerMs = Date.now() - composerStartedAt;
   return {
     status:'composed',
