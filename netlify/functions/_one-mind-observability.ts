@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 // Phase J — safe structured observability for the One-Mind pipeline.
 //
 // This is NOT a transcript logger and never accepts raw customer text or raw
@@ -37,6 +38,8 @@ function safeTokens(values: readonly unknown[], maxItems = 30, maxChars = 160): 
 export type OneMindTraceEnvelope = {
   traceVersion: typeof ONE_MIND_TRACE_VERSION;
   traceId: string;
+  /** Stable pseudonymous grouping key. Never the raw guest/canonical/provider id. */
+  conversationKey: string | null;
   at: string;
   channel: string;
   versions: {
@@ -94,6 +97,15 @@ export type OneMindTraceEnvelope = {
   };
 };
 
+export function conversationKeyFromGuestId(guestDbId: string | null | undefined): string | null {
+  if (!guestDbId) return null;
+  return createHash('sha256')
+    .update('tamma-one-mind-conversation-v1:')
+    .update(guestDbId)
+    .digest('hex')
+    .slice(0, 24);
+}
+
 export function buildOneMindTraceEnvelope(args:{
   turn:OneMindTurnResult;
   response?:ComposedResponse | null;
@@ -115,6 +127,7 @@ export function buildOneMindTraceEnvelope(args:{
   return {
     traceVersion:ONE_MIND_TRACE_VERSION,
     traceId:safeToken(turn.trace.eventId,180) ?? 'unknown',
+    conversationKey:conversationKeyFromGuestId(turn.identity.guestDbId),
     at:(args.at ?? new Date()).toISOString(),
     channel:safeToken(turn.trace.channel,40) ?? 'unknown',
     versions:{
@@ -176,4 +189,68 @@ export function emitOneMindTrace(trace:OneMindTraceEnvelope):void {
   } catch {
     // Deliberately swallowed. Observability is non-blocking.
   }
+}
+
+
+export const ONE_MIND_TRACE_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+function traceStoreConfig(): { url:string; key:string } | null {
+  const url=process.env.SUPABASE_URL;
+  const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return url && key ? {url:url.replace(/\/$/,''),key} : null;
+}
+
+/** Best-effort bounded trace persistence for Phase K. The table is created by
+ * one-mind-observability-v1.sql in the EXISTING tamma-customer-data project.
+ * Failure is returned, never thrown into the customer response path. */
+export async function persistOneMindTrace(trace:OneMindTraceEnvelope):Promise<boolean>{
+  const config=traceStoreConfig();
+  if(!config) return false;
+  try{
+    const observedAt=new Date(trace.at);
+    const base=Number.isFinite(observedAt.getTime()) ? observedAt : new Date();
+    const expiresAt=new Date(base.getTime()+ONE_MIND_TRACE_RETENTION_MS).toISOString();
+    const response=await fetch(config.url+'/rest/v1/one_mind_traces',{
+      method:'POST',
+      headers:{
+        apikey:config.key,
+        Authorization:'Bearer '+config.key,
+        'Content-Type':'application/json',
+        Prefer:'return=minimal',
+      },
+      body:JSON.stringify({
+        trace_id:trace.traceId,
+        conversation_key:trace.conversationKey,
+        channel:trace.channel,
+        domain:trace.semantic.domain,
+        intent:trace.semantic.intent,
+        action:trace.semantic.action,
+        dialog_mode:trace.dialog.mode,
+        degradation_condition:trace.degradation.condition,
+        composer_mode:trace.composer.mode,
+        state_conflict_retries:trace.state.conflictRetries,
+        total_ms:trace.timingsMs.total,
+        envelope:trace,
+        observed_at:trace.at,
+        expires_at:expiresAt,
+      }),
+    });
+    if(!response.ok){
+      const body=await response.text().catch(()=>'');
+      console.error('THONGTHAI_ONE_MIND_TRACE_PERSIST_ERROR',response.status,body.slice(0,160));
+      return false;
+    }
+    return true;
+  }catch(error){
+    console.error('THONGTHAI_ONE_MIND_TRACE_PERSIST_ERROR',error instanceof Error ? error.message.slice(0,180) : 'unknown');
+    return false;
+  }
+}
+
+/** Log + bounded DB persistence. Both are best-effort and neither may fail a
+ * customer turn. Awaiting it only guarantees the serverless write has a chance
+ * to finish; all errors are swallowed inside the observability boundary. */
+export async function recordOneMindTrace(trace:OneMindTraceEnvelope):Promise<void>{
+  emitOneMindTrace(trace);
+  await persistOneMindTrace(trace).catch(()=>false);
 }
