@@ -18,10 +18,48 @@
 //   an already-identified "this refers to prior context" marker against the real
 //   SemanticContext entity list -- a bounded data lookup, not language understanding.
 
-import { callPreferredModel, stripCodeFences } from './_thongthai-brain-v3';
-import type { ChatTurn } from './_thongthai-brain-v3';
+// Imports ONLY from the neutral provider module -- never from
+// _thongthai-brain-v3.ts. This is deliberate: once the Brain later consumes
+// the Semantic Interpreter's output, an import from brain-v3 here would
+// create Brain -> Semantic Interpreter -> Brain. See THONGTHAI_HANDOFF.md
+// (Phase B.1) and tests/model-provider-no-cycle.test.ts for the static proof.
+import { callPreferredModel as callPreferredModelFromProvider, stripCodeFences, type ChatTurn } from './_thongthai-model-provider';
+// Ecosystem vocabulary/relationships come from the ONE canonical Bible source
+// (Phase A), not a second hand-typed paraphrase -- _thongthai-bible-generated.ts
+// is a plain generated data module with zero imports of its own, so importing
+// it here creates no dependency risk in either direction.
+import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
+
+function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
+  return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
+}
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v1';
+
+/**
+ * Explicit, mechanically-checkable distinction between what the golden eval
+ * corpus (tests/fixtures/semantic-eval-corpus.ts) actually proves today and
+ * what it does not yet prove -- see THONGTHAI_HANDOFF.md (Phase B.1, item 3).
+ *
+ * STATIC/NETWORK-FREE SEMANTIC CONTRACT: every corpus case's simulatedModelOutput
+ * is run through the real parseSemanticTurnResponse/resolveReferences validation
+ * layer in `npm test`. This proves the deterministic layer correctly accepts a
+ * well-formed classification and correctly resolves references -- it does NOT
+ * prove the real model would produce that classification.
+ *
+ * LIVE MODEL SEMANTIC CONFORMANCE: whether the REAL configured provider stack
+ * (Gemini/OpenAI) actually classifies each corpus message the way its
+ * `expected`/`simulatedModelOutput` says it should. This has NOT been executed
+ * (no API keys in this dev environment; `npm test` stays network-free by this
+ * repo's own convention). It must run as a separate live acceptance job before
+ * Phase O's final integration, scoring the real model's output against this
+ * corpus's stored ground truth -- the same live-verification discipline used
+ * for every earlier phase of this program.
+ */
+export const SEMANTIC_EVAL_STATUS = {
+  staticNetworkFreeSemanticContract: 'pass_fail_in_npm_test',
+  liveModelSemanticConformance: 'not_yet_executed',
+} as const;
 
 export type SemanticDomain =
   | 'ecosystem' | 'restaurant' | 'stay' | 'activity' | 'promotion' | 'membership'
@@ -158,10 +196,8 @@ If the customer's message plainly continues or references that context (a short 
 things just mentioned, a correction, an implicit "the same one"), say so via "references" -- do not treat it
 as if it arrived with no history. If there truly is no relevant context, ordinary new requests need none.
 
-Ecosystem vocabulary you must recognize: ทำมา-ชาติ is the overall brand. ตำมา-ชาติ is the restaurant.
-ทำมา-ชาติ ผจญญภัย (Adventure) is the activity business (ขี่ม้า/horseback riding -- individual horses are named
-resources such as ทองไทย and ภาราดร, not people; ATV; ยิงธนู/archery). ทำมา-ชาติ เฮือนสเตย์ is the stay business.
-Inthanin is the café. Community/OTOP is local partner products.
+ECOSYSTEM VOCABULARY (canonical -- from the Bible, do not use a different version of this elsewhere):
+${THONGTHAI_BIBLE_SECTIONS.ecosystemVocabulary}
 
 Classify the CURRENT message only (use context to interpret it, not to answer a different, earlier message):
 

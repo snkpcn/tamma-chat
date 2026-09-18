@@ -1,13 +1,27 @@
-// Phase B tests. Everything here runs with NO network/LLM call -- see
-// _semantic-interpreter.ts's module comment for why (no API keys in this dev
-// environment; this repo's test convention keeps npm test network-free, same as
-// the pre-existing interpretStayBookingTurn). What IS fully tested here:
+// Phase B tests.
+//
+// ==========================================================================
+// EVAL STATUS -- read before trusting a "pass" here as more than it is:
+//
+// STATIC/NETWORK-FREE SEMANTIC CONTRACT: PASS (this file, run by `npm test`).
+//   Proves the deterministic validation/reference-resolution layer correctly
+//   accepts each corpus case's simulatedModelOutput and resolves references
+//   against real context. Does NOT call any model.
+//
+// LIVE MODEL SEMANTIC CONFORMANCE: NOT YET EXECUTED.
+//   Whether the real configured provider (Gemini/OpenAI) actually classifies
+//   each corpus message the way its `expected`/`simulatedModelOutput` says it
+//   should has not been checked -- no API keys in this dev environment, and
+//   `npm test` stays network-free by this repo's own convention (same as the
+//   pre-existing interpretStayBookingTurn). This must run as a live
+//   acceptance job before Phase O's final integration. See
+//   _semantic-interpreter.ts's SEMANTIC_EVAL_STATUS constant.
+// ==========================================================================
+//
+// What IS fully tested here (network-free):
 //   1. the prompt builder (structural correctness, context grounding)
 //   2. the response parser/validator/reference-resolver, fed each corpus case's
-//      simulatedModelOutput -- proving the deterministic layer correctly accepts
-//      a well-formed classification and correctly resolves references against
-//      real context, without corrupting or second-guessing the model's semantic
-//      judgment
+//      simulatedModelOutput
 //   3. shadow comparison against the existing legacy regex routers, to
 //      demonstrate concretely where the semantic approach already covers more
 //      than the phrase-matching approach -- without changing production routing
@@ -21,10 +35,16 @@ import {
   toSemanticInterpretationMeta,
   confidenceBucket,
   emptySemanticContext,
+  SEMANTIC_EVAL_STATUS,
   type SemanticContext,
 } from '../netlify/functions/_semantic-interpreter';
 import { legacyShadowRoute } from '../netlify/functions/_semantic-interpreter-shadow';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
+
+test('eval status is explicit: static contract has run, live model conformance has not', () => {
+  assert.equal(SEMANTIC_EVAL_STATUS.staticNetworkFreeSemanticContract, 'pass_fail_in_npm_test');
+  assert.equal(SEMANTIC_EVAL_STATUS.liveModelSemanticConformance, 'not_yet_executed');
+});
 
 test(`golden eval corpus has at least 40 cases (has ${SEMANTIC_EVAL_CORPUS.length})`, () => {
   assert.ok(SEMANTIC_EVAL_CORPUS.length >= 40, `corpus too small: ${SEMANTIC_EVAL_CORPUS.length}`);
