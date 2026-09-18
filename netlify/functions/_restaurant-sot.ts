@@ -158,20 +158,25 @@ export async function restaurantMenuAdvice(input: RestaurantAdvisorInput) {
 export async function loadRestaurantWorldFacts(): Promise<Array<{ fact_key: string; category: string; fact_value: unknown; source: string; updated_at: string }>> {
   try {
     const menu = await listRestaurantMenu();
-    const rid = await restaurantId();
-    const profiles = await restaurantMenuProfiles(rid);
-    const updatedAt = [...menu.map(item => item.source_updated_at), ...profiles.rows.map(row => String(row.updated_at))]
+    const updatedAt = menu.map(item => item.source_updated_at)
       .reduce((latest, value) => value > latest ? value : latest, new Date(0).toISOString());
     return [{
-      fact_key: 'restaurant_menu_live', category: 'operations', source: 'tamma_chart_os.restaurant_menu_live+restaurant_menu_intelligence_profiles', updated_at: updatedAt,
+      fact_key: 'restaurant_menu_live', category: 'operations', source: 'tamma_chart_os.restaurant_menu_live', updated_at: updatedAt,
       fact_value: {
         restaurant: RESTAURANT_NAME, menuUrl: RESTAURANT_MENU_URL, sourceOfTruth: true,
-        recommendationProfileVersion:'v1',
+        // Passively carried in every conversational turn regardless of topic, so
+        // this stays a lean summary (name/price/availability) rather than the
+        // full per-item ingredient list + recommendation profile -- those are
+        // exactly what list_restaurant_menu/restaurantMenuAdvice already return
+        // on demand, and the brain's own doctrine routes ingredient/allergy/
+        // recommendation reasoning through that tool call, never this passive
+        // fact. (Phase P: this fact alone was ~34KB of a ~77KB prompt and is
+        // the prime suspect for the legacy brain's near-universal
+        // LLMAvailabilityError on non-discovery turns.)
         items: menu.map(item => ({
           id: item.menu_item_id, category: item.category_name, name: item.name, price: item.selling_price,
           signature: item.is_signature, orderable: item.is_orderable, availableServings: item.available_servings,
-          ingredients: item.ingredient_names, unavailableIngredients: item.unavailable_ingredients,
-          profile: normalizeRestaurantProfile(profiles.map.get(item.menu_item_id)?.profile),
+          unavailableIngredients: item.unavailable_ingredients,
         })),
       },
     }];
