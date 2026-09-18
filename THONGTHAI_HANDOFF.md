@@ -114,7 +114,37 @@ the same or next commit.
   - `npm test`: **186/186 passing** (117 baseline + 69 new). Both new modules bundle cleanly
     standalone (14.8kb / 7.2kb). Production routing files (`thongthai-chat.ts`,
     `line-webhook.ts`) unchanged — legacy behavior is completely untouched by this phase.
-- [ ] Phase C — Server-side Conversation Continuity. NOT STARTED.
+- [x] **Phase B.1 — Hardening (3 architecture corrections requested after Phase B review).**
+  Done, committed. Summary:
+  1. **Circular dependency prevention**: extracted all provider-calling concerns (Gemini/
+     OpenAI calls, `LLMRequestError`/`LLMAvailabilityError`/`ProviderNotConfiguredError`,
+     `callPreferredModel`, `stripCodeFences`, `ChatTurn`) out of `_thongthai-brain-v3.ts` into
+     a genuinely neutral `netlify/functions/_thongthai-model-provider.ts` (zero business/
+     semantic logic, zero imports from brain-v3 or the semantic interpreter). Both
+     `_thongthai-brain-v3.ts` and `_semantic-interpreter.ts` now import FROM this module
+     instead of the interpreter importing from brain-v3 directly — this is what breaks the
+     future Brain → Semantic Interpreter → Brain cycle. `brain-v3.ts` re-exports what
+     `thongthai-chat.ts` already imports from it, so that file needed zero changes.
+     `tests/model-provider-no-cycle.test.ts` statically proves the import graph has no cycle
+     (checks actual import specifiers via regex, not just "it compiles") and that both esbuild
+     bundles succeed standalone. Behavior/timeouts/fallback order unchanged from before.
+  2. **Ecosystem vocabulary dedup**: `_semantic-interpreter.ts`'s prompt no longer hand-types
+     its own paraphrase of ecosystem relationships — it interpolates
+     `THONGTHAI_BIBLE_SECTIONS.ecosystemVocabulary` directly from the same generated Bible
+     artifact the Brain prompt uses. One authored copy, not three.
+  3. **Precise eval claims**: added `SEMANTIC_EVAL_STATUS` (a mechanically-checkable constant
+     in `_semantic-interpreter.ts`, tested in `tests/semantic-interpreter-corpus.test.ts`)
+     explicitly distinguishing `staticNetworkFreeSemanticContract: 'pass_fail_in_npm_test'`
+     (what the 49-case corpus actually proves today — the validation layer) from
+     `liveModelSemanticConformance: 'not_yet_executed'` (whether the real model classifies
+     each corpus message correctly — deferred to a live acceptance job before Phase O).
+  - `npm test`: **193/193 passing** (186 + 7 new). `thongthai-chat.ts`/`line-webhook.ts`
+    bundles unaffected (`git diff --stat` empty on both throughout B.1).
+- [ ] Phase C — Server-side Conversation Continuity. NOT STARTED. This is the exact next
+  action — see the detailed design brief the user gave for it (bounded conversation_context,
+  privacy/retention rules, context builder producing SemanticContext, cross-channel identity
+  tests, 15 required test areas, the horse-booking multi-turn golden scenario) — treat that
+  brief as binding detail, not optional flavor, when implementing.
 - [ ] Phase D — Working/Task State + Memory boundaries. NOT STARTED. (Note: audit found the
   *existing* memory architecture — guest_memory / guest_semantic_memory / guest_agent_state /
   operational tables — already maps cleanly onto the brief's 4-layer model. This phase is
@@ -173,6 +203,6 @@ consume it without a rewrite. Concretely:
 
 ## Last commit on this branch
 
-- Commit: `0022750` — "Phase B: one reusable semantic interpreter, beside existing routing
-  (not replacing it yet)"
-- Phases A and B complete, pushed. Phase C not started.
+- Commit: `ba0edb4` — "Phase B.1: extract neutral provider module, dedupe ecosystem
+  vocabulary, precise eval claims"
+- Phases A, B, B.1 complete, pushed. Phase C not started.
