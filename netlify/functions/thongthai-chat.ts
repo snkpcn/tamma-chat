@@ -39,6 +39,7 @@ import {
   type RestaurantPreorderDraft,
   type RestaurantProposedSetState,
 } from './_restaurant-preorder-dialog';
+import { processThongthaiOneMindTurn } from './_thongthai-one-mind-orchestrator';
 import {
   buildPendingPromotionRedemption,
   decidePromotionFallback,
@@ -811,6 +812,36 @@ export const handler: Handler = async (event: HandlerEvent) => {
   }
 
   await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
+
+  // Phase G.1: optional SHADOW orchestration only. It never supplies the
+  // customer response and cannot execute transactions. Production remains on
+  // the legacy response path until G.2; this hook exists so branch/local
+  // acceptance can compare the One-Mind decision against legacy behavior.
+  if (process.env.THONGTHAI_ONE_MIND_SHADOW === '1') {
+    const rawEventId = isObject(rawBody) && isNonEmptyString(rawBody.eventId)
+      ? rawBody.eventId.trim().slice(0, 180)
+      : null;
+    const shadowEventId = rawEventId ?? `shadow:${channel}:${Date.now()}`;
+    try {
+      const shadow = await processThongthaiOneMindTurn({
+        channel,
+        message: request.message,
+        eventId: shadowEventId,
+        providerUserKey: providerUserKey ?? request.guestId,
+        canonicalAnonymousId: request.guestId,
+        guestDbId,
+        // Persist only when explicitly enabled AND the transport gave us a
+        // stable event id. A generated shadow id must never mutate continuity.
+        persistState: process.env.THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1' && Boolean(rawEventId),
+      });
+      console.log('THONGTHAI_ONE_MIND_SHADOW', JSON.stringify(shadow.trace));
+    } catch (error) {
+      console.error(
+        'THONGTHAI_ONE_MIND_SHADOW_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+    }
+  }
 
   const [communityOfferings, runtime] = await Promise.all([
     loadVerifiedCommunityOfferings(),
