@@ -303,6 +303,7 @@ export async function processThongthaiOneMindTurnAuthoritative(
   stateDependencies: Partial<AuthoritativeStateDependencies> = {},
   now: Date = new Date(),
   maxAttempts = 4,
+  persistPredicate: (result: OneMindTurnResult) => boolean = () => true,
 ): Promise<OneMindTurnResult> {
   const deps: OneMindDependencies = { ...REAL_DEPENDENCIES, ...dependencies };
   const stateDeps: AuthoritativeStateDependencies = {
@@ -324,7 +325,8 @@ export async function processThongthaiOneMindTurnAuthoritative(
       input, identity, conversationContextBefore, taskStateBefore, deps, now,
     );
 
-    if (input.persistState !== true || !identity.guestDbId) {
+    const shouldPersist = input.persistState === true && persistPredicate(result);
+    if (!shouldPersist || !identity.guestDbId) {
       return {
         ...result,
         trace:{ ...result.trace, statePersisted:false, stateConflictRetries:attempt },
