@@ -129,10 +129,10 @@ function safeSliceEnd(text: string, requested: number): number {
 
 function bestReadableCut(text: string, limit: number): number {
   if (text.length <= limit) return text.length;
+  const paragraphCut = text.lastIndexOf('\n\n', limit);
+  if (paragraphCut > 0) return paragraphCut;
   const minimum = Math.floor(limit * 0.55);
   const candidates = [
-    text.lastIndexOf('\n\n', limit),
-    text.lastIndexOf('\n', limit),
     text.lastIndexOf('。', limit),
     text.lastIndexOf('. ', limit),
     text.lastIndexOf('! ', limit),
