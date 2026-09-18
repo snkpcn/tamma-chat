@@ -39,7 +39,7 @@ import {
   type RestaurantPreorderDraft,
   type RestaurantProposedSetState,
 } from './_restaurant-preorder-dialog';
-import { processThongthaiOneMindTurn } from './_thongthai-one-mind-orchestrator';
+import { processThongthaiOneMindTurnResilient } from './_thongthai-one-mind-orchestrator';
 import {
   buildPendingPromotionRedemption,
   decidePromotionFallback,
@@ -823,7 +823,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
       : null;
     const shadowEventId = rawEventId ?? `shadow:${channel}:${Date.now()}`;
     try {
-      const shadow = await processThongthaiOneMindTurn({
+      const shadow = await processThongthaiOneMindTurnResilient({
         channel,
         message: request.message,
         eventId: shadowEventId,
@@ -834,7 +834,12 @@ export const handler: Handler = async (event: HandlerEvent) => {
         // stable event id. A generated shadow id must never mutate continuity.
         persistState: process.env.THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1' && Boolean(rawEventId),
       });
-      console.log('THONGTHAI_ONE_MIND_SHADOW', JSON.stringify(shadow.trace));
+      console.log(
+        'THONGTHAI_ONE_MIND_SHADOW',
+        JSON.stringify(shadow.status === 'ok'
+          ? { status:'ok', trace:shadow.result.trace, degradation:shadow.result.knowledgeDegradation }
+          : { status:'degraded', degradation:shadow.degradation }),
+      );
     } catch (error) {
       console.error(
         'THONGTHAI_ONE_MIND_SHADOW_ERROR',
