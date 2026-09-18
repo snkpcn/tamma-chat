@@ -12,7 +12,7 @@ const ALL=[...SEMANTIC_EVAL_CORPUS,...PHASE_L_SEMANTIC_CASES];
 
 test(`Phase L stored semantic golden inventory is >=150 meaningful cases (has ${ALL.length})`,()=>{
   assert.ok(ALL.length>=150,`need >=150, have ${ALL.length}`);
-  assert.equal(PHASE_L_SEMANTIC_CASES.length,70);
+  assert.equal(PHASE_L_SEMANTIC_CASES.length,80);
 });
 
 test('Phase L all semantic case ids remain globally unique',()=>{
