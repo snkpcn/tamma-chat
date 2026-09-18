@@ -9,6 +9,7 @@ import {
 import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts, restaurantMenuAdvice } from './_restaurant-sot';
 import { loadActivePromotionsWorldFact, redeemPromotion } from './_promotions-runtime';
 import { loadActivityWorldFacts } from './_activity-sot';
+import { patchGuestAgentState } from './_guest-agent-state-store';
 
 export const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
@@ -294,23 +295,23 @@ export async function persistBrainRuntime(guestDbId: string | null, channel: Bra
   if (!guestDbId || !configuration()) return;
   try {
     const now = new Date().toISOString();
-    const res = await dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`);
-    const rows = await res.json() as Array<{state:Record<string,unknown>}>;
-    const next: Record<string,unknown> = {
-      ...(rows[0]?.state ?? {}), last_intent:response.intent,last_channel:channel,last_style_mode:response.responseStyle,
+    const set: Record<string,unknown> = {
+      last_intent:response.intent,last_channel:channel,last_style_mode:response.responseStyle,
       updated_by_brain_version:THONGTHAI_BRAIN_VERSION,
       updated_by_bible_version:THONGTHAI_BIBLE_VERSION,
     };
+    const removeKeys: string[] = [];
     const update = response.agentStateUpdate ?? {};
     const active = safeShort(update.activeTopic,80); const summary = safeShort(update.travelContextSummary,500); const unresolved = safeShort(update.unresolvedNeed,180);
-    if (active !== null) next.active_topic=active;
-    if (summary !== null) next.travel_context_summary=summary;
-    if (unresolved !== null) next.unresolved_need=unresolved;
-    if (update.clearUnresolvedNeed === true) delete next.unresolved_need;
-    if (update.restaurantProposedSet) next.restaurantProposedSet = update.restaurantProposedSet;
-    if (update.pendingPromotionRedemption) next.pendingPromotionRedemption = update.pendingPromotionRedemption;
-    if (update.clearPendingPromotionRedemption === true) delete next.pendingPromotionRedemption;
-    await dbFetch('guest_agent_state?on_conflict=guest_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({guest_id:guestDbId,state:next,updated_at:now})});
+    if (active !== null) set.active_topic=active;
+    if (summary !== null) set.travel_context_summary=summary;
+    if (unresolved !== null) set.unresolved_need=unresolved;
+    if (update.clearUnresolvedNeed === true) removeKeys.push('unresolved_need');
+    if (update.restaurantProposedSet) set.restaurantProposedSet = update.restaurantProposedSet;
+    if (update.pendingPromotionRedemption) set.pendingPromotionRedemption = update.pendingPromotionRedemption;
+    if (update.clearPendingPromotionRedemption === true) removeKeys.push('pendingPromotionRedemption');
+    const patched = await patchGuestAgentState(guestDbId,{set,removeKeys});
+    if (!patched) throw new Error('guest_agent_state_cas_exhausted');
 
     for (const memory of (response.semanticMemoryUpdates ?? []).slice(0,8)) {
       if (!SAFE_MEMORY_KEYS.has(memory.key)) continue;
