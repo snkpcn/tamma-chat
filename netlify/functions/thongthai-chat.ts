@@ -40,6 +40,7 @@ import {
   type RestaurantProposedSetState,
 } from './_restaurant-preorder-dialog';
 import { processThongthaiOneMindTurnResilient } from './_thongthai-one-mind-orchestrator';
+import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
 import {
   buildPendingPromotionRedemption,
   decidePromotionFallback,
@@ -813,15 +814,78 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
 
+  const rawEventId = isObject(rawBody) && isNonEmptyString(rawBody.eventId)
+    ? rawBody.eventId.trim().slice(0, 180)
+    : null;
+  const headerEventId = isNonEmptyString(event.headers?.['x-nf-request-id'])
+    ? event.headers['x-nf-request-id'].trim().slice(0, 180)
+    : (isNonEmptyString(event.headers?.['x-request-id'])
+      ? event.headers['x-request-id'].trim().slice(0, 180)
+      : null);
+  // LINE supplies its message id. Web currently gets Netlify's request id;
+  // if neither exists this unique per-invocation fallback still separates two
+  // intentional identical messages (unlike hashing message text).
+  const transportEventId = rawEventId ?? headerEventId
+    ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
+
+  // Phase G.2 strangler cutover. OFF by default. Only task-free READ-ONLY
+  // turns in the explicitly proven domains can return from One-Mind here.
+  // Transactional/in-progress-task turns are inspected but not persisted and
+  // fall through to the unchanged legacy path below.
+  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1') {
+    try {
+      const oneMind = await processOneMindCustomerTurn({
+        channel,
+        language:request.language,
+        message:request.message,
+        eventId:transportEventId,
+        providerUserKey:providerUserKey ?? request.guestId,
+        canonicalAnonymousId:request.guestId,
+        guestDbId,
+        persistState:true,
+      });
+      if (oneMind.status === 'composed') {
+        console.log('THONGTHAI_ONE_MIND_CUTOVER', JSON.stringify({
+          domain:oneMind.turn.semanticTurn.domain,
+          action:oneMind.turn.semanticTurn.action,
+          responseIntent:oneMind.turn.dialogDecision.responseIntent,
+          composerMode:oneMind.response.mode,
+          stateConflictRetries:oneMind.turn.trace.stateConflictRetries ?? 0,
+        }));
+        const mappedIntent = oneMind.turn.semanticTurn.action === 'recommend'
+          || oneMind.turn.semanticTurn.action === 'discover'
+          ? 'recommendation'
+          : 'information';
+        return json(200, {
+          message:oneMind.response.message,
+          intent:mappedIntent,
+          contextUpdates:{},
+          journeyAction:{type:'none',journey:null},
+          suggestedActions:[],
+        });
+      }
+      console.log('THONGTHAI_ONE_MIND_LEGACY_REQUIRED', JSON.stringify({
+        reason:oneMind.reason,
+        domain:oneMind.turn.semanticTurn.domain,
+        action:oneMind.turn.semanticTurn.action,
+      }));
+    } catch (error) {
+      // Strangler safety: until full G.2 equivalence is proven, One-Mind
+      // failure never takes the legacy product down with it.
+      console.error(
+        'THONGTHAI_ONE_MIND_CUTOVER_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+    }
+  }
+
   // Phase G.1: optional SHADOW orchestration only. It never supplies the
   // customer response and cannot execute transactions. Production remains on
   // the legacy response path until G.2; this hook exists so branch/local
   // acceptance can compare the One-Mind decision against legacy behavior.
-  if (process.env.THONGTHAI_ONE_MIND_SHADOW === '1') {
-    const rawEventId = isObject(rawBody) && isNonEmptyString(rawBody.eventId)
-      ? rawBody.eventId.trim().slice(0, 180)
-      : null;
-    const shadowEventId = rawEventId ?? `shadow:${channel}:${Date.now()}`;
+  if (process.env.THONGTHAI_ONE_MIND_SHADOW === '1'
+      && process.env.THONGTHAI_ONE_MIND_CUTOVER !== '1') {
+    const shadowEventId = rawEventId ?? headerEventId ?? `shadow:${channel}:${Date.now()}`;
     try {
       const shadow = await processThongthaiOneMindTurnResilient({
         channel,
@@ -832,7 +896,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
         guestDbId,
         // Persist only when explicitly enabled AND the transport gave us a
         // stable event id. A generated shadow id must never mutate continuity.
-        persistState: process.env.THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1' && Boolean(rawEventId),
+        persistState: process.env.THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1' && Boolean(rawEventId ?? headerEventId),
       });
       console.log(
         'THONGTHAI_ONE_MIND_SHADOW',
