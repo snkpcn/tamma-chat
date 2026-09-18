@@ -12,6 +12,21 @@ test('recognizes the exact broad discovery phrases customers use in LINE', () =>
   assert.equal(isExperienceDiscoveryIntent('ที่นี่มีอะไรให้ทำบ้าง'), true);
 });
 
+test('understands colloquial Thai and small typos instead of requiring an exact phrase', () => {
+  assert.equal(isExperienceDiscoveryIntent('มีไรทำมั่ง'), true);
+  assert.equal(isExperienceDiscoveryIntent('มีไรทำมั้ง'), true);
+  assert.equal(isExperienceDiscoveryIntent('มีรัยทำมั่งครับ'), true);
+  assert.equal(isExperienceDiscoveryIntent('มีอารัยทำบ้าง'), true);
+  assert.equal(isExperienceDiscoveryIntent('มีไลทำมั่ง'), true);
+  assert.equal(isExperienceDiscoveryIntent('มีอะไลทำบ้างง'), true);
+});
+
+test('punctuation, spacing and polite endings do not break discovery intent', () => {
+  assert.equal(isExperienceDiscoveryIntent('มีอะไร ทำบ้างครับ?'), true);
+  assert.equal(isExperienceDiscoveryIntent('ที่นี่ มีอะไรให้ทำมั่งคะ'), true);
+  assert.equal(isExperienceDiscoveryIntent('มีกิจกรรมอะไรบ้างหน่อยครับ'), true);
+});
+
 test('first-visit generic recommendation stays ecosystem-wide', () => {
   assert.equal(isExperienceDiscoveryIntent('มาครั้งแรก มีอะไรแนะนำ'), true);
 });
