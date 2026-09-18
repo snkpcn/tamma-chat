@@ -889,7 +889,101 @@ const input = qs('#chatInput');
 const headerAvatarImg = qs('#headerAvatarImg');
 const fabAvatarImg = qs('#fabAvatarImg');
 
-const QUICK_ACTION_KEYS = ['quick_eat','quick_rest','quick_explore','quick_3h','quick_couple','quick_family','quick_build','quick_view'];
+const CHAT_FALLBACK_COPY = {
+  th: {
+    chat_status_thinking:'ทองไทยกำลังดูให้ครับ…',
+    chat_status_ready:'พร้อมช่วยครับ',
+    chat_open_greeting:'สวัสดีครับ ผมทองไทย 🐴\nอยากดูเรื่องไหนก่อนครับ?',
+    chat_unavailable:'ตอนนี้ทองไทยเชื่อมระบบไม่สำเร็จชั่วคราวครับ\nลองส่งอีกครั้งได้เลย',
+    btn_save_this_journey:'บันทึก Journey นี้',
+    notify_saved_confirm:'บันทึกไว้แล้วครับ ✅',
+    quick_build:'ช่วยจัดแผนให้หน่อย',
+    concierge_more_info:'ขอรายละเอียดเพิ่มหน่อย',
+    concierge_here_is_plan:'นี่คือแผนที่จัดไว้ครับ',
+    footer_contact_message:'อยากติดต่อทีมงานครับ',
+    visit_ask_thongthai:'แนะนำที่เที่ยวใกล้ ๆ ให้หน่อย'
+  },
+  en: {
+    chat_status_thinking:'Thongthai is checking…',
+    chat_status_ready:'Ready to help',
+    chat_open_greeting:'Hi, I’m Thongthai 🐴\nWhat would you like to look at first?',
+    chat_unavailable:'Thongthai cannot reach the service right now.\nPlease try sending that again.',
+    btn_save_this_journey:'Save this Journey',
+    notify_saved_confirm:'Saved ✅',
+    quick_build:'Help me build a plan',
+    concierge_more_info:'Tell me more',
+    concierge_here_is_plan:'Here is the plan',
+    footer_contact_message:'I want to contact the team',
+    visit_ask_thongthai:'Recommend something nearby'
+  }
+};
+
+const QUICK_ACTION_COPY = {
+  th: {
+    general:[
+      {label:'หาอะไรกิน', message:'ที่ตำมา-ชาติมีอะไรกินบ้าง'},
+      {label:'หาที่พัก', message:'ทำมา-ชาติ เฮือนสเตย์มีที่พักแบบไหนบ้าง'},
+      {label:'หากิจกรรม', message:'ทำมา-ชาติ ผจญภัยมีกิจกรรมอะไรบ้าง'}
+    ],
+    dining:[
+      {label:'มีอะไรกินบ้าง?', message:'ที่ตำมา-ชาติมีอะไรกินบ้าง'},
+      {label:'เมนูแนะนำ', message:'แนะนำเมนูที่ตำมา-ชาติให้หน่อย'},
+      {label:'จัดชุดตามงบ', message:'ช่วยจัดชุดอาหารที่ตำมา-ชาติตามงบให้หน่อย'}
+    ],
+    stay:[
+      {label:'มีบ้านแบบไหน?', message:'ทำมา-ชาติ เฮือนสเตย์มีที่พักแบบไหนบ้าง'},
+      {label:'เช็กราคาที่พัก', message:'ขอราคาที่พักทำมา-ชาติ เฮือนสเตย์'},
+      {label:'ช่วยเลือกที่พัก', message:'ช่วยแนะนำที่พักทำมา-ชาติ เฮือนสเตย์ให้หน่อย'}
+    ],
+    adventure:[
+      {label:'มีกิจกรรมอะไรบ้าง?', message:'ทำมา-ชาติ ผจญภัยมีกิจกรรมอะไรบ้าง'},
+      {label:'กิจกรรมไหนดี?', message:'ช่วยแนะนำกิจกรรมทำมา-ชาติ ผจญภัยให้หน่อย'},
+      {label:'เช็กรอบว่าง', message:'อยากเช็กรอบว่างของกิจกรรมทำมา-ชาติ ผจญภัย'}
+    ]
+  },
+  en: {
+    general:[
+      {label:'Find food', message:'What can I eat at Tam Ma-Chaat restaurant?'},
+      {label:'Find a stay', message:'What stay options are available at Tam Ma-Chaat?'},
+      {label:'Find activities', message:'What activities are available at Tam Ma-Chaat?'}
+    ],
+    dining:[
+      {label:'What’s on the menu?', message:'What can I eat at Tam Ma-Chaat restaurant?'},
+      {label:'Recommend dishes', message:'Recommend dishes from the Tam Ma-Chaat restaurant menu.'},
+      {label:'Build a budget set', message:'Help me build a restaurant set within my budget.'}
+    ],
+    stay:[
+      {label:'What stays are there?', message:'What stay options are available at Tam Ma-Chaat?'},
+      {label:'Check stay prices', message:'What are the current Tam Ma-Chaat stay prices?'},
+      {label:'Help me choose', message:'Help me choose a Tam Ma-Chaat stay.'}
+    ],
+    adventure:[
+      {label:'What activities?', message:'What activities are available at Tam Ma-Chaat?'},
+      {label:'Recommend one', message:'Recommend a Tam Ma-Chaat activity for me.'},
+      {label:'Check availability', message:'I want to check activity availability.'}
+    ]
+  }
+};
+
+function currentChatLang(){
+  try {
+    const external = window.I18N && typeof window.I18N.lang === 'function' ? window.I18N.lang() : '';
+    const lang = String(external || document.documentElement.lang || 'th').toLowerCase();
+    if(lang.startsWith('th')) return 'th';
+    return 'en';
+  } catch(e){ return 'th'; }
+}
+
+function chatT(key){
+  try {
+    if(window.I18N && typeof window.I18N.t === 'function'){
+      const translated = window.I18N.t(key);
+      if(translated && translated !== key) return translated;
+    }
+  } catch(e){}
+  const lang = currentChatLang();
+  return (CHAT_FALLBACK_COPY[lang] && CHAT_FALLBACK_COPY[lang][key]) || CHAT_FALLBACK_COPY.en[key] || key;
+}
 
 let sectionHint = null;
 window.ThongthaiContext = {
@@ -898,29 +992,25 @@ window.ThongthaiContext = {
 
 const currentPrefs = { duration:null, travelerType:null, mood:null, lowEnergy:false, excludedStops:new Set(), lastJourneyStops:null };
 
-// §45 — show a small, context-aware set (~3) instead of dumping all 8 chips
-// at once. Picks based on what's already known this conversation and which
-// section the guest opened the chat from.
 function getContextualQuickActions(){
-  const p = currentPrefs;
-  const sectionMoodMap = { dining:'quick_eat', stay:'quick_rest', adventure:'quick_explore' };
-  const picks = [];
-  if(sectionHint && sectionMoodMap[sectionHint.toLowerCase()]) picks.push(sectionMoodMap[sectionHint.toLowerCase()]);
-  if(!p.mood){
-    ['quick_eat','quick_rest','quick_explore'].forEach(k=>{ if(!picks.includes(k)) picks.push(k); });
-  } else if(!p.travelerType){
-    picks.push('quick_couple','quick_family');
-  }
-  if(!p.duration && picks.length < 3) picks.push('quick_3h');
-  if(picks.length < 3) picks.push('quick_build');
-  if(picks.length < 3) picks.push('quick_view');
-  // de-dupe, cap at 3
-  return [...new Set(picks)].slice(0, 3);
+  const lang = currentChatLang();
+  const copy = QUICK_ACTION_COPY[lang] || QUICK_ACTION_COPY.en;
+  const section = String(sectionHint || '').toLowerCase();
+  if(section === 'dining' || section === 'stay' || section === 'adventure') return copy[section];
+  return copy.general;
 }
+
 function renderQuickActions(){
-  const t = window.I18N ? window.I18N.t : (k)=>k;
-  const keys = getContextualQuickActions();
-  quickWrap.innerHTML = keys.map(k=>`<button class="qchip" type="button">${t(k)}</button>`).join('');
+  if(!quickWrap) return;
+  quickWrap.replaceChildren();
+  getContextualQuickActions().slice(0,3).forEach(action=>{
+    const btn = document.createElement('button');
+    btn.className='qchip';
+    btn.type='button';
+    btn.textContent=action.label;
+    btn.dataset.message=action.message;
+    quickWrap.appendChild(btn);
+  });
 }
 renderQuickActions();
 window.addEventListener('i18n:change', renderQuickActions);
@@ -1025,7 +1115,7 @@ function buildChatRequestPayload(text){
   const js = window.JourneyProvider ? window.JourneyProvider.get() : {};
   return {
     message: text,
-    language: window.I18N ? window.I18N.lang() : 'th',
+    language: currentChatLang(),
     guestId: getAnonymousGuestId(),
     chatHistory: (js.chatHistory || []).slice(-12).map(m => ({ role: m.role, content: m.text })),
     // The real, accumulated conversational memory — not reconstructed from
@@ -1068,9 +1158,9 @@ async function tryAIChatEndpoint(text){
   }
 }
 
-async function handleUserMessage(text){
-  const t = window.I18N ? window.I18N.t : (k)=>k;
-  addMessage('user', escapeHtml(text));
+async function handleUserMessage(text, displayText = text){
+  const t = chatT;
+  addMessage('user', escapeHtml(displayText));
   statusEl.textContent = t('chat_status_thinking');
   showTyping();
 
@@ -1107,35 +1197,25 @@ async function handleUserMessage(text){
     return;
   }
 
-  // Fallback path — the existing, fully local engine. This is what actually
-  // runs today, since no live AI endpoint is deployed yet.
-  await new Promise(r=> setTimeout(r, 620 + Math.random()*450));
+  // Keep one brain across every channel. If the shared endpoint is unavailable,
+  // fail visibly and safely instead of switching mid-conversation to the legacy
+  // local ConciergeProvider, which has different intent/memory/wording rules.
   hideTyping();
-  const context = { section: sectionHint, currentPrefs };
-  const res = ConciergeProvider.reply(text, context);
-  const state = res.pose || 'default';
-  setStage(state);
-  const stack = addFlowMessage(res.text, res.flow, state);
-  window.JourneyProvider.pushChat('assistant', res.text);
-  statusEl.textContent = t('chat_status_ready');
-  renderQuickActions(); // refresh chips now that currentPrefs may have changed
-  if(res.offerSave && res.flow){
-    window.__currentPlan = { time:currentPrefs.duration, who:currentPrefs.travelerType, mood:currentPrefs.mood, stops:res.flow, moodTag:'inthanin' };
-    const saveBtn = document.createElement('button');
-    saveBtn.className='btn btn-primary btn-sm'; saveBtn.style.marginTop='2px'; saveBtn.textContent=t('btn_save_this_journey');
-    saveBtn.onclick = async ()=>{ await window.JourneyProvider.savePlan(window.__currentPlan); addMessage('bot', t('notify_saved_confirm')); };
-    const wrap = document.createElement('div'); wrap.style.background='transparent'; wrap.style.border='none'; wrap.style.padding='0';
-    wrap.appendChild(saveBtn);
-    stack.appendChild(wrap);
-    body.scrollTop = body.scrollHeight;
-  }
+  setStage('reassuring');
+  const unavailable = chatT('chat_unavailable');
+  addFlowMessage(escapeHtml(unavailable), null, 'reassuring');
+  window.JourneyProvider.pushChat('assistant', unavailable);
+  statusEl.textContent = chatT('chat_status_ready');
+  renderQuickActions();
+
 }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
 on(quickWrap,'click',(e)=>{
   const btn = e.target.closest('.qchip');
   if(!btn) return;
-  handleUserMessage(btn.textContent);
+  const requestText = btn.dataset.message || btn.textContent;
+  handleUserMessage(requestText, btn.textContent);
 });
 on(qs('#chatSend'),'click', ()=>{
   const v = input.value.trim();
@@ -1153,7 +1233,7 @@ function openChat(){
   if(!opened){
     opened = true;
     setStage('welcome');
-    addFlowMessage(window.I18N ? window.I18N.t('chat_open_greeting') : '', null, 'welcome');
+    addFlowMessage(chatT('chat_open_greeting'), null, 'welcome');
   }
 }
 function closeChat(){ overlay.classList.remove('is-open'); document.body.style.overflow=''; }
@@ -1163,21 +1243,21 @@ on(overlay,'click',(e)=>{ if(e.target===overlay) closeChat(); });
 ['askThongthaiHeader','askThongthaiMobile','askThongthaiHero','footerAskThongthai','askThongthaiOTOP'].forEach(id=>{
   on(qs('#'+id),'click',(e)=>{ e.preventDefault(); openChat(); });
 });
-on(qs('#footerContact'),'click',(e)=>{ e.preventDefault(); openChat(); handleUserMessage(window.I18N ? window.I18N.t('footer_contact_message') : ''); });
-on(qs('#askThongthaiNearby'),'click',(e)=>{ e.preventDefault(); openChat(); handleUserMessage(window.I18N ? window.I18N.t('visit_ask_thongthai') : ''); });
+on(qs('#footerContact'),'click',(e)=>{ e.preventDefault(); openChat(); handleUserMessage(chatT('footer_contact_message')); });
+on(qs('#askThongthaiNearby'),'click',(e)=>{ e.preventDefault(); openChat(); handleUserMessage(chatT('visit_ask_thongthai')); });
 
 window.ThongthaiChat = {
   open: openChat,
   notify(text){ if(!overlay.classList.contains('is-open')){ /* silent toast could go here */ } openChat(); setStage('reassuring'); addFlowMessage(text, null, 'reassuring'); },
   openWithContext(expKey){
     openChat();
-    const t = window.I18N ? window.I18N.t : (k)=>k;
+    const t = chatT;
     const map = { dining:t('quick_eat'), stay:t('quick_rest'), adventure:t('quick_explore') };
     handleUserMessage(map[expKey] || t('concierge_more_info'));
   },
   openWithPlan(plan){
     openChat();
-    const t = window.I18N ? window.I18N.t : (k)=>k;
+    const t = chatT;
     if(!plan){ handleUserMessage(t('quick_build')); return; }
     const normalizedPlan = window.normalizeJourneyPlan ? window.normalizeJourneyPlan(plan) : plan;
     const flow = Array.isArray(normalizedPlan && normalizedPlan.stops)
