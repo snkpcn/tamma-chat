@@ -2,10 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   processThongthaiOneMindTurn,
+  processThongthaiOneMindTurnAuthoritative,
   resolveOneMindIdentity,
   type OneMindDependencies,
 } from '../netlify/functions/_thongthai-one-mind-orchestrator';
 import {
+  applyConversationContextUpdate,
   emptyConversationContextState,
   type ConversationContextState,
 } from '../netlify/functions/_conversation-context';
@@ -191,4 +193,104 @@ test('duplicate event id is idempotent for bounded conversation/task state', asy
 
   assert.equal(JSON.stringify(conversation), afterFirstConversation);
   assert.equal(JSON.stringify(taskState), afterFirstTask);
+});
+
+
+test('authoritative G.2 path retries the WHOLE turn on CAS conflict and preserves the concurrent message', async () => {
+  let interpreterCalls = 0;
+  let loadCalls = 0;
+  let casCalls = 0;
+
+  const concurrentContext = applyConversationContextUpdate(
+    emptyConversationContextState(NOW),
+    {
+      eventId:'web-concurrent',
+      channel:'web',
+      userMessage:'อยากขี่ม้า',
+      activeDomain:'activity',
+      activeTopic:'horse_riding',
+      lastAction:'ask',
+    },
+    NOW,
+  );
+
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANONICAL,
+    guestDbIdFromAnonymousId: async () => GUEST_DB,
+    // These legacy loaders are intentionally irrelevant to the authoritative
+    // path; if it accidentally falls back to them this test should fail.
+    loadConversationContext: async () => { throw new Error('legacy_context_loader_used'); },
+    persistConversationContext: async () => { throw new Error('legacy_context_persist_used'); },
+    loadTaskState: async () => { throw new Error('legacy_task_loader_used'); },
+    persistTaskState: async () => { throw new Error('legacy_task_persist_used'); },
+    interpretSemanticTurn: async (_message, context) => {
+      interpreterCalls += 1;
+      if (interpreterCalls === 1) assert.equal(context.activeDomain, null);
+      if (interpreterCalls === 2) assert.equal(context.activeDomain, 'activity');
+      return semantic({
+        action:'provide_information',
+        entities:{ date:'2026-09-19', partySize:2 },
+      });
+    },
+    buildKnowledgeAdapters: () => ({}),
+  };
+
+  const result = await processThongthaiOneMindTurnAuthoritative({
+    channel:'line',
+    message:'พรุ่งนี้สองคน',
+    eventId:'line-current',
+    providerUserKey:'line-key',
+    persistState:true,
+  }, deps, {
+    loadSnapshot: async () => {
+      loadCalls += 1;
+      return loadCalls === 1
+        ? { exists:true, state:{}, updatedAt:'2026-09-18T11:59:00.000Z' }
+        : {
+            exists:true,
+            state:{
+              conversationContext:concurrentContext,
+              taskState:emptyTaskStateContainer(),
+            },
+            updatedAt:'2026-09-18T12:00:00.500Z',
+          };
+    },
+    compareAndSwap: async () => {
+      casCalls += 1;
+      return casCalls === 1
+        ? { status:'conflict' as const }
+        : {
+            status:'applied' as const,
+            snapshot:{ exists:true, state:{}, updatedAt:'2026-09-18T12:00:01.000Z' },
+          };
+    },
+  }, NOW);
+
+  assert.equal(interpreterCalls, 2, 'semantic interpretation must rerun against the newer canonical context');
+  assert.equal(loadCalls, 2);
+  assert.equal(casCalls, 2);
+  assert.equal(result.trace.statePersisted, true);
+  assert.equal(result.trace.stateConflictRetries, 1);
+  assert.equal(result.conversationContextAfter.recentTurns.some(turn => turn.content === 'อยากขี่ม้า'), true);
+  assert.equal(result.conversationContextAfter.recentTurns.some(turn => turn.content === 'พรุ่งนี้สองคน'), true);
+});
+
+test('authoritative G.2 path gives up rather than stale-overwriting after bounded CAS conflicts', async () => {
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANONICAL,
+    guestDbIdFromAnonymousId: async () => GUEST_DB,
+    interpretSemanticTurn: async () => semantic(),
+    buildKnowledgeAdapters: () => ({}),
+  };
+
+  await assert.rejects(() => processThongthaiOneMindTurnAuthoritative({
+    channel:'line',
+    message:'เอาภาราดร',
+    eventId:'conflict-loop',
+    providerUserKey:'line-key',
+    persistState:true,
+  }, deps, {
+    loadSnapshot: async () => ({ exists:true, state:{}, updatedAt:'2026-09-18T12:00:00.000Z' }),
+    compareAndSwap: async () => ({ status:'conflict' as const }),
+  }, NOW, 2), /one_mind_state_conflict_exhausted/);
 });
