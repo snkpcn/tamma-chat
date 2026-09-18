@@ -12,8 +12,24 @@ import { SEMANTIC_EVAL_CORPUS } from '../tests/fixtures/semantic-eval-corpus';
 import { PHASE_L_SEMANTIC_CASES } from '../tests/fixtures/phase-l-semantic-cases';
 
 const all=[...SEMANTIC_EVAL_CORPUS,...PHASE_L_SEMANTIC_CASES];
-const limitRaw=Number(process.env.LIVE_EVAL_LIMIT||all.length);
-const limit=Number.isFinite(limitRaw)?Math.max(1,Math.min(all.length,Math.floor(limitRaw))):all.length;
+
+const PRODUCTION_SMOKE_IDS=new Set([
+  'l-activity-08','l-activity-10',
+  'l-restaurant-02','l-restaurant-03','l-restaurant-05','l-restaurant-09',
+  'l-stay-02','l-stay-04','l-stay-08',
+  'l-promo-01','l-promo-04','l-promo-05',
+  'l-member-01','l-member-03',
+  'l-otop-01','l-otop-03',
+  'l-cafe-02','l-payment-03',
+  'l-journey-01','l-journey-02','l-journey-05','l-journey-07',
+  'l-support-02',
+]);
+const profile=process.env.LIVE_EVAL_PROFILE||'full';
+const profileCases=profile==='production-smoke'
+  ? all.filter(item=>PRODUCTION_SMOKE_IDS.has(item.id)||item.message==='มีไรทำมั่ง')
+  : all;
+const limitRaw=Number(process.env.LIVE_EVAL_LIMIT||profileCases.length);
+const limit=Number.isFinite(limitRaw)?Math.max(1,Math.min(profileCases.length,Math.floor(limitRaw))):profileCases.length;
 const minPctRaw=Number(process.env.LIVE_EVAL_MIN_PASS_PCT||95);
 const minPct=Number.isFinite(minPctRaw)?Math.max(0,Math.min(100,minPctRaw)):95;
 
@@ -24,7 +40,7 @@ if(!process.env.GEMINI_API_KEY&&!process.env.OPENAI_API_KEY){
   let pass=0;
   let failed=0;
   const failures:Array<{id:string;expected:string;actual:string;message:string}>=[];
-  const selected=all.slice(0,limit);
+  const selected=profileCases.slice(0,limit);
 
   for(const evalCase of selected){
     try{
@@ -58,6 +74,7 @@ if(!process.env.GEMINI_API_KEY&&!process.env.OPENAI_API_KEY){
   const pct=selected.length?pass/selected.length*100:0;
   console.log(JSON.stringify({
     kind:'LIVE_MODEL_SEMANTIC_CONFORMANCE',
+    profile,
     total:selected.length,
     pass,
     failed,
