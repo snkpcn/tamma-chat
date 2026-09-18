@@ -305,6 +305,14 @@ export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentS
     /(ตำลาว|ตำไทย|ชุดอาหาร|ร้านอาหาร|ตำมา-ชาติ|เมนู|สั่งอาหาร|แพ้ถั่ว|ไม่เอาหมู)/u.test(turn.content));
   const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง)/u.test(text);
   if (explicitFood) return true;
+
+  // Broad wording is ambiguous globally, but not when the guest opened
+  // Thongthai from the dining surface. Keep the current business context
+  // instead of expanding a restaurant question into the whole ecosystem.
+  const diningContext = String(request.pageContext?.section ?? '').toLowerCase() === 'dining';
+  const broadDiningDiscovery = /(มาครั้งแรก|ครั้งแรก|มีอะไร(?:บ้าง)?|แนะนำ(?:หน่อย|อะไร|เมนู)?|น่าลอง|ไหนดี|เริ่ม(?:จาก)?อะไร)/u.test(text);
+  if (diningContext && broadDiningDiscovery) return true;
+
   const restaurantFollowUp = /(งบ|แพ้|ไม่กิน|ไม่เอา|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน|เอาชุด|ชุดเมื่อกี้)/u.test(text);
   return hasRestaurantHistory && restaurantFollowUp;
 }
