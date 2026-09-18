@@ -725,57 +725,91 @@ the same or next commit.
   - Customer integration head before this handoff update:
     `1a8037ef7245644d260ff1e5d8b25c4c3fbadfb6`.
   - Both main branches and both production sites remain untouched; no Netlify deploy occurred.
-- [ ] **Phase L — Golden conversation eval (150+ meaningful scenarios). NOT STARTED as final suite. Exact next phase.**
-- [ ] Phase M — Full E2E. NOT STARTED.
+- [x] **Phase L — Golden Conversation Eval. DONE for network-free/static acceptance.**
+  - Final stored semantic inventory is **154 meaningful ground-truth cases**:
+    existing corpus + 80 Phase L additions.
+  - Added `tests/fixtures/phase-l-semantic-cases.ts` covering:
+    activity, restaurant, stay, promotion, membership, OTOP, café, payment,
+    journey/ecosystem/support, corrections, cancellations, status checks,
+    recommendation constraints, explicit commit, topic switch and multi-intent.
+  - Added `tests/phase-l-golden-corpus.test.ts`:
+    - enforces >=150 stored cases
+    - global unique ids
+    - every One-Mind customer domain covered
+    - no single-domain domination
+    - all Phase L cases pass the REAL deterministic parser/reference layer
+    - named historical regression presence
+  - Existing specialized suites remain part of the final golden acceptance for:
+    multi-turn horse flow, restaurant recommendation→preorder, stay, promotion,
+    context continuity, retry/idempotence, source truth, graceful degradation,
+    response-composer truth guards, Web/LINE parity and CAS concurrency.
+  - Named historical regressions retained:
+    `มีไรทำมั่ง`, repeated promotion discovery, restaurant preorder continuation,
+    LINE stay checkout typo, homepage script disappearance, retry/idempotence,
+    cross-channel continuation, SOURCE_UNAVAILABLE != EMPTY, requested != confirmed.
+  - Added `scripts/run-semantic-live-eval.ts` and package command
+    `npm run eval:semantic:live`.
+    This reuses the same stored ground truth against the REAL configured provider stack.
+    It is intentionally NOT part of normal CI and requires Gemini/OpenAI credentials.
+  - **LIVE MODEL semantic conformance is NOT yet executed.**
+    It remains a Phase O pre-deploy acceptance gate; do not misreport static fixtures as
+    proof of live model classification quality.
+  - Latest customer branch CI:
+    run `35355393513`, **429/429 tests passing, 0 failed**.
+  - Main/production untouched; no deploy performed.
+- [ ] **Phase M — Full E2E. NOT STARTED. Exact next phase.**
 - [ ] Phase N — Legacy cleanup. NOT STARTED.
 - [ ] Phase O — Final production integration/deployment. NOT STARTED.
 
 ## Exact next action
 
-Start **Phase L — Golden Conversation Eval** in the customer integration branch.
+Start **Phase M — Full E2E** on the SAME integration branches.
 
-Requirements:
-1. Final scenario inventory must be **>=150 meaningful scenarios**, not trivial wording padding.
-2. Cover:
-   - semantic meaning
-   - multi-turn context/reference continuity
-   - task merge/correction/topic switch
-   - knowledge-source selection
-   - unavailable vs empty vs unknown
-   - explicit-commit gating
-   - transaction idempotence contracts
-   - provider/model degradation
-   - response-composer truth guards
-   - Web/LINE parity
-   - linked vs unlinked identity
-   - duplicate event delivery
-   - restaurant/activity/stay/promotion/membership/OTOP/café/support
-3. Preserve the distinction between NETWORK-FREE contract/eval tests and LIVE MODEL
-   semantic conformance. Ordinary `npm test` stays network-free.
-4. Add a live-model eval runner/script for Phase O acceptance that can score the same stored
-   ground truth when real provider credentials are available; do NOT make normal CI depend on
-   API keys.
-5. Every known historical bug must remain a named regression:
-   - `มีไรทำมั่ง`
-   - repeated promotion discovery
-   - restaurant preorder continuation
-   - LINE stay checkout typo
-   - homepage JS/script disappearance
-   - retry/idempotence
-   - cross-channel continuation
-   - source outage != empty
-   - requested != confirmed
-6. Do not deploy.
+Phase M must prove the canonical system across boundaries without deploying partial architecture.
+
+Required E2E families:
+1. customer turn → One-Mind semantic/context/task/knowledge/dialog/composer
+2. activity booking proposal → existing deterministic booking executor contract
+3. stay booking proposal → existing operational booking contract
+4. restaurant recommendation → proposed set → preorder contract
+5. promotion discovery → redemption contract
+6. payment lifecycle/status truth
+7. membership inquiry/state
+8. OTOP inquiry/order contract
+9. café UNKNOWN/verified-follow-up behavior (no invented catalog)
+10. Web/LINE linked continuity
+11. unlinked identity isolation
+12. duplicate/retry idempotence
+13. source outage degradation
+14. model outage + grounded deterministic answer
+15. requested != confirmed
+16. bounded safe trace → backoffice diagnostics contract
+
+Use TEST environment / injected adapters / existing test-safe records where writes are required.
+Do not create a second database or new production system.
+Do not deploy yet.
+
+Also add an explicit Phase O smoke checklist for the first real production deployment:
+- apply tracked migrations
+- final main reconciliation
+- live-model semantic conformance
+- web smoke
+- LINE smoke
+- booking/status smoke
+- backoffice diagnostics smoke
+- verify no duplicate transactions
+- verify requested/confirmed wording
 
 Sequence remains:
-**L → M → N → O**.
+**M → N → O**.
 
 ## Last commit on this branch
 
-- Customer K code head before handoff update:
-  `1a8037ef7245644d260ff1e5d8b25c4c3fbadfb6`.
-- Backoffice K checkpoint:
-  `f51d56171138799246e17f47b01ae2c8bec19ba1`.
-- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I, J, K complete.
+- Customer Phase L tested head:
+  `20eaf670375743c17fb4e54ff6bf08670a7d8a6b` plus subsequent corpus expansion at
+  `583c034a2c5d70765a1b9c189c19b6786a810f73`.
+- Latest CI run: `35355393513`, 429/429 passing.
+- Backoffice Phase K head: `f51d56171138799246e17f47b01ae2c8bec19ba1`.
+- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I, J, K, L complete.
 - G.2 read-only strangler + CAS concurrency hardening remain behind OFF env gate.
 - Main/production untouched; no deploy performed.
