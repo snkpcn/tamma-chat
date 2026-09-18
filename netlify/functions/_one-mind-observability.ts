@@ -210,13 +210,13 @@ export async function persistOneMindTrace(trace:OneMindTraceEnvelope):Promise<bo
     const observedAt=new Date(trace.at);
     const base=Number.isFinite(observedAt.getTime()) ? observedAt : new Date();
     const expiresAt=new Date(base.getTime()+ONE_MIND_TRACE_RETENTION_MS).toISOString();
-    const response=await fetch(config.url+'/rest/v1/one_mind_traces',{
+    const response=await fetch(config.url+'/rest/v1/one_mind_traces?on_conflict=channel,trace_id',{
       method:'POST',
       headers:{
         apikey:config.key,
         Authorization:'Bearer '+config.key,
         'Content-Type':'application/json',
-        Prefer:'return=minimal',
+        Prefer:'resolution=ignore-duplicates,return=minimal',
       },
       body:JSON.stringify({
         trace_id:trace.traceId,
