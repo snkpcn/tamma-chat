@@ -92,6 +92,13 @@ export type OneMindTrace = {
   actionProposed: boolean;
   statePersisted: boolean;
   stateConflictRetries?: number;
+  timingsMs?: {
+    semantic: number;
+    dialogAndKnowledge: number;
+    stateRead: number;
+    stateWrite: number;
+    total: number;
+  };
 };
 
 export type OneMindTurnResult = {
@@ -188,14 +195,18 @@ async function computeOneMindTurnFromState(
   deps: OneMindDependencies,
   now: Date,
 ): Promise<OneMindTurnResult> {
+  const computeStartedAt = Date.now();
   const message = normalizeMessage(input.message);
   const semanticContext = buildSemanticContext(conversationContextBefore, now);
+  const semanticStartedAt = Date.now();
   const semanticTurn = await deps.interpretSemanticTurn(message, semanticContext);
+  const semanticMs = Date.now() - semanticStartedAt;
   const adapters = deps.buildKnowledgeAdapters(input.channel, {
     guestDbId: identity.guestDbId,
     environment: input.environment ?? 'live',
   });
 
+  const dialogStartedAt = Date.now();
   const dialog = await processDialogTurnDetailed({
     semanticTurn,
     conversationContext: conversationContextBefore,
@@ -203,6 +214,7 @@ async function computeOneMindTurnFromState(
     channel: input.channel,
     eventId: input.eventId,
   }, adapters, now);
+  const dialogAndKnowledgeMs = Date.now() - dialogStartedAt;
 
   const taskStateAfter = dialog.decision.taskStateContainer;
   const conversationContextAfter = nextConversationContext(
@@ -240,6 +252,13 @@ async function computeOneMindTurnFromState(
       actionProposed: Boolean(dialog.decision.actionProposal),
       statePersisted: false,
       stateConflictRetries: 0,
+      timingsMs:{
+        semantic:semanticMs,
+        dialogAndKnowledge:dialogAndKnowledgeMs,
+        stateRead:0,
+        stateWrite:0,
+        total:Date.now() - computeStartedAt,
+      },
     },
   };
 }
