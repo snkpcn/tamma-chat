@@ -808,7 +808,22 @@ the same or next commit.
     run `35357417413`, success. Previous permanent guard run `35357273502`:
     **446/446 tests passing, 0 failed**.
   - Main/production untouched; no deploy performed.
-- [ ] **Phase O — Final production integration/deployment. READY TO START.**
+- [~] **Phase O — Final production integration/deployment. IN PROGRESS.**
+  - Pre-production customer integration CI: **449/449 passing**, run `35357662505`.
+  - Backoffice integration CI: **31/31 passing**, run `35354802054`.
+  - Customer main rechecked immediately before integration: `d37c56f44753bce2ec25d3091506cd3c0b703bdc` (unchanged since Phase 0 hotfix).
+  - Backoffice main rechecked: `f9cd61cfab5987ecc13839b0934e1c2f14796914`.
+  - Applied tracked additive migration `one-mind-observability-v1.sql` to the EXISTING
+    tamma-customer-data Supabase project.
+  - Verified `public.one_mind_traces` exists with RLS enabled, no policies, and
+    `trg_prune_expired_one_mind_traces` installed.
+  - Production env prepared:
+    `THONGTHAI_ONE_MIND_CUTOVER=1` and
+    `THONGTHAI_RUN_LIVE_EVAL_ON_BUILD=1`.
+    Current old production code ignores the new cutover flag until final deploy.
+  - Added opt-in Netlify build gate. Final production build will run the curated real-provider
+    semantic acceptance profile and fail the deploy if pass rate is below 90%.
+  - No customer/backoffice code deploy has occurred yet at this checkpoint.
 
 ## Exact next action
 
