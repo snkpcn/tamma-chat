@@ -1,4 +1,4 @@
-// Phase D: statically proves _task-state.ts's three dependencies
+// Phase D/G.2: statically proves _task-state.ts's semantic/domain dependencies
 // (_semantic-interpreter.ts, _promotion-dialog.ts, _restaurant-preorder-dialog.ts)
 // do not import back from _task-state.ts, and that _task-state.ts stays
 // decoupled from the heavy runtime/brain layer (_thongthai-runtime-v3.ts,
@@ -31,6 +31,6 @@ test('_task-state.ts does not import the runtime/brain/model-provider layer -- i
 
 test('_task-state.ts only imports from the expected leaf modules', async () => {
   const imports = await importsOf('_task-state.ts');
-  const allowed = new Set(['./_semantic-interpreter', './_promotion-dialog', './_restaurant-preorder-dialog']);
+  const allowed = new Set(['./_semantic-interpreter', './_promotion-dialog', './_restaurant-preorder-dialog', './_guest-agent-state-store']);
   for (const specifier of imports) assert.ok(allowed.has(specifier), `unexpected import in _task-state.ts: ${specifier}`);
 });
