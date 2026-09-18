@@ -309,7 +309,12 @@ export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentS
   if (RESTAURANT_SET_ACCEPT_RE.test(text) && proposedSet) return true;
   const hasRestaurantHistory = request.chatHistory.slice(-6).some(turn =>
     /(ตำลาว|ตำไทย|ชุดอาหาร|ร้านอาหาร|ตำมา-ชาติ|เมนู|สั่งอาหาร|แพ้ถั่ว|ไม่เอาหมู)/u.test(turn.content));
-  const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง)/u.test(text);
+  // "ไรกิน"/"มีไรกิน" is the colloquial shortening of "อะไรกิน" (dropping the
+  // leading อะ), as in the canonical smoke phrase "ร้านมีไรกิน" -- without this,
+  // that phrasing missed every deterministic branch above and fell through to
+  // a full LLM round trip, which the legacy path only reaches as a One-Mind
+  // safety net that's already spent most of the request's time budget.
+  const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง)/u.test(text);
   if (explicitFood) return true;
   const restaurantFollowUp = /(งบ|แพ้|ไม่กิน|ไม่เอา|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน|เอาชุด|ชุดเมื่อกี้)/u.test(text);
   return hasRestaurantHistory && restaurantFollowUp;

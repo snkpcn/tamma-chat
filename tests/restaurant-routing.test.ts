@@ -38,6 +38,11 @@ test('explicit restaurant or food recommendation uses restaurant advisor', () =>
   assert.equal(isRestaurantAdvisorTurn(request('อาหารแนะนำมีอะไรบ้าง'), {agentState:{}}), true);
 });
 
+test('colloquial "ร้านมีไรกิน" (อะไร shortened to ไร) is recognized as restaurant discovery', () => {
+  assert.equal(isRestaurantAdvisorTurn(request('ร้านมีไรกิน'), {agentState:{}}), true);
+  assert.equal(isRestaurantAdvisorTurn(request('มีไรกินมั้ย'), {agentState:{}}), true);
+});
+
 test('restaurant follow-up can use prior restaurant context', () => {
   const history = [
     {role:'user' as const, content:'มากัน 3 คน งบไม่เกิน 700 อยากกินอีสานแท้'},
