@@ -169,7 +169,7 @@ async function reinforceStructuredMemory(message: string, userId: string, langua
   console.log('LINE_STRUCTURED_MEMORY_REINFORCED', inferredConstraints.join(','));
 }
 
-async function askThongthai(message: string, userId: string): Promise<ThongthaiResponse> {
+async function askThongthai(message: string, userId: string, eventId?: string): Promise<ThongthaiResponse> {
   const response = await fetch(siteBaseUrl() + THONGTHAI_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -187,6 +187,7 @@ async function askThongthai(message: string, userId: string): Promise<ThongthaiR
         journalEntries: [],
       },
       pageContext: { section: 'line' },
+      ...(eventId ? { eventId } : {}),
     }),
   });
 
@@ -198,9 +199,9 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function askThongthaiReliably(message: string, userId: string): Promise<ThongthaiResponse> {
+async function askThongthaiReliably(message: string, userId: string, eventId?: string): Promise<ThongthaiResponse> {
   try {
-    return await askThongthai(message, userId);
+    return await askThongthai(message, userId, eventId);
   } catch (firstError) {
     console.error(
       'LINE_THONGTHAI_FIRST_ATTEMPT_ERROR',
@@ -213,7 +214,7 @@ async function askThongthaiReliably(message: string, userId: string): Promise<Th
   // but the model/final response times out and the customer otherwise sees silence.
   await delay(250);
   try {
-    return await askThongthai(message, userId);
+    return await askThongthai(message, userId, eventId);
   } catch (secondError) {
     console.error(
       'LINE_THONGTHAI_SECOND_ATTEMPT_ERROR',
@@ -460,7 +461,7 @@ async function handleEvent(
   } catch (error) {
     console.error('LINE_BOOKING_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
   }
-  const result = await askThongthaiReliably(message, userId);
+  const result = await askThongthaiReliably(message, userId, event.message.id);
 
   try {
     await reinforceStructuredMemory(message, userId, language);
