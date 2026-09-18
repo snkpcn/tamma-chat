@@ -1073,3 +1073,12 @@ intentionally retained.
 - After provider evidence is captured and the root cause is fixed, remove both the endpoint and this temporary env var.
 
 - Phase P diagnostic token rotated after accidental on-screen exposure; production rebuild retriggered at 2026-09-19 01:37 ICT.
+
+
+### Phase P deploy unblocked — credits restored — 2026-09-19
+
+- Netlify production deploys had been paused because the team exhausted its billing-cycle credits.
+- The owner has now purchased additional Netlify credits.
+- This commit intentionally retriggers the EXISTING tamma-chat production auto-deploy from current main.
+- Do not add more diagnostic architectures or workaround endpoints before verifying this deploy and reading the existing build-time diagnostic artifact.
+- Current objective: deploy current main -> read `phase-p-diagnostic-result.json` -> fix the confirmed provider failure -> remove temporary diagnostic machinery/token -> rerun production UAT -> close Phase P.
