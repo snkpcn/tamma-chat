@@ -212,10 +212,12 @@ export async function processThongthaiOneMindTurn(
   const persistState = input.persistState === true;
   if (persistState) {
     // Bounded conversational/task state only. No booking/order/payment writes.
-    await Promise.all([
-      deps.persistConversationContext(identity.guestDbId, conversationContextAfter),
-      deps.persistTaskState(identity.guestDbId, taskStateAfter),
-    ]);
+    // Persist sequentially because both Phase C and Phase D currently share
+    // guest_agent_state.state via read-modify-write wrappers. Parallel writes
+    // could each read the same old JSON object and then clobber the sibling
+    // field written by the other call.
+    await deps.persistConversationContext(identity.guestDbId, conversationContextAfter);
+    await deps.persistTaskState(identity.guestDbId, taskStateAfter);
   }
 
   return {
