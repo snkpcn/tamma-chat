@@ -29,6 +29,7 @@ import {
 } from './_thongthai-runtime-v3';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { polishCustomerMessage } from './_chat-copy-style';
+import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import {
   clearRestaurantPreorderDraft,
   formatRestaurantSetPrompt,
@@ -722,6 +723,23 @@ async function promotionDiscoveryFallbackResponse(
   return resolvePromotionRedemption(decision.pending, request, guestDbId, channel);
 }
 
+function deterministicExperienceDiscoveryResponse(
+  request: BrainRequest,
+  runtime: BrainRuntimeContext,
+): BrainResponse | null {
+  if (request.language !== 'th' || !isExperienceDiscoveryIntent(request.message)) return null;
+  return {
+    message: formatExperienceDiscoveryMessage(runtime.worldFacts),
+    intent:'recommendation',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 async function deterministicRestaurantResponse(
   request: BrainRequest,
   runtime: { agentState: Record<string, unknown> },
@@ -817,6 +835,22 @@ export const handler: Handler = async (event: HandlerEvent) => {
   });
   if (promotionContinuation) {
     const polished = polishedResponse(promotionContinuation, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Broad discovery such as "มีอะไรทำบ้าง" is a core product question and
+  // must not depend on LLM availability. Answer it deterministically from the
+  // shared experience catalog + live activity inventory before calling the model.
+  const experienceDiscovery = deterministicExperienceDiscoveryResponse(request, runtime);
+  if (experienceDiscovery) {
+    const polished = polishedResponse(experienceDiscovery, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return json(200, {
       message: polished.message,
