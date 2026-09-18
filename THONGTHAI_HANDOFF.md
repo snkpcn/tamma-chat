@@ -1002,3 +1002,65 @@ intentionally retained.
 - Current backoffice production deploy remains:
   Netlify deploy `6aad4e43bfe37a0008d2b0c1`, state `ready`,
   commit_ref `45655cb4c16b9213017abff4961f81bb13336bcc`.
+
+## Phase P — Post-launch production UAT + behavior hardening — 2026-09-18
+
+- [~] **Phase P — IN PROGRESS. One critical finding NOT yet resolved.**
+- Ran real multi-turn production UAT (10 flows, ~49 turns, via GitHub Actions against
+  https://tamma-chat.netlify.app/, since this session's own outbound HTTP is proxy-blocked)
+  against production main as of `afd5eda`/`62ec8cc`, then again after each fix below.
+- **Confirmed HIGH-severity finding, still unresolved as of this checkpoint**: nearly every
+  non-discovery customer turn (any follow-up, selection, correction, or non-"discover"-domain
+  question -- horse selection, date/party-size follow-up, stay/otop/cafe/membership questions,
+  "จองเลย") returns the generic legacy degradation apology
+  ("ตอนนี้ทองไทยคิดช้ากว่าปกตินิดหนึ่งครับ...") instead of a real answer. Only turns served by a
+  genuinely lightweight path succeed: One-Mind's `discover`-action fast path (no second LLM
+  call) or a fully deterministic branch with no LLM call at all (`มีไรทำมั่ง`,
+  `ร้านมีไรกิน`-style discovery, promotion discovery). Reproduced identically across 3 separate
+  full/partial runs, including after a clean 5-minute cooldown with no other LLM traffic from
+  this session -- ruling out simple rate-limit exhaustion from this session's own testing volume
+  as the sole explanation.
+- Root layer: **Timeout / Provider / Degradation**, specifically the legacy `runThongthaiBrain()`
+  path in `_thongthai-brain-v3.ts` (the strangler-safety-net the customer gateway falls through
+  to whenever One-Mind's G.2 cutover does not complete a turn itself, which today is most
+  non-discovery domains/actions) -- its call to `callPreferredModel` throws `LLMAvailabilityError`
+  (both Gemini and the configured OpenAI fallback failing) on nearly every attempt, fast
+  (4-11s, not the 10s/8s AbortController timeouts), while the exact same shared provider module
+  called with a smaller prompt (semantic interpreter, grounded-deterministic composer) succeeds
+  reliably.
+- **Two real, verified size-reduction fixes landed** (both legitimate improvements, kept
+  regardless of the open question below):
+  1. `fa446f8` -- bounded a base `world_facts` query that had literally no LIMIT clause.
+  2. `123941e` -- trimmed the `restaurant_menu_live` world fact (carried on every conversational
+     turn regardless of topic) from a full per-item ingredient list + recommendation profile
+     object down to a lean summary; the doctrine already routes real ingredient/allergy/
+     recommendation reasoning through the `list_restaurant_menu` tool call instead, so nothing
+     the model can act on was lost.
+  - A temporary read-only diagnostic (`thongthai-brain-prompt-diagnostic.ts`, added `0d01ee3`,
+    removed `d2aca0d` once its job was done) measured the REAL production prompt directly:
+    **77,217 chars before, 52,509 chars after** (`restaurant_menu_live` alone: 34,117 -> 9,447
+    chars). Both numbers are real production measurements, not estimates.
+  - **This 32% total reduction had zero measurable effect on the failure** -- re-running the
+    identical previously-failing turns against the fixed deploy reproduced the exact same
+    100% failure, unchanged. This is an honest negative result: it does not confirm prompt size
+    is the (sole) cause, only that neither fix so far was the dominant lever, if size is
+    a factor at all.
+- **NOT YET ROOT-CAUSED.** This session has no access to Netlify function logs, the Gemini/
+  OpenAI provider dashboards, or any way to read the actual classified provider error text
+  (e.g. "Gemini 429" vs "Gemini network error" vs "OpenAI 503") that `LLMAvailabilityError`
+  carries internally -- `console.error('THONGTHAI_BRAIN_ERROR', error)` logs it, but nothing
+  in this session's toolset can read Netlify's function log output. A safe, no-PII diagnostic
+  endpoint that would have made ONE real model call to capture that exact error was drafted but
+  deliberately NOT deployed: an unauthenticated production GET endpoint that can trigger a real,
+  billed LLM call on demand is a cost-abuse risk that was correctly flagged before it shipped.
+- **Recommended next step for whoever picks this up**: get direct Netlify function log access
+  (or add a properly authenticated/rate-limited diagnostic) and read the actual
+  `THONGTHAI_BRAIN_ERROR`/`THONGTHAI_MODEL_PROVIDER_FALLBACK` log lines for one real failing
+  turn. That single piece of evidence (the literal provider error string) would very likely
+  resolve this immediately, and this session could not obtain it safely.
+- Regression tests added this checkpoint (452/452 total): `tests/legacy-brain-prompt-bounds.test.ts`
+  locks in both size-reduction fixes so they cannot silently regress.
+- No production booking, order, payment, or promotion-redemption test transaction was created
+  at any point in this investigation; all UAT flows were real customer-equivalent messages sent
+  to the live production gateway, consistent with the standing "read-only inquiry flows are
+  safe, no fake transactions" rule.
