@@ -1,6 +1,7 @@
 import type {
   BrainChannel, BrainResponse, BrainToolCall, BrainToolResult, BrainRuntimeContext, BrainRequest,
 } from './_thongthai-brain-v3';
+import { THONGTHAI_BRAIN_VERSION, THONGTHAI_BIBLE_VERSION } from './_thongthai-brain-v3';
 import {
   createBooking, createCafeInquiry, createOtopOrder, listBookingOptions, listOtopProducts,
   type OpsChannel, type ServiceType,
@@ -329,7 +330,8 @@ export async function persistBrainRuntime(guestDbId: string | null, channel: Bra
     const rows = await res.json() as Array<{state:Record<string,unknown>}>;
     const next: Record<string,unknown> = {
       ...(rows[0]?.state ?? {}), last_intent:response.intent,last_channel:channel,last_style_mode:response.responseStyle,
-      updated_by_brain_version:'2026-09-agentic-operations-v3',
+      updated_by_brain_version:THONGTHAI_BRAIN_VERSION,
+      updated_by_bible_version:THONGTHAI_BIBLE_VERSION,
     };
     const update = response.agentStateUpdate ?? {};
     const active = safeShort(update.activeTopic,80); const summary = safeShort(update.travelContextSummary,500); const unresolved = safeShort(update.unresolvedNeed,180);

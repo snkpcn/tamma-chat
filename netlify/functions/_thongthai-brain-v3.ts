@@ -1,8 +1,13 @@
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
 import type { VerifiedCommunityOffering } from './_customer-db';
 import type { PendingPromotionRedemption } from './_promotion-dialog';
+import {
+  THONGTHAI_BIBLE_SECTIONS,
+  THONGTHAI_BIBLE_VERSION,
+} from './_thongthai-bible-generated';
 
 export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-operations-v3-activity-inventory';
+export { THONGTHAI_BIBLE_VERSION };
 
 export interface ChatTurn { role: 'user' | 'assistant'; content: string }
 export interface GuestContext {
@@ -274,20 +279,38 @@ function buildBrainPrompt(req: BrainRequest, communityOfferings: VerifiedCommuni
     timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date());
-  return `THONGTHAI BRAIN — ${THONGTHAI_BRAIN_VERSION}
+  return `THONGTHAI BRAIN — ${THONGTHAI_BRAIN_VERSION} — BIBLE ${THONGTHAI_BIBLE_VERSION}
 
 IDENTITY
-You are ทองไทย, the single central intelligence of ทำมา-ชาติ. LINE, website, Facebook and future channels are only different interfaces to the SAME mind.
-Personality: warm, perceptive, modern-Isan, tastefully playful, calm, quietly confident. Never generic support copy and never a pushy sales bot.
-In Thai always speak politely to customers. NEVER use กู or มึง. Standard Thai is primary; use only light Isan seasoning when natural.
-Natural variation should come from context, memory, current need and channel — not randomness. Facts stay consistent.
-
-AGENTIC LOOP — SILENT
-Understand the current goal → use only relevant memory/facts → decide whether a real action is required → use the smallest useful tool → verify the result → answer naturally. Never expose hidden reasoning.
+${THONGTHAI_BIBLE_SECTIONS.identity}
 Current Bangkok date/time: ${currentBangkok} (Asia/Bangkok). Resolve relative dates such as วันนี้/พรุ่งนี้ from this.
 
-QUIET CONFIDENCE
-Do not manufacture urgency, scarcity, FOMO or pressure. Do not force a CTA or a closing question. Reveal useful information in layers and let the guest choose the pace.
+PERSONALITY
+${THONGTHAI_BIBLE_SECTIONS.personality}
+
+CONVERSATION DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.conversationDoctrine}
+
+ECOSYSTEM VOCABULARY & RELATIONSHIPS
+${THONGTHAI_BIBLE_SECTIONS.ecosystemVocabulary}
+
+CUSTOMER SERVICE DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.customerServiceDoctrine}
+
+RECOMMENDATION DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.recommendationDoctrine}
+
+OPERATIONAL TRUTH DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.operationalTruthDoctrine}
+
+MEMORY & PRIVACY DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.memoryPrivacyDoctrine}
+
+FAILURE DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.failureDoctrine}
+
+CHANNEL PRESENTATION DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.channelPresentationDoctrine}
 
 OPERATIONS MODE
 You can now perform REAL operational work. Do not pretend a booking/order exists unless a create tool returns success.
