@@ -201,7 +201,7 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<s
   } finally { clearTimeout(timeout); }
 }
 
-async function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
+export async function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
   try { return await callGemini(systemPrompt, messages); }
   catch (error) {
     if (!(error instanceof LLMAvailabilityError)) throw error;
@@ -578,7 +578,7 @@ function validateBrainResponse(data: unknown, runtime: BrainRuntimeContext): Bra
     toolCalls: normalizeToolCalls(raw.toolCalls, runtime.toolResults.length > 0, runtime),
   };
 }
-function stripCodeFences(text: string): string { return text.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/```\s*$/i,'').trim(); }
+export function stripCodeFences(text: string): string { return text.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/```\s*$/i,'').trim(); }
 function cleanLineMessage(text: string): string {
   return text.replace(/\*\*(.*?)\*\*/gs,'$1').replace(/__(.*?)__/gs,'$1').replace(/^#{1,6}\s+/gm,'').replace(/^\s*[-*]\s+/gm,'• ').replace(/`([^`]+)`/g,'$1').replace(/\n{3,}/g,'\n\n').trim();
 }

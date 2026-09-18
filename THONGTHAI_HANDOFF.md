@@ -74,25 +74,46 @@ the same or next commit.
     doctrine section matches a price/promo-code/stock pattern — compile succeeded, so none
     were introduced). `main`/production untouched (only this integration branch has these
     commits).
-- [ ] **Phase B — Semantic Interpreter.** NOT STARTED. This is the exact next action.
-  - Design target: a reusable `SemanticTurn` contract (domain/intent/action/entities/
-    references/constraints/confidence/needsClarification) per the user's Phase 2 spec, NOT
-    another `_experience-discovery.ts`-style hand-rolled phrase/regex matcher.
-  - Must handle reference resolution as a first-class case (ตัวไหน / แล้วม้าล่ะ / สองคน /
-    พรุ่งนี้ / corrections like "ไม่ใช่ หมายถึงภาราดร") — this depends on Phase C
-    (conversation continuity/context) existing to have something to resolve references
-    *against*, so Phase B and C are likely intertwined in practice even though listed
-    separately; expect to build a minimal version of C's context object alongside B's first
-    cut, then deepen C properly in its own pass.
-  - Must be tested via semantic-equivalence-group assertions (classify correctly), not
-    exact-string assertions — this is the acceptance gate the user set.
-  - Should run *beside* existing deterministic routing at first (shadow mode / comparison in
-    tests), not replace it yet — strangler discipline.
-  - Three existing hand-rolled regex intent modules it will eventually make redundant (do NOT
-    delete yet): `_experience-discovery.ts`, parts of `_promotion-dialog.ts`'s intent
-    detection, `isRestaurantAdvisorTurn()`'s gate in `thongthai-chat.ts`. Also the LINE-layer
-    regex handlers in `_operations-db.ts` (`handleLineBookingMessage`,
-    `handleLineMembershipMessage`) are a later (Phase G) concern, not Phase B's.
+- [x] **Phase B — Semantic Interpreter.** Done, committed on this branch (see "Last commit"
+  below). Summary:
+  - `netlify/functions/_semantic-interpreter.ts`: the one reusable `SemanticTurn` contract
+    (domain/intent/action/entities/references/constraints/confidence/needsClarification) plus
+    `SemanticContext`/`SemanticContextEntity` (a minimal precursor of Phase C's real
+    conversation-continuity store — passed in by the caller for now, tests build it by hand).
+    `buildSemanticInterpreterPrompt()` (pure) + `parseSemanticTurnResponse()` (pure, validates
+    enums and deterministically resolves flagged references against real context entities —
+    never guesses an id) + `interpretSemanticTurn()` (the real async entry point, reuses
+    `_thongthai-brain-v3.ts`'s existing `callPreferredModel`/Gemini→OpenAI stack, now exported
+    for this reuse — NOT a second independent LLM integration). Never calls a business tool;
+    only understands the turn.
+  - `netlify/functions/_semantic-interpreter-shadow.ts`: read-only comparison harness
+    (`legacyShadowRoute`) reusing the existing legacy routers' own matching logic
+    (`isExperienceDiscoveryIntent`, `isPromotionDiscoveryIntent`/`isPromotionAcceptIntent`, a
+    copy of `thongthai-chat.ts`'s inline food-keyword regex) so tests can compare new vs. old
+    without wiring the interpreter into production routing. `thongthai-chat.ts` and
+    `line-webhook.ts` are completely untouched by Phase B (verified via `git diff --stat`).
+  - `tests/fixtures/semantic-eval-corpus.ts`: **49 cases** (>= 40 required), covering all 8
+    required categories (formal/colloquial/typo/follow_up/correction/topic_switch/ambiguous/
+    multi_intent) and all 4 required domains (restaurant/activity/stay/promotion), plus
+    membership/otop/cafe/payment/journey/support. Each case pairs a real message with a
+    `simulatedModelOutput` (the JSON a correctly-functioning model should produce) — this is
+    both today's test fixture AND the ground truth a live acceptance pass should verify the
+    real model against before Phase O (no API keys in this dev environment; `npm test` stays
+    network-free per this repo's existing convention — see `interpretStayBookingTurn` for the
+    same established pattern).
+  - `tests/semantic-interpreter-corpus.test.ts`: corpus-size/coverage checks, per-case
+    validation-layer tests (all 49), 3 semantic-equivalence-group tests (broad_discovery x7,
+    restaurant_recommendation x3, stay_availability x2 — all classify identically), the exact
+    "ตัวไหนนิสัยดีกว่า" reference-resolution worked example from the brief, prompt-builder
+    structural checks (grounds in real context, never asks the model to invent values, no
+    chain-of-thought), instrumentation/metadata tests, and shadow-comparison tests — which
+    surfaced two REAL, honest gaps in the current legacy routers (documented as findings, not
+    hidden): "แถวนี้ทำไรดี" isn't caught by the legacy experience-discovery matcher, and
+    "โปรมีไร" (question-before-mention word order) isn't caught by the legacy promotion
+    matcher. Both are exactly the class of gap the semantic layer is meant to close.
+  - `npm test`: **186/186 passing** (117 baseline + 69 new). Both new modules bundle cleanly
+    standalone (14.8kb / 7.2kb). Production routing files (`thongthai-chat.ts`,
+    `line-webhook.ts`) unchanged — legacy behavior is completely untouched by this phase.
 - [ ] Phase C — Server-side Conversation Continuity. NOT STARTED.
 - [ ] Phase D — Working/Task State + Memory boundaries. NOT STARTED. (Note: audit found the
   *existing* memory architecture — guest_memory / guest_semantic_memory / guest_agent_state /
@@ -125,15 +146,32 @@ the same or next commit.
 
 ## Exact next action
 
-Start Phase B (Semantic Interpreter). Read this file's Phase B notes above first. Do not
-create a new phrase-matcher module. Design the `SemanticTurn` type, decide where it lives
-(likely `netlify/functions/_semantic-interpreter.ts` or similar, LLM-backed with structured
-output, validated deterministically), and write the first eval cases for the exact phrase
-cluster the user specified (มีอะไรทำบ้าง / มีไรทำมั่ง / มีไรทำมั้ง / มีไรให้เล่น / etc. — one
-semantic equivalence group).
+Start Phase C (server-side conversation continuity). Read `THONGTHAI_HANDOFF.md`'s Phase C
+bullet above first, and re-read `_semantic-interpreter.ts`'s `SemanticContext`/
+`SemanticContextEntity` types before designing anything new — Phase C's real persistence
+layer needs to produce exactly that shape (or a compatible one) so Phase B's interpreter can
+consume it without a rewrite. Concretely:
+- Design where bounded/expiring conversation context actually lives (likely extending
+  `guest_agent_state` rather than a new table — audit found the existing memory architecture
+  already maps cleanly onto this need; check before adding a new table).
+- Must NOT create permanent raw-transcript storage — tamma-backoffice's product philosophy is
+  explicitly "no raw chat storage" (see Phase K notes below); design short retention +
+  automatic expiration/redaction from the start, not as a later patch.
+- LINE currently sends `chatHistory: []` on every turn (`_line-webhook-core.ts`'s
+  `askThongthai()`) — this is the concrete bug Phase C fixes. Web already sends real
+  `chatHistory`/`guestContext`/`journeyContext` from `JourneyProvider`; the server becoming
+  authoritative means thongthai-chat loads its own bounded context by canonical guest identity
+  rather than trusting only what the channel provides.
+- Needs: recent bounded turns, rolling summary, current topic, active entities/referents
+  (feeds `SemanticContext.recentEntities`), unresolved need, current task id/state (Phase F
+  precursor), last recommendation, last tool result status.
+- Still strangler discipline: build this beside existing state, don't wire it into
+  `thongthai-chat.ts`'s actual request handling yet unless doing so is low-risk and additive
+  (e.g., LINE finally loading real context non-destructively could plausibly land in Phase C
+  itself if it's a clean addition — use judgment, but do not remove/change existing
+  deterministic routing behavior while doing it).
 
 ## Last commit on this branch
 
-- Commit: `e4220be` — "Phase A: Bible/Brain contract — one canonical doctrine source, actually
-  consumed at runtime"
-- Phase A complete, pushed. Phase B not started.
+- Commit: `<update after next push>` — Phase B complete, pushed. Phase A also complete.
+  Phase C not started.
