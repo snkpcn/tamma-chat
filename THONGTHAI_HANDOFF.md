@@ -571,61 +571,86 @@ the same or next commit.
       production deploy occurred.
   - [ ] **G.2 — Actual customer-visible LINE/Web cutover. NOT STARTED.**
     Must wait until Phase H degradation + Phase I Response Composer are complete and tested.
-- [ ] **Phase H — Graceful Degradation. NOT STARTED.** Exact next phase.
-- [ ] **Phase I — Response Composer. NOT STARTED.**
+- [x] **Phase H — Graceful Degradation. DONE.**
+  - Hardened the neutral provider hierarchy in `_thongthai-model-provider.ts`: Gemini primary
+    model(s) still run first; transient HTTP 429/500/502/503/504, timeout/network availability
+    failures, and a missing Gemini configuration are now explicitly fallback-eligible for the
+    existing OpenAI secondary provider. Bad/blocked/invalid request-class failures remain
+    distinct and are not blindly retried against a second provider.
+  - Added pure canonical policy module `_graceful-degradation.ts`.
+    It never writes customer prose, never queries DB, and never executes transactions.
+    Machine states are deliberately distinct:
+    `model_unavailable`, `model_invalid`, `source_unavailable`,
+    `verified_empty`, `fact_unknown`, `internal_error`.
+  - Degradation levels are explicit:
+    normal → grounded deterministic → deterministic transactional continuation (only when a
+    pre-existing tested continuation capability is explicitly supplied) → human handoff →
+    final failure. Merely having an active task NEVER grants deterministic continuation.
+  - `safeToExecuteTransaction` is always false in the Phase H policy. A later transaction
+    boundary still requires an explicit validated ActionProposal and customer commit.
+  - Phase E source truth is preserved through `planKnowledgeDegradation()`: authoritative
+    EMPTY means a valid zero-result answer; SOURCE_UNAVAILABLE is retryable failure; UNKNOWN /
+    no registered source is unverified truth, not an empty result. Partial grounded facts may
+    still be used, but only as partial grounding.
+  - The canonical orchestrator now carries `knowledgeDegradation` beside the exact
+    `KnowledgeBundle[]` used for its DialogDecision, so Phase I can compose truthful fallback
+    copy without re-querying or guessing.
+  - Added `processThongthaiOneMindTurnResilient()`: provider failover happens first in the
+    neutral provider module; only after the stack is exhausted does the wrapper return a
+    structured `status:'degraded'` result with identity, bounded server context/task state and
+    a `DegradationPlan`. The degraded path performs no state/transaction writes and no prose.
+  - G.1's optional `thongthai-chat.ts` shadow hook now uses the resilient wrapper and logs only
+    safe structured status/trace/degradation metadata; legacy customer response remains
+    authoritative and unchanged.
+  - Added `tests/graceful-degradation.test.ts`: provider eligibility, transient-status policy,
+    model unavailable vs invalid, deterministic-fallback gating, transactional-continuation
+    gating, EMPTY vs UNAVAILABLE vs UNKNOWN, partial grounding, healthy grounding.
+  - Latest branch CI run `35349060912`: **382/382 tests passing, 0 failed**.
+  - Main remains `d37c56f44753bce2ec25d3091506cd3c0b703bdc`; production current deploy
+    remains the pre-architecture ready deploy. No deploy occurred.
+- [ ] **Phase I — Response Composer. NOT STARTED. Exact next phase.**
+- [ ] **G.2 — Actual customer-visible LINE/Web cutover. NOT STARTED.**
 - [ ] Phase J — Observability (trace object, no chain-of-thought). NOT STARTED.
 - [ ] Phase K — Backoffice Control Plane (tamma-backoffice: health/diagnostics view +
   Conversation Inspector). NOT STARTED. Conversation Inspector must remain bounded/expiring,
   not permanent raw transcript storage.
 - [ ] Phase L — Golden conversation eval (150+ cases). NOT STARTED as final suite; corpus is
-  already being grown phase-by-phase (80 scenarios as of Phase F; G.1 focused on integration
-  foundation tests rather than padding the semantic corpus).
+  already being grown phase-by-phase.
 - [ ] Phase M — Full E2E. NOT STARTED.
-- [ ] Phase N — Legacy cleanup (retire superseded regex/channel logic only after equivalent
-  golden/E2E tests pass). NOT STARTED.
+- [ ] Phase N — Legacy cleanup. NOT STARTED.
 - [ ] Phase O — Final production integration/deployment. NOT STARTED.
 
 ## Exact next action
 
-Start **Phase H — Graceful Degradation** on this SAME integration branch.
+Start **Phase I — Response Composer** on this SAME integration branch.
 
-Sequence is now deliberately:
+Sequence remains:
 **G.1 → H → I → G.2 → J → K → L → M → N → O**.
 
-Reason: a customer-visible cutover before a canonical fallback policy and Response Composer exist
-would force ad-hoc prose/fallback logic back into LINE/Web handlers, recreating the fragmentation
-this architecture is removing.
+Phase I must be the ONE place that converts:
+`DialogDecision + KnowledgeBundle[] + DegradationPlan + Bible style doctrine + channel`
+into customer-facing text.
 
-Phase H must be designed around the canonical One-Mind orchestrator, not around channel-specific
-fallback strings. Required degradation hierarchy:
-1. primary model provider
-2. secondary model provider
-3. validated semantic/task state + grounded deterministic knowledge
-4. deterministic transactional continuation only where already safe/validated
-5. graceful human handoff / final generic failure
-
-Keep these states distinct end-to-end:
-- MODEL_UNAVAILABLE
-- SOURCE_UNAVAILABLE
-- VERIFIED_EMPTY
-- FACT_UNKNOWN / UNVERIFIED
-
-Never turn source failure into "ไม่มี", and never turn unknown into an invented answer.
-
-**Known gaps carried forward**:
-1. G.1 shadow hook is OFF by default and not customer authoritative; this is intentional.
-2. The shared `guest_agent_state.state` persistence wrappers still need cross-request
-   concurrency hardening before G.2 customer cutover; sequential same-turn writes fixed only the
-   intra-turn clobber.
-3. Response Composer does not yet exist; do not add customer prose to Dialog Manager/orchestrator
-   during Phase H.
-4. Café has no verified live catalog SOT today; preserve UNKNOWN/hand-off behavior rather than
-   manufacturing a `cafe_live` source.
-5. Existing LINE membership/booking handlers and Web ConciergeProvider remain legacy-authoritative
-   until G.2; do not delete them during H/I.
+Requirements carried forward:
+1. No business truth may be invented in prose. Copy can only use grounded values / explicit
+   verified empty / explicit unknown-unavailable state.
+2. EMPTY, UNAVAILABLE, UNKNOWN and MODEL_UNAVAILABLE must have different copy classes.
+3. Channel affects presentation only (LINE shorter/scan-friendly; Web can be slightly richer),
+   never business meaning.
+4. Do not put response wording back into LINE/Web handlers or Dialog Manager.
+5. Keep tasteful restrained emoji and mobile readability; avoid brochure-like dumping.
+6. The composer must never say booking/order/payment is confirmed/submitted unless the actual
+   operational result carries the required real code/status; an ActionProposal alone is NOT a
+   successful transaction.
+7. G.2 cutover remains blocked until Phase I is complete and tested.
+8. Before G.2, resolve the known cross-request concurrency risk in shared
+   `guest_agent_state.state` persistence (same-turn sequential write is fixed; two simultaneous
+   requests still need atomic/versioned/serialized protection).
+9. Café still has no verified live catalog SOT; composer must truthfully express unknown /
+   staff-follow-up path rather than inventing café offerings.
 
 ## Last commit on this branch
 
-- G.1 CI head before handoff update: `43d706d61b79eb6e06c642bb86ef11c4a9625c00`.
-- Phases A, B, B.1, C, D, D.1, E, F, G.1 complete and pushed.
-- Phase H is the exact next action.
+- Phase H code head before handoff update: `6fcd1edbea2ca0162b681f99d922cf07ed5ccf8b`.
+- Phases A, B, B.1, C, D, D.1, E, F, G.1, H complete and pushed.
+- Phase I is the exact next action.
