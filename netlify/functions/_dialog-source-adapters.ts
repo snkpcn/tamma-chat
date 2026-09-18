@@ -14,8 +14,20 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { listRestaurantMenu } from './_restaurant-sot';
 import { loadActivityWorldFacts } from './_activity-sot';
 import { loadActivePromotionsWorldFact } from './_promotions-runtime';
-import { listOtopProducts } from './_operations-db';
-import type { GroundedFact, KnowledgeSourceAdapters, KnowledgeSourceType, SourceResult } from './_knowledge-resolver';
+import {
+  listBookingOptions,
+  listOtopProducts,
+  listServiceResources,
+  loadLatestBookingStatus,
+  loadMembershipStatus,
+} from './_operations-db';
+import type {
+  GroundedFact,
+  KnowledgeRequest,
+  KnowledgeSourceAdapters,
+  KnowledgeSourceType,
+  SourceResult,
+} from './_knowledge-resolver';
 
 function ok(sourceId: string, sourceType: KnowledgeSourceType, data: GroundedFact[], now: Date): SourceResult {
   const fetchedAt = now.toISOString();
@@ -89,18 +101,136 @@ async function otopCatalogAdapter(now: Date = new Date()): Promise<SourceResult>
   } catch (error) { return unavailable('otop_products_live', 'otop_live', error, now); }
 }
 
-/** Builds a real KnowledgeSourceAdapters set for the given channel.
- *  Deliberately partial: only restaurant/activity(catalog)/promotion/otop
- *  are wired today, matching what existing functions cleanly support
- *  read-only. Availability/booking-status/stay/membership/cafe real
- *  adapters need per-request argument mapping (date/resourceCode/
- *  partySize/reference id) beyond a bare KnowledgeRequest and are left for
- *  Phase G's channel migration work, tracked in THONGTHAI_HANDOFF.md. */
-export function buildRealKnowledgeSourceAdapters(channel: BrainChannel): KnowledgeSourceAdapters {
+function requestValue(request: KnowledgeRequest, key: string): unknown {
+  return request.entities[key] ?? request.task?.slots?.[key];
+}
+function stringValue(request: KnowledgeRequest, key: string): string | null {
+  const value = requestValue(request, key);
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+function numberValue(request: KnowledgeRequest, key: string): number | null {
+  const value = Number(requestValue(request, key));
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Pure request shaping used by both the real adapter and network-free tests. */
+export function bookingAvailabilityArgs(request: KnowledgeRequest): {
+  serviceType: 'activity' | 'stay';
+  date: string | null;
+  resourceCode: string | null;
+  durationMinutes: number | null;
+  partySize: number | null;
+} | null {
+  if (request.domain !== 'activity' && request.domain !== 'stay') return null;
   return {
-    restaurant: { menu: () => restaurantMenuAdapter() },
-    activity: { catalog: () => activityCatalogAdapter() },
-    promotion: { eligibility: () => promotionEligibilityAdapter(channel)() },
-    otop: { catalog: () => otopCatalogAdapter() },
+    serviceType: request.domain,
+    date: stringValue(request, 'date'),
+    resourceCode: stringValue(request, 'resourceCode'),
+    durationMinutes: numberValue(request, 'durationMinutes'),
+    partySize: numberValue(request, 'partySize'),
+  };
+}
+
+function availabilityAdapter(environment: 'live' | 'test' = 'live') {
+  return async (request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> => {
+    const args = bookingAvailabilityArgs(request);
+    const sourceType: KnowledgeSourceType = request.domain === 'stay' ? 'stay_live' : 'activity_live';
+    const sourceId = request.domain === 'stay' ? 'stay_booking_options_live' : 'activity_booking_options_live';
+    if (!args?.date) return unavailable(sourceId, sourceType, new Error('missing_date'), now);
+    try {
+      const options = await listBookingOptions(
+        args.serviceType,
+        args.date,
+        environment,
+        args.resourceCode,
+        args.durationMinutes,
+        args.partySize,
+      );
+      const facts: GroundedFact[] = options.flatMap(option => {
+        const keyBase = `availability:${option.resourceCode}:${option.startAt}`;
+        return [
+          { key: `${keyBase}:available`, value: option.available > 0, domain: request.domain, sourceId, sourceType, authoritative: true, fetchedAt: now.toISOString() },
+          { key: `${keyBase}:capacity_available`, value: option.available, domain: request.domain, sourceId, sourceType, authoritative: true, fetchedAt: now.toISOString() },
+          { key: `${keyBase}:startAt`, value: option.startAt, domain: request.domain, sourceId, sourceType, authoritative: true, fetchedAt: now.toISOString() },
+          { key: `${keyBase}:endAt`, value: option.endAt, domain: request.domain, sourceId, sourceType, authoritative: true, fetchedAt: now.toISOString() },
+        ];
+      });
+      return ok(sourceId, sourceType, facts, now);
+    } catch (error) { return unavailable(sourceId, sourceType, error, now); }
+  };
+}
+
+async function stayCatalogAdapter(_request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> {
+  const sourceId = 'stay_service_resources_live';
+  try {
+    const resources = await listServiceResources('stay');
+    const facts: GroundedFact[] = resources.flatMap(resource => [
+      { key: `stay:${resource.code}:name`, value: resource.name, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
+      { key: `stay:${resource.code}:description`, value: resource.description, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
+      { key: `stay:${resource.code}:capacity`, value: resource.defaultCapacity, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
+    ]);
+    return ok(sourceId, 'stay_live', facts, now);
+  } catch (error) { return unavailable(sourceId, 'stay_live', error, now); }
+}
+
+function bookingStatusAdapter(guestDbId: string | null | undefined) {
+  return async (request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> => {
+    const sourceId = 'bookings_operational';
+    if (!guestDbId) return unavailable(sourceId, 'booking_operational', new Error('guest_identity_required'), now);
+    try {
+      const bookingCode = stringValue(request, 'bookingCode');
+      const booking = await loadLatestBookingStatus(guestDbId, bookingCode);
+      if (!booking) return { status: 'empty', sourceId, sourceType: 'booking_operational', fetchedAt: now.toISOString() };
+      return ok(sourceId, 'booking_operational', [
+        { key: `booking:${booking.bookingCode}:status`, value: booking.status, domain: request.domain, sourceId, sourceType: 'booking_operational', authoritative: true, fetchedAt: now.toISOString(), updatedAt: booking.updatedAt },
+        { key: `booking:${booking.bookingCode}:contact_status`, value: booking.contactStatus, domain: request.domain, sourceId, sourceType: 'booking_operational', authoritative: true, fetchedAt: now.toISOString(), updatedAt: booking.updatedAt },
+        { key: `booking:${booking.bookingCode}:startAt`, value: booking.startAt, domain: request.domain, sourceId, sourceType: 'booking_operational', authoritative: true, fetchedAt: now.toISOString(), updatedAt: booking.updatedAt },
+      ], now);
+    } catch (error) { return unavailable(sourceId, 'booking_operational', error, now); }
+  };
+}
+
+function membershipStatusAdapter(guestDbId: string | null | undefined) {
+  return async (request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> => {
+    const sourceId = 'customer_membership_operational';
+    if (!guestDbId) return unavailable(sourceId, 'membership_operational', new Error('guest_identity_required'), now);
+    try {
+      const membership = await loadMembershipStatus(guestDbId);
+      if (!membership) return { status: 'empty', sourceId, sourceType: 'membership_operational', fetchedAt: now.toISOString() };
+      return ok(sourceId, 'membership_operational', [
+        { key: 'membership:status', value: membership.memberStatus, domain: request.domain, sourceId, sourceType: 'membership_operational', authoritative: true, fetchedAt: now.toISOString() },
+        { key: 'membership:profile_completed', value: Boolean(membership.profileCompletedAt), domain: request.domain, sourceId, sourceType: 'membership_operational', authoritative: true, fetchedAt: now.toISOString() },
+      ], now);
+    } catch (error) { return unavailable(sourceId, 'membership_operational', error, now); }
+  };
+}
+
+export type RealKnowledgeAdapterOptions = {
+  guestDbId?: string | null;
+  environment?: 'live' | 'test';
+};
+
+/** Builds the read-only source set used by the One-Mind shadow
+ * orchestrator. Every adapter wraps an existing canonical data-access
+ * function; none performs a transactional write. */
+export function buildRealKnowledgeSourceAdapters(
+  channel: BrainChannel,
+  options: RealKnowledgeAdapterOptions = {},
+): KnowledgeSourceAdapters {
+  const environment = options.environment ?? 'live';
+  return {
+    restaurant: { menu: request => restaurantMenuAdapter() },
+    activity: {
+      catalog: request => activityCatalogAdapter(),
+      availability: request => availabilityAdapter(environment)(request),
+    },
+    stay: {
+      catalog: request => stayCatalogAdapter(request),
+      availability: request => availabilityAdapter(environment)(request),
+    },
+    promotion: { eligibility: request => promotionEligibilityAdapter(channel)() },
+    bookingStatus: { lookup: request => bookingStatusAdapter(options.guestDbId)(request) },
+    membership: { status: request => membershipStatusAdapter(options.guestDbId)(request) },
+    otop: { catalog: request => otopCatalogAdapter() },
   };
 }
