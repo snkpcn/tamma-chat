@@ -1,3 +1,12 @@
+/**
+ * LEGACY COMPATIBILITY FALLBACK ONLY.
+ *
+ * Customer semantic understanding now belongs to _semantic-interpreter.ts.
+ * This narrow deterministic matcher is retained only as a rollback/provider-
+ * outage escape valve for the legacy path and MUST NOT be expanded with new
+ * customer phrasings. New language behavior belongs in the canonical semantic
+ * layer + golden eval corpus.
+ */
 import { EXPERIENCES } from '../../src/data/experiences';
 
 type WorldFactLike = { fact_key?: unknown; fact_value?: unknown };

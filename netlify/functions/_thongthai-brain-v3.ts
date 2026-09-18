@@ -1,10 +1,34 @@
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
 import type { VerifiedCommunityOffering } from './_customer-db';
 import type { PendingPromotionRedemption } from './_promotion-dialog';
+import {
+  THONGTHAI_BIBLE_SECTIONS,
+  THONGTHAI_BIBLE_VERSION,
+} from './_thongthai-bible-generated';
+// Provider-calling concerns (which LLM, timeouts, fallback order, JSON
+// extraction) live in the neutral _thongthai-model-provider.ts module, not
+// here -- this file only imports FROM it, never the reverse, so the Semantic
+// Interpreter can also import from the provider module without ever creating
+// a Brain <-> Semantic Interpreter cycle. See THONGTHAI_HANDOFF.md (Phase B.1)
+// and tests/model-provider-no-cycle.test.ts.
+import {
+  ProviderNotConfiguredError,
+  LLMAvailabilityError,
+  callPreferredModel as callPreferredModelFromProvider,
+  stripCodeFences,
+  type ChatTurn,
+} from './_thongthai-model-provider';
+
+export { ProviderNotConfiguredError, LLMAvailabilityError, stripCodeFences };
+export type { ChatTurn };
 
 export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-operations-v3-activity-inventory';
+export { THONGTHAI_BIBLE_VERSION };
 
-export interface ChatTurn { role: 'user' | 'assistant'; content: string }
+function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
+  return callPreferredModelFromProvider(systemPrompt, messages, 'thongthai-brain-v3');
+}
+export { callPreferredModel };
 export interface GuestContext {
   tripDuration: string | null;
   travelerType: string | null;
@@ -84,18 +108,6 @@ export interface BrainResponse {
   toolCalls?: BrainToolCall[];
 }
 
-export class ProviderNotConfiguredError extends Error {
-  constructor() { super('GEMINI_API_KEY is not set.'); this.name = 'ProviderNotConfiguredError'; }
-}
-class LLMRequestError extends Error {
-  constructor(message: string) { super(message); this.name = 'LLMRequestError'; }
-}
-export class LLMAvailabilityError extends LLMRequestError {
-  constructor(message: string) { super(message); this.name = 'LLMAvailabilityError'; }
-}
-
-const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'] as const;
-const OPENAI_MODEL = 'gpt-5.6-luna';
 const VALID_INTENTS: ChatIntent[] = [
   'conversation','create_journey','modify_journey','explain_journey','save_journey','journal',
   'recommendation','information','booking','order','customer_service',
@@ -118,91 +130,6 @@ export function getBrainChannel(section: string | null): BrainChannel {
   if (section === 'facebook' || section === 'messenger') return 'facebook';
   if (section === 'backoffice' || section === 'admin') return 'backoffice';
   return 'web';
-}
-
-async function callGemini(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new ProviderNotConfiguredError();
-  const contents = messages.map(message => ({
-    role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text: message.content }],
-  }));
-  let lastAvailabilityError = '';
-  for (const model of GEMINI_MODELS) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        signal: controller.signal,
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] }, contents,
-          generationConfig: { responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 4096 },
-        }),
-      });
-      if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        if (response.status === 429 || response.status === 503) {
-          lastAvailabilityError = `Gemini ${response.status}`;
-          continue;
-        }
-        throw new LLMRequestError(`Gemini ${response.status}: ${body.slice(0, 240)}`);
-      }
-      const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>; promptFeedback?: { blockReason?: string } };
-      if (data.promptFeedback?.blockReason) throw new LLMRequestError(`Gemini blocked: ${data.promptFeedback.blockReason}`);
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new LLMRequestError('Gemini returned no text');
-      console.log('THONGTHAI_BRAIN_MODEL_SUCCESS', model, THONGTHAI_BRAIN_VERSION);
-      return text;
-    } catch (error) {
-      if ((error as Error).name === 'AbortError') { lastAvailabilityError = 'Gemini timeout'; continue; }
-      if (error instanceof LLMRequestError) throw error;
-      throw new LLMRequestError(`Gemini network error: ${(error as Error).message}`);
-    } finally { clearTimeout(timeout); }
-  }
-  throw new LLMAvailabilityError(lastAvailabilityError || 'Gemini unavailable');
-}
-
-async function callOpenAI(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new LLMAvailabilityError('OpenAI fallback not configured');
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
-  try {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: OPENAI_MODEL, instructions: systemPrompt,
-        input: messages.map(message => ({ role: message.role, content: [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: message.content }] })),
-        reasoning: { effort: 'none' }, max_output_tokens: 4096,
-        text: { format: { type: 'json_schema', name: 'thongthai_brain_response', strict: false, schema: { type: 'object' } } },
-      }),
-    });
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      if ([429,500,502,503,504].includes(response.status)) throw new LLMAvailabilityError(`OpenAI ${response.status}`);
-      throw new LLMRequestError(`OpenAI ${response.status}: ${body.slice(0, 240)}`);
-    }
-    const data = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
-    let text = data.output_text ?? '';
-    if (!text) for (const item of data.output ?? []) for (const content of item.content ?? []) if (content.type === 'output_text' && content.text) text += content.text;
-    if (!text) throw new LLMRequestError('OpenAI returned no text');
-    return text;
-  } catch (error) {
-    if ((error as Error).name === 'AbortError') throw new LLMAvailabilityError('OpenAI timeout');
-    throw error;
-  } finally { clearTimeout(timeout); }
-}
-
-async function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
-  try { return await callGemini(systemPrompt, messages); }
-  catch (error) {
-    if (!(error instanceof LLMAvailabilityError)) throw error;
-    console.log('THONGTHAI_BRAIN_PROVIDER_FALLBACK', 'gemini', 'openai');
-    return callOpenAI(systemPrompt, messages);
-  }
 }
 
 export interface StayBookingInterpretation {
@@ -274,20 +201,38 @@ function buildBrainPrompt(req: BrainRequest, communityOfferings: VerifiedCommuni
     timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date());
-  return `THONGTHAI BRAIN — ${THONGTHAI_BRAIN_VERSION}
+  return `THONGTHAI BRAIN — ${THONGTHAI_BRAIN_VERSION} — BIBLE ${THONGTHAI_BIBLE_VERSION}
 
 IDENTITY
-You are ทองไทย, the single central intelligence of ทำมา-ชาติ. LINE, website, Facebook and future channels are only different interfaces to the SAME mind.
-Personality: warm, perceptive, modern-Isan, tastefully playful, calm, quietly confident. Never generic support copy and never a pushy sales bot.
-In Thai always speak politely to customers. NEVER use กู or มึง. Standard Thai is primary; use only light Isan seasoning when natural.
-Natural variation should come from context, memory, current need and channel — not randomness. Facts stay consistent.
-
-AGENTIC LOOP — SILENT
-Understand the current goal → use only relevant memory/facts → decide whether a real action is required → use the smallest useful tool → verify the result → answer naturally. Never expose hidden reasoning.
+${THONGTHAI_BIBLE_SECTIONS.identity}
 Current Bangkok date/time: ${currentBangkok} (Asia/Bangkok). Resolve relative dates such as วันนี้/พรุ่งนี้ from this.
 
-QUIET CONFIDENCE
-Do not manufacture urgency, scarcity, FOMO or pressure. Do not force a CTA or a closing question. Reveal useful information in layers and let the guest choose the pace.
+PERSONALITY
+${THONGTHAI_BIBLE_SECTIONS.personality}
+
+CONVERSATION DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.conversationDoctrine}
+
+ECOSYSTEM VOCABULARY & RELATIONSHIPS
+${THONGTHAI_BIBLE_SECTIONS.ecosystemVocabulary}
+
+CUSTOMER SERVICE DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.customerServiceDoctrine}
+
+RECOMMENDATION DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.recommendationDoctrine}
+
+OPERATIONAL TRUTH DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.operationalTruthDoctrine}
+
+MEMORY & PRIVACY DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.memoryPrivacyDoctrine}
+
+FAILURE DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.failureDoctrine}
+
+CHANNEL PRESENTATION DOCTRINE
+${THONGTHAI_BIBLE_SECTIONS.channelPresentationDoctrine}
 
 OPERATIONS MODE
 You can now perform REAL operational work. Do not pretend a booking/order exists unless a create tool returns success.
@@ -555,7 +500,6 @@ function validateBrainResponse(data: unknown, runtime: BrainRuntimeContext): Bra
     toolCalls: normalizeToolCalls(raw.toolCalls, runtime.toolResults.length > 0, runtime),
   };
 }
-function stripCodeFences(text: string): string { return text.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/```\s*$/i,'').trim(); }
 function cleanLineMessage(text: string): string {
   return text.replace(/\*\*(.*?)\*\*/gs,'$1').replace(/__(.*?)__/gs,'$1').replace(/^#{1,6}\s+/gm,'').replace(/^\s*[-*]\s+/gm,'• ').replace(/`([^`]+)`/g,'$1').replace(/\n{3,}/g,'\n\n').trim();
 }

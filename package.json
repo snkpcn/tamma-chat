@@ -4,7 +4,8 @@
   "private": true,
   "description": "ทำมา-ชาติ — Experiences of Isan. Static site (index.html) plus the Thongthai AI concierge Netlify Functions backend.",
   "scripts": {
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "eval:semantic:live": "tsx scripts/run-semantic-live-eval.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0"
