@@ -145,6 +145,50 @@ the same or next commit.
   privacy/retention rules, context builder producing SemanticContext, cross-channel identity
   tests, 15 required test areas, the horse-booking multi-turn golden scenario) — treat that
   brief as binding detail, not optional flavor, when implementing.
+- [x] **Phase C — Server-side Conversation Continuity.** Done, committed. Summary:
+  - **Storage**: no new table, no migration. Extends the EXISTING `guest_agent_state.state`
+    JSONB with a new `conversationContext` field, additive, same pattern
+    `restaurantProposedSet`/`pendingPromotionRedemption` already use. Keyed by canonical
+    `guest_id` (via existing identity resolution), never by channel — this is what makes
+    cross-channel continuity automatic rather than something to separately build.
+  - `netlify/functions/_conversation-context.ts`: `ConversationContextState` (schemaVersion,
+    bounded recentTurns, rollingSummary, activeDomain/activeTopic/openQuestion,
+    recentEntities, lastAction, currentTaskReference, lastRecommendationReference,
+    lastToolResultSummary, recentEventIds, updatedAt/expiresAt). Pure reducer
+    `applyConversationContextUpdate()` (idempotent on `eventId` — a retried/duplicated
+    webhook delivery is a no-op). Pure `buildSemanticContext()` — the context builder the
+    review asked for, converting persisted state into exactly Phase B's `SemanticContext`
+    shape; the Semantic Interpreter still never touches the DB itself. Thin DB I/O
+    (`loadConversationContext`/`persistConversationContext`), untested by `npm test` per this
+    repo's existing convention for such wrappers (same as `loadBrainRuntime`/
+    `persistBrainRuntime`).
+  - **Retention**: `CONTEXT_TTL_MS` = 2 hours of inactivity; `isContextExpired`/`pruneExpired`
+    treat stale context as absent (application-level expiry, no DB TTL/cron needed for
+    correctness). `MAX_RECENT_TURNS=8`, `MAX_TURN_CHARS=400`, `MAX_RECENT_ENTITIES=6`. Every
+    turn passes through `redactSensitiveContent()` (phone/email/long-digit-run redaction)
+    before storage — found and fixed a real regex bug here (trailing-whitespace consumption)
+    via the test suite, not shipped broken. No payment secrets, image/slip content, passwords,
+    or tokens ever reach this module (they don't flow through `request.message` text at all).
+  - **Entity honesty**: `SemanticContextEntity` (Phase B's type) extended additively with
+    `source?: 'catalog'|'tool_result'|'conversation'` and `canonical?: boolean`. An entity only
+    mentioned in conversation (not yet resolved against a real catalog/tool result — Phase C
+    doesn't execute real tool calls) gets a `conv:`-prefixed id and `canonical:false`, never a
+    fabricated-looking operational id.
+  - `tests/conversation-context.test.ts`: all 15 required test areas, each explicitly labeled
+    `[area N]`. `tests/fixtures/semantic-multiturn-scenarios.ts` +
+    `tests/semantic-multiturn-golden.test.ts`: the exact 6-turn horse-booking scenario from the
+    brief, driven through the REAL reducer + REAL Phase B validation layer turn-by-turn,
+    asserting continuity end-to-end (including a channel switch web→LINE mid-scenario at turn
+    5) plus a dedicated duplicate-delivery replay test proving the whole scenario is
+    idempotent, not just a single turn.
+  - **Correction to the Phase B report**: the corpus was reported as 49 cases; recounting
+    found the accurate number is **51** (manual tally error, not a code bug). Total eval
+    scenarios now: 51 (corpus) + 6 (multi-turn golden) = **57**, growing toward the Phase L
+    target of 150+.
+  - `npm test`: **221/221 passing** (193 baseline + 28 new). New module bundles cleanly
+    standalone (7.3kb). `thongthai-chat.ts`/`line-webhook.ts` bundles and diffs unaffected —
+    Phase C does not wire continuity into the actual request-handling path yet (deliberate;
+    see "Exact next action" below for why and what's left for Phase F/G).
 - [ ] Phase D — Working/Task State + Memory boundaries. NOT STARTED. (Note: audit found the
   *existing* memory architecture — guest_memory / guest_semantic_memory / guest_agent_state /
   operational tables — already maps cleanly onto the brief's 4-layer model. This phase is
@@ -176,33 +220,33 @@ the same or next commit.
 
 ## Exact next action
 
-Start Phase C (server-side conversation continuity). Read `THONGTHAI_HANDOFF.md`'s Phase C
-bullet above first, and re-read `_semantic-interpreter.ts`'s `SemanticContext`/
-`SemanticContextEntity` types before designing anything new — Phase C's real persistence
-layer needs to produce exactly that shape (or a compatible one) so Phase B's interpreter can
-consume it without a rewrite. Concretely:
-- Design where bounded/expiring conversation context actually lives (likely extending
-  `guest_agent_state` rather than a new table — audit found the existing memory architecture
-  already maps cleanly onto this need; check before adding a new table).
-- Must NOT create permanent raw-transcript storage — tamma-backoffice's product philosophy is
-  explicitly "no raw chat storage" (see Phase K notes below); design short retention +
-  automatic expiration/redaction from the start, not as a later patch.
-- LINE currently sends `chatHistory: []` on every turn (`_line-webhook-core.ts`'s
-  `askThongthai()`) — this is the concrete bug Phase C fixes. Web already sends real
-  `chatHistory`/`guestContext`/`journeyContext` from `JourneyProvider`; the server becoming
-  authoritative means thongthai-chat loads its own bounded context by canonical guest identity
-  rather than trusting only what the channel provides.
-- Needs: recent bounded turns, rolling summary, current topic, active entities/referents
-  (feeds `SemanticContext.recentEntities`), unresolved need, current task id/state (Phase F
-  precursor), last recommendation, last tool result status.
-- Still strangler discipline: build this beside existing state, don't wire it into
-  `thongthai-chat.ts`'s actual request handling yet unless doing so is low-risk and additive
-  (e.g., LINE finally loading real context non-destructively could plausibly land in Phase C
-  itself if it's a clean addition — use judgment, but do not remove/change existing
-  deterministic routing behavior while doing it).
+Start Phase D (Working/Task State + Memory boundaries). Read this file's Phase D bullet above
+first.
+
+**Known gap carried forward from Phase C, explicitly not closed yet (by design, not
+oversight)**: `_conversation-context.ts` exists and is fully tested, but is NOT wired into
+`thongthai-chat.ts`'s request handling or `_line-webhook-core.ts`'s `askThongthai()` yet. LINE
+still sends `chatHistory: []` in production today — that concrete bug is still live. This was
+a deliberate strangler-discipline call: wiring continuity into the actual request path is
+really a Phase F/G concern (the Dialog Manager needs to exist to decide what to DO with
+`SemanticContext`, and wiring it in half-finished risked exactly the kind of "partial change
+to production routing" the review has repeatedly warned about). Phase D/E/F should treat
+"wire `_conversation-context.ts` into `thongthai-chat.ts` for real, including finally fixing
+LINE's `chatHistory: []`" as a concrete, tracked task — do not let it get lost. It is NOT
+optional cleanup; it's the actual fix for one of Phase 0's seven confirmed findings.
+
+For Phase D itself:
+- Audit found the *existing* memory architecture (`guest_memory` / `guest_semantic_memory` /
+  `guest_agent_state` / operational tables) already maps cleanly onto the brief's 4-layer
+  model (Conversation Memory / Working State / Durable Preference Memory / Operational State).
+  This phase is likely more "formalize the boundary and document which layer owns what" than
+  "build new storage" — `_conversation-context.ts` (Phase C) already IS the Conversation
+  Memory layer; `guest_semantic_memory` already IS Durable Preference Memory; operational
+  tables already ARE Operational State. Check what's genuinely missing before adding anything.
+- Do not abuse `guest_semantic_memory` for operational state, and do not let
+  `_conversation-context.ts`'s bounded turns become a second copy of durable preferences.
 
 ## Last commit on this branch
 
-- Commit: `ba0edb4` — "Phase B.1: extract neutral provider module, dedupe ecosystem
-  vocabulary, precise eval claims"
-- Phases A, B, B.1 complete, pushed. Phase C not started.
+- Commit: `<update after next push>` — Phase C complete, pushed. Phases A, B, B.1 also
+  complete. Phase D not started.

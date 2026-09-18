@@ -81,15 +81,27 @@ const VALID_ACTIONS: SemanticAction[] = [
 ];
 
 /** A single entity Thongthai currently knows about from recent conversation --
- *  the raw material a reference (below) resolves against. This is a minimal
- *  precursor of Phase C's real conversation-continuity store: for Phase B it is
- *  passed in by the caller (tests build it by hand; a real caller will build it
- *  from whatever context Phase C ends up persisting). */
+ *  the raw material a reference (below) resolves against. Built by Phase C's
+ *  conversation-context builder (see _conversation-context.ts) from whatever
+ *  it has actually persisted; test fixtures build it by hand.
+ *
+ *  `source`/`canonical` exist so an entity that is only conversational (a
+ *  horse's name the guest mentioned, not yet matched against any real
+ *  catalog/tool result) is represented honestly rather than assigned a
+ *  fabricated operational resource id -- see THONGTHAI_HANDOFF.md's Phase C
+ *  entity-continuity notes. `canonical:true` means `id` is a real id from a
+ *  verified source (catalog/tool result) safe to pass to a later domain
+ *  tool call; `canonical:false` means `id` is only a conversation-scoped
+ *  reference key, good enough to resolve "ตัวไหน"/"เอาภาราดร"-style
+ *  references within this conversation, but not yet a real backend id. */
 export type SemanticContextEntity = {
   id: string;
   type: string;
   name: string;
   domain: SemanticDomain;
+  source?: 'catalog' | 'tool_result' | 'conversation';
+  canonical?: boolean;
+  parentId?: string;
 };
 
 export type SemanticContext = {
