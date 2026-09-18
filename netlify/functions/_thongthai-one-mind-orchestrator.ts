@@ -15,11 +15,13 @@ import {
   applyConversationContextUpdate,
   buildSemanticContext,
   loadConversationContext,
+  parseConversationContextState,
   persistConversationContext,
   type ConversationContextState,
 } from './_conversation-context';
 import {
   loadTaskState,
+  parseTaskState,
   persistTaskState,
   type TaskStateContainer,
 } from './_task-state';
@@ -43,6 +45,11 @@ import {
   planModelDegradation,
   type DegradationPlan,
 } from './_graceful-degradation';
+import {
+  compareAndSwapGuestAgentState,
+  loadGuestAgentStateSnapshot,
+  type GuestAgentStateSnapshot,
+} from './_guest-agent-state-store';
 
 export const ONE_MIND_ORCHESTRATOR_VERSION = 'one-mind-g1-v1';
 
@@ -84,6 +91,7 @@ export type OneMindTrace = {
   }>;
   actionProposed: boolean;
   statePersisted: boolean;
+  stateConflictRetries?: number;
 };
 
 export type OneMindTurnResult = {
