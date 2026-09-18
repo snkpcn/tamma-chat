@@ -333,42 +333,86 @@ export async function processThongthaiOneMindTurnAuthoritative(
   if (!message) throw new Error('one_mind_message_required');
   if (!input.eventId.trim()) throw new Error('one_mind_event_id_required');
 
+  const totalStartedAt = Date.now();
   const identity = await resolveOneMindIdentity(input, deps);
   const attempts = Math.max(1, Math.min(8, Math.floor(maxAttempts)));
+  let stateReadMs = 0;
+  let stateWriteMs = 0;
+  let semanticMs = 0;
+  let dialogAndKnowledgeMs = 0;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const stateReadStartedAt = Date.now();
     const snapshot: GuestAgentStateSnapshot = await stateDeps.loadSnapshot(identity.guestDbId);
+    stateReadMs += Date.now() - stateReadStartedAt;
     const conversationContextBefore = parseConversationContextState(snapshot.state.conversationContext, now);
     const taskStateBefore = parseTaskState(snapshot.state.taskState);
     const result = await computeOneMindTurnFromState(
       input, identity, conversationContextBefore, taskStateBefore, deps, now,
     );
+    semanticMs += result.trace.timingsMs?.semantic ?? 0;
+    dialogAndKnowledgeMs += result.trace.timingsMs?.dialogAndKnowledge ?? 0;
 
     const shouldPersist = input.persistState === true && persistPredicate(result);
     if (!shouldPersist || !identity.guestDbId) {
       return {
         ...result,
-        trace:{ ...result.trace, statePersisted:false, stateConflictRetries:attempt },
+        trace:{
+          ...result.trace,
+          statePersisted:false,
+          stateConflictRetries:attempt,
+          timingsMs:{
+            semantic:semanticMs,
+            dialogAndKnowledge:dialogAndKnowledgeMs,
+            stateRead:stateReadMs,
+            stateWrite:stateWriteMs,
+            total:Date.now() - totalStartedAt,
+          },
+        },
       };
     }
 
+    const stateWriteStartedAt = Date.now();
     const write = await stateDeps.compareAndSwap(identity.guestDbId, snapshot, {
       set:{
         conversationContext:result.conversationContextAfter,
         taskState:result.taskStateAfter,
       },
     }, now);
+    stateWriteMs += Date.now() - stateWriteStartedAt;
 
     if (write.status === 'applied') {
       return {
         ...result,
-        trace:{ ...result.trace, statePersisted:true, stateConflictRetries:attempt },
+        trace:{
+          ...result.trace,
+          statePersisted:true,
+          stateConflictRetries:attempt,
+          timingsMs:{
+            semantic:semanticMs,
+            dialogAndKnowledge:dialogAndKnowledgeMs,
+            stateRead:stateReadMs,
+            stateWrite:stateWriteMs,
+            total:Date.now() - totalStartedAt,
+          },
+        },
       };
     }
     if (write.status === 'unconfigured') {
       return {
         ...result,
-        trace:{ ...result.trace, statePersisted:false, stateConflictRetries:attempt },
+        trace:{
+          ...result.trace,
+          statePersisted:false,
+          stateConflictRetries:attempt,
+          timingsMs:{
+            semantic:semanticMs,
+            dialogAndKnowledge:dialogAndKnowledgeMs,
+            stateRead:stateReadMs,
+            stateWrite:stateWriteMs,
+            total:Date.now() - totalStartedAt,
+          },
+        },
       };
     }
     // conflict => loop, reload the newer canonical state, and recompute.
