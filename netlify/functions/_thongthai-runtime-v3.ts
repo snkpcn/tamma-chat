@@ -66,7 +66,7 @@ export async function loadBrainRuntime(guestDbId: string | null, channel: BrainC
   if (!configuration()) return fallback;
   try {
     const worldPromise = Promise.all([
-    dbFetch('world_facts?active=eq.true&verified=eq.true&select=fact_key,category,fact_value,source,updated_at&order=fact_key.asc').then(r => r.json() as Promise<WorldFactRow[]>),
+    dbFetch('world_facts?active=eq.true&verified=eq.true&select=fact_key,category,fact_value,source,updated_at&order=fact_key.asc&limit=300').then(r => r.json() as Promise<WorldFactRow[]>),
     loadActivityWorldFacts(),
     loadRestaurantWorldFacts(),
     loadActivePromotionsWorldFact(channel),
