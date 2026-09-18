@@ -66,6 +66,8 @@ export async function processOneMindCustomerTurn(
     dependencies,
     stateDependencies,
     now,
+    4,
+    candidate => readOnlyCutoverEligibility(candidate).eligible,
   );
   const eligibility = readOnlyCutoverEligibility(turn);
   if (!eligibility.eligible) {
