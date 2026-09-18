@@ -124,10 +124,13 @@ function stripKnownFields(message: string): string {
     .replace(/\b(?:20\d{2}|25\d{2})-\d{1,2}-\d{1,2}\b/gu, ' ')
     .replace(/(?:^|\s)\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?(?=$|\s)/gu, ' ')
     .replace(/(?:^|\s)(?:[01]?\d|2[0-3])[:.]\d{2}(?=$|\s|น\.?)/gu, ' ')
-    .replace(/(?:เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย|โอเค|พรุ่งนี้|วันนี้|มะรืน|เวลา|รับอาหาร|รับ|ตอน|ประมาณ|ชื่อผู้สั่ง|ชื่อลูกค้า|ผมชื่อ|ฉันชื่อ|ชื่อ)/gu, ' ')
+    .replace(/(?:เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย|เอาโปรนี้|ใช้โปรนี้|รับโปรนี้|เอาสิทธิ์นี้|รับสิทธิ์นี้|รับโปรโมชันนี้|รับโปรโมชั่นนี้|เอาโปรโมชันนี้|เอาโปรโมชั่นนี้|โอเค|พรุ่งนี้|วันนี้|มะรืน|เวลา|รับอาหาร|รับ|ตอน|ประมาณ|ชื่อผู้สั่ง|ชื่อลูกค้า|ผมชื่อ|ฉันชื่อ|ชื่อ)/gu, ' ')
     .replace(/(?:บ่าย\s*(?:หนึ่ง|สอง|สาม|สี่|ห้า|\d{1,2})(?:\s*โมง)?|(?:หนึ่ง|สอง|สาม|สี่|ห้า|\d{1,2})\s*ทุ่ม|เที่ยงครึ่ง|เที่ยง|(?:[01]?\d|2[0-3])\s*(?:โมง|นาฬิกา))/gu, ' ')
     .replace(/[,:;|•·]+/g, ' ')
-    .replace(/\b(?:ครับ|ค่ะ|คะ|จ้า|จ้ะ)\b/gu, ' ')
+    // \b relies on \w, which Thai characters never match -- so a bare "\bค่ะ\b"
+    // never actually strips an isolated Thai politeness word. Match against
+    // whitespace/string boundaries instead.
+    .replace(/(?:^|\s)(?:ครับ|ค่ะ|คะ|จ้า|จ้ะ)(?=\s|$)/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -135,7 +138,7 @@ function stripKnownFields(message: string): string {
 function extractName(message: string, allowLoose: boolean): string | null {
   const explicit = message.match(/(?:ชื่อผู้สั่ง|ชื่อลูกค้า|ผมชื่อ|ฉันชื่อ|ชื่อ)\s*([^\d,;|]{1,60}?)(?=\s*(?:\+?66|0\d|$))/u);
   if (explicit) {
-    const value = explicit[1].replace(/\b(?:ครับ|ค่ะ|คะ)\b/gu,'').trim();
+    const value = explicit[1].replace(/(?:^|\s)(?:ครับ|ค่ะ|คะ)(?=\s|$)/gu,' ').trim();
     return value || null;
   }
   if (!allowLoose) return null;
