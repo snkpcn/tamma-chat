@@ -104,3 +104,7 @@ Record in `THONGTHAI_HANDOFF.md`:
 - production smoke results
 - live semantic acceptance result/limitation
 - known remaining limitations
+
+## Netlify env-scope verification
+
+Production cutover/live-eval flags must be stored with the `all` Netlify scope in the production context; Phase O verifies both are visible before the final activation build.
