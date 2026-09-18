@@ -44,6 +44,8 @@ import {
   formatPromotionClarificationMessage,
   formatPromotionListMessage,
   formatPromotionRedeemPrompt,
+  isPromotionAcceptIntent,
+  isPromotionDiscoveryIntent,
   missingPromotionFields,
   parsePendingPromotionRedemption,
   type PendingPromotionRedemption,
@@ -645,7 +647,7 @@ async function resolvePromotionRedemption(
   return { ...firstResponse, message, agentStateUpdate:{ clearPendingPromotionRedemption: true } };
 }
 
-async function promotionContinuationResponse(
+export async function promotionContinuationResponse(
   request: BrainRequest,
   runtime: BrainRuntimeContext,
   guestDbId: string | null,
@@ -653,6 +655,26 @@ async function promotionContinuationResponse(
 ): Promise<BrainResponse | null> {
   const pending = parsePendingPromotionRedemption(runtime.agentState.pendingPromotionRedemption);
   if (!pending) return null;
+
+  // A repeated discovery question ("มีโปรอะไร", "มีโปรอะไรอีก", "มีโปรไหนบ้าง", ...)
+  // must never be fed into the redemption field-parser -- parseRestaurantPreorderTurn's
+  // loose name fallback would otherwise treat the customer's own question text as
+  // their name. Only an explicit acceptance phrase, or a message that isn't itself
+  // a pure discovery re-ask, continues the redemption; a bare re-ask re-shows the
+  // live promo list and leaves the pending redemption untouched.
+  const isDiscoveryReAsk = isPromotionDiscoveryIntent(request.message)
+    && !isPromotionAcceptIntent(request.message)
+    && !RESTAURANT_SET_ACCEPT_RE.test(request.message);
+  if (isDiscoveryReAsk) {
+    const promotions = activePromotionsFromRuntime(runtime);
+    return {
+      message: formatPromotionListMessage(promotions), intent:'recommendation', contextUpdates:{},
+      journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
+      agentStateUpdate:{ pendingPromotionRedemption: pending },
+      semanticMemoryUpdates:[], toolCalls:[],
+    };
+  }
+
   return resolvePromotionRedemption(pending, request, guestDbId, channel);
 }
 
