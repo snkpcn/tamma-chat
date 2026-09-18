@@ -686,42 +686,96 @@ the same or next commit.
   - Added `tests/one-mind-observability.test.ts` covering privacy boundaries, timings,
     transaction metadata provenance and non-blocking logging.
   - Latest branch CI run `35351938514`: **419/419 tests passing, 0 failed**.
-- [ ] **Phase K — Backoffice Control Plane. NOT STARTED. Exact next phase.**
-- [ ] Phase L — Golden conversation eval (150+ cases). NOT STARTED as final suite; corpus is
-  already being grown phase-by-phase.
+- [x] **Phase K — Backoffice Control Plane. DONE on integration branches.**
+  - Customer repo now tracks the bounded trace schema:
+    `netlify/functions/supabase/one-mind-observability-v1.sql`.
+    It targets the EXISTING tamma-customer-data Supabase project only.
+  - `one_mind_traces` is designed for 24-hour retention, RLS enabled, service-role server
+    access only, unique `(channel, trace_id)`, pseudonymous conversation keys, and safe
+    machine-only envelopes. An insert trigger opportunistically prunes expired rows.
+  - Trace writes are idempotent with `on_conflict=channel,trace_id` +
+    `resolution=ignore-duplicates`.
+  - The migration is COMMITTED but intentionally NOT APPLIED to production yet.
+    Phase O remains the only production integration/deploy point.
+  - `thongthai-brain-status.ts` now exposes only safe component versions/config booleans:
+    Bible, Semantic Interpreter, Orchestrator, Response Composer, Graceful Degradation,
+    model-provider configuration, Supabase configuration and One-Mind cutover/shadow flags.
+  - Existing backoffice repo `snkpcn/tamma-backoffice` now uses the SAME integration branch:
+    `feature/thongthai-one-mind-architecture`.
+  - Backoffice added owner-only server API:
+    `netlify/functions/thongthai-intelligence.ts`.
+    It reads only unexpired `one_mind_traces`, computes P50/P95/fallback/unknown/conflict
+    health metrics, returns Attention Required items and supports pseudonymous conversation-key
+    inspection. It returns `available:false` honestly when the trace table is not yet present.
+  - Added `thongthai-intelligence.html`:
+    System Health, component versions, latency, fallback/unknown/conflict counts,
+    Attention Required, recent safe traces and bounded Conversation Inspector.
+  - Conversation Inspector is explicitly NOT a transcript. It displays NO customer message,
+    assistant response, raw model output, chain-of-thought, identity/contact or payment data.
+  - Backoffice main navigation now links Thongthai Intelligence.
+  - Backoffice branch-only CI:
+    `.github/workflows/one-mind-backoffice-ci.yml`.
+    First complete K CI: run `35354657869`, **31/31 passing**.
+  - Backoffice handoff file:
+    `THONGTHAI_HANDOFF.md` committed on the backoffice integration branch.
+  - Backoffice integration head at K checkpoint:
+    `f51d56171138799246e17f47b01ae2c8bec19ba1`.
+  - Customer repo K schema/privacy tests added:
+    `tests/one-mind-trace-schema.test.ts`.
+  - Customer integration head before this handoff update:
+    `1a8037ef7245644d260ff1e5d8b25c4c3fbadfb6`.
+  - Both main branches and both production sites remain untouched; no Netlify deploy occurred.
+- [ ] **Phase L — Golden conversation eval (150+ meaningful scenarios). NOT STARTED as final suite. Exact next phase.**
 - [ ] Phase M — Full E2E. NOT STARTED.
 - [ ] Phase N — Legacy cleanup. NOT STARTED.
 - [ ] Phase O — Final production integration/deployment. NOT STARTED.
 
 ## Exact next action
 
-Start **Phase K — Backoffice Control Plane** using the EXISTING canonical
-`snkpcn/tamma-backoffice` repository only.
+Start **Phase L — Golden Conversation Eval** in the customer integration branch.
 
-Phase K requirements:
-1. Create/use a shared integration branch in the existing backoffice repo; do not create a new
-   repo/site/project/database.
-2. Add a health/diagnostics view for One-Mind components and a bounded Conversation Inspector.
-3. Inspector must show ONLY the safe Phase J trace envelope / bounded working-state metadata.
-   It must NOT store or display permanent raw chat transcripts, raw model output, chain-of-thought,
-   customer contact details or payment data.
-4. If persistence is required, design it against the EXISTING tamma-customer-data Supabase only,
-   with explicit expiry/retention. Prefer committing migration/schema + tests first; do not apply
-   a live DB migration just to make the UI prototype work.
-5. Backoffice reads must be authenticated/server-side; no service-role key in browser code.
-6. Diagnostics failure must not affect customer traffic.
-7. Keep `THONGTHAI_ONE_MIND_CUTOVER` OFF and do not deploy either repo yet.
-8. Every meaningful checkpoint must be committed/pushed and both repos' handoff state must be
-   sufficient for the next agent.
+Requirements:
+1. Final scenario inventory must be **>=150 meaningful scenarios**, not trivial wording padding.
+2. Cover:
+   - semantic meaning
+   - multi-turn context/reference continuity
+   - task merge/correction/topic switch
+   - knowledge-source selection
+   - unavailable vs empty vs unknown
+   - explicit-commit gating
+   - transaction idempotence contracts
+   - provider/model degradation
+   - response-composer truth guards
+   - Web/LINE parity
+   - linked vs unlinked identity
+   - duplicate event delivery
+   - restaurant/activity/stay/promotion/membership/OTOP/café/support
+3. Preserve the distinction between NETWORK-FREE contract/eval tests and LIVE MODEL
+   semantic conformance. Ordinary `npm test` stays network-free.
+4. Add a live-model eval runner/script for Phase O acceptance that can score the same stored
+   ground truth when real provider credentials are available; do NOT make normal CI depend on
+   API keys.
+5. Every known historical bug must remain a named regression:
+   - `มีไรทำมั่ง`
+   - repeated promotion discovery
+   - restaurant preorder continuation
+   - LINE stay checkout typo
+   - homepage JS/script disappearance
+   - retry/idempotence
+   - cross-channel continuation
+   - source outage != empty
+   - requested != confirmed
+6. Do not deploy.
 
 Sequence remains:
-**K → L → M → N → O**. G.2 customer activation stays deferred to O under the user's
-finish-first/deploy-once rule.
+**L → M → N → O**.
 
 ## Last commit on this branch
 
-- Current tested customer-repo head before this handoff update:
-  `633cab0e53e3948b387d7857f27ecf28b7a203b7`.
-- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I, J complete.
-- G.2 read-only strangler + CAS concurrency hardening implemented behind OFF env gate.
-- Main/production untouched; no Netlify deploy performed.
+- Customer K code head before handoff update:
+  `1a8037ef7245644d260ff1e5d8b25c4c3fbadfb6`.
+- Backoffice K checkpoint:
+  `f51d56171138799246e17f47b01ae2c8bec19ba1`.
+- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I, J, K complete.
+- G.2 read-only strangler + CAS concurrency hardening remain behind OFF env gate.
+- Main/production untouched; no deploy performed.
