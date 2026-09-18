@@ -13,10 +13,94 @@ const DISCOVERY_PATTERNS = [
   /(?:มาครั้งแรก|ครั้งแรก).*(?:มีอะไรแนะนำ|แนะนำอะไร)/u,
 ];
 
+const DISCOVERY_CANONICAL = [
+  'มีอะไรทำบ้าง',
+  'มีกิจกรรมอะไรบ้าง',
+  'มีประสบการณ์อะไรบ้าง',
+  'ที่นี่มีอะไรให้ทำบ้าง',
+  'มีอะไรให้เล่นบ้าง',
+  'มีอะไรให้เที่ยวบ้าง',
+  'มาครั้งแรกมีอะไรแนะนำ',
+];
+
+function normalizeThaiDiscoveryText(message: string): string {
+  let text = String(message ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[!?！？….,，。/\\|()[\]{}"'“”‘’:_-]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Common spoken/typed Thai forms. This is intent normalization, not reply
+  // rewriting, so customers can type naturally without matching a literal
+  // canned phrase.
+  text = text
+    .replace(/อารัย|อะรัย|อาไร/gu, 'อะไร')
+    .replace(/มี(?:รัย|ไร)(?=\s|ทำ|เล่น|เที่ยว|บ้าง|มั่ง|มั้ง|$)/gu, 'มีอะไร')
+    .replace(/ทำ(?:รัย|ไร)(?=\s|บ้าง|มั่ง|มั้ง|ได้|$)/gu, 'ทำอะไร')
+    .replace(/เล่น(?:รัย|ไร)(?=\s|บ้าง|มั่ง|มั้ง|$)/gu, 'เล่นอะไร')
+    .replace(/เที่ยว(?:รัย|ไร)(?=\s|บ้าง|มั่ง|มั้ง|$)/gu, 'เที่ยวอะไร')
+    .replace(/(?:มั่ง|มั้ง)/gu, 'บ้าง')
+    .replace(/(?:ครับ|คับ|ค่ะ|คะ|จ้า|จ๊ะ|นะครับ|นะคะ|หน่อยครับ|หน่อยค่ะ|หน่อย)$/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return text;
+}
+
+function compactThai(value: string): string {
+  return value.replace(/\s+/g, '');
+}
+
+function editDistanceWithin(a: string, b: string, maxDistance: number): boolean {
+  if (Math.abs(a.length - b.length) > maxDistance) return false;
+  if (a === b) return true;
+
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMin = current[0]!;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const value = Math.min(
+        previous[j]! + 1,
+        current[j - 1]! + 1,
+        previous[j - 1]! + cost,
+      );
+      current.push(value);
+      rowMin = Math.min(rowMin, value);
+    }
+    if (rowMin > maxDistance) return false;
+    previous = current;
+  }
+  return previous[b.length]! <= maxDistance;
+}
+
 export function isExperienceDiscoveryIntent(message: string): boolean {
-  const text = String(message ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const text = normalizeThaiDiscoveryText(message);
   if (!text) return false;
-  return DISCOVERY_PATTERNS.some(pattern => pattern.test(text));
+
+  // Do not steal clearly restaurant-specific questions from the live menu
+  // advisor just because they also contain "อะไร/แนะนำ".
+  if (/(?:ที่ร้าน|ร้านอาหาร|เมนู|อาหารแนะนำ|กินอะไร|อะไรกิน)/u.test(text)) return false;
+
+  if (DISCOVERY_PATTERNS.some(pattern => pattern.test(text))) return true;
+
+  const compact = compactThai(text);
+  const hasDiscoveryShape =
+    /(กิจกรรม|ประสบการณ์)/u.test(text)
+    || /(?:มี|ที่นี่).*(?:อะไร|ไร).*(?:ทำ|เล่น|เที่ยว)/u.test(text)
+    || /(?:ทำ|เล่น|เที่ยว).*(?:อะไร|ไร).*(?:ได้|บ้าง)/u.test(text)
+    || /(?:มาครั้งแรก|ครั้งแรก).*(?:แนะนำ|อะไร)/u.test(text);
+  if (hasDiscoveryShape) return true;
+
+  // Short Thai chat often has one or two key typos ("มีไลทำมั่ง",
+  // "มีอะไลทำบ้าง"). For this narrow intent only, tolerate a tiny edit
+  // distance from known semantic anchors instead of falling through to the
+  // generic LLM-unavailable response.
+  const maxDistance = compact.length <= 14 ? 2 : 3;
+  return DISCOVERY_CANONICAL.some(candidate =>
+    editDistanceWithin(compact, compactThai(candidate), maxDistance));
 }
 
 function catalogName(id: string, fallback: string): string {
