@@ -667,10 +667,26 @@ the same or next commit.
   - G.2 is **code-ready for the first read-only slice but NOT production-activated**. Per the
     user's finish-first/deploy-once rule, do not turn on the env gate or deploy a branch preview
     yet. Production remains on the legacy path.
-- [ ] **Phase J — Observability. NOT STARTED. Exact next phase.**
-- [ ] Phase K — Backoffice Control Plane (tamma-backoffice: health/diagnostics view +
-  Conversation Inspector). NOT STARTED. Conversation Inspector must remain bounded/expiring,
-  not permanent raw transcript storage.
+- [x] **Phase J — Observability. DONE.**
+  - Added `_one-mind-observability.ts` as the ONE safe structured trace envelope.
+  - Trace contains machine metadata only: request/trace id, channel, component versions,
+    semantic domain/intent/action/confidence bucket/reference counts, dialog mode/reasons,
+    knowledge source statuses, degradation state, composer mode/used fact keys, action-proposal
+    presence, CAS retry count, optional real transaction status/code, and stage/total latency.
+  - Trace explicitly excludes canonical guest ids, provider user keys, raw customer text,
+    response prose, raw model output/reasoning and chain-of-thought. Token sanitization also
+    redacts email/phone-shaped strings defensively.
+  - One-Mind stage timings now cover semantic interpretation, dialog+knowledge, state read/write
+    and total latency; authoritative turns accumulate latency across CAS retries rather than
+    hiding concurrency cost.
+  - `_thongthai-one-mind-response.ts` attaches the full trace to both composed and
+    `legacy_required` results, including Response Composer latency.
+  - `thongthai-chat.ts` emits the safe envelope through `emitOneMindTrace()`. The emitter
+    swallows logging failures, so observability cannot change the customer response.
+  - Added `tests/one-mind-observability.test.ts` covering privacy boundaries, timings,
+    transaction metadata provenance and non-blocking logging.
+  - Latest branch CI run `35351938514`: **419/419 tests passing, 0 failed**.
+- [ ] **Phase K — Backoffice Control Plane. NOT STARTED. Exact next phase.**
 - [ ] Phase L — Golden conversation eval (150+ cases). NOT STARTED as final suite; corpus is
   already being grown phase-by-phase.
 - [ ] Phase M — Full E2E. NOT STARTED.
@@ -679,29 +695,33 @@ the same or next commit.
 
 ## Exact next action
 
-Start **Phase J — Observability** on this SAME integration branch.
+Start **Phase K — Backoffice Control Plane** using the EXISTING canonical
+`snkpcn/tamma-backoffice` repository only.
 
-Required shape:
-1. ONE safe trace envelope across Semantic Interpreter → Task/Context → Knowledge Resolver →
-   Dialog Manager → Degradation → Response Composer.
-2. No raw model reasoning / chain-of-thought. No raw PII/contact info. No raw chat transcript
-   persistence.
-3. Include only machine-safe metadata such as trace/request id, canonical guest surrogate/hash
-   if needed, channel, versions, domain/action/intent, source statuses, dialog mode/reason codes,
-   degradation condition/level, composer mode/used fact keys, action proposal presence,
-   transaction outcome code/status (when real), CAS conflict retry count, total/stage latency.
-4. Make the trace usable by Phase K's bounded Conversation Inspector without changing the
-   product's "no permanent raw chat storage" stance.
-5. Observability must never change customer behavior: logging/trace failure is non-blocking.
-6. Keep the current G.2 env gate OFF; do not deploy yet.
+Phase K requirements:
+1. Create/use a shared integration branch in the existing backoffice repo; do not create a new
+   repo/site/project/database.
+2. Add a health/diagnostics view for One-Mind components and a bounded Conversation Inspector.
+3. Inspector must show ONLY the safe Phase J trace envelope / bounded working-state metadata.
+   It must NOT store or display permanent raw chat transcripts, raw model output, chain-of-thought,
+   customer contact details or payment data.
+4. If persistence is required, design it against the EXISTING tamma-customer-data Supabase only,
+   with explicit expiry/retention. Prefer committing migration/schema + tests first; do not apply
+   a live DB migration just to make the UI prototype work.
+5. Backoffice reads must be authenticated/server-side; no service-role key in browser code.
+6. Diagnostics failure must not affect customer traffic.
+7. Keep `THONGTHAI_ONE_MIND_CUTOVER` OFF and do not deploy either repo yet.
+8. Every meaningful checkpoint must be committed/pushed and both repos' handoff state must be
+   sufficient for the next agent.
 
 Sequence remains:
-**J → K → L → M → N → O** (G.2 production activation is deferred to O under the user's
-finish-first/deploy-once rule; its read-only code path is already present behind the gate).
+**K → L → M → N → O**. G.2 customer activation stays deferred to O under the user's
+finish-first/deploy-once rule.
 
 ## Last commit on this branch
 
-- Current tested code head before this handoff update: `ef6f4cfe438c225fc22c2aed17677883b60d9197`.
-- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I complete.
-- G.2 read-only strangler + concurrency hardening implemented behind OFF env gate.
+- Current tested customer-repo head before this handoff update:
+  `633cab0e53e3948b387d7857f27ecf28b7a203b7`.
+- Phases A, B, B.1, C, D, D.1, E, F, G.1, H, I, J complete.
+- G.2 read-only strangler + CAS concurrency hardening implemented behind OFF env gate.
 - Main/production untouched; no Netlify deploy performed.
