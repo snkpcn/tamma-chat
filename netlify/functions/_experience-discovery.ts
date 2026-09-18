@@ -45,11 +45,11 @@ function liveActivityNames(worldFacts: WorldFactLike[]): string[] {
 export function formatExperienceDiscoveryMessage(worldFacts: WorldFactLike[]): string {
   const activities = liveActivityNames(worldFacts);
   const activityLine = activities.length
-    ? `🌿 เล่น — ${activities.join(' / ')}`
-    : `🌿 เล่น — ${catalogName('adventure', 'ทำมา-ชาติ ผจญภัย')}`;
+    ? `🌿 กิจกรรม — ${activities.join(' / ')}`
+    : `🌿 กิจกรรม — ${catalogName('adventure', 'ทำมา-ชาติ ผจญภัย')}`;
 
   return [
-    'มีครับ 😊 ที่ทำมา-ชาติเลือกได้หลายแบบ',
+    'มีครับ 😊 ที่ทำมา-ชาติมีหลายแบบ',
     '',
     `🍽️ กิน — ${catalogName('dining', 'ตำมา-ชาติ')}`,
     activityLine,
@@ -57,6 +57,6 @@ export function formatExperienceDiscoveryMessage(worldFacts: WorldFactLike[]): s
     `🌅 ชิล — ${catalogName('landscape', 'เดินชมพื้นที่กลาง')} / ${catalogName('sunset', 'ชมพระอาทิตย์ตก')}`,
     `☕ แวะพัก — ${catalogName('inthanin', 'Inthanin')}`,
     '',
-    'บอกได้เลยว่ามากี่คน + มีเวลากี่ชั่วโมง ทองไทยจัดเป็นทริปสั้น ๆ ให้ได้ครับ',
+    'บอกจำนวนคน + เวลาที่มีได้เลย ทองไทยจัดเป็นแพลนสั้น ๆ ให้ได้ครับ',
   ].join('\n');
 }
