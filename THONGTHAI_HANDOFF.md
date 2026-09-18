@@ -986,3 +986,19 @@ intentionally retained.
    operator instruction to stop all Execute SQL/pg_net use; (c) the temporary Netlify deploy
    bridge branch on `tamma-backoffice` still exists on GitHub (inert, unmerged, no residue on
    main) and needs a credential with branch-delete scope to remove.
+
+
+### Post-completion cleanup addendum — 2026-09-18
+
+- Temporary backoffice deploy branch `phase-o-netlify-deploy-temp` could not be deleted with
+  the available credential, but it has now been force-reset to the exact backoffice main SHA
+  `45655cb4c16b9213017abff4961f81bb13336bcc`.
+  Therefore the temporary proxy credential file and private deploy workflow are no longer
+  present at that branch tip (both paths return 404 on the branch). The branch now behaves as
+  an inert alias of backoffice main and contains no temporary deployment residue.
+- Current customer production deploy is directly observable:
+  Netlify deploy `6aad5c6425c49c0008bf5bba`, state `ready`,
+  commit_ref `afd5eda4bce175571ff6eb5b062ccb386fb36b49` (this final handoff commit).
+- Current backoffice production deploy remains:
+  Netlify deploy `6aad4e43bfe37a0008d2b0c1`, state `ready`,
+  commit_ref `45655cb4c16b9213017abff4961f81bb13336bcc`.
