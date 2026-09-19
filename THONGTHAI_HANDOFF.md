@@ -1266,3 +1266,113 @@ runtime as well as at build time).
   "do not force unfinished transactional cutover") or restructuring the legacy brain to accept a
   pre-classified `SemanticTurn` (a real redesign, explicitly out of scope this pass). Flagged here
   for whoever picks up membership/cafe/journey/payment/support equivalence work next.
+
+
+### Phase P — Conversation-coverage hardening: active tasks are INTERRUPTIBLE — 2026-09-19
+
+**Root cause fixed**: `_dialog-manager.ts`'s `planDialogTurn` checked `missingFields.length > 0`
+BEFORE ever looking at what the current turn actually was. Once cutover made One-Mind the primary
+path, any turn on an active task with a genuinely missing field (routine for an in-progress
+booking) collapsed straight to `collect_field` regardless of its own action -- so a side-question
+like "ตัวไหนนิสัยดีกว่า" (compare) or "ร้านมีไรกิน" (an unrelated topic) got answered with "เลือก
+ระยะเวลา 30/60/90 นาที" instead of being addressed on its own terms.
+
+**Dialog Manager precedence change**: `planDialogTurn` now computes `isTaskSideQuestion` --
+true when the active task's turn action is one of `ask/discover/recommend/compare/status`
+(`SIDE_QUESTION_ACTIONS`) AND the turn does not also state a real task-slot value
+(`providesTaskSlotValue`, checked against known slot key names like `date`/`time`/`durationMinutes`/
+`resourceCode`, not `compareAttribute`, which is comparison metadata and is now stripped before any
+slot merge -- see `taskSlotPatch`). When true, the turn routes through `query_knowledge`/`answer`
+instead of `collect_field`, and `mergeTaskState` never touches the task's slots for it, so the task
+survives completely untouched. A HYBRID turn (e.g. "บ่ายสามได้ปะ" classified `ask` but stating a
+real `time` value) still proceeds normally -- the value is retained AND `collect_field` still fires
+for whatever remains genuinely required, matching the existing (and still passing)
+`tests/dialog-manager-horse-scenario.test.ts` contract exactly.
+
+**Semantic classes added** (`_deterministic-semantic-turn.ts`, all structural/marker-based, never
+literal phrase tables -- matching the existing `hasCorrectionMarker`/`hasCommitMarker` precedent):
+- `compare_entities` (`detectCompareEntities`): fires on the classifier interrogative "ตัวไหน"/
+  "อันไหน"/"ชิ้นไหน" combined with a small closed attribute-keyword vocabulary (นิสัย/อารมณ์ ->
+  temperament, มือใหม่/เริ่มต้น/หัดขี่ -> beginnerSuitability, อายุ, เพศ, ขนาด, น้ำหนัก ->
+  maxRiderWeight) and 2+ recently-shown same-domain entities. Without a recognized attribute it
+  defers (returns null) rather than deriving an under-specified comparison.
+- `ask_price` / `ask_how_it_works` / `ask_availability_status`
+  (`detectActivitySideQuestion`): price markers (ราคา/เท่าไร/กี่บาท), a sentence-final "ยังไง"/
+  "อย่างไร"/informal "ไง" particle, and ว่างไหม-style availability markers, scoped to the
+  activity domain (restaurant/otop price questions already have their own working zero-LLM paths).
+- `task_cancel` (`hasCancelMarker`, new in `_slot-parsers.ts`): ยกเลิก/ไม่เอาแล้ว/etc. Wired into
+  `mergeTaskState` as a dedicated branch (previously 'cancel' was in `TASK_WORTHY_ACTIONS` but had
+  NO actual transition wiring at all -- a real, separate bug this pass also closed) that transitions
+  the task to `cancelled` via the existing `_task-state.ts` transition graph; a terminal task is
+  never reopened, and a new `isTerminalTaskStatus` export (reusing the existing `TERMINAL_STATUSES`
+  set) makes `planDialogTurn` treat a cancelled task as "no active task" for missingFields/mode
+  purposes, so it never re-surfaces a stale `collect_field` prompt.
+- `detectCrossDomainTopicSwitch`: a fallback tried only once nothing task-specific matches -- reuses
+  the SAME topic-narrow markers already used for the no-task case (ecosystem broad discovery,
+  activity `ม้า`/ATV/ยิงธนู, and a new restaurant marker `ร้าน...กิน/อาหาร/เมนู` reusing the
+  ecosystem graph's `thamma-chat-restaurant` node) so a genuine topic switch away from an active
+  task ("ร้านมีไรกิน" mid-booking) still surfaces as a real turn instead of silently falling to
+  "unclassifiable", letting the Dialog Manager's existing suspend/resume mechanism fire.
+- `extractDurationMinutes` (new in `_slot-parsers.ts`): "60 นาที"/"90 นาที" -> a bounded
+  (5-600 minute) duration value, reusing the existing correction-marker mechanism for "จริงๆ 90
+  นาที" to overwrite rather than add to the slot.
+
+**Side-question behavior**: a compare/price/how-it-works/status-without-a-slot-value question on
+an active task is answered on its own terms (grounded facts when available, an honest
+"cannot verify"/"cannot answer that yet" when not) and the task's slots and missingFields are left
+completely untouched -- proven at the Dialog Manager level directly
+(`tests/dialog-manager-side-question-precedence.test.ts`) and end-to-end with the model forced
+unavailable (`tests/conversation-coverage-hardening.test.ts`).
+
+**Topic-switch/resume behavior**: "ร้านมีไรกิน" while an activity task is active suspends it
+(`taskStateAfter.activeTask === null`, `taskStateAfter.suspendedTask` holds every slot filled so
+far) and answers the restaurant question instead; "กลับมาจองม้าต่อ" resumes the SAME task
+(same `taskId`, every slot -- including `time`/`resourceCode` set before the switch -- still
+intact), via the existing `detectTopicTransition`/`suspendActiveTask`/`resumeSuspendedTask`
+mechanism in `_task-state.ts`/`_dialog-manager.ts`, now reachable because the topic-switch message
+is recognized at all (see `detectCrossDomainTopicSwitch` above).
+
+**Anti-hallucination fix**: `composeDeterministicResponse` in `_response-composer.ts` checked the
+generic `model_unavailable` grounded-facts fallback BEFORE `cannot_verify_comparison` -- under a
+forced/degraded model, a comparison the Dialog Manager had ALREADY determined was unverified could
+still render whatever OTHER facts happened to exist (e.g. the two horses' names) via
+`composeGroundedDeterministicResponse`, which does not know it is being asked to represent a
+declined comparison and would render them as ordinary catalog output. Reordered so
+`cannot_verify_comparison` is checked first, and the same responseIntent now short-circuits the
+zero-LLM composer fast path in `_thongthai-one-mind-response.ts` (a comparison already known to be
+unverifiable needs no model call at all to phrase correctly).
+
+**Authoritative entity attribute model**: `_activity-sot.ts` now passes `activity_assets.metadata`
+through untouched; `_dialog-source-adapters.ts`'s `activityCatalogAdapter` emits a fact for each of
+`_activity-catalog-policy.ts`'s `ACTIVITY_ASSET_ATTRIBUTE_KEYS`
+(`temperament, beginnerSuitability, age, sex, size, maxRiderWeight, notes, operationalStatus`)
+ONLY when that specific field is actually present in an asset's real metadata -- key format
+`<attribute>:<entityId>`, matching `resolveDialogDecision`'s existing anti-hallucination fact
+lookup exactly. No value is ever defaulted or invented for ทองไทย/ภาราดร/any other asset; today
+none of these fields are populated in the real data, so every comparison correctly resolves to
+"cannot verify" until operations actually records one.
+
+**Forced-no-LLM conversation result**: the FULL scripted conversation --
+`มีไรทำมั่ง / ม้าล่ะ / ตัวไหนนิสัยดีกว่า / เอาภาราดร / บ่ายสามได้ปะ / จะขี่ม้าไง / มีราคาเท่าไร /
+ร้านมีไรกิน / กลับมาจองม้าต่อ / 60 นาที / จริงๆ 90 นาที` -- passes end-to-end in
+`tests/conversation-coverage-hardening.test.ts` with the model provider forced to always throw
+`LLMAvailabilityError`: zero real LLM calls, no generic apology on any turn, no repeated duration
+prompt on any of the three side-questions, the comparison never invents a temperament claim, the
+selected horse (`resourceCode: 'activity-horse'`) and requested time (`'15:00'`) survive the full
+script including the topic-switch/resume round trip, the duration correctly goes 60 -> 90 on the
+explicit correction, and `actionProposal` stays `undefined` throughout (no transaction, no fake
+confirmation -- this script never even states a date, so the task never becomes ready regardless).
+Additional standalone forced-outage coverage: `มีม้ากี่ตัว` (count, answered from real catalog
+facts), `ตัวไหนเหมาะกับมือใหม่` (beginner-suitability comparison, honestly unverified),
+`พรุ่งนี้ว่างไหม` (availability question on an active task, task preserved, no fake availability
+claim), and an explicit `ยกเลิกก่อน` -> `กลับมาจองต่อ` sequence proving a cancelled task is never
+silently revived.
+
+**Test pass count**: 503/503 (`npm test`), including all pre-existing coverage (no regressions --
+the pre-existing `tests/dialog-manager-horse-scenario.test.ts` contract for the
+`ask`-with-a-real-slot-value hybrid case was the discriminator that caught and corrected an
+initially-too-broad version of the side-question precedence rule during this pass).
+
+**No production transaction was created by this hardening pass** -- every new test is
+network-free, dependency-injected, in-memory state only, matching this repo's established
+convention; none of them call a live Supabase/Gemini/OpenAI endpoint.

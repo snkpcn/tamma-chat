@@ -7,10 +7,13 @@
 // the caller then either falls back to the real model (if available) or asks
 // ONE honest clarifying question -- it must never guess.
 import type {
-  SemanticContext, SemanticContextEntity, SemanticReference, SemanticTurn,
+  SemanticContext, SemanticContextEntity, SemanticDomain, SemanticReference, SemanticTurn,
 } from './_semantic-interpreter';
-import type { ActiveTask, TaskStateContainer } from './_task-state';
-import { extractDate, extractPartySize, extractTime, hasCommitMarker, hasCorrectionMarker } from './_slot-parsers';
+import { isTerminalTaskStatus, type ActiveTask, type TaskStateContainer } from './_task-state';
+import {
+  extractDate, extractDurationMinutes, extractPartySize, extractTime,
+  hasCancelMarker, hasCommitMarker, hasCorrectionMarker,
+} from './_slot-parsers';
 import { isExperienceDiscoveryIntent } from './_experience-discovery';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 
@@ -50,11 +53,151 @@ function findActivityTopicNarrow(message: string): boolean {
   return ACTIVITY_TOPIC_KEYWORDS.some(item => item.keyword.test(message) && Boolean(findEcosystemNode(item.nodeId)));
 }
 
+/** "ร้าน...กิน/อาหาร/เมนู" -- a restaurant-topic marker, reusing the SAME
+ *  doctrine-level business-unit structure as ACTIVITY_TOPIC_KEYWORDS (see
+ *  _ecosystem-entity-graph.ts's 'thamma-chat-restaurant' node), not a
+ *  growing phrase table. Exists so a topic switch AWAY from an active task
+ *  toward the restaurant domain ("ร้านมีไรกิน" while mid-booking) is
+ *  recognized structurally -- see detectCrossDomainTopicSwitch below. */
+const RESTAURANT_TOPIC_MARKER = /ร้าน.*(?:กิน|อาหาร|เมนู)|(?:กิน|อาหาร|เมนู).*ร้าน/u;
+
+function findRestaurantTopicNarrow(message: string): boolean {
+  return RESTAURANT_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('thamma-chat-restaurant'));
+}
+
+/** A structural fallback, tried only once nothing task-specific matches
+ *  (see deriveDeterministicSemanticTurn below): does this message name a
+ *  DIFFERENT supported topic than whatever is currently active? If so, it's
+ *  a topic switch, not an unparseable message -- the resulting 'discover'
+ *  turn naturally triggers the Dialog Manager's existing suspend/resume
+ *  mechanism (detectTopicTransition in _dialog-manager.ts) once its domain
+ *  differs from the active task's. Reuses the SAME topic-narrow markers
+ *  already used for the no-task case, never a new phrase table. */
+function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
+  if (findRestaurantTopicNarrow(message)) {
+    return {
+      domain: 'restaurant', intent: 'restaurant_topic_switch', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+  if (findActivityTopicNarrow(message)) {
+    return {
+      domain: 'activity', intent: 'activity_topic_narrow', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+  if (isExperienceDiscoveryIntent(message)) {
+    return {
+      domain: 'ecosystem', intent: 'broad_experience_discovery', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Side-question classes. An active/open task is INTERRUPTIBLE: having an
+// unfinished task does not mean every following message is a slot fill. Each
+// class below is a small, closed, STRUCTURAL marker set (a grammatical
+// pattern or a bounded attribute vocabulary), never a growing table of full
+// customer phrases -- matching hasCorrectionMarker/hasCommitMarker's
+// existing precedent in _slot-parsers.ts.
+// ---------------------------------------------------------------------------
+
+/** "ตัวไหน" / "อันไหน" -- a classifier-based interrogative ("which [counted
+ *  item]"), structural across any counted noun, not a specific phrase. */
+const COMPARE_MARKER = /ตัวไหน|อันไหน|ชิ้นไหน/u;
+
+/** A small, closed attribute vocabulary -- the SAME attributes the
+ *  authoritative activity/asset source-of-truth is being asked to support
+ *  (see _activity-catalog-policy.ts's ACTIVITY_ASSET_ATTRIBUTE_KEYS). A
+ *  comparison is only ever derived when one of these is recognized, so it
+ *  never falls back to a coarse "any fact exists" hallucination risk. */
+const COMPARE_ATTRIBUTE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; attribute: string }> = [
+  { pattern: /นิสัย|อารมณ์/u, attribute: 'temperament' },
+  { pattern: /มือใหม่|เริ่มต้น|หัดขี่/u, attribute: 'beginnerSuitability' },
+  { pattern: /อายุ/u, attribute: 'age' },
+  { pattern: /เพศ/u, attribute: 'sex' },
+  { pattern: /ขนาด|ตัวใหญ่|ตัวเล็ก/u, attribute: 'size' },
+  { pattern: /น้ำหนัก/u, attribute: 'maxRiderWeight' },
+];
+
+/** A comparison among recently-shown entities of the SAME domain ("ตัวไหน
+ *  นิสัยดีกว่า" after being shown two horses). Requires BOTH the "which
+ *  one" marker and a recognized attribute keyword -- without a recognized
+ *  attribute, deferring (returning null) is safer than deriving an
+ *  under-specified compare that would fall back to a coarse "any fact
+ *  exists" check downstream (see resolveDialogDecision's anti-hallucination
+ *  logic in _dialog-manager.ts). Never touches task state. */
+function detectCompareEntities(message: string, context: SemanticContext, domain: SemanticDomain | null): SemanticTurn | null {
+  if (!domain || !COMPARE_MARKER.test(message)) return null;
+  const attribute = COMPARE_ATTRIBUTE_KEYWORDS.find(item => item.pattern.test(message))?.attribute;
+  if (!attribute) return null;
+  const candidates = context.recentEntities.filter(entity => entity.domain === domain);
+  if (candidates.length < 2) return null;
+  const ids = candidates.slice(0, 4).map(entity => entity.id);
+  return {
+    domain, intent: 'compare_entities', action: 'compare',
+    entities: { compareAttribute: attribute },
+    references: [{ type: 'entity_comparison', refersToPriorContext: true, resolvedEntityIds: ids }],
+    constraints: [], confidence: 0.85, needsClarification: false,
+  };
+}
+
+const PRICE_MARKER = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/u;
+const AVAILABILITY_STATUS_MARKER = /ว่างไหม|ว่างมั้ย|ว่างรึเปล่า|ว่างหรือเปล่า/u;
+/** An informal or formal "how does this work" question -- "ยังไง"/
+ *  "อย่างไร" (formal), or a bare sentence-final "ไง" (a common informal
+ *  shorthand for the same, e.g. "จะขี่ม้าไง"). A structural, sentence-final
+ *  grammatical particle, not a specific phrase. */
+const HOW_IT_WORKS_MARKER = /ยังไง|อย่างไร|(?:^|\s)\S*ไง[\s?？]*$/u;
+
+/** Price / availability-status / how-it-works questions about the CURRENT
+ *  activity topic (whether or not a task exists yet). Scoped to 'activity'
+ *  for now -- restaurant/otop price questions already have their own
+ *  working zero-LLM paths (deterministicRestaurantResponse et al. in
+ *  thongthai-chat.ts), so this only fills the gap the activity domain
+ *  doesn't yet have one for. Never touches task state -- these are read-only
+ *  side-questions (see TASK_WORTHY_ACTIONS in _dialog-manager.ts, which
+ *  'ask'/'status' are deliberately excluded from). */
+function detectActivitySideQuestion(message: string, domain: SemanticDomain | null): SemanticTurn | null {
+  if (domain !== 'activity') return null;
+  if (PRICE_MARKER.test(message)) {
+    return { domain, intent: 'ask_price', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false };
+  }
+  if (AVAILABILITY_STATUS_MARKER.test(message)) {
+    const entities: Record<string, unknown> = {};
+    const date = extractDate(message);
+    if (date) entities.date = date;
+    return { domain, intent: 'ask_availability_status', action: 'status', entities, references: [], constraints: [], confidence: 0.8, needsClarification: false };
+  }
+  if (HOW_IT_WORKS_MARKER.test(message)) {
+    return { domain, intent: 'ask_how_it_works', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.75, needsClarification: false };
+  }
+  return null;
+}
+
 function deriveForActiveTask(
   message: string,
   context: SemanticContext,
   task: ActiveTask,
 ): SemanticTurn | null {
+  // An explicit cancel ends the task outright, regardless of what other
+  // slot-shaped content the message might also contain.
+  if (hasCancelMarker(message)) {
+    return {
+      domain: task.domain, intent: 'task_cancel', action: 'cancel',
+      entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false,
+    };
+  }
+
+  // Side-questions must be answered on their own terms -- never silently
+  // reduced to whatever slot value they might incidentally also contain
+  // (see the Dialog Manager's SIDE_QUESTION_ACTIONS precedence, which
+  // preserves the task untouched for exactly these actions).
+  const sideQuestion = detectActivitySideQuestion(message, task.domain);
+  if (sideQuestion) return sideQuestion;
+
   // A commit signal ("จองเลย", "ยืนยันจอง") means the customer wants more
   // than a slot updated -- recognizing and acting on an explicit booking
   // commitment needs real understanding (and the transaction-executor
@@ -67,9 +210,11 @@ function deriveForActiveTask(
   const date = extractDate(message);
   const time = extractTime(message);
   const partySize = extractPartySize(message);
+  const durationMinutes = extractDurationMinutes(message);
   if (date) entities.date = date;
   if (time) entities.time = time;
   if (partySize) entities.partySize = partySize;
+  if (durationMinutes) entities.durationMinutes = durationMinutes;
 
   const entityMatch = findEntityByName(message, context.recentEntities);
   const references: SemanticReference[] = entityMatch
@@ -112,10 +257,34 @@ export function deriveDeterministicSemanticTurn(
   const trimmed = message.trim();
   if (!trimmed) return null;
 
-  const activeTask = taskState.activeTask;
+  const activeTask = taskState.activeTask && !isTerminalTaskStatus(taskState.activeTask.status)
+    ? taskState.activeTask
+    : null;
+  const effectiveDomain = activeTask?.domain ?? context.activeDomain;
+
+  // A comparison among recently-shown entities can happen with or without an
+  // open task (e.g. "ตัวไหนนิสัยดีกว่า" right after browsing, before any
+  // selection is made) -- checked first, and it never touches task state.
+  const compare = detectCompareEntities(trimmed, context, effectiveDomain);
+  if (compare) return compare;
+
   if (activeTask && (activeTask.status === 'collecting' || activeTask.status === 'ready')) {
-    return deriveForActiveTask(trimmed, context, activeTask);
+    const taskDerived = deriveForActiveTask(trimmed, context, activeTask);
+    if (taskDerived) return taskDerived;
+    // Nothing task-specific matched -- before giving up, check whether this
+    // is actually a topic switch AWAY from the active task (e.g. "ร้านมีไรกิน"
+    // while mid-activity-booking). A genuine switch must still surface as a
+    // real turn (so the Dialog Manager's existing suspend mechanism fires),
+    // not silently fall through to "genuinely unclassifiable".
+    const topicSwitch = detectCrossDomainTopicSwitch(trimmed);
+    if (topicSwitch && topicSwitch.domain !== activeTask.domain) return topicSwitch;
+    return null;
   }
+
+  // No open task: a price/availability/how-it-works side-question about the
+  // current topic, asked before any selection is made.
+  const sideQuestion = detectActivitySideQuestion(trimmed, effectiveDomain);
+  if (sideQuestion) return sideQuestion;
 
   // No active task: a selection among entities the customer already saw
   // this conversation ("เอาภาราดร" after being shown horse options).

@@ -79,3 +79,19 @@ export function resolveActivityDurationOptions(
   if (sorted.length > 1) return { status: 'multiple', options: sorted };
   return { status: 'unknown' };
 }
+
+// ---------------------------------------------------------------------------
+// Optional structured asset attributes -- e.g. for a horse comparison
+// ("ตัวไหนนิสัยดีกว่า"). This is SUPPORT for these attributes, not data:
+// activityCatalogAdapter (_dialog-source-adapters.ts) reads each key below
+// off an asset's real activity_assets.metadata, and emits a fact ONLY when
+// that specific field is actually present -- never a default, never a
+// fabricated value for ทองไทย/ภาราดร/etc. If operations has not recorded an
+// attribute for an asset, no fact exists for it, and the anti-hallucination
+// check in _dialog-manager.ts's resolveDialogDecision (a comparison must be
+// backed by a real verified fact per candidate) correctly reports "cannot
+// verify" rather than guessing.
+// ---------------------------------------------------------------------------
+export const ACTIVITY_ASSET_ATTRIBUTE_KEYS = [
+  'temperament', 'beginnerSuitability', 'age', 'sex', 'size', 'maxRiderWeight', 'notes', 'operationalStatus',
+] as const;

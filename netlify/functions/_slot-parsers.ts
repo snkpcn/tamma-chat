@@ -105,3 +105,19 @@ export function hasCorrectionMarker(message: string): boolean {
 export function hasCommitMarker(message: string): boolean {
   return /จองเลย|ยืนยันจอง|สั่งเลย|ยืนยันการจอง|ยืนยันการสั่ง/u.test(message);
 }
+
+/** A customer explicitly asking to cancel/abandon whatever is in progress
+ *  ("ยกเลิกก่อน", "ไม่เอาแล้ว"). A small, closed marker, not a phrase table. */
+export function hasCancelMarker(message: string): boolean {
+  return /ยกเลิก|ไม่เอาแล้ว|ไม่จองแล้ว|ไม่สั่งแล้ว/u.test(message);
+}
+
+/** "60 นาที" / "90 นาที" -> a duration in minutes, bounded to a plausible
+ *  activity-duration range so an unrelated number (a price, a headcount)
+ *  is never misread as a duration. */
+export function extractDurationMinutes(message: string): number | null {
+  const match = message.match(/(\d{1,3})\s*นาที/u);
+  if (!match) return null;
+  const minutes = Number(match[1]);
+  return minutes >= 5 && minutes <= 600 ? minutes : null;
+}

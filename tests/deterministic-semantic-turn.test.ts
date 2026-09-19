@@ -105,3 +105,99 @@ test('an explicit commit marker ("จองเลย") on an active task defers 
   const turn = deriveDeterministicSemanticTurn('จองเลย บ่ายสาม', emptySemanticContext(), taskState);
   assert.equal(turn, null);
 });
+
+// ---------------------------------------------------------------------------
+// Conversation-coverage hardening: an active task is INTERRUPTIBLE -- these
+// classes prove side-questions are recognized structurally (comparison
+// markers, attribute keywords, price/how-it-works/availability markers,
+// cancel markers), never via a literal phrase table, and never touch task
+// state themselves.
+// ---------------------------------------------------------------------------
+
+test('a comparison among two same-domain recent entities derives compare with a recognized attribute, no task touched', () => {
+  const context: SemanticContext = { activeDomain: 'activity', recentEntities: [horseEntity(), horseEntity({ id: 'activity_asset:horse-02', name: 'ทองไทย' })] };
+  const turn = deriveDeterministicSemanticTurn('ตัวไหนนิสัยดีกว่า', context, emptyTaskStateContainer());
+  assert.ok(turn);
+  assert.equal(turn!.action, 'compare');
+  assert.equal(turn!.domain, 'activity');
+  assert.equal(turn!.entities.compareAttribute, 'temperament');
+  assert.equal(turn!.references[0]!.resolvedEntityIds?.length, 2);
+  assert.equal(turn!.needsClarification, false);
+});
+
+test('a comparison marker with an unrecognized attribute defers rather than under-specifying the comparison', () => {
+  const context: SemanticContext = { activeDomain: 'activity', recentEntities: [horseEntity(), horseEntity({ id: 'activity_asset:horse-02', name: 'ทองไทย' })] };
+  const turn = deriveDeterministicSemanticTurn('ตัวไหนดีกว่ากันนะ', context, emptyTaskStateContainer());
+  assert.equal(turn, null);
+});
+
+test('a comparison marker with only one recent entity in the domain defers (nothing to compare)', () => {
+  const context: SemanticContext = { activeDomain: 'activity', recentEntities: [horseEntity()] };
+  const turn = deriveDeterministicSemanticTurn('ตัวไหนนิสัยดีกว่า', context, emptyTaskStateContainer());
+  assert.equal(turn, null);
+});
+
+test('a price question on an active activity task is a side-question, not a slot update', () => {
+  const taskState: TaskStateContainer = {
+    ...emptyTaskStateContainer(),
+    activeTask: createActiveTask({ type: 'activity_booking', sourceChannel: 'line', now: NOW, initialSlots: { resourceCode: 'activity-horse' } }),
+  };
+  const turn = deriveDeterministicSemanticTurn('มีราคาเท่าไร', emptySemanticContext(), taskState);
+  assert.ok(turn);
+  assert.equal(turn!.action, 'ask');
+  assert.equal(turn!.intent, 'ask_price');
+  assert.deepEqual(turn!.entities, {});
+});
+
+test('an informal "how does it work" question on an active activity task is a side-question', () => {
+  const taskState: TaskStateContainer = {
+    ...emptyTaskStateContainer(),
+    activeTask: createActiveTask({ type: 'activity_booking', sourceChannel: 'line', now: NOW }),
+  };
+  const turn = deriveDeterministicSemanticTurn('จะขี่ม้าไง', emptySemanticContext(), taskState);
+  assert.ok(turn);
+  assert.equal(turn!.action, 'ask');
+  assert.equal(turn!.intent, 'ask_how_it_works');
+});
+
+test('an availability-status question retains the stated date but is classified as status, not a silent slot fill', () => {
+  const taskState: TaskStateContainer = {
+    ...emptyTaskStateContainer(),
+    activeTask: createActiveTask({ type: 'activity_booking', sourceChannel: 'line', now: NOW }),
+  };
+  const turn = deriveDeterministicSemanticTurn('พรุ่งนี้ว่างไหม', emptySemanticContext(), taskState);
+  assert.ok(turn);
+  assert.equal(turn!.action, 'status');
+  assert.equal(turn!.entities.date, '2026-09-20');
+});
+
+test('an explicit cancel marker on an active task derives a cancel action', () => {
+  const taskState: TaskStateContainer = {
+    ...emptyTaskStateContainer(),
+    activeTask: createActiveTask({ type: 'activity_booking', sourceChannel: 'line', now: NOW }),
+  };
+  const turn = deriveDeterministicSemanticTurn('ยกเลิกก่อน', emptySemanticContext(), taskState);
+  assert.ok(turn);
+  assert.equal(turn!.action, 'cancel');
+});
+
+test('a bare duration turn on an active task fills durationMinutes, and a correction updates it', () => {
+  const taskState: TaskStateContainer = {
+    ...emptyTaskStateContainer(),
+    activeTask: createActiveTask({ type: 'activity_booking', sourceChannel: 'line', now: NOW, initialSlots: { durationMinutes: 60 } }),
+  };
+  const fill = deriveDeterministicSemanticTurn('60 นาที', emptySemanticContext(), taskState);
+  assert.ok(fill);
+  assert.equal(fill!.entities.durationMinutes, 60);
+  assert.equal(fill!.action, 'provide_information');
+
+  const correction = deriveDeterministicSemanticTurn('จริงๆ 90 นาที', emptySemanticContext(), taskState);
+  assert.ok(correction);
+  assert.equal(correction!.entities.durationMinutes, 90);
+  assert.equal(correction!.action, 'correct_previous');
+});
+
+test('a price question with no active task and no active domain defers rather than guessing a domain', () => {
+  const turn = deriveDeterministicSemanticTurn('มีราคาเท่าไร', emptySemanticContext(), emptyTaskStateContainer());
+  assert.equal(turn, null);
+});

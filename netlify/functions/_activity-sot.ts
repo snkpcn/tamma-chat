@@ -43,7 +43,13 @@ export async function loadActivityWorldFacts(): Promise<WorldFactRow[]> {
         name: rows[0]?.activity_name ?? code,
         durations: rows.map(row => ({ durationMinutes:Number(row.duration_minutes), price:row.price == null ? null : Number(row.price), currency:row.currency })),
         activeInventory: physical.length,
-        assets: physical.map(row => ({ code:row.asset_code, name:row.name, type:row.asset_type })),
+        // `metadata` is passed through untouched -- optional structured
+        // attributes (temperament, beginner suitability, etc.) live here IF
+        // and only if operations has actually recorded them for this asset.
+        // See _dialog-source-adapters.ts's activityCatalogAdapter for which
+        // keys are surfaced as facts, and _activity-catalog-policy.ts's
+        // header for why nothing is ever defaulted/invented here.
+        assets: physical.map(row => ({ code:row.asset_code, name:row.name, type:row.asset_type, metadata:row.metadata ?? {} })),
       };
     });
     const now = new Date().toISOString();

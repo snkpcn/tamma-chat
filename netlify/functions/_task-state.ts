@@ -205,6 +205,14 @@ export function canTransitionTask(from: ActiveTaskStatus, to: ActiveTaskStatus):
 
 const TERMINAL_STATUSES: ReadonlySet<ActiveTaskStatus> = new Set(['completed', 'cancelled', 'failed', 'superseded']);
 
+/** A terminal task (cancelled/completed/failed/superseded) is done -- a
+ *  caller deciding whether a turn should be treated as "no active task"
+ *  (e.g. never asking for its missing fields again) checks this rather than
+ *  re-deriving the terminal-status list. */
+export function isTerminalTaskStatus(status: ActiveTaskStatus): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
 /** System-internal eviction transformation -- NOT exposed via transitionTask
  *  and NOT reachable through TASK_TRANSITIONS. This is the ONLY function
  *  that produces `superseded`, and it is only ever called from

@@ -33,7 +33,7 @@
 import type { SemanticAction, SemanticContext, SemanticContextEntity, SemanticDomain, SemanticTurn } from './_semantic-interpreter';
 import type { ConversationContextState } from './_conversation-context';
 import {
-  applyTaskStateEvent, type ActiveTask, type ActiveTaskType, type TaskStateContainer,
+  applyTaskStateEvent, isTerminalTaskStatus, type ActiveTask, type ActiveTaskType, type TaskStateContainer,
 } from './_task-state';
 import { computeTaskMissingFields, DOMAIN_TASK_REQUIRED_FIELDS } from './_domain-task-policy';
 import {
@@ -59,7 +59,8 @@ export type DialogReasonCode =
   | 'knowledge_unavailable' | 'knowledge_unverified' | 'knowledge_empty'
   | 'ready_for_availability_check' | 'awaiting_explicit_commit' | 'explicit_commit_received'
   | 'task_suspended_for_topic_switch' | 'task_resumed' | 'cannot_verify_comparison'
-  | 'known_unconfigured_price' | 'duplicate_event_ignored' | 'no_active_task';
+  | 'known_unconfigured_price' | 'duplicate_event_ignored' | 'no_active_task'
+  | 'task_side_question_preserved' | 'task_cancelled';
 
 export type ResponseIntent =
   | 'discovery_response' | 'grounded_answer' | 'clarify_ambiguous_entity' | 'ask_missing_field'
@@ -126,6 +127,48 @@ const TASK_WORTHY_ACTIONS: ReadonlySet<SemanticAction> = new Set(['confirm', 'pr
  *  perform a transaction. 'confirm' (e.g. "เอาภาราดร") is a SELECTION, not
  *  a booking commitment -- see "READY != EXECUTE" in the brief. */
 const COMMIT_ACTIONS: ReadonlySet<SemanticAction> = new Set(['book', 'order']);
+
+/** An active task is INTERRUPTIBLE: having an unfinished task does not mean
+ *  every following message is a slot fill. These actions are inherently
+ *  side-questions/browsing, never a customer providing task information --
+ *  see TASK_WORTHY_ACTIONS above, which this set is deliberately disjoint
+ *  from (a SemanticTurn has exactly one action, so a turn is never both).
+ *  A side-question turn on an active task must be answered on its own
+ *  terms -- never silently replaced by the task's own missing-field
+ *  prompt. */
+const SIDE_QUESTION_ACTIONS: ReadonlySet<SemanticAction> = new Set(['ask', 'discover', 'recommend', 'compare', 'status']);
+
+/** Known task-slot key names across domains (matches FIELD_LABELS_TH in
+ *  _response-composer.ts). A side-question-shaped action that ALSO carries
+ *  one of these (e.g. "บ่ายสามได้ปะ" classified as 'ask' but still stating a
+ *  time) is a hybrid turn, not a pure side-question -- see
+ *  "AVAILABILITY VS SLOT FILL": the value must still be merged and missing-
+ *  field collection must still proceed normally, so a genuinely still-
+ *  required field (like durationMinutes) is still asked for. A key like
+ *  'compareAttribute' (comparison metadata, never a real slot) does not
+ *  count, so a pure compare/price/how-it-works question still bypasses. */
+const KNOWN_TASK_SLOT_KEYS = new Set([
+  'date', 'time', 'partySize', 'durationMinutes', 'resourceCode', 'quantity',
+  'customerName', 'phone', 'checkIn', 'checkOut',
+]);
+
+function providesTaskSlotValue(entities: Record<string, unknown>): boolean {
+  return Object.keys(entities).some(key => KNOWN_TASK_SLOT_KEYS.has(key));
+}
+
+/** Comparison metadata (compareAttribute) is deliberately carried in
+ *  turn.entities so resolveDialogDecision's anti-hallucination check can
+ *  read it (see DialogPlan.compareAttribute below) -- but it is NOT a real
+ *  task slot and must never be written into task.slots. Strips it (and any
+ *  future non-slot meta keys) before a merge, never before it's read. */
+const NON_SLOT_META_KEYS = new Set(['compareAttribute']);
+function taskSlotPatch(entities: Record<string, unknown>): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(entities)) {
+    if (!NON_SLOT_META_KEYS.has(key)) patch[key] = value;
+  }
+  return patch;
+}
 
 const DEFAULT_TASK_TYPE_FOR_DOMAIN: Partial<Record<SemanticDomain, ActiveTaskType>> = {
   activity: 'activity_booking',
@@ -194,22 +237,42 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     reasons.push('task_resumed');
   }
 
+  // An explicit cancel ends the active task outright -- never re-derived as
+  // a slot update (turn.entities is typically empty for "ยกเลิกก่อน") and
+  // never left silently unhandled. A terminal task is never reopened (see
+  // TASK_TRANSITIONS in _task-state.ts); a later "resume" finds nothing to
+  // resume and must say so honestly, not resurrect a cancelled task.
+  if (turn.action === 'cancel') {
+    if (container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+      container = applyTaskStateEvent(container, {
+        kind: 'transition', eventId: `${eventId}:task_merge`, nextStatus: 'cancelled',
+      }, now);
+      reasons.push('task_cancelled');
+    } else {
+      reasons.push('no_active_task');
+    }
+    return { container, reasons };
+  }
+
   if (!container.activeTask) {
     const defaultType = DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
     if (TASK_WORTHY_ACTIONS.has(turn.action) && defaultType) {
       container = applyTaskStateEvent(container, {
         kind: 'start', eventId: `${eventId}:task_merge`,
-        params: { type: defaultType, sourceChannel: channel, initialSlots: turn.entities },
+        params: { type: defaultType, sourceChannel: channel, initialSlots: taskSlotPatch(turn.entities) },
       }, now);
     } else {
       reasons.push('discovery_only');
       return { container, reasons };
     }
   } else if (container.activeTask.domain === turn.domain && Object.keys(turn.entities).length) {
-    container = applyTaskStateEvent(container, {
-      kind: 'update_slots', eventId: `${eventId}:task_merge`,
-      slotPatch: turn.entities, requiredFields: DOMAIN_TASK_REQUIRED_FIELDS[container.activeTask.type] ?? [],
-    }, now);
+    const slotPatch = taskSlotPatch(turn.entities);
+    if (Object.keys(slotPatch).length) {
+      container = applyTaskStateEvent(container, {
+        kind: 'update_slots', eventId: `${eventId}:task_merge`,
+        slotPatch, requiredFields: DOMAIN_TASK_REQUIRED_FIELDS[container.activeTask.type] ?? [],
+      }, now);
+    }
   }
 
   const selectedEntities = resolveSelectedEntities(turn, conversationContext);
@@ -302,12 +365,25 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
 
   const { container, reasons } = mergeTaskState(input, now);
   const knowledgeRequests = planKnowledgeNeeds(turn, container);
-  const missingFields = container.activeTask?.missingFields ?? [];
+  // A terminal task (just cancelled, or otherwise finished) is treated as
+  // "no active task" from here on -- its stale missingFields must never
+  // resurface a collect_field prompt for something that no longer exists.
+  const hasOpenTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
+  const missingFields = hasOpenTask ? container.activeTask!.missingFields : [];
   const customerCommitPresent = COMMIT_ACTIONS.has(turn.action);
   if (customerCommitPresent) reasons.push('explicit_commit_received');
 
+  // CORE PRECEDENCE: an active task's missing fields must never hijack a
+  // side-question. mergeTaskState above never touches task slots for a
+  // SIDE_QUESTION_ACTIONS turn (it is never TASK_WORTHY, so no update_slots
+  // fires), so the task is already preserved untouched here -- this only
+  // decides how the turn is ANSWERED. The missing-field reminder simply
+  // waits for a genuine continuation turn instead of overriding this one.
+  const isTaskSideQuestion = hasOpenTask && SIDE_QUESTION_ACTIONS.has(turn.action) && !providesTaskSlotValue(turn.entities);
+  if (isTaskSideQuestion) reasons.push('task_side_question_preserved');
+
   let mode: DialogMode;
-  if (!container.activeTask) {
+  if (!hasOpenTask || isTaskSideQuestion) {
     mode = knowledgeRequests.length ? 'query_knowledge' : 'answer';
   } else if (missingFields.length > 0) {
     mode = 'collect_field';

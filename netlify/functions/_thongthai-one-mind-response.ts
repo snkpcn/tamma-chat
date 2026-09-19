@@ -88,13 +88,42 @@ export type OneMindCustomerTurnResult =
       observability:OneMindTraceEnvelope;
     };
 
-export function readOnlyCutoverEligibility(turn: OneMindTurnResult):
+/** True when the turn's "understanding" is not real understanding at all --
+ *  it is the orchestrator's own synthesized fallback (see resolveSemanticTurn
+ *  in _thongthai-one-mind-orchestrator.ts), produced only because BOTH the
+ *  deterministic deriver returned null AND the real model was unavailable.
+ *  Composing such a turn as a confident 'clarify' would silently steal the
+ *  message away from legacy's own working zero-LLM matchers (e.g. the
+ *  restaurant advisor, experience discovery) before they ever get a chance
+ *  -- exactly the "unrelated side-question gets swallowed" defect this
+ *  hardening pass exists to close. */
+function isGenuinelyUnclassifiedFallback(turn: OneMindTurnResult): boolean {
+  return turn.semanticTurn.clarificationReason === 'provider_unavailable';
+}
+
+export type ReadOnlyCutoverEligibilityOptions = {
+  /** Set only by a caller that is ITSELF the last resort (e.g. the legacy
+   *  handler's own LLMAvailabilityError catch, invoked only after legacy's
+   *  own deterministic pre-checks and its own real model attempt have
+   *  already failed) -- there, a bounded honest clarifying question is
+   *  strictly better than the flat generic apology, so the exclusion below
+   *  is waived. The PRIMARY cutover path never sets this. */
+  allowGenuinelyUnclassifiedFallback?: boolean;
+};
+
+export function readOnlyCutoverEligibility(
+  turn: OneMindTurnResult,
+  options: ReadOnlyCutoverEligibilityOptions = {},
+):
   | { eligible:true }
   | { eligible:false; reason:'transactional_or_task_turn' | 'domain_not_cut_over' } {
   if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
     return { eligible:false, reason:'domain_not_cut_over' };
   }
   if (Boolean(turn.dialogDecision.actionProposal)) {
+    return { eligible:false, reason:'transactional_or_task_turn' };
+  }
+  if (!options.allowGenuinelyUnclassifiedFallback && isGenuinelyUnclassifiedFallback(turn)) {
     return { eligible:false, reason:'transactional_or_task_turn' };
   }
   if (READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
@@ -118,6 +147,7 @@ export async function processOneMindCustomerTurn(
   dependencies: Partial<OneMindDependencies> = {},
   stateDependencies: Partial<AuthoritativeStateDependencies> = {},
   now: Date = new Date(),
+  eligibilityOptions: ReadOnlyCutoverEligibilityOptions = {},
 ): Promise<OneMindCustomerTurnResult> {
   const totalStartedAt = Date.now();
   const turn = await processThongthaiOneMindTurnAuthoritative(
@@ -126,9 +156,9 @@ export async function processOneMindCustomerTurn(
     stateDependencies,
     now,
     4,
-    candidate => readOnlyCutoverEligibility(candidate).eligible,
+    candidate => readOnlyCutoverEligibility(candidate, eligibilityOptions).eligible,
   );
-  const eligibility = readOnlyCutoverEligibility(turn);
+  const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptions);
   if (!eligibility.eligible) {
     return {
       status:'legacy_required',
@@ -165,7 +195,12 @@ export async function processOneMindCustomerTurn(
   // model to rephrase "what's the missing field" would spend a call to
   // rewrite prose that is already right. "Do NOT call an LLM simply to
   // rewrite already-grounded prose" (owner's Phase P brief).
-  const deterministicFastPath = (turn.dialogDecision.mode === 'collect_field' || turn.dialogDecision.mode === 'clarify')
+  // A cannot_verify_comparison decision is ALSO already-machine-determined
+  // (see resolveDialogDecision's anti-hallucination check in
+  // _dialog-manager.ts) -- no model call could add anything, it could only
+  // risk phrasing it in a way that implies an answer was found.
+  const deterministicFastPath = (turn.dialogDecision.mode === 'collect_field' || turn.dialogDecision.mode === 'clarify'
+      || turn.dialogDecision.responseIntent === 'cannot_verify_comparison')
     ? composeDeterministicResponse(composerInput)
     : null;
   const groundedFastPath = !deterministicFastPath && shouldPreferGroundedDeterministicResponse(

@@ -13,6 +13,7 @@
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { listRestaurantMenu } from './_restaurant-sot';
 import { loadActivityWorldFacts } from './_activity-sot';
+import { ACTIVITY_ASSET_ATTRIBUTE_KEYS } from './_activity-catalog-policy';
 import { loadActivePromotionsWorldFact } from './_promotions-runtime';
 import {
   listBookingOptions,
@@ -58,7 +59,7 @@ async function activityCatalogAdapter(now: Date = new Date()): Promise<SourceRes
     const rows = await loadActivityWorldFacts();
     const facts: GroundedFact[] = [];
     for (const row of rows) {
-      const value = row.fact_value as { activities?: Array<{ activityCode: string; resourceCode: string; name: string; durations: Array<{ durationMinutes: number; price: number | null }>; assets: Array<{ code: string; name: string; type: string }> }> };
+      const value = row.fact_value as { activities?: Array<{ activityCode: string; resourceCode: string; name: string; durations: Array<{ durationMinutes: number; price: number | null }>; assets: Array<{ code: string; name: string; type: string; metadata?: Record<string, unknown> }> }> };
       for (const activity of value.activities ?? []) {
         facts.push({ key: `activity:${activity.activityCode}:name`, value: activity.name, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         facts.push({ key: `activity:${activity.activityCode}:resourceCode`, value: activity.resourceCode, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
@@ -66,14 +67,29 @@ async function activityCatalogAdapter(now: Date = new Date()): Promise<SourceRes
           facts.push({ key: `activity:${activity.activityCode}:${duration.durationMinutes}min:price`, value: duration.price, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         }
         for (const asset of activity.assets) {
-          facts.push({ key: `activity_asset:${asset.code}:name`, value: asset.name, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+          const entityId = `activity_asset:${asset.code}`;
+          facts.push({ key: `${entityId}:name`, value: asset.name, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
           // Links a named asset ("ภาราดร") back to its parent activity code,
           // so a customer's asset selection can resolve to the REAL bookable
           // resourceCode authoritatively (see _activity-catalog-policy.ts) --
           // never by assuming the asset id and the booking resourceCode are
           // the same string, which they are not (one resourceCode per
           // ACTIVITY TYPE, not per named asset -- see _operations-db.ts).
-          facts.push({ key: `activity_asset:${asset.code}:activityCode`, value: activity.activityCode, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+          facts.push({ key: `${entityId}:activityCode`, value: activity.activityCode, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+          // Optional structured attributes (temperament, beginner
+          // suitability, etc.) -- a fact is emitted ONLY when operations has
+          // actually recorded that specific field for this asset; nothing
+          // is ever defaulted or invented (see _activity-catalog-policy.ts's
+          // ACTIVITY_ASSET_ATTRIBUTE_KEYS header). Key format
+          // "<attribute>:<entityId>" matches resolveDialogDecision's
+          // existing anti-hallucination comparison check in
+          // _dialog-manager.ts.
+          const metadata = asset.metadata ?? {};
+          for (const attributeKey of ACTIVITY_ASSET_ATTRIBUTE_KEYS) {
+            const attributeValue = metadata[attributeKey];
+            if (attributeValue === undefined || attributeValue === null) continue;
+            facts.push({ key: `${attributeKey}:${entityId}`, value: attributeValue, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+          }
         }
       }
     }

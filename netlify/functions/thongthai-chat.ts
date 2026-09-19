@@ -1031,7 +1031,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
         persistState: true,
       }, {
         interpretSemanticTurn: async () => { throw error; },
-      }).catch(fallbackError => {
+      }, {}, undefined, { allowGenuinelyUnclassifiedFallback: true }).catch(fallbackError => {
         console.error('THONGTHAI_ONE_MIND_FALLBACK_ERROR', fallbackError instanceof Error ? fallbackError.message.slice(0, 220) : 'unknown');
         return null;
       });

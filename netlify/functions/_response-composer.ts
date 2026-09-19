@@ -441,6 +441,16 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     } else {
       message = copy.clarify;
     }
+  } else if (input.dialogDecision.responseIntent === 'cannot_verify_comparison') {
+    // NO HALLUCINATION: checked BEFORE the generic model-unavailable
+    // grounded-fallback below. A comparison the Dialog Manager already
+    // determined is unverified (see resolveDialogDecision's anti-
+    // hallucination check in _dialog-manager.ts) must say so honestly --
+    // never fall through to composeGroundedDeterministicResponse, which
+    // would render whatever OTHER facts happen to exist (e.g. the entities'
+    // names) as if they answered the comparison, silently implying an
+    // answer that was never actually verified.
+    message = copy.comparison;
   } else if (input.degradation.condition === 'model_unavailable'
       || input.degradation.condition === 'model_invalid'
       || input.degradation.condition === 'internal_error') {
@@ -449,8 +459,6 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
       if (grounded) return grounded;
     }
     message = copy.model;
-  } else if (input.dialogDecision.responseIntent === 'cannot_verify_comparison') {
-    message = copy.comparison;
   } else if (input.dialogDecision.mode === 'propose_action') {
     message = copy.proposal;
   } else {
