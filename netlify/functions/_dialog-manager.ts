@@ -410,7 +410,6 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   }
 
   const { container, reasons } = mergeTaskState(input, now);
-  const knowledgeRequests = planKnowledgeNeeds(turn, container);
   // A terminal task (just cancelled, or otherwise finished) is treated as
   // "no active task" from here on -- its stale missingFields must never
   // resurface a collect_field prompt for something that no longer exists.
@@ -434,6 +433,11 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
 
   if (isTaskSideQuestion) reasons.push('task_side_question_preserved');
   if (isTaskUnrelatedTurn) reasons.push('task_unrelated_turn_preserved');
+
+  // Knowledge requests are about the CURRENT turn too. An unrelated turn
+  // must not trigger catalog/availability work merely because the preserved
+  // task still needs data (e.g. a greeting must not fetch horse durations).
+  const knowledgeRequests = isTaskUnrelatedTurn ? [] : planKnowledgeNeeds(turn, container);
 
   // Missing fields still live on the preserved task, but they are NOT
   // response-facing on a turn that did not actually continue that task.
