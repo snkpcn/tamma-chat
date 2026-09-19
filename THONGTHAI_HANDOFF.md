@@ -1185,3 +1185,84 @@ required anywhere -- **SAFE TO DELETE: YES**.
   closing pass. All new tests are network-free, dependency-injected, and use only synthetic
   in-memory state (matching this repo's established `npm test` convention) -- none of them call a
   live Supabase/Gemini/OpenAI endpoint or write to production.
+
+
+### Phase P — FINAL CLOSURE: authoritative duration policy + One-Mind primary — 2026-09-19
+
+Two remaining gaps, closed:
+
+**1. Authoritative activity duration policy** (`_activity-catalog-policy.ts`, new). Never hardcodes
+a duration per activity/asset. Reuses the SAME catalog facts the Knowledge Resolver already
+produces (`activity_offerings`/`activity_assets` via `_activity-sot.ts`):
+- `resolveActivityResourceCode(bundles, selection)` resolves a customer's selection (a named
+  asset like `activity_asset:horse-01`, or an activityCode directly) to the REAL bookable
+  `resourceCode`. This also fixed a real bug from the prior closure pass: `service_resources`
+  (what `create_booking`/`listBookingOptions` key off) has ONE row per ACTIVITY TYPE
+  (`activity-horse`), not per named asset -- the deterministic deriver had been setting
+  `resourceCode` directly to the asset's own id, which would never match a real resource. A new
+  `activity_asset:<code>:activityCode` link fact (added to `activityCatalogAdapter` in
+  `_dialog-source-adapters.ts`) makes the asset -> activity -> resourceCode chain resolvable
+  authoritatively.
+- `resolveActivityDurationOptions(bundles, resourceCode)` reads the activity's real
+  `activity:<code>:<N>min:price` facts: exactly one verified duration auto-fills
+  `durationMinutes`; more than one leaves it unset and the Response Composer asks ONE question
+  showing the real choices (`"เลือกระยะเวลาได้เลยครับ: 30 นาที หรือ 60 นาที"`); none verified says so
+  honestly (`"ยังเช็กระยะเวลาของกิจกรรมนี้ให้ไม่ได้ครับ"`) instead of guessing.
+- Wired into `_dialog-manager.ts` via `applyActivityCatalogPolicy` (called from
+  `processDialogTurnDetailed`, after knowledge is resolved, before the final decision): applies
+  a slot patch only when the just-fetched authoritative facts verify it, then re-plans the SAME
+  turn from the updated task state (safe/idempotent -- every task-state mutation is keyed on a
+  sub-id of the turn's own eventId, so replanning with the same input never double-applies).
+  `planKnowledgeNeeds` now also requests the activity catalog whenever a task has a named asset
+  selected but no resolved `resourceCode`, or a `resourceCode` but no verified `durationMinutes`.
+- Works generically for horses/ATV/archery/future activities -- nothing activity-specific is
+  hardcoded anywhere in this policy.
+- Regression: `tests/zero-cost-provider-outage.test.ts` now proves all three cases (single
+  duration auto-fills and the canonical script becomes `collect_field: [date]` only; multiple
+  durations ask the real choices; zero verified durations says so honestly) end-to-end, with the
+  model forced fully unavailable, zero LLM calls, no fake booking (`REQUESTED != CONFIRMED` --
+  `actionProposal` stays `undefined` even once every field is filled but the customer never
+  committed).
+
+**2. One-Mind is now the primary path for supported traffic.** `THONGTHAI_ONE_MIND_CUTOVER=1` is
+set via `netlify.toml`'s `[build.environment]` (a plain feature flag, not a secret -- git-tracked,
+no manual dashboard action needed, and Netlify serves `[build.environment]` values to Functions at
+runtime as well as at build time).
+- `readOnlyCutoverEligibility` in `_thongthai-one-mind-response.ts` was widened last pass to cover
+  task-continuation turns (`collect_field`/`clarify`/`answer`/`query_knowledge`, never
+  `propose_action`/`execute_tool`); this pass additionally cuts over the `ecosystem` domain, since
+  it is the one domain with no `DEFAULT_TASK_TYPE_FOR_DOMAIN` entry at all -- a turn classified
+  into it structurally CANNOT create an `ActiveTask`, so it carries none of the
+  transaction-executor risk the remaining exclusions (`membership`/`cafe`/`journey`/`payment`/
+  `support`) still do. Those stay on legacy, unchanged -- "do not force unfinished transactional
+  cutover".
+- **Structural safety proof**, not just a per-scenario assertion: `tests/one-mind-never-executes.test.ts`
+  greps every module in the One-Mind pipeline (orchestrator, response bridge, Dialog Manager,
+  Knowledge Resolver, real source adapters, Response Composer, the new catalog/deterministic-turn
+  policy modules) and proves NONE of them ever calls a real transaction-executing function
+  (`createBooking`, `createRestaurantPreorder`, `createOtopOrder`, `redeemPromotion`,
+  `createCafeInquiry`, `executeBrainTools`) or imports the legacy tool-execution runtime at all --
+  an `ActionProposal.toolName` is only ever a descriptive string. This means the boundary cannot
+  silently regress even if a future change adds a "helpful" direct call somewhere in that module
+  set. Existing scenario-level coverage (`tests/phase-m-e2e.test.ts`'s M4/M5/M6/M7/M8/M9,
+  `tests/one-mind-response.test.ts`) independently confirms `propose_action`/`execute_tool`
+  turns across activity/stay/restaurant-preorder/promotion/OTOP/cafe all keep
+  `readOnlyCutoverEligibility(...).eligible === false`.
+- **Known, bounded, honestly-disclosed gap**: `thongthai-chat.ts`'s cutover block invokes
+  `processOneMindCustomerTurn` unconditionally on every turn (pre-existing structure, not new to
+  this pass) -- when the deterministic deriver cannot resolve a message AND its real
+  classification lands in an excluded domain (`membership`/`cafe`/`journey`/`payment`/`support`),
+  One-Mind's own `interpretSemanticTurn` spends one real model call, then `readOnlyCutoverEligibility`
+  says `domain_not_cut_over`, and the turn falls through to `runThongthaiBrain`, which spends its
+  OWN independent real call -- two real calls that turn, instead of the "at most one" target.
+  This is a real, narrow regression introduced specifically by turning the cutover flag on (with
+  the flag off, as it was before this pass, membership/cafe/journey/payment/support turns cost
+  exactly one call, via legacy alone). It does not affect restaurant/activity/stay/promotion/
+  otop/ecosystem turns (the large majority of real customer questions for this business), is
+  bounded to only the domains not yet cut over, and never compounds into a cascading-retry cost
+  the circuit breaker doesn't already stop (a genuinely rate-limited Gemini fails the SECOND
+  attempt via the circuit breaker's fast-fail, not a second real network hit). Fixing it fully
+  would require either extending the domain cutover further (explicitly out of scope --
+  "do not force unfinished transactional cutover") or restructuring the legacy brain to accept a
+  pre-classified `SemanticTurn` (a real redesign, explicitly out of scope this pass). Flagged here
+  for whoever picks up membership/cafe/journey/payment/support equivalence work next.

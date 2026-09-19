@@ -108,12 +108,24 @@ test('initial G.2 gate still refuses a task turn that reaches an ActionProposal'
   assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'transactional_or_task_turn'});
 });
 
-test('initial G.2 gate deliberately leaves ecosystem and membership on legacy until equivalence is proven', () => {
-  for (const domain of ['ecosystem','membership'] as const) {
+test('initial G.2 gate deliberately leaves membership/cafe/journey/payment/support on legacy until equivalence is proven', () => {
+  for (const domain of ['membership','cafe','journey','payment','support'] as const) {
     const r=result();
     r.semanticTurn={...r.semanticTurn,domain};
     assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'domain_not_cut_over'});
   }
+});
+
+// Phase P closure: 'ecosystem' is the one exception to the domain exclusion
+// above -- it has no DEFAULT_TASK_TYPE_FOR_DOMAIN entry (see
+// _dialog-manager.ts), so a turn classified into it structurally can never
+// create an ActiveTask and therefore can never reach an ActionProposal.
+// Cutting it over carries none of the unfinished-transaction-executor risk
+// the remaining domains above still do.
+test('initial G.2 gate allows read-only ecosystem turns (structurally transaction-proof, no task type exists for it)', () => {
+  const r=result();
+  r.semanticTurn={...r.semanticTurn,domain:'ecosystem'};
+  assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:true});
 });
 
 test('response bridge centralizes wording in Response Composer and contains no Thai customer copy itself', () => {

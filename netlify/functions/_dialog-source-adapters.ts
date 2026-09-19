@@ -67,6 +67,13 @@ async function activityCatalogAdapter(now: Date = new Date()): Promise<SourceRes
         }
         for (const asset of activity.assets) {
           facts.push({ key: `activity_asset:${asset.code}:name`, value: asset.name, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+          // Links a named asset ("ภาราดร") back to its parent activity code,
+          // so a customer's asset selection can resolve to the REAL bookable
+          // resourceCode authoritatively (see _activity-catalog-policy.ts) --
+          // never by assuming the asset id and the booking resourceCode are
+          // the same string, which they are not (one resourceCode per
+          // ACTIVITY TYPE, not per named asset -- see _operations-db.ts).
+          facts.push({ key: `activity_asset:${asset.code}:activityCode`, value: activity.activityCode, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         }
       }
     }

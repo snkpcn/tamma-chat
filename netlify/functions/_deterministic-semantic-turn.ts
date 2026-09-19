@@ -31,6 +31,21 @@ function findEntityByName(message: string, entities: readonly SemanticContextEnt
   return candidates.length === 1 ? candidates[0]! : null;
 }
 
+/** For most domains (stay, restaurant, otop) the selected entity's own id
+ *  IS the real bookable resourceCode, so landing it directly into
+ *  entities.resourceCode is correct and lets a new/updated task start
+ *  already filled. Activity is the one exception: service_resources (what
+ *  create_booking actually keys off) has one resourceCode per ACTIVITY
+ *  TYPE, not per named asset ("activity_asset:horse-01" is NOT
+ *  "activity-horse") -- see _operations-db.ts. Setting it directly there
+ *  would silently pass an invalid/wrong resourceCode. That resolution
+ *  instead happens authoritatively, from the real catalog, in the Dialog
+ *  Manager (see _activity-catalog-policy.ts) once selectedEntities carries
+ *  the selection through the existing resolveSelectedEntities mechanism. */
+function directResourceCode(entity: SemanticContextEntity): string | null {
+  return entity.id.startsWith('activity_asset:') ? null : entity.id;
+}
+
 function findActivityTopicNarrow(message: string): boolean {
   return ACTIVITY_TOPIC_KEYWORDS.some(item => item.keyword.test(message) && Boolean(findEcosystemNode(item.nodeId)));
 }
@@ -60,10 +75,13 @@ function deriveForActiveTask(
   const references: SemanticReference[] = entityMatch
     ? [{ type: 'entity_selection', value: entityMatch.name, refersToPriorContext: true, resolvedEntityId: entityMatch.id }]
     : [];
-  // A selection must also land as a slot value (e.g. resourceCode), not only
-  // as a reference -- otherwise "retain selected horse" would show up in
-  // selectedEntities but never satisfy the task's own missing-field check.
-  if (entityMatch) entities.resourceCode = entityMatch.id;
+  // A selection must also land as a slot value where that's directly valid
+  // (stay/restaurant/otop) -- see directResourceCode. For an activity asset,
+  // resourceCode resolution happens authoritatively downstream instead.
+  if (entityMatch) {
+    const resourceCode = directResourceCode(entityMatch);
+    if (resourceCode) entities.resourceCode = resourceCode;
+  }
 
   if (!Object.keys(entities).length && !references.length) return null;
 
@@ -103,14 +121,15 @@ export function deriveDeterministicSemanticTurn(
   // this conversation ("เอาภาราดร" after being shown horse options).
   const entityMatch = findEntityByName(trimmed, context.recentEntities);
   if (entityMatch) {
+    const resourceCode = directResourceCode(entityMatch);
     return {
       domain: entityMatch.domain === 'unknown' ? (context.activeDomain ?? 'unknown') : entityMatch.domain,
       intent: 'select_prior_entity',
       action: 'confirm',
-      // Also land the selection as resourceCode so a new task created from
-      // this turn (Dialog Manager seeds initialSlots from `entities`) starts
-      // with the selection already filled, not just recorded as a reference.
-      entities: { resourceCode: entityMatch.id },
+      // Lands directly as resourceCode where that's valid (stay/restaurant/
+      // otop); for an activity asset, resourceCode resolves authoritatively
+      // downstream from selectedEntities instead (see directResourceCode).
+      entities: resourceCode ? { resourceCode } : {},
       references: [{ type: 'entity_selection', value: entityMatch.name, refersToPriorContext: true, resolvedEntityId: entityMatch.id }],
       constraints: [],
       confidence: 0.9,

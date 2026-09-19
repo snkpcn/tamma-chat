@@ -49,7 +49,24 @@ function memoryState() {
 
 const GENERIC_APOLOGY = /ตอบเรื่องนี้ให้แม่นไม่ได้|คิดช้ากว่าปกติ/;
 
-test('canonical activity flow retains context/selection/slots with ZERO LLM calls across the entire forced-outage conversation', async () => {
+// Real activity_offerings/activity_assets shape (see _activity-sot.ts /
+// _dialog-source-adapters.ts's activityCatalogAdapter): service_resources
+// (what create_booking actually keys off) has ONE row per ACTIVITY TYPE
+// ("activity-horse"), not per named asset. A customer selecting "ภาราดร"
+// must resolve to the real activity resourceCode, never the asset's own id.
+function horseCatalogFacts(durationsMinutes: number[]): GroundedFact[] {
+  return [
+    fact('activity:horse:name', 'ขี่ม้า', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity:horse:resourceCode', 'activity-horse', 'activity', 'activity_catalog', 'activity_live'),
+    ...durationsMinutes.map(minutes => fact(`activity:horse:${minutes}min:price`, 500, 'activity', 'activity_catalog', 'activity_live')),
+    fact('activity_asset:horse-01:name', 'ภาราดร', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity_asset:horse-01:activityCode', 'horse', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity_asset:horse-02:name', 'สายฟ้า', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity_asset:horse-02:activityCode', 'horse', 'activity', 'activity_catalog', 'activity_live'),
+  ];
+}
+
+test('canonical activity flow retains context/selection/slots with ZERO LLM calls, auto-filling a single verified duration', async () => {
   const state = memoryState();
   let modelCallCount = 0;
   const forcedUnavailable: Partial<OneMindDependencies> = {
@@ -60,12 +77,7 @@ test('canonical activity flow retains context/selection/slots with ZERO LLM call
       throw new LLMAvailabilityError('forced unavailable for test', []);
     },
     buildKnowledgeAdapters: (): KnowledgeSourceAdapters => ({
-      activity: {
-        catalog: async () => ok('activity_catalog', 'activity_live', [
-          fact('activity_asset:horse-01:name', 'ภาราดร', 'activity', 'activity_catalog', 'activity_live'),
-          fact('activity_asset:horse-02:name', 'สายฟ้า', 'activity', 'activity_catalog', 'activity_live'),
-        ]),
-      },
+      activity: { catalog: async () => ok('activity_catalog', 'activity_live', horseCatalogFacts([30])) },
     }),
   };
 
@@ -80,20 +92,27 @@ test('canonical activity flow retains context/selection/slots with ZERO LLM call
   assert.equal(t1.status, 'composed');
   if (t1.status !== 'composed') return;
   assert.doesNotMatch(t1.response.message, GENERIC_APOLOGY);
-  assert.match(t1.response.message, /ภาราดร/, 'discovery must show the real catalog name, not a guess');
+  // The composer renders the activity's own catalog name here (its
+  // asset-name fallback only engages when no activity-level name fact
+  // exists) -- either way it is a real authoritative name, never a guess.
+  assert.match(t1.response.message, /ขี่ม้า/, 'discovery must show the real catalog name, not a guess');
 
   // Turn 2: "เอาภาราดร" -- selects the horse shown in turn 1. Must resolve
   // deterministically against recentEntities populated from turn 1's
-  // grounded facts, creating an activity_booking task with that selection
-  // already retained as resourceCode + selectedEntities.
+  // grounded facts, creating an activity_booking task. The selected asset's
+  // REAL bookable resourceCode ("activity-horse", not the asset id) and its
+  // single verified duration (30 min) must both auto-fill from the
+  // authoritative catalog -- never guessed, never hardcoded.
   const t2 = await processThongthaiOneMindTurnAuthoritative({
     channel: 'line', message: 'เอาภาราดร', eventId: 'canon-2',
     providerUserKey: 'line-canon', persistState: true, environment: 'test',
   }, forcedUnavailable, state, new Date(NOW.getTime() + 1000));
   assert.ok(t2.taskStateAfter.activeTask, 'a task must exist after an explicit selection');
-  assert.equal(t2.taskStateAfter.activeTask?.slots.resourceCode, 'activity_asset:horse-01');
+  assert.equal(t2.taskStateAfter.activeTask?.slots.resourceCode, 'activity-horse', 'must resolve to the REAL activity resourceCode, not the asset id');
+  assert.equal(t2.taskStateAfter.activeTask?.slots.durationMinutes, 30, 'a single verified duration must auto-fill');
   assert.equal(t2.taskStateAfter.activeTask?.selectedEntities[0]?.name, 'ภาราดร');
   assert.equal(t2.dialogDecision.mode, 'collect_field');
+  assert.deepEqual(t2.dialogDecision.missingFields, ['date'], 'only date should remain -- resourceCode and duration were resolved authoritatively');
   const eligibility2 = readOnlyCutoverEligibility(t2);
   assert.equal(eligibility2.eligible, true, 'a collect_field task-continuation turn must not be forced onto legacy');
 
@@ -104,18 +123,24 @@ test('canonical activity flow retains context/selection/slots with ZERO LLM call
   }, forcedUnavailable, state, new Date(NOW.getTime() + 2000));
   assert.equal(t3.taskStateAfter.activeTask?.slots.date, '2026-09-20');
   assert.equal(t3.taskStateAfter.activeTask?.slots.partySize, 2);
-  // The selection from turn 2 must still be there -- a later slot fill must
-  // never silently drop an earlier one.
-  assert.equal(t3.taskStateAfter.activeTask?.slots.resourceCode, 'activity_asset:horse-01');
+  // The selection/duration from turn 2 must still be there -- a later slot
+  // fill must never silently drop an earlier one.
+  assert.equal(t3.taskStateAfter.activeTask?.slots.resourceCode, 'activity-horse');
+  assert.equal(t3.taskStateAfter.activeTask?.slots.durationMinutes, 30);
+  // All required fields are now present, but the customer never said
+  // "จองเลย"/committed -- REQUESTED != CONFIRMED, and READY != EXECUTE:
+  // no proposal without an explicit commit.
+  assert.equal(t3.dialogDecision.actionProposal, undefined, 'ready-but-uncommitted must never fake-propose a booking');
 
   // Turn 4: "บ่ายสามได้ปะ" -- time, filled onto the SAME task; every prior
-  // slot (selection, date, partySize) must still be retained.
+  // slot (selection, duration, date, partySize) must still be retained.
   const t4 = await processThongthaiOneMindTurnAuthoritative({
     channel: 'line', message: 'บ่ายสามได้ปะ', eventId: 'canon-4',
     providerUserKey: 'line-canon', persistState: true, environment: 'test',
   }, forcedUnavailable, state, new Date(NOW.getTime() + 3000));
   const finalSlots = t4.taskStateAfter.activeTask?.slots;
-  assert.equal(finalSlots?.resourceCode, 'activity_asset:horse-01', 'selected horse must survive to the final turn');
+  assert.equal(finalSlots?.resourceCode, 'activity-horse', 'the real resourceCode must survive to the final turn');
+  assert.equal(finalSlots?.durationMinutes, 30, 'the auto-filled duration must survive to the final turn');
   assert.equal(finalSlots?.date, '2026-09-20', 'date must survive to the final turn');
   assert.equal(finalSlots?.partySize, 2, 'party size must survive to the final turn');
   assert.equal(finalSlots?.time, '15:00', 'requested time must be retained');
@@ -135,6 +160,73 @@ test('canonical activity flow retains context/selection/slots with ZERO LLM call
   // The deterministic deriver covered every turn in this script -- the real
   // (forced-throwing) model was never actually reached.
   assert.equal(modelCallCount, 0, 'the canonical flow must cost zero LLM calls end-to-end');
+});
+
+test('a horse activity with MULTIPLE verified durations asks ONE question showing the real choices, never auto-picks one', async () => {
+  const state = memoryState();
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANON,
+    guestDbIdFromAnonymousId: async () => GUEST,
+    interpretSemanticTurn: async () => { throw new LLMAvailabilityError('forced unavailable', []); },
+    buildKnowledgeAdapters: (): KnowledgeSourceAdapters => ({
+      activity: { catalog: async () => ok('activity_catalog', 'activity_live', horseCatalogFacts([30, 60])) },
+    }),
+  };
+  await processOneMindCustomerTurn({
+    channel: 'line', language: 'th', message: 'ม้าล่ะ', eventId: 'multi-1',
+    providerUserKey: 'line-multi', persistState: true, environment: 'test',
+  }, deps, state, NOW);
+  const select = await processThongthaiOneMindTurnAuthoritative({
+    channel: 'line', message: 'เอาภาราดร', eventId: 'multi-2',
+    providerUserKey: 'line-multi', persistState: true, environment: 'test',
+  }, deps, state, new Date(NOW.getTime() + 1000));
+
+  assert.equal(select.taskStateAfter.activeTask?.slots.resourceCode, 'activity-horse');
+  assert.equal(select.taskStateAfter.activeTask?.slots.durationMinutes, undefined, 'must NOT auto-pick a duration when more than one is verified');
+  assert.ok(select.dialogDecision.missingFields.includes('durationMinutes'));
+
+  const composed = await processOneMindCustomerTurn({
+    channel: 'line', language: 'th', message: 'เอาภาราดร', eventId: 'multi-2-compose',
+    providerUserKey: 'line-multi', persistState: false, environment: 'test',
+  }, deps, state, new Date(NOW.getTime() + 1000));
+  assert.equal(composed.status, 'composed');
+  if (composed.status === 'composed') {
+    assert.match(composed.response.message, /30 นาที/);
+    assert.match(composed.response.message, /60 นาที/);
+    assert.doesNotMatch(composed.response.message, GENERIC_APOLOGY);
+  }
+});
+
+test('a horse activity with NO verified duration says it cannot be verified yet, never guesses a default', async () => {
+  const state = memoryState();
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANON,
+    guestDbIdFromAnonymousId: async () => GUEST,
+    interpretSemanticTurn: async () => { throw new LLMAvailabilityError('forced unavailable', []); },
+    buildKnowledgeAdapters: (): KnowledgeSourceAdapters => ({
+      activity: { catalog: async () => ok('activity_catalog', 'activity_live', horseCatalogFacts([])) },
+    }),
+  };
+  await processOneMindCustomerTurn({
+    channel: 'line', language: 'th', message: 'ม้าล่ะ', eventId: 'unknown-1',
+    providerUserKey: 'line-unknown', persistState: true, environment: 'test',
+  }, deps, state, NOW);
+  const select = await processThongthaiOneMindTurnAuthoritative({
+    channel: 'line', message: 'เอาภาราดร', eventId: 'unknown-2',
+    providerUserKey: 'line-unknown', persistState: true, environment: 'test',
+  }, deps, state, new Date(NOW.getTime() + 1000));
+  assert.equal(select.taskStateAfter.activeTask?.slots.resourceCode, 'activity-horse');
+  assert.equal(select.taskStateAfter.activeTask?.slots.durationMinutes, undefined);
+
+  const composed = await processOneMindCustomerTurn({
+    channel: 'line', language: 'th', message: 'เอาภาราดร', eventId: 'unknown-2-compose',
+    providerUserKey: 'line-unknown', persistState: false, environment: 'test',
+  }, deps, state, new Date(NOW.getTime() + 1000));
+  assert.equal(composed.status, 'composed');
+  if (composed.status === 'composed') {
+    assert.match(composed.response.message, /เช็กระยะเวลา|ไม่ขอเดา|ยังไม่มีข้อมูลยืนยัน/);
+    assert.doesNotMatch(composed.response.message, GENERIC_APOLOGY);
+  }
 });
 
 test('stay booking date continuation degrades deterministically too (pipeline is domain-generic, not activity-only)', async () => {

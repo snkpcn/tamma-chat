@@ -3,6 +3,15 @@
   publish = "."
   functions = "netlify/functions"
 
+[build.environment]
+  # Phase P closure: One-Mind is now the primary path for supported read-only
+  # and task-continuation turns (never propose_action/execute_tool -- see
+  # readOnlyCutoverEligibility in _thongthai-one-mind-response.ts and the
+  # structural proof in tests/one-mind-never-executes.test.ts that this
+  # pipeline never calls a transaction executor). Legacy remains the
+  # fallback for domains not yet cut over and for any real transaction.
+  THONGTHAI_ONE_MIND_CUTOVER = "1"
+
 [functions]
   node_bundler = "esbuild"
 

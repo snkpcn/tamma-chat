@@ -21,6 +21,7 @@ import {
 } from './_thongthai-model-provider';
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
 import { polishCustomerMessage } from './_chat-copy-style';
+import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
 
 export const RESPONSE_COMPOSER_VERSION = 'response-composer-v1';
 const MAX_FACTS_IN_PROMPT = 100;
@@ -272,6 +273,18 @@ function deterministicMessages(language: ResponseLanguage) {
   };
 }
 
+/** Re-derives the duration policy result purely for RENDERING the
+ *  collect_field question -- the actual auto-fill decision already happened
+ *  upstream in the Dialog Manager (see _activity-catalog-policy.ts /
+ *  applyActivityCatalogPolicy); this never applies a slot itself. */
+function activityDurationChoiceForCollectField(input: ResponseComposerInput): ActivityDurationPolicyResult | null {
+  const task = input.dialogDecision.taskStateContainer.activeTask;
+  if (!task || task.type !== 'activity_booking') return null;
+  const resourceCode = typeof task.slots.resourceCode === 'string' ? task.slots.resourceCode : null;
+  if (!resourceCode) return null;
+  return resolveActivityDurationOptions(input.knowledgeBundles, resourceCode);
+}
+
 function groundedValueMap(input: ResponseComposerInput): Map<string, unknown> {
   const map = new Map<string, unknown>();
   for (const fact of allFacts(input.knowledgeBundles)) map.set(fact.key, fact.value);
@@ -412,7 +425,18 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     message = copy.clarify;
   } else if (input.dialogDecision.mode === 'collect_field') {
     const missing = input.dialogDecision.missingFields.slice(0, 2);
-    if (input.language === 'th' && missing.length) {
+    const durationChoice = missing.includes('durationMinutes')
+      ? activityDurationChoiceForCollectField(input)
+      : null;
+    if (durationChoice?.status === 'multiple' && input.language === 'th') {
+      // Authoritative activity duration policy: more than one verified
+      // duration means ASK, never silently pick one. The choices come
+      // directly from the same authoritative catalog facts, never a
+      // hardcoded per-activity duration table.
+      message = `เลือกระยะเวลาได้เลยครับ: ${durationChoice.options.map(minutes => `${minutes} นาที`).join(' หรือ ')}`;
+    } else if (durationChoice?.status === 'unknown' && input.language === 'th') {
+      message = 'ตอนนี้ทองไทยยังเช็กระยะเวลาของกิจกรรมนี้ให้ไม่ได้ครับ ไม่ขอเดา ให้ทีมงานช่วยตรวจสอบอีกครั้งนะครับ';
+    } else if (input.language === 'th' && missing.length) {
       message = `ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`;
     } else {
       message = copy.clarify;

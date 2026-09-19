@@ -2,9 +2,15 @@
 //
 // Channel handlers must not reconstruct business logic or wording. This module
 // joins the authoritative One-Mind turn with the ONE Response Composer and
-// exposes an intentionally narrow read-only cutover gate. Transactional or
-// in-progress task turns remain on legacy until their action executor is
-// migrated and equivalence-tested.
+// exposes the cutover gate: read-only turns AND task-continuation turns
+// (slot-fill/correction/entity-selection/clarify -- anything that never
+// reaches an ActionProposal) compose through One-Mind. Only a turn whose
+// DialogDecision actually proposes/executes a transaction
+// (propose_action/execute_tool) still falls through to the existing
+// deterministic legacy executor, until that executor is migrated and
+// equivalence-tested -- see tests/one-mind-never-executes.test.ts for the
+// structural proof that this module set never calls a transaction executor
+// itself, so that boundary cannot silently regress.
 import type { BrainChannel } from './_thongthai-brain-v3';
 import {
   processThongthaiOneMindTurnAuthoritative,
@@ -29,7 +35,15 @@ import {
 export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
 const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','status']);
-const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop']);
+// Phase P closure: 'ecosystem' joins the cutover set here -- unlike every
+// other domain, it has no entry in _dialog-manager.ts's
+// DEFAULT_TASK_TYPE_FOR_DOMAIN, so a turn classified into it can NEVER
+// create an ActiveTask and therefore can never reach an ActionProposal;
+// including it carries none of the transaction-executor risk the remaining
+// exclusions (membership/cafe/journey/payment/support) still do, so those
+// stay on legacy until their own equivalence is proven -- "do not force
+// unfinished transactional cutover".
+const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
 // Task-worthy modes that only ever COLLECT/CLARIFY information -- they never
 // execute or even propose a transaction (see DialogMode/COMMIT_ACTIONS in

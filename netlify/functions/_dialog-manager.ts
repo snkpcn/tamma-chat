@@ -33,13 +33,14 @@
 import type { SemanticAction, SemanticContext, SemanticContextEntity, SemanticDomain, SemanticTurn } from './_semantic-interpreter';
 import type { ConversationContextState } from './_conversation-context';
 import {
-  applyTaskStateEvent, type ActiveTaskType, type TaskStateContainer,
+  applyTaskStateEvent, type ActiveTask, type ActiveTaskType, type TaskStateContainer,
 } from './_task-state';
 import { computeTaskMissingFields, DOMAIN_TASK_REQUIRED_FIELDS } from './_domain-task-policy';
 import {
   getGroundedFactValue, resolveKnowledge, type KnowledgeBundle, type KnowledgeRequest,
   type KnowledgeSourceAdapters,
 } from './_knowledge-resolver';
+import { resolveActivityDurationOptions, resolveActivityResourceCode } from './_activity-catalog-policy';
 
 // ---------------------------------------------------------------------------
 // Contracts
@@ -233,6 +234,15 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   return { container, reasons };
 }
 
+function needsActivityCatalogResolution(task: ActiveTask): boolean {
+  if (task.type !== 'activity_booking') return false;
+  const resourceCode = task.slots.resourceCode;
+  if (!resourceCode) {
+    return task.selectedEntities.some(entity => entity.id.startsWith('activity_asset:'));
+  }
+  return !task.slots.durationMinutes;
+}
+
 /** Translates semantic/task state into INFORMATION NEEDS -- never queries
  *  every source every turn. Returns at most one KnowledgeRequest per domain
  *  actually implicated by this turn. */
@@ -249,6 +259,13 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
       if (turn.action === 'compare' || turn.action === 'ask') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
       if (turn.action === 'discover') return [{ ...base, domain: 'activity', needs: ['catalog'] }];
+      // Authoritative resourceCode/duration resolution (see
+      // _activity-catalog-policy.ts, applied in processDialogTurnDetailed
+      // below): a task with a named asset selected but no resolved
+      // resourceCode yet, or a resourceCode set but no verified duration
+      // yet, needs the SAME real catalog data discovery already fetches --
+      // never a hardcoded/guessed value.
+      if (task && needsActivityCatalogResolution(task)) return [{ ...base, domain: 'activity', needs: ['catalog'] }];
       if (task && task.missingFields.length === 0 && (turn.action === 'provide_information' || COMMIT_ACTIONS.has(turn.action))) {
         return [{ ...base, domain: 'activity', needs: ['availability'] }];
       }
@@ -401,6 +418,61 @@ export type DialogTurnResult = {
   decision: DialogDecision;
 };
 
+async function resolveBundles(plan: DialogPlan, adapters: KnowledgeSourceAdapters, now: Date): Promise<KnowledgeBundle[]> {
+  return (plan.mode === 'clarify' || !plan.knowledgeRequests.length)
+    ? []
+    : Promise.all(plan.knowledgeRequests.map(request => resolveKnowledge(request, adapters, now)));
+}
+
+/** Authoritative activity resourceCode/duration auto-fill (see
+ *  _activity-catalog-policy.ts). Never guesses: applies a slot only when the
+ *  real catalog facts just fetched verify it (a resolved asset->activity
+ *  link, or exactly one valid duration). When something was applied, the
+ *  turn is re-planned from the updated task state so missingFields/mode
+ *  reflect it (e.g. "collect_field: date" instead of "...resourceCode");
+ *  re-running planDialogTurn with the SAME input.eventId is safe because
+ *  every task-state mutation it makes is idempotent per _task-state.ts's
+ *  applyTaskStateEvent (a sub-id already applied this turn is a no-op). */
+function applyActivityCatalogPolicy(
+  plan: DialogPlan,
+  bundles: readonly KnowledgeBundle[],
+  input: DialogInput,
+  now: Date,
+): DialogPlan | null {
+  const task = plan.taskStateContainer.activeTask;
+  if (!task || task.type !== 'activity_booking') return null;
+
+  let container = plan.taskStateContainer;
+  let applied = false;
+
+  let resourceCode = typeof task.slots.resourceCode === 'string' ? task.slots.resourceCode : null;
+  if (!resourceCode) {
+    const assetSelection = task.selectedEntities.find(entity => entity.id.startsWith('activity_asset:'));
+    const resolved = assetSelection ? resolveActivityResourceCode(bundles, assetSelection.id) : null;
+    if (resolved) {
+      container = applyTaskStateEvent(container, {
+        kind: 'update_slots', eventId: `${input.eventId}:activity_resource_autofill`,
+        slotPatch: { resourceCode: resolved },
+      }, now);
+      resourceCode = resolved;
+      applied = true;
+    }
+  }
+
+  if (resourceCode && !container.activeTask?.slots.durationMinutes) {
+    const durationPolicy = resolveActivityDurationOptions(bundles, resourceCode);
+    if (durationPolicy.status === 'single') {
+      container = applyTaskStateEvent(container, {
+        kind: 'update_slots', eventId: `${input.eventId}:activity_duration_autofill`,
+        slotPatch: { durationMinutes: durationPolicy.durationMinutes },
+      }, now);
+      applied = true;
+    }
+  }
+
+  return applied ? planDialogTurn({ ...input, taskState: container }, now) : null;
+}
+
 /** Detailed form used by the One-Mind orchestrator and, later, the Response
  * Composer. It resolves knowledge exactly once and returns the grounded
  * bundles alongside the final decision so downstream layers never have to
@@ -410,10 +482,15 @@ export async function processDialogTurnDetailed(
   adapters: KnowledgeSourceAdapters,
   now: Date = new Date(),
 ): Promise<DialogTurnResult> {
-  const plan = planDialogTurn(input, now);
-  const bundles = (plan.mode === 'clarify' || !plan.knowledgeRequests.length)
-    ? []
-    : await Promise.all(plan.knowledgeRequests.map(request => resolveKnowledge(request, adapters, now)));
+  let plan = planDialogTurn(input, now);
+  let bundles = await resolveBundles(plan, adapters, now);
+
+  const replanned = applyActivityCatalogPolicy(plan, bundles, input, now);
+  if (replanned) {
+    plan = replanned;
+    bundles = await resolveBundles(plan, adapters, now);
+  }
+
   return { plan, bundles, decision: resolveDialogDecision(plan, bundles) };
 }
 

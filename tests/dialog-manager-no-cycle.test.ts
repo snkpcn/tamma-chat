@@ -46,7 +46,7 @@ test('_dialog-manager.ts makes zero direct DB calls -- no bare global `fetch(` c
 
 test('_dialog-manager.ts only imports the expected leaf modules', async () => {
   const imports = await importsOf('_dialog-manager.ts');
-  const allowed = new Set(['./_semantic-interpreter', './_conversation-context', './_task-state', './_domain-task-policy', './_knowledge-resolver']);
+  const allowed = new Set(['./_semantic-interpreter', './_conversation-context', './_task-state', './_domain-task-policy', './_knowledge-resolver', './_activity-catalog-policy']);
   for (const specifier of imports) assert.ok(allowed.has(specifier), `unexpected import in _dialog-manager.ts: ${specifier}`);
 });
 
