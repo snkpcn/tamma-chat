@@ -1551,3 +1551,22 @@ focuses on conversation flow and zero-paid-LLM resilience, not new business trut
 **Data invariant**: if price/detail fields are absent or unwired, report them as unknown/data
 gaps. Do not hardcode owner-supplied facts into copy until they are represented in the proper
 source-of-truth adapter/world facts.
+
+
+### Production regression hardening — stale/unrelated task hijack — 2026-09-19
+
+Real LINE production evidence showed an unfinished activity task from ~14:49 still hijacking general chat at ~17:38–17:39: หวัดดีจ้า and หลอนป่ะเนี่ย both returned the old 30/60/90-minute collection prompt.
+
+Root cause was systemic:
+- ConversationContext expires after CONTEXT_TTL_MS = 2h, but persisted TaskState had no matching conversational staleness rule, so an old active task could remain the implicit owner of future turns indefinitely.
+- Dialog Manager protected known read-only side-question actions, but a same-domain/general semantic turn such as provide_information/unknown with no actual task evidence could still fall through to missingFields -> collect_field.
+- Topic switching treated generic non-business semantic domains too broadly; support-like classification could suspend business state for the wrong reason.
+
+Fix on integration branch:
+- active unfinished tasks are conversationally SUSPENDED (not cancelled/deleted) after the same 2-hour inactivity TTL; progress remains resumable.
+- stale-task normalization happens BEFORE semantic interpretation, so an explicit later activity turn can resume the suspended task while arbitrary text cannot inherit it.
+- authoritative persistence writes the stale suspension even when the current response itself falls through to legacy.
+- Dialog Manager now requires positive structural evidence that the CURRENT turn contributes to the active task before missing fields may drive the reply. Unrelated turns preserve task state internally but expose zero response-facing missingFields.
+- only task-bearing business domains may trigger suspend/resume topic transitions; support, payment, unknown, and ecosystem/general turns do not evict the active business task.
+
+Regression coverage added for same-domain unrelated turns, support/unknown general chat, >2h task staleness, stale missing-field suppression, and explicit resume of the same preserved task.

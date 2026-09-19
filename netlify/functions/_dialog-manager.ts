@@ -60,7 +60,7 @@ export type DialogReasonCode =
   | 'ready_for_availability_check' | 'awaiting_explicit_commit' | 'explicit_commit_received'
   | 'task_suspended_for_topic_switch' | 'task_resumed' | 'cannot_verify_comparison'
   | 'known_unconfigured_price' | 'duplicate_event_ignored' | 'no_active_task'
-  | 'task_side_question_preserved' | 'task_cancelled';
+  | 'task_side_question_preserved' | 'task_unrelated_turn_preserved' | 'task_cancelled';
 
 export type ResponseIntent =
   | 'discovery_response' | 'grounded_answer' | 'clarify_ambiguous_entity' | 'ask_missing_field'
@@ -170,6 +170,42 @@ function taskSlotPatch(entities: Record<string, unknown>): Record<string, unknow
   return patch;
 }
 
+
+const TASK_EVIDENCE_ACTIONS: ReadonlySet<SemanticAction> = new Set([
+  'confirm', 'provide_information', 'modify', 'correct_previous',
+]);
+
+function hasResolvedTaskReference(turn: SemanticTurn): boolean {
+  return turn.references.some(reference =>
+    Boolean(reference.resolvedEntityId) || Boolean(reference.resolvedEntityIds?.length)
+  );
+}
+
+/**
+ * Structural "does this CURRENT turn actually continue the active task?"
+ * contract. An active task is state, not intent: its mere existence must
+ * never turn arbitrary customer text into a slot-fill turn.
+ */
+function turnContributesToActiveTask(turn: SemanticTurn, task: ActiveTask): boolean {
+  if (turn.action === 'cancel' || COMMIT_ACTIONS.has(turn.action)) return true;
+
+  // Hybrid read-only questions may also state a real task slot ("บ่ายสามได้ปะ").
+  if (providesTaskSlotValue(turn.entities)) return true;
+
+  if (!TASK_EVIDENCE_ACTIONS.has(turn.action)) return false;
+  if (hasResolvedTaskReference(turn)) return true;
+  if (turn.constraints.length > 0) return true;
+
+  // Generic domain fields such as budget/email/specialRequest may not be in
+  // KNOWN_TASK_SLOT_KEYS, but a semantic mutation action with a real entity
+  // payload is still explicit evidence of task contribution.
+  const patch = taskSlotPatch(turn.entities);
+  if (Object.keys(patch).length > 0) return true;
+
+  void task;
+  return false;
+}
+
 const DEFAULT_TASK_TYPE_FOR_DOMAIN: Partial<Record<SemanticDomain, ActiveTaskType>> = {
   activity: 'activity_booking',
   stay: 'stay_booking',
@@ -198,7 +234,10 @@ function isAmbiguous(turn: SemanticTurn): boolean {
 type TopicTransition = 'none' | 'suspend' | 'resume';
 
 function detectTopicTransition(taskState: TaskStateContainer, domain: SemanticDomain): TopicTransition {
-  if (domain === 'unknown') return 'none';
+  // Only a genuine task-bearing BUSINESS domain can suspend/resume a task.
+  // General/support/payment/unknown/ecosystem turns must never evict a live
+  // business task merely because their semantic domain differs.
+  if (!DEFAULT_TASK_TYPE_FOR_DOMAIN[domain]) return 'none';
   const { activeTask, suspendedTask } = taskState;
   if (suspendedTask && suspendedTask.domain === domain && (!activeTask || activeTask.domain !== domain)) return 'resume';
   if (activeTask && activeTask.domain !== domain) return 'suspend';
@@ -380,17 +419,28 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   const customerCommitPresent = COMMIT_ACTIONS.has(turn.action);
   if (customerCommitPresent) reasons.push('explicit_commit_received');
 
-  // CORE PRECEDENCE: an active task's missing fields must never hijack a
-  // side-question. mergeTaskState above never touches task slots for a
-  // SIDE_QUESTION_ACTIONS turn (it is never TASK_WORTHY, so no update_slots
-  // fires), so the task is already preserved untouched here -- this only
-  // decides how the turn is ANSWERED. The missing-field reminder simply
-  // waits for a genuine continuation turn instead of overriding this one.
-  const isTaskSideQuestion = hasOpenTask && SIDE_QUESTION_ACTIONS.has(turn.action) && !providesTaskSlotValue(turn.entities);
+  // CORE PRECEDENCE: the CURRENT turn must contain positive structural
+  // evidence that it continues the active task before missingFields may drive
+  // the reply. This closes the production failure where "หวัดดีจ้า" hours
+  // later inherited an old activity task and got "เลือก 30/60/90 นาที".
+  const activeTask = hasOpenTask ? container.activeTask! : null;
+  const contributesToTask = activeTask ? turnContributesToActiveTask(turn, activeTask) : false;
+  const isTaskSideQuestion = hasOpenTask && SIDE_QUESTION_ACTIONS.has(turn.action) && !contributesToTask;
+  const isTaskUnrelatedTurn = hasOpenTask
+    && !contributesToTask
+    && !isTaskSideQuestion
+    && !customerCommitPresent
+    && turn.action !== 'cancel';
+
   if (isTaskSideQuestion) reasons.push('task_side_question_preserved');
+  if (isTaskUnrelatedTurn) reasons.push('task_unrelated_turn_preserved');
+
+  // Missing fields still live on the preserved task, but they are NOT
+  // response-facing on a turn that did not actually continue that task.
+  const responseMissingFields = (isTaskSideQuestion || isTaskUnrelatedTurn) ? [] : missingFields;
 
   let mode: DialogMode;
-  if (!hasOpenTask || isTaskSideQuestion) {
+  if (!hasOpenTask || isTaskSideQuestion || isTaskUnrelatedTurn) {
     mode = knowledgeRequests.length ? 'query_knowledge' : 'answer';
   } else if (missingFields.length > 0) {
     mode = 'collect_field';
@@ -410,7 +460,7 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
     ? turn.references.flatMap(reference => (reference.resolvedEntityId ? [reference.resolvedEntityId] : (reference.resolvedEntityIds ?? [])))
     : [];
 
-  return { taskStateContainer: container, knowledgeRequests, mode, reasons, missingFields, customerCommitPresent, action: turn.action, compareAttribute, compareEntityIds };
+  return { taskStateContainer: container, knowledgeRequests, mode, reasons, missingFields: responseMissingFields, customerCommitPresent, action: turn.action, compareAttribute, compareEntityIds };
 }
 
 // ---------------------------------------------------------------------------

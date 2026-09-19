@@ -99,3 +99,31 @@ test('cancelling with no active task at all is a safe no-op, never fabricates a 
   const plan = planDialogTurn(input, NOW);
   assert.equal(plan.taskStateContainer.activeTask, null);
 });
+
+
+test('an unrelated same-domain semantic turn with no task evidence never becomes collect_field', () => {
+  const taskState = activityTask();
+  const input: DialogInput = {
+    semanticTurn: turn({ domain:'activity', action:'provide_information', intent:'general_chat', entities:{}, references:[], constraints:[] }),
+    conversationContext: emptyConversationContextState(NOW), taskState, channel:'line', eventId:'sq-unrelated-1',
+  };
+  const plan = planDialogTurn(input, NOW);
+  assert.equal(plan.mode, 'answer');
+  assert.deepEqual(plan.missingFields, [], 'task missing fields must not leak into unrelated reply');
+  assert.ok(plan.reasons.includes('task_unrelated_turn_preserved'));
+  assert.deepEqual(plan.taskStateContainer.activeTask!.missingFields, ['durationMinutes'], 'task progress is preserved internally');
+});
+
+test('support/unknown general chat does not suspend or hijack an active business task', () => {
+  const taskState = activityTask();
+  const input: DialogInput = {
+    semanticTurn: turn({ domain:'support', action:'unknown', intent:'general_chat', entities:{}, references:[], constraints:[] }),
+    conversationContext: emptyConversationContextState(NOW), taskState, channel:'line', eventId:'sq-unrelated-2',
+  };
+  const plan = planDialogTurn(input, NOW);
+  assert.equal(plan.mode, 'answer');
+  assert.deepEqual(plan.missingFields, []);
+  assert.equal(plan.taskStateContainer.activeTask?.taskId, taskState.activeTask?.taskId);
+  assert.equal(plan.taskStateContainer.suspendedTask, null, 'general/support chat is not a business topic switch');
+  assert.ok(plan.reasons.includes('task_unrelated_turn_preserved'));
+});

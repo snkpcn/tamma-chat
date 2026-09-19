@@ -17,12 +17,15 @@ import {
   loadConversationContext,
   parseConversationContextState,
   persistConversationContext,
+  CONTEXT_TTL_MS,
   type ConversationContextState,
 } from './_conversation-context';
 import {
   loadTaskState,
   parseTaskState,
   persistTaskState,
+  suspendActiveTask,
+  isTerminalTaskStatus,
   type TaskStateContainer,
 } from './_task-state';
 import {
@@ -146,6 +149,27 @@ const REAL_DEPENDENCIES: OneMindDependencies = {
 
 function normalizeMessage(message: string): string {
   return message.trim().slice(0, 4000);
+}
+
+
+export function normalizeTaskStateForConversation(
+  taskState: TaskStateContainer,
+  now: Date = new Date(),
+): { taskState: TaskStateContainer; staleTaskSuspended: boolean } {
+  const task = taskState.activeTask;
+  if (!task || isTerminalTaskStatus(task.status)) {
+    return { taskState, staleTaskSuspended:false };
+  }
+
+  const updatedAt = Date.parse(task.updatedAt);
+  const stale = !Number.isFinite(updatedAt) || now.getTime() - updatedAt >= CONTEXT_TTL_MS;
+  if (!stale) return { taskState, staleTaskSuspended:false };
+
+  // Working-task state can outlive bounded conversation context in storage,
+  // but after the same inactivity window it may no longer be the implicit
+  // owner of the next customer turn. Suspend it (preserve progress) rather
+  // than cancel/delete it; an explicit/domain-specific resume can restore it.
+  return { taskState:suspendActiveTask(taskState, now), staleTaskSuspended:true };
 }
 
 export async function resolveOneMindIdentity(
@@ -377,10 +401,11 @@ export async function processThongthaiOneMindTurn(
   if (!input.eventId.trim()) throw new Error('one_mind_event_id_required');
 
   const identity = await resolveOneMindIdentity(input, deps);
-  const [conversationContextBefore, taskStateBefore] = await Promise.all([
+  const [conversationContextBefore, loadedTaskState] = await Promise.all([
     deps.loadConversationContext(identity.guestDbId, now),
     deps.loadTaskState(identity.guestDbId),
   ]);
+  const { taskState:taskStateBefore } = normalizeTaskStateForConversation(loadedTaskState, now);
   const result = await computeOneMindTurnFromState(
     input, identity, conversationContextBefore, taskStateBefore, deps, now,
   );
@@ -444,14 +469,18 @@ export async function processThongthaiOneMindTurnAuthoritative(
     const snapshot: GuestAgentStateSnapshot = await stateDeps.loadSnapshot(identity.guestDbId);
     stateReadMs += Date.now() - stateReadStartedAt;
     const conversationContextBefore = parseConversationContextState(snapshot.state.conversationContext, now);
-    const taskStateBefore = parseTaskState(snapshot.state.taskState);
+    const loadedTaskState = parseTaskState(snapshot.state.taskState);
+    const { taskState:taskStateBefore, staleTaskSuspended } = normalizeTaskStateForConversation(loadedTaskState, now);
     const result = await computeOneMindTurnFromState(
       input, identity, conversationContextBefore, taskStateBefore, deps, now,
     );
     semanticMs += result.trace.timingsMs?.semantic ?? 0;
     dialogAndKnowledgeMs += result.trace.timingsMs?.dialogAndKnowledge ?? 0;
 
-    const shouldPersist = input.persistState === true && persistPredicate(result);
+    // Staleness normalization is a state-safety operation, not a response
+    // cutover decision. Persist it even when this turn itself falls through
+    // to legacy (e.g. a greeting/support turn outside initial cutover).
+    const shouldPersist = input.persistState === true && (staleTaskSuspended || persistPredicate(result));
     if (!shouldPersist || !identity.guestDbId) {
       return {
         ...result,
