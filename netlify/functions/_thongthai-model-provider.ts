@@ -25,7 +25,8 @@ export type ProviderAttemptOutcome =
   | 'server_error'
   | 'network_error'
   | 'request_error'
-  | 'not_configured';
+  | 'not_configured'
+  | 'circuit_open';
 
 export type ProviderAttemptDiagnostic = {
   provider: 'gemini' | 'openai';
@@ -79,17 +80,11 @@ const MIN_ATTEMPT_BUDGET_MS = 1_200;
 
 // Phase P confirmed root cause: production 429s on EVERY attempt, Gemini and
 // OpenAI alike, each rejected in a few hundred ms -- a real rate-limit
-// condition, not a timeout. The old retry loop re-tried instantly with zero
-// delay, so a retry against the same still-exhausted quota window was
-// guaranteed to fail the same way every time. This backoff gives a
-// rate-limited quota window a real chance to roll over before the next
-// attempt, honoring the provider's own Retry-After header when given.
-const DEFAULT_RATE_LIMIT_BACKOFF_MS = 800;
-const MAX_RATE_LIMIT_BACKOFF_MS = 2_000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+// condition, not a timeout. A 429 now opens the circuit breaker below
+// instead of sleeping-then-retrying in place: a retry against the same
+// still-exhausted quota window is guaranteed to fail the same way, so it's
+// cheaper (and truer to the zero-cost mandate) to fail this turn fast and
+// let the caller degrade deterministically.
 
 function parseRetryAfterMs(response: Response): number | null {
   const header = response.headers.get('retry-after');
@@ -97,6 +92,42 @@ function parseRetryAfterMs(response: Response): number | null {
   const seconds = Number(header);
   if (!Number.isFinite(seconds) || seconds < 0) return null;
   return seconds * 1000;
+}
+
+// Zero-cost architecture (owner constraint: no paid LLM spend). A bounded,
+// in-process circuit breaker for Gemini's free tier: once it 429s, every
+// customer turn for the next COOLDOWN window would otherwise re-hit the
+// same still-exhausted quota and burn the retry/backoff budget for nothing.
+// This is intentionally simple module-level state (persists across warm
+// Netlify Function invocations, resets on cold start) -- no database, no new
+// SaaS dependency, "bounded" per the owner's own brief. When the circuit is
+// open, callGemini fails IMMEDIATELY with zero network calls, so callers can
+// degrade deterministically right away instead of waiting out a doomed
+// attempt. After cooldown, exactly one real attempt is allowed through; if
+// it also 429s, the circuit reopens for another cooldown.
+const CIRCUIT_MIN_COOLDOWN_MS = 5_000;
+const CIRCUIT_MAX_COOLDOWN_MS = 60_000;
+const CIRCUIT_DEFAULT_COOLDOWN_MS = 15_000;
+
+let geminiCircuitOpenUntil = 0;
+
+export function isGeminiCircuitOpen(now: number = Date.now()): boolean {
+  return now < geminiCircuitOpenUntil;
+}
+
+/** Test-only escape hatch: production code never needs to reset this by
+ *  hand (the circuit closes itself once `now` passes geminiCircuitOpenUntil). */
+export function resetGeminiCircuitForTests(): void {
+  geminiCircuitOpenUntil = 0;
+}
+
+function openGeminiCircuit(retryAfterMs: number | null): void {
+  const cooldownMs = Math.min(
+    Math.max(retryAfterMs ?? CIRCUIT_DEFAULT_COOLDOWN_MS, CIRCUIT_MIN_COOLDOWN_MS),
+    CIRCUIT_MAX_COOLDOWN_MS,
+  );
+  geminiCircuitOpenUntil = Date.now() + cooldownMs;
+  console.log('THONGTHAI_MODEL_PROVIDER_CIRCUIT_OPEN', cooldownMs);
 }
 
 export function isAvailabilityHttpStatus(status: number): boolean {
@@ -122,6 +153,12 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
   let lastAvailabilityError = '';
   const attempts: ProviderAttemptDiagnostic[] = [];
   for (const model of GEMINI_MODELS) {
+    if (isGeminiCircuitOpen()) {
+      lastAvailabilityError = 'Gemini circuit open (recent rate limit)';
+      attempts.push({ provider: 'gemini', model, outcome: 'circuit_open', elapsedMs: 0 });
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ circuit_open: true, callerLabel, model }));
+      continue;
+    }
     const remainingMs = deadlineAt - Date.now();
     if (remainingMs < MIN_ATTEMPT_BUDGET_MS) {
       lastAvailabilityError = 'Gemini shared timeout budget exhausted';
@@ -148,13 +185,15 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
           lastAvailabilityError = `Gemini ${response.status}`;
           attempts.push({ provider: 'gemini', model, outcome: classifyHttpOutcome(response.status), httpStatus: response.status, elapsedMs });
           if (response.status === 429) {
-            const remainingAfterAttempt = deadlineAt - Date.now();
-            const backoffMs = Math.min(
-              parseRetryAfterMs(response) ?? DEFAULT_RATE_LIMIT_BACKOFF_MS,
-              MAX_RATE_LIMIT_BACKOFF_MS,
-              remainingAfterAttempt - MIN_ATTEMPT_BUDGET_MS,
-            );
-            if (backoffMs > 0) await sleep(backoffMs);
+            console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ provider_429: true, callerLabel, model }));
+            // Opening the circuit here (rather than sleeping and retrying the
+            // next model in this same turn) is the zero-cost-quota behavior:
+            // a 429 on one model means the shared project quota is exhausted,
+            // so an immediate retry against another model is very likely to
+            // fail the same way. Fail this turn fast and let the caller
+            // degrade deterministically instead of spending wall-clock time
+            // on a doomed retry.
+            openGeminiCircuit(parseRetryAfterMs(response));
           }
           continue;
         }
@@ -263,12 +302,23 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[], deadlineAt
  * wall-clock deadline -- see the comment above that constant for why: the old
  * independent per-attempt timeouts could sum to ~28s worst case, comfortably
  * exceeding a serverless Function's execution ceiling.
+ *
+ * Zero-cost architecture (owner constraint): OpenAI is a PAID API the owner
+ * will not fund, so it is no longer called by default -- Gemini's free tier
+ * is the only provider in normal production operation. OpenAI is only ever
+ * attempted when THONGTHAI_ALLOW_PAID_FALLBACK='1' is explicitly set (an
+ * opt-in escape hatch, off by default), so no code path can spend money
+ * without an explicit, deliberate configuration change. When Gemini is
+ * unavailable and paid fallback is not enabled, the caller gets the SAME
+ * LLMAvailabilityError it always would -- callers already have a
+ * deterministic degradation path for that (see _graceful-degradation.ts).
  */
 export async function callPreferredModel(systemPrompt: string, messages: ChatTurn[], callerLabel = 'unknown'): Promise<string> {
   const deadlineAt = Date.now() + TOTAL_PROVIDER_BUDGET_MS;
   try { return await callGemini(systemPrompt, messages, callerLabel, deadlineAt); }
   catch (geminiError) {
     if (!shouldFallbackToSecondaryProvider(geminiError)) throw geminiError;
+    if (process.env.THONGTHAI_ALLOW_PAID_FALLBACK !== '1') throw geminiError;
     console.log('THONGTHAI_MODEL_PROVIDER_FALLBACK', callerLabel, 'gemini', 'openai');
     const geminiAttempts = geminiError instanceof LLMRequestError || geminiError instanceof ProviderNotConfiguredError
       ? geminiError.attempts : [];

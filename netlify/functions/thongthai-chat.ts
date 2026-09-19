@@ -1013,6 +1013,52 @@ export const handler: Handler = async (event: HandlerEvent) => {
           suggestedActions: polished.suggestedActions,
         });
       }
+      // Zero-cost architecture (Phase P): before the flat "try again" apology,
+      // try the canonical One-Mind pipeline's deterministic degradation --
+      // Task State + Dialog Manager + Response Composer can still retain
+      // context, fill/correct a slot, select a previously-shown entity, or
+      // ask ONE honest clarifying question without the model. The model
+      // already failed once this turn (this IS that failure), so
+      // interpretSemanticTurn is overridden to rethrow the SAME error
+      // immediately rather than spend a second real provider attempt --
+      // "at most one LLM call per customer turn" still holds.
+      const oneMindFallback = await processOneMindCustomerTurn({
+        channel, language: request.language, message: request.message,
+        eventId: transportEventId,
+        providerUserKey: providerUserKey ?? request.guestId,
+        canonicalAnonymousId: request.guestId,
+        guestDbId,
+        persistState: true,
+      }, {
+        interpretSemanticTurn: async () => { throw error; },
+      }).catch(fallbackError => {
+        console.error('THONGTHAI_ONE_MIND_FALLBACK_ERROR', fallbackError instanceof Error ? fallbackError.message.slice(0, 220) : 'unknown');
+        return null;
+      });
+      if (oneMindFallback && oneMindFallback.status === 'composed') {
+        const mappedIntent = oneMindFallback.turn.semanticTurn.action === 'recommend'
+          || oneMindFallback.turn.semanticTurn.action === 'discover'
+          ? 'recommendation'
+          : 'information';
+        const polished = polishedResponse({
+          message: oneMindFallback.response.message,
+          intent: mappedIntent,
+          contextUpdates: {},
+          journeyAction: { type: 'none', journey: null },
+          suggestedActions: [],
+          responseStyle: 'direct',
+          semanticMemoryUpdates: [],
+          toolCalls: [],
+        }, channel);
+        await persistBrainRuntime(guestDbId, channel, polished);
+        return json(200, {
+          message: polished.message,
+          intent: polished.intent,
+          contextUpdates: polished.contextUpdates,
+          journeyAction: polished.journeyAction,
+          suggestedActions: polished.suggestedActions,
+        });
+      }
       const fallback = polishedResponse(availabilityBrainResponse(), channel);
       return json(200, fallback);
     }

@@ -28,8 +28,15 @@ import {
 import {
   interpretSemanticTurn,
   toSemanticInterpretationMeta,
+  type SemanticContext,
+  type SemanticContextEntity,
   type SemanticTurn,
 } from './_semantic-interpreter';
+import { deriveDeterministicSemanticTurn } from './_deterministic-semantic-turn';
+import {
+  LLMAvailabilityError,
+  ProviderNotConfiguredError,
+} from './_thongthai-model-provider';
 import {
   processDialogTurnDetailed,
   type DialogDecision,
@@ -159,11 +166,45 @@ export async function resolveOneMindIdentity(
   };
 }
 
+// Catalog-style facts follow the SAME "<prefix>:<id>:name" key convention the
+// Response Composer already renders from (see compactGroundedLines in
+// _response-composer.ts) -- reusing that established convention here, rather
+// than inventing a new one, to turn discovery results (e.g. real horse names
+// from the activity catalog) into recallable conversation entities. Without
+// this, a customer could never deterministically say "เอาภาราดร" after being
+// SHOWN that name this same conversation -- there would be nothing in
+// recentEntities to match against.
+const CATALOG_NAME_FACT_KEY = /^(restaurant|menu|activity|activity_asset|stay|otop)(?::[^:]+)*:([^:]+):name$/;
+const FACT_PREFIX_DOMAIN: Partial<Record<string, SemanticTurn['domain']>> = {
+  restaurant: 'restaurant', menu: 'restaurant', activity: 'activity', activity_asset: 'activity',
+  stay: 'stay', otop: 'otop',
+};
+
+function entitiesFromGroundedFacts(bundles: readonly KnowledgeBundle[]): SemanticContextEntity[] {
+  const seen = new Set<string>();
+  const entities: SemanticContextEntity[] = [];
+  for (const bundle of bundles) {
+    for (const fact of bundle.facts) {
+      const match = fact.key.match(CATALOG_NAME_FACT_KEY);
+      if (!match || typeof fact.value !== 'string' || !fact.value.trim()) continue;
+      const [, prefix, id] = match;
+      const domain = FACT_PREFIX_DOMAIN[prefix!] ?? bundle.domain;
+      const entityId = `${prefix}:${id}`;
+      if (seen.has(entityId)) continue;
+      seen.add(entityId);
+      entities.push({ id: entityId, type: prefix!, name: fact.value.trim(), domain, source: 'catalog', canonical: true });
+      if (entities.length >= 8) return entities;
+    }
+  }
+  return entities;
+}
+
 function nextConversationContext(
   before: ConversationContextState,
   input: OneMindTurnInput,
   semanticTurn: SemanticTurn,
   decision: DialogDecision,
+  bundles: readonly KnowledgeBundle[],
   now: Date,
 ): ConversationContextState {
   const activeTask = decision.taskStateContainer.activeTask;
@@ -173,6 +214,12 @@ function nextConversationContext(
       ? 'clarification_required'
       : null;
 
+  // A selection the customer just made takes priority over (and is kept
+  // alongside) whatever the catalog returned this same turn.
+  const selected = activeTask?.selectedEntities ?? [];
+  const selectedIds = new Set(selected.map(entity => entity.id));
+  const discovered = entitiesFromGroundedFacts(bundles).filter(entity => !selectedIds.has(entity.id));
+
   return applyConversationContextUpdate(before, {
     eventId: input.eventId,
     channel: input.channel,
@@ -180,11 +227,61 @@ function nextConversationContext(
     activeDomain: semanticTurn.domain === 'unknown' ? undefined : semanticTurn.domain,
     activeTopic: semanticTurn.intent || undefined,
     openQuestion,
-    newEntities: activeTask?.selectedEntities ?? [],
+    newEntities: [...selected, ...discovered],
     lastAction: semanticTurn.action,
     currentTaskReference: activeTask?.taskId ?? null,
     lastToolResultSummary: decision.actionProposal ? 'action_proposed_not_executed' : undefined,
   }, now);
+}
+
+/**
+ * Zero-cost architecture (Phase P): the ONE place a One-Mind turn decides
+ * whether it needs a real model call at all.
+ *
+ * 1. Prefer a deterministic derivation (zero LLM calls) whenever the turn is
+ *    structurally interpretable from context alone -- slot fills,
+ *    corrections, entity selections, a handful of doctrine-level discovery
+ *    patterns. See _deterministic-semantic-turn.ts.
+ * 2. Otherwise call the real model. If the provider is unavailable
+ *    (LLMAvailabilityError/ProviderNotConfiguredError -- includes the
+ *    circuit breaker's fast-fail), this NEVER throws out of the orchestrator:
+ *    it synthesizes an honest "needs clarification" turn instead, which the
+ *    Dialog Manager turns into ONE concise clarifying question rather than a
+ *    generic apology or a guess. A non-availability failure (a blocked/
+ *    invalid response) still propagates -- that is a different, real error
+ *    class the caller must still see.
+ */
+async function resolveSemanticTurn(
+  message: string,
+  context: SemanticContext,
+  taskState: TaskStateContainer,
+  deps: OneMindDependencies,
+): Promise<SemanticTurn> {
+  const deterministic = deriveDeterministicSemanticTurn(message, context, taskState);
+  if (deterministic) {
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: true, model_call_used: false }));
+    return deterministic;
+  }
+  try {
+    const turn = await deps.interpretSemanticTurn(message, context);
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: false, model_call_used: true }));
+    return turn;
+  } catch (error) {
+    if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: false, model_call_used: false, clarification_without_model: true }));
+    const domain = taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown';
+    return {
+      domain,
+      intent: 'clarification_needed_provider_unavailable',
+      action: 'ask',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0,
+      needsClarification: true,
+      clarificationReason: 'provider_unavailable',
+    };
+  }
 }
 
 async function computeOneMindTurnFromState(
@@ -199,7 +296,7 @@ async function computeOneMindTurnFromState(
   const message = normalizeMessage(input.message);
   const semanticContext = buildSemanticContext(conversationContextBefore, now);
   const semanticStartedAt = Date.now();
-  const semanticTurn = await deps.interpretSemanticTurn(message, semanticContext);
+  const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, deps);
   const semanticMs = Date.now() - semanticStartedAt;
   const adapters = deps.buildKnowledgeAdapters(input.channel, {
     guestDbId: identity.guestDbId,
@@ -222,6 +319,7 @@ async function computeOneMindTurnFromState(
     input,
     semanticTurn,
     dialog.decision,
+    dialog.bundles,
     now,
   );
 

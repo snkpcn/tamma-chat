@@ -401,6 +401,22 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     message = copy.unknown;
   } else if (input.degradation.condition === 'verified_empty') {
     message = input.dialogDecision.responseIntent === 'no_active_promotion' ? copy.noPromo : copy.empty;
+  } else if (input.dialogDecision.mode === 'clarify') {
+    // Zero-cost architecture: a clarify/collect_field decision is a real,
+    // already-computed machine decision from the Dialog Manager -- it does
+    // not need the model to have succeeded this turn to be spoken correctly.
+    // Checking mode BEFORE the model-failure branch below means an active
+    // task's slot-collection question still asks for the SPECIFIC missing
+    // field even while the provider is down/circuit-open, instead of
+    // collapsing to the generic "can't answer this right now" apology.
+    message = copy.clarify;
+  } else if (input.dialogDecision.mode === 'collect_field') {
+    const missing = input.dialogDecision.missingFields.slice(0, 2);
+    if (input.language === 'th' && missing.length) {
+      message = `ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`;
+    } else {
+      message = copy.clarify;
+    }
   } else if (input.degradation.condition === 'model_unavailable'
       || input.degradation.condition === 'model_invalid'
       || input.degradation.condition === 'internal_error') {
@@ -411,15 +427,6 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     message = copy.model;
   } else if (input.dialogDecision.responseIntent === 'cannot_verify_comparison') {
     message = copy.comparison;
-  } else if (input.dialogDecision.mode === 'clarify') {
-    message = copy.clarify;
-  } else if (input.dialogDecision.mode === 'collect_field') {
-    const missing = input.dialogDecision.missingFields.slice(0, 2);
-    if (input.language === 'th' && missing.length) {
-      message = `ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`;
-    } else {
-      message = copy.clarify;
-    }
   } else if (input.dialogDecision.mode === 'propose_action') {
     message = copy.proposal;
   } else {

@@ -1,3 +1,5 @@
+import { extractDate, extractTime } from './_slot-parsers';
+
 export type RestaurantSetItem = { name: string; quantity: number };
 
 export type RestaurantPreorderDraft = {
@@ -26,80 +28,6 @@ export type ParsedRestaurantPreorderTurn = {
   phone: string | null;
   email: string | null;
 };
-
-const THAI_NUMBER: Record<string, number> = {
-  'หนึ่ง': 1, 'สอง': 2, 'สาม': 3, 'สี่': 4, 'ห้า': 5, 'หก': 6,
-};
-
-function bangkokDate(now: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(now);
-  const value = (type: string) => parts.find(part => part.type === type)?.value ?? '';
-  return `${value('year')}-${value('month')}-${value('day')}`;
-}
-
-function addBangkokDays(date: string, days: number): string {
-  const base = new Date(`${date}T12:00:00+07:00`);
-  const shifted = new Date(base.getTime() + days * 86_400_000);
-  return bangkokDate(shifted);
-}
-
-function validDate(year: number, month: number, day: number): string | null {
-  if (year > 2400) year -= 543;
-  if (year < 2000 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return null;
-  const value = `${String(year).padStart(4,'0')}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-  const parsed = new Date(`${value}T12:00:00+07:00`);
-  return bangkokDate(parsed) === value ? value : null;
-}
-
-function extractDate(message: string, now: Date): string | null {
-  const today = bangkokDate(now);
-  if (/มะรืน/u.test(message)) return addBangkokDays(today, 2);
-  if (/พรุ่งนี้/u.test(message)) return addBangkokDays(today, 1);
-  if (/วันนี้/u.test(message)) return today;
-
-  const iso = message.match(/\b(20\d{2}|25\d{2})-(\d{1,2})-(\d{1,2})\b/u);
-  if (iso) return validDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
-
-  const slash = message.match(/(?:^|\s)(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?(?=$|\s)/u);
-  if (slash) {
-    const currentYear = Number(today.slice(0,4));
-    let year = slash[3] ? Number(slash[3]) : currentYear;
-    if (year < 100) year += 2000;
-    return validDate(year, Number(slash[2]), Number(slash[1]));
-  }
-  return null;
-}
-
-function thaiHourToken(token: string): number | null {
-  if (/^\d{1,2}$/.test(token)) return Number(token);
-  return THAI_NUMBER[token] ?? null;
-}
-
-function extractTime(message: string): string | null {
-  const explicit = message.match(/(?:^|\s)([01]?\d|2[0-3])[:.](\d{2})(?=$|\s|น\.?)/u);
-  if (explicit) return `${String(Number(explicit[1])).padStart(2,'0')}:${explicit[2]}`;
-
-  if (/เที่ยงครึ่ง/u.test(message)) return '12:30';
-  if (/เที่ยง/u.test(message)) return '12:00';
-
-  const afternoon = message.match(/บ่าย\s*(หนึ่ง|สอง|สาม|สี่|ห้า|\d{1,2})(?:\s*โมง)?/u);
-  if (afternoon) {
-    const hour = thaiHourToken(afternoon[1]);
-    if (hour != null && hour >= 1 && hour <= 5) return `${String(hour + 12).padStart(2,'0')}:00`;
-  }
-
-  const evening = message.match(/(หนึ่ง|สอง|สาม|สี่|ห้า|\d{1,2})\s*ทุ่ม/u);
-  if (evening) {
-    const hour = thaiHourToken(evening[1]);
-    if (hour != null && hour >= 1 && hour <= 5) return `${String(hour + 18).padStart(2,'0')}:00`;
-  }
-
-  const oclock = message.match(/(?:^|\s)([01]?\d|2[0-3])\s*(?:โมง|นาฬิกา)(?=$|\s)/u);
-  if (oclock) return `${String(Number(oclock[1])).padStart(2,'0')}:00`;
-  return null;
-}
 
 function normalizePhone(raw: string): string | null {
   let digits = raw.replace(/\D/g, '');

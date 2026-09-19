@@ -61,15 +61,48 @@ test('initial G.2 gate refuses transactional action even before an ActionProposa
   assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'transactional_or_task_turn'});
 });
 
-test('initial G.2 gate refuses any turn with an active task', () => {
+// Zero-cost architecture (Phase P): continuing an already-active task is
+// safe to compose through One-Mind as long as the DialogDecision never
+// reaches an ActionProposal (a real commitment) -- slot-filling, correcting
+// a field, and asking one clarifying question all stay eligible so the
+// canonical zero-LLM continuation flow doesn't get stuck on legacy. Only a
+// turn that actually proposes/executes a transaction still requires the
+// (not-yet-equivalence-tested) legacy executor.
+test('initial G.2 gate allows a safe task-continuation turn (collect_field, no ActionProposal)', () => {
   const active=createActiveTask({type:'activity_booking',sourceChannel:'web',initialSlots:{resourceCode:'activity-horse'}},NOW);
   const state={...emptyTaskStateContainer(),activeTask:active};
   const r=result({
     taskStateBefore:state,
     taskStateAfter:state,
     semanticTurn:{
-      domain:'activity',intent:'activity_question',action:'ask',entities:{},references:[],
+      domain:'activity',intent:'task_slot_update',action:'provide_information',entities:{date:'2026-09-20'},references:[],
       constraints:[],confidence:.9,needsClarification:false,
+    },
+    dialogDecision:{
+      mode:'collect_field',taskStateContainer:state,knowledgeRequests:[],missingFields:['partySize'],
+      responseIntent:'ask_missing_field',reasons:['missing_field'],
+    },
+  });
+  assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:true});
+});
+
+test('initial G.2 gate still refuses a task turn that reaches an ActionProposal', () => {
+  const active=createActiveTask({type:'activity_booking',sourceChannel:'web',initialSlots:{resourceCode:'activity-horse',date:'2026-09-20',durationMinutes:60}},NOW);
+  const state={...emptyTaskStateContainer(),activeTask:active};
+  const r=result({
+    taskStateBefore:state,
+    taskStateAfter:state,
+    semanticTurn:{
+      domain:'activity',intent:'confirm_booking',action:'book',entities:{},references:[],
+      constraints:[],confidence:.9,needsClarification:false,
+    },
+    dialogDecision:{
+      mode:'propose_action',taskStateContainer:state,knowledgeRequests:[],missingFields:[],
+      responseIntent:'propose_action',reasons:['explicit_commit_received'],
+      actionProposal:{
+        toolName:'create_booking',validatedArgs:{},requiresExplicitConfirmation:false,
+        customerCommitPresent:true,idempotencyKey:active.taskId,
+      },
     },
   });
   assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'transactional_or_task_turn'});

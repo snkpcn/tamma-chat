@@ -1082,3 +1082,106 @@ intentionally retained.
 - This commit intentionally retriggers the EXISTING tamma-chat production auto-deploy from current main.
 - Do not add more diagnostic architectures or workaround endpoints before verifying this deploy and reading the existing build-time diagnostic artifact.
 - Current objective: deploy current main -> read `phase-p-diagnostic-result.json` -> fix the confirmed provider failure -> remove temporary diagnostic machinery/token -> rerun production UAT -> close Phase P.
+
+
+### Phase P — CLOSED: zero-paid-LLM-cost architecture — 2026-09-19
+
+- **Confirmed root cause** (via the build-time diagnostic artifact, since removed): genuine
+  sustained HTTP 429 rate-limiting on BOTH Gemini and the configured OpenAI fallback -- not a
+  timeout, payload size, credential, or deploy-sync issue (all independently ruled out earlier
+  in Phase P). A 15-minute-cooldown + 3-probe check confirmed the quota exhaustion was sustained,
+  not something client-side backoff alone could out-wait.
+- **Owner then imposed a hard product constraint: ZERO PAID LLM COST.** No Gemini paid capacity,
+  no OpenAI credits. Phase P's closing scope became: make supported flows work under Gemini-free-
+  tier-or-nothing, with graceful, honest, non-fake-booking degradation whenever the model is
+  unavailable -- reusing the EXISTING One-Mind pipeline (Conversation Context -> Semantic
+  Interpreter -> Task State -> Knowledge Resolver -> Dialog Manager -> Response Composer), never
+  a new regex phrase-table brain.
+
+**Zero-cost provider policy** (`_thongthai-model-provider.ts`):
+- Gemini free tier is called opportunistically. A bounded in-process circuit breaker
+  (`isGeminiCircuitOpen`/`resetGeminiCircuitForTests`) opens on any 429, honoring `Retry-After`
+  when present (floored at 5s, capped at 60s, default 15s) -- while open, every Gemini attempt is
+  skipped with zero network calls, so a customer turn during an outage fails FAST instead of
+  waiting out a doomed retry. One real probe is allowed again once the cooldown elapses.
+- OpenAI is no longer called by default. It requires the explicit opt-in
+  `THONGTHAI_ALLOW_PAID_FALLBACK=1` env var (unset in production); without it, a Gemini
+  availability failure is rethrown as-is rather than spending an OpenAI credit.
+
+**Reduced/zero model calls per turn**:
+- `_deterministic-semantic-turn.ts` (new): derives a `SemanticTurn` from context alone (generic
+  slot parsers for date/time/party size, a small closed correction-marker set, entity-name
+  matching against `recentEntities`, and the ecosystem's own doctrine-level activity graph) for
+  slot-filling, corrections, entity selection, and a few structural discovery patterns -- reusing
+  the ALREADY-EXISTING, already-tested `isExperienceDiscoveryIntent` provider-outage matcher
+  rather than inventing a second one. Never derives a commit action (`hasCommitMarker` makes it
+  defer instead of silently dropping a "จองเลย"-style booking intent).
+- `_thongthai-one-mind-orchestrator.ts`'s `resolveSemanticTurn` tries the deterministic deriver
+  FIRST; only calls the real model when it returns null; if the real call then fails with
+  `LLMAvailabilityError`/`ProviderNotConfiguredError` (includes a fast circuit-open fail), it
+  synthesizes an honest `needsClarification` turn instead of throwing -- the orchestrator now
+  NEVER propagates a model-availability failure out of a turn computation.
+- Grounded catalog facts (e.g. real horse names surfaced by a `discover` turn) are folded into
+  `recentEntities` for the NEXT turn (`entitiesFromGroundedFacts` in the orchestrator), so a
+  later "เอาภาราดร"-style selection has something real to resolve against without a model call.
+- `_response-composer.ts`'s `composeDeterministicResponse` now checks `dialogDecision.mode`
+  (`clarify`/`collect_field`) BEFORE the model-failure branch -- a slot-collection/clarify
+  decision is already-correct centralized copy and no longer collapses to the generic "can't
+  answer this right now" apology just because the model that would have phrased it failed.
+- `_thongthai-one-mind-response.ts`'s `processOneMindCustomerTurn` composes `collect_field`/
+  `clarify` turns directly via `composeDeterministicResponse`, skipping the model-phrasing call
+  entirely for those modes ("do not call an LLM to rewrite already-grounded prose").
+- `readOnlyCutoverEligibility` is widened: a turn that only continues an already-active task
+  (fills a slot, corrects a field, selects an entity, asks one clarifying question) is eligible
+  for One-Mind composition even with an active task, as long as it never reaches an
+  `ActionProposal`. `propose_action`/`execute_tool` still require the legacy executor
+  (transaction-executor equivalence testing is still pending, unchanged from before Phase P).
+- `thongthai-chat.ts`'s legacy `LLMAvailabilityError` catch block now tries the One-Mind pipeline
+  (with `interpretSemanticTurn` overridden to immediately rethrow the SAME already-caught error,
+  never a second real provider attempt -- "at most one LLM call per customer turn" holds even on
+  this fallback path) before falling to the flat generic apology.
+
+**Known gap, honestly disclosed, NOT fixed in this pass** (out of Phase P's scope, pre-existing):
+`DOMAIN_TASK_REQUIRED_FIELDS.activity_booking` requires `durationMinutes` (grounded in
+`createBooking`'s real validation, per `_domain-task-policy.ts`'s own header comment), which the
+owner's canonical example script never actually states. The zero-LLM continuation correctly
+retains every slot the customer DOES give (selected horse, date, party size, time) and never
+fakes a booking or shows a generic apology, but `collect_field` mode will keep asking for a
+duration the script never supplies. This is a pre-existing business-policy gap, not something
+invented or silently patched here.
+
+**Which flows work with the model forced fully unavailable** (proven by
+`tests/zero-cost-provider-outage.test.ts`, dependency-injected `interpretSemanticTurn` that always
+throws `LLMAvailabilityError`, zero network calls):
+- Activity multi-turn continuation (the owner's exact canonical script): topic narrow -> entity
+  selection -> date+partySize fill -> time fill, all slots retained end-to-end, zero LLM calls,
+  no fake booking, no generic apology.
+- Stay booking entity selection + date fill (proves the pipeline is domain-generic, not
+  activity-only).
+- A genuinely ambiguous zero-context turn gets ONE honest clarifying question, never a guess.
+- Broad ecosystem discovery ("มีไรทำมั่ง"), promotion discovery/continuation, and the restaurant
+  advisor/preorder flow were ALREADY zero-LLM before this pass (`deterministicExperienceDiscoveryResponse`,
+  `promotionContinuationResponse`, `deterministicRestaurantResponse` in `thongthai-chat.ts`, checked
+  unconditionally before any model call) -- unchanged, still covered by existing tests.
+- Membership/OTOP/cafe: covered generically by the same Task State/Dialog Manager/Response
+  Composer machinery (no domain-specific code in that path), but not individually scripted in
+  this pass's new tests -- same honest-disclosure posture as the durationMinutes gap above.
+
+**Model calls per turn, before vs after**: before, a non-discovery One-Mind-eligible turn cost
+exactly 1 model call (`interpretSemanticTurn`) plus, on ANY failure, a full second real call from
+the legacy brain retry -- and every task-continuation turn was unconditionally routed to that
+legacy path regardless of provider health. After: most task-continuation/slot-fill/correction/
+selection turns cost 0 model calls; a turn that genuinely needs understanding still costs at most
+1; a fallback attempt from the legacy catch block costs 0 additional real network calls (the
+already-caught error is rethrown, never re-attempted).
+
+**Diagnostic cleanup**: `scripts/phase-p-run-diagnostic.ts`, `scripts/phase-p-diagnostic-build.mjs`,
+`tests/phase-p-diagnostic-artifact-schema.test.ts`, the `netlify.toml` build-command entry, and the
+`.gitignore` entry for `phase-p-diagnostic-result.json` have all been removed. No temporary
+diagnostic code remains in the codebase. `THONGTHAI_PHASE_P_DIAGNOSTIC_TOKEN` is no longer read or
+required anywhere -- **SAFE TO DELETE: YES**.
+
+- No production booking, order, payment, or promotion-redemption transaction was created by this
+  closing pass. All new tests are network-free, dependency-injected, and use only synthetic
+  in-memory state (matching this repo's established `npm test` convention) -- none of them call a
+  live Supabase/Gemini/OpenAI endpoint or write to production.

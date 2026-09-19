@@ -1,87 +1,98 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { callPreferredModel } from '../netlify/functions/_thongthai-model-provider';
+import {
+  callPreferredModel,
+  isGeminiCircuitOpen,
+  resetGeminiCircuitForTests,
+} from '../netlify/functions/_thongthai-model-provider';
 
 // Phase P confirmed root cause (production diagnostic artifact, both a
 // semantic-interpret call and a legacy-brain call, same reproduction turn):
 // every single attempt across Gemini AND OpenAI came back 429 rate_limited,
 // each rejected in a few hundred ms. The old retry loop moved to the next
 // model with ZERO delay, so a retry against the same still-exhausted quota
-// window was guaranteed to fail identically every time. These tests lock in
-// that a 429 now gets a real backoff before the next attempt (honoring
-// Retry-After when the provider sends one), so a quota window has an actual
-// chance to roll over instead of being hammered instantly.
+// window was guaranteed to fail identically every time.
+//
+// Zero-cost-quota architecture superseded the original fix (a sleep-then-
+// retry-in-place backoff) with a bounded in-process circuit breaker: a 429
+// opens the circuit immediately and the turn fails FAST (no sleep, no
+// retrying a second model against the same exhausted quota), so the caller
+// can degrade deterministically right away instead of burning request
+// latency on a doomed retry. These tests lock in that behavior, and that the
+// circuit's cooldown honors (and bounds) the provider's Retry-After header.
 
 function jsonResponse(body: unknown, status: number, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), { status, headers });
 }
 
-test('a 429 from the first Gemini model is followed by a real backoff before retrying the second model', async () => {
+test('a 429 from the first Gemini model opens the circuit and fails the turn fast, without retrying the second model', async () => {
   const originalFetch = global.fetch;
   const originalGemini = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = 'test-gemini-key';
+  resetGeminiCircuitForTests();
   let callCount = 0;
-  const callTimestamps: number[] = [];
   global.fetch = (async () => {
-    callTimestamps.push(Date.now());
     callCount += 1;
+    // If the circuit breaker failed to stop the retry, this would let a
+    // second attempt "succeed" -- callCount staying at 1 proves it was
+    // skipped instead of actually retried against the same exhausted quota.
     if (callCount === 1) return jsonResponse({}, 429);
     return jsonResponse({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }, 200);
   }) as typeof fetch;
 
   try {
-    const result = await callPreferredModel('system', [{ role: 'user', content: 'hi' }], 'test');
-    assert.equal(result, '{"ok":true}');
-    assert.equal(callTimestamps.length, 2, 'expected exactly two Gemini attempts (429 then success)');
-    const gapMs = callTimestamps[1] - callTimestamps[0];
-    // Old behavior retried with ~0ms gap. A real backoff must be a
-    // meaningful, measurable delay -- not an instant retry.
-    assert.ok(gapMs >= 300, `expected a real backoff before the retry, got ${gapMs}ms gap`);
+    const startedAt = Date.now();
+    await assert.rejects(() => callPreferredModel('system', [{ role: 'user', content: 'hi' }], 'test'));
+    const elapsedMs = Date.now() - startedAt;
+    assert.equal(callCount, 1, 'the second Gemini model should be skipped via the open circuit, not retried');
+    assert.ok(elapsedMs < 500, `expected a fast fail with no backoff sleep, got ${elapsedMs}ms`);
+    assert.ok(isGeminiCircuitOpen(), 'circuit should be open immediately after a 429');
   } finally {
     global.fetch = originalFetch;
+    resetGeminiCircuitForTests();
     if (originalGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalGemini;
   }
 });
 
-test('a 429 with a Retry-After header is honored (capped) instead of the default backoff', async () => {
+test('a 429 with a Retry-After header sets the circuit cooldown to that value (bounded)', async () => {
   const originalFetch = global.fetch;
   const originalGemini = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = 'test-gemini-key';
-  const callTimestamps: number[] = [];
-  let callCount = 0;
-  global.fetch = (async () => {
-    callTimestamps.push(Date.now());
-    callCount += 1;
-    if (callCount === 1) return jsonResponse({}, 429, { 'retry-after': '1' });
-    return jsonResponse({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }, 200);
-  }) as typeof fetch;
+  resetGeminiCircuitForTests();
+  global.fetch = (async () => jsonResponse({}, 429, { 'retry-after': '10' })) as typeof fetch;
 
   try {
-    await callPreferredModel('system', [{ role: 'user', content: 'hi' }], 'test');
-    const gapMs = callTimestamps[1] - callTimestamps[0];
-    // Retry-After: 1 means ~1000ms; capped at MAX_RATE_LIMIT_BACKOFF_MS (2000ms).
-    assert.ok(gapMs >= 800 && gapMs <= 2_500, `expected a ~1s backoff honoring Retry-After, got ${gapMs}ms`);
+    const startedAt = Date.now();
+    await assert.rejects(() => callPreferredModel('system', [{ role: 'user', content: 'hi' }], 'test'));
+    assert.ok(isGeminiCircuitOpen(startedAt + 9_000), 'circuit should still be open before the honored 10s Retry-After elapses');
+    assert.ok(!isGeminiCircuitOpen(startedAt + 10_500), 'circuit should close again once the honored Retry-After window elapses');
   } finally {
     global.fetch = originalFetch;
+    resetGeminiCircuitForTests();
     if (originalGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalGemini;
   }
 });
 
-test('repeated 429s still resolve within the shared timeout budget, never regressing to unbounded retries', async () => {
+test('repeated 429s still resolve fast, never regressing to unbounded retries or a paid OpenAI fallback', async () => {
   const originalFetch = global.fetch;
   const originalGemini = process.env.GEMINI_API_KEY;
   const originalOpenAI = process.env.OPENAI_API_KEY;
   process.env.GEMINI_API_KEY = 'test-gemini-key';
+  // An OpenAI key being present must not matter: without the explicit
+  // THONGTHAI_ALLOW_PAID_FALLBACK opt-in, zero-cost policy forbids spending
+  // it as a fallback.
   process.env.OPENAI_API_KEY = 'test-openai-key';
+  resetGeminiCircuitForTests();
   global.fetch = (async () => jsonResponse({}, 429)) as typeof fetch;
 
   try {
     const startedAt = Date.now();
     await assert.rejects(() => callPreferredModel('system', [{ role: 'user', content: 'hi' }], 'test'));
     const elapsedMs = Date.now() - startedAt;
-    assert.ok(elapsedMs < 9_000, `expected the shared budget to still bound total latency even with 429 backoffs, got ${elapsedMs}ms`);
+    assert.ok(elapsedMs < 500, `expected the circuit breaker to fail fast with no retries, got ${elapsedMs}ms`);
   } finally {
     global.fetch = originalFetch;
+    resetGeminiCircuitForTests();
     if (originalGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalGemini;
     if (originalOpenAI === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalOpenAI;
   }

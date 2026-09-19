@@ -14,6 +14,7 @@ import {
   type AuthoritativeStateDependencies,
 } from './_thongthai-one-mind-orchestrator';
 import {
+  composeDeterministicResponse,
   composeGroundedDeterministicResponse,
   composeThongthaiResponse,
   type ComposedResponse,
@@ -30,6 +31,14 @@ export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','status']);
 const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
+// Task-worthy modes that only ever COLLECT/CLARIFY information -- they never
+// execute or even propose a transaction (see DialogMode/COMMIT_ACTIONS in
+// _dialog-manager.ts: only 'propose_action'/'execute_tool' reach an
+// ActionProposal). Continuing an in-progress task's slot-filling/correction/
+// entity-selection turns through One-Mind is exactly the zero-cost-quota
+// requirement (Phase P): the transaction executor equivalence gap that keeps
+// 'propose_action'/'execute_tool' on legacy does not apply to these modes.
+const TASK_CONTINUATION_SAFE_MODES = new Set(['collect_field','clarify','answer','query_knowledge']);
 
 export function shouldPreferGroundedDeterministicResponse(
   turn: OneMindTurnResult,
@@ -37,6 +46,14 @@ export function shouldPreferGroundedDeterministicResponse(
 ): boolean {
   return turn.semanticTurn.action === 'discover'
     || elapsedMs >= COMPOSER_MODEL_BUDGET_CUTOFF_MS;
+}
+
+/** True for a task-active turn whose DialogDecision only collects/clarifies
+ *  (never a real commitment) -- see TASK_CONTINUATION_SAFE_MODES above. */
+export function isSafeTaskContinuationTurn(turn: OneMindTurnResult): boolean {
+  return Boolean(turn.taskStateBefore.activeTask || turn.taskStateAfter.activeTask)
+    && TASK_CONTINUATION_SAFE_MODES.has(turn.dialogDecision.mode)
+    && !turn.dialogDecision.actionProposal;
 }
 
 export type OneMindCustomerTurnInput = OneMindTurnInput & {
@@ -63,13 +80,23 @@ export function readOnlyCutoverEligibility(turn: OneMindTurnResult):
   if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
     return { eligible:false, reason:'domain_not_cut_over' };
   }
-  if (!READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
-      || Boolean(turn.dialogDecision.actionProposal)
-      || Boolean(turn.taskStateBefore.activeTask)
-      || Boolean(turn.taskStateAfter.activeTask)) {
+  if (Boolean(turn.dialogDecision.actionProposal)) {
     return { eligible:false, reason:'transactional_or_task_turn' };
   }
-  return { eligible:true };
+  if (READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
+      && !turn.taskStateBefore.activeTask
+      && !turn.taskStateAfter.activeTask) {
+    return { eligible:true };
+  }
+  // A turn that merely continues an already-active task (fills a slot,
+  // corrects a field, selects an entity, or asks one clarifying question)
+  // never reaches an ActionProposal -- checked above -- so it carries none of
+  // the transaction-executor equivalence risk that keeps propose_action/
+  // execute_tool on legacy. See TASK_CONTINUATION_SAFE_MODES.
+  if (isSafeTaskContinuationTurn(turn)) {
+    return { eligible:true };
+  }
+  return { eligible:false, reason:'transactional_or_task_turn' };
 }
 
 export async function processOneMindCustomerTurn(
@@ -118,13 +145,22 @@ export async function processOneMindCustomerTurn(
   // discovery, and whenever the orchestration phase has already consumed most
   // of the request budget. This preserves One-Mind truth/wording ownership
   // without falling back to channel-local business logic.
-  const groundedFastPath = shouldPreferGroundedDeterministicResponse(
+  // Zero-cost architecture (Phase P): a collect_field/clarify decision is
+  // already-correct, already-tested centralized copy (see
+  // composeDeterministicResponse in _response-composer.ts) -- asking the
+  // model to rephrase "what's the missing field" would spend a call to
+  // rewrite prose that is already right. "Do NOT call an LLM simply to
+  // rewrite already-grounded prose" (owner's Phase P brief).
+  const deterministicFastPath = (turn.dialogDecision.mode === 'collect_field' || turn.dialogDecision.mode === 'clarify')
+    ? composeDeterministicResponse(composerInput)
+    : null;
+  const groundedFastPath = !deterministicFastPath && shouldPreferGroundedDeterministicResponse(
     turn,
     composerStartedAt - totalStartedAt,
   )
     ? composeGroundedDeterministicResponse(composerInput)
     : null;
-  const response = groundedFastPath ?? await composeThongthaiResponse(composerInput);
+  const response = deterministicFastPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
   const composerMs = Date.now() - composerStartedAt;
   return {
     status:'composed',

@@ -223,3 +223,38 @@ test('model outage without verified facts remains the last-resort concise failur
   }));
   assert.match(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้/);
 });
+
+// Zero-cost architecture (Phase P): the Dialog Manager's mode is a real
+// already-computed decision, not something that needs the model to have
+// succeeded this turn. A slot-collection/clarify turn must still ask for the
+// SPECIFIC missing field/clarification while Gemini is down or circuit-open
+// -- collapsing to the generic "can't answer this right now" apology here
+// would be exactly the production defect Phase P fixed.
+test('an active-task slot-collection turn asks for the missing field even under model_unavailable, not the generic apology', () => {
+  const response=composeDeterministicResponse(input({
+    knowledgeBundles:[],
+    dialogDecision:decision({
+      mode:'collect_field', responseIntent:'ask_missing_field',
+      missingFields:['date','partySize'],
+    }),
+    degradation:degradation({
+      condition:'model_unavailable', level:'human_handoff',
+      reasonCodes:['provider_stack_exhausted','active_task_present'], retryable:true,
+    }),
+  }));
+  assert.match(response.message,/วัน \+ จำนวนคน/);
+  assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้/);
+});
+
+test('a clarify-mode turn asks for clarification even under model_unavailable, not the generic apology', () => {
+  const response=composeDeterministicResponse(input({
+    knowledgeBundles:[],
+    dialogDecision:decision({ mode:'clarify', responseIntent:'clarify_ambiguous_entity' }),
+    degradation:degradation({
+      condition:'model_unavailable', level:'human_handoff',
+      reasonCodes:['provider_stack_exhausted'], retryable:true,
+    }),
+  }));
+  assert.match(response.message,/ขอรายละเอียดเพิ่ม/);
+  assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้/);
+});
