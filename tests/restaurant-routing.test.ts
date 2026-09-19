@@ -51,6 +51,22 @@ test('restaurant follow-up can use prior restaurant context', () => {
   assert.equal(isRestaurantAdvisorTurn(request('ไม่เอาหมูด้วย', history), {agentState:{}}), true);
 });
 
+test('restaurant follow-up can use persisted server-side context when transported chat history is empty', () => {
+  const runtime = {
+    agentState:{
+      restaurantAdvisorContext:{
+        source:'restaurant_menu_advisor_v1',
+        recentMessages:['ร้านมีไรกิน'],
+        updatedAt:'2026-09-18T01:20:00.000Z',
+      },
+    },
+  };
+  assert.equal(isRestaurantAdvisorTurn(request('มากันสองคน งบ 500'), runtime), true);
+  assert.equal(isRestaurantAdvisorTurn(request('ไม่กินหมู'), runtime), true);
+  assert.equal(isRestaurantAdvisorTurn(request('ราคาเท่าไร'), runtime), true);
+  assert.equal(isRestaurantAdvisorTurn(request('เอาชุดเมื่อกี้'), runtime), true);
+});
+
 test('pending preorder keeps date time and name replies inside restaurant flow', () => {
   const runtime = {
     agentState:{

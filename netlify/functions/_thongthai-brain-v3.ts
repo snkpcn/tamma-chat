@@ -80,6 +80,11 @@ export interface AgentStateUpdate {
     partySize: number | null;
     createdAt: string;
   };
+  restaurantAdvisorContext?: {
+    source: 'restaurant_menu_advisor_v1';
+    recentMessages: string[];
+    updatedAt: string;
+  };
   /** Deterministic promo-redemption-in-progress state -- set only by the
    *  TS-native fallback dialog in thongthai-chat.ts, never by the LLM's own
    *  JSON output (not part of the documented OUTPUT schema below). */

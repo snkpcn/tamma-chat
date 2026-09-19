@@ -66,6 +66,7 @@ export type {
 
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
 const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
+const RESTAURANT_ADVISOR_CONTEXT_SOURCE = 'restaurant_menu_advisor_v1';
 
 function emptyGuestContext(): GuestContext {
   return {
@@ -226,6 +227,48 @@ function mergeAfterTools(first: BrainResponse, second: BrainResponse, toolResult
   };
 }
 
+function currentRestaurantAdvisorContext(runtime: { agentState: Record<string, unknown> }): AgentStateUpdate['restaurantAdvisorContext'] | null {
+  const raw = runtime.agentState.restaurantAdvisorContext;
+  if (!isObject(raw) || !Array.isArray(raw.recentMessages)) return null;
+  const recentMessages = raw.recentMessages
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map(item => item.trim().replace(/\s+/g, ' ').slice(0, 180))
+    .slice(-8);
+  if (!recentMessages.length) return null;
+  return {
+    source: RESTAURANT_ADVISOR_CONTEXT_SOURCE,
+    recentMessages,
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
+  };
+}
+
+function restaurantAdvisorRecentMessages(
+  request: BrainRequest,
+  runtime: { agentState: Record<string, unknown> },
+): string[] {
+  const stored = currentRestaurantAdvisorContext(runtime)?.recentMessages ?? [];
+  const transported = request.chatHistory.slice(-6).map(turn => turn.content);
+  return [...stored, ...transported].slice(-8);
+}
+
+function restaurantAdvisorContextUpdate(
+  request: BrainRequest,
+  runtime: { agentState: Record<string, unknown> },
+): AgentStateUpdate {
+  const recentMessages = [...restaurantAdvisorRecentMessages(request, runtime), request.message]
+    .map(item => item.trim().replace(/\s+/g, ' ').slice(0, 180))
+    .filter(Boolean)
+    .slice(-8);
+  return {
+    activeTopic: 'restaurant',
+    restaurantAdvisorContext: {
+      source: RESTAURANT_ADVISOR_CONTEXT_SOURCE,
+      recentMessages,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
 function polishedResponse(response: BrainResponse, channel: BrainChannel): BrainResponse {
   const message = polishCustomerMessage(response.message, channel);
   return { ...response, message: message || response.message.trim() };
@@ -309,6 +352,7 @@ export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentS
   if (RESTAURANT_SET_ACCEPT_RE.test(text) && proposedSet) return true;
   const hasRestaurantHistory = request.chatHistory.slice(-6).some(turn =>
     /(ตำลาว|ตำไทย|ชุดอาหาร|ร้านอาหาร|ตำมา-ชาติ|เมนู|สั่งอาหาร|แพ้ถั่ว|ไม่เอาหมู)/u.test(turn.content));
+  const hasRestaurantServerContext = Boolean(currentRestaurantAdvisorContext(runtime)) || Boolean(proposedSet);
   // "ไรกิน"/"มีไรกิน" is the colloquial shortening of "อะไรกิน" (dropping the
   // leading อะ), as in the canonical smoke phrase "ร้านมีไรกิน" -- without this,
   // that phrasing missed every deterministic branch above and fell through to
@@ -316,8 +360,8 @@ export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentS
   // safety net that's already spent most of the request's time budget.
   const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง)/u.test(text);
   if (explicitFood) return true;
-  const restaurantFollowUp = /(งบ|แพ้|ไม่กิน|ไม่เอา|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน|เอาชุด|ชุดเมื่อกี้)/u.test(text);
-  return hasRestaurantHistory && restaurantFollowUp;
+  const restaurantFollowUp = /(งบ|แพ้|ไม่กิน|ไม่เอา|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน|เอาชุด|ชุดเมื่อกี้|อันเมื่อกี้|อันนั้น|ราคา|กี่บาท|เผ็ด|จืด|หวาน|เค็ม|\d+\s*คน|คนเดียว|สองคน|สามคน|สี่คน)/u.test(text);
+  return (hasRestaurantHistory || hasRestaurantServerContext) && restaurantFollowUp;
 }
 
 function formatMoney(value: unknown): string {
@@ -762,8 +806,9 @@ async function deterministicRestaurantResponse(
     partySize: null,
     budget: typeof request.guestContext.budget === 'number' ? request.guestContext.budget : null,
     constraints: request.guestContext.constraints,
-    recentMessages: request.chatHistory.slice(-6).map(turn => turn.content),
+    recentMessages: restaurantAdvisorRecentMessages(request, runtime),
   });
+  const advisorContext = restaurantAdvisorContextUpdate(request, runtime);
   return {
     message: formatAdvisorMessage(advice),
     intent: advice.mode === 'compare' ? 'information' : 'recommendation',
@@ -771,7 +816,7 @@ async function deterministicRestaurantResponse(
     journeyAction:{type:'none',journey:null},
     suggestedActions:[],
     responseStyle:'direct',
-    agentStateUpdate: proposedSetFromAdvisor(advice),
+    agentStateUpdate: mergeAgentState(proposedSetFromAdvisor(advice), advisorContext),
     semanticMemoryUpdates:[],
     toolCalls:[],
   };
@@ -951,6 +996,25 @@ export const handler: Handler = async (event: HandlerEvent) => {
   });
   if (promotionContinuation) {
     const polished = polishedResponse(promotionContinuation, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Promotion discovery is read-only and fully backed by loaded live promotion
+  // facts, so it should not wait for a model call. This also lets side
+  // questions like "มีโปรด้วยไหม" work while another topic is active.
+  const promotionDiscovery = await promotionDiscoveryFallbackResponse(request, runtime, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_PROMOTION_DISCOVERY_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (promotionDiscovery) {
+    const polished = polishedResponse(promotionDiscovery, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return json(200, {
       message: polished.message,

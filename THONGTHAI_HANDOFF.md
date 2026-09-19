@@ -1523,3 +1523,31 @@ Response Composer path that points to the existing LINE-first membership flow (`
   exposes provider names or the generic outage apology.
 
 **Test result after this hotfix**: `npm test` passes **513/513**, 0 failed.
+
+### Flow hardening after owner data-gap decision — 2026-09-19
+
+**Owner direction**: prices and richer business details will be supplied later. Until then,
+Thongthai must say unknown/unverified naturally instead of inventing values. This pass therefore
+focuses on conversation flow and zero-paid-LLM resilience, not new business truth.
+
+**Fixes**:
+- Restaurant advisory follow-ups no longer depend on client-provided `chatHistory`. The
+  deterministic restaurant path now persists a small server-side `restaurantAdvisorContext`, so
+  production turns like `ร้านมีไรกิน -> มากันสองคน งบ 500 -> ไม่กินหมู -> เอาชุดเมื่อกี้ ->
+  ราคาเท่าไร` stay in the same flow on both Web and LINE even when the transport sends an empty
+  history array.
+- Promotion discovery is now handled before any LLM call from the already-loaded live promotion
+  facts. Side questions such as `มีโปรด้วยไหม` can be answered deterministically during another
+  flow, and an empty source remains a real "ไม่มีโปรตอนนี้" answer rather than a provider outage.
+- Recommendation follow-ups in stay/OTOP/cafe now plan catalog knowledge requests instead of
+  falling through to the model path. This keeps `อันไหนดี`/similar turns on authoritative data and
+  lets missing data degrade to honest unavailable/unverified copy.
+
+**New regression coverage**:
+- `tests/restaurant-routing.test.ts`: restaurant follow-ups work from persisted server-side
+  advisor context when transported chat history is empty.
+- `tests/dialog-manager.test.ts`: `recommend` turns for stay, OTOP, and cafe query catalog data.
+
+**Data invariant**: if price/detail fields are absent or unwired, report them as unknown/data
+gaps. Do not hardcode owner-supplied facts into copy until they are represented in the proper
+source-of-truth adapter/world facts.

@@ -336,7 +336,7 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       return [];
     case 'stay':
       if (turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
-      if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'stay', needs: ['catalog', 'availability'] }];
+      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'stay', needs: ['catalog', 'availability'] }];
       if (task && task.missingFields.length === 0) return [{ ...base, domain: 'stay', needs: ['availability'] }];
       return [];
     case 'promotion':
@@ -344,13 +344,13 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       return [];
     case 'otop':
       if (turn.action === 'status') return [{ ...base, domain: 'otop', needs: ['order_status'] }];
-      if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'otop', needs: ['catalog'] }];
+      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'otop', needs: ['catalog'] }];
       return [];
     case 'membership':
       if (turn.action === 'status') return [{ ...base, domain: 'membership', needs: ['membership_status'] }];
       return [];
     case 'cafe':
-      if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'cafe', needs: ['catalog'] }];
+      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'cafe', needs: ['catalog'] }];
       return [];
     case 'ecosystem':
       if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'ecosystem', needs: ['catalog'] }];

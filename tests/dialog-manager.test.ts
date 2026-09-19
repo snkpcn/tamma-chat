@@ -114,6 +114,15 @@ test('restaurant discovery plans exactly a restaurant catalog request, nothing e
   assert.deepEqual(plan.knowledgeRequests[0]!.needs, ['catalog', 'recommendations_input']);
 });
 
+test('recommendation follow-ups in non-restaurant catalog domains still query authoritative catalog data', () => {
+  for (const domain of ['stay', 'otop', 'cafe'] as const) {
+    const plan = planDialogTurn(input({ semanticTurn: turn({ domain, action: 'recommend' }) }));
+    assert.equal(plan.knowledgeRequests.length, 1, `${domain} should query knowledge`);
+    assert.equal(plan.knowledgeRequests[0]!.domain, domain);
+    assert.ok(plan.knowledgeRequests[0]!.needs.includes('catalog'));
+  }
+});
+
 test('a complete activity task with a provide_information turn plans an availability request', () => {
   let plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'confirm', entities: { resourceCode: 'activity-horse', date: '2026-09-19', durationMinutes: 60 } }), eventId: 'evt-1' }));
   plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'provide_information', entities: {} }), taskState: plan.taskStateContainer, eventId: 'evt-2' }));

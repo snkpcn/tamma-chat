@@ -308,6 +308,7 @@ export async function persistBrainRuntime(guestDbId: string | null, channel: Bra
     if (unresolved !== null) set.unresolved_need=unresolved;
     if (update.clearUnresolvedNeed === true) removeKeys.push('unresolved_need');
     if (update.restaurantProposedSet) set.restaurantProposedSet = update.restaurantProposedSet;
+    if (update.restaurantAdvisorContext) set.restaurantAdvisorContext = update.restaurantAdvisorContext;
     if (update.pendingPromotionRedemption) set.pendingPromotionRedemption = update.pendingPromotionRedemption;
     if (update.clearPendingPromotionRedemption === true) removeKeys.push('pendingPromotionRedemption');
     const patched = await patchGuestAgentState(guestDbId,{set,removeKeys});
