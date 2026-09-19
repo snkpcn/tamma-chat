@@ -6,6 +6,7 @@ import {
   assertOperationalClaimSafety,
   buildResponseComposerPrompt,
   composeDeterministicResponse,
+  composeGroundedDeterministicResponse,
   composeThongthaiResponse,
   parseComposedResponse,
   type ResponseComposerInput,
@@ -210,6 +211,15 @@ test('model outage with verified grounded data still answers deterministically i
   assert.match(response.message,/89 บาท/);
   assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้/);
   assert.deepEqual(response.usedFactKeys.sort(), ['menu:m1:name','menu:m1:price'].sort());
+});
+
+test('grounded deterministic restaurant copy uses customer-facing menu wording, not internal verification language', () => {
+  const response=composeGroundedDeterministicResponse(input());
+  assert.ok(response);
+  assert.match(response.message,/เมนูที่มีตอนนี้/);
+  assert.match(response.message,/ส้มตำไทย/);
+  assert.match(response.message,/89 บาท/);
+  assert.doesNotMatch(response.message,/ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้/);
 });
 
 test('model outage without verified facts remains the last-resort concise failure', () => {

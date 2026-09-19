@@ -229,20 +229,11 @@ test('confidenceBucket thresholds', () => {
 
 // --- shadow comparison against legacy deterministic routers (no production wiring) ---
 
-test('shadow comparison: colloquial broad-discovery variants -- documents exactly which ones the legacy regex router still misses', () => {
+test('shadow comparison: colloquial broad-discovery variants are all covered by the deterministic fallback matcher', () => {
   const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'broad_discovery');
   const legacyResults = group.map(c => ({ id: c.id, message: c.message, ...legacyShadowRoute(c.message) }));
   const legacyMissed = legacyResults.filter(r => r.legacyDomain !== 'ecosystem').map(r => r.message);
-  // Real finding as of this Phase B checkpoint: the legacy router (broadened by
-  // a concurrent commit during this program) now catches 6 of the 7 required
-  // equivalence-group phrasings via its edit-distance fuzzy matcher, but still
-  // misses "แถวนี้ทำไรดี" -- it doesn't match any DISCOVERY_PATTERNS regex and
-  // isn't within edit-distance of a DISCOVERY_CANONICAL phrase. This is exactly
-  // the class of gap the semantic layer is built to close: the interpreter's
-  // simulated-output test above proves it classifies this phrase correctly.
-  // If this list ever grows, that's a legacy-router regression worth noting;
-  // if it shrinks to zero, update this assertion to say so explicitly.
-  assert.deepEqual(legacyMissed, ['แถวนี้ทำไรดี']);
+  assert.deepEqual(legacyMissed, []);
 });
 
 test('shadow comparison: legacy router has no concept of reference resolution at all (it is message-only, never sees context)', () => {

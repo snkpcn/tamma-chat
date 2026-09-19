@@ -72,6 +72,27 @@ function findRestaurantTopicNarrow(message: string): boolean {
   return RESTAURANT_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('thamma-chat-restaurant'));
 }
 
+const STAY_TOPIC_MARKER = /ห้อง|ที่พัก|เฮือน|บ้านพัก|เช[็็]?คอิน|เช็คอิน|เช็คเอาท์|เช็กเอาต์|room\s*service|รูม\s*เซอร์วิส/iu;
+const OTOP_TOPIC_MARKER = /otop|โอทอป|ของฝาก|สินค้าชุมชน/iu;
+const CAFE_TOPIC_MARKER = /กาแฟ|คาเฟ่|อินทนิน|inthanin|ลาเต้|latte|เครื่องดื่ม/iu;
+const MEMBERSHIP_TOPIC_MARKER = /สมาชิก|member|membership/iu;
+
+function findStayTopic(message: string): boolean {
+  return STAY_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('thamma-chat-stay'));
+}
+
+function findOtopTopic(message: string): boolean {
+  return OTOP_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('otop-community'));
+}
+
+function findCafeTopic(message: string): boolean {
+  return CAFE_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('inthanin'));
+}
+
+function findMembershipTopic(message: string): boolean {
+  return MEMBERSHIP_TOPIC_MARKER.test(message);
+}
+
 /** A structural fallback, tried only once nothing task-specific matches
  *  (see deriveDeterministicSemanticTurn below): does this message name a
  *  DIFFERENT supported topic than whatever is currently active? If so, it's
@@ -84,6 +105,30 @@ function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
   if (findRestaurantTopicNarrow(message)) {
     return {
       domain: 'restaurant', intent: 'restaurant_topic_switch', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+  if (findStayTopic(message)) {
+    return {
+      domain: 'stay', intent: 'stay_topic_switch', action: 'ask',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+  if (findOtopTopic(message)) {
+    return {
+      domain: 'otop', intent: 'otop_topic_switch', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+  if (findCafeTopic(message)) {
+    return {
+      domain: 'cafe', intent: 'cafe_topic_switch', action: 'ask',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+  if (findMembershipTopic(message)) {
+    return {
+      domain: 'membership', intent: 'membership_topic_switch', action: /สถานะ|เช็ค|ตรวจ|ดู/u.test(message) ? 'status' : 'ask',
       entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
     };
   }
@@ -181,6 +226,35 @@ function detectActivitySideQuestion(message: string, domain: SemanticDomain | nu
   }
   if (HOW_IT_WORKS_MARKER.test(message)) {
     return { domain, intent: 'ask_how_it_works', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.75, needsClarification: false };
+  }
+  return null;
+}
+
+function detectNonActivitySideQuestion(message: string, domain: SemanticDomain | null): SemanticTurn | null {
+  if (!domain || domain === 'activity' || domain === 'unknown') return null;
+  const entities: Record<string, unknown> = {};
+  const date = extractDate(message);
+  const partySize = extractPartySize(message);
+  if (date) entities.date = date;
+  if (partySize) entities.partySize = partySize;
+
+  if (domain === 'stay') {
+    if (STAY_TOPIC_MARKER.test(message) || AVAILABILITY_STATUS_MARKER.test(message) || Object.keys(entities).length) {
+      return { domain, intent:'stay_follow_up', action:'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
+    }
+  }
+  if (domain === 'otop') {
+    if (PRICE_MARKER.test(message) || /อัน(?:ไหน|นี้|นั้น)|ไหนดี|ยังมี/u.test(message)) {
+      return { domain, intent:'otop_follow_up', action: PRICE_MARKER.test(message) ? 'ask' : 'recommend', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
+    }
+  }
+  if (domain === 'cafe') {
+    if (PRICE_MARKER.test(message) || /เปิด|เมนู|มี|แก้ว|หวาน|เย็น|ร้อน/u.test(message)) {
+      return { domain, intent:'cafe_follow_up', action:'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
+    }
+  }
+  if (domain === 'membership' && /สถานะ|สิทธิ|สมัคร|เช็ค|ตรวจ|ดู/u.test(message)) {
+    return { domain, intent:'membership_follow_up', action:/สถานะ|เช็ค|ตรวจ|ดู/u.test(message) ? 'status' : 'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
   }
   return null;
 }
@@ -314,6 +388,9 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  const nonActivitySideQuestion = detectNonActivitySideQuestion(trimmed, effectiveDomain);
+  if (nonActivitySideQuestion) return nonActivitySideQuestion;
+
   const activityTopic = findActivityTopic(trimmed);
 
   // Quantity/inventory question for a known activity ("มีม้ากี่ตัว",
@@ -343,6 +420,63 @@ export function deriveDeterministicSemanticTurn(
       references: [],
       constraints: [],
       confidence: 0.85,
+      needsClarification: false,
+    };
+  }
+
+  if (findStayTopic(trimmed)) {
+    const entities: Record<string, unknown> = {};
+    const date = extractDate(trimmed);
+    const partySize = extractPartySize(trimmed);
+    if (date) entities.date = date;
+    if (partySize) entities.partySize = partySize;
+    return {
+      domain: 'stay',
+      intent: 'stay_read_only_inquiry',
+      action: 'ask',
+      entities,
+      references: [],
+      constraints: [],
+      confidence: 0.82,
+      needsClarification: false,
+    };
+  }
+
+  if (findOtopTopic(trimmed)) {
+    return {
+      domain: 'otop',
+      intent: 'otop_product_discovery',
+      action: PRICE_MARKER.test(trimmed) ? 'ask' : 'discover',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.82,
+      needsClarification: false,
+    };
+  }
+
+  if (findCafeTopic(trimmed)) {
+    return {
+      domain: 'cafe',
+      intent: 'cafe_read_only_inquiry',
+      action: 'ask',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.82,
+      needsClarification: false,
+    };
+  }
+
+  if (findMembershipTopic(trimmed)) {
+    return {
+      domain: 'membership',
+      intent: /สถานะ|เช็ค|ตรวจ|ดู/u.test(trimmed) ? 'membership_status' : 'membership_information',
+      action: /สถานะ|เช็ค|ตรวจ|ดู/u.test(trimmed) ? 'status' : 'ask',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.82,
       needsClarification: false,
     };
   }

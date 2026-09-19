@@ -24,9 +24,8 @@ function classify(legacyDomain: SemanticDomain | null, newDomain: SemanticDomain
   return 'needs_review';
 }
 
-test('shadow comparison: known legacy gaps are classified as expected_improvement under the new pipeline', () => {
+test('shadow comparison: remaining known legacy gaps are classified as expected_improvement under the new pipeline', () => {
   const cases: Array<{ message: string; newDomain: SemanticDomain; note: string }> = [
-    { message: 'แถวนี้ทำไรดี', newDomain: 'ecosystem', note: 'broad discovery phrasing the legacy regex never caught' },
     { message: 'โปรมีไร', newDomain: 'promotion', note: 'short promotion-discovery phrasing the legacy regex never caught' },
   ];
   for (const testCase of cases) {

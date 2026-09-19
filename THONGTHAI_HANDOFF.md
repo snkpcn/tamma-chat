@@ -1429,3 +1429,69 @@ attribute facts (`ACTIVITY_ASSET_ATTRIBUTE_KEYS`); `composeDeterministicResponse
 `cannot_verify_comparison`-before-`model_unavailable` reordering and `composeThongthaiResponse`'s
 earlier model-bypass for the same responseIntent are complementary, not duplicative. Full suite
 re-verified green after the merge (see test pass count below).
+
+### Final production acceptance hardening — 2026-09-19
+
+**Starting state verified**: local `origin/main` was exactly
+`2d23b4ee2947cfb6ebf24d9c30f16fe7d728294a`; no intervening commits existed above the expected
+baseline. `THONGTHAI_ONE_MIND_CUTOVER=1` is present in `netlify.toml`. The public
+`thongthai-brain-status` endpoint reported `oneMindCutoverConfigured=true`,
+`oneMindShadowConfigured=false`, `geminiConfigured=true`, `openaiFallbackConfigured=true`, and
+`supabaseConfigured=true`. Netlify CLI could not inspect private deploy/env state in this session
+because it was not logged in/linked, so deploy id/env confirmation must still come from the
+authenticated Netlify project after push/deploy.
+
+**Production UAT finding**: the activity canonical script passes only when the test `guestId` is a
+real UUID (same as the web `tamma_guest_id` contract). A non-UUID guest id cannot create/load the
+server-side guest row, so state does not persist and the request falls back to legacy/LLM behavior.
+With a UUID guest, production preserved the horse selection and time, did not invent horse
+temperament, did not create a transaction, and corrected `60 นาที -> 90 นาที`; the remaining
+missing field was correctly `date`.
+
+**Defects fixed in this pass**:
+- Response-quality: grounded deterministic restaurant/OTOP/stay/activity lists no longer expose
+  the raw phrase `ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้ครับ`; the composer now uses customer-facing
+  domain intros like `🍽️ เมนูที่มีตอนนี้ครับ`.
+- Zero-cost read-only coverage: production was still returning the generic provider apology for
+  supported read-only turns such as stay (`มีห้องพรุ่งนี้ไหม`, check-in/out/room service), OTOP
+  (`มีของฝากอะไรบ้าง`), cafe (`มีลาเต้ไหม`), membership (`สมัครสมาชิกยังไง`), and ecosystem
+  variants (`แถวนี้ทำไรดี`, `พาแฟนมา มีไรแนะนำ`). `_deterministic-semantic-turn.ts` now derives
+  these by business-domain topic/intent markers and active-domain follow-up rules, not literal
+  answer phrase tables.
+- Cutover gate: read-only `membership` and `cafe` turns may now compose through One-Mind; payment,
+  journey and support remain legacy-required until their own equivalence is proven. Transactional
+  OTOP/cafe/membership actions are still not executed by One-Mind.
+- Entity-selection precedence: after the system shows a stay entity, a customer selecting it must
+  resolve the entity before broad stay side-question handling. The no-active-task derivation now
+  tries recent-entity selection before non-activity side-question fallback.
+
+**New/updated regression coverage**:
+- `tests/deterministic-semantic-turn.test.ts`: production read-only domain failures and broad
+  discovery variants derive with zero LLM calls; active-domain OTOP/cafe short follow-ups work.
+- `tests/response-composer.test.ts`: grounded restaurant copy must use customer-facing wording and
+  must not contain the rejected internal verification phrase.
+- `tests/one-mind-response.test.ts` and `tests/phase-m-e2e.test.ts`: membership/cafe read-only
+  cutover is allowed, while unfinished transactional domains remain legacy-required.
+- Shadow/corpus tests updated because `แถวนี้ทำไรดี` is no longer a documented legacy miss; the
+  deterministic fallback matcher now covers the full broad-discovery equivalence group.
+
+**Test result**: `npm test` passes **511/511**, 0 failed.
+
+**Data gaps observed, not fixed in code**:
+- Activity asset metadata fields are supported but not populated for the two horses:
+  `temperament`, `beginnerSuitability`, `age`, `sex`, `size`, `maxRiderWeight`, `notes`,
+  `operationalStatus`. Until operations fills them in `activity_assets.metadata`, comparisons must
+  continue to answer "ยังไม่มีข้อมูลยืนยัน" and never choose a horse.
+- Activity price facts for horse/ATV/archery are present structurally via `activity_offerings`, but
+  production currently behaves as if some prices are null/unconfigured for customer-facing price
+  questions. Treat as data gap unless DB audit proves otherwise.
+- Stay policies provided by the owner earlier (check-in <= 14:00, check-out <= 12:00, room service
+  10:00-22:00, final confirmation by LINE/email/phone) are not yet wired as One-Mind authoritative
+  knowledge. Do not hardcode them in composer copy; add a source adapter/world-fact route first.
+- Cafe/Inthanin menu/hours data has no read-only One-Mind adapter yet. The new cutover prevents a
+  generic provider apology, but it can only say source unavailable/unverified until real cafe facts
+  are wired.
+
+**Deployment reminder**: after this commit is pushed, allow one Netlify production deploy, verify
+the deploy SHA equals the pushed main SHA, then rerun a concise production smoke using UUID
+`guestId`s. Do not use non-UUID UAT guest ids for continuity testing.

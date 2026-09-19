@@ -346,6 +346,12 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.action === 'status') return [{ ...base, domain: 'otop', needs: ['order_status'] }];
       if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'otop', needs: ['catalog'] }];
       return [];
+    case 'membership':
+      if (turn.action === 'status') return [{ ...base, domain: 'membership', needs: ['membership_status'] }];
+      return [];
+    case 'cafe':
+      if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'cafe', needs: ['catalog'] }];
+      return [];
     case 'ecosystem':
       if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'ecosystem', needs: ['catalog'] }];
       return [];

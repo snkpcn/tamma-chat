@@ -43,7 +43,7 @@ const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','statu
 // exclusions (membership/cafe/journey/payment/support) still do, so those
 // stay on legacy until their own equivalence is proven -- "do not force
 // unfinished transactional cutover".
-const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem']);
+const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
 // Task-worthy modes that only ever COLLECT/CLARIFY information -- they never
 // execute or even propose a transaction (see DialogMode/COMMIT_ACTIONS in

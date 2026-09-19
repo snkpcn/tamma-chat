@@ -480,6 +480,15 @@ function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; 
   return { lines, keys:[...new Set(keys)] };
 }
 
+function groundedIntro(input: ResponseComposerInput): string {
+  if (input.language !== 'th') return 'Here is what I can verify right now:';
+  if (input.knowledgeBundles.some(bundle => bundle.domain === 'restaurant')) return '🍽️ เมนูที่มีตอนนี้ครับ';
+  if (input.knowledgeBundles.some(bundle => bundle.domain === 'stay')) return '🏡 ที่พักที่มีตอนนี้ครับ';
+  if (input.knowledgeBundles.some(bundle => bundle.domain === 'otop')) return '🛍️ ของฝากที่มีตอนนี้ครับ';
+  if (input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) return '🌿 กิจกรรมที่มีตอนนี้ครับ';
+  return 'ตัวเลือกที่มีตอนนี้ครับ';
+}
+
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
   const activitySummary = naturalActivityTopicSummary(input);
   if (activitySummary) {
@@ -496,9 +505,7 @@ export function composeGroundedDeterministicResponse(input: ResponseComposerInpu
 
   const grounded = compactGroundedLines(input);
   if (!grounded.lines.length) return null;
-  const intro = input.language === 'th'
-    ? 'ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้ครับ'
-    : 'Here is what I can verify right now:';
+  const intro = groundedIntro(input);
   const message = [intro, '', ...grounded.lines].join('\n');
   return {
     message:polishCustomerMessage(message, input.channel),

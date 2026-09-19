@@ -215,11 +215,9 @@ test('M6 restaurant preorder: explicit order proposal matches existing determini
   assert.match(runtime,/call\.name === 'create_restaurant_preorder'/);
 });
 
-test('M7 unsupported/transactional domains stay on legacy safety path instead of accidental partial cutover',async()=>{
+test('M7 membership/cafe read-only turns may compose, while unfinished transactional domains stay on legacy safety path',async()=>{
   const cases:Array<[SemanticTurn['domain'],SemanticTurn['action'],string]>=[
-    ['membership','status','membership_status'],
     ['payment','status','payment_status'],
-    ['cafe','ask','ask_cafe_menu'],
   ];
   for(const [domain,action,intent] of cases){
     const state=memoryState();
@@ -229,6 +227,19 @@ test('M7 unsupported/transactional domains stay on legacy safety path instead of
       providerUserKey:'web-key',persistState:true,environment:'test',
     },oneMindDeps(()=>turn,()=>({})),state.deps,NOW);
     assert.equal(result.status,'legacy_required',`${domain} must not be silently cut over before equivalence`);
+  }
+  const readOnlyCases:Array<[SemanticTurn['domain'],SemanticTurn['action'],string]>=[
+    ['membership','status','membership_status'],
+    ['cafe','ask','ask_cafe_menu'],
+  ];
+  for(const [domain,action,intent] of readOnlyCases){
+    const state=memoryState();
+    const turn=semantic(domain,action,intent);
+    const result=await processOneMindCustomerTurn({
+      channel:'web',language:'th',message:'test',eventId:`m-readonly-${domain}`,
+      providerUserKey:'web-key',persistState:true,environment:'test',
+    },oneMindDeps(()=>turn,()=>({})),state.deps,NOW);
+    assert.equal(result.status,'composed',`${domain} read-only degradation should be centralized instead of falling to generic provider apology`);
   }
 });
 

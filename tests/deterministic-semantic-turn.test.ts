@@ -18,11 +18,54 @@ test('no context, broad discovery phrasing derives ecosystem/discover with zero 
   assert.equal(turn!.needsClarification, false);
 });
 
+test('production broad-discovery variants derive ecosystem/discover without a model', () => {
+  for (const message of ['แถวนี้ทำไรดี', 'พาแฟนมา มีไรแนะนำ', 'มาครั้งแรกแนะนำหน่อย']) {
+    const turn = deriveDeterministicSemanticTurn(message, emptySemanticContext(), emptyTaskStateContainer());
+    assert.ok(turn, message);
+    assert.equal(turn!.domain, 'ecosystem', message);
+    assert.equal(turn!.action, 'discover', message);
+  }
+});
+
 test('a message naming a known activity narrows to the activity domain (discover, no task created)', () => {
   const turn = deriveDeterministicSemanticTurn('ม้าล่ะ', emptySemanticContext(), emptyTaskStateContainer());
   assert.ok(turn);
   assert.equal(turn!.domain, 'activity');
   assert.equal(turn!.action, 'discover');
+});
+
+test('production read-only business domains derive deterministically instead of falling to provider outage', () => {
+  const cases = [
+    ['มีห้องพรุ่งนี้ไหม', 'stay', 'ask'],
+    ['เช็คอินกี่โมง', 'stay', 'ask'],
+    ['มี room service ไหม', 'stay', 'ask'],
+    ['มีของฝากอะไรบ้าง', 'otop', 'discover'],
+    ['มีลาเต้ไหม', 'cafe', 'ask'],
+    ['สมัครสมาชิกยังไง', 'membership', 'ask'],
+    ['เช็คสถานะสมาชิกได้ไหม', 'membership', 'status'],
+  ] as const;
+
+  for (const [message, domain, action] of cases) {
+    const turn = deriveDeterministicSemanticTurn(message, emptySemanticContext(), emptyTaskStateContainer());
+    assert.ok(turn, message);
+    assert.equal(turn!.domain, domain, message);
+    assert.equal(turn!.action, action, message);
+    assert.equal(turn!.needsClarification, false, message);
+  }
+});
+
+test('short follow-ups reuse the active read-only domain when structurally clear', () => {
+  const otopContext: SemanticContext = { activeDomain: 'otop', recentEntities: [] };
+  const otop = deriveDeterministicSemanticTurn('อันไหนดี', otopContext, emptyTaskStateContainer());
+  assert.ok(otop);
+  assert.equal(otop!.domain, 'otop');
+  assert.equal(otop!.action, 'recommend');
+
+  const cafeContext: SemanticContext = { activeDomain: 'cafe', recentEntities: [] };
+  const cafe = deriveDeterministicSemanticTurn('ราคาเท่าไร', cafeContext, emptyTaskStateContainer());
+  assert.ok(cafe);
+  assert.equal(cafe!.domain, 'cafe');
+  assert.equal(cafe!.action, 'ask');
 });
 
 test('selecting a recently-shown entity by name resolves deterministically, with no active task yet', () => {
