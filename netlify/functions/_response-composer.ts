@@ -22,6 +22,7 @@ import {
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
+import { extractTime } from './_slot-parsers';
 
 export const RESPONSE_COMPOSER_VERSION = 'response-composer-v1';
 const MAX_FACTS_IN_PROMPT = 100;
@@ -554,7 +555,11 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
       // duration means ASK, never silently pick one. The choices come
       // directly from the same authoritative catalog facts, never a
       // hardcoded per-activity duration table.
-      message = `เลือกระยะเวลาได้เลยครับ: ${durationChoice.options.map(minutes => `${minutes} นาที`).join(' หรือ ')}`;
+      const suppliedTime = extractTime(input.userMessage ?? '');
+      const timeAck = suppliedTime
+        ? `รับเวลา ${suppliedTime} ไว้ก่อนครับ (ยังไม่ได้ยืนยันคิว)\n`
+        : '';
+      message = `${timeAck}เลือกระยะเวลาได้เลยครับ: ${durationChoice.options.map(minutes => `${minutes} นาที`).join(' หรือ ')}`;
     } else if (durationChoice?.status === 'unknown' && input.language === 'th') {
       message = 'ตอนนี้ทองไทยยังเช็กระยะเวลาของกิจกรรมนี้ให้ไม่ได้ครับ ไม่ขอเดา ให้ทีมงานช่วยตรวจสอบอีกครั้งนะครับ';
     } else if (input.language === 'th' && missing.length) {
@@ -607,6 +612,15 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
   if (input.degradation.condition === 'source_unavailable'
       || input.degradation.condition === 'verified_empty'
       || input.degradation.condition === 'fact_unknown') {
+    return composeDeterministicResponse(input);
+  }
+
+  // Comparison safety is a machine decision, not a wording preference.
+  // If the Dialog Manager could not verify the precise comparison attribute
+  // for the candidate entities (for example horse temperament), do NOT hand
+  // the turn to a model that might fill the missing trait with plausible
+  // prose. Speak the canonical "cannot verify" copy deterministically.
+  if (input.dialogDecision.responseIntent === 'cannot_verify_comparison') {
     return composeDeterministicResponse(input);
   }
 

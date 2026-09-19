@@ -335,3 +335,42 @@ test('activity inventory-count question answers from authoritative asset invento
   }
   assert.equal(modelCallCount, 0, 'inventory-count question must not spend an LLM call');
 });
+
+
+test('time supplied before choosing among multiple durations is retained and acknowledged instead of ignored', async () => {
+  const state = memoryState();
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANON,
+    guestDbIdFromAnonymousId: async () => GUEST,
+    interpretSemanticTurn: async () => { throw new LLMAvailabilityError('forced unavailable', []); },
+    buildKnowledgeAdapters: (): KnowledgeSourceAdapters => ({
+      activity: { catalog: async () => ok('activity_catalog', 'activity_live', horseCatalogFacts([30, 60, 90])) },
+    }),
+  };
+
+  await processOneMindCustomerTurn({
+    channel:'line', language:'th', message:'ม้าล่ะ', eventId:'time-before-duration-1',
+    providerUserKey:'line-time-before-duration', persistState:true, environment:'test',
+  }, deps, state, NOW);
+
+  await processOneMindCustomerTurn({
+    channel:'line', language:'th', message:'เอาภาราดร', eventId:'time-before-duration-2',
+    providerUserKey:'line-time-before-duration', persistState:true, environment:'test',
+  }, deps, state, new Date(NOW.getTime()+1000));
+
+  const result = await processOneMindCustomerTurn({
+    channel:'line', language:'th', message:'บ่ายสามได้ปะ', eventId:'time-before-duration-3',
+    providerUserKey:'line-time-before-duration', persistState:true, environment:'test',
+  }, deps, state, new Date(NOW.getTime()+2000));
+
+  assert.equal(result.status,'composed');
+  if (result.status === 'composed') {
+    assert.equal(result.turn.taskStateAfter.activeTask?.slots.time,'15:00');
+    assert.ok(result.turn.dialogDecision.missingFields.includes('durationMinutes'));
+    assert.match(result.response.message,/15:00/u);
+    assert.match(result.response.message,/ยังไม่ได้ยืนยันคิว/u);
+    assert.match(result.response.message,/30 นาที/u);
+    assert.match(result.response.message,/60 นาที/u);
+    assert.match(result.response.message,/90 นาที/u);
+  }
+});

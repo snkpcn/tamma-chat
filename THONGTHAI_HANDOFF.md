@@ -1294,3 +1294,17 @@ runtime as well as at build time).
 - Fix stays inside the shared Response Composer: when authoritative activity knowledge narrows to exactly one activity with a verified asset count, deterministic degradation now composes a natural concise LINE answer (for example: `มีขี่ม้าครับ 🐴 / ตอนนี้มีม้า 2 ตัว / • ทองไทย / • ภาราดร`). Quantity questions use the same verified facts but lead with the count directly.
 - No mutable fact is hardcoded: count, names, and activity identity still come only from the authoritative activity catalog facts.
 - Regression assertions now reject the generic fact-dump intro for both `ม้าล่ะ` and `มีม้ากี่ตัว`.
+
+
+### Post-closure production hotfix 4 — comparison truth + slot acknowledgement — 2026-09-19
+
+- Real LINE UAT exposed two customer-facing defects:
+  1. `ตัวไหนนิสัยดีกว่า` produced friendly-sounding but unverified horse temperament claims even though the live activity catalog did not contain authoritative temperament facts.
+  2. After selecting a horse with multiple verified duration options, `บ่ายสามได้ปะ` correctly parsed/stored 15:00 but the deterministic response repeated only the duration choices, making it look as if the customer's time was ignored.
+- Root causes:
+  - Response Composer still attempted model phrasing for `cannot_verify_comparison`; usedFactKeys validation alone cannot prove every adjective in free prose is grounded.
+  - collect-field rendering did not acknowledge a slot successfully supplied in the same turn when another required field remained missing.
+- Fix:
+  - `cannot_verify_comparison` now always renders deterministic canonical copy, so missing comparison attributes cannot be plausibly invented by the model.
+  - when a verified multi-duration activity still needs duration but the current message supplies a parseable time, the response explicitly acknowledges the stored time and says the queue is not yet confirmed before asking for the real duration choices.
+- No availability is implied by accepting the requested time into task state; requested time remains distinct from verified availability/confirmation.
