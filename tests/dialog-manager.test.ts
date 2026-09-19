@@ -123,9 +123,9 @@ test('recommendation follow-ups in non-restaurant catalog domains still query au
   }
 });
 
-test('a complete activity task with a provide_information turn plans an availability request', () => {
+test('a complete activity task with a real provide_information slot update plans an availability request', () => {
   let plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'confirm', entities: { resourceCode: 'activity-horse', date: '2026-09-19', durationMinutes: 60 } }), eventId: 'evt-1' }));
-  plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'provide_information', entities: {} }), taskState: plan.taskStateContainer, eventId: 'evt-2' }));
+  plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'provide_information', entities: { partySize: 2 } }), taskState: plan.taskStateContainer, eventId: 'evt-2' }));
   assert.equal(plan.missingFields.length, 0);
   assert.equal(plan.knowledgeRequests.some(r => r.needs.includes('availability')), true);
   assert.equal(plan.mode, 'query_knowledge');
