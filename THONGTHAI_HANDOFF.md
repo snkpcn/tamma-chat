@@ -1286,3 +1286,11 @@ runtime as well as at build time).
   - the real activity adapter filters by requested `activityCode` and emits authoritative asset count/type facts from the same live `activity_offerings/activity_assets` source;
   - deterministic Response Composer renders count + real named assets for inventory questions, and shows named assets on a single-activity topic-narrow response.
 - Regression coverage added under forced-provider-unavailable conditions: `มีม้ากี่ตัว` must answer from live-style authoritative facts with zero LLM calls, and `ม้าล่ะ` must surface a real named horse asset rather than unrelated activities.
+
+
+### Post-closure production hotfix 3 — natural activity follow-up copy — 2026-09-19
+
+- Real LINE UAT showed that the prior activity fix was factually correct but customer-facing wording was still robotic: `ม้าล่ะ` rendered the generic header `ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้ครับ` followed by raw bullets `ขี่ม้า / ทองไทย / ภาราดร`.
+- Fix stays inside the shared Response Composer: when authoritative activity knowledge narrows to exactly one activity with a verified asset count, deterministic degradation now composes a natural concise LINE answer (for example: `มีขี่ม้าครับ 🐴 / ตอนนี้มีม้า 2 ตัว / • ทองไทย / • ภาราดร`). Quantity questions use the same verified facts but lead with the count directly.
+- No mutable fact is hardcoded: count, names, and activity identity still come only from the authoritative activity catalog facts.
+- Regression assertions now reject the generic fact-dump intro for both `ม้าล่ะ` and `มีม้ากี่ตัว`.

@@ -291,6 +291,65 @@ function groundedValueMap(input: ResponseComposerInput): Map<string, unknown> {
   return map;
 }
 
+
+function naturalActivityTopicSummary(input: ResponseComposerInput): { message: string; keys: string[] } | null {
+  if (input.language !== 'th' || !input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) return null;
+
+  const facts = groundedValueMap(input);
+  const activityIds = [...new Set(
+    [...facts.keys()]
+      .map(key => key.match(/^activity:([^:]+):name$/)?.[1])
+      .filter((id): id is string => Boolean(id)),
+  )];
+  if (activityIds.length !== 1) return null;
+
+  const id = activityIds[0]!;
+  const activityNameKey = `activity:${id}:name`;
+  const countKey = `activity:${id}:assetCount`;
+  const activityName = facts.get(activityNameKey);
+  const count = facts.get(countKey);
+  if (typeof activityName !== 'string' || typeof count !== 'number') return null;
+
+  const assetCodes = [...facts.keys()]
+    .map(key => key.match(/^activity_asset:([^:]+):activityCode$/)?.[1])
+    .filter((code): code is string => Boolean(code))
+    .filter(code => facts.get(`activity_asset:${code}:activityCode`) === id);
+  const assetTypes = [...new Set(
+    assetCodes
+      .map(code => facts.get(`activity_asset:${code}:type`))
+      .filter((value): value is string => typeof value === 'string'),
+  )];
+  const names = assetCodes
+    .map(code => ({ code, name: facts.get(`activity_asset:${code}:name`) }))
+    .filter((item): item is { code: string; name: string } => typeof item.name === 'string' && Boolean(item.name));
+
+  const typeCopy: Record<string, { noun: string; unit: string; emoji: string }> = {
+    horse:{ noun:'ม้า', unit:'ตัว', emoji:'🐴' },
+    atv:{ noun:'ATV', unit:'คัน', emoji:'🏍️' },
+    archery:{ noun:'ชุดยิงธนู', unit:'ชุด', emoji:'🏹' },
+  };
+  const copy = assetTypes.length === 1 ? typeCopy[assetTypes[0]!] : undefined;
+  const noun = copy?.noun ?? activityName;
+  const unit = copy?.unit ?? 'รายการ';
+  const emoji = copy?.emoji ?? '🌿';
+  const isCountQuestion = /(?:กี่(?:ตัว|คัน|ชุด|อัน|รายการ)?|จำนวน(?:เท่าไร|เท่าไหร่|กี่)|มีกี่)/u.test(input.userMessage ?? '');
+
+  const header = isCountQuestion
+    ? `ตอนนี้มี${noun} ${count} ${unit}ครับ ${emoji}`
+    : `มี${activityName}ครับ ${emoji}\nตอนนี้มี${noun} ${count} ${unit}`;
+  const nameLines = names.map(item => `• ${item.name}`);
+  const message = [header, ...nameLines].join('\n');
+
+  const used = [activityNameKey, countKey];
+  for (const item of names) {
+    used.push(`activity_asset:${item.code}:name`);
+    used.push(`activity_asset:${item.code}:activityCode`);
+    const typeKey = `activity_asset:${item.code}:type`;
+    if (facts.has(typeKey)) used.push(typeKey);
+  }
+  return { message, keys:[...new Set(used)] };
+}
+
 function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; keys: string[] } {
   const facts = groundedValueMap(input);
   const lines: string[] = [];
@@ -421,6 +480,19 @@ function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; 
 }
 
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
+  const activitySummary = naturalActivityTopicSummary(input);
+  if (activitySummary) {
+    return {
+      message:polishCustomerMessage(activitySummary.message, input.channel),
+      mode:'deterministic',
+      usedFactKeys:activitySummary.keys,
+      composerVersion:RESPONSE_COMPOSER_VERSION,
+      bibleVersion:THONGTHAI_BIBLE_VERSION,
+      channel:input.channel,
+      language:input.language,
+    };
+  }
+
   const grounded = compactGroundedLines(input);
   if (!grounded.lines.length) return null;
   const intro = input.language === 'th'

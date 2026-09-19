@@ -98,8 +98,10 @@ test('canonical activity flow retains context/selection/slots with ZERO LLM call
   // The composer renders the activity's own catalog name here (its
   // asset-name fallback only engages when no activity-level name fact
   // exists) -- either way it is a real authoritative name, never a guess.
-  assert.match(t1.response.message, /ขี่ม้า/, 'discovery must show the real catalog name, not a guess');
-  assert.match(t1.response.message, /ภาราดร/, 'topic-narrow discovery should show real named horse assets, not repeat unrelated activities');
+  assert.match(t1.response.message, /มีขี่ม้า/u, 'topic-narrow response should sound like a natural answer, not a raw fact dump');
+  assert.match(t1.response.message, /ม้า.*2.*ตัว/u, 'topic-narrow response should summarize the verified horse count naturally');
+  assert.match(t1.response.message, /ภาราดร/u, 'topic-narrow discovery should show real named horse assets, not repeat unrelated activities');
+  assert.doesNotMatch(t1.response.message, /ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้/u, 'do not expose the generic deterministic fact-dump intro for a simple activity follow-up');
 
   // Turn 2: "เอาภาราดร" -- selects the horse shown in turn 1. Must resolve
   // deterministically against recentEntities populated from turn 1's
@@ -326,8 +328,9 @@ test('activity inventory-count question answers from authoritative asset invento
 
   assert.equal(result.status, 'composed');
   if (result.status === 'composed') {
-    assert.match(result.response.message, /ม้า.*2.*ตัว/u);
+    assert.match(result.response.message, /ตอนนี้มีม้า.*2.*ตัว/u);
     assert.match(result.response.message, /ภาราดร/u);
+    assert.doesNotMatch(result.response.message, /ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้/u);
     assert.doesNotMatch(result.response.message, GENERIC_APOLOGY);
   }
   assert.equal(modelCallCount, 0, 'inventory-count question must not spend an LLM call');
