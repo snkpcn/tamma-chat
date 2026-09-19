@@ -1266,3 +1266,11 @@ runtime as well as at build time).
   "do not force unfinished transactional cutover") or restructuring the legacy brain to accept a
   pre-classified `SemanticTurn` (a real redesign, explicitly out of scope this pass). Flagged here
   for whoever picks up membership/cafe/journey/payment/support equivalence work next.
+
+
+### Post-closure production hotfix — LINE broad discovery regression — 2026-09-19
+
+- Real LINE UAT immediately exposed a regression after enabling One-Mind primary: colloquial broad discovery `มีไรทำมั่ง` returned the deterministic FACT_UNKNOWN copy (`ข้อมูลส่วนนี้ยังไม่มีข้อมูลยืนยันครับ ทองไทยไม่ขอเดาให้ผิด`) instead of the verified ecosystem/activity discovery response.
+- Root cause: `thongthai-chat.ts` ran the One-Mind cutover block before the already-existing zero-cost `deterministicExperienceDiscoveryResponse`. The ecosystem turn was eligible for cutover and composed an unknown response before the authoritative discovery fast path could execute.
+- Fix: preserve the entire broad-discovery intent class via the shared `isExperienceDiscoveryIntent` matcher, skipping the cutover block for that class so the existing verified deterministic discovery response owns it. This is a domain-level routing fix, not a phrase patch.
+- Regression coverage added in `tests/experience-discovery.test.ts` to lock this precedence while One-Mind cutover remains enabled.
