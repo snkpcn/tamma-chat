@@ -6,6 +6,7 @@ import {
   assertOperationalClaimSafety,
   buildResponseComposerPrompt,
   composeDeterministicResponse,
+  composeThongthaiResponse,
   parseComposedResponse,
   type ResponseComposerInput,
 } from '../netlify/functions/_response-composer';
@@ -257,4 +258,19 @@ test('a clarify-mode turn asks for clarification even under model_unavailable, n
   }));
   assert.match(response.message,/ขอรายละเอียดเพิ่ม/);
   assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้/);
+});
+
+
+test('unverified comparison is always deterministic and cannot hallucinate traits', async () => {
+  const response = await composeThongthaiResponse(input({
+    knowledgeBundles:[],
+    dialogDecision:decision({
+      mode:'answer',
+      responseIntent:'cannot_verify_comparison',
+      reasons:['cannot_verify_comparison'],
+    }),
+  }));
+  assert.equal(response.mode, 'deterministic');
+  assert.match(response.message,/ยังไม่มีข้อมูลยืนยัน|ไม่ขอเดา/u);
+  assert.doesNotMatch(response.message,/ใจดี|น่ารัก|คุ้นเคยกับคน|นิสัยดีกว่า/u);
 });

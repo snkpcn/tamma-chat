@@ -838,7 +838,15 @@ export const handler: Handler = async (event: HandlerEvent) => {
   // turns in the explicitly proven domains can return from One-Mind here.
   // Transactional/in-progress-task turns are inspected but not persisted and
   // fall through to the unchanged legacy path below.
-  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1') {
+  // Preserve the existing authoritative zero-cost broad-discovery fast path.
+  // One-Mind's ecosystem cutover can otherwise compose FACT_UNKNOWN before
+  // deterministicExperienceDiscoveryResponse gets a chance to render the
+  // verified experience/activity catalog (regression observed in LINE for
+  // colloquial Thai such as "มีไรทำมั่ง"). This is a domain-level routing
+  // guard, not a phrase-by-phrase answer patch: the shared
+  // isExperienceDiscoveryIntent matcher owns the entire broad-discovery class.
+  const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
+  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath) {
     try {
       const oneMind = await processOneMindCustomerTurn({
         channel,

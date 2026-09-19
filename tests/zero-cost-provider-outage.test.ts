@@ -58,10 +58,13 @@ function horseCatalogFacts(durationsMinutes: number[]): GroundedFact[] {
   return [
     fact('activity:horse:name', 'ขี่ม้า', 'activity', 'activity_catalog', 'activity_live'),
     fact('activity:horse:resourceCode', 'activity-horse', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity:horse:assetCount', 2, 'activity', 'activity_catalog', 'activity_live'),
     ...durationsMinutes.map(minutes => fact(`activity:horse:${minutes}min:price`, 500, 'activity', 'activity_catalog', 'activity_live')),
     fact('activity_asset:horse-01:name', 'ภาราดร', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity_asset:horse-01:type', 'horse', 'activity', 'activity_catalog', 'activity_live'),
     fact('activity_asset:horse-01:activityCode', 'horse', 'activity', 'activity_catalog', 'activity_live'),
     fact('activity_asset:horse-02:name', 'สายฟ้า', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity_asset:horse-02:type', 'horse', 'activity', 'activity_catalog', 'activity_live'),
     fact('activity_asset:horse-02:activityCode', 'horse', 'activity', 'activity_catalog', 'activity_live'),
   ];
 }
@@ -95,7 +98,10 @@ test('canonical activity flow retains context/selection/slots with ZERO LLM call
   // The composer renders the activity's own catalog name here (its
   // asset-name fallback only engages when no activity-level name fact
   // exists) -- either way it is a real authoritative name, never a guess.
-  assert.match(t1.response.message, /ขี่ม้า/, 'discovery must show the real catalog name, not a guess');
+  assert.match(t1.response.message, /มีขี่ม้า/u, 'topic-narrow response should sound like a natural answer, not a raw fact dump');
+  assert.match(t1.response.message, /ม้า.*2.*ตัว/u, 'topic-narrow response should summarize the verified horse count naturally');
+  assert.match(t1.response.message, /ภาราดร/u, 'topic-narrow discovery should show real named horse assets, not repeat unrelated activities');
+  assert.doesNotMatch(t1.response.message, /ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้/u, 'do not expose the generic deterministic fact-dump intro for a simple activity follow-up');
 
   // Turn 2: "เอาภาราดร" -- selects the horse shown in turn 1. Must resolve
   // deterministically against recentEntities populated from turn 1's
@@ -296,5 +302,75 @@ test('a genuinely ambiguous zero-LLM turn asks ONE clarifying question instead o
     // Falling to legacy (e.g. domain not cut over) is also an acceptable
     // outcome here -- the key invariant is that One-Mind itself never threw.
     assert.equal(result.turn.semanticTurn.needsClarification, true);
+  }
+});
+
+
+test('activity inventory-count question answers from authoritative asset inventory with ZERO LLM calls', async () => {
+  const state = memoryState();
+  let modelCallCount = 0;
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANON,
+    guestDbIdFromAnonymousId: async () => GUEST,
+    interpretSemanticTurn: async () => {
+      modelCallCount += 1;
+      throw new LLMAvailabilityError('forced unavailable', []);
+    },
+    buildKnowledgeAdapters: (): KnowledgeSourceAdapters => ({
+      activity: { catalog: async () => ok('activity_catalog', 'activity_live', horseCatalogFacts([30])) },
+    }),
+  };
+
+  const result = await processOneMindCustomerTurn({
+    channel:'line', language:'th', message:'มีม้ากี่ตัว', eventId:'inventory-count-1',
+    providerUserKey:'line-inventory-count', persistState:true, environment:'test',
+  }, deps, state, NOW);
+
+  assert.equal(result.status, 'composed');
+  if (result.status === 'composed') {
+    assert.match(result.response.message, /ตอนนี้มีม้า.*2.*ตัว/u);
+    assert.match(result.response.message, /ภาราดร/u);
+    assert.doesNotMatch(result.response.message, /ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้/u);
+    assert.doesNotMatch(result.response.message, GENERIC_APOLOGY);
+  }
+  assert.equal(modelCallCount, 0, 'inventory-count question must not spend an LLM call');
+});
+
+
+test('time supplied before choosing among multiple durations is retained and acknowledged instead of ignored', async () => {
+  const state = memoryState();
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANON,
+    guestDbIdFromAnonymousId: async () => GUEST,
+    interpretSemanticTurn: async () => { throw new LLMAvailabilityError('forced unavailable', []); },
+    buildKnowledgeAdapters: (): KnowledgeSourceAdapters => ({
+      activity: { catalog: async () => ok('activity_catalog', 'activity_live', horseCatalogFacts([30, 60, 90])) },
+    }),
+  };
+
+  await processOneMindCustomerTurn({
+    channel:'line', language:'th', message:'ม้าล่ะ', eventId:'time-before-duration-1',
+    providerUserKey:'line-time-before-duration', persistState:true, environment:'test',
+  }, deps, state, NOW);
+
+  await processOneMindCustomerTurn({
+    channel:'line', language:'th', message:'เอาภาราดร', eventId:'time-before-duration-2',
+    providerUserKey:'line-time-before-duration', persistState:true, environment:'test',
+  }, deps, state, new Date(NOW.getTime()+1000));
+
+  const result = await processOneMindCustomerTurn({
+    channel:'line', language:'th', message:'บ่ายสามได้ปะ', eventId:'time-before-duration-3',
+    providerUserKey:'line-time-before-duration', persistState:true, environment:'test',
+  }, deps, state, new Date(NOW.getTime()+2000));
+
+  assert.equal(result.status,'composed');
+  if (result.status === 'composed') {
+    assert.equal(result.turn.taskStateAfter.activeTask?.slots.time,'15:00');
+    assert.ok(result.turn.dialogDecision.missingFields.includes('durationMinutes'));
+    assert.match(result.response.message,/15:00/u);
+    assert.match(result.response.message,/ยังไม่ได้ยืนยันคิว/u);
+    assert.match(result.response.message,/30 นาที/u);
+    assert.match(result.response.message,/60 นาที/u);
+    assert.match(result.response.message,/90 นาที/u);
   }
 });

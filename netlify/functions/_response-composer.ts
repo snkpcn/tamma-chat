@@ -22,6 +22,7 @@ import {
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
+import { extractTime } from './_slot-parsers';
 
 export const RESPONSE_COMPOSER_VERSION = 'response-composer-v1';
 const MAX_FACTS_IN_PROMPT = 100;
@@ -291,6 +292,65 @@ function groundedValueMap(input: ResponseComposerInput): Map<string, unknown> {
   return map;
 }
 
+
+function naturalActivityTopicSummary(input: ResponseComposerInput): { message: string; keys: string[] } | null {
+  if (input.language !== 'th' || !input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) return null;
+
+  const facts = groundedValueMap(input);
+  const activityIds = [...new Set(
+    [...facts.keys()]
+      .map(key => key.match(/^activity:([^:]+):name$/)?.[1])
+      .filter((id): id is string => Boolean(id)),
+  )];
+  if (activityIds.length !== 1) return null;
+
+  const id = activityIds[0]!;
+  const activityNameKey = `activity:${id}:name`;
+  const countKey = `activity:${id}:assetCount`;
+  const activityName = facts.get(activityNameKey);
+  const count = facts.get(countKey);
+  if (typeof activityName !== 'string' || typeof count !== 'number') return null;
+
+  const assetCodes = [...facts.keys()]
+    .map(key => key.match(/^activity_asset:([^:]+):activityCode$/)?.[1])
+    .filter((code): code is string => Boolean(code))
+    .filter(code => facts.get(`activity_asset:${code}:activityCode`) === id);
+  const assetTypes = [...new Set(
+    assetCodes
+      .map(code => facts.get(`activity_asset:${code}:type`))
+      .filter((value): value is string => typeof value === 'string'),
+  )];
+  const names = assetCodes
+    .map(code => ({ code, name: facts.get(`activity_asset:${code}:name`) }))
+    .filter((item): item is { code: string; name: string } => typeof item.name === 'string' && Boolean(item.name));
+
+  const typeCopy: Record<string, { noun: string; unit: string; emoji: string }> = {
+    horse:{ noun:'ม้า', unit:'ตัว', emoji:'🐴' },
+    atv:{ noun:'ATV', unit:'คัน', emoji:'🏍️' },
+    archery:{ noun:'ชุดยิงธนู', unit:'ชุด', emoji:'🏹' },
+  };
+  const copy = assetTypes.length === 1 ? typeCopy[assetTypes[0]!] : undefined;
+  const noun = copy?.noun ?? activityName;
+  const unit = copy?.unit ?? 'รายการ';
+  const emoji = copy?.emoji ?? '🌿';
+  const isCountQuestion = /(?:กี่(?:ตัว|คัน|ชุด|อัน|รายการ)?|จำนวน(?:เท่าไร|เท่าไหร่|กี่)|มีกี่)/u.test(input.userMessage ?? '');
+
+  const header = isCountQuestion
+    ? `ตอนนี้มี${noun} ${count} ${unit}ครับ ${emoji}`
+    : `มี${activityName}ครับ ${emoji}\nตอนนี้มี${noun} ${count} ${unit}`;
+  const nameLines = names.map(item => `• ${item.name}`);
+  const message = [header, ...nameLines].join('\n');
+
+  const used = [activityNameKey, countKey];
+  for (const item of names) {
+    used.push(`activity_asset:${item.code}:name`);
+    used.push(`activity_asset:${item.code}:activityCode`);
+    const typeKey = `activity_asset:${item.code}:type`;
+    if (facts.has(typeKey)) used.push(typeKey);
+  }
+  return { message, keys:[...new Set(used)] };
+}
+
 function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; keys: string[] } {
   const facts = groundedValueMap(input);
   const lines: string[] = [];
@@ -320,15 +380,64 @@ function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; 
   }
 
   if (!lines.length && input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) {
+    const activityBundles = input.knowledgeBundles.filter(bundle => bundle.domain === 'activity');
+    const inventoryRequested = activityBundles.some(bundle => bundle.sources.some(source => source.need === 'inventory'));
     const ids = [...new Set([...facts.keys()].map(key => key.match(/^activity:([^:]+):name$/)?.[1]).filter(Boolean) as string[])];
-    for (const id of ids) {
-      const nameKey = `activity:${id}:name`;
-      const name = facts.get(nameKey);
-      if (typeof name === 'string' && name) add(`• ${name}`, [nameKey]);
-    }
-    if (!lines.length) {
-      for (const [key, value] of facts) {
-        if (/^activity_asset:.*:name$/.test(key) && typeof value === 'string') add(`• ${value}`, [key]);
+
+    if (inventoryRequested) {
+      for (const id of ids) {
+        const countKey = `activity:${id}:assetCount`;
+        const count = facts.get(countKey);
+        if (typeof count !== 'number') continue;
+
+        const assetCodes = [...facts.keys()]
+          .map(key => key.match(/^activity_asset:([^:]+):activityCode$/)?.[1])
+          .filter((code): code is string => Boolean(code))
+          .filter(code => facts.get(`activity_asset:${code}:activityCode`) === id);
+        const assetTypes = [...new Set(assetCodes.map(code => facts.get(`activity_asset:${code}:type`)).filter((value): value is string => typeof value === 'string'))];
+        const names = assetCodes
+          .map(code => facts.get(`activity_asset:${code}:name`))
+          .filter((value): value is string => typeof value === 'string' && Boolean(value));
+
+        const typeCopy: Record<string, { noun: string; unit: string }> = {
+          horse:{noun:'ม้า',unit:'ตัว'}, atv:{noun:'ATV',unit:'คัน'}, archery:{noun:'ชุดยิงธนู',unit:'ชุด'},
+        };
+        const copy = assetTypes.length === 1 ? typeCopy[assetTypes[0]!] : undefined;
+        const nameKey = `activity:${id}:name`;
+        const activityName = facts.get(nameKey);
+        const subject = copy?.noun ?? (typeof activityName === 'string' ? activityName : 'รายการกิจกรรม');
+        const unit = copy?.unit ?? 'รายการ';
+        const used = [countKey, ...(typeof activityName === 'string' ? [nameKey] : [])];
+        for (const code of assetCodes) {
+          const nKey = `activity_asset:${code}:name`;
+          const tKey = `activity_asset:${code}:type`;
+          if (facts.has(nKey)) used.push(nKey);
+          if (facts.has(tKey)) used.push(tKey);
+        }
+        add(`• ${subject}มี ${count} ${unit}${names.length ? ` — ${names.join(' / ')}` : ''}`, used);
+      }
+    } else {
+      for (const id of ids) {
+        const nameKey = `activity:${id}:name`;
+        const name = facts.get(nameKey);
+        if (typeof name === 'string' && name) add(`• ${name}`, [nameKey]);
+      }
+      // A topic-narrow catalog request is filtered by the real adapter to one
+      // activityCode. In that case show the real named assets too, so "ม้าล่ะ"
+      // means horse details rather than repeating the whole activity menu.
+      if (ids.length === 1) {
+        const id = ids[0]!;
+        for (const [key, value] of facts) {
+          const match = key.match(/^activity_asset:([^:]+):name$/);
+          if (!match || typeof value !== 'string') continue;
+          const code = match[1]!;
+          if (facts.get(`activity_asset:${code}:activityCode`) === id) add(`• ${value}`, [key, `activity_asset:${code}:activityCode`]);
+        }
+      }
+      if (!lines.length) {
+        for (const [key, value] of facts) {
+          if (/^activity_asset:.*:name$/.test(key) && typeof value === 'string') add(`• ${value}`, [key]);
+        }
       }
     }
   }
@@ -372,6 +481,19 @@ function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; 
 }
 
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
+  const activitySummary = naturalActivityTopicSummary(input);
+  if (activitySummary) {
+    return {
+      message:polishCustomerMessage(activitySummary.message, input.channel),
+      mode:'deterministic',
+      usedFactKeys:activitySummary.keys,
+      composerVersion:RESPONSE_COMPOSER_VERSION,
+      bibleVersion:THONGTHAI_BIBLE_VERSION,
+      channel:input.channel,
+      language:input.language,
+    };
+  }
+
   const grounded = compactGroundedLines(input);
   if (!grounded.lines.length) return null;
   const intro = input.language === 'th'
@@ -433,7 +555,11 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
       // duration means ASK, never silently pick one. The choices come
       // directly from the same authoritative catalog facts, never a
       // hardcoded per-activity duration table.
-      message = `เลือกระยะเวลาได้เลยครับ: ${durationChoice.options.map(minutes => `${minutes} นาที`).join(' หรือ ')}`;
+      const suppliedTime = extractTime(input.userMessage ?? '');
+      const timeAck = suppliedTime
+        ? `รับเวลา ${suppliedTime} ไว้ก่อนครับ (ยังไม่ได้ยืนยันคิว)\n`
+        : '';
+      message = `${timeAck}เลือกระยะเวลาได้เลยครับ: ${durationChoice.options.map(minutes => `${minutes} นาที`).join(' หรือ ')}`;
     } else if (durationChoice?.status === 'unknown' && input.language === 'th') {
       message = 'ตอนนี้ทองไทยยังเช็กระยะเวลาของกิจกรรมนี้ให้ไม่ได้ครับ ไม่ขอเดา ให้ทีมงานช่วยตรวจสอบอีกครั้งนะครับ';
     } else if (input.language === 'th' && missing.length) {
@@ -494,6 +620,15 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
   if (input.degradation.condition === 'source_unavailable'
       || input.degradation.condition === 'verified_empty'
       || input.degradation.condition === 'fact_unknown') {
+    return composeDeterministicResponse(input);
+  }
+
+  // Comparison safety is a machine decision, not a wording preference.
+  // If the Dialog Manager could not verify the precise comparison attribute
+  // for the candidate entities (for example horse temperament), do NOT hand
+  // the turn to a model that might fill the missing trait with plausible
+  // prose. Speak the canonical "cannot verify" copy deterministically.
+  if (input.dialogDecision.responseIntent === 'cannot_verify_comparison') {
     return composeDeterministicResponse(input);
   }
 

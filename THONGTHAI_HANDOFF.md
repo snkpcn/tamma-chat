@@ -1268,6 +1268,48 @@ runtime as well as at build time).
   for whoever picks up membership/cafe/journey/payment/support equivalence work next.
 
 
+### Post-closure production hotfix — LINE broad discovery regression — 2026-09-19
+
+- Real LINE UAT immediately exposed a regression after enabling One-Mind primary: colloquial broad discovery `มีไรทำมั่ง` returned the deterministic FACT_UNKNOWN copy (`ข้อมูลส่วนนี้ยังไม่มีข้อมูลยืนยันครับ ทองไทยไม่ขอเดาให้ผิด`) instead of the verified ecosystem/activity discovery response.
+- Root cause: `thongthai-chat.ts` ran the One-Mind cutover block before the already-existing zero-cost `deterministicExperienceDiscoveryResponse`. The ecosystem turn was eligible for cutover and composed an unknown response before the authoritative discovery fast path could execute.
+- Fix: preserve the entire broad-discovery intent class via the shared `isExperienceDiscoveryIntent` matcher, skipping the cutover block for that class so the existing verified deterministic discovery response owns it. This is a domain-level routing fix, not a phrase patch.
+- Regression coverage added in `tests/experience-discovery.test.ts` to lock this precedence while One-Mind cutover remains enabled.
+
+
+### Post-closure production hotfix 2 — activity follow-up specificity/count — 2026-09-19
+
+- Real LINE UAT after the broad-discovery hotfix exposed two related One-Mind issues: `ม้าล่ะ` returned the whole activity list instead of horse-specific live assets, and `มีม้ากี่ตัว` was misclassified as another generic activity discovery turn, repeating the same list.
+- Root cause: the zero-cost deterministic semantic deriver recognized only the activity topic, not the information need (inventory count), and the activity catalog adapter returned every activity even when the turn had already narrowed to one activityCode.
+- Fix is domain-structural, not phrase-by-phrase:
+  - deterministic semantic turn now carries the canonical `activityCode` for activity-topic narrowing and recognizes generic quantity-question structure as `activity_inventory_count`;
+  - Dialog Manager requests the existing authoritative `inventory` knowledge need for that intent;
+  - the real activity adapter filters by requested `activityCode` and emits authoritative asset count/type facts from the same live `activity_offerings/activity_assets` source;
+  - deterministic Response Composer renders count + real named assets for inventory questions, and shows named assets on a single-activity topic-narrow response.
+- Regression coverage added under forced-provider-unavailable conditions: `มีม้ากี่ตัว` must answer from live-style authoritative facts with zero LLM calls, and `ม้าล่ะ` must surface a real named horse asset rather than unrelated activities.
+
+
+### Post-closure production hotfix 3 — natural activity follow-up copy — 2026-09-19
+
+- Real LINE UAT showed that the prior activity fix was factually correct but customer-facing wording was still robotic: `ม้าล่ะ` rendered the generic header `ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้ครับ` followed by raw bullets `ขี่ม้า / ทองไทย / ภาราดร`.
+- Fix stays inside the shared Response Composer: when authoritative activity knowledge narrows to exactly one activity with a verified asset count, deterministic degradation now composes a natural concise LINE answer (for example: `มีขี่ม้าครับ 🐴 / ตอนนี้มีม้า 2 ตัว / • ทองไทย / • ภาราดร`). Quantity questions use the same verified facts but lead with the count directly.
+- No mutable fact is hardcoded: count, names, and activity identity still come only from the authoritative activity catalog facts.
+- Regression assertions now reject the generic fact-dump intro for both `ม้าล่ะ` and `มีม้ากี่ตัว`.
+
+
+### Post-closure production hotfix 4 — comparison truth + slot acknowledgement — 2026-09-19
+
+- Real LINE UAT exposed two customer-facing defects:
+  1. `ตัวไหนนิสัยดีกว่า` produced friendly-sounding but unverified horse temperament claims even though the live activity catalog did not contain authoritative temperament facts.
+  2. After selecting a horse with multiple verified duration options, `บ่ายสามได้ปะ` correctly parsed/stored 15:00 but the deterministic response repeated only the duration choices, making it look as if the customer's time was ignored.
+- Root causes:
+  - Response Composer still attempted model phrasing for `cannot_verify_comparison`; usedFactKeys validation alone cannot prove every adjective in free prose is grounded.
+  - collect-field rendering did not acknowledge a slot successfully supplied in the same turn when another required field remained missing.
+- Fix:
+  - `cannot_verify_comparison` now always renders deterministic canonical copy, so missing comparison attributes cannot be plausibly invented by the model.
+  - when a verified multi-duration activity still needs duration but the current message supplies a parseable time, the response explicitly acknowledges the stored time and says the queue is not yet confirmed before asking for the real duration choices.
+- No availability is implied by accepting the requested time into task state; requested time remains distinct from verified availability/confirmation.
+
+
 ### Phase P — Conversation-coverage hardening: active tasks are INTERRUPTIBLE — 2026-09-19
 
 **Root cause fixed**: `_dialog-manager.ts`'s `planDialogTurn` checked `missingFields.length > 0`
@@ -1376,3 +1418,14 @@ initially-too-broad version of the side-question precedence rule during this pas
 **No production transaction was created by this hardening pass** -- every new test is
 network-free, dependency-injected, in-memory state only, matching this repo's established
 convention; none of them call a live Supabase/Gemini/OpenAI endpoint.
+
+**Reconciled with parallel hotfixes**: this pass was merged against four production hotfixes
+landed independently on `main` for the same real LINE UAT session (broad-discovery cutover
+bypass, activity follow-up specificity/count, natural follow-up copy, and an earlier version of
+the comparison-truth/slot-acknowledgement fix -- see the four "Post-closure production hotfix"
+entries above). The merge is additive, not a rewrite of either side: `activityCatalogAdapter` now
+both filters by the hotfixes' `requestedActivityCode` AND emits this pass's authoritative
+attribute facts (`ACTIVITY_ASSET_ATTRIBUTE_KEYS`); `composeDeterministicResponse`'s
+`cannot_verify_comparison`-before-`model_unavailable` reordering and `composeThongthaiResponse`'s
+earlier model-bypass for the same responseIntent are complementary, not duplicative. Full suite
+re-verified green after the merge (see test pass count below).
