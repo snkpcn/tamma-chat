@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   formatExperienceDiscoveryMessage,
   isExperienceDiscoveryIntent,
@@ -70,4 +71,17 @@ test('inactive activity inventory is not advertised as currently playable', () =
 
   assert.match(message, /ทำมา-ชาติ ผจญภัย/);
   assert.doesNotMatch(message, /ขี่ม้า \/ ATV/);
+});
+
+
+test('gateway preserves broad experience discovery fast path when One-Mind cutover is enabled', () => {
+  const source = readFileSync('netlify/functions/thongthai-chat.ts', 'utf8');
+  assert.match(
+    source,
+    /const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent\(request\.message\);/,
+  );
+  assert.match(
+    source,
+    /THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath/,
+  );
 });
