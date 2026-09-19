@@ -53,20 +53,28 @@ async function restaurantMenuAdapter(now: Date = new Date()): Promise<SourceResu
 
 /** Reuses loadActivityWorldFacts() exactly (now a neutral module, see
  *  _activity-sot.ts's header for why it was extracted). */
-async function activityCatalogAdapter(now: Date = new Date()): Promise<SourceResult> {
+async function activityCatalogAdapter(request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> {
   try {
     const rows = await loadActivityWorldFacts();
     const facts: GroundedFact[] = [];
+    const requestedActivityCode = typeof request.entities.activityCode === 'string'
+      ? request.entities.activityCode.trim()
+      : null;
     for (const row of rows) {
       const value = row.fact_value as { activities?: Array<{ activityCode: string; resourceCode: string; name: string; durations: Array<{ durationMinutes: number; price: number | null }>; assets: Array<{ code: string; name: string; type: string }> }> };
-      for (const activity of value.activities ?? []) {
+      const activities = requestedActivityCode
+        ? (value.activities ?? []).filter(activity => activity.activityCode === requestedActivityCode)
+        : (value.activities ?? []);
+      for (const activity of activities) {
         facts.push({ key: `activity:${activity.activityCode}:name`, value: activity.name, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         facts.push({ key: `activity:${activity.activityCode}:resourceCode`, value: activity.resourceCode, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+        facts.push({ key: `activity:${activity.activityCode}:assetCount`, value: activity.assets.length, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         for (const duration of activity.durations) {
           facts.push({ key: `activity:${activity.activityCode}:${duration.durationMinutes}min:price`, value: duration.price, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         }
         for (const asset of activity.assets) {
           facts.push({ key: `activity_asset:${asset.code}:name`, value: asset.name, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+          facts.push({ key: `activity_asset:${asset.code}:type`, value: asset.type, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
           // Links a named asset ("ภาราดร") back to its parent activity code,
           // so a customer's asset selection can resolve to the REAL bookable
           // resourceCode authoritatively (see _activity-catalog-policy.ts) --
@@ -231,7 +239,7 @@ export function buildRealKnowledgeSourceAdapters(
   return {
     restaurant: { menu: request => restaurantMenuAdapter() },
     activity: {
-      catalog: request => activityCatalogAdapter(),
+      catalog: request => activityCatalogAdapter(request),
       availability: request => availabilityAdapter(environment)(request),
     },
     stay: {

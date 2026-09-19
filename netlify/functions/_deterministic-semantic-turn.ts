@@ -20,10 +20,10 @@ export const DETERMINISTIC_SEMANTIC_TURN_VERSION = 'deterministic-semantic-turn-
 // activities this ecosystem has today (see _ecosystem-entity-graph.ts, which
 // the rest of the system already treats as canonical structure), not a
 // growing table of customer phrasings.
-const ACTIVITY_TOPIC_KEYWORDS: ReadonlyArray<{ nodeId: string; keyword: RegExp }> = [
-  { nodeId: 'activity-horse', keyword: /ม้า/u },
-  { nodeId: 'activity-atv', keyword: /atv/iu },
-  { nodeId: 'activity-archery', keyword: /ยิงธนู|ธนู/u },
+const ACTIVITY_TOPIC_KEYWORDS: ReadonlyArray<{ nodeId: string; activityCode: string; keyword: RegExp }> = [
+  { nodeId: 'activity-horse', activityCode: 'horse', keyword: /ม้า/u },
+  { nodeId: 'activity-atv', activityCode: 'atv', keyword: /atv|เอทีวี/iu },
+  { nodeId: 'activity-archery', activityCode: 'archery', keyword: /ยิงธนู|ธนู/u },
 ];
 
 function findEntityByName(message: string, entities: readonly SemanticContextEntity[]): SemanticContextEntity | null {
@@ -46,8 +46,15 @@ function directResourceCode(entity: SemanticContextEntity): string | null {
   return entity.id.startsWith('activity_asset:') ? null : entity.id;
 }
 
-function findActivityTopicNarrow(message: string): boolean {
-  return ACTIVITY_TOPIC_KEYWORDS.some(item => item.keyword.test(message) && Boolean(findEcosystemNode(item.nodeId)));
+function findActivityTopic(message: string): { nodeId: string; activityCode: string } | null {
+  const match = ACTIVITY_TOPIC_KEYWORDS.find(item => item.keyword.test(message) && Boolean(findEcosystemNode(item.nodeId)));
+  return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
+}
+
+function isInventoryCountQuestion(message: string): boolean {
+  // Generic quantity-question structure, not a phrase answer table. The
+  // activity topic itself comes from the canonical ecosystem graph above.
+  return /(?:กี่(?:ตัว|คัน|ชุด|อัน|รายการ)?|จำนวน(?:เท่าไร|เท่าไหร่|กี่)|มีกี่)/u.test(message);
 }
 
 function deriveForActiveTask(
@@ -137,13 +144,32 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  const activityTopic = findActivityTopic(trimmed);
+
+  // Quantity/inventory question for a known activity ("มีม้ากี่ตัว",
+  // "ATV มีกี่คัน"). This remains zero-LLM: the semantic layer only
+  // identifies the requested activity + information need; the actual count
+  // comes later from the authoritative live activity catalog.
+  if (activityTopic && isInventoryCountQuestion(trimmed)) {
+    return {
+      domain: 'activity',
+      intent: 'activity_inventory_count',
+      action: 'ask',
+      entities: { activityCode: activityTopic.activityCode, inventoryCount: true },
+      references: [],
+      constraints: [],
+      confidence: 0.9,
+      needsClarification: false,
+    };
+  }
+
   // Narrowing to a specific known activity ("ม้าล่ะ" / "ATV ล่ะ").
-  if (findActivityTopicNarrow(trimmed)) {
+  if (activityTopic) {
     return {
       domain: 'activity',
       intent: 'activity_topic_narrow',
       action: 'discover',
-      entities: {},
+      entities: { activityCode: activityTopic.activityCode },
       references: [],
       constraints: [],
       confidence: 0.85,

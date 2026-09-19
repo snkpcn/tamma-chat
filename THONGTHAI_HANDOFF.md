@@ -1274,3 +1274,15 @@ runtime as well as at build time).
 - Root cause: `thongthai-chat.ts` ran the One-Mind cutover block before the already-existing zero-cost `deterministicExperienceDiscoveryResponse`. The ecosystem turn was eligible for cutover and composed an unknown response before the authoritative discovery fast path could execute.
 - Fix: preserve the entire broad-discovery intent class via the shared `isExperienceDiscoveryIntent` matcher, skipping the cutover block for that class so the existing verified deterministic discovery response owns it. This is a domain-level routing fix, not a phrase patch.
 - Regression coverage added in `tests/experience-discovery.test.ts` to lock this precedence while One-Mind cutover remains enabled.
+
+
+### Post-closure production hotfix 2 — activity follow-up specificity/count — 2026-09-19
+
+- Real LINE UAT after the broad-discovery hotfix exposed two related One-Mind issues: `ม้าล่ะ` returned the whole activity list instead of horse-specific live assets, and `มีม้ากี่ตัว` was misclassified as another generic activity discovery turn, repeating the same list.
+- Root cause: the zero-cost deterministic semantic deriver recognized only the activity topic, not the information need (inventory count), and the activity catalog adapter returned every activity even when the turn had already narrowed to one activityCode.
+- Fix is domain-structural, not phrase-by-phrase:
+  - deterministic semantic turn now carries the canonical `activityCode` for activity-topic narrowing and recognizes generic quantity-question structure as `activity_inventory_count`;
+  - Dialog Manager requests the existing authoritative `inventory` knowledge need for that intent;
+  - the real activity adapter filters by requested `activityCode` and emits authoritative asset count/type facts from the same live `activity_offerings/activity_assets` source;
+  - deterministic Response Composer renders count + real named assets for inventory questions, and shows named assets on a single-activity topic-narrow response.
+- Regression coverage added under forced-provider-unavailable conditions: `มีม้ากี่ตัว` must answer from live-style authoritative facts with zero LLM calls, and `ม้าล่ะ` must surface a real named horse asset rather than unrelated activities.

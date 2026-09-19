@@ -58,10 +58,13 @@ function horseCatalogFacts(durationsMinutes: number[]): GroundedFact[] {
   return [
     fact('activity:horse:name', 'ขี่ม้า', 'activity', 'activity_catalog', 'activity_live'),
     fact('activity:horse:resourceCode', 'activity-horse', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity:horse:assetCount', 2, 'activity', 'activity_catalog', 'activity_live'),
     ...durationsMinutes.map(minutes => fact(`activity:horse:${minutes}min:price`, 500, 'activity', 'activity_catalog', 'activity_live')),
     fact('activity_asset:horse-01:name', 'ภาราดร', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity_asset:horse-01:type', 'horse', 'activity', 'activity_catalog', 'activity_live'),
     fact('activity_asset:horse-01:activityCode', 'horse', 'activity', 'activity_catalog', 'activity_live'),
     fact('activity_asset:horse-02:name', 'สายฟ้า', 'activity', 'activity_catalog', 'activity_live'),
+    fact('activity_asset:horse-02:type', 'horse', 'activity', 'activity_catalog', 'activity_live'),
     fact('activity_asset:horse-02:activityCode', 'horse', 'activity', 'activity_catalog', 'activity_live'),
   ];
 }
@@ -96,6 +99,7 @@ test('canonical activity flow retains context/selection/slots with ZERO LLM call
   // asset-name fallback only engages when no activity-level name fact
   // exists) -- either way it is a real authoritative name, never a guess.
   assert.match(t1.response.message, /ขี่ม้า/, 'discovery must show the real catalog name, not a guess');
+  assert.match(t1.response.message, /ภาราดร/, 'topic-narrow discovery should show real named horse assets, not repeat unrelated activities');
 
   // Turn 2: "เอาภาราดร" -- selects the horse shown in turn 1. Must resolve
   // deterministically against recentEntities populated from turn 1's
@@ -297,4 +301,34 @@ test('a genuinely ambiguous zero-LLM turn asks ONE clarifying question instead o
     // outcome here -- the key invariant is that One-Mind itself never threw.
     assert.equal(result.turn.semanticTurn.needsClarification, true);
   }
+});
+
+
+test('activity inventory-count question answers from authoritative asset inventory with ZERO LLM calls', async () => {
+  const state = memoryState();
+  let modelCallCount = 0;
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANON,
+    guestDbIdFromAnonymousId: async () => GUEST,
+    interpretSemanticTurn: async () => {
+      modelCallCount += 1;
+      throw new LLMAvailabilityError('forced unavailable', []);
+    },
+    buildKnowledgeAdapters: (): KnowledgeSourceAdapters => ({
+      activity: { catalog: async () => ok('activity_catalog', 'activity_live', horseCatalogFacts([30])) },
+    }),
+  };
+
+  const result = await processOneMindCustomerTurn({
+    channel:'line', language:'th', message:'มีม้ากี่ตัว', eventId:'inventory-count-1',
+    providerUserKey:'line-inventory-count', persistState:true, environment:'test',
+  }, deps, state, NOW);
+
+  assert.equal(result.status, 'composed');
+  if (result.status === 'composed') {
+    assert.match(result.response.message, /ม้า.*2.*ตัว/u);
+    assert.match(result.response.message, /ภาราดร/u);
+    assert.doesNotMatch(result.response.message, GENERIC_APOLOGY);
+  }
+  assert.equal(modelCallCount, 0, 'inventory-count question must not spend an LLM call');
 });

@@ -257,6 +257,7 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       return [];
     case 'activity':
       if (turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
+      if (turn.intent === 'activity_inventory_count') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
       if (turn.action === 'compare' || turn.action === 'ask') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
       if (turn.action === 'discover') return [{ ...base, domain: 'activity', needs: ['catalog'] }];
       // Authoritative resourceCode/duration resolution (see

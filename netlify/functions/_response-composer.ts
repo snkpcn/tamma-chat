@@ -320,15 +320,64 @@ function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; 
   }
 
   if (!lines.length && input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) {
+    const activityBundles = input.knowledgeBundles.filter(bundle => bundle.domain === 'activity');
+    const inventoryRequested = activityBundles.some(bundle => bundle.sources.some(source => source.need === 'inventory'));
     const ids = [...new Set([...facts.keys()].map(key => key.match(/^activity:([^:]+):name$/)?.[1]).filter(Boolean) as string[])];
-    for (const id of ids) {
-      const nameKey = `activity:${id}:name`;
-      const name = facts.get(nameKey);
-      if (typeof name === 'string' && name) add(`• ${name}`, [nameKey]);
-    }
-    if (!lines.length) {
-      for (const [key, value] of facts) {
-        if (/^activity_asset:.*:name$/.test(key) && typeof value === 'string') add(`• ${value}`, [key]);
+
+    if (inventoryRequested) {
+      for (const id of ids) {
+        const countKey = `activity:${id}:assetCount`;
+        const count = facts.get(countKey);
+        if (typeof count !== 'number') continue;
+
+        const assetCodes = [...facts.keys()]
+          .map(key => key.match(/^activity_asset:([^:]+):activityCode$/)?.[1])
+          .filter((code): code is string => Boolean(code))
+          .filter(code => facts.get(`activity_asset:${code}:activityCode`) === id);
+        const assetTypes = [...new Set(assetCodes.map(code => facts.get(`activity_asset:${code}:type`)).filter((value): value is string => typeof value === 'string'))];
+        const names = assetCodes
+          .map(code => facts.get(`activity_asset:${code}:name`))
+          .filter((value): value is string => typeof value === 'string' && Boolean(value));
+
+        const typeCopy: Record<string, { noun: string; unit: string }> = {
+          horse:{noun:'ม้า',unit:'ตัว'}, atv:{noun:'ATV',unit:'คัน'}, archery:{noun:'ชุดยิงธนู',unit:'ชุด'},
+        };
+        const copy = assetTypes.length === 1 ? typeCopy[assetTypes[0]!] : undefined;
+        const nameKey = `activity:${id}:name`;
+        const activityName = facts.get(nameKey);
+        const subject = copy?.noun ?? (typeof activityName === 'string' ? activityName : 'รายการกิจกรรม');
+        const unit = copy?.unit ?? 'รายการ';
+        const used = [countKey, ...(typeof activityName === 'string' ? [nameKey] : [])];
+        for (const code of assetCodes) {
+          const nKey = `activity_asset:${code}:name`;
+          const tKey = `activity_asset:${code}:type`;
+          if (facts.has(nKey)) used.push(nKey);
+          if (facts.has(tKey)) used.push(tKey);
+        }
+        add(`• ${subject}มี ${count} ${unit}${names.length ? ` — ${names.join(' / ')}` : ''}`, used);
+      }
+    } else {
+      for (const id of ids) {
+        const nameKey = `activity:${id}:name`;
+        const name = facts.get(nameKey);
+        if (typeof name === 'string' && name) add(`• ${name}`, [nameKey]);
+      }
+      // A topic-narrow catalog request is filtered by the real adapter to one
+      // activityCode. In that case show the real named assets too, so "ม้าล่ะ"
+      // means horse details rather than repeating the whole activity menu.
+      if (ids.length === 1) {
+        const id = ids[0]!;
+        for (const [key, value] of facts) {
+          const match = key.match(/^activity_asset:([^:]+):name$/);
+          if (!match || typeof value !== 'string') continue;
+          const code = match[1]!;
+          if (facts.get(`activity_asset:${code}:activityCode`) === id) add(`• ${value}`, [key, `activity_asset:${code}:activityCode`]);
+        }
+      }
+      if (!lines.length) {
+        for (const [key, value] of facts) {
+          if (/^activity_asset:.*:name$/.test(key) && typeof value === 'string') add(`• ${value}`, [key]);
+        }
       }
     }
   }
