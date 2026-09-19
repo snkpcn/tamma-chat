@@ -79,6 +79,16 @@ test('selecting a recently-shown entity by name resolves deterministically, with
   assert.equal(turn!.needsClarification, false);
 });
 
+test('owner-verified horse names still select the activity resource during provider outage even if recentEntities were not persisted', () => {
+  const context: SemanticContext = { activeDomain: 'activity', recentEntities: [] };
+  const turn = deriveDeterministicSemanticTurn('เอาภาราดร', context, emptyTaskStateContainer());
+  assert.ok(turn);
+  assert.equal(turn!.domain, 'activity');
+  assert.equal(turn!.action, 'confirm');
+  assert.equal(turn!.entities.resourceCode, 'activity-horse');
+  assert.equal(turn!.entities.horseName, 'ภาราดร');
+});
+
 test('a date + party size turn against an active task fills both slots deterministically', () => {
   const taskState: TaskStateContainer = {
     ...emptyTaskStateContainer(),

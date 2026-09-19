@@ -518,6 +518,21 @@ export function composeGroundedDeterministicResponse(input: ResponseComposerInpu
   };
 }
 
+export function composeMembershipInformationResponse(input: ResponseComposerInput): ComposedResponse {
+  const message = input.language === 'th'
+    ? 'สมัครสมาชิกผ่าน LINE ได้เลยครับ พิมพ์ “สมัครสมาชิก” แล้วทองไทยจะพาใส่ข้อมูลทีละขั้น\n\nถ้าต้องการเช็กสถานะ พิมพ์ “เช็คสถานะสมาชิก” ได้ครับ'
+    : 'You can sign up through LINE by sending “สมัครสมาชิก”. Thongthai will guide the membership steps there.';
+  return {
+    message:polishCustomerMessage(message, input.channel),
+    mode:'deterministic',
+    usedFactKeys:[],
+    composerVersion:RESPONSE_COMPOSER_VERSION,
+    bibleVersion:THONGTHAI_BIBLE_VERSION,
+    channel:input.channel,
+    language:input.language,
+  };
+}
+
 export function composeDeterministicResponse(input: ResponseComposerInput): ComposedResponse {
   const copy = deterministicMessages(input.language);
   const outcome = input.operationalOutcome;

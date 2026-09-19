@@ -29,6 +29,16 @@ const ACTIVITY_TOPIC_KEYWORDS: ReadonlyArray<{ nodeId: string; activityCode: str
   { nodeId: 'activity-archery', activityCode: 'archery', keyword: /ยิงธนู|ธนู/u },
 ];
 
+// Canonical named activity assets that are part of the owner-verified
+// ecosystem vocabulary and the live activity_assets inventory. This is a
+// bounded entity lexicon for selection continuity during provider outage,
+// not a table of answers: it never carries temperament, price, availability,
+// or any other mutable fact.
+const ACTIVITY_ASSET_SELECTIONS: ReadonlyArray<{ pattern: RegExp; name: string; resourceCode: string; entityId: string }> = [
+  { pattern: /ภาราดร/u, name: 'ภาราดร', resourceCode: 'activity-horse', entityId: 'activity_asset:paradon' },
+  { pattern: /ทองไทย/u, name: 'ทองไทย', resourceCode: 'activity-horse', entityId: 'activity_asset:thongthai' },
+];
+
 function findEntityByName(message: string, entities: readonly SemanticContextEntity[]): SemanticContextEntity | null {
   const candidates = entities.filter(entity => entity.name && message.includes(entity.name));
   return candidates.length === 1 ? candidates[0]! : null;
@@ -52,6 +62,10 @@ function directResourceCode(entity: SemanticContextEntity): string | null {
 function findActivityTopic(message: string): { nodeId: string; activityCode: string } | null {
   const match = ACTIVITY_TOPIC_KEYWORDS.find(item => item.keyword.test(message) && Boolean(findEcosystemNode(item.nodeId)));
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
+}
+
+function findKnownActivityAssetSelection(message: string): typeof ACTIVITY_ASSET_SELECTIONS[number] | null {
+  return ACTIVITY_ASSET_SELECTIONS.find(item => item.pattern.test(message)) ?? null;
 }
 
 function isInventoryCountQuestion(message: string): boolean {
@@ -299,8 +313,13 @@ function deriveForActiveTask(
   if (durationMinutes) entities.durationMinutes = durationMinutes;
 
   const entityMatch = findEntityByName(message, context.recentEntities);
+  const knownActivityAsset = !entityMatch && task.domain === 'activity'
+    ? findKnownActivityAssetSelection(message)
+    : null;
   const references: SemanticReference[] = entityMatch
     ? [{ type: 'entity_selection', value: entityMatch.name, refersToPriorContext: true, resolvedEntityId: entityMatch.id }]
+    : knownActivityAsset
+      ? [{ type: 'entity_selection', value: knownActivityAsset.name, refersToPriorContext: false, resolvedEntityId: knownActivityAsset.entityId }]
     : [];
   // A selection must also land as a slot value where that's directly valid
   // (stay/restaurant/otop) -- see directResourceCode. For an activity asset,
@@ -308,6 +327,9 @@ function deriveForActiveTask(
   if (entityMatch) {
     const resourceCode = directResourceCode(entityMatch);
     if (resourceCode) entities.resourceCode = resourceCode;
+  } else if (knownActivityAsset) {
+    entities.resourceCode = knownActivityAsset.resourceCode;
+    entities.horseName = knownActivityAsset.name;
   }
 
   if (!Object.keys(entities).length && !references.length) return null;
@@ -384,6 +406,22 @@ export function deriveDeterministicSemanticTurn(
       references: [{ type: 'entity_selection', value: entityMatch.name, refersToPriorContext: true, resolvedEntityId: entityMatch.id }],
       constraints: [],
       confidence: 0.9,
+      needsClarification: false,
+    };
+  }
+
+  const knownActivityAsset = (effectiveDomain === 'activity' || findActivityTopic(trimmed)?.activityCode === 'horse')
+    ? findKnownActivityAssetSelection(trimmed)
+    : null;
+  if (knownActivityAsset) {
+    return {
+      domain: 'activity',
+      intent: 'select_known_activity_asset',
+      action: hasCorrectionMarker(trimmed) ? 'correct_previous' : 'confirm',
+      entities: { resourceCode: knownActivityAsset.resourceCode, horseName: knownActivityAsset.name },
+      references: [{ type: 'entity_selection', value: knownActivityAsset.name, refersToPriorContext: false, resolvedEntityId: knownActivityAsset.entityId }],
+      constraints: [],
+      confidence: 0.82,
       needsClarification: false,
     };
   }

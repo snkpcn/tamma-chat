@@ -7,6 +7,7 @@ import {
   buildResponseComposerPrompt,
   composeDeterministicResponse,
   composeGroundedDeterministicResponse,
+  composeMembershipInformationResponse,
   composeThongthaiResponse,
   parseComposedResponse,
   type ResponseComposerInput,
@@ -220,6 +221,22 @@ test('grounded deterministic restaurant copy uses customer-facing menu wording, 
   assert.match(response.message,/ส้มตำไทย/);
   assert.match(response.message,/89 บาท/);
   assert.doesNotMatch(response.message,/ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้/);
+});
+
+test('membership signup information is deterministic and never a provider apology', () => {
+  const response=composeMembershipInformationResponse(input({
+    knowledgeBundles:[],
+    dialogDecision:decision({ mode:'answer', responseIntent:'grounded_answer' }),
+    degradation:degradation({
+      condition:'model_unavailable',
+      level:'human_handoff',
+      reasonCodes:['provider_stack_exhausted','human_followup_required'],
+      retryable:true,
+    }),
+  }));
+  assert.match(response.message,/สมัครสมาชิกผ่าน LINE/);
+  assert.match(response.message,/สมัครสมาชิก/);
+  assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้|Gemini|OpenAI/i);
 });
 
 test('model outage without verified facts remains the last-resort concise failure', () => {

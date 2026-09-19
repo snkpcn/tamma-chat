@@ -22,6 +22,7 @@ import {
 import {
   composeDeterministicResponse,
   composeGroundedDeterministicResponse,
+  composeMembershipInformationResponse,
   composeThongthaiResponse,
   type ComposedResponse,
   type ResponseComposerInput,
@@ -203,13 +204,18 @@ export async function processOneMindCustomerTurn(
       || turn.dialogDecision.responseIntent === 'cannot_verify_comparison')
     ? composeDeterministicResponse(composerInput)
     : null;
+  const membershipFastPath = !deterministicFastPath
+      && turn.semanticTurn.domain === 'membership'
+      && turn.semanticTurn.action === 'ask'
+    ? composeMembershipInformationResponse(composerInput)
+    : null;
   const groundedFastPath = !deterministicFastPath && shouldPreferGroundedDeterministicResponse(
     turn,
     composerStartedAt - totalStartedAt,
   )
     ? composeGroundedDeterministicResponse(composerInput)
     : null;
-  const response = deterministicFastPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
+  const response = deterministicFastPath ?? membershipFastPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
   const composerMs = Date.now() - composerStartedAt;
   return {
     status:'composed',

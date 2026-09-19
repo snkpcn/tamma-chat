@@ -1495,3 +1495,31 @@ missing field was correctly `date`.
 **Deployment reminder**: after this commit is pushed, allow one Netlify production deploy, verify
 the deploy SHA equals the pushed main SHA, then rerun a concise production smoke using UUID
 `guestId`s. Do not use non-UUID UAT guest ids for continuity testing.
+
+### Final acceptance hotfix after first production smoke — 2026-09-19
+
+**Post-deploy smoke finding**: after the hardening commit reached production, most read-only
+domain smoke checks improved as expected (`ร้านมีไรกิน`, stay catalog, ecosystem broad discovery,
+honest unavailable/unverified answers for missing cafe/stay-policy/OTOP data). One activity
+continuity edge still failed: after a customer asked `ตัวไหนนิสัยดีกว่า`, a follow-up selection
+`เอาภาราดร` could fall through to a generic clarification if the previous activity entities were
+not present in `recentEntities` for that exact turn.
+
+**Fix**: `_deterministic-semantic-turn.ts` now has a bounded, owner-verified activity-asset
+selection lexicon for the two known horse names (`ภาราดร`, `ทองไทย`) that maps only to the
+canonical activity horse resource identity. This is not an answer table: it carries no price,
+temperament, suitability, availability, or other mutable business fact. Its only job is to keep
+selection/correction continuity alive during provider outage or context-persistence gaps.
+
+**Membership wording fix**: read-only membership signup questions now use a deterministic
+Response Composer path that points to the existing LINE-first membership flow (`พิมพ์
+"สมัครสมาชิก"`). It does not create a membership, does not claim success, and prevents
+`สมัครสมาชิกยังไง` from degrading into a generic provider-unavailable apology.
+
+**New regression coverage**:
+- `tests/deterministic-semantic-turn.test.ts`: known horse names select the activity horse
+  resource even when `recentEntities` is empty.
+- `tests/response-composer.test.ts`: membership signup information is deterministic and never
+  exposes provider names or the generic outage apology.
+
+**Test result after this hotfix**: `npm test` passes **513/513**, 0 failed.
