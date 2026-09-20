@@ -280,8 +280,9 @@ async function resolveSemanticTurn(
   context: SemanticContext,
   taskState: TaskStateContainer,
   deps: OneMindDependencies,
+  now: Date = new Date(),
 ): Promise<SemanticTurn> {
-  const deterministic = deriveDeterministicSemanticTurn(message, context, taskState);
+  const deterministic = deriveDeterministicSemanticTurn(message, context, taskState, now);
   if (deterministic) {
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: true, model_call_used: false }));
     return deterministic;
@@ -320,7 +321,7 @@ async function computeOneMindTurnFromState(
   const message = normalizeMessage(input.message);
   const semanticContext = buildSemanticContext(conversationContextBefore, now);
   const semanticStartedAt = Date.now();
-  const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, deps);
+  const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, deps, now);
   const semanticMs = Date.now() - semanticStartedAt;
   const adapters = deps.buildKnowledgeAdapters(input.channel, {
     guestDbId: identity.guestDbId,

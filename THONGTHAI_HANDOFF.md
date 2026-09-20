@@ -1570,3 +1570,19 @@ Fix on integration branch:
 - only task-bearing business domains may trigger suspend/resume topic transitions; support, payment, unknown, and ecosystem/general turns do not evict the active business task.
 
 Regression coverage added for same-domain unrelated turns, support/unknown general chat, >2h task staleness, stale missing-field suppression, and explicit resume of the same preserved task.
+
+
+### Direct LINE routing root-cause fix — 2026-09-20
+
+Production LINE evidence showed the repeated activity-duration reply was emitted before One-Mind:
+`_line-webhook-core.ts` calls `handleLineBookingMessage()` first, and the legacy activity
+session branch consumed every later text while status was `collecting`. The One-Mind
+interruptibility work therefore could never see greetings/side questions.
+
+The legacy booking compatibility path is now gated by
+`shouldConsumeLegacyLineBookingTurn()`: only starts/resumes/status or turns that structurally
+supply booking fields are consumed. Read-only/general turns fall through to One-Mind. Session
+`updated_at` is loaded and aligned with the 2-hour conversation TTL, so stale sessions require
+explicit resume while preserving progress. Added cross-activity/stay regression tests. Also
+threaded the orchestrator's injected turn clock into deterministic relative-date parsing to
+remove daily `พรุ่งนี้` test drift.

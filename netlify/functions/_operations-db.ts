@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { interpretStayBookingTurn } from './_thongthai-brain-v3';
+import { CONTEXT_TTL_MS } from './_conversation-context';
 
 export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
 export type ServiceType = 'restaurant' | 'stay' | 'activity';
@@ -402,7 +403,7 @@ export async function handleLineMembershipMessage(anonymousId: string, rawLineUs
   return null;
 }
 
-type LineBookingSession = {
+export type LineBookingSession = {
   service_type: ServiceType | null;
   resource_code: string | null;
   requested_date: string | null;
@@ -413,6 +414,7 @@ type LineBookingSession = {
   special_request: string | null;
   status: 'collecting' | 'awaiting_phone' | 'awaiting_special_request' | 'needs_slot' | 'ready' | 'submitted' | 'failed' | 'cancelled';
   booking_code: string | null;
+  updated_at?: string | null;
 };
 
 function bangkokDateParts(now = new Date()): { year: number; month: number; day: number } {
@@ -522,7 +524,7 @@ function primaryGuestNameFromText(text: string): string | null {
 
 async function loadLineBookingSession(guestDbId: string): Promise<LineBookingSession | null> {
   const response = await dbFetch(
-    `booking_sessions?guest_id=eq.${guestDbId}&select=service_type,resource_code,requested_date,requested_time,end_date,party_size,quantity,special_request,status,booking_code&limit=1`,
+    `booking_sessions?guest_id=eq.${guestDbId}&select=service_type,resource_code,requested_date,requested_time,end_date,party_size,quantity,special_request,status,booking_code,updated_at&limit=1`,
   );
   return (await response.json() as LineBookingSession[])[0] ?? null;
 }
@@ -667,6 +669,109 @@ function activityLabel(resourceCode: string): string {
   return 'ยิงธนู';
 }
 
+
+function stayBookingStartIntent(text: string): boolean {
+  return /(?:จอง|สำรอง).{0,12}(?:ที่พัก|ห้อง|เฮือนสเตย์)|(?:ที่พัก|ห้อง|เฮือนสเตย์).{0,12}(?:จอง|สำรอง)/u.test(text);
+}
+
+function activityBookingStartIntent(text: string): boolean {
+  const activityKeyword = /(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)/iu;
+  return (
+    /(?:จอง|สำรอง).{0,24}(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)|(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู).{0,24}(?:จอง|สำรอง)/iu.test(text)
+    || (
+      activityKeyword.test(text)
+      && (
+        /(?:อยาก|ขอ|จะ|ต้องการ|เล่น|เอา).{0,24}(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)|(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู).{0,24}(?:ครึ่ง\s*ชั่วโมง|ชั่วโมง|30|60|90|\d{1,2}\s*(?:คน|ท่าน))/iu.test(text)
+      )
+    )
+  );
+}
+
+function isReadOnlyBookingQuestion(text: string): boolean {
+  return /[?？]|(?:อะไร|ไหน|ยังไง|อย่างไร|(?:^|\s)\S*ไง(?:\s|$)|เท่าไร|เท่าไหร่|กี่(?:บาท|ตัว|คัน|ชุด)?|ไหม|มั้ย|หรือเปล่า|รึเปล่า|ปะ(?:\s|$))/u.test(text);
+}
+
+function bookingResumeIntent(text: string): boolean {
+  return /(?:กลับมา|ขอ|เอา).{0,16}(?:จอง|สำรอง).{0,16}ต่อ|(?:จอง|สำรอง).{0,16}ต่อ/u.test(text);
+}
+
+function lineOnlyContactIntent(text: string): boolean {
+  return /(?:ติดต่อ|ใช้).{0,16}(?:LINE|ไลน์).{0,12}(?:นี้)?|(?:LINE|ไลน์)\s*นี้/iu.test(text);
+}
+
+function explicitSpecialRequestAnswer(text: string): boolean {
+  if (/^(?:ไม่มี|ไม่มีครับ|ไม่มีค่ะ|ไม่ต้อง|ไม่เป็นไร|none|no|nope)$/iu.test(text)) return true;
+  return /(?:ขอ|อยาก|ช่วย|เตรียม|ต้องการ).{0,24}(?:หมอน|เตียง|อาหาร|แพ้|เด็ก|ผู้สูงอายุ|รถเข็น|แม่บ้าน|วันเกิด|เค้ก|ดอกไม้)/u.test(text);
+}
+
+function sessionIsStale(session: LineBookingSession, now: Date): boolean {
+  if (!session.updated_at) return false;
+  const updatedAt = Date.parse(session.updated_at);
+  return Number.isFinite(updatedAt) && now.getTime() - updatedAt >= CONTEXT_TTL_MS;
+}
+
+/** Legacy LINE booking is an operational compatibility layer, not a
+ * conversational router. Only clearly booking-related turns are consumed;
+ * everything else falls through to One-Mind. */
+export function shouldConsumeLegacyLineBookingTurn(
+  session: LineBookingSession | null,
+  message: string,
+  now: Date = new Date(),
+): boolean {
+  const text = message.trim();
+  if (!text) return false;
+  const stayStart = stayBookingStartIntent(text);
+  const activityStart = activityBookingStartIntent(text);
+  const resume = bookingResumeIntent(text);
+  const readOnlyQuestion = isReadOnlyBookingQuestion(text);
+
+  if (!session) return !readOnlyQuestion && (stayStart || activityStart);
+  if (session.status === 'submitted') {
+    return stayStart || activityStart || /(?:สถานะ|เรียบร้อย|เลข(?:ที่)?จอง|คำขอจอง)/u.test(text);
+  }
+  if (session.status === 'cancelled' || session.status === 'failed') {
+    return !readOnlyQuestion && (stayStart || activityStart);
+  }
+  if (sessionIsStale(session, now) && !resume && !stayStart && !activityStart) return false;
+  if (readOnlyQuestion && !resume) return false;
+
+  if (session.service_type === 'activity') {
+    const suppliesField = Boolean(
+      activityDurationFromText(text)
+      || activityDateFromText(text)
+      || activityTimeFromText(text)
+      || partySizeFromText(text)
+      || activityGuestNameFromText(text)
+      || phoneFromText(text)
+      || lineOnlyContactIntent(text)
+    );
+    return resume || activityStart || suppliesField;
+  }
+
+  if (session.service_type === 'stay') {
+    if (session.status === 'awaiting_phone') {
+      return resume || stayStart || Boolean(phoneFromText(text)) || lineOnlyContactIntent(text);
+    }
+    if (session.status === 'awaiting_special_request') {
+      return resume || stayStart || explicitSpecialRequestAnswer(text);
+    }
+    const checkIn = bookingDateFromText(text) ?? session.requested_date;
+    const suppliesField = Boolean(
+      bookingDateFromText(text)
+      || checkoutDateFromText(text, checkIn)
+      || contextualCheckoutDateFromText(text, checkIn)
+      || partySizeFromText(text)
+      || roomQuantityFromText(text)
+      || phoneFromText(text)
+      || /(?:^|\s)ชื่อ\s*[^,\n]+/u.test(text)
+      || lineOnlyContactIntent(text)
+    );
+    return resume || stayStart || suppliesField;
+  }
+
+  return !readOnlyQuestion && (stayStart || activityStart || resume);
+}
+
 function thaiLocalTime(iso: string): string {
   return new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso));
 }
@@ -676,32 +781,28 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   const identity = await registerLineContact(anonymousId, rawLineUserId);
   if (!identity) return null;
   const text = message.trim();
-  const startIntent = /(?:จอง|สำรอง).{0,12}(?:ที่พัก|ห้อง|เฮือนสเตย์)|(?:ที่พัก|ห้อง|เฮือนสเตย์).{0,12}(?:จอง|สำรอง)/u.test(text);
+  const startIntent = stayBookingStartIntent(text);
   const initialContact = await lineBookingContact(identity.customerId);
   const environment: 'live' | 'test' = initialContact.isTest ? 'test' : 'live';
   let session = await loadLineBookingSession(identity.guestDbId);
   let lineOnlyContact = false;
 
+  // If this turn does not clearly belong to the booking, let One-Mind answer it.
+  if (!shouldConsumeLegacyLineBookingTurn(session, text)) return null;
+
   const activitySession = session?.service_type === 'activity' && session.status === 'collecting' ? session : null;
-  const activityKeyword = /(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)/iu;
-  const activityIntent = (
-    /(?:จอง|สำรอง).{0,24}(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)|(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู).{0,24}(?:จอง|สำรอง)/iu.test(text)
-    || (
-      activityKeyword.test(text)
-      && (
-        /(?:อยาก|ขอ|จะ|ต้องการ|เล่น|เอา).{0,24}(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู)|(?:ATV|เอทีวี|ขี่ม้า|ยิงธนู).{0,24}(?:ครึ่ง\s*ชั่วโมง|ชั่วโมง|30|60|90|\d{1,2}\s*(?:คน|ท่าน))/iu.test(text)
-      )
-    )
-  );
+  const activityIntent = activityBookingStartIntent(text);
   if (activityIntent || (activitySession && !startIntent)) {
     const resourceCode = activityResourceFromText(text) ?? activitySession?.resource_code ?? null;
     const durationMinutes = activityDurationFromText(text) ?? activityDurationFromSession(activitySession);
     const requestedDate = activityDateFromText(text) ?? activitySession?.requested_date ?? null;
     const requestedTime = activityTimeFromText(text) ?? activitySession?.requested_time ?? null;
     const partySize = partySizeFromText(text) ?? activitySession?.party_size ?? null;
-    const suppliedName = activityGuestNameFromText(text) ?? primaryGuestNameFromText(text);
+    const explicitName = activityGuestNameFromText(text);
+    const bareNameAllowed = Boolean(resourceCode && durationMinutes && requestedDate && requestedTime && partySize);
+    const suppliedName = explicitName ?? (bareNameAllowed ? primaryGuestNameFromText(text) : null);
     const suppliedPhone = phoneFromText(text);
-    const lineOnly = /(?:ติดต่อ|ใช้).{0,16}(?:LINE|ไลน์).{0,12}(?:นี้)?|(?:LINE|ไลน์)\s*นี้/iu.test(text);
+    const lineOnly = lineOnlyContactIntent(text);
 
     const saveActivityProgress = async (): Promise<void> => {
       await saveLineBookingSession(identity.guestDbId, environment, {

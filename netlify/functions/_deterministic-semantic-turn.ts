@@ -227,14 +227,14 @@ const HOW_IT_WORKS_MARKER = /ยังไง|อย่างไร|(?:^|\s)\S*�
  *  doesn't yet have one for. Never touches task state -- these are read-only
  *  side-questions (see TASK_WORTHY_ACTIONS in _dialog-manager.ts, which
  *  'ask'/'status' are deliberately excluded from). */
-function detectActivitySideQuestion(message: string, domain: SemanticDomain | null): SemanticTurn | null {
+function detectActivitySideQuestion(message: string, domain: SemanticDomain | null, now: Date = new Date()): SemanticTurn | null {
   if (domain !== 'activity') return null;
   if (PRICE_MARKER.test(message)) {
     return { domain, intent: 'ask_price', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false };
   }
   if (AVAILABILITY_STATUS_MARKER.test(message)) {
     const entities: Record<string, unknown> = {};
-    const date = extractDate(message);
+    const date = extractDate(message, now);
     if (date) entities.date = date;
     return { domain, intent: 'ask_availability_status', action: 'status', entities, references: [], constraints: [], confidence: 0.8, needsClarification: false };
   }
@@ -244,10 +244,10 @@ function detectActivitySideQuestion(message: string, domain: SemanticDomain | nu
   return null;
 }
 
-function detectNonActivitySideQuestion(message: string, domain: SemanticDomain | null): SemanticTurn | null {
+function detectNonActivitySideQuestion(message: string, domain: SemanticDomain | null, now: Date = new Date()): SemanticTurn | null {
   if (!domain || domain === 'activity' || domain === 'unknown') return null;
   const entities: Record<string, unknown> = {};
-  const date = extractDate(message);
+  const date = extractDate(message, now);
   const partySize = extractPartySize(message);
   if (date) entities.date = date;
   if (partySize) entities.partySize = partySize;
@@ -277,6 +277,7 @@ function deriveForActiveTask(
   message: string,
   context: SemanticContext,
   task: ActiveTask,
+  now: Date = new Date(),
 ): SemanticTurn | null {
   // An explicit cancel ends the task outright, regardless of what other
   // slot-shaped content the message might also contain.
@@ -291,7 +292,7 @@ function deriveForActiveTask(
   // reduced to whatever slot value they might incidentally also contain
   // (see the Dialog Manager's SIDE_QUESTION_ACTIONS precedence, which
   // preserves the task untouched for exactly these actions).
-  const sideQuestion = detectActivitySideQuestion(message, task.domain);
+  const sideQuestion = detectActivitySideQuestion(message, task.domain, now);
   if (sideQuestion) return sideQuestion;
 
   // A commit signal ("จองเลย", "ยืนยันจอง") means the customer wants more
@@ -303,7 +304,7 @@ function deriveForActiveTask(
   if (hasCommitMarker(message)) return null;
 
   const entities: Record<string, unknown> = {};
-  const date = extractDate(message);
+  const date = extractDate(message, now);
   const time = extractTime(message);
   const partySize = extractPartySize(message);
   const durationMinutes = extractDurationMinutes(message);
@@ -357,6 +358,7 @@ export function deriveDeterministicSemanticTurn(
   message: string,
   context: SemanticContext,
   taskState: TaskStateContainer,
+  now: Date = new Date(),
 ): SemanticTurn | null {
   const trimmed = message.trim();
   if (!trimmed) return null;
@@ -373,7 +375,7 @@ export function deriveDeterministicSemanticTurn(
   if (compare) return compare;
 
   if (activeTask && (activeTask.status === 'collecting' || activeTask.status === 'ready')) {
-    const taskDerived = deriveForActiveTask(trimmed, context, activeTask);
+    const taskDerived = deriveForActiveTask(trimmed, context, activeTask, now);
     if (taskDerived) return taskDerived;
     // Nothing task-specific matched -- before giving up, check whether this
     // is actually a topic switch AWAY from the active task (e.g. "ร้านมีไรกิน"
@@ -387,7 +389,7 @@ export function deriveDeterministicSemanticTurn(
 
   // No open task: a price/availability/how-it-works side-question about the
   // current topic, asked before any selection is made.
-  const sideQuestion = detectActivitySideQuestion(trimmed, effectiveDomain);
+  const sideQuestion = detectActivitySideQuestion(trimmed, effectiveDomain, now);
   if (sideQuestion) return sideQuestion;
 
   // No active task: a selection among entities the customer already saw
@@ -426,7 +428,7 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
-  const nonActivitySideQuestion = detectNonActivitySideQuestion(trimmed, effectiveDomain);
+  const nonActivitySideQuestion = detectNonActivitySideQuestion(trimmed, effectiveDomain, now);
   if (nonActivitySideQuestion) return nonActivitySideQuestion;
 
   const activityTopic = findActivityTopic(trimmed);
@@ -464,7 +466,7 @@ export function deriveDeterministicSemanticTurn(
 
   if (findStayTopic(trimmed)) {
     const entities: Record<string, unknown> = {};
-    const date = extractDate(trimmed);
+    const date = extractDate(trimmed, now);
     const partySize = extractPartySize(trimmed);
     if (date) entities.date = date;
     if (partySize) entities.partySize = partySize;

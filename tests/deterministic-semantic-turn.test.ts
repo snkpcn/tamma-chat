@@ -97,7 +97,7 @@ test('a date + party size turn against an active task fills both slots determini
       initialSlots: { resourceCode: 'activity_asset:horse-01' },
     }),
   };
-  const turn = deriveDeterministicSemanticTurn('พรุ่งนี้สองคน', emptySemanticContext(), taskState);
+  const turn = deriveDeterministicSemanticTurn('พรุ่งนี้สองคน', emptySemanticContext(), taskState, NOW);
   assert.ok(turn);
   assert.equal(turn!.action, 'provide_information');
   assert.equal(turn!.domain, 'activity');
@@ -218,7 +218,7 @@ test('an availability-status question retains the stated date but is classified 
     ...emptyTaskStateContainer(),
     activeTask: createActiveTask({ type: 'activity_booking', sourceChannel: 'line', now: NOW }),
   };
-  const turn = deriveDeterministicSemanticTurn('พรุ่งนี้ว่างไหม', emptySemanticContext(), taskState);
+  const turn = deriveDeterministicSemanticTurn('พรุ่งนี้ว่างไหม', emptySemanticContext(), taskState, NOW);
   assert.ok(turn);
   assert.equal(turn!.action, 'status');
   assert.equal(turn!.entities.date, '2026-09-20');
