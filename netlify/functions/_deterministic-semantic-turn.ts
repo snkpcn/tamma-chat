@@ -317,14 +317,6 @@ function deriveForActiveTask(
   const sideQuestion = detectActivitySideQuestion(message, task.domain, now);
   if (sideQuestion) return sideQuestion;
 
-  // A commit signal ("จองเลย", "ยืนยันจอง") means the customer wants more
-  // than a slot updated -- recognizing and acting on an explicit booking
-  // commitment needs real understanding (and the transaction-executor
-  // equivalence this deriver deliberately never touches -- see
-  // TASK_CONTINUATION_SAFE_MODES). Defer rather than silently reduce the
-  // message to just its slot value and drop the commit intent.
-  if (hasCommitMarker(message)) return null;
-
   const entities: Record<string, unknown> = {};
   const date = extractDate(message, now);
   const time = extractTime(message);
@@ -355,13 +347,13 @@ function deriveForActiveTask(
     entities.horseName = knownActivityAsset.name;
   }
 
-  if (!Object.keys(entities).length && !references.length) return null;
-
   const correcting = hasCorrectionMarker(message);
+  const committing = hasCommitMarker(message);
+  if (!Object.keys(entities).length && !references.length && !committing) return null;
   return {
     domain: task.domain,
     intent: correcting ? 'task_field_correction' : (entityMatch ? 'select_prior_entity' : 'task_slot_update'),
-    action: correcting ? 'correct_previous' : (entityMatch ? 'confirm' : 'provide_information'),
+    action: committing ? 'book' : correcting ? 'correct_previous' : (entityMatch ? 'confirm' : 'provide_information'),
     entities,
     references,
     constraints: [],
@@ -450,14 +442,23 @@ export function deriveDeterministicSemanticTurn(
 
   const knownActivityAsset = findKnownActivityAssetSelection(trimmed);
   if (knownActivityAsset) {
-    const hasAdditionalSlotShape = Boolean(extractDate(trimmed, now) || extractTime(trimmed)
-      || extractPartySize(trimmed) || extractDurationMinutes(trimmed));
-    if (hasAdditionalSlotShape) return null;
+    const entities: Record<string, unknown> = {
+      resourceCode: knownActivityAsset.resourceCode,
+      horseName: knownActivityAsset.name,
+    };
+    const date = extractDate(trimmed, now);
+    const time = extractTime(trimmed);
+    const partySize = extractPartySize(trimmed);
+    const durationMinutes = extractDurationMinutes(trimmed);
+    if (date) entities.date = date;
+    if (time) entities.time = time;
+    if (partySize) entities.partySize = partySize;
+    if (durationMinutes) entities.durationMinutes = durationMinutes;
     return {
       domain: 'activity',
       intent: 'select_known_activity_asset',
-      action: hasCorrectionMarker(trimmed) ? 'correct_previous' : 'confirm',
-      entities: { resourceCode: knownActivityAsset.resourceCode, horseName: knownActivityAsset.name },
+      action: hasCommitMarker(trimmed) ? 'book' : hasCorrectionMarker(trimmed) ? 'correct_previous' : 'confirm',
+      entities,
       references: [{ type: 'entity_selection', value: knownActivityAsset.name, refersToPriorContext: false, resolvedEntityId: knownActivityAsset.entityId }],
       constraints: [],
       confidence: 0.82,

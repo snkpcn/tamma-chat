@@ -89,6 +89,40 @@ test('owner-verified horse names still select the activity resource during provi
   assert.equal(turn!.entities.horseName, 'ภาราดร');
 });
 
+test('owner-verified horse name plus booking slots in one sentence stays deterministic', () => {
+  const context: SemanticContext = { activeDomain: 'activity', recentEntities: [] };
+  const turn = deriveDeterministicSemanticTurn(
+    'ขี่ม้า 30 นาที เอาภาราดร วันที่ 2026-09-25 เวลา 10:00 จำนวน 1 คน ยืนยันการจอง',
+    context,
+    emptyTaskStateContainer(),
+    NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.domain, 'activity');
+  assert.equal(turn!.action, 'book');
+  assert.equal(turn!.entities.resourceCode, 'activity-horse');
+  assert.equal(turn!.entities.horseName, 'ภาราดร');
+  assert.equal(turn!.entities.durationMinutes, 30);
+  assert.equal(turn!.entities.date, '2026-09-25');
+  assert.equal(turn!.entities.time, '10:00');
+  assert.equal(turn!.entities.partySize, 1);
+});
+
+test('a bare booking confirmation against an active activity task derives commit deterministically', () => {
+  const taskState: TaskStateContainer = {
+    ...emptyTaskStateContainer(),
+    activeTask: createActiveTask({
+      type: 'activity_booking', sourceChannel: 'web', now: NOW,
+      initialSlots: { resourceCode: 'activity-horse', horseName: 'ภาราดร', date: '2026-09-25', time: '10:00', durationMinutes: 30, partySize: 1 },
+    }),
+  };
+  const turn = deriveDeterministicSemanticTurn('ยืนยันการจอง', emptySemanticContext(), taskState, NOW);
+  assert.ok(turn);
+  assert.equal(turn!.domain, 'activity');
+  assert.equal(turn!.action, 'book');
+  assert.deepEqual(turn!.entities, {});
+});
+
 test('a date + party size turn against an active task fills both slots deterministically', () => {
   const taskState: TaskStateContainer = {
     ...emptyTaskStateContainer(),
@@ -147,16 +181,17 @@ test('empty/whitespace message never derives a turn', () => {
 
 // A "จองเลย"-style explicit commit signal is never silently reduced to a
 // mere slot update -- that would drop the customer's actual booking intent.
-// It must defer (null) so the caller either asks the real model (if
-// available) or asks one honest clarifying/confirming question -- never a
-// fabricated commitment derived by a zero-LLM parser.
-test('an explicit commit marker ("จองเลย") on an active task defers instead of reducing to a bare slot update', () => {
+// With an active task, the deterministic parser can safely preserve both the
+// commit action and any slot values stated in the same sentence.
+test('an explicit commit marker ("จองเลย") on an active task preserves booking intent and slots', () => {
   const taskState: TaskStateContainer = {
     ...emptyTaskStateContainer(),
     activeTask: createActiveTask({ type: 'activity_booking', sourceChannel: 'line', now: NOW }),
   };
   const turn = deriveDeterministicSemanticTurn('จองเลย บ่ายสาม', emptySemanticContext(), taskState);
-  assert.equal(turn, null);
+  assert.ok(turn);
+  assert.equal(turn!.action, 'book');
+  assert.equal(turn!.entities.time, '15:00');
 });
 
 // ---------------------------------------------------------------------------

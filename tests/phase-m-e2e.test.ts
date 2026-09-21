@@ -158,7 +158,7 @@ test('M4 activity: explicit booking commit reaches ActionProposal but never exec
   const deps=oneMindDeps(()=>turn,()=>adapters);
 
   const select=await processThongthaiOneMindTurnAuthoritative({
-    channel:'line',message:'เอาภาราดร พรุ่งนี้สองคน',eventId:'m-activity-select',
+    channel:'line',message:'เอาภาราดร 60 นาที พรุ่งนี้สองคน',eventId:'m-activity-select',
     providerUserKey:'line-key',persistState:true,environment:'test',
   },deps,state.deps,NOW);
   assert.ok(select.taskStateAfter.activeTask);
