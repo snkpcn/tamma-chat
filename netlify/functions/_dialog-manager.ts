@@ -499,8 +499,8 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
   // "were any facts returned at all" guess -- a catalog answering with
   // names/prices but no temperament must still be treated as unverified.
   if (plan.action === 'compare' && !unavailable) {
-    const verified = plan.compareAttribute && plan.compareEntityIds.length
-      ? plan.compareEntityIds.every(id => {
+    const verified = plan.compareAttribute
+      ? plan.compareEntityIds.length > 0 && plan.compareEntityIds.every(id => {
           const suffix = id.replace(/^conv:/, '');
           return bundles.some(bundle => getGroundedFactValue(bundle, `${plan.compareAttribute}:${suffix}`).status === 'known');
         })
