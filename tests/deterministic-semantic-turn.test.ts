@@ -194,6 +194,24 @@ test('an activity comparison with too little recent entity context still stays d
   assert.deepEqual(turn!.references, []);
 });
 
+test('an activity comparison with missing activeDomain still stays deterministic and grounded', () => {
+  const turn = deriveDeterministicSemanticTurn('ตัวไหนนิสัยดีกว่า', emptySemanticContext(), emptyTaskStateContainer());
+  assert.ok(turn);
+  assert.equal(turn!.domain, 'activity');
+  assert.equal(turn!.action, 'compare');
+  assert.equal(turn!.entities.compareAttribute, 'temperament');
+  assert.deepEqual(turn!.references, []);
+});
+
+test('owner-verified horse selection starts an activity task even when recentEntities are missing', () => {
+  const turn = deriveDeterministicSemanticTurn('เอาภาราดร', emptySemanticContext(), emptyTaskStateContainer());
+  assert.ok(turn);
+  assert.equal(turn!.domain, 'activity');
+  assert.equal(turn!.action, 'confirm');
+  assert.equal(turn!.entities.resourceCode, 'activity-horse');
+  assert.equal(turn!.entities.horseName, 'ภาราดร');
+});
+
 test('a price question on an active activity task is a side-question, not a slot update', () => {
   const taskState: TaskStateContainer = {
     ...emptyTaskStateContainer(),
