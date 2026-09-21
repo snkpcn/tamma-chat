@@ -201,7 +201,23 @@ function detectCompareEntities(message: string, context: SemanticContext, domain
   const attribute = COMPARE_ATTRIBUTE_KEYWORDS.find(item => item.pattern.test(message))?.attribute;
   if (!attribute) return null;
   const candidates = context.recentEntities.filter(entity => entity.domain === domain);
-  if (candidates.length < 2) return null;
+  if (candidates.length < 2) {
+    // Production gateway fast paths may occasionally answer the prior catalog
+    // turn outside One-Mind, leaving no recent entity records even though the
+    // customer is asking a structurally clear activity comparison ("ตัวไหน
+    // นิสัยดีกว่า"). Keep this in the deterministic/grounded pipeline so the
+    // resolver can check the authoritative source and honestly say "ไม่รู้"
+    // instead of spending/failing a model call and returning a generic outage.
+    if (domain === 'activity') {
+      return {
+        domain, intent: 'compare_entities', action: 'compare',
+        entities: { compareAttribute: attribute },
+        references: [],
+        constraints: [], confidence: 0.7, needsClarification: false,
+      };
+    }
+    return null;
+  }
   const ids = candidates.slice(0, 4).map(entity => entity.id);
   return {
     domain, intent: 'compare_entities', action: 'compare',
