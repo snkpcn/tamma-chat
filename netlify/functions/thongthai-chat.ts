@@ -345,8 +345,8 @@ export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentS
   // A promotion mention must always reach the LLM brain's redeem_promotion tool --
   // this deterministic shortcut has no knowledge of active_promotions_live and
   // would otherwise intercept "เอาโปรตำไทย..." before the promo could ever be redeemed.
-  // Negative lookahead excludes "โปรด" (please/kindly), an unrelated polite word.
-  if (/โปร(?!ด)/u.test(text)) return false;
+  // Negative lookahead excludes "โปรด..." (please/kindly), an unrelated polite word.
+  if (/โปร(?!ด(?:แนะนำ|ช่วย|หน่อย|บอก|จัด|หา))/u.test(text)) return false;
   const proposedSet = currentRestaurantSet(runtime);
   if (proposedSet?.preorderDraft) return true;
   if (RESTAURANT_SET_ACCEPT_RE.test(text) && proposedSet) return true;
@@ -922,7 +922,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
   // guard, not a phrase-by-phrase answer patch: the shared
   // isExperienceDiscoveryIntent matcher owns the entire broad-discovery class.
   const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
-  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath) {
+  const preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: {} });
+  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
+      && !preserveRestaurantFastPath) {
     try {
       const oneMind = await processOneMindCustomerTurn({
         channel,
@@ -1004,11 +1006,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
     }
   }
 
-  const [communityOfferings, runtime] = await Promise.all([
-    loadVerifiedCommunityOfferings(),
-    loadBrainRuntime(guestDbId, channel),
-  ]);
-
   const history = request.chatHistory.slice(-16);
   const lastTurn = history[history.length - 1];
   const currentAlreadyIncluded = Boolean(
@@ -1017,6 +1014,11 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const messages: ChatTurn[] = currentAlreadyIncluded
     ? history
     : [...history, { role: 'user', content: request.message }];
+
+  const [communityOfferings, runtime] = await Promise.all([
+    loadVerifiedCommunityOfferings(),
+    loadBrainRuntime(guestDbId, channel),
+  ]);
 
   // A promotion redemption already in progress must reliably finish
   // regardless of LLM health -- checked unconditionally, before the LLM,

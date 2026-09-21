@@ -59,7 +59,9 @@ export function shouldPreferGroundedDeterministicResponse(
   turn: OneMindTurnResult,
   elapsedMs: number,
 ): boolean {
+  const hasGroundedFacts = turn.groundedKnowledge.some(bundle => bundle.facts.length > 0);
   return turn.semanticTurn.action === 'discover'
+    || (hasGroundedFacts && READ_ONLY_ACTIONS.has(turn.semanticTurn.action))
     || elapsedMs >= COMPOSER_MODEL_BUDGET_CUTOFF_MS;
 }
 
