@@ -384,6 +384,20 @@ export function deriveDeterministicSemanticTurn(
     // not silently fall through to "genuinely unclassifiable".
     const topicSwitch = detectCrossDomainTopicSwitch(trimmed);
     if (topicSwitch && topicSwitch.domain !== activeTask.domain) return topicSwitch;
+    if (topicSwitch && topicSwitch.domain === activeTask.domain) {
+      const entities: Record<string, unknown> = {};
+      if (typeof activeTask.slots.resourceCode === 'string') entities.resourceCode = activeTask.slots.resourceCode;
+      return {
+        domain: activeTask.domain,
+        intent: 'resume_active_task',
+        action: 'provide_information',
+        entities,
+        references: [],
+        constraints: [],
+        confidence: 0.8,
+        needsClarification: false,
+      };
+    }
     return null;
   }
 
