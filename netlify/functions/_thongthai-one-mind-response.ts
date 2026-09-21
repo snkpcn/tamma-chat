@@ -126,7 +126,9 @@ export function readOnlyCutoverEligibility(
   if (Boolean(turn.dialogDecision.actionProposal)) {
     return { eligible:false, reason:'transactional_or_task_turn' };
   }
-  if (!options.allowGenuinelyUnclassifiedFallback && isGenuinelyUnclassifiedFallback(turn)) {
+  if (!options.allowGenuinelyUnclassifiedFallback
+      && isGenuinelyUnclassifiedFallback(turn)
+      && turn.semanticTurn.domain === 'unknown') {
     return { eligible:false, reason:'transactional_or_task_turn' };
   }
   if (READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
