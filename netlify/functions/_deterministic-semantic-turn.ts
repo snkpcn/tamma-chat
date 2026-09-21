@@ -197,10 +197,12 @@ const COMPARE_ATTRIBUTE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; attribute: st
  *  exists" check downstream (see resolveDialogDecision's anti-hallucination
  *  logic in _dialog-manager.ts). Never touches task state. */
 function detectCompareEntities(message: string, context: SemanticContext, domain: SemanticDomain | null): SemanticTurn | null {
-  if (!domain || !COMPARE_MARKER.test(message)) return null;
+  if (!COMPARE_MARKER.test(message)) return null;
   const attribute = COMPARE_ATTRIBUTE_KEYWORDS.find(item => item.pattern.test(message))?.attribute;
   if (!attribute) return null;
-  const candidates = context.recentEntities.filter(entity => entity.domain === domain);
+  const effectiveDomain: SemanticDomain | null = domain ?? 'activity';
+  if (!effectiveDomain) return null;
+  const candidates = context.recentEntities.filter(entity => entity.domain === effectiveDomain);
   if (candidates.length < 2) {
     // Production gateway fast paths may occasionally answer the prior catalog
     // turn outside One-Mind, leaving no recent entity records even though the
@@ -208,9 +210,9 @@ function detectCompareEntities(message: string, context: SemanticContext, domain
     // นิสัยดีกว่า"). Keep this in the deterministic/grounded pipeline so the
     // resolver can check the authoritative source and honestly say "ไม่รู้"
     // instead of spending/failing a model call and returning a generic outage.
-    if (domain === 'activity') {
+    if (effectiveDomain === 'activity') {
       return {
-        domain, intent: 'compare_entities', action: 'compare',
+        domain: effectiveDomain, intent: 'compare_entities', action: 'compare',
         entities: { compareAttribute: attribute },
         references: [],
         constraints: [], confidence: 0.7, needsClarification: false,
@@ -220,7 +222,7 @@ function detectCompareEntities(message: string, context: SemanticContext, domain
   }
   const ids = candidates.slice(0, 4).map(entity => entity.id);
   return {
-    domain, intent: 'compare_entities', action: 'compare',
+    domain: effectiveDomain, intent: 'compare_entities', action: 'compare',
     entities: { compareAttribute: attribute },
     references: [{ type: 'entity_comparison', refersToPriorContext: true, resolvedEntityIds: ids }],
     constraints: [], confidence: 0.85, needsClarification: false,
@@ -442,10 +444,11 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
-  const knownActivityAsset = (effectiveDomain === 'activity' || findActivityTopic(trimmed)?.activityCode === 'horse')
-    ? findKnownActivityAssetSelection(trimmed)
-    : null;
+  const knownActivityAsset = findKnownActivityAssetSelection(trimmed);
   if (knownActivityAsset) {
+    const hasAdditionalSlotShape = Boolean(extractDate(trimmed, now) || extractTime(trimmed)
+      || extractPartySize(trimmed) || extractDurationMinutes(trimmed));
+    if (hasAdditionalSlotShape) return null;
     return {
       domain: 'activity',
       intent: 'select_known_activity_asset',
