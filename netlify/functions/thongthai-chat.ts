@@ -68,6 +68,8 @@ export type {
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
 const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
 const RESTAURANT_ADVISOR_CONTEXT_SOURCE = 'restaurant_menu_advisor_v1';
+const SIMPLE_GREETING_RE = /^(?:สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ดีคับ|hello|hi|hey)(?:$|[\s!?.ๆ，,])[\s\S]{0,64}$/iu;
+const OPERATIONAL_TOPIC_RE = /(?:จอง|ยกเลิก|เลื่อน|สั่ง|จ่าย|ชำระ|โอน|ขี่ม้า|ม้า|ภาราดร|ทองไทย|atv|เอทีวี|ยิงธนู|ร้าน|อาหาร|เมนู|ห้อง|ที่พัก|เฮือน|otop|โอทอป|ของฝาก|สมาชิก|โปร)/iu;
 
 function emptyGuestContext(): GuestContext {
   return {
@@ -97,6 +99,28 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+export function isSimpleGreetingMessage(message: string): boolean {
+  const trimmed = message.trim();
+  return SIMPLE_GREETING_RE.test(trimmed) && !OPERATIONAL_TOPIC_RE.test(trimmed);
+}
+
+export function deterministicGreetingResponse(request: BrainRequest): BrainResponse | null {
+  if (!isSimpleGreetingMessage(request.message)) return null;
+  const isThai = request.language === 'th' || /[\u0E00-\u0E7F]/u.test(request.message);
+  return {
+    message: isThai
+      ? 'สวัสดีครับ ผมทองไทย พร้อมช่วยเรื่องร้านอาหาร ที่พัก กิจกรรม หรือข้อมูลทำมา-ชาติครับ'
+      : "Hi, I'm Thongthai. I can help with dining, stays, activities, or planning your visit.",
+    intent: 'greeting',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
 }
 
 function normalizeGuestContext(value: unknown): GuestContext {
@@ -897,6 +921,7 @@ async function deterministicActivityResponse(
   const args = { ...proposal.validatedArgs } as Record<string, unknown>;
   const horseName = typeof args.horseName === 'string' ? args.horseName : null;
   const selectedAsset = horseName ? activityAssetFromText(horseName) : activityAssetFromText(request.message);
+  const selectedHorseName = horseName ?? selectedAsset?.name ?? null;
   const note = selectedAsset ? formatActivityAssetNote(selectedAsset) : (typeof args.note === 'string' ? args.note : null);
 
   const firstResponse: BrainResponse = {
@@ -937,7 +962,7 @@ async function deterministicActivityResponse(
     message: [
       'ส่งคำขอจองเข้าระบบแล้วครับ ✅',
       bookingCode ? `เลขที่จอง ${bookingCode}` : '',
-      horseName ? `ม้าที่เลือก: ${horseName}` : '',
+      selectedHorseName ? `ม้าที่เลือก: ${selectedHorseName}` : '',
       'ทีมงานจะยืนยันอีกครั้งทาง LINE / โทร / อีเมล',
     ].filter(Boolean).join('\n'),
   };
@@ -1110,6 +1135,19 @@ export const handler: Handler = async (event: HandlerEvent) => {
     loadBrainRuntime(guestDbId, channel),
   ]);
 
+  const greeting = deterministicGreetingResponse(request);
+  if (greeting) {
+    const polished = polishedResponse(greeting, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   // A promotion redemption already in progress must reliably finish
   // regardless of LLM health -- checked unconditionally, before the LLM,
   // same discipline as the restaurant preorder continuation below.
@@ -1254,84 +1292,4 @@ export const handler: Handler = async (event: HandlerEvent) => {
       });
       if (oneMindFallback && oneMindFallback.status === 'composed') {
         const mappedIntent = oneMindFallback.turn.semanticTurn.action === 'recommend'
-          || oneMindFallback.turn.semanticTurn.action === 'discover'
-          ? 'recommendation'
-          : 'information';
-        const polished = polishedResponse({
-          message: oneMindFallback.response.message,
-          intent: mappedIntent,
-          contextUpdates: {},
-          journeyAction: { type: 'none', journey: null },
-          suggestedActions: [],
-          responseStyle: 'direct',
-          semanticMemoryUpdates: [],
-          toolCalls: [],
-        }, channel);
-        await persistBrainRuntime(guestDbId, channel, polished);
-        return json(200, {
-          message: polished.message,
-          intent: polished.intent,
-          contextUpdates: polished.contextUpdates,
-          journeyAction: polished.journeyAction,
-          suggestedActions: polished.suggestedActions,
-        });
-      }
-      const fallback = polishedResponse(availabilityBrainResponse(), channel);
-      return json(200, fallback);
-    }
-    return json(502, { error: 'Thongthai brain request failed. Please try again.' });
-  }
-
-  await persistCustomerResult(guestDbId, firstResponse, request.journeyContext, request.language);
-
-  let finalResponse = firstResponse;
-  const toolCalls = firstResponse.toolCalls ?? [];
-  if (toolCalls.length) {
-    const toolResults = await executeBrainTools(
-      guestDbId,
-      channel,
-      toolCalls,
-      firstResponse,
-      request,
-    );
-    const duplicatePreorderNotice = duplicateRestaurantPreorderMessage(request.language, toolResults);
-    if (duplicatePreorderNotice) {
-      finalResponse = {
-        ...firstResponse,
-        toolCalls: [],
-        suggestedActions: [],
-        message: duplicatePreorderNotice,
-      };
-    } else {
-      try {
-        const afterTools = await runThongthaiBrain(
-          request,
-          communityOfferings,
-          messages,
-          { ...runtime, toolResults },
-        );
-        finalResponse = mergeAfterTools(firstResponse, afterTools, toolResults);
-      } catch (error) {
-        console.error('THONGTHAI_BRAIN_POST_TOOL_ERROR', error);
-        finalResponse = {
-          ...firstResponse,
-          toolCalls: [],
-          message: toolResults.every(result => result.ok)
-            ? firstResponse.message
-            : `${firstResponse.message}\n\nมีบางอย่างที่ทองไทยยังทำให้ไม่สำเร็จครับ ลองอีกครั้งได้เลย`,
-        };
-      }
-    }
-  }
-
-  finalResponse = polishedResponse(finalResponse, channel);
-  await persistBrainRuntime(guestDbId, channel, finalResponse);
-
-  return json(200, {
-    message: finalResponse.message,
-    intent: finalResponse.intent,
-    contextUpdates: finalResponse.contextUpdates,
-    journeyAction: finalResponse.journeyAction,
-    suggestedActions: finalResponse.suggestedActions,
-  });
-};
+          || oneMindFallback.turn.semanticTur
