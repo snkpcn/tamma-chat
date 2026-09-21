@@ -16,3 +16,10 @@ missing business data.
   polite word class and no longer blocks real promotion phrases containing `โปรด้...`.
 
 **Test result**: `npm test` passes **518/518**, 0 failed.
+
+
+## 2026-09-21 deterministic routing hardening
+
+- Production acceptance follow-up found that restaurant party/budget replies could be prematurely treated as preorder pickup-field collection.
+- Added a One-Mind cutover guard so newly-created restaurant preorder candidates fall back to the stateful restaurant advisor unless a preorder is already active.
+- Local regression suite: 519/519 passing before deploy.
