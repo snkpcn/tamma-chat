@@ -675,6 +675,18 @@ export function activitySessionMarker(durationMinutes: 30 | 60 | 90 | null, asse
   return parts.length ? parts.join(';') : null;
 }
 
+/** The durable, cross-repo contract for "which named asset did the
+ *  customer pick": a `[asset:<code>]` tag appended to the booking's own
+ *  customer_note, where <code> is the real activity_assets.asset_code
+ *  (e.g. "horse-pharadon"). tamma-backoffice's operations adapter parses
+ *  this same tag back out to resolve the schedule-grid cell -- keep this
+ *  format in sync with that repo's booking-asset normalization if it ever
+ *  changes here. Human-readable name stays in front so customer_note is
+ *  still plain text everywhere else it's already displayed. */
+export function formatActivityAssetNote(asset: { name: string; assetCode: string }): string {
+  return `เลือก: ${asset.name} [asset:${asset.assetCode}]`;
+}
+
 function activityTimeFromText(text: string): string | null {
   const m = text.match(/(?:^|\s)([01]?\d|2[0-3])[:.](\d{2})(?:\s*(?:น\.?|นาฬิกา|โมง))?/u);
   if (!m) return null;
@@ -880,8 +892,14 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
         // resourceCode only ever carries the ACTIVITY TYPE (e.g.
         // "activity-horse"), never which specific named asset the customer
         // picked mid-conversation -- without this, staff in Backoffice had
-        // no durable record of which horse to actually prepare.
-        note: selectedAsset ? `เลือก: ${selectedAsset.name}` : null,
+        // no durable record of which horse to actually prepare. The
+        // trailing `[asset:<code>]` tag is a stable, machine-parseable
+        // marker (see ACTIVITY_ASSET_NOTE_TAG below) that tamma-backoffice's
+        // operations adapter reads back to place the booking against the
+        // correct schedule cell -- the human-readable name in front is
+        // unchanged so customer_note still reads naturally everywhere else
+        // it's already displayed (booking cards, etc).
+        note: selectedAsset ? formatActivityAssetNote(selectedAsset) : null,
       });
       await saveLineBookingSession(identity.guestDbId, environment, {
         service_type: 'activity',

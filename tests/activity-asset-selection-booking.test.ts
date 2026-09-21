@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   activityAssetFromSession, activityAssetFromText, activityDurationFromSession, activitySessionMarker,
-  type LineBookingSession,
+  formatActivityAssetNote, type LineBookingSession,
 } from '../netlify/functions/_operations-db';
 
 function session(overrides: Partial<LineBookingSession> = {}): LineBookingSession {
@@ -61,4 +61,16 @@ test('a session with neither duration nor asset selected yet has a null marker a
   const empty = session({ special_request: null });
   assert.equal(activityDurationFromSession(empty), null);
   assert.equal(activityAssetFromSession(empty), null);
+});
+
+// The booking's customer_note carries a `[asset:<code>]` tag that
+// tamma-backoffice's operations adapter parses back out to place the
+// booking against the correct schedule-grid cell -- this is the durable
+// cross-repo contract, so its exact shape is locked down here.
+test('formatActivityAssetNote embeds a stable, machine-parseable [asset:<code>] tag alongside the human-readable name', () => {
+  const note = formatActivityAssetNote({ name: 'ภาราดร', assetCode: 'horse-pharadon' });
+  assert.equal(note, 'เลือก: ภาราดร [asset:horse-pharadon]');
+  const thongthaiNote = formatActivityAssetNote({ name: 'ทองไทย', assetCode: 'horse-thongthai' });
+  assert.match(thongthaiNote, /\[asset:horse-thongthai\]$/);
+  assert.match(thongthaiNote, /^เลือก: ทองไทย/);
 });
