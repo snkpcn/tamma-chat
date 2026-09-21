@@ -1441,6 +1441,30 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
   const startAt = options[0].startAt;
   const endAt = input.serviceType === 'activity' ? options[0].endAt : options[options.length - 1].endAt;
 
+  // `bookings` has no idempotency_key column (unlike restaurant_preorders'
+  // create_restaurant_preorder_v2 RPC, which genuinely is safe to retry).
+  // The LINE webhook layer's askThongthaiReliably() retries once on ANY
+  // failure -- including one thrown by something AFTER a booking write
+  // already succeeded (e.g. the guest_agent_state CAS write) -- and
+  // deterministic committed-booking turns (thongthai-chat.ts's
+  // executeDeterministicActivityBooking) call this with no caller-side
+  // session guard at all. Without this check, that retry would silently
+  // create a second real booking for the identical slot. A guest booking
+  // the exact same resource at the exact same start time again within two
+  // minutes is effectively always the same request replayed, never a
+  // genuinely distinct new booking -- so treat it as one, the same way a
+  // real idempotency key would.
+  if (input.guestDbId) {
+    const recentWindowStart = new Date(Date.now() - 120_000).toISOString();
+    const dupRes = await dbFetch(
+      `bookings?guest_id=eq.${input.guestDbId}&resource_id=eq.${resourceRows[0].id}&start_at=eq.${encodeURIComponent(startAt)}`
+      + `&status=neq.cancelled&created_at=gte.${encodeURIComponent(recentWindowStart)}`
+      + '&select=booking_code,status,start_at,end_at&order=created_at.desc&limit=1',
+    );
+    const existing = (await dupRes.json() as Array<{ booking_code: string; status: string; start_at: string; end_at: string }>)[0];
+    if (existing) return { bookingCode: existing.booking_code, status: existing.status, startAt: existing.start_at, endAt: existing.end_at };
+  }
+
   const bookingRes = await dbFetch('bookings', {
     method: 'POST',
     headers: { Prefer: 'return=representation' },

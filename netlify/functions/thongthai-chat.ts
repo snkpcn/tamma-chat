@@ -75,7 +75,12 @@ export type {
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
 const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
 const RESTAURANT_ADVISOR_CONTEXT_SOURCE = 'restaurant_menu_advisor_v1';
-const SIMPLE_GREETING_RE = /^(?:สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ดีคับ|hello|hi|hey)(?:$|[\s!?.ๆ，,])[\s\S]{0,64}$/iu;
+// "สวัสดี"/"หวัดดี" are commonly glued directly onto a polite particle with
+// no space ("สวัสดีครับ", "สวัสดีค่ะ") -- the far more common real-world
+// phrasing than the bare word alone. The boundary group must accept those
+// particles directly, not just whitespace/punctuation/end-of-string, or the
+// single most common Thai greeting silently misses the fast path.
+const SIMPLE_GREETING_RE = /^(?:สวัสดี|หวัดดี|ดีครับ|ดีค่ะ|ดีคับ|hello|hi|hey)(?:$|[\s!?.ๆ，,]|ครับ|ค่ะ|คะ|คับ)[\s\S]{0,64}$/iu;
 const OPERATIONAL_TOPIC_RE = /(?:จอง|ยกเลิก|เลื่อน|สั่ง|จ่าย|ชำระ|โอน|ขี่ม้า|ม้า|ภาราดร|ทองไทย|atv|เอทีวี|ยิงธนู|ร้าน|อาหาร|เมนู|ห้อง|ที่พัก|เฮือน|otop|โอทอป|ของฝาก|สมาชิก|โปร)/iu;
 
 function emptyGuestContext(): GuestContext {
