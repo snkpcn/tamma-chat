@@ -1292,4 +1292,84 @@ export const handler: Handler = async (event: HandlerEvent) => {
       });
       if (oneMindFallback && oneMindFallback.status === 'composed') {
         const mappedIntent = oneMindFallback.turn.semanticTurn.action === 'recommend'
-          || oneMindFallback.turn.semanticTur
+          || oneMindFallback.turn.semanticTurn.action === 'discover'
+          ? 'recommendation'
+          : 'information';
+        const polished = polishedResponse({
+          message: oneMindFallback.response.message,
+          intent: mappedIntent,
+          contextUpdates: {},
+          journeyAction: { type: 'none', journey: null },
+          suggestedActions: [],
+          responseStyle: 'direct',
+          semanticMemoryUpdates: [],
+          toolCalls: [],
+        }, channel);
+        await persistBrainRuntime(guestDbId, channel, polished);
+        return json(200, {
+          message: polished.message,
+          intent: polished.intent,
+          contextUpdates: polished.contextUpdates,
+          journeyAction: polished.journeyAction,
+          suggestedActions: polished.suggestedActions,
+        });
+      }
+      const fallback = polishedResponse(availabilityBrainResponse(), channel);
+      return json(200, fallback);
+    }
+    return json(502, { error: 'Thongthai brain request failed. Please try again.' });
+  }
+
+  await persistCustomerResult(guestDbId, firstResponse, request.journeyContext, request.language);
+
+  let finalResponse = firstResponse;
+  const toolCalls = firstResponse.toolCalls ?? [];
+  if (toolCalls.length) {
+    const toolResults = await executeBrainTools(
+      guestDbId,
+      channel,
+      toolCalls,
+      firstResponse,
+      request,
+    );
+    const duplicatePreorderNotice = duplicateRestaurantPreorderMessage(request.language, toolResults);
+    if (duplicatePreorderNotice) {
+      finalResponse = {
+        ...firstResponse,
+        toolCalls: [],
+        suggestedActions: [],
+        message: duplicatePreorderNotice,
+      };
+    } else {
+      try {
+        const afterTools = await runThongthaiBrain(
+          request,
+          communityOfferings,
+          messages,
+          { ...runtime, toolResults },
+        );
+        finalResponse = mergeAfterTools(firstResponse, afterTools, toolResults);
+      } catch (error) {
+        console.error('THONGTHAI_BRAIN_POST_TOOL_ERROR', error);
+        finalResponse = {
+          ...firstResponse,
+          toolCalls: [],
+          message: toolResults.every(result => result.ok)
+            ? firstResponse.message
+            : `${firstResponse.message}\n\nมีบางอย่างที่ทองไทยยังทำให้ไม่สำเร็จครับ ลองอีกครั้งได้เลย`,
+        };
+      }
+    }
+  }
+
+  finalResponse = polishedResponse(finalResponse, channel);
+  await persistBrainRuntime(guestDbId, channel, finalResponse);
+
+  return json(200, {
+    message: finalResponse.message,
+    intent: finalResponse.intent,
+    contextUpdates: finalResponse.contextUpdates,
+    journeyAction: finalResponse.journeyAction,
+    suggestedActions: finalResponse.suggestedActions,
+  });
+};
