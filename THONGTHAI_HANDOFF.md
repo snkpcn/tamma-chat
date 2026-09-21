@@ -23,3 +23,6 @@ missing business data.
 - Production acceptance follow-up found that restaurant party/budget replies could be prematurely treated as preorder pickup-field collection.
 - Added a One-Mind cutover guard so newly-created restaurant preorder candidates fall back to the stateful restaurant advisor unless a preorder is already active.
 - Local regression suite: 519/519 passing before deploy.
+
+
+Deployment trigger note: GitHub Contents API commit created to trigger Netlify production build for main 2026-09-21T05:08:20.462Z.
