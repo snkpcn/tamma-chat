@@ -1025,6 +1025,19 @@ export const handler: Handler = async (event: HandlerEvent) => {
   const transportEventId = rawEventId ?? headerEventId
     ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
 
+  const earlyGreeting = deterministicGreetingResponse(request);
+  if (earlyGreeting) {
+    const polished = polishedResponse(earlyGreeting, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   // Phase G.2 strangler cutover. OFF by default. Only task-free READ-ONLY
   // turns in the explicitly proven domains can return from One-Mind here.
   // Transactional/in-progress-task turns are inspected but not persisted and
@@ -1135,19 +1148,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
     loadBrainRuntime(guestDbId, channel),
   ]);
 
-  const greeting = deterministicGreetingResponse(request);
-  if (greeting) {
-    const polished = polishedResponse(greeting, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
-      message: polished.message,
-      intent: polished.intent,
-      contextUpdates: polished.contextUpdates,
-      journeyAction: polished.journeyAction,
-      suggestedActions: polished.suggestedActions,
-    });
-  }
-
   // A promotion redemption already in progress must reliably finish
   // regardless of LLM health -- checked unconditionally, before the LLM,
   // same discipline as the restaurant preorder continuation below.
@@ -1186,6 +1186,28 @@ export const handler: Handler = async (event: HandlerEvent) => {
     });
   }
 
+  const deterministicActivity = await deterministicActivityResponse(
+    request,
+    guestDbId,
+    channel,
+    transportEventId,
+    providerUserKey,
+  ).catch(error => {
+    console.error('THONGTHAI_ACTIVITY_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (deterministicActivity) {
+    const polished = polishedResponse(deterministicActivity, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   // Broad discovery such as "มีอะไรทำบ้าง" is a core product question and
   // must not depend on LLM availability. Answer it deterministically from the
   // shared experience catalog + live activity inventory before calling the model.
@@ -1208,28 +1230,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
   });
   if (deterministicRestaurant) {
     const polished = polishedResponse(deterministicRestaurant, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
-      message: polished.message,
-      intent: polished.intent,
-      contextUpdates: polished.contextUpdates,
-      journeyAction: polished.journeyAction,
-      suggestedActions: polished.suggestedActions,
-    });
-  }
-
-  const deterministicActivity = await deterministicActivityResponse(
-    request,
-    guestDbId,
-    channel,
-    transportEventId,
-    providerUserKey,
-  ).catch(error => {
-    console.error('THONGTHAI_ACTIVITY_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return null;
-  });
-  if (deterministicActivity) {
-    const polished = polishedResponse(deterministicActivity, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return json(200, {
       message: polished.message,
