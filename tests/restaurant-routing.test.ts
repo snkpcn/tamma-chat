@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isRestaurantAdvisorTurn } from '../netlify/functions/thongthai-chat';
+import { isRestaurantAdvisorTurn, restaurantPreorderDialogResponse } from '../netlify/functions/thongthai-chat';
 import type { BrainRequest } from '../netlify/functions/_thongthai-brain-v3';
 import {
   formatRestaurantSetPrompt,
@@ -87,6 +87,49 @@ test('pending preorder keeps date time and name replies inside restaurant flow',
   assert.equal(isRestaurantAdvisorTurn(request('พรุ่งนี้ 14:00'), runtime), true);
   assert.equal(isRestaurantAdvisorTurn(request('นุ๊ก'), runtime), true);
   assert.equal(isRestaurantAdvisorTurn(request('นุ๊ก 0610169999'), runtime), true);
+});
+
+test('pending preorder answers price side-questions without swallowing them as missing pickup fields', async () => {
+  const runtime = {
+    agentState:{
+      restaurantProposedSet:{
+        source:'restaurant_menu_advisor_v1',
+        items:[{name:'ตำซั่วปลาร้า',quantity:1},{name:'เสือร้องไห้',quantity:1}],
+        total:497,
+        budget:500,
+        partySize:2,
+        createdAt:'2026-09-18T01:20:00.000Z',
+        preorderDraft:{
+          date:null,time:null,customerName:null,phone:null,email:null,
+          acceptedAt:'2026-09-18T01:30:00.000Z',
+        },
+      },
+    },
+  };
+  const response = await restaurantPreorderDialogResponse(request('ราคาเท่าไร'), runtime, 'guest-1', 'web');
+  assert.match(response?.message ?? '', /497 บาท/);
+  assert.equal((response?.message ?? '').split('\n')[0], 'ชุดเมื่อกี้รวม 497 บาทครับ');
+});
+
+test('pending preorder lets menu-advice side-questions return to the advisor instead of collecting fields', async () => {
+  const runtime = {
+    agentState:{
+      restaurantProposedSet:{
+        source:'restaurant_menu_advisor_v1',
+        items:[{name:'ตำซั่วปลาร้า',quantity:1}],
+        total:89,
+        budget:500,
+        partySize:2,
+        createdAt:'2026-09-18T01:20:00.000Z',
+        preorderDraft:{
+          date:null,time:null,customerName:null,phone:null,email:null,
+          acceptedAt:'2026-09-18T01:30:00.000Z',
+        },
+      },
+    },
+  };
+  const response = await restaurantPreorderDialogResponse(request('มีอะไรเผ็ดน้อยๆไหม'), runtime, 'guest-1', 'web');
+  assert.equal(response, null);
 });
 
 test('restaurant preorder draft requires phone and formats a short contact prompt', () => {

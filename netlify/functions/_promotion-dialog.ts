@@ -48,10 +48,10 @@ export function buildPendingPromotionRedemption(
 /** A promotion mention must always be handled here (or by the LLM's redeem_promotion
  *  tool) -- never silently ignored. Excludes "โปรด" (please), an unrelated polite word. */
 export function isPromotionMention(message: string): boolean {
-  return /โปร(?!ด)/u.test(message);
+  return /โปร(?!ด(?:แนะนำ|ช่วย|หน่อย|บอก|จัด|หา))/u.test(message);
 }
 
-const DISCOVERY_RE = /(มีโปรอะไร|โปรอะไรบ้าง|โปรโมชันอะไร|โปรโมชั่นอะไร|มีโปรโมชัน|มีโปรโมชั่น|วันนี้มีโปร|โปรสำหรับ|โปรวันนี้|ขอดูโปร|เช็คโปร|เช็กโปร|โปรมีอะไรบ้าง|โปรไหนบ้าง|มีโปรไหน)/u;
+const DISCOVERY_RE = /(มีโปรอะไร|โปรอะไรบ้าง|โปรโมชันอะไร|โปรโมชั่นอะไร|มีโปรโมชัน|มีโปรโมชั่น|วันนี้มีโปร|โปรสำหรับ|โปรวันนี้|โปรด้วย|ขอดูโปร|เช็คโปร|เช็กโปร|โปรมีอะไรบ้าง|โปรไหนบ้าง|มีโปรไหน)/u;
 const ACCEPT_RE = /(เอาโปรนี้|ใช้โปรนี้|รับโปรนี้|เอาสิทธิ์นี้|รับสิทธิ์นี้|รับโปรโมชันนี้|รับโปรโมชั่นนี้|เอาโปรโมชันนี้|เอาโปรโมชั่นนี้)/u;
 
 export function isPromotionDiscoveryIntent(message: string): boolean {

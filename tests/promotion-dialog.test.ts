@@ -46,6 +46,11 @@ test('"วันนี้มีโปรอะไร" and "โปรสำหร
   assert.equal(isPromotionDiscoveryIntent('โปรสำหรับ 2 คน'), true);
 });
 
+test('"มีโปรด้วยไหม" is a discovery side-question, not a preorder field', () => {
+  assert.equal(isPromotionMention('มีโปรด้วยไหม'), true);
+  assert.equal(isPromotionDiscoveryIntent('มีโปรด้วยไหม'), true);
+});
+
 test('"เอาโปรนี้" / "ใช้โปรนี้" are accept intents', () => {
   assert.equal(isPromotionAcceptIntent('เอาโปรนี้'), true);
   assert.equal(isPromotionAcceptIntent('ใช้โปรนี้ค่ะ'), true);

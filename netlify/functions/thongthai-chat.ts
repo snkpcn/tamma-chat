@@ -485,7 +485,17 @@ function preorderFailureMessage(detail: string): string {
   return 'ตอนนี้ระบบสร้างออเดอร์ให้ยังไม่สำเร็จครับ ข้อมูลชุดเดิมยังอยู่ ลองส่งวัน เวลา หรือชื่ออีกครั้งได้เลย';
 }
 
-async function restaurantPreorderDialogResponse(
+function isRestaurantPriceQuestion(text: string): boolean {
+  return /(ราคา|กี่บาท|เท่าไร|เท่าไหร่|รวม)/u.test(text);
+}
+
+function isRestaurantAdvisorSideQuestion(text: string): boolean {
+  return isRestaurantPriceQuestion(text)
+    || /(เผ็ด|จืด|หวาน|เค็ม|ไม่กิน|ไม่เอา|แพ้|มีอะไร|เมนู|แนะนำ|อันไหน|ต่างกัน)/u.test(text)
+    || isPromotionDiscoveryIntent(text);
+}
+
+export async function restaurantPreorderDialogResponse(
   request: BrainRequest,
   runtime: { agentState: Record<string, unknown> },
   guestDbId: string | null,
@@ -495,6 +505,27 @@ async function restaurantPreorderDialogResponse(
   if (!set) return null;
   const acceptedNow = RESTAURANT_SET_ACCEPT_RE.test(normThai(request.message));
   if (!acceptedNow && !set.preorderDraft) return null;
+  const text = normThai(request.message);
+
+  if (!acceptedNow && set.preorderDraft && isRestaurantAdvisorSideQuestion(text)) {
+    if (isRestaurantPriceQuestion(text) && typeof set.total === 'number') {
+      return {
+        message: [
+          `ชุดเมื่อกี้รวม ${Math.round(set.total)} บาทครับ`,
+          'ถ้าจะสั่งต่อ ขอวัน + เวลารับอาหารได้เลย เช่น “พรุ่งนี้ 14:00”',
+        ].join('\n'),
+        intent:'information',
+        contextUpdates:{},
+        journeyAction:{type:'none',journey:null},
+        suggestedActions:[],
+        responseStyle:'direct',
+        agentStateUpdate:{ restaurantProposedSet: set as AgentStateUpdate['restaurantProposedSet'] },
+        semanticMemoryUpdates:[],
+        toolCalls:[],
+      };
+    }
+    return null;
+  }
 
   const parsed = parseRestaurantPreorderTurn(request.message, set.preorderDraft ?? {});
   const draft = mergeRestaurantPreorderDraft(set.preorderDraft, parsed);
