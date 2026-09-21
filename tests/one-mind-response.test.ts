@@ -86,6 +86,29 @@ test('initial G.2 gate allows a safe task-continuation turn (collect_field, no A
   assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:true});
 });
 
+test('G.2 gate refuses a newly-created restaurant preorder so advisor follow-ups are not turned into pickup-field prompts', () => {
+  const after={...emptyTaskStateContainer(),activeTask:createActiveTask({
+    type:'restaurant_preorder',
+    sourceChannel:'web',
+    initialSlots:{ partySize:2, budget:500 },
+  },NOW)};
+  const r=result({
+    taskStateBefore:emptyTaskStateContainer(),
+    taskStateAfter:after,
+    semanticTurn:{
+      domain:'restaurant',intent:'restaurant_follow_up',action:'provide_information',
+      entities:{ partySize:2, budget:500 },references:[],
+      constraints:[],confidence:.8,needsClarification:false,
+    },
+    dialogDecision:{
+      mode:'collect_field',taskStateContainer:after,knowledgeRequests:[],
+      missingFields:['date','time'],responseIntent:'ask_missing_field',
+      reasons:['missing_field'],
+    },
+  });
+  assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'transactional_or_task_turn'});
+});
+
 test('initial G.2 gate still refuses a task turn that reaches an ActionProposal', () => {
   const active=createActiveTask({type:'activity_booking',sourceChannel:'web',initialSlots:{resourceCode:'activity-horse',date:'2026-09-20',durationMinutes:60}},NOW);
   const state={...emptyTaskStateContainer(),activeTask:active};

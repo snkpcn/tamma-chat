@@ -134,6 +134,14 @@ export function readOnlyCutoverEligibility(
       && !turn.taskStateAfter.activeTask) {
     return { eligible:true };
   }
+  // A newly-created restaurant preorder from an ambiguous party/budget
+  // follow-up is not a safe task continuation yet. Let the stateful
+  // deterministic restaurant advisor answer first; only an already-active
+  // preorder may collect pickup fields here.
+  if (!turn.taskStateBefore.activeTask
+      && turn.taskStateAfter.activeTask?.type === 'restaurant_preorder') {
+    return { eligible:false, reason:'transactional_or_task_turn' };
+  }
   // A turn that merely continues an already-active task (fills a slot,
   // corrects a field, selects an entity, or asks one clarifying question)
   // never reaches an ActionProposal -- checked above -- so it carries none of
