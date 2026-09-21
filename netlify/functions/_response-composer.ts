@@ -26,6 +26,8 @@ import { extractTime } from './_slot-parsers';
 
 export const RESPONSE_COMPOSER_VERSION = 'response-composer-v1';
 const MAX_FACTS_IN_PROMPT = 100;
+const PRICE_QUESTION_RE = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/iu;
+const HOW_IT_WORKS_RE = /(?:ยังไง|อย่างไร|ไง|วิธี|ทำยังไง|เล่นยังไง|ขี่.*ไง)/iu;
 
 export type ResponseLanguage = 'th' | 'en' | 'zh' | 'lo' | 'vi';
 
@@ -292,6 +294,96 @@ function groundedValueMap(input: ResponseComposerInput): Map<string, unknown> {
   return map;
 }
 
+function requestedActivityId(input: ResponseComposerInput, facts: Map<string, unknown>): string | null {
+  const resourceCode = input.dialogDecision.taskStateContainer.activeTask?.slots.resourceCode;
+  if (typeof resourceCode === 'string' && resourceCode.trim()) {
+    for (const [key, value] of facts) {
+      const match = key.match(/^activity:([^:]+):resourceCode$/);
+      if (match && value === resourceCode) return match[1]!;
+    }
+    return resourceCode.replace(/^activity-/, '') || null;
+  }
+  const activityCode = input.dialogDecision.knowledgeRequests
+    .map(request => request.entities.activityCode)
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  return activityCode ?? null;
+}
+
+function activityDisplayName(activityId: string | null, facts: Map<string, unknown>): { name: string; key?: string } {
+  if (activityId) {
+    const nameKey = `activity:${activityId}:name`;
+    const value = facts.get(nameKey);
+    if (typeof value === 'string' && value.trim()) return { name: value.trim(), key: nameKey };
+  }
+  const firstNameKey = [...facts.keys()].find(key => /^activity:[^:]+:name$/.test(key));
+  const value = firstNameKey ? facts.get(firstNameKey) : null;
+  return typeof value === 'string' && value.trim()
+    ? { name: value.trim(), key: firstNameKey }
+    : { name: 'กิจกรรมนี้' };
+}
+
+function activityPriceAnswer(input: ResponseComposerInput): { message: string; keys: string[] } | null {
+  if (input.language !== 'th' || !input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) return null;
+  const priceRequested = PRICE_QUESTION_RE.test(input.userMessage ?? '')
+    || input.dialogDecision.knowledgeRequests.some(request => request.domain === 'activity' && request.needs.includes('price'));
+  if (!priceRequested) return null;
+
+  const facts = groundedValueMap(input);
+  const activityId = requestedActivityId(input, facts);
+  const display = activityDisplayName(activityId, facts);
+  const entries = [...facts.entries()]
+    .map(([key, value]) => {
+      const match = key.match(/^activity:([^:]+):(\d+)min:price$/);
+      return match ? { key, activityId: match[1]!, minutes: Number(match[2]), value } : null;
+    })
+    .filter((entry): entry is { key: string; activityId: string; minutes: number; value: unknown } => Boolean(entry))
+    .filter(entry => !activityId || entry.activityId === activityId)
+    .sort((a, b) => a.minutes - b.minutes);
+
+  const used = display.key ? [display.key] : [];
+  if (!entries.length || entries.every(entry => entry.value == null)) {
+    return {
+      message: `ราคาของ${display.name}ยังไม่มีข้อมูลยืนยันในระบบครับ ทองไทยไม่ขอเดา`,
+      keys: used,
+    };
+  }
+
+  const lines = entries.map(entry => {
+    used.push(entry.key);
+    return typeof entry.value === 'number'
+      ? `• ${entry.minutes} นาที — ${Math.round(entry.value)} บาท`
+      : `• ${entry.minutes} นาที — ยังไม่ได้ตั้งราคา`;
+  });
+  return {
+    message: [`ราคาของ${display.name}ที่มีข้อมูลตอนนี้ครับ`, ...lines].join('\n'),
+    keys: [...new Set(used)],
+  };
+}
+
+function activityHowItWorksAnswer(input: ResponseComposerInput): { message: string; keys: string[] } | null {
+  if (input.language !== 'th' || !input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) return null;
+  if (!HOW_IT_WORKS_RE.test(input.userMessage ?? '')) return null;
+  const facts = groundedValueMap(input);
+  const activityId = requestedActivityId(input, facts);
+  const display = activityDisplayName(activityId, facts);
+  const durationKeys = [...facts.keys()]
+    .map(key => {
+      const match = key.match(/^activity:([^:]+):(\d+)min:price$/);
+      return match ? { key, activityId: match[1]!, minutes: Number(match[2]) } : null;
+    })
+    .filter((entry): entry is { key: string; activityId: string; minutes: number } => Boolean(entry))
+    .filter(entry => !activityId || entry.activityId === activityId)
+    .sort((a, b) => a.minutes - b.minutes);
+  const used = [...durationKeys.map(entry => entry.key), ...(display.key ? [display.key] : [])];
+  const suffix = durationKeys.length
+    ? `\n\nระยะเวลาที่มีในระบบ: ${durationKeys.map(entry => `${entry.minutes} นาที`).join(' / ')}`
+    : '';
+  return {
+    message: `รายละเอียดขั้นตอนของ${display.name}ยังไม่มีข้อมูลยืนยันในระบบครับ ทองไทยไม่ขอเดา${suffix}`,
+    keys: [...new Set(used)],
+  };
+}
+
 
 function naturalActivityTopicSummary(input: ResponseComposerInput): { message: string; keys: string[] } | null {
   if (input.language !== 'th' || !input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) return null;
@@ -490,6 +582,32 @@ function groundedIntro(input: ResponseComposerInput): string {
 }
 
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
+  const activityPrice = activityPriceAnswer(input);
+  if (activityPrice) {
+    return {
+      message:polishCustomerMessage(activityPrice.message, input.channel),
+      mode:'deterministic',
+      usedFactKeys:activityPrice.keys,
+      composerVersion:RESPONSE_COMPOSER_VERSION,
+      bibleVersion:THONGTHAI_BIBLE_VERSION,
+      channel:input.channel,
+      language:input.language,
+    };
+  }
+
+  const activityHow = activityHowItWorksAnswer(input);
+  if (activityHow) {
+    return {
+      message:polishCustomerMessage(activityHow.message, input.channel),
+      mode:'deterministic',
+      usedFactKeys:activityHow.keys,
+      composerVersion:RESPONSE_COMPOSER_VERSION,
+      bibleVersion:THONGTHAI_BIBLE_VERSION,
+      channel:input.channel,
+      language:input.language,
+    };
+  }
+
   const activitySummary = naturalActivityTopicSummary(input);
   if (activitySummary) {
     return {
