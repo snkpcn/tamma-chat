@@ -145,6 +145,8 @@ test('conversation-coverage hardening: the exact multi-turn LINE UAT script, for
   if (t6.status === 'composed') {
     assert.doesNotMatch(t6.response.message, GENERIC_APOLOGY);
     assert.doesNotMatch(t6.response.message, DURATION_PROMPT, 'a side-question must not be hijacked into the duration prompt');
+    assert.match(t6.response.message, /ขั้นตอน|วิธี|ยังไม่มีข้อมูลยืนยัน/u, 'a how-it-works question must be answered as that question, not as a repeated catalog');
+    assert.doesNotMatch(t6.response.message, /กิจกรรมที่มีตอนนี้/u, 'how-it-works must not fall back to the generic activity catalog');
   }
   assert.equal(t6.turn.taskStateAfter.activeTask?.slots.time, '15:00', 'side question must not disturb the task');
   assert.equal(t6.turn.taskStateAfter.activeTask?.slots.resourceCode, 'activity-horse');
@@ -155,6 +157,10 @@ test('conversation-coverage hardening: the exact multi-turn LINE UAT script, for
   if (t7.status === 'composed') {
     assert.doesNotMatch(t7.response.message, GENERIC_APOLOGY);
     assert.doesNotMatch(t7.response.message, DURATION_PROMPT, 'a price question must not be hijacked into the duration prompt');
+    assert.match(t7.response.message, /300 บาท/u);
+    assert.match(t7.response.message, /500 บาท/u);
+    assert.match(t7.response.message, /700 บาท/u);
+    assert.doesNotMatch(t7.response.message, /กิจกรรมที่มีตอนนี้/u, 'a price question must not fall back to the generic activity catalog');
   }
   assert.equal(t7.turn.taskStateAfter.activeTask?.slots.time, '15:00');
 
