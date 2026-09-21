@@ -27,6 +27,7 @@ import {
   persistBrainRuntime,
   registerGuestIdentity,
 } from './_thongthai-runtime-v3';
+import { activityAssetFromText, formatActivityAssetNote } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
@@ -853,6 +854,95 @@ async function deterministicRestaurantResponse(
   };
 }
 
+async function deterministicActivityResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+  transportEventId: string,
+  providerUserKey: string | null,
+): Promise<BrainResponse | null> {
+  const oneMind = await processOneMindCustomerTurn({
+    channel,
+    language: request.language,
+    message: request.message,
+    eventId: transportEventId,
+    providerUserKey: providerUserKey ?? request.guestId,
+    canonicalAnonymousId: request.guestId,
+    guestDbId,
+    persistState: true,
+  });
+
+  const turn = oneMind.status === 'composed' || oneMind.status === 'legacy_required'
+    ? oneMind.turn
+    : null;
+  if (!turn || turn.semanticTurn.domain !== 'activity') return null;
+
+  if (oneMind.status === 'composed') {
+    return {
+      message: oneMind.response.message,
+      intent: turn.semanticTurn.action === 'discover' || turn.semanticTurn.action === 'recommend'
+        ? 'recommendation'
+        : 'information',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
+
+  const proposal = turn.dialogDecision.actionProposal;
+  if (!proposal || proposal.toolName !== 'create_booking' || !proposal.customerCommitPresent) return null;
+  const args = { ...proposal.validatedArgs } as Record<string, unknown>;
+  const horseName = typeof args.horseName === 'string' ? args.horseName : null;
+  const selectedAsset = horseName ? activityAssetFromText(horseName) : activityAssetFromText(request.message);
+  const note = selectedAsset ? formatActivityAssetNote(selectedAsset) : (typeof args.note === 'string' ? args.note : null);
+
+  const firstResponse: BrainResponse = {
+    message: '',
+    intent: 'booking',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+  const [result] = await executeBrainTools(
+    guestDbId,
+    channel,
+    [{
+      name: 'create_booking',
+      args: {
+        serviceType: 'activity',
+        ...args,
+        ...(note ? { note } : {}),
+      },
+    }],
+    firstResponse,
+    request,
+  );
+  if (!result?.ok) {
+    return {
+      ...firstResponse,
+      message: 'ยังส่งคำขอจองไม่สำเร็จครับ ลองเลือกวัน เวลา และระยะเวลาอีกครั้ง หรือให้ทีมงานช่วยต่อได้เลยครับ',
+    };
+  }
+  let detail: Record<string, unknown> = {};
+  try { detail = JSON.parse(result.detail) as Record<string, unknown>; } catch { /* keep defaults */ }
+  const bookingCode = typeof detail.bookingCode === 'string' ? detail.bookingCode : '';
+  return {
+    ...firstResponse,
+    message: [
+      'ส่งคำขอจองเข้าระบบแล้วครับ ✅',
+      bookingCode ? `เลขที่จอง ${bookingCode}` : '',
+      horseName ? `ม้าที่เลือก: ${horseName}` : '',
+      'ทีมงานจะยืนยันอีกครั้งทาง LINE / โทร / อีเมล',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 export const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
@@ -1080,6 +1170,28 @@ export const handler: Handler = async (event: HandlerEvent) => {
   });
   if (deterministicRestaurant) {
     const polished = polishedResponse(deterministicRestaurant, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const deterministicActivity = await deterministicActivityResponse(
+    request,
+    guestDbId,
+    channel,
+    transportEventId,
+    providerUserKey,
+  ).catch(error => {
+    console.error('THONGTHAI_ACTIVITY_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (deterministicActivity) {
+    const polished = polishedResponse(deterministicActivity, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return json(200, {
       message: polished.message,
