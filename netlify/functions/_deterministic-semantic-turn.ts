@@ -33,10 +33,14 @@ const ACTIVITY_TOPIC_KEYWORDS: ReadonlyArray<{ nodeId: string; activityCode: str
 // ecosystem vocabulary and the live activity_assets inventory. This is a
 // bounded entity lexicon for selection continuity during provider outage,
 // not a table of answers: it never carries temperament, price, availability,
-// or any other mutable fact.
-const ACTIVITY_ASSET_SELECTIONS: ReadonlyArray<{ pattern: RegExp; name: string; resourceCode: string; entityId: string }> = [
-  { pattern: /ภาราดร/u, name: 'ภาราดร', resourceCode: 'activity-horse', entityId: 'activity_asset:paradon' },
-  { pattern: /ทองไทย/u, name: 'ทองไทย', resourceCode: 'activity-horse', entityId: 'activity_asset:thongthai' },
+// or any other mutable fact. Exported so the legacy transactional booking
+// executor (_operations-db.ts's handleLineBookingMessage) can record which
+// named asset the customer actually selected onto the booking itself --
+// without this, the specific horse chosen mid-conversation never reached the
+// durable booking row at all (see ACTIVITY_ASSET_SELECTIONS usage there).
+export const ACTIVITY_ASSET_SELECTIONS: ReadonlyArray<{ pattern: RegExp; name: string; resourceCode: string; entityId: string }> = [
+  { pattern: /ภาราดร/u, name: 'ภาราดร', resourceCode: 'activity-horse', entityId: 'activity_asset:horse-pharadon' },
+  { pattern: /ทองไทย/u, name: 'ทองไทย', resourceCode: 'activity-horse', entityId: 'activity_asset:horse-thongthai' },
 ];
 
 function findEntityByName(message: string, entities: readonly SemanticContextEntity[]): SemanticContextEntity | null {
@@ -64,7 +68,7 @@ function findActivityTopic(message: string): { nodeId: string; activityCode: str
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
 }
 
-function findKnownActivityAssetSelection(message: string): typeof ACTIVITY_ASSET_SELECTIONS[number] | null {
+export function findKnownActivityAssetSelection(message: string): typeof ACTIVITY_ASSET_SELECTIONS[number] | null {
   return ACTIVITY_ASSET_SELECTIONS.find(item => item.pattern.test(message)) ?? null;
 }
 

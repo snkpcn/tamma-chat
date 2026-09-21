@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { interpretStayBookingTurn } from './_thongthai-brain-v3';
 import { CONTEXT_TTL_MS } from './_conversation-context';
+import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
 
 export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
 export type ServiceType = 'restaurant' | 'stay' | 'activity';
@@ -639,16 +640,39 @@ function activityDurationFromText(text: string): 30 | 60 | 90 | null {
   return n === 30 || n === 60 || n === 90 ? n : null;
 }
 
-function activityDurationFromSession(session: LineBookingSession | null): 30 | 60 | 90 | null {
+export function activityDurationFromSession(session: LineBookingSession | null): 30 | 60 | 90 | null {
   const fromQuantity = Number(session?.quantity);
   if (fromQuantity === 30 || fromQuantity === 60 || fromQuantity === 90) return fromQuantity;
-  const fromNote = session?.special_request?.match(/^activity_duration:(30|60|90)$/)?.[1];
+  const fromNote = session?.special_request?.match(/activity_duration:(30|60|90)/)?.[1];
   const n = Number(fromNote);
   return n === 30 || n === 60 || n === 90 ? n : null;
 }
 
-function activitySessionMarker(durationMinutes: 30 | 60 | 90 | null): string | null {
-  return durationMinutes ? `activity_duration:${durationMinutes}` : null;
+/** The specific named asset (e.g. "ภาราดร") a customer selects mid-
+ *  conversation is otherwise never captured by this legacy transactional
+ *  flow -- resourceCode only ever carries the ACTIVITY TYPE ("activity-
+ *  horse"), never which of the 2 real horses. Reuses the SAME bounded,
+ *  owner-verified lexicon the deterministic semantic layer already uses
+ *  (_deterministic-semantic-turn.ts's ACTIVITY_ASSET_SELECTIONS) so there is
+ *  exactly one source of truth for "which named assets exist", not a second
+ *  copy of the list. */
+export function activityAssetFromText(text: string): { name: string; assetCode: string } | null {
+  const match = findKnownActivityAssetSelection(text);
+  if (!match) return null;
+  const assetCode = match.entityId.replace(/^activity_asset:/, '');
+  return { name: match.name, assetCode };
+}
+
+export function activityAssetFromSession(session: LineBookingSession | null): { name: string; assetCode: string } | null {
+  const fromNote = session?.special_request?.match(/activity_asset:([a-z0-9-]+):([^;]*)/u);
+  return fromNote ? { assetCode: fromNote[1]!, name: decodeURIComponent(fromNote[2]!) } : null;
+}
+
+export function activitySessionMarker(durationMinutes: 30 | 60 | 90 | null, asset: { name: string; assetCode: string } | null): string | null {
+  const parts: string[] = [];
+  if (durationMinutes) parts.push(`activity_duration:${durationMinutes}`);
+  if (asset) parts.push(`activity_asset:${asset.assetCode}:${encodeURIComponent(asset.name)}`);
+  return parts.length ? parts.join(';') : null;
 }
 
 function activityTimeFromText(text: string): string | null {
@@ -798,6 +822,7 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
     const requestedDate = activityDateFromText(text) ?? activitySession?.requested_date ?? null;
     const requestedTime = activityTimeFromText(text) ?? activitySession?.requested_time ?? null;
     const partySize = partySizeFromText(text) ?? activitySession?.party_size ?? null;
+    const selectedAsset = activityAssetFromText(text) ?? activityAssetFromSession(activitySession);
     const explicitName = activityGuestNameFromText(text);
     const bareNameAllowed = Boolean(resourceCode && durationMinutes && requestedDate && requestedTime && partySize);
     const suppliedName = explicitName ?? (bareNameAllowed ? primaryGuestNameFromText(text) : null);
@@ -812,7 +837,7 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
         requested_time: requestedTime,
         party_size: partySize,
         quantity: durationMinutes ?? activitySession?.quantity ?? 1,
-        special_request: activitySessionMarker(durationMinutes),
+        special_request: activitySessionMarker(durationMinutes, selectedAsset),
         status: 'collecting',
         booking_code: null,
       });
@@ -852,6 +877,11 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
         customerName: contact.fullName,
         phone: suppliedPhone ?? contact.phone,
         environment,
+        // resourceCode only ever carries the ACTIVITY TYPE (e.g.
+        // "activity-horse"), never which specific named asset the customer
+        // picked mid-conversation -- without this, staff in Backoffice had
+        // no durable record of which horse to actually prepare.
+        note: selectedAsset ? `เลือก: ${selectedAsset.name}` : null,
       });
       await saveLineBookingSession(identity.guestDbId, environment, {
         service_type: 'activity',
@@ -870,10 +900,10 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
           guest_id: identity.guestDbId,
           event_type: 'agent_action',
           intent: 'booking',
-          metadata: { action: 'create_booking', bookingCode: created.bookingCode, channel: 'line', resourceCode, durationMinutes },
+          metadata: { action: 'create_booking', bookingCode: created.bookingCode, channel: 'line', resourceCode, durationMinutes, selectedAssetCode: selectedAsset?.assetCode ?? null },
         }),
       });
-      return `รับคำขอจองแล้วครับ ✅\nเลขที่คำขอ: ${created.bookingCode}\n${activityLabel(resourceCode)} · ${thaiShortDate(created.startAt)} เวลา ${thaiLocalTime(created.startAt)} น. · ${durationMinutes} นาที · ${partySize} ท่าน\nสถานะ: รอทีมงานยืนยันกลับทาง LINE นี้ครับ`;
+      return `รับคำขอจองแล้วครับ ✅\nเลขที่คำขอ: ${created.bookingCode}\n${activityLabel(resourceCode)}${selectedAsset ? ` · ${selectedAsset.name}` : ''} · ${thaiShortDate(created.startAt)} เวลา ${thaiLocalTime(created.startAt)} น. · ${durationMinutes} นาที · ${partySize} ท่าน\nสถานะ: รอทีมงานยืนยันกลับทาง LINE นี้ครับ`;
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       if (!message.includes('no_matching_schedule') && !message.includes('schedule_full') && !message.includes('schedule_choice_required')) throw error;
