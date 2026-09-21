@@ -184,10 +184,14 @@ test('a comparison marker with an unrecognized attribute defers rather than unde
   assert.equal(turn, null);
 });
 
-test('a comparison marker with only one recent entity in the domain defers (nothing to compare)', () => {
+test('an activity comparison with too little recent entity context still stays deterministic and grounded', () => {
   const context: SemanticContext = { activeDomain: 'activity', recentEntities: [horseEntity()] };
   const turn = deriveDeterministicSemanticTurn('ตัวไหนนิสัยดีกว่า', context, emptyTaskStateContainer());
-  assert.equal(turn, null);
+  assert.ok(turn);
+  assert.equal(turn!.domain, 'activity');
+  assert.equal(turn!.action, 'compare');
+  assert.equal(turn!.entities.compareAttribute, 'temperament');
+  assert.deepEqual(turn!.references, []);
 });
 
 test('a price question on an active activity task is a side-question, not a slot update', () => {
