@@ -56,6 +56,13 @@ import {
   type PendingPromotionRedemption,
   type PromotionListItem,
 } from './_promotion-dialog';
+import {
+  extractDate,
+  extractDurationMinutes,
+  extractPartySize,
+  extractTime,
+  hasCommitMarker,
+} from './_slot-parsers';
 
 export type {
   BrainRequest as ChatRequest,
@@ -885,6 +892,11 @@ async function deterministicActivityResponse(
   transportEventId: string,
   providerUserKey: string | null,
 ): Promise<BrainResponse | null> {
+  const direct = directCommittedActivityBookingArgs(request.message);
+  if (direct) {
+    return executeDeterministicActivityBooking(direct, request, guestDbId, channel);
+  }
+
   const oneMind = await processOneMindCustomerTurn({
     channel,
     language: request.language,
@@ -918,7 +930,45 @@ async function deterministicActivityResponse(
 
   const proposal = turn.dialogDecision.actionProposal;
   if (!proposal || proposal.toolName !== 'create_booking' || !proposal.customerCommitPresent) return null;
-  const args = { ...proposal.validatedArgs } as Record<string, unknown>;
+  return executeDeterministicActivityBooking(
+    { ...proposal.validatedArgs } as Record<string, unknown>,
+    request,
+    guestDbId,
+    channel,
+  );
+}
+
+function directCommittedActivityBookingArgs(message: string): Record<string, unknown> | null {
+  if (!hasCommitMarker(message)) return null;
+  const selectedAsset = activityAssetFromText(message);
+  if (!selectedAsset) return null;
+  const date = extractDate(message);
+  const time = extractTime(message);
+  const durationMinutes = extractDurationMinutes(message);
+  const partySize = extractPartySize(message);
+  if (!date || !time || !durationMinutes || !partySize) return null;
+  const phone = message.match(/(?:เบอร์|โทร)\s*([0-9][0-9\s-]{7,18}[0-9])/u)?.[1]?.replace(/\D/g, '') ?? null;
+  const customerName = message.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|จำนวน|ยืนยัน|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim() ?? null;
+  return {
+    serviceType: 'activity',
+    resourceCode: selectedAsset.resourceCode,
+    horseName: selectedAsset.name,
+    date,
+    time,
+    durationMinutes,
+    partySize,
+    ...(customerName ? { customerName } : {}),
+    ...(phone ? { phone } : {}),
+    note: formatActivityAssetNote(selectedAsset),
+  };
+}
+
+async function executeDeterministicActivityBooking(
+  args: Record<string, unknown>,
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse> {
   const horseName = typeof args.horseName === 'string' ? args.horseName : null;
   const selectedAsset = horseName ? activityAssetFromText(horseName) : activityAssetFromText(request.message);
   const selectedHorseName = horseName ?? selectedAsset?.name ?? null;
