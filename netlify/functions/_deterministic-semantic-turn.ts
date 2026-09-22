@@ -561,6 +561,24 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  // A restaurant-topic marker with no active task (e.g. mid a stay
+  // conversation that never created a task, since stay has no
+  // task-creation mechanism today -- see THONGTHAI_HANDOFF.md). Without
+  // this, findRestaurantTopicNarrow was only ever consulted inside
+  // detectCrossDomainTopicSwitch's active-task branch above, so a
+  // domain-only "active" conversation (context.activeDomain set from a
+  // prior read-only reply, no task) had no path to recognize a genuine
+  // topic switch to restaurant -- it fell through to null and, if the
+  // model was unavailable, silently re-answered as the STALE domain
+  // instead of switching. Reuses the same marker/intent shape
+  // detectCrossDomainTopicSwitch already returns, never a new lexicon.
+  if (findRestaurantTopicNarrow(trimmed)) {
+    return {
+      domain: 'restaurant', intent: 'restaurant_topic_switch', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+
   if (findStayTopic(trimmed)) {
     const entities: Record<string, unknown> = {};
     const date = extractDate(trimmed, now);
