@@ -2690,3 +2690,145 @@ final-approval-worthy, same as every other customer-facing composer in
 this codebase), and which LINE groups should be bound to receive
 feedback notifications — then a deploy decision, following the same
 one-clean-merge discipline already used for every prior phase.
+
+## FEEDBACK OPERATIONS PHASE — backoffice review system + LINE routing +
+## dashboard (NOT DEPLOYED, NOT MERGED)
+
+Branch: `feature/feedback-operations-phase`, based on `main` (which
+already includes Service Mind v1, PR #48, merged). **Not merged, not
+deployed, migration not applied, no LINE group bound.**
+
+### Overview
+
+Service Mind v1 shipped the chat-facing half of the feedback loop
+(classification, sincere acknowledgment, an `ops_feedback_events` row on
+a best-effort basis). This phase builds the *operational* half: richer
+extraction (who/what was actually mentioned, not just a type/severity/
+business-unit triple), a real LINE routing table (including an urgent-
+safety owner escalation), notification content the staff can actually
+act on without opening the backoffice, and a read-only-first backoffice
+dashboard (`tamma-backoffice` repo) so the owner can actually see and
+triage what customers are saying.
+
+### 1. Structured extraction (`_service-mind-feedback-intent.ts`)
+
+`classifyServiceFeedback` (already live from v1) now ALSO returns, on
+every match: `personMentions`, `businessUnitMentions`,
+`sentimentKeywords`, `issueKeywords` (a closed 15-value taxonomy), and
+`namedAssets` — computed by a new pure function, `extractFeedbackKeywords`,
+callable independently for testing. Classification markers themselves
+were widened additively (never narrowed) to cover the phrase set the
+Feedback Operations spec gave as canonical examples across all 5
+feedback types and all 6 business units — see the file's own comments
+for exactly which marker covers which example phrase, and why
+(`ทองไทยตอบดี` vs. `ทองไทยตอบยาวไป`, `มีปัญหาระหว่างทาง` vs. bare `มีปัญหา`,
+etc. are all deliberate near-miss disambiguations, not accidents).
+
+**Person/role entity rule** (the most accuracy-sensitive part of this
+phase, per the spec's own "never over-accuse a person"): a closed list
+of role words (`พนักงาน`, `แคชเชียร์`, `ไกด์`, `แม่ครัว`, `แม่บ้าน`,
+`คนดูแลม้า`, `เจ้าของ`, `ทองไทย`) is checked BEFORE any name-guessing, so
+"พนักงานพูดไม่ดี" always produces a role-level mention
+(`{label: 'พนักงาน', kind: 'role'}`), never a fabricated individual name.
+A named honorific match (`พี่เจิด`) or, failing that, a bare name
+immediately preceding a negative-behavior verb with no honorific
+("เจิดพูดไม่ดี") produces a `kind: 'named'` mention. `staffName` (the
+field the response composer already used pre-this-phase) is now derived
+from `personMentions` rather than its own separate regex, so the two can
+never drift.
+
+Proven load-bearing: temporarily disabling the role-word precedence
+check and re-running the suite makes exactly the 3 tests that depend on
+it fail (unknown-staff complaint, role-level activity complaint, cafe
+role+compliment) with everything else still green — see the commit
+history for this verification, not repeated in this doc.
+
+### 2. Persistence (`_service-mind-feedback-events.ts`)
+
+`createFeedbackEvent`'s POST body now also carries
+`person_mentions`/`business_unit_mentions`/`sentiment_keywords`/
+`issue_keywords`/`named_assets`/`keyword_summary` (all from
+`extractFeedbackKeywords`). The row's `notification_status` is now
+PATCHed to the real dispatch outcome after `dispatchEntityNotification`
+returns (`sent`/`duplicate`/`not_bound`/`not_configured`) instead of
+being left at its insert-time `'pending'` forever — a real gap in v1 the
+dashboard's status column depends on. On a notification dispatch
+failure, `notification_error` is now also written to the row (previously
+only `console.error`-logged, never durably recorded). Every new write is
+still inside the same try/catch discipline as v1: a table that doesn't
+exist yet (migration not applied) degrades exactly the same way it
+always has, no new failure mode introduced.
+
+### 3. LINE routing (`_ops-notifications.ts`)
+
+`notifyFeedbackEvent`'s message body now includes the ORIGINAL customer
+message (not just the summary), the event id explicitly, and a
+backoffice deep link (`customer-voice.html?event=<id>`) — all three
+were spec requirements v1's message body didn't yet meet. Routing logic:
+unchanged for every non-urgent case (one team, by business unit, exactly
+as v1 already did — `restaurant`/`activity`/`stay`/`cafe` route to their
+team, `membership`/`system`/`general`/`unknown` route to `'all'`, the
+existing owner/general broadcast binding). NEW: a `severity === 'urgent'`
+event whose primary team ISN'T already `'all'` also sends a second,
+separately-idempotent message to `'all'` (owner/general) — the spec's
+"urgent safety issue → owner/general + relevant group if known" rule.
+This is the ONLY case that sends to more than one group; every other
+combination still routes to exactly one bound channel, matching the
+spec's explicit "do not spam all groups" constraint. The escalation
+send is best-effort (a failure there is logged but never fails the
+primary send/response).
+
+### 4. Database (migration v2, NOT APPLIED)
+
+`supabase/migrations/20260922230000_ops_feedback_events_keywords_dashboard_v2.sql`
+— purely additive `ALTER TABLE` on top of v1's (also still not applied)
+`ops_feedback_events`: adds the 6 extraction columns above plus
+`notification_error`, `internal_notes` (an append-only staff triage
+log), `acknowledged_at`/`resolved_at`, `updated_at` (with a touch
+trigger), and widens the `status` check constraint from 3 values
+(`new`/`acknowledged`/`resolved`) to 5
+(`new`/`acknowledged`/`in_progress`/`resolved`/`dismissed`) — strictly
+widening, so it cannot invalidate any existing row or insert. RLS/grants
+are unchanged from v1 (service-role only) — see the migration file's own
+banner comment for the full safety argument and exact apply instructions
+(apply v1 first, then v2, via the Supabase MCP server's `apply_migration`
+tool or `supabase db push`, owner-authorized only).
+
+### 5. Tests
+
+11 new tests added to `tests/service-mind.test.ts` (Section 4, tests
+22–31, numbered to slot after the existing Section 3 tests without
+renumbering them), covering: named vs. bare-name vs. role-word person
+mentions across 4 distinct phrasings, restaurant/stay/cafe/activity/
+system/suggestion business-unit + issue-keyword extraction, and a
+mixed-sentiment message ("อาหารช้า ห้องน้ำไม่สะอาด แต่พี่เจิดดูแลดี") proving
+the positive named-person signal survives even when the overall message
+also classifies as a complaint (via `keyword_summary`'s
+`topPositive`/`topNegative` split — the "structured metadata" fallback
+the spec itself suggested as acceptable when a single event can't
+represent two feedback types at once). `canonical-core-harness.ts`
+gained PATCH support for `ops_feedback_events` (previously POST/GET
+only) plus a `feedbackEventRow(id)` accessor, so tests can assert on the
+post-dispatch `notification_status`, not just the insert body.
+
+Full suite: 709/709 passing (698 pre-existing + 11 new), zero
+regressions.
+
+### 6. Backoffice dashboard — see `tamma-backoffice` repo's own handoff
+notes for the "เสียงลูกค้า" page (separate repo, separate PR).
+
+### Deploy status: NOT DEPLOYED, NOT MERGED
+
+No migration applied (v1 or v2), no LINE group bound, no production DB
+mutation, no real booking/order/payment/redemption created in any test.
+All work is on `feature/feedback-operations-phase` (customer repo) and
+its counterpart branch in `tamma-backoffice`.
+
+### Next step
+
+Owner review, per the Feedback Operations spec's own two-option close:
+**Option 1** — ready for review only (code/migration/dashboard ready,
+nothing applied/deployed). **Option 2** — owner approves: apply v1 then
+v2 migrations, bind the relevant LINE groups (restaurant/activity/stay/
+cafe/owner-general), deploy the customer repo, deploy the backoffice
+repo.

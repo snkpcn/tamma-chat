@@ -333,6 +333,164 @@ test('21. Notification actually sent: when a team channel IS bound, the customer
   });
 });
 
+// ---------------------------------------------------------------------
+// SECTION 4 -- FEEDBACK OPERATIONS (structured extraction: person/role
+// mentions, business-unit/sentiment/issue keywords, named assets -- see
+// _service-mind-feedback-intent.ts's extractFeedbackKeywords). Exercises
+// the "IMPORTANT ENTITY RULES" from the Feedback Operations spec: never
+// over-accuse a person, a generic role word is never mistaken for a
+// confirmed individual's name.
+// ---------------------------------------------------------------------
+
+test('22. Named staff compliment ("พี่เจิดดูแลดีมาก"): person_mentions has named เจิด, positive sentiment, route owner/general', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-named-compliment', 'พี่เจิดดูแลดีมาก');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'compliment');
+    const mentions = events[0].person_mentions as Array<{ label: string; kind: string }>;
+    assert.deepEqual(mentions, [{ label: 'พี่เจิด', kind: 'named' }]);
+    assert.ok((events[0].sentiment_keywords as string[]).includes('ดูแลดี'));
+    assert.equal(events[0].route_target, 'owner_general');
+  });
+});
+
+test('23. Named staff complaint ("เจิดพูดไม่ดี"): bare name (no honorific) still captured as a named person, no over-claim', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-named-complaint', 'เจิดพูดไม่ดี');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'complaint');
+    assert.ok(['normal', 'high'].includes(String(events[0].severity)));
+    const mentions = events[0].person_mentions as Array<{ label: string; kind: string }>;
+    assert.deepEqual(mentions, [{ label: 'เจิด', kind: 'named' }]);
+    assert.equal(events[0].staff_name, 'เจิด');
+  });
+});
+
+test('24. Unknown staff complaint ("พนักงานพูดไม่ดี"): role-level mention only, NEVER a fabricated name', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-unknown-staff', 'พนักงานพูดไม่ดี');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'complaint');
+    assert.equal(events[0].staff_name, null, 'must never invent a specific name for a generic role complaint');
+    const mentions = events[0].person_mentions as Array<{ label: string; kind: string }>;
+    assert.deepEqual(mentions, [{ label: 'พนักงาน', kind: 'role' }]);
+  });
+});
+
+test('24b. Role-level activity complaint ("คนดูแลม้าพูดไม่ดี"): role mention, business_unit activity, person unknown', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-role-activity', 'คนดูแลม้าพูดไม่ดี');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'complaint');
+    assert.equal(events[0].business_unit, 'activity');
+    assert.equal(events[0].staff_name, null);
+    const mentions = events[0].person_mentions as Array<{ label: string; kind: string }>;
+    assert.deepEqual(mentions, [{ label: 'คนดูแลม้า', kind: 'role' }]);
+  });
+});
+
+test('25. Restaurant complaint ("ร้านอาหารรอนานมาก อาหารช้า"): business_unit restaurant, issue_keywords delay + food_quality, route restaurant', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-restaurant-delay', 'ร้านอาหารรอนานมาก อาหารช้า');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].business_unit, 'restaurant');
+    assert.equal(events[0].route_target, 'restaurant_group');
+    const issues = events[0].issue_keywords as string[];
+    assert.ok(issues.includes('delay'));
+    assert.ok(issues.includes('food_quality'));
+  });
+});
+
+test('26. Activity safety ("พื้นลื่นมาก ตอนเล่น ATV น่ากลัว"): safety_issue, business_unit activity, issue_keywords include safety/activity_condition, severity urgent/high, routes to activity + owner escalation', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-activity-safety', 'พื้นลื่นมาก ตอนเล่น ATV น่ากลัว');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'safety_issue');
+    assert.equal(events[0].business_unit, 'activity');
+    assert.ok(['high', 'urgent'].includes(String(events[0].severity)));
+    const issues = events[0].issue_keywords as string[];
+    assert.ok(issues.includes('safety') || issues.includes('activity_condition'));
+    assert.ok((events[0].named_assets as string[]).includes('ATV'));
+  });
+});
+
+test('27. Stay cleanliness complaint ("ห้องพักไม่สะอาด"): business_unit stay, issue_keywords cleanliness, complaint', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-stay-cleanliness', 'ห้องพักไม่สะอาด');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'complaint');
+    assert.equal(events[0].business_unit, 'stay');
+    assert.ok((events[0].issue_keywords as string[]).includes('cleanliness'));
+  });
+});
+
+test('28. Cafe compliment ("กาแฟอินทนินอร่อย พนักงานน่ารัก"): business_unit cafe, compliment, positive food/service keywords, role mention', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-cafe-compliment', 'กาแฟอินทนินอร่อย พนักงานน่ารัก');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'compliment');
+    assert.equal(events[0].business_unit, 'cafe');
+    const sentiment = events[0].sentiment_keywords as string[];
+    assert.ok(sentiment.includes('อร่อย'));
+    assert.ok(sentiment.includes('น่ารัก'));
+    const mentions = events[0].person_mentions as Array<{ label: string; kind: string }>;
+    assert.deepEqual(mentions, [{ label: 'พนักงาน', kind: 'role' }]);
+  });
+});
+
+test('29. System feedback ("ทองไทยตอบยาวไป"): system_feedback, communication issue keyword, routes owner/admin', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-system-feedback', 'ทองไทยตอบยาวไป');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'system_feedback');
+    assert.equal(events[0].route_target, 'admin_group');
+    assert.ok((events[0].issue_keywords as string[]).includes('communication'));
+  });
+});
+
+test('30. Suggestion ("น่าจะมีแพ็กเกจครอบครัว"): suggestion, routes owner/general, no overclaim', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-suggestion', 'น่าจะมีแพ็กเกจครอบครัว');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].feedback_type, 'suggestion');
+    assert.equal(events[0].route_target, 'owner_general');
+  });
+});
+
+test('31. Multi-keyword mixed feedback ("อาหารช้า ห้องน้ำไม่สะอาด แต่พี่เจิดดูแลดี"): never silently collapses -- keeps both negative issue keywords AND the positive named-person mention', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-fo-mixed', 'อาหารช้า ห้องน้ำไม่สะอาด แต่พี่เจิดดูแลดี');
+    assert.equal(r.statusCode, 200);
+    const events = harness.postsTo('ops_feedback_events');
+    assert.equal(events.length, 1, 'a single message still produces exactly one event, carrying mixed sentiment via structured metadata rather than fabricating multiple events');
+    const summary = events[0].keyword_summary as { topPositive: string[]; topNegative: string[] };
+    assert.ok(summary.topPositive.includes('ดูแลดี'), 'positive sentiment toward the named staff member must not be lost');
+    assert.ok(summary.topNegative.length > 0, 'negative sentiment about the food/cleanliness must not be lost');
+    const mentions = events[0].person_mentions as Array<{ label: string; kind: string }>;
+    assert.deepEqual(mentions, [{ label: 'พี่เจิด', kind: 'named' }], 'the positive named-person mention must survive even though the overall message also contains complaints');
+  });
+});
+
 test('20. Event failure fallback: if the feedback table write fails, the customer still gets a sincere response, no crash, no generic slow apology', async () => {
   await withHarness(async () => {
     // Simulate the migration genuinely not being applied yet (its real,
