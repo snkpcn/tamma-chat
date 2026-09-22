@@ -1009,3 +1009,86 @@ git pull --ff-only origin feature/thongthai-one-mind-architecture
 npm test   # expect 597/597 passing as of commit 167c490
 git log --oneline -18
 ```
+
+## 2026-09-22 Priority 7 Checkpoint — Final Cleanup Pass
+
+Branch: `feature/thongthai-one-mind-architecture`. HEAD: `6e27030`
+(this commit follows it). Full suite: **597/597 passing**. Working tree
+clean.
+
+### Re-audit for now-provably-dead code
+
+Checked each candidate from the owner's Priority 7 list against this
+session's actual changes:
+
+- **Legacy LINE booking conversation routing** — NOT removable.
+  `handleLineBookingMessage`/`handleLineMembershipMessage` remain the
+  only code that can execute a real LINE transaction (unchanged
+  architectural constraint). Correctly reclassified this session as a
+  passive execution adapter fed by the canonical brain (Priority 2), not
+  removed.
+- **Duplicated slot handling** — the one real instance found this session
+  (a private Thai-month lexicon duplicated between the legacy parser and
+  the shared one) was already consolidated in the very first checkpoint
+  and again in Priority 2 (`bookingDateFromText` now delegates to
+  `_slot-parsers.ts`'s `extractDate` instead of owning a second copy).
+- **Obsolete compatibility bridges** — `_thongthai-runtime.ts` (fully
+  superseded by `_thongthai-runtime-v3.ts`) was found and deleted in the
+  first checkpoint of this session, with a resurrection-guard test.
+- **Old deterministic fallbacks superseded by canonical One-Mind
+  behavior** — per the Priority 6 finding, restaurant/stay/promotion/
+  OTOP/membership/cafe fallbacks in `thongthai-chat.ts` are explicitly
+  NOT yet superseded (One-Mind has no equivalent coverage for those
+  domains) — correctly left in place. Only the activity domain has deep
+  One-Mind coverage; nothing there was found duplicating what One-Mind
+  already fully owns.
+- **Duplicate response generation** — none found this session.
+- **Old state-sync helpers** — the one real instance found
+  (`mergeBrainGuestData`'s raw-upsert bypass of the shared CAS store,
+  surfaced while migrating it out of the dead `_thongthai-runtime.ts`)
+  was fixed in the first checkpoint.
+
+**Conclusion: no further safe deletions identified beyond what was
+already done in earlier checkpoints this session.** Verified via:
+- Confirmed every helper function touched this session
+  (`activityAssetFromSession`, `activityDurationFromSession`,
+  `activitySessionMarker`, `loadLineBookingSession`,
+  `saveLineBookingSession`) still has live callers, not orphaned by the
+  refactors.
+- Full combined `tsc --noEmit` across all 9 production files touched
+  this session in one pass: zero new errors (same 4 pre-existing,
+  unrelated errors present before this session started).
+- Final esbuild-bundle-and-invoke smoke test on BOTH entry points
+  (`line-webhook.ts` and `thongthai-chat.ts`), including the exact
+  original bug-report message sequence (`ฮัลโหล` then
+  `"เอาภาราดรครับ เอา 30 นาทีครับ 3 ตุลาคม เวลา 13.00"` combined in one
+  turn) — both resolve cleanly (`200`), zero crashes, only expected
+  sandbox limitations logged (no real API keys/DB/LINE egress).
+
+### Net effect on codebase size/clarity this session
+
+23 files changed: 1 production file deleted outright (346 lines), 9
+production files modified with net-positive but modest line counts (each
+change traceable to a specific, documented, tested bug or architectural
+fix), 13 test files added/extended, plus this handoff document. The
+codebase is smaller in dead weight (one fewer duplicate runtime module)
+and structurally clearer (LINE no longer self-fetches; state ownership
+between `taskState` and `booking_sessions` is now explicit and
+one-directional, with the direction and guardrails documented in code
+comments at the exact point they apply) than at session start.
+
+### This is the final checkpoint of this session
+
+See the end-of-turn report delivered to the owner for the full 16-item
+Definition of Done checklist and FINAL PRODUCTION ACCEPTANCE GATES.
+
+### Commands the next agent/session should run first
+
+```bash
+cd /home/user/tamma-chat
+git fetch origin feature/thongthai-one-mind-architecture
+git checkout feature/thongthai-one-mind-architecture
+git pull --ff-only origin feature/thongthai-one-mind-architecture
+npm test   # expect 597/597 passing
+git log --oneline -20
+```
