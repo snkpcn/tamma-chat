@@ -1580,3 +1580,138 @@ git pull --ff-only origin feature/thongthai-one-mind-architecture
 npm test   # expect 638/638 passing
 git log --oneline -20
 ```
+
+---
+
+## LOCAL CONCIERGE INTELLIGENCE FRAMEWORK (post-deploy, branch work — NOT DEPLOYED)
+
+Branch: `feature/local-concierge-intelligence`, based on `main` (which
+already contains the merged release candidate from PR #42,
+`main@2cb2e88`). **Not merged, not deployed.** Owner will decide deploy
+later.
+
+### Observed post-deploy gap
+
+After the release candidate went live, a real customer message —
+"อิสานมีอะไรดี ช่วงนี้ฝนตกไหมอะ" — exposed a structural gap, not a one-off
+phrase miss: Thongthai had no general way to answer local-area, weather-
+condition, food-culture, visitor-journey, activity-suitability, or safety-
+uncertainty questions. These aren't rare edge cases for a concierge for a
+real rural Isan/Chaiyaphum property — they're a normal, broad class of
+things a real visitor asks. Patching only the one observed sentence would
+have left the next 50 phrasings of the same underlying question classes
+unanswered.
+
+### Framework added
+
+Three new pure, side-effect-free modules, following the exact same
+discipline already established by `_ecosystem-entity-graph.ts` (static
+structural knowledge, never a mutable/real-time fact) and
+`_deterministic-semantic-turn.ts` (small closed marker sets, never a
+growing phrase table):
+
+- **`_local-concierge-knowledge.ts`** — the STATIC LOCAL KNOWLEDGE pack
+  (season guidance for hot/rainy/cool, region/place character, food-
+  culture style, general safety principle). A lookup table, not prose —
+  extend by adding entries, never by writing a new paragraph per phrase.
+  Explicitly documents the truth boundary: this module must never be
+  asked for a real-time fact (current weather, current availability).
+- **`_local-concierge-intent.ts`** — structural classifiers for 6
+  categories (`weather_condition`, `region_place`, `food_culture`,
+  `visitor_journey`, `activity_suitability`, `safety_uncertainty`), each a
+  small set of grammatical/vocabulary markers, plus
+  `hasExplicitTransactionIntent` — the guard that makes local-concierge
+  questions yield to a real booking/confirm/signup/accept-offer signal in
+  the same message (Routing Safety, category F below).
+- **`_local-concierge-response.ts`** — pure composer, one function per
+  category, following the required shape (direct answer → local context →
+  best options → real-time-data caveat → at most one follow-up). Every
+  business name it prints comes from `_ecosystem-entity-graph.ts`'s real
+  node labels, never invented.
+
+Wired into `thongthai-chat.ts` as `deterministicLocalConciergeResponse`,
+called from `processThongthaiChatCore` at **two** points (both required,
+found empirically while testing, not assumed up front):
+1. In the legacy deterministic chain, right after promotion-discovery and
+   right **before** the bare ecosystem broad-discovery fallback (a message
+   can match both, e.g. "ฝนตกแล้วยังทำอะไรได้บ้าง" also matches
+   `isExperienceDiscoveryIntent`'s own "ทำอะไรได้บ้าง" pattern — the more
+   specific, weather-aware answer wins) and before the activity/restaurant
+   deterministic responses (so a blended question like "ฝนตกขี่ม้าได้ไหม"
+   gets concierge reasoning, not a generic activity-inventory answer that
+   silently drops the weather framing).
+2. A matching `preserveLocalConciergeFastPath` guard added alongside the
+   **existing** `preserveExperienceDiscoveryFastPath`/
+   `preserveRestaurantFastPath` guards, right before the One-Mind cutover
+   block. **Found and fixed a real gap while testing**: without this,
+   One-Mind's own structural markers (`findActivityTopic` matching "ม้า")
+   claimed a blended message like "ฝนตกขี่ม้าได้ไหม" as plain activity-
+   topic discovery BEFORE `deterministicLocalConciergeResponse` ever got a
+   turn — confirmed by writing a permanent regression test
+   (`local-concierge-intelligence.test.ts`'s tests A2 and E) and verifying
+   it fails when this guard is disabled. This reuses the exact precedent
+   these two existing guards already established — not new architecture,
+   the same pattern extended once more.
+
+### Categories covered
+
+Weather/condition, place/region, food-culture, visitor-journey, activity-
+suitability, safety-uncertainty — all 6, per the owner's spec. General
+safety questions with a comparison shape ("ตัวไหนนิสัยดีกว่า") are
+deliberately left to the EXISTING `detectCompareEntities`/
+`cannot_verify_comparison` path in `_deterministic-semantic-turn.ts`
+(already correct, already tested in Gate 5) rather than duplicated here.
+
+### Tests added
+
+`tests/local-concierge-intelligence.test.ts` — 8 tests, grouped by
+category A-F exactly as specified, driven through the real
+`processThongthaiChatCore`, never hand-constructed `SemanticTurn`s.
+Verified the One-Mind fast-path-guard fix is load-bearing (not vacuous) by
+disabling it and confirming tests A2/E fail, then restoring it.
+
+### Examples: before vs after
+
+| Message | Before | After |
+|---|---|---|
+| "อิสานมีอะไรดี ช่วงนี้ฝนตกไหมอะ" | generic "ไม่มีข้อมูลที่ยืนยันได้" apology | honest no-live-weather caveat + real seasonal guidance + connects to ตำมา-ชาติ/Inthanin/เฮือนสเตย์ |
+| "ฝนตกขี่ม้าได้ไหม" | plain horse-inventory listing (weather framing silently dropped) | "cannot confirm live ground conditions, generally rideable in normal weather, please confirm with staff on the day" |
+| "มีเวลา 3 ชั่วโมง จัดทริปให้หน่อย" | generic apology (fell through to unavailable LLM) | short journey suggestion touching food/stay/activity/cafe, asks the one genuinely missing detail (companions) |
+| "ทำมา-ชาติฟีลแบบไหน" | generic apology | short, real region-character answer |
+| "มีเวลา 3 ชั่วโมง จองขี่ม้าเลย" (explicit book-now) | (untested) | correctly yields to the real activity booking flow, not journey-planning copy |
+
+### Facts still missing (honest, documented)
+
+Same truth boundary as always in this program: this framework answers
+from STATIC local knowledge only. It has no live weather integration, no
+live ground-condition sensor, and does not override staff's real safety
+judgment at the property — every weather/safety response explicitly says
+so and defers to staff/"check when you arrive." If the owner wants an
+actual live weather source integrated later, that is real new
+infrastructure (a weather API adapter wired through
+`_knowledge-resolver.ts`'s existing adapter pattern), not something this
+static-knowledge framework should fake.
+
+Known remaining classifier gaps (precision, not correctness — no
+hallucination in any of these, just a generic non-answer instead of a
+concierge one): a typo'd visitor-type word ("มืใหม่" for "มือใหม่") isn't
+recognized (typo tolerance was intentionally not chased here, matching
+this codebase's existing precedent of narrow edit-distance tolerance only
+for `isExperienceDiscoveryIntent`'s own established phrase set, not a
+general solution); a bare companion mention with no planning/visitor-type
+signal at all (e.g. "มากับแฟน" alone, no question) is deliberately left
+unclassified rather than risk false-firing on incidental mentions.
+
+### Deploy status: NOT DEPLOYED
+
+No Netlify, no deploy, no DB migration, no production DB mutation, no
+transaction created. All work is on `feature/local-concierge-intelligence`
+(pushed to `origin`), untouched by any of tonight's/this session's deploy
+activity on the actual release candidate.
+
+### Next step
+
+Owner review of the framework design and the before/after examples above,
+then a deploy decision (merge to `main` + Netlify deploy, following the
+SAME pre-deploy checklist/watch-window discipline already used for the
+release candidate itself).
