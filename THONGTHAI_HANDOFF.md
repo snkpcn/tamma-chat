@@ -1369,3 +1369,214 @@ before an explicit resume (A→B→C→resume A).
    PRODUCTION ACCEPTANCE" section, and the owner's 11-item final report.
 4. Commit and push after every meaningful checkpoint, as done throughout
    this session — do not accumulate uncommitted work.
+
+---
+
+## RELEASE CANDIDATE — PRE-PRODUCTION ACCEPTANCE
+
+Branch: `feature/thongthai-one-mind-architecture`. HEAD as of this section:
+`cdd49a8` (this documentation commit follows it). Full suite: **638/638
+passing**. Working tree clean throughout. **DO NOT DEPLOY. DO NOT TOUCH
+NETLIFY. DO NOT TOUCH MAIN. DO NOT APPLY PRODUCTION DB MIGRATIONS** — none
+of the above was done at any point in this program.
+
+### What this release-gate program closed
+
+Starting from the accepted `f57978a` architecture checkpoint (597/597
+passing), this program closed all 6 required release-acceptance gates
+without any architecture rebuild: LINE and Web still share ONE canonical
+customer core (`processThongthaiChatCore`); `guest_agent_state.state.
+taskState` is still the one authoritative conversational task state;
+`booking_sessions` is still only a one-directional compatibility mirror;
+domains that route through legacy `thongthai-chat.ts` machinery were
+tested exactly as they are, not rewritten to look uniform.
+
+**7 real production bugs found and fixed**, every one with a regression
+test independently verified to fail against the reverted fix before
+landing:
+
+1. Promotion redemption accepted an off-topic message (or a bare
+   "ยืนยัน") as the customer's name, creating a redemption with no real
+   name ever given.
+2. Restaurant topic-switch detection never fired when there was no active
+   task (only worked mid-task) — a conversation with no open task
+   literally could not deterministically switch to restaurant.
+3. Restaurant preorder's own loose-name fallback captured an off-topic
+   message as the name whenever date/time were still missing — sibling
+   bug to #1, fixed by requiring date+time already known first.
+4. Membership status questions phrased with ordinary "หรือยัง/รึยัง" (yet?)
+   particles were misrouted to generic sign-up instructions instead of an
+   actual status lookup.
+5. Generalized #2: any domain's own loose side-question marker (bare
+   "มี", price words) could swallow a message that structurally named a
+   DIFFERENT domain, before ever checking for a real topic switch — fixed
+   once for all domains, not just restaurant.
+6. A cancelled task stayed present in `container.activeTask` (only its
+   status changed), so the dialog manager's task-start decision — a bare
+   null check — silently merged the very next unrelated selection INTO
+   the dead, cancelled task instead of starting a clean new one,
+   resurrecting it in all but name.
+7. (Test-infrastructure, not production, but load-bearing for everything
+   above): `guest_agent_state` PATCH — the real CAS write path used by
+   every turn after a guest's first — was never modeled in the test
+   harness, so state changes after turn 1 silently failed to persist in
+   any test that happened not to notice; and restaurant preorder creation
+   turned out to be an RPC, not a direct table insert, so an early
+   harness route made an "exactly-once" assertion pass vacuously against
+   a write path production never uses. Both fixed in `tests/helpers/
+   canonical-core-harness.ts` before they could hide a real bug.
+
+### A. Per-domain cross-domain stress result (Gate 1)
+
+All 8 required domains covered with permanent tests driven through the
+real `processThongthaiChatCore`, never hand-constructed `SemanticTurn`s:
+**activity** (pre-existing 16-turn flow, regression only), **stay**
+(`stay-real-text-readonly-flow.test.ts`), **restaurant**
+(`restaurant-cross-domain-stress.test.ts`), **promotion**
+(`promotion-redemption-loose-name-guard.test.ts`), **otop**
+(`otop-cross-domain-stress.test.ts`), **membership**
+(`membership-cross-domain-stress.test.ts`), **cafe**
+(`cafe-cross-domain-stress.test.ts`), **ecosystem**
+(`ecosystem-cross-domain-stress.test.ts`). Per domain: informational
+question never mutates state, policy answers never erase state, topic
+switch works, resume works, corrections overwrite, no duplicate
+transaction, exactly one confirmation-gated action where applicable — all
+PASS, with bugs #1-#5 above found and fixed along the way.
+
+### B. Per-domain LINE/Web equivalence result (Gate 2)
+
+Activity's deep 6-turn equivalence proof pre-existed
+(`tests/web-line-channel-equivalence.test.ts`, driven through
+`processThongthaiOneMindTurnAuthoritative` directly). The remaining 7
+domains are covered by `tests/gate2-line-web-domain-equivalence.test.ts`,
+driven through `processThongthaiChatCore` for both channels with
+independent guests. **Result: equivalent business meaning confirmed for
+all 8 domains** — same real facts surfaced, same missing-field/
+transaction-gating behavior, same write counts. No channel-specific
+business-logic divergence found anywhere; the one legitimate difference
+(LINE's legacy-session mirror, activity-only) is itself asserted as
+channel-specific transport plumbing, not business logic.
+
+### C. Stale-state result (Gate 3)
+
+`tests/gate3-stale-interrupted-conversations.test.ts`: a stale task never
+hijacks a plain greeting or leaks into an unrelated domain's answer; a
+suspended task survives more than one intervening domain hop before an
+explicit resume (A→B→C→resume A); and bug #6 above (cancelled-task
+resurrection) — found, fixed, regression-tested.
+
+### D. Exactly-once transaction result
+
+Verified per domain throughout Gates 1-3: promotion redemption (exactly
+one `promotion_redemptions` row, even across repeated off-topic/bare-
+confirmation turns), restaurant preorder (exactly one RPC-created
+preorder, missing fields block creation, a stray post-completion
+confirmation never creates a second one), activity booking (pre-existing
+16-turn proof: exactly one transaction proposal, absent on all 15 prior
+turns, carrying the FINAL corrected values). No domain tested produced a
+duplicate or premature transaction at any point in this program.
+
+### E. Backoffice/notification contract result (Gate 4)
+
+Re-verified read-only against the live `tamma-customer-data` schema
+(project `upaokrprawzhgzeqsdke`): `booking_allocations`/`cafe_inquiries`/
+`otop_order_items` each still have their `AFTER INSERT` trigger →
+`enqueue_tamma_ops_notification()` → staff LINE notification, confirmed
+still wired correctly. `restaurant_preorder_items` still has zero
+triggers — same gap found in a prior session, still real, still
+unapplied. See item F below for the prepared fix.
+
+### F. Restaurant preorder notification migration — NOT APPLIED
+
+File: `supabase/migrations/20260922190000_restaurant_preorder_items_ops_notification_v1.sql`.
+Effect: adds one `elsif` branch to the existing
+`enqueue_tamma_ops_notification()` dispatcher (mirroring the
+`otop_order_items` branch's exact shape) plus one new trigger,
+`ops_notify_restaurant_after_item`, on `restaurant_preorder_items` —
+purely additive, no existing branch/trigger/table touched. Verified via
+static content tests (`tests/gate4-restaurant-notification-migration.test.ts`)
+that every existing dispatcher branch survives byte-for-byte and exactly
+one new trigger is added. **This migration has NOT been applied to any
+database. OWNER APPROVAL IS REQUIRED before applying it** — see the
+file's own header comment for the full idempotency safety argument
+(`notifyRestaurantPreorderTeam`'s existing ignore-duplicates key means
+the app's own inline call and this trigger's call for the same preorder
+will not double-notify).
+
+### G. Remaining known data/capability gaps (honestly documented, not fixed)
+
+Per this program's explicit scope discipline — real feature gaps, not
+classification bugs a regex/state-check fix can safely close:
+
+- **Stay** has no booking-task-creation mechanism via the canonical core
+  at all (no `AgentStateUpdate` field, no `taskState` write path for a
+  stay booking draft) — a real stay booking intent never produces an
+  `ActiveTask`, unlike activity/restaurant/otop. Stay's deterministic
+  routing also does not yet distinguish different policy sub-questions
+  (check-in time vs. room-service hours vs. availability all collapse to
+  the same generic catalog-listing answer) — verified to degrade
+  identically and honestly on both channels (Gate 2), never asserting an
+  invented time.
+- **OTOP** purchase intent ("เอาอันนี้") is not distinguished from a
+  browsing follow-up in the deterministic layer — verified to never
+  fabricate an order, but it also doesn't acknowledge the selection or
+  ask which product is meant when more than one was shown.
+- **Cafe** has no knowledge adapter wired up in `_dialog-source-
+  adapters.ts` at all — `_knowledge-resolver.ts` already expects
+  `adapters.cafe?.facts` and finds nothing. Every cafe question (menu,
+  price, hours) honestly degrades to "cannot confirm" today, even though
+  real `cafe_hours`/`cafe_latte_price`-shaped facts already exist in
+  `world_facts`. Zero hallucination risk, but a real missed-answer gap.
+- 3 of activity's original 16 turns (`ชื่ออะไรบ้าง`, `เวลาเดิมนะ`,
+  `ตอนนี้ที่เลือกไว้มีอะไรบ้าง`) still have no deterministic handler
+  (documented in the CRITICAL REQUIREMENT checkpoint above) — harmless
+  (never corrupts state) but not yet answered without a live LLM.
+
+### H. Production acceptance smoke plan (for the owner's actual deploy, not performed here)
+
+1. Netlify production deploy SHA must match this branch's merge commit
+   before any of the below.
+2. A real LINE greeting must reply correctly in production (the exact
+   check that failed after the original `ee2a315` incident).
+3. Live LINE smoke test of the exact original bug flow: "ฮัลโหล" then
+   "เอาภาราดรครับ เอา 30 นาทีครับ 3 ตุลาคม เวลา 13.00" in one message —
+   this was re-verified this session via real esbuild-bundled-and-invoked
+   handler code (not just unit tests) with a real HMAC-signed synthetic
+   LINE event; both turns resolved `200 OK` with zero crashes.
+4. Live smoke test of one representative flow per domain (the same
+   messages used in this program's Gate 1/2 tests) on both LINE and Web.
+5. Confirm the restaurant notification migration (item F) is either
+   intentionally deferred or applied-and-watched (first
+   `restaurant_preorder_items` insert's `ops_notification_deliveries`
+   rows show exactly one delivered notification, not two) — owner
+   decision, not automatic.
+6. Only after 1-5 pass does this branch merit merging to `main`/deploying
+   — none of that was performed in this program.
+
+### I. Explicit confirmation
+
+- **Netlify: untouched.** No build triggered, no deploy, no config
+  change.
+- **No deploy performed** at any point in this program.
+- **No production database mutation.** Every database interaction this
+  program performed was either read-only (`execute_sql` against
+  `tamma-customer-data`, confirming trigger/function state) or against
+  this session's own in-memory test harness (`tests/helpers/canonical-
+  core-harness.ts`'s `global.fetch` mock) — never the real Supabase
+  REST/RPC endpoints.
+- **No real transaction was ever created.** Every booking/preorder/order/
+  redemption referenced in this document was created inside the offline
+  test harness against mocked data, never against `tamma-customer-data`.
+- **`main` untouched.** All work stayed on
+  `feature/thongthai-one-mind-architecture`.
+
+### Commands the next agent/session should run first
+
+```bash
+cd /home/user/tamma-chat
+git fetch origin feature/thongthai-one-mind-architecture
+git checkout feature/thongthai-one-mind-architecture
+git pull --ff-only origin feature/thongthai-one-mind-architecture
+npm test   # expect 638/638 passing
+git log --oneline -20
+```
