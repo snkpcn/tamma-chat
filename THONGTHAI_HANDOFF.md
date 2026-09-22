@@ -1232,23 +1232,101 @@ is worse than no test, because it looks like coverage.
 
 ### Next task (exact resumption point)
 
-1. Build permanent stress-test files for OTOP, membership, cafe, and
-   general-ecosystem, using `tests/helpers/canonical-core-harness.ts` and
-   the owner's exact example conversations. Before trusting any write-path
-   assertion, confirm (by grepping the real implementation, not guessing)
-   whether that domain's transactional write is a plain table insert or an
-   RPC — restaurant just turned out to be an RPC when every other domain's
-   writes so far have been plain inserts; do not assume the pattern holds
-   for OTOP/cafe without checking `_operations-db.ts` directly (a first
-   pass already found bookings/otop_orders/cafe_inquiries ARE plain
-   inserts — see the checkpoint above — but re-verify before relying on
-   that for a specific new assertion).
-2. Then Gate 2 (LINE vs Web equivalence across all domains, not just
-   activity), Gate 3 (stale/interrupted-conversation coverage beyond
-   activity), Gate 4 (restaurant-preorder-notification migration file +
-   schema tests, migration NOT applied), Gate 5 (no-hallucination checks),
-   Gate 6 (release freeze: full suite + tsc + esbuild smoke + final
-   `THONGTHAI_HANDOFF.md` "RELEASE CANDIDATE" section + the owner's
-   11-item final report).
-3. Commit and push after every meaningful checkpoint, as done for the
-   three checkpoints above — do not accumulate uncommitted work.
+### GATE 1 COMPLETE (commits `a266837`..`4fcb995`)
+
+Permanent stress-test files now exist for all 8 required domains —
+`activity` (pre-existing 16-turn flow etc., unchanged), `stay-real-text-
+readonly-flow.test.ts`, `restaurant-cross-domain-stress.test.ts`,
+`promotion-redemption-loose-name-guard.test.ts`, `otop-cross-domain-
+stress.test.ts`, `membership-cross-domain-stress.test.ts`, `cafe-cross-
+domain-stress.test.ts`, `ecosystem-cross-domain-stress.test.ts` — all
+driven through the real `processThongthaiChatCore` via `tests/helpers/
+canonical-core-harness.ts`, never hand-constructed `SemanticTurn`s.
+
+**Five real production bugs found and fixed this session** (all with a
+regression test verified to fail on the reverted fix before landing):
+1. Promotion redemption accepted an off-topic message as the customer's
+   name (`resolvePromotionRedemption` reusing the restaurant preorder
+   parser's loose-name fallback with no guard).
+2. `deriveDeterministicSemanticTurn` never checked for a restaurant-topic
+   switch when there was no active task (only checked it for an
+   in-progress task) — a stay conversation with no task literally could
+   not switch to restaurant deterministically.
+3. Restaurant preorder's own loose-name fallback captured an off-topic
+   message as the name whenever date/time were STILL missing (not just
+   once they were already known, which was the fallback's own design
+   premise) — same bug class as #1, sibling flow.
+4. Membership status questions phrased with ordinary "หรือยัง/รึยัง" (yet?)
+   particles, rather than an explicit "สถานะ/เช็ค/ตรวจ/ดู" keyword, were
+   misrouted to the generic "here's how to sign up" script instead of an
+   actual status lookup.
+5. Generalized #2's fix: ANY domain's own loose side-question marker (bare
+   "มี", price words) could swallow a message that structurally named a
+   DIFFERENT domain, before ever checking for a real topic switch — found
+   via cafe→stay ("มีห้องพักไหม" mid a cafe conversation), fixed once for
+   all domains in `deriveDeterministicSemanticTurn`'s no-active-task path.
+
+**Two harness (test infrastructure) bugs also found and fixed**, both
+capable of producing false-positive-passing tests if left in place: (a)
+`guest_agent_state` PATCH (the real CAS write path used by every turn
+after a guest's first) was never modeled, so state changes after turn 1
+silently failed to persist; (b) restaurant preorder creation is an RPC
+(`create_restaurant_preorder_v2`/`_v3`), not a direct table insert, so an
+early version of the harness's fake direct-insert route made an
+"exactly-once" assertion pass vacuously against a write path production
+never uses. See `tests/helpers/canonical-core-harness.ts`'s own comments
+for the fixes; see the checkpoint commits above for full narrative.
+
+**Known, deliberately NOT-fixed gaps** (documented per this program's
+"do not create new architecture, fix the smallest real cause" discipline
+— these are real feature gaps, not classification bugs a regex can close):
+- **Stay** has no booking-task-creation mechanism via the canonical core
+  at all (no `AgentStateUpdate` field, no `taskState` write path for a
+  stay booking draft) — a real stay booking intent never produces an
+  `ActiveTask`, unlike activity/restaurant/otop.
+- **OTOP** purchase intent ("เอาอันนี้") is not distinguished from a
+  browsing follow-up in the deterministic layer — it never fabricates an
+  order (verified), but it also doesn't acknowledge the selection or ask
+  which product is meant when more than one was shown.
+- **Cafe** has NO knowledge adapter wired up in `_dialog-source-
+  adapters.ts` at all (`_knowledge-resolver.ts` already expects
+  `adapters.cafe?.facts` and finds nothing) — every cafe question
+  honestly degrades to "cannot confirm," even though real `cafe_hours`/
+  `cafe_latte_price`-shaped facts exist in `world_facts`. No hallucination
+  risk, but a real missed-answer gap.
+
+**Full suite: 616/616 passing.** All checkpoints pushed to
+`feature/thongthai-one-mind-architecture`. Production/Netlify untouched
+throughout.
+
+### Next task (exact resumption point)
+
+1. **Gate 2** — LINE vs Web equivalence across ALL 8 domains (not just
+   activity, which already has this from a prior session). For each
+   domain, run the SAME representative flow with `channel: 'line'` vs
+   `channel: 'web'` through `processThongthaiChatCore` (or the LINE
+   adapter's own entry, `_line-webhook-core.ts`, if channel-specific
+   wiring needs proving too) and assert equivalent business meaning
+   (domain/action interpretation, durable state, constraints, task/draft
+   state, transaction proposal+args, idempotency) — formatting may differ.
+2. **Gate 3** — stale/interrupted-conversation coverage beyond activity's
+   existing tests: old stale task + greeting, abandoned draft + unrelated
+   request, switch A→B→C→resume A, cancel + fresh start, across the newly
+   -tested domains.
+3. **Gate 4** — restaurant-preorder-notification migration: create/keep an
+   actual migration file in the repo (the SQL was drafted in a prior
+   session's checkpoint — locate and verify it's still accurate against
+   the now-better-understood RPC-based creation flow), add schema-
+   assertion tests, do NOT apply it, mark OWNER APPROVAL REQUIRED.
+4. **Gate 5** — dedicated no-hallucination checks (temperament/beginner-
+   suitability/availability/price/policy/menu/OTOP/cafe unknown-fact
+   probes) — several domains already demonstrate this informally via
+   Gate 1's tests (especially cafe's "cannot confirm" tests), but a
+   dedicated pass across ALL domains closes the gate properly.
+5. **Gate 6** — release freeze: full suite + tsc + esbuild bundle/import
+   smoke for both entry points + the exact original LINE bug flow +
+   activity's 16-turn flow + all Gate 1-5 flows, then ONE final commit
+   updating `THONGTHAI_HANDOFF.md` with a "RELEASE CANDIDATE — PRE-
+   PRODUCTION ACCEPTANCE" section, and the owner's 11-item final report.
+6. Commit and push after every meaningful checkpoint, as done throughout
+   this session — do not accumulate uncommitted work.
