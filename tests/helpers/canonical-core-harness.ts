@@ -126,6 +126,21 @@ export type Harness = {
    *  provider. If the queue is empty, a safe generic "conversation" reply
    *  is returned (never a hallucinated business fact). */
   programGeminiReply: (reply: HarnessGeminiReply) => void;
+  /** Script the NEXT call to the OpenWeatherMap endpoint
+   *  (_weather-provider.ts's getWeatherForTammaLocation) -- ok:true + body
+   *  for a scripted success, ok:false for a scripted provider error. THIS
+   *  is required for any test that wants a real "weather succeeded" path
+   *  through the full processThongthaiChatCore pipeline: setting
+   *  `global.fetch` yourself before calling withHarness does NOT work --
+   *  withHarness unconditionally installs its own fetchMock for the whole
+   *  run, and that mock's default for any unrecognized domain (which an
+   *  unprogrammed OpenWeatherMap call would otherwise hit) returns an
+   *  empty successful list, silently masking a "weather succeeded but with
+   *  no real data" state that looks like success in a loose assertion. If
+   *  nothing is programmed, an OpenWeatherMap call is answered with
+   *  ok:false (a provider error) rather than that misleading empty-success
+   *  default. */
+  programWeatherFetch: (response: { ok: boolean; body?: unknown }) => void;
   /** Directly inspect/seed a guest's persisted state row -- useful for
    *  stale-state tests that need to start from an already-existing task. */
   getState: (guestDbId: string) => GuestAgentStateSnapshot | undefined;
@@ -155,6 +170,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const customerAccounts = new Map<string, { id: string; guest_id: string }>();
   const posts = new Map<string, Array<Record<string, unknown>>>();
   const geminiQueue: HarnessGeminiReply[] = [];
+  let weatherFetchResponse: { ok: boolean; body: unknown } | null = null;
   const restaurantPreorders = new Map<string, Record<string, unknown>>(); // id -> row (tamma_chart_os.restaurant_preorders)
   const restaurantPreorderItems = new Map<string, Array<Record<string, unknown>>>(); // id -> item rows
   const restaurantPreorderIdempotency = new Map<string, string>(); // idempotency_key -> id
@@ -252,6 +268,17 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     if (u.includes('generativelanguage.googleapis.com')) {
       const reply = geminiQueue.shift() ?? { message: 'ขอโทษนะครับ ตอนนี้ทองไทยยังไม่มีข้อมูลที่ยืนยันได้สำหรับเรื่องนี้ครับ', intent: 'conversation' };
       return jsonResponse({ candidates: [{ content: { parts: [{ text: JSON.stringify(reply) }] } }] });
+    }
+
+    // --- weather provider (OpenWeatherMap, _weather-provider.ts) ---
+    // See programWeatherFetch's own doc comment: this must NOT fall
+    // through to the generic "unknown GET -> empty list" default below --
+    // an empty list is `ok:true`, and getWeatherForTammaLocation would
+    // read that as a real (if data-less) success rather than the honest
+    // "nothing programmed" case.
+    if (u.includes('api.openweathermap.org')) {
+      if (!weatherFetchResponse) return jsonResponse({}, 500);
+      return jsonResponse(weatherFetchResponse.body ?? {}, weatherFetchResponse.ok ? 200 : 500);
     }
 
     // --- guest_identities ---
@@ -441,6 +468,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   return {
     fetchMock,
     programGeminiReply: reply => { geminiQueue.push(reply); },
+    programWeatherFetch: response => { weatherFetchResponse = { ok: response.ok, body: response.body ?? {} }; },
     getState: guestDbId => agentState.get(guestDbId),
     setState: (guestDbId, state, updatedAt) => { agentState.set(guestDbId, { exists: true, state, updatedAt: updatedAt ?? new Date().toISOString() }); },
     postsTo: table => posts.get(table) ?? [],

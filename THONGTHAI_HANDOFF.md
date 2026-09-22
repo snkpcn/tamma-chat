@@ -2034,3 +2034,102 @@ Netlify deploy performed by this session — all env-var reading was via
 `process.env` in code/tests only, never a live call against the owner's
 real key (every test mocks `global.fetch`). Work remains on
 `feature/local-concierge-intelligence`, pushed, not merged, not deployed.
+
+**Update:** merged to `main` via PR #43 (`be2babb`), tree-identical to the
+tested branch tip.
+
+---
+
+## HOTFIX — weather routing production incident (on top of PR #43)
+
+Live smoke on production after PR #43 reported "ฝนตกไหมตอนนี้" and
+"ฝนตกไหม" returning the generic LLM-outage apology ("...ทองไทยคิดช้ากว่า
+ปกติ...") instead of a weather answer.
+
+### Root cause
+
+That exact apology string is `availabilityBrainResponse()`, reachable from
+exactly ONE place in the whole codebase: `thongthai-chat.ts`'s catch
+branch for `LLMAvailabilityError` thrown by `runThongthaiBrain` (the real
+LLM call), reached only after every deterministic responder ahead of it
+(including the local-concierge one) returned `null`. Reproducing the exact
+production-reported phrases through the full `processThongthaiChatCore`
+path in every provider state (unset / mocked success / mocked HTTP error)
+showed the classifier and composer both already handle them correctly —
+so the apology could only mean the local-concierge deterministic responder
+was skipped or crashed before it could answer.
+
+Two real, confirmed gaps (found by code inspection, not guessed):
+1. **No defensive `.catch()`** around `deterministicLocalConciergeResponse`'s
+   call site in `processThongthaiChatCore` — every sibling deterministic
+   responder (`promotionDiscoveryFallbackResponse`,
+   `deterministicActivityResponse`, `deterministicRestaurantResponse`) is
+   wrapped in `.catch(error => { console.error(...); return null; })`, but
+   this one, added in Phase 1, was not. If anything in the local-concierge
+   composer path threw, the exception would escape `processThongthaiChatCore`
+   entirely uncaught (there is no top-level try/catch around it, nor around
+   the Netlify `handler` that calls it) — a hard crash, not a graceful
+   apology. **Verified load-bearing**: forced a throw inside
+   `getWeatherForTammaLocation` via a temporary test-only env flag, removed
+   the `.catch()`, confirmed the request crashed uncaught (worse than the
+   apology — no response at all), then restored both and confirmed it
+   degrades gracefully to a real answer instead.
+2. **No timeout on the OpenWeather fetch** — a hung/slow provider call
+   would `await` indefinitely, with no upper bound, inside a function with
+   no defensive catch above it (gap 1). Added a 6-second `AbortController`
+   timeout; a timeout now degrades to `status: 'unavailable', reason:
+   'timeout'`, the same structured shape as every other failure mode.
+
+Separately, investigating this surfaced an **unrelated test-infrastructure
+bug**: several of Phase 3's own "mocked weather success" end-to-end tests
+were silently not exercising their intended mock at all.
+`withHarness` (the shared test harness) unconditionally installs its own
+`global.fetch` mock for its whole run and restores the real one only
+afterward — a `global.fetch = myMock` set *before* calling `withHarness`
+is invisible to any code that runs inside it. Its own fallback for an
+unrecognized domain (which an unprogrammed OpenWeatherMap call would hit)
+returns an empty-but-`ok:true` list, which `_weather-provider.ts` reads as
+a real (if data-less) success — so the affected tests passed for the wrong
+reason (asserting only the `"จากข้อมูลล่าสุด"` prefix, which appears
+regardless of whether real mocked data made it through). Fixed by adding
+`harness.programWeatherFetch({ ok, body })` to `canonical-core-harness.ts`
+(the same pattern as its existing `programGeminiReply`), and updated every
+affected Phase 3 test to use it and to additionally assert the actual
+mocked data value, not just the prefix.
+
+### Files changed (hotfix)
+
+- `netlify/functions/thongthai-chat.ts` — added `.catch()` around
+  `deterministicLocalConciergeResponse`'s call site.
+- `netlify/functions/_weather-provider.ts` — added an `AbortController`-based
+  6s timeout (`timeoutMs` parameter, default 6000, overridable for tests);
+  new `'timeout'` reason code.
+- `tests/helpers/canonical-core-harness.ts` — added
+  `programWeatherFetch` + its routing branch (additive; no existing test's
+  behavior changed).
+- `tests/weather-provider.test.ts` — rewritten to use
+  `programWeatherFetch` throughout; added the exact production-reported
+  phrases as a dedicated regression test across all 3 provider states, a
+  timeout regression test, and a synchronous-throw regression test.
+
+### Tests added
+
+3 new tests in `tests/weather-provider.test.ts` (now 13 total, was 10):
+"exact production-reported phrases never return the generic LLM-outage
+apology, in any provider state" (unset / mocked success / mocked
+failure — pins both exact phrases from the report), "OpenWeather fetch
+that hangs past the timeout degrades to unavailable, never crashes, never
+hangs indefinitely", "a fetch that throws synchronously... still degrades
+gracefully". Every existing Phase 1/2/3 local-concierge test still passes
+unmodified.
+
+### Full test result
+
+**665/665 passing** (662 before this hotfix + 3 net new).
+
+### Ready for one hotfix deploy?
+
+Yes. Small, targeted diff (2 defensive fixes + a test-infrastructure fix +
+regression tests), all green, both fixes verified load-bearing via the
+established revert-and-confirm methodology. No DB migration, no
+production transaction.

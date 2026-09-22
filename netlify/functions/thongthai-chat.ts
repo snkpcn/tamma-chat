@@ -1453,7 +1453,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // One-Mind can't claim these messages first either. See
   // deterministicLocalConciergeResponse's own header comment for the full
   // precedence reasoning and the explicit-transaction-intent yield.
-  const localConcierge = await deterministicLocalConciergeResponse(request);
+  const localConcierge = await deterministicLocalConciergeResponse(request).catch(error => {
+    console.error('THONGTHAI_LOCAL_CONCIERGE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
   if (localConcierge) {
     const polished = polishedResponse(localConcierge, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
