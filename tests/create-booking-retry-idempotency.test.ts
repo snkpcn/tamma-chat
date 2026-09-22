@@ -19,12 +19,14 @@
 // `bookings`, both calls resolve to the SAME booking_code.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createBooking } from '../netlify/functions/_operations-db';
+import { createBooking, decryptPii } from '../netlify/functions/_operations-db';
 
 const RESOURCE_ROW = { id: 'res-horse-1', code: 'activity-horse', name: 'ขี่ม้า' };
 const GUEST_DB_ID = '11111111-1111-4111-8111-111111111111';
 const START_AT = '2026-10-01T10:00:00+07:00';
 const END_AT = '2026-10-01T11:00:00+07:00';
+const SECOND_START_AT = '2026-10-01T11:00:00+07:00';
+const SECOND_END_AT = '2026-10-01T12:00:00+07:00';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -37,6 +39,7 @@ function jsonResponse(body: unknown, status = 200): Response {
  *  duplicate check has to work under, not just a canned single response. */
 function mockSupabase() {
   let postCount = 0;
+  const bookingPosts: Array<Record<string, unknown>> = [];
   const bookingsTable: Array<{ guest_id: string | null; booking_code: string; status: string; start_at: string; end_at: string; created_at: string }> = [];
   let bookingSeq = 0;
 
@@ -51,10 +54,12 @@ function mockSupabase() {
       return jsonResponse([{ ...RESOURCE_ROW, metadata: {} }]);
     }
     if (u.includes('/service_schedules') && method === 'GET') {
-      // Two contiguous 30-minute slots covering 10:00-11:00, full capacity.
+      // Contiguous 30-minute slots covering 10:00-12:00, full capacity.
       return jsonResponse([
         { id: 'sched-1', start_at: START_AT, end_at: '2026-10-01T10:30:00+07:00', capacity_total: 2, capacity_reserved: 0 },
         { id: 'sched-2', start_at: '2026-10-01T10:30:00+07:00', end_at: END_AT, capacity_total: 2, capacity_reserved: 0 },
+        { id: 'sched-3', start_at: SECOND_START_AT, end_at: '2026-10-01T11:30:00+07:00', capacity_total: 2, capacity_reserved: 0 },
+        { id: 'sched-4', start_at: '2026-10-01T11:30:00+07:00', end_at: SECOND_END_AT, capacity_total: 2, capacity_reserved: 0 },
       ]);
     }
     if (u.includes('/customer_accounts') && method === 'GET') {
@@ -69,20 +74,23 @@ function mockSupabase() {
       // retry of the SAME request would look like. Parse guest_id out of
       // the querystring so two different guests booking the identical slot
       // are never conflated with each other.
-      const guestMatch = decodeURIComponent(u).match(/guest_id=eq\.([^&]+)/)?.[1] ?? null;
-      const match = bookingsTable.filter(b => b.status !== 'cancelled' && b.guest_id === guestMatch);
+      const decoded = decodeURIComponent(u);
+      const guestMatch = decoded.match(/guest_id=eq\.([^&]+)/)?.[1] ?? null;
+      const startMatch = decoded.match(/start_at=eq\.([^&]+)/)?.[1] ?? null;
+      const match = bookingsTable.filter(b => b.status !== 'cancelled' && b.guest_id === guestMatch && b.start_at === startMatch);
       return jsonResponse(match.length ? [match[match.length - 1]] : []);
     }
     if (u.endsWith('/bookings') && method === 'POST') {
       postCount += 1;
       bookingSeq += 1;
-      const body = JSON.parse(String(init.body ?? '{}')) as { guest_id?: string | null };
+      const body = JSON.parse(String(init.body ?? '{}')) as { guest_id?: string | null; start_at?: string; end_at?: string };
+      bookingPosts.push(body);
       const row = {
         guest_id: body.guest_id ?? null,
         booking_code: `BK-TEST-${String(bookingSeq).padStart(4, '0')}`,
         status: 'requested',
-        start_at: START_AT,
-        end_at: END_AT,
+        start_at: body.start_at ?? START_AT,
+        end_at: body.end_at ?? END_AT,
         created_at: new Date().toISOString(),
       };
       bookingsTable.push(row);
@@ -94,7 +102,7 @@ function mockSupabase() {
     throw new Error(`unexpected fetch in test: ${method} ${u}`);
   }) as typeof fetch;
 
-  return { fetchMock, postCount: () => postCount };
+  return { fetchMock, postCount: () => postCount, bookingPosts: () => bookingPosts };
 }
 
 test('a retried committed-activity-booking turn never creates a second real booking', async () => {
@@ -134,6 +142,56 @@ test('a retried committed-activity-booking turn never creates a second real book
     global.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = originalUrl;
     if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+  }
+});
+
+test('booking rows keep their submitted customer contact snapshot even when the same guest later changes profile details', async () => {
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.SUPABASE_URL;
+  const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalPiiKey = process.env.CUSTOMER_PII_ENCRYPTION_KEY;
+  process.env.SUPABASE_URL = 'https://example.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+  process.env.CUSTOMER_PII_ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+  const { fetchMock, bookingPosts } = mockSupabase();
+  global.fetch = fetchMock;
+
+  try {
+    const baseInput = {
+      guestDbId: GUEST_DB_ID,
+      channel: 'web' as const,
+      serviceType: 'activity' as const,
+      resourceCode: 'activity-horse',
+      date: '2026-10-01',
+      durationMinutes: 60,
+      partySize: 1,
+    };
+
+    await createBooking({
+      ...baseInput,
+      time: '10:00',
+      customerName: 'SMOKE TEST PHARADON',
+      phone: '0999990001',
+      note: 'เลือก: ภาราดร [asset:horse-pharadon]',
+    });
+    await createBooking({
+      ...baseInput,
+      time: '11:00',
+      customerName: 'SMOKE TEST THONGTHAI',
+      phone: '0999990002',
+      note: 'เลือก: ทองไทย [asset:horse-thongthai]',
+    });
+
+    const [pharadon, thongthai] = bookingPosts();
+    assert.equal(decryptPii(pharadon.booking_customer_name_enc as string), 'SMOKE TEST PHARADON');
+    assert.equal(decryptPii(pharadon.booking_phone_enc as string), '0999990001');
+    assert.equal(decryptPii(thongthai.booking_customer_name_enc as string), 'SMOKE TEST THONGTHAI');
+    assert.equal(decryptPii(thongthai.booking_phone_enc as string), '0999990002');
+  } finally {
+    global.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+    if (originalPiiKey === undefined) delete process.env.CUSTOMER_PII_ENCRYPTION_KEY; else process.env.CUSTOMER_PII_ENCRYPTION_KEY = originalPiiKey;
   }
 });
 
