@@ -88,18 +88,32 @@ export function parseRestaurantPreorderTurn(
   const time = extractTime(message);
   // The loose fallback ("whatever text is left once known fields are
   // stripped, unless it contains a small restaurant-specific blocklist of
-  // words") was built for the restaurant preorder flow, where by the time
-  // a name is being collected the customer has already explicitly
-  // committed to an order -- an unrelated aside is comparatively rare and
-  // the blocklist catches the restaurant-domain ones. A caller outside
-  // that flow (promotion redemption reusing this same parser) can pass
-  // allowLooseName:false to require an EXPLICIT name marker ("ชื่อ...",
-  // "ผมชื่อ...") instead, when a wrong guess would be worse than asking
-  // again -- see resolvePromotionRedemption in thongthai-chat.ts for the
-  // real incident this closes: an unrelated question or a bare "ยืนยัน"
+  // words") exists for the restaurant preorder flow's designed one-shot
+  // "นุ๊ก 0610169999" reply, with no "ชื่อ" marker required -- but that
+  // design's own premise is that date+time are ALREADY resolved by the
+  // time a bare name is being collected (see formatRestaurantSetPrompt:
+  // date/time is always asked for before name/phone). The original version
+  // of this gate only checked "no name yet", not "date+time already
+  // known" -- so an unrelated aside sent BEFORE date/time were supplied
+  // (e.g. "ตอนนี้ฝนตกไหม" right after accepting a set) was wrongly
+  // captured as the customer's name, with the preorder later completing
+  // under a name the customer never gave. Gating on date+time already
+  // being resolved (from `current`, or from this very message when both
+  // are supplied together) closes that while keeping the one-shot reply
+  // working exactly as designed.
+  //
+  // A caller outside the restaurant-preorder-draft flow (promotion
+  // redemption reusing this same parser, which doesn't necessarily even
+  // have a date/time requirement) can pass allowLooseName:false to
+  // require an EXPLICIT name marker ("ชื่อ...", "ผมชื่อ...") unconditionally
+  // instead -- see resolvePromotionRedemption in thongthai-chat.ts for the
+  // real incident that closed: an unrelated question or a bare "ยืนยัน"
   // was being accepted as the customer's name and redeeming a real
   // promotion with no name ever actually given.
-  const allowLooseName = (options.allowLooseName ?? true) && !current.customerName && message.trim().length <= 80;
+  const dateTimeAlreadyResolved = Boolean((current.date ?? date) && (current.time ?? time));
+  const allowLooseName = options.allowLooseName === false
+    ? false
+    : !current.customerName && message.trim().length <= 80 && dateTimeAlreadyResolved;
   const customerName = extractName(message, allowLooseName);
   return { date, time, customerName, phone, email };
 }

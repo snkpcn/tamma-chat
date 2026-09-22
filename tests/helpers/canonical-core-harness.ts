@@ -111,7 +111,14 @@ export function defaultCatalog(): Required<HarnessCatalog> {
   };
 }
 
-export type HarnessGeminiReply = { message: string; intent?: string; toolCalls?: unknown[]; contextUpdates?: Record<string, unknown> };
+export type HarnessGeminiReply = {
+  message: string; intent?: string; toolCalls?: unknown[]; contextUpdates?: Record<string, unknown>;
+  /** Passed straight through into the raw completion JSON -- lets a test
+   *  script a proposal-generation turn (e.g. the brain proposing a
+   *  restaurant set, or clearing an unresolved need) the same way the
+   *  real model would via its own agentStateUpdate field. */
+  agentStateUpdate?: Record<string, unknown>;
+};
 
 export type Harness = {
   fetchMock: typeof fetch;
@@ -139,14 +146,81 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const customerAccounts = new Map<string, { id: string; guest_id: string }>();
   const posts = new Map<string, Array<Record<string, unknown>>>();
   const geminiQueue: HarnessGeminiReply[] = [];
+  const restaurantPreorders = new Map<string, Record<string, unknown>>(); // id -> row (tamma_chart_os.restaurant_preorders)
+  const restaurantPreorderItems = new Map<string, Array<Record<string, unknown>>>(); // id -> item rows
+  const restaurantPreorderIdempotency = new Map<string, string>(); // idempotency_key -> id
   let guestSeq = 0;
   let bookingSeq = 0;
   let genericSeq = 0;
+  let restaurantPreorderSeq = 0;
 
   function recordPost(table: string, body: Record<string, unknown>) {
     const list = posts.get(table) ?? [];
     list.push(body);
     posts.set(table, list);
+  }
+
+  /** Real preorder creation is create_restaurant_preorder_v2/_v3 -- a
+   *  Postgres RPC that resolves menu items -> prices itself, computes the
+   *  total, and is idempotent on p_idempotency_key (see _restaurant-sot.ts).
+   *  Mirrors that: resolves prices from the SAME catalog.restaurantMenu the
+   *  rest of this harness already serves, and returns duplicate:true with
+   *  the ORIGINAL row on a repeated key instead of creating a second one --
+   *  this is what a test asserts "exactly once" against. */
+  function createRestaurantPreorderRpc(
+    body: Record<string, unknown>,
+    promotionCampaignId: string | null,
+    pricingOverride: Record<string, number> | null,
+  ): { id: string; preorderCode: string; totalAmount: number; normalTotalAmount?: number; discountAmount?: number; status: string; duplicate: boolean } {
+    const idempotencyKey = String(body.p_idempotency_key ?? '');
+    const existingId = restaurantPreorderIdempotency.get(idempotencyKey);
+    if (existingId) {
+      const row = restaurantPreorders.get(existingId)!;
+      return {
+        id: row.id as string, preorderCode: row.preorder_code as string,
+        totalAmount: row.total_amount as number,
+        normalTotalAmount: row.normal_total_amount as number | undefined,
+        discountAmount: row.discount_amount as number | undefined,
+        status: row.status as string, duplicate: true,
+      };
+    }
+    restaurantPreorderSeq += 1;
+    const id = `preorder-${restaurantPreorderSeq}`;
+    const rawItems = Array.isArray(body.p_items) ? body.p_items as Array<{ menuItemId?: string; quantity?: number }> : [];
+    const menuById = new Map(catalog.restaurantMenu.map(item => [String(item.menu_item_id), item]));
+    const resolvedItems = rawItems.map(item => {
+      const menu = menuById.get(String(item.menuItemId));
+      const override = pricingOverride?.[String(item.menuItemId)];
+      const unitPrice = typeof override === 'number' ? override : (typeof menu?.selling_price === 'number' ? menu.selling_price : 0);
+      const quantity = typeof item.quantity === 'number' ? item.quantity : 1;
+      return { menu_name: (menu?.name as string | undefined) ?? String(item.menuItemId), quantity, unit_price: unitPrice, line_total: unitPrice * quantity };
+    });
+    const normalTotal = resolvedItems.reduce((sum, item) => {
+      const menu = menuById.get(String((rawItems[resolvedItems.indexOf(item)] ?? {}).menuItemId));
+      return sum + (typeof menu?.selling_price === 'number' ? menu.selling_price * item.quantity : item.line_total);
+    }, 0);
+    const totalAmount = resolvedItems.reduce((sum, item) => sum + item.line_total, 0);
+    const row: Record<string, unknown> = {
+      id, restaurant_id: body.p_restaurant_id, preorder_code: `RP-TEST-${String(restaurantPreorderSeq).padStart(4, '0')}`,
+      guest_id: body.p_guest_id ?? null, customer_name: body.p_customer_name, phone: body.p_phone || null, email: body.p_email || null,
+      requested_for: body.p_requested_for, source_channel: body.p_source_channel, customer_note: body.p_customer_note || null,
+      status: 'pending', total_amount: totalAmount, environment: body.p_environment,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      promotion_campaign_id: promotionCampaignId, promotion_redemption_id: null,
+      normal_total_amount: promotionCampaignId ? normalTotal : null,
+      discount_amount: promotionCampaignId ? Math.max(0, normalTotal - totalAmount) : 0,
+      pricing_source: promotionCampaignId ? 'promotion' : 'menu',
+    };
+    restaurantPreorders.set(id, row);
+    restaurantPreorderItems.set(id, resolvedItems);
+    restaurantPreorderIdempotency.set(idempotencyKey, id);
+    recordPost('restaurant_preorders_rpc', body);
+    return {
+      id, preorderCode: row.preorder_code as string, totalAmount,
+      normalTotalAmount: promotionCampaignId ? normalTotal : undefined,
+      discountAmount: promotionCampaignId ? (row.discount_amount as number) : undefined,
+      status: 'pending', duplicate: false,
+    };
   }
 
   function ensureGuestByAnonymousId(anonymousId: string) {
@@ -223,6 +297,32 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
       recordPost('guest_agent_state', body);
       return jsonResponse([{ state: nextSnapshot.state, updated_at: nextSnapshot.updatedAt }]);
     }
+    // Real compareAndSwapGuestAgentState (_guest-agent-state-store.ts) uses
+    // PATCH once a row already exists -- guest_id + updated_at=eq.<CAS
+    // token> as the filter, body already carries the FULLY MERGED next
+    // state (the client computes the merge, not this store). Mirrors real
+    // PostgREST CAS semantics: token matches -> apply and return the row;
+    // token stale -> return an empty array (the real client reads that as
+    // 'conflict' and reloads/retries). Without this branch every write
+    // after a guest's first ever write silently vanishes (falls through to
+    // the generic "unmodeled write" fallback below, which never touches
+    // the `agentState` map) -- turn-2-onward state changes would appear to
+    // succeed but never actually persist.
+    if (path.startsWith('guest_agent_state') && method === 'PATCH') {
+      const guestIdParam = query.get('guest_id')?.replace('eq.', '') ?? '';
+      const expectedUpdatedAt = query.get('updated_at')?.replace('eq.', '') ?? '';
+      const existing = agentState.get(guestIdParam);
+      if (!existing?.exists || existing.updatedAt !== expectedUpdatedAt) return jsonResponse([]);
+      const body = JSON.parse(String(init.body ?? '{}')) as { state?: Record<string, unknown>; updated_at?: string };
+      const nextSnapshot: GuestAgentStateSnapshot = {
+        exists: true,
+        state: body.state ?? existing.state,
+        updatedAt: body.updated_at ?? new Date().toISOString(),
+      };
+      agentState.set(guestIdParam, nextSnapshot);
+      recordPost('guest_agent_state', { guest_id: guestIdParam, ...body });
+      return jsonResponse([{ state: nextSnapshot.state, updated_at: nextSnapshot.updatedAt }]);
+    }
 
     // --- community_offerings / world_facts ---
     if (path.startsWith('community_offerings')) return jsonResponse([]);
@@ -236,14 +336,32 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     if (path.startsWith('restaurants') && method === 'GET') return jsonResponse([{ id: RESTAURANT_ID }]);
     if (path.startsWith('restaurant_menu_live') && method === 'GET') return jsonResponse(catalog.restaurantMenu);
     if (path.startsWith('restaurant_menu_intelligence_profiles') && method === 'GET') return jsonResponse([]);
-    if (path.startsWith('restaurant_preorders') && method === 'POST') {
+    // Real preorder CREATION is an RPC (create_restaurant_preorder_v2 for
+    // plain orders, _v3 for promotion-priced ones -- see _restaurant-sot.ts
+    // createRestaurantPreorder/createRestaurantPreorderWithPromotion), never
+    // a direct INSERT on restaurant_preorders. restaurant_preorders/
+    // restaurant_preorder_items are only ever READ afterward (by id, for
+    // the staff-notification message) -- see preorderById/preorderItems.
+    if (path.startsWith('rpc/create_restaurant_preorder_v2') && method === 'POST') {
       const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
-      genericSeq += 1;
-      recordPost('restaurant_preorders', body);
-      return jsonResponse([{ id: `preorder-${genericSeq}`, preorder_code: `RP-TEST-${String(genericSeq).padStart(4, '0')}`, ...body }]);
+      return jsonResponse(createRestaurantPreorderRpc(body, null, null));
     }
-    if (path.startsWith('restaurant_preorder_items') && method === 'POST') { recordPost('restaurant_preorder_items', JSON.parse(String(init.body ?? '[]'))); return jsonResponse([]); }
-    if (path.startsWith('restaurant_preorders') && method === 'GET') return jsonResponse([]);
+    if (path.startsWith('rpc/create_restaurant_preorder_v3') && method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      const override = (body.p_pricing_override ?? {}) as Record<string, number>;
+      return jsonResponse(createRestaurantPreorderRpc(
+        body, typeof body.p_promotion_campaign_id === 'string' ? body.p_promotion_campaign_id : null, override,
+      ));
+    }
+    if (path.startsWith('restaurant_preorders') && method === 'GET') {
+      const id = query.get('id')?.replace('eq.', '') ?? '';
+      const row = restaurantPreorders.get(id);
+      return jsonResponse(row ? [row] : []);
+    }
+    if (path.startsWith('restaurant_preorder_items') && method === 'GET') {
+      const preorderId = query.get('preorder_id')?.replace('eq.', '') ?? '';
+      return jsonResponse(restaurantPreorderItems.get(preorderId) ?? []);
+    }
 
     // --- otop ---
     if (path.startsWith('otop_products') && method === 'GET') return jsonResponse(catalog.otopProducts);
