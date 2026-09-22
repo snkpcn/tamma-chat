@@ -615,3 +615,87 @@ git pull --ff-only origin feature/thongthai-one-mind-architecture
 npm test   # expect 580/580 passing as of commit b41911c
 git log --oneline -10
 ```
+
+## 2026-09-22 CRITICAL REQUIREMENT Checkpoint — 16-Turn Canonical-State Proof
+
+Branch: `feature/thongthai-one-mind-architecture`. HEAD: `2754200`.
+Working tree: clean, pushed. Full suite: **582/582 passing**.
+
+### What this proves
+
+`tests/activity-16-turn-canonical-state.test.ts` drives the exact
+owner-specified 16-turn horse-booking conversation through the REAL
+One-Mind pipeline (deterministic semantic derivation → dialog manager →
+task state), with a single in-memory `guest_agent_state` row carried
+across all 16 turns via the same `{loadSnapshot, compareAndSwap}` shape
+the real CAS read/write uses — one continuous conversation, not 16
+independent single-turn tests. Asserts domain/action/entities/missing-
+fields/dialog-decision/task-state at every turn.
+
+Confirmed working: side questions (price, inventory count, comparison)
+answered without losing the open task; unknown temperament honestly
+admitted, never invented; topic switch (turn 8, restaurant) suspends the
+activity task rather than destroying it; explicit resume (turn 9) restores
+the exact prior slots; corrections (turns 12, 13) overwrite only the
+stated field; the final confirmation (turn 16) produces **exactly one**
+transaction proposal — verified absent on all 15 prior turns — carrying
+the **final corrected** values (ทองไทย, 60 minutes), never the original
+(ภาราดร, 30 minutes) stated earlier; One-Mind proposes but never executes.
+
+### Real bug found and fixed while building this test
+
+Turn 13 ("ไม่เอาภาราดรแล้ว เอาทองไทย" — a correction naming both the
+rejected and newly-chosen horse in one message) surfaced that
+`_deterministic-semantic-turn.ts`'s `findKnownActivityAssetSelection`
+picked whichever name came first in `ACTIVITY_ASSET_SELECTIONS`'s array
+order (ภาราดร), regardless of which one the customer was negating — so
+this exact correction phrasing would have silently kept the REJECTED
+horse. Fixed structurally: a name immediately preceded by a negation
+marker (ไม่เอา/ไม่ใช่/ไม่รับ/ไม่ได้เอา — the same category
+`hasCorrectionMarker` already recognizes) is excluded before picking a
+match, working regardless of phrasing order. Direct regression test added
+in `tests/deterministic-semantic-turn.test.ts` covering both orders.
+
+### Honest, documented gap (not hidden)
+
+3 of the 16 turns (`ชื่ออะไรบ้าง`, `เวลาเดิมนะ`, `ตอนนี้ที่เลือกไว้มีอะไรบ้าง`)
+have no deterministic handler yet and no LLM is configured in this test
+environment, so they fall back to a generic clarify response instead of
+answering the question. The test proves the property that matters for the
+split-brain audit — the fallback never loses/corrupts/resets the task's
+known slots — but does NOT prove these 3 specific questions get answered
+in production. This is a real capability gap for a future session:
+- `ชื่ออะไรบ้าง` ("what are the names") — could be a new deterministic
+  side-question category alongside the existing inventory-count/price
+  ones in `_deterministic-semantic-turn.ts`, backed by the real catalog.
+- `ตอนนี้ที่เลือกไว้มีอะไรบ้าง` ("what have I selected so far") — a
+  natural, generic "summarize the active task's slots" category that
+  would work across ALL domains (not just activity), reading directly
+  from `task.slots` (data already correctly tracked, just not yet
+  surfaced back to the customer on request).
+- `เวลาเดิมนะ` ("same time as before") — currently harmless (doesn't
+  corrupt state) but doesn't explicitly acknowledge the re-affirmation
+  either; in production this depends on the configured LLM understanding
+  it via context, which this zero-LLM test environment can't exercise.
+
+None of these are safe to deploy blind — they're additive read-only
+response quality, not safety-critical, and are listed here rather than
+implemented so the next session can decide priority.
+
+### Next step
+
+Priority 3: cross-channel (web/line) equivalence tests — prove the same
+logical conversation via `channel:'web'` and `channel:'line'` produces
+equivalent semantic/task/transaction results, fixing architecture (not
+weakening tests) if they diverge.
+
+### Commands the next agent/session should run first
+
+```bash
+cd /home/user/tamma-chat
+git fetch origin feature/thongthai-one-mind-architecture
+git checkout feature/thongthai-one-mind-architecture
+git pull --ff-only origin feature/thongthai-one-mind-architecture
+npm test   # expect 582/582 passing as of commit 2754200
+git log --oneline -12
+```
