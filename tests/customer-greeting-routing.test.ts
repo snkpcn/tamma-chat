@@ -90,6 +90,20 @@ test('web chat history fallback preserves ภาราดร through slot collec
   assert.equal(draft?.phone, '0999990001');
 });
 
+test('web chat history fallback accepts explicit smoke retest identities as booking names', () => {
+  const draft = activityBookingFallbackDraft(request('ยืนยัน', [
+    'อยากขี่ม้า',
+    'เอาภาราดร',
+    '30 นาที',
+    '2 ตุลาคม 2026 เวลา 10:00',
+    '1 คน',
+    'SMOKE RETEST PHARADON',
+    '0999990011',
+  ]));
+  assert.equal(draft?.customerName, 'SMOKE RETEST PHARADON');
+  assert.equal(draft?.phone, '0999990011');
+});
+
 test('web chat history fallback still confirms after initial horse context scrolls out of the UI window', () => {
   const draft = activityBookingFallbackDraft(request('ยืนยัน', [
     'เอาภาราดร',
