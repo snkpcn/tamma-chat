@@ -790,3 +790,130 @@ git pull --ff-only origin feature/thongthai-one-mind-architecture
 npm test   # expect 583/583 passing as of commit 48a7986
 git log --oneline -14
 ```
+
+## 2026-09-22 Priority 5 Checkpoint — Restaurant Notification Parity (prepared, not applied)
+
+Branch: `feature/thongthai-one-mind-architecture`. HEAD: `2c300fd`.
+Full suite: **585/585 passing**. No production DB mutation.
+
+### What changed (code, safe to ship now)
+
+`netlify/functions/ops-notify.ts` now accepts `entity: 'restaurant_preorder'`
+and routes it to the existing `notifyRestaurantPreorderTeam` (from
+`_restaurant-sot.ts` — reused, not re-implemented). Nothing calls this
+endpoint with that entity today (no DB trigger exists yet), so this is
+inert, forward-compatible preparation — zero behavior change to any live
+path until the migration below is applied.
+
+### The exact migration — NOT applied, needs owner authorization
+
+Verified directly against the live `tamma-customer-data` schema (project
+`upaokrprawzhgzeqsdke`) with read-only `execute_sql` only. Confirmed via
+`pg_get_functiondef`: `enqueue_tamma_ops_notification()` currently branches
+on `tg_table_name` for `booking_allocations` → entity `booking`,
+`cafe_inquiries` → entity `cafe_inquiry`, `otop_order_items` → entity
+`otop_order`, with a final `else return new;` — `restaurant_preorder_items`
+(confirmed to exist, with `preorder_id` FK to `restaurant_preorders`,
+exactly mirroring `booking_allocations`/`otop_order_items`'s shape) falls
+through that `else` today. The migration is additive only — one new
+`elsif` branch plus one new trigger, matching the existing pattern exactly:
+
+```sql
+-- 1. Extend the existing dispatcher function with one more branch,
+--    mirroring the otop_order_items case exactly.
+create or replace function public.enqueue_tamma_ops_notification()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public', 'vault', 'net'
+as $function$
+declare
+  v_secret text;
+  v_entity text;
+  v_entity_id uuid;
+  v_environment text;
+begin
+  if tg_table_name = 'booking_allocations' then
+    v_entity := 'booking';
+    v_entity_id := new.booking_id;
+    select b.environment into v_environment from public.bookings b where b.id = new.booking_id;
+  elsif tg_table_name = 'cafe_inquiries' then
+    v_entity := 'cafe_inquiry';
+    v_entity_id := new.id;
+    v_environment := new.environment;
+  elsif tg_table_name = 'otop_order_items' then
+    v_entity := 'otop_order';
+    v_entity_id := new.order_id;
+    select o.environment into v_environment from public.otop_orders o where o.id = new.order_id;
+  elsif tg_table_name = 'restaurant_preorder_items' then
+    v_entity := 'restaurant_preorder';
+    v_entity_id := new.preorder_id;
+    select p.environment into v_environment from public.restaurant_preorders p where p.id = new.preorder_id;
+  else
+    return new;
+  end if;
+
+  if coalesce(v_environment, 'live') not in ('live', 'test') then
+    return new;
+  end if;
+
+  select decrypted_secret into v_secret
+  from vault.decrypted_secrets
+  where name = 'ops_notification_webhook_secret'
+  order by created_at desc
+  limit 1;
+
+  if v_secret is null or length(v_secret) < 24 then
+    raise warning 'ops_notification_webhook_secret is missing; skipping notification enqueue';
+    return new;
+  end if;
+
+  perform net.http_post(
+    url := 'https://tamma-chat.netlify.app/.netlify/functions/ops-notify',
+    body := jsonb_build_object('entity', v_entity, 'id', v_entity_id::text, 'environment', coalesce(v_environment, 'live')),
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-ops-notification-secret', v_secret),
+    timeout_milliseconds := 5000
+  );
+
+  return new;
+exception
+  when others then
+    raise warning 'Could not enqueue Tamma ops notification: %', sqlerrm;
+    return new;
+end;
+$function$;
+
+-- 2. New trigger, matching ops_notify_booking_after_allocation /
+--    ops_notify_otop_after_item exactly.
+create trigger ops_notify_restaurant_after_item
+after insert on public.restaurant_preorder_items
+for each row execute function public.enqueue_tamma_ops_notification();
+```
+
+**Before applying**: confirm `notifyRestaurantPreorderTeam`'s existing
+idempotency (`ops_notification_deliveries` with
+`resolution=ignore-duplicates` on `idempotency_key`) means a preorder
+created through the existing inline call path (which still runs
+unchanged) plus this NEW trigger firing on the same `restaurant_preorder_items`
+insert will not double-notify — the code already reused in Priority 5 is
+built exactly to make that safe (a second call for the same preorder
+resolves to `'duplicate'`), but this should be watched on the first
+`restaurant_preorder_items` insert after the migration lands, same as any
+production change.
+
+### Next step
+
+Priority 6: cross-domain (stay/restaurant/promotion/OTOP/membership/cafe/
+ecosystem) multi-turn stress suites plus Thai fuzz variants, per the
+original brief's Phase 8-10.
+
+### Commands the next agent/session should run first
+
+```bash
+cd /home/user/tamma-chat
+git fetch origin feature/thongthai-one-mind-architecture
+git checkout feature/thongthai-one-mind-architecture
+git pull --ff-only origin feature/thongthai-one-mind-architecture
+npm test   # expect 585/585 passing as of commit 2c300fd
+git log --oneline -16
+```
