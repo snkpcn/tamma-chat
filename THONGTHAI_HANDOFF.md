@@ -917,3 +917,95 @@ git pull --ff-only origin feature/thongthai-one-mind-architecture
 npm test   # expect 585/585 passing as of commit 2c300fd
 git log --oneline -16
 ```
+
+## 2026-09-22 Priority 6 Checkpoint — Thai Fuzz Suite + Domain-Coverage Finding
+
+Branch: `feature/thongthai-one-mind-architecture`. HEAD: `167c490`.
+Full suite: **597/597 passing**.
+
+### Thai fuzz suite: done, 2 real gaps found and fixed
+
+`tests/thai-fuzz-variants.test.ts` systematically tested every variant the
+owner listed against the shared parsers. Two genuine, narrow, structural
+gaps found and fixed (see the commit message for full detail): a shortened
+inventory-count question ("มีกี่ตัว", no keyword restated) now falls back
+to an already-open task's own topic instead of hitting the LLM path
+needlessly; "บ่ายโมง" (colloquial 1pm with the implied "one" omitted) is
+now recognized. "เวลาเดิมนะ" is confirmed to correctly NOT match the
+correction-marker pattern (a reference to a prior value, not a correction
+— a real, honestly-documented gap already proven harmless in the 16-turn
+test, not a bug).
+
+### Important architectural finding: honest scope decision on cross-domain multi-turn suites
+
+Attempted to build stay- and restaurant-domain multi-turn stress tests
+through the real pipeline (`processThongthaiOneMindTurnAuthoritative`),
+using the owner's own example turns for each domain, the same way the
+activity 16-turn test was built. **Result: almost none of those messages
+produce a deterministic semantic turn in `_deterministic-semantic-turn.ts`
+at all** — they fall straight through to the LLM-unavailable clarification
+fallback in this zero-LLM test environment.
+
+This is not a bug in those messages or in the test harness. It's
+confirmation of something already noted in the Priority 4 audit:
+**One-Mind's deterministic semantic-turn coverage is activity-domain-
+heavy by design.** Restaurant conversations are deliberately routed
+AROUND One-Mind entirely today — `thongthai-chat.ts`'s own
+`isRestaurantAdvisorTurn`/`preserveRestaurantFastPath` explicitly gates
+the One-Mind cutover OFF for restaurant-advisor turns, sending them
+instead through that file's own separate machinery
+(`restaurantPreorderDialogResponse`, `deterministicRestaurantResponse`,
+the legacy paid-LLM brain's restaurant tool calls). Stay has some
+deterministic coverage in `_deterministic-semantic-turn.ts` (confirmed:
+`stay_read_only_inquiry`/`stay_follow_up` intents exist and fire) but
+still depends on the LLM for anything beyond the most basic recognition.
+
+**Given this, building "16-turn-style" full-pipeline tests for restaurant/
+stay against `processThongthaiOneMindTurnAuthoritative` would either (a)
+mostly test the LLM-unavailable fallback (uninformative), or (b) require
+testing against a completely different set of functions
+(`thongthai-chat.ts`'s own restaurant/stay machinery) with a different,
+heavier mocking burden (HTTP/DB, similar to what
+`create-booking-retry-idempotency.test.ts` already does for the write
+path).** Rather than force weak or mislabeled tests, this scope was
+deliberately NOT pursued this pass. What already exists and remains
+valid:
+- `tests/dialog-manager-restaurant-scenario.test.ts` /
+  `tests/dialog-manager-stay-scenario.test.ts` — multi-turn dialog-manager
+  behavior with hand-constructed semantic turns (proves the DIALOG LOGIC
+  is correct given a certain interpretation, a real and valid but
+  different layer than proving real Thai text produces that
+  interpretation).
+- `tests/restaurant-preorder-dialog.test.ts`,
+  `tests/restaurant-intelligence.test.ts`, `tests/restaurant-routing.test.ts`,
+  `tests/promotion-*.test.ts` — domain-specific unit/integration coverage
+  of `thongthai-chat.ts`'s own restaurant/promotion machinery.
+
+**Recommendation for a future session**, if full real-text multi-turn
+proof for restaurant/stay/promotion/OTOP/membership/cafe/ecosystem is
+wanted: build it against `thongthai-chat.ts`'s exported response functions
+directly (`restaurantPreorderDialogResponse`,
+`deterministicActivityResponse`, etc.), with HTTP/DB mocking for
+`loadRestaurantWorldFacts`/`loadCustomerMemory`/etc. — not against the
+One-Mind orchestrator, since that is not where those domains' production
+logic actually lives yet. This is itself a finding worth weighing against
+Priority 4's "move business ownership into the canonical brain" goal:
+until restaurant/stay/etc. get the same deterministic-coverage investment
+activity received, `thongthai-chat.ts`'s separate machinery remains a
+necessary B-classification adapter, not a removable duplicate.
+
+### Next step
+
+Priority 7: final cleanup pass (re-audit for now-provably-dead code),
+final full suite run, final report.
+
+### Commands the next agent/session should run first
+
+```bash
+cd /home/user/tamma-chat
+git fetch origin feature/thongthai-one-mind-architecture
+git checkout feature/thongthai-one-mind-architecture
+git pull --ff-only origin feature/thongthai-one-mind-architecture
+npm test   # expect 597/597 passing as of commit 167c490
+git log --oneline -18
+```
