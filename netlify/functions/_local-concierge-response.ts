@@ -1,17 +1,25 @@
 // Composes the actual customer-facing message for a classified Local
-// Concierge question (see _local-concierge-intent.ts). Pure function, no
-// I/O -- same discipline as _experience-discovery.ts's
-// formatExperienceDiscoveryMessage. Every fact used here traces back to
-// _local-concierge-knowledge.ts's static pack or _ecosystem-entity-graph.ts's
-// real node labels -- this function never invents a business name, never
-// asserts a live weather/availability fact, and always keeps the reply to
-// the shape required: direct answer -> local context -> best options ->
-// caveat if real-time data is missing -> at most one follow-up question.
+// Concierge question (see _local-concierge-intent.ts). Same discipline as
+// _experience-discovery.ts's formatExperienceDiscoveryMessage. Every fact
+// used here traces back to _local-concierge-knowledge.ts's static pack,
+// _local-concierge-location.ts's owner-provided location,
+// _weather-provider.ts's real-time (or honestly-unavailable) weather, or
+// _ecosystem-entity-graph.ts's real node labels -- this module never
+// invents a business name, never asserts a live weather/ground-condition
+// fact it doesn't actually have, and always keeps the reply to the shape
+// required: direct answer -> local context -> best options -> caveat if
+// real-time data is missing -> at most one follow-up question.
+//
+// weather_condition and activity_suitability are async: they call
+// getWeatherForTammaLocation() (a real I/O boundary), so
+// composeLocalConciergeResponse itself is async -- callers must await it.
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 import {
-  FOOD_CULTURE_GUIDANCE, INDOOR_FRIENDLY_BUSINESS_UNITS, OUTDOOR_SENSITIVE_ACTIVITY_NODES,
+  FOOD_CULTURE_GUIDANCE, HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS, OUTDOOR_SENSITIVE_ACTIVITY_NODES,
   REGION_GUIDANCE, SAFETY_GENERAL_GUIDANCE, SEASON_GUIDANCE, type LocalSeason,
 } from './_local-concierge-knowledge';
+import { TAMMA_CHART_LOCATION } from './_local-concierge-location';
+import { getWeatherForTammaLocation, type WeatherResult } from './_weather-provider';
 import type { LocalConciergeMatch } from './_local-concierge-intent';
 
 function nodeLabel(id: string, fallback: string): string {
@@ -30,25 +38,48 @@ function outdoorActivityNames(): string {
     .join(' / ');
 }
 
-/** No live weather integration exists (see THONGTHAI_HANDOFF.md's
- *  category-C truth boundary) -- a message can only ever HINT at rain vs.
- *  sun/cool from its own wording, never confirm current conditions. This
- *  reads the season-like hint from the message itself (what the customer
- *  is describing), not a forecast. */
+/** A fallback season-like hint read from the message's OWN wording (what
+ *  the customer is describing), used only when live weather is
+ *  unavailable -- never a forecast, never a claim about "right now". */
 function seasonHintFromMessage(message: string): LocalSeason {
   if (/ฝน|โคลน|ลื่น/u.test(message)) return 'rainy';
   if (/แดด|ร้อน/u.test(message)) return 'hot';
   return 'cool';
 }
 
-export function composeWeatherConditionResponse(message: string): string {
+/** One short "จากข้อมูลล่าสุด..." line built from a WeatherResult that's
+ *  already confirmed status: 'ok' -- the only place allowed to phrase a
+ *  live weather fact for the customer, so freshness/source are always
+ *  cited together with the fact itself (never a bare number). */
+function liveWeatherLine(weather: WeatherResult): string {
+  const parts: string[] = [];
+  if (weather.forecastSummary) parts.push(weather.forecastSummary);
+  else if (weather.condition) parts.push(weather.condition);
+  if (weather.temperatureCelsius !== null) parts.push(`อุณหภูมิประมาณ ${weather.temperatureCelsius}°C`);
+  if (weather.precipitationChance !== null) parts.push(`โอกาสฝนประมาณ ${weather.precipitationChance}%`);
+  const detail = parts.length ? parts.join(' ') : 'สภาพอากาศทั่วไป';
+  return `จากข้อมูลล่าสุด${weather.source ? ` (${weather.source})` : ''}: ${detail}`;
+}
+
+export async function composeWeatherConditionResponse(message: string): Promise<string> {
+  const weather = await getWeatherForTammaLocation();
   const season = seasonHintFromMessage(message);
   const guidance = SEASON_GUIDANCE[season];
+
+  if (weather.status === 'ok') {
+    return [
+      liveWeatherLine(weather),
+      guidance.prepGuidance,
+      guidance.indoorFriendlyNote.replace(/ที่ร่ม/u, `ที่ร่มอย่าง${indoorFriendlyNames()}`),
+      'สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ',
+    ].join('\n');
+  }
+
   return [
-    'ทองไทยยังไม่มีข้อมูลสภาพอากาศสดแบบเรียลไทม์ในระบบนะครับ เลยยืนยันแบบเป๊ะๆ ไม่ได้',
+    'ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ',
     `แต่โดยทั่วไปช่วงนี้: ${guidance.summary} — ${guidance.prepGuidance}`,
     guidance.indoorFriendlyNote.replace(/ที่ร่ม/u, `ที่ร่มอย่าง${indoorFriendlyNames()}`),
-    `ถ้าอยากได้แผนแบบเจาะจงวันนี้/พรุ่งนี้ บอกช่วงเวลาที่มีมาได้เลย ทองไทยจัดแผนให้ครับ 😊`,
+    'แนะนำเช็คอีกทีใกล้ๆ วันที่มา หรือสอบถามทีมงานหน้างานได้เลยครับ',
   ].join('\n');
 }
 
@@ -70,7 +101,7 @@ export function composeFoodCultureResponse(): string {
 
 export function composeVisitorJourneyResponse(message: string): string {
   const hasTime = /มีเวลา|ครึ่งวัน|เต็มวัน|คืน/u.test(message);
-  const hasCompanion = /แฟน|ครอบครัว|เด็ก|ผู้ใหญ่/u.test(message);
+  const hasCompanion = /แฟน|ครอบครัว|เด็ก|ผู้ใหญ่|เพื่อน|แม่|พ่อ|ลูก/u.test(message);
   const missing: string[] = [];
   if (!hasTime) missing.push('มีเวลาประมาณเท่าไร');
   if (!hasCompanion) missing.push('มากับใคร (คนเดียว/แฟน/ครอบครัว)');
@@ -86,13 +117,18 @@ export function composeVisitorJourneyResponse(message: string): string {
   return lines.join('\n');
 }
 
-export function composeActivitySuitabilityResponse(match: LocalConciergeMatch): string {
+export async function composeActivitySuitabilityResponse(match: LocalConciergeMatch): Promise<string> {
   const activityName = match.activityNodeId ? nodeLabel(match.activityNodeId, 'กิจกรรมนี้') : 'กิจกรรมกลางแจ้ง';
-  return [
-    `ทองไทยยังไม่มีข้อมูลสภาพพื้นที่/สภาพอากาศสดตอนนี้ เลยฟันธงแทนทีมงานหน้างานไม่ได้ครับ`,
-    `โดยทั่วไป ${activityName} เล่นได้ในสภาพอากาศปกติ แต่ถ้าฝนตกหนัก/พื้นลื่นมาก ทีมงานจะพิจารณาความปลอดภัยหน้างานอีกครั้ง`,
-    'แนะนำเช็คกับทีมงานตอนถึงหน้างานเพื่อความชัวร์ครับ ถ้าเล่นไม่ได้ทองไทยมีตัวเลือกอื่น (กิน/คาเฟ่/พัก) ให้ปรับแผนได้เสมอ',
-  ].join('\n');
+  const weather = await getWeatherForTammaLocation();
+
+  const lines: string[] = [];
+  lines.push(weather.status === 'ok' ? liveWeatherLine(weather) : 'ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ');
+  // Ground condition is never claimed from a weather fact alone (rain/no
+  // rain does not by itself tell us the ACTUAL ground condition on site) --
+  // this caveat applies whether or not live weather is available above.
+  lines.push(`โดยทั่วไป ${activityName} เล่นได้ในสภาพอากาศปกติ แต่สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ`);
+  lines.push('แนะนำเช็คกับทีมงานตอนถึงหน้างานเพื่อความชัวร์ครับ ถ้าเล่นไม่ได้ทองไทยมีตัวเลือกอื่น (กิน/คาเฟ่/พัก) ให้ปรับแผนได้เสมอ');
+  return lines.join('\n');
 }
 
 export function composeSafetyUncertaintyResponse(): string {
@@ -103,8 +139,39 @@ export function composeSafetyUncertaintyResponse(): string {
   ].join('\n');
 }
 
-export function composeLocalConciergeResponse(match: LocalConciergeMatch, message: string): string {
+/** Category A (static): the owner-provided Maps link is the one canonical
+ *  source of "where are we" -- see _local-concierge-location.ts. Never
+ *  invents an address; includes one only once resolutionStatus is
+ *  'resolved'. */
+export function composeLocationResponse(): string {
+  const location = TAMMA_CHART_LOCATION;
+  const lines: string[] = [];
+  if (location.resolutionStatus === 'resolved' && location.address) {
+    lines.push(`ทำมา-ชาติอยู่ที่: ${location.address}`);
+  }
+  lines.push(`ปักหมุดตามลิงก์นี้ได้เลยครับ: ${location.mapsLink}`);
+  lines.push('กดลิงก์แล้วกดนำทางได้เลยครับ ถ้าใกล้ถึงแล้วหาจุดจอดไม่เจอ ทักมาได้เลยครับ');
+  return lines.join('\n');
+}
+
+/** Category B (business facts from a configured source): the owner's own
+ *  ride-feel + personality facts, and ONLY those -- see HORSE_FACTS's own
+ *  comment for the exact disallowed-claims list this must never cross
+ *  into (no safety guarantee, no beginner-suitability claim, no "better/
+ *  worse" framing). */
+export function composeHorseComparisonResponse(): string {
+  const thongthai = HORSE_FACTS.thongthai;
+  const pharadon = HORSE_FACTS.pharadon;
+  return [
+    `${thongthai.name}จะให้ฟีลแน่น ๆ ${thongthai.rideFeelTh} ส่วน${pharadon.name}จะ${pharadon.rideFeelTh} แต่ทั้งคู่${thongthai.personalityTh}ครับ 😊`,
+    'เรื่องความเหมาะสมเฉพาะคน (เช่นมือใหม่/สุขภาพ) ขอให้ทีมงานช่วยแนะนำหน้างานอีกทีนะครับ เพื่อความชัวร์',
+  ].join('\n');
+}
+
+export async function composeLocalConciergeResponse(match: LocalConciergeMatch, message: string): Promise<string> {
   switch (match.category) {
+    case 'location': return composeLocationResponse();
+    case 'horse_comparison': return composeHorseComparisonResponse();
     case 'weather_condition': return composeWeatherConditionResponse(message);
     case 'region_place': return composeRegionPlaceResponse();
     case 'food_culture': return composeFoodCultureResponse();

@@ -875,12 +875,12 @@ function deterministicExperienceDiscoveryResponse(
 // local context must never swallow an explicit booking/confirm/signup/
 // redeem intent (see Gates 1-3's exactly-once/no-premature-transaction
 // discipline, which this must not regress).
-function deterministicLocalConciergeResponse(request: BrainRequest): BrainResponse | null {
+async function deterministicLocalConciergeResponse(request: BrainRequest): Promise<BrainResponse | null> {
   if (hasExplicitTransactionIntent(request.message)) return null;
   const match = classifyLocalConciergeQuestion(request.message);
   if (!match) return null;
   return {
-    message: composeLocalConciergeResponse(match, request.message),
+    message: await composeLocalConciergeResponse(match, request.message),
     intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
@@ -1453,7 +1453,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // One-Mind can't claim these messages first either. See
   // deterministicLocalConciergeResponse's own header comment for the full
   // precedence reasoning and the explicit-transaction-intent yield.
-  const localConcierge = deterministicLocalConciergeResponse(request);
+  const localConcierge = await deterministicLocalConciergeResponse(request);
   if (localConcierge) {
     const polished = polishedResponse(localConcierge, channel);
     await persistBrainRuntime(guestDbId, channel, polished);

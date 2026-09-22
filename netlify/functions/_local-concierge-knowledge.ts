@@ -89,3 +89,22 @@ export const SAFETY_GENERAL_GUIDANCE: LocalTopicGuidance = {
   ],
   relatedBusinessUnits: ['thamma-chat-adventure'],
 };
+
+/** Owner-provided, owner-verified horse facts (category B: business facts
+ *  from a configured source -- these two lines are the ENTIRE configured
+ *  fact set for each horse; nothing beyond ride feel + personality is
+ *  configured, so nothing beyond that may ever be asserted -- no safety
+ *  guarantee, no beginner-suitability claim, no "better/worse" framing.
+ *  See THONGTHAI_HANDOFF.md's Local Concierge Intelligence Framework
+ *  section for the owner's exact disallowed-claims list this guards
+ *  against. */
+export type HorseFact = {
+  name: string;
+  rideFeelTh: string;
+  personalityTh: string;
+};
+
+export const HORSE_FACTS: Record<'thongthai' | 'pharadon', HorseFact> = {
+  thongthai: { name: 'ทองไทย', rideFeelTh: 'ขี่กระด้างกว่านิดนึง', personalityTh: 'ขี้เล่นน่ารัก' },
+  pharadon: { name: 'ภาราดร', rideFeelTh: 'ขี่นิ่มกว่านิดหน่อย', personalityTh: 'ขี้เล่นน่ารัก' },
+};
