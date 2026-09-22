@@ -509,3 +509,109 @@ git log --oneline -8
 - Live LINE smoke test of the full required conversation sequence.
 These require the owner's explicit go-ahead for ONE deploy; nothing above
 was performed against production.
+
+## 2026-09-22 Priority 2 Checkpoint — Booking Split-Brain Eliminated
+
+Branch: `feature/thongthai-one-mind-architecture`. HEAD: `b41911c`.
+Working tree: clean, pushed. Full suite: **580/580 passing**.
+
+### Design: one-directional ownership, redesigned from ee2a315
+
+`guest_agent_state.state.taskState` is canonical for a customer's activity-
+booking conversation. `booking_sessions` is a passive execution adapter:
+still the only thing `handleLineBookingMessage` (`_operations-db.ts`) can
+use to actually execute a real LINE booking, but it no longer independently
+interprets customer intent once One-Mind has an activity_booking task for
+that guest.
+
+**The critical redesign vs. `ee2a315`**: that attempt added a live
+`loadTaskState` fetch to the LEGACY flow's own reply-critical hot path on
+every turn — extra I/O on the path most exposed to latency, and (per
+Priority 1's finding) the most plausible structural contributor to the
+production incident that followed. This instead writes proactively from
+the **One-Mind side**: `_operations-db.ts`'s new
+`mirrorActivityTaskToLegacySession` is called from
+`_thongthai-one-mind-orchestrator.ts`, immediately after a taskState CAS
+write actually applies (never on a conflict-retry that didn't commit).
+The legacy flow's *existing* read of its own session row
+(`loadLineBookingSession`, already called on every turn regardless) picks
+up the mirrored values with **zero new I/O added to that path**.
+
+### Guardrails (the "never becomes a second interpreter" half)
+
+- Only writes while the legacy session is itself still `'collecting'` (or
+  doesn't exist yet) — backs off entirely once the legacy flow has moved a
+  session into `awaiting_phone`/`awaiting_special_request`/`submitted`/etc.
+  One-Mind must never override legacy-flow-specific progression it can't
+  see.
+- Never steals a session already claimed by a different `service_type`
+  (e.g. an in-progress stay booking).
+- The read inside the mirror function exists *only* to decide whether to
+  defer; it never pulls legacy values back into taskState. All 4
+  guardrail/behavior tests in `tests/mirror-activity-task-to-legacy-
+  session.test.ts` pass against a fully mocked Supabase REST layer.
+- Orchestrator-level gating (`tests/mirror-activity-task-orchestrator-
+  wiring.test.ts`, 4 tests): fires only for `channel === 'line'` +
+  `task.type === 'activity_booking'` + non-terminal status, after a write
+  that actually `applied`. Web never triggers it (proven, not assumed) —
+  channels must not each own separate operational side effects.
+
+### Two independent parser fixes re-applied
+
+Reverted along with `ee2a315` even though they were unrelated to its
+network-call risk (needed regardless, since the *current* turn's own
+date/time text is still parsed by the legacy flow's own parser, not
+mirrored from an earlier turn):
+- `bookingDateFromText`'s numeric-date regex no longer treats `.` as a
+  date separator (it collided with `13.00` as a TIME). Falls through to
+  `_slot-parsers.ts`'s `extractDate`, now taught to recognize a day + Thai
+  month name (`3 ตุลาคม` / `3 ต.ค.`) instead of a second private lexicon.
+- `activityDurationFromText` no longer requires a trailing word boundary
+  after `นาที`, so `"30 นาทีครับ"` (politeness particle glued on with no
+  space — the overwhelmingly common real phrasing) parses correctly.
+- 8 new tests in `tests/legacy-activity-parser-fixes.test.ts`.
+
+### Verification (no production access)
+
+- Full suite: 580/580 (24 new tests across 4 files this checkpoint).
+- esbuild bundle test (same method as Priority 1): bundled the real
+  `line-webhook.ts`, invoked the handler with a synthetic signed LINE
+  message stating horse + duration + date + time in one turn
+  (`"เอาภาราดรครับ เอา 30 นาทีครับ 3 ตุลาคม เวลา 13.00"`) — resolved cleanly
+  (200 OK), the deterministic semantic layer correctly parsed the real
+  Thai text (`deterministic_turn:true` in the log), no crash, no new
+  failure class versus Priority 1's baseline.
+
+### Still not done: the 16-turn end-to-end conversation proof
+
+The owner's CRITICAL REQUIREMENT (prove the full 16-turn horse-booking
+conversation, asserting slot/state values at every turn) has **not yet
+been built**. Priority 2's tests prove the mirror mechanism and its
+gating in isolation, not the full multi-turn conversation end-to-end
+through the real routing gate (`shouldConsumeLegacyLineBookingTurn`) that
+decides, turn by turn, whether a message reaches the legacy flow or
+One-Mind. That routing gate itself was NOT modified this pass (out of
+scope for Priority 1/2) and is the next thing to verify directly.
+
+### Next step
+
+Build the 16-turn stress test (owner's CRITICAL REQUIREMENT). This
+requires exercising the REAL turn-by-turn routing decision
+(`shouldConsumeLegacyLineBookingTurn` in `_operations-db.ts`, plus the
+One-Mind side via `processThongthaiOneMindTurnAuthoritative`) against a
+single persistent mocked state store (both `guest_agent_state` and
+`booking_sessions`, via `global.fetch` mocking following this session's
+established pattern), asserting the required fields at every turn. This
+is the strongest remaining proof that Priorities 1+2 actually fixed the
+original bug end-to-end, not just in their own unit tests.
+
+### Commands the next agent/session should run first
+
+```bash
+cd /home/user/tamma-chat
+git fetch origin feature/thongthai-one-mind-architecture
+git checkout feature/thongthai-one-mind-architecture
+git pull --ff-only origin feature/thongthai-one-mind-architecture
+npm test   # expect 580/580 passing as of commit b41911c
+git log --oneline -10
+```
