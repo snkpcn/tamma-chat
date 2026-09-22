@@ -1,7 +1,7 @@
 import { handleBookingOpsCommand } from './_ops-booking-actions';
 import { decryptPii, encryptPii, piiHash } from './_operations-db';
 
-export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all';
+export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all' | 'owner_general';
 export type OpsNotificationEntity = 'booking' | 'cafe_inquiry' | 'otop_order' | 'feedback_event';
 
 type TargetType = 'group' | 'room';
@@ -37,6 +37,7 @@ const TEAM_LABELS: Record<OpsTeamCode, string> = {
   cafe: 'Inthanin Café',
   otop: 'OTOP / สินค้าชุมชน',
   all: 'ทุกทีม',
+  owner_general: 'เจ้าของ/ทั่วไป',
 };
 
 function dbConfig(): { url: string; key: string } {
@@ -136,6 +137,14 @@ function parseTeamCode(raw: string): OpsTeamCode | null {
     [/^(cafe|café|คาเฟ่|กาแฟ|inthanin|อินทนิน)$/u, 'cafe'],
     [/^(otop|โอทอป|สินค้า|สินค้าชุมชน)$/u, 'otop'],
     [/^(all|ทั้งหมด|ทุกทีม)$/u, 'all'],
+    // Owner/general/admin -- a real, dedicated LINE group for system
+    // feedback, unknown-business-unit feedback, and the urgent-safety
+    // escalation (see notifyFeedbackEvent below). Deliberately a
+    // DIFFERENT team code than 'all' (which stays reserved for its
+    // existing, narrower meaning elsewhere) -- 'all' remains unbindable
+    // via this command (checked below), but 'owner_general' is a real,
+    // bindable team like restaurant/stay/activity/cafe/otop.
+    [/^(owner|general|admin|เจ้าของ|ทั่วไป|แอดมิน|ผู้ดูแล)$/u, 'owner_general'],
   ];
   return aliases.find(([pattern]) => pattern.test(value))?.[1] ?? null;
 }
@@ -480,11 +489,15 @@ async function notifyOtopOrder(id: string): Promise<'sent' | 'duplicate' | 'not_
 // safety_issue/system_feedback -- see _service-mind-feedback-events.ts,
 // which writes ops_feedback_events and then calls this). business_unit
 // values that don't map to a real bound team (membership/system/general/
-// unknown) route to 'all' -- the SAME existing broadcast-to-every-bound-
-// team mechanic sendDailyOpsSummaries already uses, not a new concept.
+// unknown) route to the dedicated 'owner_general' team -- a real,
+// individually bindable LINE group (see parseTeamCode above), not the
+// 'all' pseudo-team. As of this write, 'owner_general' has NOT been
+// bound yet (see THONGTHAI_HANDOFF.md's Feedback Operations Phase 1
+// entry) -- sendTeamMessage below honestly returns 'not_bound' until an
+// owner runs "ผูกทีม เจ้าของ" (or one of its aliases) in the real group.
 const FEEDBACK_BUSINESS_UNIT_TEAM: Record<string, OpsTeamCode> = {
   restaurant: 'restaurant', activity: 'activity', stay: 'stay', cafe: 'cafe',
-  membership: 'all', system: 'all', general: 'all', unknown: 'all',
+  membership: 'owner_general', system: 'owner_general', general: 'owner_general', unknown: 'owner_general',
 };
 const FEEDBACK_TYPE_LABEL: Record<string, string> = {
   compliment: '💛 คำชม', complaint: '⚠️ ข้อร้องเรียน', suggestion: '💡 ข้อเสนอแนะ',
@@ -512,10 +525,10 @@ function feedbackMessageBody(event: {
 }
 
 // Urgent safety issues, and any feedback whose business unit doesn't map
-// to a real team, additionally reach the 'all' (owner/general) group --
-// same "don't over-notify" discipline the task's routing rules call for:
-// every OTHER severity/business-unit combination goes to exactly one
-// group, never a broadcast.
+// to a real team, additionally reach the 'owner_general' group -- same
+// "don't over-notify" discipline the task's routing rules call for: every
+// OTHER severity/business-unit combination goes to exactly one group,
+// never a broadcast.
 async function notifyFeedbackEvent(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
   const response = await dbFetch(
     `ops_feedback_events?id=eq.${id}`
@@ -539,18 +552,38 @@ async function notifyFeedbackEvent(id: string): Promise<'sent' | 'duplicate' | '
     payload: { feedback_type: event.feedback_type, business_unit: event.business_unit },
   });
 
-  if (event.severity === 'urgent' && primaryTeam !== 'all') {
-    await sendTeamMessage({
-      teamCode: 'all',
-      entityType: 'feedback_event',
-      entityId: event.id,
-      deliveryType: `feedback_${event.feedback_type}_owner_escalation`,
-      idempotencyKey: `feedback_event_created_owner:${event.id}`,
-      text: feedbackMessageBody(event, 'all'),
-      payload: { feedback_type: event.feedback_type, business_unit: event.business_unit, escalation: true },
-    }).catch(escalationError => {
+  if (event.severity === 'urgent' && primaryTeam !== 'owner_general') {
+    try {
+      const escalationStatus = await sendTeamMessage({
+        teamCode: 'owner_general',
+        entityType: 'feedback_event',
+        entityId: event.id,
+        deliveryType: `feedback_${event.feedback_type}_owner_escalation`,
+        idempotencyKey: `feedback_event_created_owner:${event.id}`,
+        text: feedbackMessageBody(event, 'owner_general'),
+        payload: { feedback_type: event.feedback_type, business_unit: event.business_unit, escalation: true },
+      });
+      // The primary send above already decided notification_status --
+      // never let the escalation's own outcome overwrite that honest
+      // value. When the escalation itself didn't actually send (no
+      // owner/general group bound yet), record that fact in
+      // notification_error so the dashboard can show it, without ever
+      // claiming the escalation succeeded when it didn't.
+      if (escalationStatus === 'not_bound') {
+        await dbFetch(`ops_feedback_events?id=eq.${event.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ notification_error: 'owner_general escalation: not_bound' }),
+        }).catch(() => undefined);
+      }
+    } catch (escalationError) {
       console.error('THONGTHAI_FEEDBACK_OWNER_ESCALATION_ERROR', escalationError instanceof Error ? escalationError.message.slice(0, 220) : 'unknown');
-    });
+      await dbFetch(`ops_feedback_events?id=eq.${event.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          notification_error: `owner_general escalation failed: ${escalationError instanceof Error ? escalationError.message.slice(0, 180) : 'unknown'}`,
+        }),
+      }).catch(() => undefined);
+    }
   }
 
   return primaryStatus;
@@ -762,7 +795,7 @@ export async function handleLineOpsGroupMessage(input: {
   if (bindMatch) {
     const teamCode = parseTeamCode(bindMatch[1]);
     if (!teamCode || teamCode === 'all') {
-      return 'ยังไม่รู้จักชื่อนี้ครับ ใช้: restaurant / stay / activity / cafe / otop';
+      return 'ยังไม่รู้จักชื่อนี้ครับ ใช้: restaurant / stay / activity / cafe / otop / เจ้าของ (owner)';
     }
     await bindLineTeamChannel({
       teamCode,
