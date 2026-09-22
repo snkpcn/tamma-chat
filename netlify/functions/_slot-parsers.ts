@@ -8,6 +8,19 @@ const THAI_NUMBER: Record<string, number> = {
   'หนึ่ง': 1, 'สอง': 2, 'สาม': 3, 'สี่': 4, 'ห้า': 5, 'หก': 6, 'เจ็ด': 7, 'แปด': 8, 'เก้า': 9, 'สิบ': 10,
 };
 
+// Full names before their abbreviations so a longer match is never cut short
+// by an earlier, shorter alternative in the regex built from this map's keys.
+const THAI_MONTH: Record<string, number> = {
+  'มกราคม': 1, 'ม.ค.': 1, 'กุมภาพันธ์': 2, 'ก.พ.': 2, 'มีนาคม': 3, 'มี.ค.': 3,
+  'เมษายน': 4, 'เม.ย.': 4, 'พฤษภาคม': 5, 'พ.ค.': 5, 'มิถุนายน': 6, 'มิ.ย.': 6,
+  'กรกฎาคม': 7, 'ก.ค.': 7, 'สิงหาคม': 8, 'ส.ค.': 8, 'กันยายน': 9, 'ก.ย.': 9,
+  'ตุลาคม': 10, 'ต.ค.': 10, 'พฤศจิกายน': 11, 'พ.ย.': 11, 'ธันวาคม': 12, 'ธ.ค.': 12,
+};
+const THAI_MONTH_PATTERN = new RegExp(
+  `(?:^|\\s)(\\d{1,2})\\s*(${Object.keys(THAI_MONTH).map(name => name.replace(/\./gu, '\\.')).join('|')})\\s*(\\d{2,4})?(?=$|\\s)`,
+  'u',
+);
+
 function bangkokDate(now: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -45,6 +58,27 @@ export function extractDate(message: string, now: Date = new Date()): string | n
     let year = slash[3] ? Number(slash[3]) : currentYear;
     if (year < 100) year += 2000;
     return validDate(year, Number(slash[2]), Number(slash[1]));
+  }
+
+  // "3 ตุลาคม" / "3 ต.ค." / "3 ตุลาคม 2569" -- a day + Thai month NAME,
+  // distinct from the slash/ISO forms above. validDate already normalizes a
+  // Buddhist-era year (>2400), so an explicit year here needs no extra
+  // conversion before being passed through.
+  const thaiMonth = message.match(THAI_MONTH_PATTERN);
+  if (thaiMonth) {
+    const day = Number(thaiMonth[1]);
+    const month = THAI_MONTH[thaiMonth[2]!]!;
+    const currentYear = Number(today.slice(0,4));
+    let year = thaiMonth[3] ? Number(thaiMonth[3]) : currentYear;
+    if (year < 100) year += 2000;
+    const resolved = validDate(year, month, day);
+    // A bare day+month with no year, already past this year (e.g. asking
+    // for "3 ตุลาคม" in November), means next year -- never a date in the
+    // customer's past.
+    if (resolved && !thaiMonth[3] && resolved < today) {
+      return validDate(year + 1, month, day);
+    }
+    return resolved;
   }
   return null;
 }

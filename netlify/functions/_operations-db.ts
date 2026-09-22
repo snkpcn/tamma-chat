@@ -2,6 +2,8 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { interpretStayBookingTurn } from './_thongthai-brain-v3';
 import { CONTEXT_TTL_MS } from './_conversation-context';
 import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
+import { isTerminalTaskStatus, loadTaskState } from './_task-state';
+import { extractDate as extractDateShared } from './_slot-parsers';
 
 export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
 export type ServiceType = 'restaurant' | 'stay' | 'activity';
@@ -433,21 +435,33 @@ function validIsoDate(year: number, month: number, day: number): string | null {
 }
 
 function bookingDateFromText(text: string): string | null {
-  const numeric = text.match(/(?:^|\s)(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?(?:\s|$)/);
+  // "/" and "-" only, deliberately NOT ".": a period is also the activity
+  // time separator ("13.00" = 13:00, see activityTimeFromText), so a message
+  // stating both a date and a time ("3 ตุลาคม เวลา 13.00") would otherwise
+  // have its time misread as a malformed DD.MM date (month 00, invalid) --
+  // silently short-circuiting before the Thai-month check below ever ran.
+  const numeric = text.match(/(?:^|\s)(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?(?:\s|$)/);
   if (numeric) {
     const today = bangkokDateParts();
     let year = numeric[3] ? Number(numeric[3]) : today.year;
     if (year < 100) year += 2000;
     if (year > 2400) year -= 543;
-    return validIsoDate(year, Number(numeric[2]), Number(numeric[1]));
+    const resolved = validIsoDate(year, Number(numeric[2]), Number(numeric[1]));
+    if (resolved) return resolved;
   }
   const matched = text.match(/วันที่\s*(\d{1,2})(?:\s*(?:เดือน)?\s*(นี้|หน้า))?/u);
-  if (!matched) return null;
-  const today = bangkokDateParts();
-  let month = today.month + (matched[2] === 'หน้า' ? 1 : 0);
-  let year = today.year;
-  if (month > 12) { month = 1; year += 1; }
-  return validIsoDate(year, month, Number(matched[1]));
+  if (matched) {
+    const today = bangkokDateParts();
+    let month = today.month + (matched[2] === 'หน้า' ? 1 : 0);
+    let year = today.year;
+    if (month > 12) { month = 1; year += 1; }
+    return validIsoDate(year, month, Number(matched[1]));
+  }
+  // "3 ตุลาคม" / "3 ต.ค." -- a day + Thai month NAME, which neither pattern
+  // above recognizes. Reuses the SAME shared parser _deterministic-semantic-
+  // turn.ts's turn derivation already uses, rather than a second copy of the
+  // Thai month lexicon here.
+  return extractDateShared(text);
 }
 
 function checkoutDateFromText(text: string, checkIn: string | null): string | null {
@@ -635,7 +649,14 @@ function activityDurationFromText(text: string): 30 | 60 | 90 | null {
   if (/(?:ครึ่ง\s*ชั่วโมง|half\s*(?:an\s*)?hour)/iu.test(text)) return 30;
   if (/(?:ชั่วโมง\s*ครึ่ง|one\s*and\s*a\s*half\s*hours?)/iu.test(text)) return 90;
   if (/(?:1|หนึ่ง)\s*(?:ชั่วโมง|ชม\.?|hour)/iu.test(text)) return 60;
-  const m = text.match(/(?:^|\s)(30|60|90)\s*(?:นาที|min(?:ute)?s?)(?:\s|$)/iu);
+  // No trailing boundary requirement after "นาที": Thai politeness particles
+  // (ครับ/ค่ะ/นะ) are routinely written directly attached to the preceding
+  // word with no space ("30 นาทีครับ"), which is the overwhelmingly common
+  // real phrasing -- requiring whitespace-or-end right after "นาที" rejected
+  // exactly that and was itself part of why a duration stated this way fell
+  // through to a different system that had never seen it (see
+  // tests/line-booking-cross-system-state.test.ts).
+  const m = text.match(/(?:^|\s)(30|60|90)\s*(?:นาที|min(?:ute)?s?)/iu);
   const n = Number(m?.[1]);
   return n === 30 || n === 60 || n === 90 ? n : null;
 }
@@ -687,10 +708,100 @@ export function formatActivityAssetNote(asset: { name: string; assetCode: string
   return `เลือก: ${asset.name} [asset:${asset.assetCode}]`;
 }
 
+export type ActivityTaskStateFallback = {
+  resourceCode: string | null;
+  durationMinutes: 30 | 60 | 90 | null;
+  date: string | null;
+  time: string | null;
+  partySize: number | null;
+  asset: { name: string; assetCode: string } | null;
+};
+
+/**
+ * The legacy LINE booking flow (this file) and the One-Mind conversational
+ * layer (_deterministic-semantic-turn.ts / _dialog-manager.ts) are two
+ * separate state stores for the SAME logical activity-booking conversation:
+ * this file's own `booking_sessions` row, and guest_agent_state's
+ * `taskState.activeTask`. A per-message routing gate
+ * (shouldConsumeLegacyLineBookingTurn) decides, turn by turn, which one
+ * handles a given message -- e.g. a bare "เอาภาราดรครับ" or "เอา 30 นาทีครับ"
+ * (no literal "ขี่ม้า"/"ATV"/"ยิงธนู" keyword, no session-recognized phrasing)
+ * is answered by One-Mind, while a date/time message that DOES match this
+ * file's own parsers is picked up here instead. Because neither store ever
+ * wrote to the other, a session existing here without ever having gone
+ * through the asset/duration turns would forget them entirely the moment a
+ * later message flipped control back to this file -- re-asking for duration
+ * even though the customer already gave it, and even discarding which named
+ * horse they picked. This reads the One-Mind task as a FALLBACK source (never
+ * overriding a value this turn's own text or this file's own session already
+ * has) so a slot collected by either system is never lost to the other.
+ */
+async function activityTaskStateFallback(guestDbId: string | null): Promise<ActivityTaskStateFallback | null> {
+  if (!guestDbId) return null;
+  try {
+    const taskState = await loadTaskState(guestDbId);
+    const task = taskState.activeTask;
+    if (!task || task.type !== 'activity_booking' || isTerminalTaskStatus(task.status)) return null;
+    const slots = task.slots;
+    const durationRaw = Number(slots.durationMinutes);
+    const durationMinutes = durationRaw === 30 || durationRaw === 60 || durationRaw === 90 ? (durationRaw as 30 | 60 | 90) : null;
+    const horseName = typeof slots.horseName === 'string' ? slots.horseName : null;
+    return {
+      resourceCode: typeof slots.resourceCode === 'string' ? slots.resourceCode : null,
+      durationMinutes,
+      date: typeof slots.date === 'string' ? slots.date : null,
+      time: typeof slots.time === 'string' ? slots.time : null,
+      partySize: typeof slots.partySize === 'number' ? slots.partySize : null,
+      asset: horseName ? activityAssetFromText(horseName) : null,
+    };
+  } catch (error) {
+    console.error('ACTIVITY_TASK_STATE_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+    return null;
+  }
+}
+
 function activityTimeFromText(text: string): string | null {
   const m = text.match(/(?:^|\s)([01]?\d|2[0-3])[:.](\d{2})(?:\s*(?:น\.?|นาฬิกา|โมง))?/u);
   if (!m) return null;
   return `${String(Number(m[1])).padStart(2, '0')}:${m[2]}`;
+}
+
+export type ResolvedActivitySlots = {
+  resourceCode: string | null;
+  durationMinutes: 30 | 60 | 90 | null;
+  requestedDate: string | null;
+  requestedTime: string | null;
+  partySize: number | null;
+  selectedAsset: { name: string; assetCode: string } | null;
+};
+
+/**
+ * The precedence cascade at the heart of this bug's fix: for each activity
+ * booking slot, what THIS message states wins; failing that, what this
+ * file's own legacy session already tracked wins; only failing both does
+ * the parallel One-Mind task's collected value get used. This ordering is
+ * what makes "เปลี่ยนเป็น 60 นาที" (change duration text present -> wins)
+ * and "เปลี่ยนเป็นทองไทย" (change asset text present -> wins, duration/date/
+ * time untouched -> preserved from session/task-state) both work as
+ * corrections without any special-cased correction-handling code: a
+ * correction is just a turn whose own text supplies a new value for
+ * exactly one slot, and every other slot naturally falls through to
+ * whatever was already known. Pure and synchronous so it is fully testable
+ * without a live session or a live One-Mind task.
+ */
+export function resolveActivitySlots(
+  text: string,
+  activitySession: LineBookingSession | null,
+  taskFallback: ActivityTaskStateFallback | null,
+): ResolvedActivitySlots {
+  return {
+    resourceCode: activityResourceFromText(text) ?? activitySession?.resource_code ?? taskFallback?.resourceCode ?? null,
+    durationMinutes: activityDurationFromText(text) ?? activityDurationFromSession(activitySession) ?? taskFallback?.durationMinutes ?? null,
+    requestedDate: activityDateFromText(text) ?? activitySession?.requested_date ?? taskFallback?.date ?? null,
+    requestedTime: activityTimeFromText(text) ?? activitySession?.requested_time ?? taskFallback?.time ?? null,
+    partySize: partySizeFromText(text) ?? activitySession?.party_size ?? taskFallback?.partySize ?? null,
+    selectedAsset: activityAssetFromText(text) ?? activityAssetFromSession(activitySession) ?? taskFallback?.asset ?? null,
+  };
 }
 
 function activityGuestNameFromText(text: string): string | null {
@@ -829,12 +940,15 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   const activitySession = session?.service_type === 'activity' && session.status === 'collecting' ? session : null;
   const activityIntent = activityBookingStartIntent(text);
   if (activityIntent || (activitySession && !startIntent)) {
-    const resourceCode = activityResourceFromText(text) ?? activitySession?.resource_code ?? null;
-    const durationMinutes = activityDurationFromText(text) ?? activityDurationFromSession(activitySession);
-    const requestedDate = activityDateFromText(text) ?? activitySession?.requested_date ?? null;
-    const requestedTime = activityTimeFromText(text) ?? activitySession?.requested_time ?? null;
-    const partySize = partySizeFromText(text) ?? activitySession?.party_size ?? null;
-    const selectedAsset = activityAssetFromText(text) ?? activityAssetFromSession(activitySession);
+    // See activityTaskStateFallback's own doc comment: a slot this turn's
+    // text and this session don't have may already have been collected by
+    // the parallel One-Mind conversation (e.g. a named horse or a duration
+    // given in a message that didn't match this file's own start/session
+    // patterns) -- fetched once per turn, only once we know this IS an
+    // activity turn, and only ever used as the last-resort fallback.
+    const taskFallback = await activityTaskStateFallback(identity.guestDbId);
+    const { resourceCode, durationMinutes, requestedDate, requestedTime, partySize, selectedAsset } =
+      resolveActivitySlots(text, activitySession, taskFallback);
     const explicitName = activityGuestNameFromText(text);
     const bareNameAllowed = Boolean(resourceCode && durationMinutes && requestedDate && requestedTime && partySize);
     const suppliedName = explicitName ?? (bareNameAllowed ? primaryGuestNameFromText(text) : null);
