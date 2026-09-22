@@ -93,3 +93,12 @@ test('gateway answers discovery before broad activity routing can swallow it', (
       < source.indexOf('const deterministicActivity = await deterministicActivityResponse('),
   );
 });
+
+test('Thai discovery fast path follows message text, not the current UI language', () => {
+  const source = readFileSync('netlify/functions/thongthai-chat.ts', 'utf8');
+  const discoveryFunction = source.slice(
+    source.indexOf('function deterministicExperienceDiscoveryResponse('),
+    source.indexOf('async function deterministicRestaurantResponse('),
+  );
+  assert.doesNotMatch(discoveryFunction, /request\.language\s*!==\s*['"]th['"]/);
+});

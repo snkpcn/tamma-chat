@@ -847,7 +847,7 @@ function deterministicExperienceDiscoveryResponse(
   request: BrainRequest,
   runtime: BrainRuntimeContext,
 ): BrainResponse | null {
-  if (request.language !== 'th' || !isExperienceDiscoveryIntent(request.message)) return null;
+  if (!isExperienceDiscoveryIntent(request.message)) return null;
   return {
     message: formatExperienceDiscoveryMessage(runtime.worldFacts),
     intent:'recommendation',
