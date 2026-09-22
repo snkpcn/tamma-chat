@@ -33,6 +33,7 @@ import { polishCustomerMessage } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
+import { redactWeatherUrl } from './_weather-provider';
 import {
   clearRestaurantPreorderDraft,
   formatRestaurantSetPrompt,
@@ -1454,7 +1455,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // deterministicLocalConciergeResponse's own header comment for the full
   // precedence reasoning and the explicit-transaction-intent yield.
   const localConcierge = await deterministicLocalConciergeResponse(request).catch(error => {
-    console.error('THONGTHAI_LOCAL_CONCIERGE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    // redactWeatherUrl: defense-in-depth -- some fetch implementations
+    // embed the request URL (appid=<key> included) in their own error
+    // message; never let that reach a log line unredacted.
+    console.error('THONGTHAI_LOCAL_CONCIERGE_ERROR', error instanceof Error ? redactWeatherUrl(error.message.slice(0, 220)) : 'unknown');
     return null;
   });
   if (localConcierge) {

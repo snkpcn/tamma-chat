@@ -38,6 +38,19 @@ export type WeatherResult = {
 // 'provider_error', never left to escape as an uncaught rejection.
 const DEFAULT_FETCH_TIMEOUT_MS = 6000;
 
+/** Strips any `appid=<key>` query value out of a URL or error-message-shaped
+ *  string before it can ever reach a log line -- the ONLY safe way to log
+ *  anything derived from the OpenWeather request is through this. Every
+ *  actual failure path in this module already degrades to a structured
+ *  WeatherResult without logging the request at all, but a caller (e.g.
+ *  thongthai-chat.ts's defensive `.catch()` around the local-concierge
+ *  call site) may log an unexpected error's `.message`, and some fetch
+ *  implementations embed the request URL in their own error message -- this
+ *  redaction is the defense-in-depth for that case. */
+export function redactWeatherUrl(text: string): string {
+  return text.replace(/appid=[^&\s]+/giu, 'appid=***redacted***');
+}
+
 function unavailable(reason: WeatherResult['unavailableReason']): WeatherResult {
   return {
     status: 'unavailable', condition: null, precipitationChance: null, temperatureCelsius: null,

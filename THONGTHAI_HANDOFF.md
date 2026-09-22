@@ -1910,9 +1910,14 @@ Phase 2 together) — no partial deploy of just one phase is intended.
 
 Same branch: `feature/local-concierge-intelligence`. The owner configured
 4 Netlify env vars for production (`WEATHER_PROVIDER=openweathermap`,
-`WEATHER_API_KEY=<set>`, `TAMMA_WEATHER_LAT=15.9565721`,
-`TAMMA_WEATHER_LON=102.0247859`). This phase wires the weather provider to
-read exactly those 4 vars and finishes the live-weather answer shapes.
+`WEATHER_API_KEY=<configured in Netlify>`,
+`TAMMA_WEATHER_LAT=<configured in Netlify>`,
+`TAMMA_WEATHER_LON=<configured in Netlify>`). This phase wires the weather
+provider to read exactly those 4 vars and finishes the live-weather
+answer shapes. (Their real values are never written into this repo — see
+the "HOTFIX — exposed secrets" section below for why even the
+non-sensitive lat/lon values must stay out of committed files once
+they're configured as Netlify env vars.)
 
 ### What changed
 
@@ -2133,3 +2138,118 @@ Yes. Small, targeted diff (2 defensive fixes + a test-infrastructure fix +
 regression tests), all green, both fixes verified load-bearing via the
 established revert-and-confirm methodology. No DB migration, no
 production transaction.
+
+**Update:** merged to `main` via PR #44 (`f1e0d6b8`). Netlify then
+reported the deploy of that commit FAILED its own secrets scan (see the
+next section) -- production was still serving the older `main@2cb2e88`
+until that was fixed.
+
+---
+
+## HOTFIX — exposed secrets detected (Netlify build failure on PR #43/#44)
+
+Netlify's production deploy of `main@f1e0d6b` (PR #44's merge) failed with
+"Exposed secrets detected"; production kept serving the older
+`main@2cb2e88` until this was fixed.
+
+### Root cause
+
+The real `WEATHER_API_KEY` was **never** in this session's possession and
+does not appear anywhere in the repository — every test and every doc
+reference uses an obviously-fake key (`test-openweather-key`), confirmed
+by a repo-wide search for `appid=`, any 32-char hex/alphanumeric string
+shaped like an OpenWeatherMap key, and the literal env var name, across
+every file type (not just this feature's own files).
+
+The actual, confirmed cause: **the real `TAMMA_WEATHER_LAT`/
+`TAMMA_WEATHER_LON` coordinate values** the owner configured in Netlify
+had been hardcoded, as realistic-looking test fixtures, into
+`tests/weather-provider.test.ts` and quoted directly in this handoff
+doc's own Phase 3 section. Netlify's secrets scanner treats the *value*
+of every configured environment variable as sensitive by default — not
+only variables that are semantically secrets — so a literal, exact match
+of a configured env var's value anywhere in the deploy source trips it,
+regardless of whether that value is actually confidential. Lat/lon are
+not sensitive on their own, but since they're configured as Netlify env
+vars, their literal appearance in committed files is exactly what the
+scanner is designed to catch. This repo's `netlify.toml` also publishes
+`publish = "."` (the whole repo root, tests and docs included, not a
+separate built `dist/`), so these files were genuinely part of what
+Netlify was scanning.
+
+**Was any real secret committed? No.** The coordinate values are not
+secrets in a security sense (they're a public place's lat/lon), and the
+actual API key was never available to this session to leak in the first
+place. This was a real, but low-severity, class of mistake — reusing an
+owner-supplied *configured* value as a *test fixture* — not a credential
+leak.
+
+### Fix
+
+- Replaced every literal occurrence of the real lat/lon values with
+  obviously-fake test coordinates in `tests/weather-provider.test.ts`,
+  and with `<configured in Netlify>` placeholders (matching the existing
+  `WEATHER_API_KEY=<configured in Netlify>` convention) in this handoff
+  doc's Phase 3 section.
+- Renamed the test fixture key from `'test-key'` to `'test-openweather-key'`
+  everywhere, so it's unambiguous at a glance in any future diff that
+  it's a placeholder, never real.
+- Added `redactWeatherUrl()` to `_weather-provider.ts` — strips
+  `appid=<value>` out of any string before it could ever reach a log
+  line — and applied it defensively at `thongthai-chat.ts`'s
+  `deterministicLocalConciergeResponse` `.catch()` handler (some fetch
+  implementations embed the request URL, key included, in their own
+  error `.message`; the provider's own internal try/catch already
+  prevents this from happening in the normal case, but this is
+  belt-and-braces at the one place upstream of it that logs anything).
+- Confirmed (grep sweep, see below) the weather provider is never
+  imported by any static/client file (`index.html`, `account.html`,
+  `chess.html`, `menu.html`) — it already only lived under
+  `netlify/functions/`, called only from other `netlify/functions/`
+  modules and this test file. No client-bundle boundary violation
+  existed; a regression test now pins this.
+- Added `WEATHER_PROVIDER`/`WEATHER_API_KEY`/`TAMMA_WEATHER_LAT`/
+  `TAMMA_WEATHER_LON` (all empty) to `.env.example` for documentation,
+  matching the existing pattern for the other provider keys.
+
+### Files changed
+
+`tests/weather-provider.test.ts` (literal values replaced; 4 new
+SECRETS-prefixed tests), `THONGTHAI_HANDOFF.md` (this section + the
+Phase 3 section's placeholder fix), `netlify/functions/_weather-provider.ts`
+(`redactWeatherUrl` export), `netlify/functions/thongthai-chat.ts`
+(applies it at the one relevant log site), `.env.example`.
+
+### Tests added
+
+4 new tests in `tests/weather-provider.test.ts` (now 17 total, was 13):
+`redactWeatherUrl` strips `appid=` correctly (including mid-string and
+case-insensitively); test-key isolation (this file and the shared harness
+only ever set the fake key); a pinned regression guard that the two
+specific real coordinate values never reappear in this test file or the
+handoff doc; and a client-bundle-boundary check that no static HTML file
+references the weather provider, its env var names, or the OpenWeatherMap
+endpoint.
+
+### Full test result
+
+**669/669 passing** (665 before this hotfix + 4 net new).
+
+### Netlify deploy status
+
+This session has no Netlify access (confirmed multiple times earlier in
+this program) and so cannot open the failed deploy's own details to
+confirm Netlify's exact reported file/line, nor can it confirm the next
+deploy actually passes the scan — that confirmation has to come from the
+owner (or a session with Netlify access) after this merges. Everything
+above is a direct, provable fix for the one concrete leak this session
+could find and reproduce (the literal coordinate values); if Netlify's
+next scan still fails, its failure details will name the exact
+file/path/line to fix next — per the owner's own instruction, that should
+be fixed at the source, never bypassed by disabling scanning.
+
+### Confirmation
+
+No DB migration, no production transaction. Exactly one more merge to
+`main` for this hotfix (no repeated deploy spam) — see the PR link in
+this session's final report.
