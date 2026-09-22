@@ -29,7 +29,13 @@ test('Phase N LINE remains a transport adapter, not a new One-Mind semantic impl
   const source=readFileSync('netlify/functions/_line-webhook-core.ts','utf8');
   assert.doesNotMatch(source,/_semantic-interpreter|_dialog-manager|_knowledge-resolver|_response-composer/);
   assert.match(source,/event\.message\.id/,'stable LINE message id must be forwarded for server idempotence');
-  assert.match(source,/THONGTHAI_ENDPOINT/);
+  // LINE calls the canonical brain in-process (processThongthaiChatCore, the
+  // same function the web HTTP handler calls) rather than self-fetching its
+  // own thongthai-chat endpoint over HTTP -- see the One-Mind architecture
+  // consolidation audit's "LINE self-fetch" finding in THONGTHAI_HANDOFF.md
+  // for why the old HTTP round-trip was a real structural risk.
+  assert.match(source,/processThongthaiChatCore/);
+  assert.doesNotMatch(source,/THONGTHAI_ENDPOINT|CUSTOMER_MEMORY_ENDPOINT/,'LINE must not self-fetch its own site functions for the canonical brain or customer memory');
 });
 
 test('Phase N Dialog Manager no longer carries stale "not wired" architecture documentation',()=>{
