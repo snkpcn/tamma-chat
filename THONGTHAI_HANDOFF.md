@@ -1301,32 +1301,71 @@ throughout.
 
 ### Next task (exact resumption point)
 
-1. **Gate 2** — LINE vs Web equivalence across ALL 8 domains (not just
-   activity, which already has this from a prior session). For each
-   domain, run the SAME representative flow with `channel: 'line'` vs
-   `channel: 'web'` through `processThongthaiChatCore` (or the LINE
-   adapter's own entry, `_line-webhook-core.ts`, if channel-specific
-   wiring needs proving too) and assert equivalent business meaning
-   (domain/action interpretation, durable state, constraints, task/draft
-   state, transaction proposal+args, idempotency) — formatting may differ.
-2. **Gate 3** — stale/interrupted-conversation coverage beyond activity's
-   existing tests: old stale task + greeting, abandoned draft + unrelated
-   request, switch A→B→C→resume A, cancel + fresh start, across the newly
-   -tested domains.
-3. **Gate 4** — restaurant-preorder-notification migration: create/keep an
-   actual migration file in the repo (the SQL was drafted in a prior
-   session's checkpoint — locate and verify it's still accurate against
-   the now-better-understood RPC-based creation flow), add schema-
-   assertion tests, do NOT apply it, mark OWNER APPROVAL REQUIRED.
-4. **Gate 5** — dedicated no-hallucination checks (temperament/beginner-
+### GATE 2 COMPLETE (commit `a283125`)
+
+`tests/gate2-line-web-domain-equivalence.test.ts` covers the remaining 7
+domains (activity's own deep 6-turn equivalence proof already existed at
+`tests/web-line-channel-equivalence.test.ts`, driven through
+`processThongthaiOneMindTurnAuthoritative` directly). Driven through the
+real shared entry point `processThongthaiChatCore` for both
+`channel:'web'` and `channel:'line'`, independent guests per channel,
+asserting equivalent business meaning (real facts surfaced, missing-
+field/transaction-gating behavior, write counts) — no channel-specific
+business divergence found in any domain. Also fixed a real harness
+usability gap: `harness.guestDbId(anonymousId)` now looks up a guest's
+internal id directly from the harness's own registry, instead of the
+previous reverse-engineering-from-last-post trick, which silently
+returned the WRONG guest's id the moment more than one guest had written
+state in the same test — exactly the shape Gate 2's multi-channel tests
+need.
+
+### GATE 3 COMPLETE (commit `a31a3f9`)
+
+`tests/gate3-stale-interrupted-conversations.test.ts`. **Found and fixed
+a real, significant production bug**: `planDialogTurn` in
+`_dialog-manager.ts` decided whether to start a fresh task with a bare
+`if (!container.activeTask)` null check. A cancelled task transitions to
+`status:'cancelled'` but is never nulled out of `container.activeTask` —
+so that check was `false` for a cancelled task, and the very next
+unrelated-but-same-domain selection ("ยกเลิก" then "เอาภาราดรครับ") got
+merged INTO the dead, cancelled task object via the `update_slots` branch
+instead of starting a genuinely new one. This **silently resurrected a
+task the customer had just cancelled**, in all but name — status stayed
+`'cancelled'` while its slots kept accumulating new data. Fixed by
+checking `isTerminalTaskStatus` too, reusing the exact `hasOpenTask`
+pattern already established elsewhere in the same file. Full suite stayed
+green before and after with zero other changes needed, confirming no
+other code relied on the buggy behavior. Also covers: a stale task never
+hijacking a plain greeting or leaking into an unrelated domain's answer,
+and a suspended task surviving more than one intervening domain hop
+before an explicit resume (A→B→C→resume A).
+
+**Full suite: 627/627 passing.** Both gates' commits pushed to
+`feature/thongthai-one-mind-architecture`. Production/Netlify untouched.
+
+### Next task (exact resumption point)
+
+1. **Gate 4** — restaurant-preorder-notification migration: locate the SQL
+   drafted in a prior session's checkpoint (search this file's history /
+   earlier "Priority 5" section), verify it's still accurate against the
+   now-better-understood RPC-based creation flow
+   (`create_restaurant_preorder_v2`/`_v3`, not a direct table insert — see
+   Gate 1's restaurant checkpoint above), create/keep an actual migration
+   file in the repo, add schema-assertion tests, do NOT apply it, mark
+   OWNER APPROVAL REQUIRED. Also trace/document the operational contract
+   for booking/OTOP/cafe (customer intent → canonical execution → DB
+   result shape → backoffice source → staff notification path) — this was
+   already verified structurally in a prior session; a light re-
+   confirmation is enough, not a full re-derivation.
+2. **Gate 5** — dedicated no-hallucination checks (temperament/beginner-
    suitability/availability/price/policy/menu/OTOP/cafe unknown-fact
    probes) — several domains already demonstrate this informally via
    Gate 1's tests (especially cafe's "cannot confirm" tests), but a
    dedicated pass across ALL domains closes the gate properly.
-5. **Gate 6** — release freeze: full suite + tsc + esbuild bundle/import
+3. **Gate 6** — release freeze: full suite + tsc + esbuild bundle/import
    smoke for both entry points + the exact original LINE bug flow +
    activity's 16-turn flow + all Gate 1-5 flows, then ONE final commit
    updating `THONGTHAI_HANDOFF.md` with a "RELEASE CANDIDATE — PRE-
    PRODUCTION ACCEPTANCE" section, and the owner's 11-item final report.
-6. Commit and push after every meaningful checkpoint, as done throughout
+4. Commit and push after every meaningful checkpoint, as done throughout
    this session — do not accumulate uncommitted work.
