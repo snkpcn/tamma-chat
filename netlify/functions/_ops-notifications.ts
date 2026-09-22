@@ -2,7 +2,7 @@ import { handleBookingOpsCommand } from './_ops-booking-actions';
 import { decryptPii, encryptPii, piiHash } from './_operations-db';
 
 export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all';
-export type OpsNotificationEntity = 'booking' | 'cafe_inquiry' | 'otop_order';
+export type OpsNotificationEntity = 'booking' | 'cafe_inquiry' | 'otop_order' | 'feedback_event';
 
 type TargetType = 'group' | 'room';
 
@@ -476,12 +476,63 @@ async function notifyOtopOrder(id: string): Promise<'sent' | 'duplicate' | 'not_
   });
 }
 
+// Service Mind feedback events (compliment/complaint/suggestion/
+// safety_issue/system_feedback -- see _service-mind-feedback-events.ts,
+// which writes ops_feedback_events and then calls this). business_unit
+// values that don't map to a real bound team (membership/system/general/
+// unknown) route to 'all' -- the SAME existing broadcast-to-every-bound-
+// team mechanic sendDailyOpsSummaries already uses, not a new concept.
+const FEEDBACK_BUSINESS_UNIT_TEAM: Record<string, OpsTeamCode> = {
+  restaurant: 'restaurant', activity: 'activity', stay: 'stay', cafe: 'cafe',
+  membership: 'all', system: 'all', general: 'all', unknown: 'all',
+};
+const FEEDBACK_TYPE_LABEL: Record<string, string> = {
+  compliment: '💛 คำชม', complaint: '⚠️ ข้อร้องเรียน', suggestion: '💡 ข้อเสนอแนะ',
+  safety_issue: '🚨 เรื่องความปลอดภัย', system_feedback: '💬 ฟีดแบ็กเรื่องทองไทย',
+};
+const FEEDBACK_SEVERITY_LABEL: Record<string, string> = {
+  low: 'ทั่วไป', normal: 'ปกติ', high: 'ต้องดูแลเร็ว', urgent: 'ด่วนมาก',
+};
+
+async function notifyFeedbackEvent(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
+  const response = await dbFetch(
+    `ops_feedback_events?id=eq.${id}`
+    + '&select=id,feedback_type,business_unit,severity,summary,staff_name,channel,environment&limit=1',
+  );
+  const rows = await response.json() as Array<{
+    id: string; feedback_type: string; business_unit: string; severity: string; summary: string;
+    staff_name: string | null; channel: string; environment: string;
+  }>;
+  const event = rows[0];
+  if (!event || !['live', 'test'].includes(event.environment)) return 'ignored';
+  const environmentPrefix = event.environment === 'test' ? '🧪 TEST — ' : '';
+  const teamCode = FEEDBACK_BUSINESS_UNIT_TEAM[event.business_unit] ?? 'all';
+  const lines = [
+    `${environmentPrefix}${FEEDBACK_TYPE_LABEL[event.feedback_type] ?? 'ฟีดแบ็กลูกค้า'} — ${TEAM_LABELS[teamCode]}`,
+    `ความรุนแรง: ${FEEDBACK_SEVERITY_LABEL[event.severity] ?? event.severity}`,
+    `สรุป: ${cleanText(event.summary, 500)}`,
+    event.staff_name ? `พนักงานที่กล่าวถึง: ${event.staff_name}` : '',
+    `ช่องทาง: ${event.channel.toUpperCase()}`,
+    `หลังบ้าน: ${BACKOFFICE_URL}`,
+  ].filter(Boolean);
+  return sendTeamMessage({
+    teamCode,
+    entityType: 'feedback_event',
+    entityId: event.id,
+    deliveryType: `feedback_${event.feedback_type}`,
+    idempotencyKey: `feedback_event_created:${event.id}`,
+    text: lines.join('\n'),
+    payload: { feedback_type: event.feedback_type, business_unit: event.business_unit },
+  });
+}
+
 export async function dispatchEntityNotification(
   entity: OpsNotificationEntity,
   id: string,
 ): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
   if (entity === 'booking') return notifyBooking(id);
   if (entity === 'cafe_inquiry') return notifyCafeInquiry(id);
+  if (entity === 'feedback_event') return notifyFeedbackEvent(id);
   return notifyOtopOrder(id);
 }
 

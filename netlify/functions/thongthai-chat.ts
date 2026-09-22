@@ -34,6 +34,19 @@ import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from '.
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
 import { redactWeatherUrl } from './_weather-provider';
+import { classifyServiceFeedback } from './_service-mind-feedback-intent';
+import { composeServiceFeedbackResponse } from './_service-mind-feedback-response';
+import { createFeedbackEvent } from './_service-mind-feedback-events';
+import {
+  composeActivityIntentStartResponse,
+  composeFoodIntentStartResponse,
+  composeThankYouCloseResponse,
+  composeVagueVisitIntentResponse,
+  isActivityIntentStartMessage,
+  isFoodIntentStartMessage,
+  isThankYouMessage,
+  isVagueVisitIntentMessage,
+} from './_service-mind-conversation-flow';
 import {
   clearRestaurantPreorderDraft,
   formatRestaurantSetPrompt,
@@ -126,8 +139,8 @@ export function deterministicGreetingResponse(request: BrainRequest): BrainRespo
   const isThai = request.language === 'th' || /[\u0E00-\u0E7F]/u.test(request.message);
   return {
     message: isThai
-      ? 'สวัสดีครับ ผมทองไทย พร้อมช่วยเรื่องร้านอาหาร ที่พัก กิจกรรม หรือข้อมูลทำมา-ชาติครับ'
-      : "Hi, I'm Thongthai. I can help with dining, stays, activities, or planning your visit.",
+      ? 'สวัสดีครับ ผมทองไทยครับ 😊 วันนี้อยากให้ช่วยเรื่องกิน พัก กิจกรรม โลเคชั่น อากาศ หรือจัดทริปให้ดีครับ'
+      : "Hi, I'm Thongthai 😊 I can help with dining, stays, activities, location, weather, or planning your trip.",
     intent: 'greeting',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
@@ -1197,6 +1210,111 @@ async function executeDeterministicActivityBooking(
     ].filter(Boolean).join('\n'),
   };
 }
+// Service Mind -- compliment/complaint/suggestion/safety-issue/system-
+// feedback. Checked early (right after the activity-booking fallback,
+// before One-Mind and every other deterministic responder) for two
+// reasons: (1) a complaint/safety report must never be swallowed by
+// domain routing (activity/restaurant/local-concierge all have their own,
+// unrelated reasons to match parts of a complaint's vocabulary), and (2)
+// classifyServiceFeedback deliberately does NOT check
+// hasExplicitTransactionIntent, so a feedback match here must win
+// BEFORE any transaction-processing code ever sees the message --
+// "บริการแย่มาก ยืนยัน" needs to be handled as a complaint, not read as a
+// booking confirmation, and returning here immediately is what guarantees
+// that (see _service-mind-feedback-intent.ts's own header comment).
+async function deterministicServiceFeedbackResponse(
+  request: BrainRequest,
+  channel: BrainChannel,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  const match = classifyServiceFeedback(request.message);
+  if (!match) return null;
+  const { notificationQueued } = await createFeedbackEvent({
+    match, message: request.message, channel, guestDbId,
+  });
+  return {
+    message: composeServiceFeedbackResponse(match, notificationQueued),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// Section 1 (before conversation): a truly bare "I want to visit" message
+// with no other structure gets ONE good clarifying question instead of
+// falling through to the LLM with nothing to go on. See
+// _service-mind-conversation-flow.ts's own header comment for why this is
+// deliberately narrow.
+function deterministicVagueVisitIntentResponse(request: BrainRequest): BrainResponse | null {
+  if (!isVagueVisitIntentMessage(request.message)) return null;
+  return {
+    message: composeVagueVisitIntentResponse(),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// Section 1 (before conversation): a bare "อยากกิน" gets a caring
+// spice/allergy question instead of risking a generic non-answer; a bare
+// "อยากขี่ม้า" gets a caring experience/feel question instead of a plain
+// asset-inventory listing. See _service-mind-conversation-flow.ts's own
+// header comments for why each marker is deliberately narrow.
+function deterministicFoodIntentStartResponse(request: BrainRequest): BrainResponse | null {
+  if (!isFoodIntentStartMessage(request.message)) return null;
+  return {
+    message: composeFoodIntentStartResponse(),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+function deterministicActivityIntentStartResponse(request: BrainRequest): BrainResponse | null {
+  if (!isActivityIntentStartMessage(request.message)) return null;
+  return {
+    message: composeActivityIntentStartResponse(),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// Section 3 (after conversation): a bare "thank you" gets a warm close
+// and, per Customer Service Doctrine's "ask only at the right time," a
+// light feedback invitation -- never a survey, never spammed onto an
+// unrelated turn (this responder only ever fires on the narrow
+// THANK_YOU_MARKER shape, nothing else).
+function deterministicThankYouCloseResponse(request: BrainRequest): BrainResponse | null {
+  if (!isThankYouMessage(request.message)) return null;
+  return {
+    message: composeThankYouCloseResponse(true),
+    intent: 'conversation',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
 export type ThongthaiChatCoreResult = { statusCode: number; payload: Record<string, unknown> };
 
 // The single canonical entry point into Thongthai's shared brain -- called by
@@ -1270,6 +1388,77 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (earlyActivityFallback) {
     const polished = polishedResponse(earlyActivityFallback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Service Mind -- see deterministicServiceFeedbackResponse's own header
+  // comment for why this must be checked this early (before any
+  // transaction-processing code, before One-Mind, before domain routing).
+  const serviceFeedback = await deterministicServiceFeedbackResponse(request, channel, guestDbId).catch(error => {
+    console.error('THONGTHAI_SERVICE_FEEDBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (serviceFeedback) {
+    const polished = polishedResponse(serviceFeedback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const vagueVisitIntent = deterministicVagueVisitIntentResponse(request);
+  if (vagueVisitIntent) {
+    const polished = polishedResponse(vagueVisitIntent, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const foodIntentStart = deterministicFoodIntentStartResponse(request);
+  if (foodIntentStart) {
+    const polished = polishedResponse(foodIntentStart, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const activityIntentStart = deterministicActivityIntentStartResponse(request);
+  if (activityIntentStart) {
+    const polished = polishedResponse(activityIntentStart, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const thankYouClose = deterministicThankYouCloseResponse(request);
+  if (thankYouClose) {
+    const polished = polishedResponse(thankYouClose, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

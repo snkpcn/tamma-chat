@@ -2415,11 +2415,238 @@ reply contains the Thai translation and never the raw English text.
 
 ### Deploy status
 
-**NOT DEPLOYED. No PR merged for this change** — per the explicit
-instruction, this is committed and pushed for review only; awaiting
-owner approval before any merge/deploy.
+**DEPLOYED.** Owner approved; PR #47 merged to `main` (`c07b46cb`). One
+deploy triggered, no repeated deploys.
 
 ### Confirmation
 
 No DB migration, no production transaction, no env var touched, no
-routing change, no deploy triggered.
+routing change.
+
+---
+
+## THONGTHAI SERVICE MIND SYSTEM — 3-phase hospitality layer (NOT DEPLOYED)
+
+Branch: `feature/service-mind-system`, based on `main`. **Not merged, not
+deployed.** Owner will decide deploy later.
+
+### Overview
+
+Makes Thongthai behave less like a chatbot and more like a world-class
+front-desk host: warm before a conversation starts, attentive and honest
+during it, and a real feedback bridge to the owner/backoffice team after
+it. Reuses the existing canonical architecture throughout — no new brain,
+no parallel pipeline, no changes to booking/order/payment execution. The
+one genuinely new subsystem is the feedback classifier + event record +
+staff notification (Section 3); Sections 1 and 2 are mostly small,
+narrowly-scoped additions plus verification that a lot of "during
+conversation" personalization the spec asks for already exists via the
+local-concierge framework from earlier phases.
+
+### 1. Before conversation
+
+- **Greeting** (`deterministicGreetingResponse`, `thongthai-chat.ts`):
+  updated from a flat canned line to a warm host line offering real help
+  categories (กิน/พัก/กิจกรรม/โลเคชั่น/อากาศ/ทริป), matching the owner's own
+  example almost verbatim.
+- **Vague visit intent** (`_service-mind-conversation-flow.ts`): a bare
+  "จะไปเที่ยว"/"อยากไปเที่ยว" with nothing else structural now asks ONE
+  companion question instead of falling through with no scaffolding.
+- **Food/activity intent start** (same file): a bare "อยากกิน" or
+  "อยากขี่ม้า" — confirmed empirically (before this change) that "อยากกิน"
+  alone risked the generic LLM-unavailable apology (no deterministic
+  scaffolding existed for it at all), and "อยากขี่ม้า" got a plain
+  horse-inventory list, not a caring question — now both ask one relevant
+  question (spice/allergy; riding experience/preferred feel) first. All
+  three markers are deliberately narrow (exact-match, optional trailing
+  punctuation only) so they never steal a message with more structure —
+  those already have better-fitting handlers (local-concierge's
+  `visitor_journey`/`food_culture`/`horse_comparison`/etc., which own
+  anything with a companion, constraint, or named business/activity).
+
+### 2. During conversation
+
+Most of the personalization categories in the spec (couple/family/
+elderly trip planning, dietary constraints, horse ride-feel facts,
+weather + outdoor activity with ground-condition caveats) **already exist
+and already work** via the Local Concierge Intelligence Framework built
+in earlier phases (`_local-concierge-intent.ts`/`_local-concierge-
+response.ts`) — verified end-to-end in `tests/service-mind.test.ts`
+(tests 5–9) rather than reimplemented, per the instruction not to create
+a parallel architecture. No new intent-classification module was built
+for weather_condition_question / itinerary_request / family_trip /
+couple_trip / horse_interest — those names map directly onto local-
+concierge's existing `weather_condition` / `visitor_journey` /
+`horse_comparison` categories.
+
+Genuinely new in this phase: the feedback-shaped categories the spec asks
+for that had **zero** existing coverage — see Section 3.
+
+### 3. After conversation — feedback system (the new subsystem)
+
+**Classification** (`_service-mind-feedback-intent.ts`): a small, closed
+marker set (same discipline as every other classifier in this codebase)
+detecting `compliment` / `complaint` / `suggestion` / `safety_issue` /
+`system_feedback` (feedback about Thongthai's own answers), plus
+structural inference of `business_unit` (restaurant/activity/stay/cafe/
+membership/system/general/unknown) and `severity` (low/normal/high/
+urgent — a real medical/fire/accident marker always forces `urgent`
+regardless of anything else in the message), and a bounded staff-name
+extraction (only when an honorific + name is actually present, e.g.
+"พี่เจิด" — never guessed).
+
+Deliberately does **not** check `hasExplicitTransactionIntent` — the
+classifier's own header comment explains why: a bare "ยืนยัน" trailing a
+complaint ("บริการแย่มาก ยืนยัน") must be read as a complaint, not a
+booking confirmation. This is enforced by **placement**, not a special
+case inside the classifier: `deterministicServiceFeedbackResponse` is
+wired into `processThongthaiChatCore` right after the activity-booking
+fallback and before every other deterministic responder, One-Mind, and
+the LLM — a feedback match returns immediately, so transaction-processing
+code never sees the message at all. **Verified load-bearing** by
+temporarily disabling this responder and confirming 9 of 21
+`service-mind.test.ts` tests fail — notably "ร้านอาหารรอนานมาก" (a
+restaurant complaint) fell through to the restaurant menu advisor and
+got shown a menu instead of being treated as a complaint — then restoring
+it and reconfirming all 21 pass.
+
+**Response composition** (`_service-mind-feedback-response.ts`): sincere,
+non-defensive, non-robotic acknowledgment per category, matching the
+owner's own example wording closely (apology + one clarifying question
+for complaint, thank-you + staff-name capture for compliment, thank-you +
+no-overpromise for suggestion, urgent acknowledgment + ground-condition
+deferral for safety issues). The closing "we'll route this" line is
+chosen honestly by whether the staff notification actually sent/queued
+(`"ส่งเรื่องให้ทีมที่เกี่ยวข้องแล้วครับ"`, past tense) vs. not yet
+(`"จะส่งต่อให้เจ้านายกับทีมที่เกี่ยวข้องครับ"`, future tense) — never
+claims delivery before it happened (Operational Truth Doctrine).
+
+**Feedback event storage** (`_service-mind-feedback-events.ts` +
+`supabase/migrations/20260922210000_ops_feedback_events_v1.sql`, **NOT
+APPLIED**): a new, purpose-built `ops_feedback_events` table. Considered
+and rejected the two existing candidates: `handoff_requests` (a
+different concept — "customer needs a human now," no compliment/
+suggestion types, never notified to staff) and `guest_events` (its own
+`guest_events_no_chat_text` CHECK constraint deliberately forbids storing
+raw chat text, which this system genuinely needs — `customer_message` —
+for staff triage; overriding that guardrail would weaken a real privacy
+boundary protecting every other `guest_events` write). The migration file
+follows this repo's own established banner-comment convention (NOT
+APPLIED marker, the gap, why the fix is purely additive, the safety
+argument, apply instructions) — same shape as the one real prior
+migration in `supabase/migrations/`.
+
+**Never blocks the customer's turn**: `createFeedbackEvent` is fully
+wrapped in try/catch — a DB write failure (including, today, the
+completely expected case of the migration not being applied yet) logs
+and degrades to `{eventId: null, notificationQueued: false}`, and the
+customer still gets the full sincere acknowledgment with the honest
+future-tense routing line. Verified in `service-mind.test.ts` test 20 by
+forcing the `ops_feedback_events` write to fail and confirming a normal
+200 response with the real apology text, never the generic LLM-outage
+apology, never a crash.
+
+**Staff notification** (`_ops-notifications.ts`, extended, not
+replaced): reuses the exact existing dispatcher — new
+`OpsNotificationEntity` value `'feedback_event'`, new `notifyFeedbackEvent`
+function mirroring `notifyCafeInquiry`'s shape exactly, wired into the
+existing `dispatchEntityNotification`. Business-unit → team routing:
+restaurant/activity/stay/cafe map to their real bound team; membership/
+system/general/unknown map to `'all'` — the SAME existing
+broadcast-to-every-bound-team mechanic `sendDailyOpsSummaries` already
+uses, not a new concept. Uses the exact same LINE Messaging API push,
+`ops_notification_channels` team-binding table, and
+`ops_notification_deliveries` idempotency-keyed delivery ledger every
+other notification (bookings, cafe inquiries, OTOP orders) already goes
+through. When no team has bound a channel yet (the honest, current state
+— nothing here is deployed), `sendTeamMessage` returns `'not_bound'`,
+exactly like every other entity type; nothing is silently dropped, no
+notification success is faked. Verified end-to-end in
+`service-mind.test.ts` test 21 (added `programOpsChannel` to
+`canonical-core-harness.ts`, using the REAL `encryptPii`/`piiHash` so
+`_ops-notifications.ts`'s own decryption round-trips exactly like
+production) that once a channel IS bound, the customer-facing wording
+correctly switches to the past-tense "already sent" line.
+
+### Files changed
+
+- `netlify/functions/_service-mind-feedback-intent.ts` (new)
+- `netlify/functions/_service-mind-feedback-response.ts` (new)
+- `netlify/functions/_service-mind-feedback-events.ts` (new)
+- `netlify/functions/_service-mind-conversation-flow.ts` (new — vague
+  visit intent, bare food/activity intent start, thank-you close)
+- `netlify/functions/_ops-notifications.ts` (extended: `'feedback_event'`
+  entity, `notifyFeedbackEvent`, wired into `dispatchEntityNotification`)
+- `netlify/functions/thongthai-chat.ts` (greeting wording; 5 new
+  deterministic responders wired into the precedence chain right after
+  the activity-booking fallback)
+- `tests/helpers/canonical-core-harness.ts` (extended: LINE push mock,
+  `ops_notification_channels`/`ops_notification_deliveries`/
+  `ops_feedback_events` mocking, `programOpsChannel`)
+- `tests/service-mind.test.ts` (new — 21 tests)
+- `supabase/migrations/20260922210000_ops_feedback_events_v1.sql` (new,
+  **NOT APPLIED**)
+
+### Notification status
+
+Not configured in any real environment by this session — no LINE group
+has been bound to any team for feedback routing (that's the owner's own
+`"ผูกทีม <name>"` command in their LINE ops groups, unchanged, already
+existing infrastructure). Until a team binds a channel, feedback
+notifications correctly degrade to `'not_bound'`, same as every other
+notification type in this codebase, and the customer-facing wording
+stays honestly future-tense.
+
+### Tests added
+
+`tests/service-mind.test.ts` — 21 tests covering all 20 of the owner's
+required scenarios plus one extra (the notification-actually-sent happy
+path), all driven through the real `processThongthaiChatCore`. The
+service-feedback responder's precedence placement is verified
+load-bearing via the established revert-and-confirm methodology (see
+Section 3 above). Full suite: **694/694 passing** (673 before this
+phase + 21 new).
+
+### Remaining gaps (honest, documented)
+
+- `ops_feedback_events` migration is prepared but **not applied** — the
+  feedback event write is currently a no-op that degrades gracefully;
+  nothing is persisted until the owner applies it.
+- No LINE group has bound to receive feedback notifications yet (a
+  separate owner action, same `"ผูกทีม"` command already used for
+  bookings — feedback events will flow to the SAME bound channel per
+  business unit once that's done, no new binding step needed).
+- Cross-turn feedback-invitation suppression (asking again if the
+  customer says "ขอบคุณ" a SECOND time later in the same session) is a
+  documented simplification, not implemented — the spam guard that IS
+  enforced is structural (the thank-you responder only ever fires on the
+  narrow bare-"ขอบคุณ" marker, never proactively on an unrelated turn,
+  which is what the owner's own test #18 actually checks).
+- The classifier is a closed marker set, not general NLU — a novel
+  phrasing of a complaint/compliment/suggestion can still structurally
+  miss and fall through to the LLM, same deliberate trade-off as every
+  other classifier in this codebase.
+- Section 2's "during conversation" coverage leans on the EXISTING
+  local-concierge framework rather than a from-scratch rebuild of every
+  named intent category in the spec (weather_condition_question,
+  itinerary_request, family_trip, couple_trip, horse_interest,
+  mobility_constraint, etc.) — verified working, not reimplemented; see
+  the note in Section 2 above for exactly which spec category maps to
+  which existing local-concierge category.
+
+### Deploy status: NOT DEPLOYED
+
+No Netlify access used, no deploy, no DB migration applied, no
+production DB mutation, no real transaction created, no real booking/
+order/payment/redemption created in any test. All work is on
+`feature/service-mind-system` (pushed to `origin`), untouched by and
+unrelated to every other branch's own deploy state.
+
+### Next step
+
+Owner review of: the feedback-event schema/migration (apply when ready),
+the response wording (matches the owner's own examples closely but is
+final-approval-worthy, same as every other customer-facing composer in
+this codebase), and which LINE groups should be bound to receive
+feedback notifications — then a deploy decision, following the same
+one-clean-merge discipline already used for every prior phase.

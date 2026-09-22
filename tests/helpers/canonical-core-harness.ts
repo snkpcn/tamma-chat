@@ -24,6 +24,7 @@
 // THONGTHAI_HANDOFF.md.
 import { createHash } from 'node:crypto';
 import type { GuestAgentStateSnapshot } from '../../netlify/functions/_guest-agent-state-store';
+import { encryptPii, piiHash } from '../../netlify/functions/_operations-db';
 
 export type HarnessCatalog = {
   activityOfferings?: Array<Record<string, unknown>>;
@@ -141,6 +142,16 @@ export type Harness = {
    *  ok:false (a provider error) rather than that misleading empty-success
    *  default. */
   programWeatherFetch: (response: { ok: boolean; body?: unknown }) => void;
+  /** Binds a fake LINE group to a team code (_ops-notifications.ts's
+   *  OpsTeamCode) for the duration of this harness run -- without this, no
+   *  team has a bound channel, `sendTeamMessage` returns 'not_bound', and
+   *  any Service Mind feedback notification correctly (and honestly)
+   *  degrades to "will route" wording rather than "routed" wording. Use
+   *  this in a test that specifically wants to prove the "notification
+   *  actually sent" path. Uses the REAL encryptPii/piiHash
+   *  (_operations-db.ts) so _ops-notifications.ts's own decryption of the
+   *  stored channel round-trips correctly, exactly like production. */
+  programOpsChannel: (teamCode: string) => void;
   /** Directly inspect/seed a guest's persisted state row -- useful for
    *  stale-state tests that need to start from an already-existing task. */
   getState: (guestDbId: string) => GuestAgentStateSnapshot | undefined;
@@ -171,6 +182,11 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const posts = new Map<string, Array<Record<string, unknown>>>();
   const geminiQueue: HarnessGeminiReply[] = [];
   let weatherFetchResponse: { ok: boolean; body: unknown } | null = null;
+  const feedbackEvents = new Map<string, Record<string, unknown>>(); // id -> row (ops_feedback_events)
+  const opsChannels = new Map<string, { id: string; team_code: string; target_id_enc: string; target_id_hash: string; enabled: boolean }>(); // team_code -> channel
+  const opsDeliveries = new Map<string, { id: string; status: string }>(); // idempotency_key -> delivery
+  let feedbackEventSeq = 0;
+  let opsDeliverySeq = 0;
   const restaurantPreorders = new Map<string, Record<string, unknown>>(); // id -> row (tamma_chart_os.restaurant_preorders)
   const restaurantPreorderItems = new Map<string, Array<Record<string, unknown>>>(); // id -> item rows
   const restaurantPreorderIdempotency = new Map<string, string>(); // idempotency_key -> id
@@ -279,6 +295,72 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     if (u.includes('api.openweathermap.org')) {
       if (!weatherFetchResponse) return jsonResponse({}, 500);
       return jsonResponse(weatherFetchResponse.body ?? {}, weatherFetchResponse.ok ? 200 : 500);
+    }
+
+    // --- LINE push (_ops-notifications.ts's linePush, used by
+    // sendTeamMessage once a channel is bound via programOpsChannel) ---
+    // always succeeds in tests -- a test asserting an actual LINE-push
+    // FAILURE is not a scenario this harness needs to model today.
+    if (u.includes('api.line.me/v2/bot/message/push')) return jsonResponse({});
+
+    // --- ops_notification_channels (_ops-notifications.ts's
+    // channelForTeam/currentBindingForTarget) -- only populated via
+    // programOpsChannel; unbound by default (matching this feature's real
+    // pre-migration/pre-deploy state honestly). ---
+    if (path.startsWith('ops_notification_channels') && method === 'GET') {
+      const teamCode = query.get('team_code')?.replace('eq.', '');
+      const targetHash = query.get('target_id_hash')?.replace('eq.', '');
+      const channel = teamCode
+        ? opsChannels.get(teamCode)
+        : [...opsChannels.values()].find(c => c.target_id_hash === targetHash);
+      return jsonResponse(channel ? [channel] : []);
+    }
+
+    // --- ops_notification_deliveries (_ops-notifications.ts's
+    // beginDelivery/finishDelivery -- idempotency-keyed delivery ledger) ---
+    if (path.startsWith('ops_notification_deliveries')) {
+      if (method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}')) as { idempotency_key: string; status?: string };
+        if (opsDeliveries.has(body.idempotency_key)) return jsonResponse([]); // on_conflict ignore-duplicates
+        opsDeliverySeq += 1;
+        const row = { id: `ops-delivery-${opsDeliverySeq}`, status: body.status ?? 'pending' };
+        opsDeliveries.set(body.idempotency_key, row);
+        return jsonResponse([row]);
+      }
+      if (method === 'GET') {
+        const key = query.get('idempotency_key')?.replace('eq.', '') ?? '';
+        const row = opsDeliveries.get(key);
+        return jsonResponse(row ? [row] : []);
+      }
+      if (method === 'PATCH') {
+        const idParam = query.get('id')?.replace('eq.', '') ?? '';
+        const body = JSON.parse(String(init.body ?? '{}')) as { status?: string };
+        for (const [key, row] of opsDeliveries.entries()) {
+          if (row.id === idParam) opsDeliveries.set(key, { ...row, status: body.status ?? row.status });
+        }
+        return jsonResponse([]);
+      }
+    }
+
+    // --- ops_feedback_events (Service Mind -- see
+    // _service-mind-feedback-events.ts, _ops-notifications.ts's
+    // notifyFeedbackEvent). Real table is prepared but NOT applied (see
+    // THONGTHAI_HANDOFF.md); modeled here so tests can assert the exact
+    // event a classified feedback message produces. ---
+    if (path.startsWith('ops_feedback_events')) {
+      if (method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+        feedbackEventSeq += 1;
+        const row = { id: `feedback-event-${feedbackEventSeq}`, environment: 'test', ...body };
+        feedbackEvents.set(row.id, row);
+        recordPost('ops_feedback_events', body);
+        return jsonResponse([row]);
+      }
+      if (method === 'GET') {
+        const idParam = query.get('id')?.replace('eq.', '') ?? '';
+        const row = feedbackEvents.get(idParam);
+        return jsonResponse(row ? [row] : []);
+      }
     }
 
     // --- guest_identities ---
@@ -469,6 +551,13 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     fetchMock,
     programGeminiReply: reply => { geminiQueue.push(reply); },
     programWeatherFetch: response => { weatherFetchResponse = { ok: response.ok, body: response.body ?? {} }; },
+    programOpsChannel: teamCode => {
+      const targetId = `line-group-${teamCode}`;
+      const targetEnc = encryptPii(targetId);
+      const targetHash = piiHash(targetId);
+      if (!targetEnc || !targetHash) throw new Error('programOpsChannel: encryption not configured (call inside withHarness)');
+      opsChannels.set(teamCode, { id: `ops-channel-${teamCode}`, team_code: teamCode, target_id_enc: targetEnc, target_id_hash: targetHash, enabled: true });
+    },
     getState: guestDbId => agentState.get(guestDbId),
     setState: (guestDbId, state, updatedAt) => { agentState.set(guestDbId, { exists: true, state, updatedAt: updatedAt ?? new Date().toISOString() }); },
     postsTo: table => posts.get(table) ?? [],
@@ -492,11 +581,17 @@ export async function withHarness<T>(
     CUSTOMER_PII_ENCRYPTION_KEY: process.env.CUSTOMER_PII_ENCRYPTION_KEY,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
     THONGTHAI_ONE_MIND_CUTOVER: process.env.THONGTHAI_ONE_MIND_CUTOVER,
+    LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN,
   };
   process.env.SUPABASE_URL = 'https://example.supabase.co';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
   process.env.CUSTOMER_PII_ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
   process.env.GEMINI_API_KEY = 'test-gemini-key';
+  // Only actually exercised when a test programs a bound ops channel (see
+  // programOpsChannel) -- linePush (_ops-notifications.ts) throws if this
+  // is unset, so it must be present even though most tests never bind a
+  // channel and never reach it.
+  process.env.LINE_CHANNEL_ACCESS_TOKEN = 'test-line-channel-access-token';
   // netlify.toml's [build.environment] only applies to Netlify's own
   // build/deploy -- it does NOT carry into a local `node --test` run, so
   // without setting this explicitly here the entire One-Mind cutover
