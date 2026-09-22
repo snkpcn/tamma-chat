@@ -1,25 +1,40 @@
 // Weather provider abstraction for ทำมา-ชาติ/ตาดโตน's live conditions. A
 // real-time fact (category C in THONGTHAI_HANDOFF.md's data-classification
 // discipline) -- this module is the ONLY place allowed to assert a live
-// weather fact, and only when a real provider, API key, and coordinates
-// are all actually configured. Never blocks the concierge answer: every
-// caller gets a structured result back, "unavailable" included, never a
-// thrown error for the ordinary case of missing/partial config (same
-// "never let a missing integration become a hard failure" discipline as
+// weather fact, and only when an API key and coordinates are actually
+// configured. Never blocks the concierge answer: every caller gets a
+// structured result back, "unavailable" included, never a thrown error
+// for the ordinary case of missing/partial config (same "never let a
+// missing integration become a hard failure" discipline as
 // _dialog-source-adapters.ts's other real adapters).
 //
-// Reads exactly the 4 Netlify env vars the owner configured in production:
-//   WEATHER_PROVIDER   -- must be 'openweathermap' (the only provider this
-//                         module implements); anything else is reported as
-//                         unavailable rather than silently ignored.
-//   WEATHER_API_KEY    -- OpenWeatherMap API key.
-//   TAMMA_WEATHER_LAT  -- ทำมา-ชาติ/ตาดโตน latitude, as a plain number string.
-//   TAMMA_WEATHER_LON  -- ทำมา-ชาติ/ตาดโตน longitude, as a plain number string.
-// Deliberately its OWN coordinate source, separate from
-// _local-concierge-location.ts's TAMMA_CHART_LOCATION (which is the
-// customer-facing Maps-link/address fact, still unresolved) -- the owner
-// supplied these specifically for weather lookups, and this module must
-// not wait on the Maps-link resolution to start working.
+// Reads these Netlify env vars:
+//   WEATHER_API_KEY    -- OpenWeatherMap API key (required).
+//   TAMMA_WEATHER_LAT  -- ทำมา-ชาติ/ตาดโตน latitude, as a plain number string
+//                         (required).
+//   TAMMA_WEATHER_LON  -- ทำมา-ชาติ/ตาดโตน longitude, as a plain number
+//                         string (required).
+//   WEATHER_PROVIDER   -- OPTIONAL. Defaults to 'openweathermap' (the only
+//                         provider this module implements) when unset --
+//                         only an EXPLICIT, different value is reported as
+//                         unavailable. Deliberately optional: its only
+//                         legitimate value, 'openweathermap', is not a
+//                         secret, but Netlify's default secrets scan flags
+//                         the literal value of ANY configured env var
+//                         (this one included) if that value also appears
+//                         in committed source/docs -- which "openweathermap"
+//                         legitimately does throughout this very file. Not
+//                         requiring the var at all removes the false
+//                         positive at its root instead of trying to keep
+//                         a legitimate, non-secret string out of a
+//                         codebase that has to mention it anyway. See
+//                         THONGTHAI_HANDOFF.md's "HOTFIX -- exposed
+//                         secrets" section for the full incident history.
+// TAMMA_WEATHER_LAT/LON are deliberately their OWN coordinate source,
+// separate from _local-concierge-location.ts's TAMMA_CHART_LOCATION
+// (which is the customer-facing Maps-link/address fact, still unresolved)
+// -- the owner supplied these specifically for weather lookups, and this
+// module must not wait on the Maps-link resolution to start working.
 
 export type WeatherResult = {
   status: 'ok' | 'unavailable';
@@ -65,10 +80,12 @@ type OpenWeatherCurrentResponse = {
 };
 
 /**
- * Live current-conditions lookup for ทำมา-ชาติ/ตาดโตน. Requires
- * WEATHER_PROVIDER='openweathermap', a configured WEATHER_API_KEY, AND
- * valid TAMMA_WEATHER_LAT/TAMMA_WEATHER_LON env vars -- any one missing or
- * invalid is reported as 'unavailable', never a guess.
+ * Live current-conditions lookup for ทำมา-ชาติ/ตาดโตน. Requires a
+ * configured WEATHER_API_KEY AND valid TAMMA_WEATHER_LAT/TAMMA_WEATHER_LON
+ * env vars -- either missing or invalid is reported as 'unavailable',
+ * never a guess. WEATHER_PROVIDER is optional and defaults to
+ * 'openweathermap'; it's only checked (and can only fail as
+ * 'unsupported_provider') when explicitly set to something else.
  *
  * Calls OpenWeatherMap's free current-weather endpoint server-side, but
  * callers depend only on this function's WeatherResult contract, not on
@@ -89,7 +106,9 @@ export async function getWeatherForTammaLocation(
   const apiKey = process.env.WEATHER_API_KEY;
   if (!apiKey) return unavailable('no_api_key_configured');
 
-  const provider = process.env.WEATHER_PROVIDER;
+  // Optional -- unset defaults to the only provider this module
+  // implements. Only an EXPLICIT, different value is unsupported.
+  const provider = process.env.WEATHER_PROVIDER || 'openweathermap';
   if (provider !== 'openweathermap') return unavailable('unsupported_provider');
 
   const latitude = Number(process.env.TAMMA_WEATHER_LAT);

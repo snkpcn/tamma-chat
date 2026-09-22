@@ -1771,12 +1771,16 @@ the `WeatherResult` contract, so swapping providers later needs no
 caller-side change.
 
 **Status: NOW LIVE in production config, per Phase 3 below** — the owner
-configured `WEATHER_PROVIDER`, `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`, and
-`TAMMA_WEATHER_LON` in Netlify. See the "PHASE 3" section for the exact
-env var contract, the classification of `TAMMA_WEATHER_LAT`/`LON` as its
-own coordinate source (deliberately separate from
-`TAMMA_CHART_LOCATION`'s still-unresolved Maps-link address), and the
-forecast-limitation and ground-condition handling added alongside it.
+configured `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`, and `TAMMA_WEATHER_LON`
+in Netlify. See the "PHASE 3" section for the exact env var contract, the
+classification of `TAMMA_WEATHER_LAT`/`LON` as its own coordinate source
+(deliberately separate from `TAMMA_CHART_LOCATION`'s still-unresolved
+Maps-link address), and the forecast-limitation and ground-condition
+handling added alongside it. **`WEATHER_PROVIDER` was originally also
+required but is now OPTIONAL (defaults to `openweathermap`) — see the
+"HOTFIX — exposed secrets, round 2" section near the end of this doc for
+why, and the exact owner action (delete it from Netlify) that goes with
+it.**
 
 `composeWeatherConditionResponse` and `composeActivitySuitabilityResponse`
 are now `async` and call `getWeatherForTammaLocation()`:
@@ -2253,3 +2257,120 @@ be fixed at the source, never bypassed by disabling scanning.
 No DB migration, no production transaction. Exactly one more merge to
 `main` for this hotfix (no repeated deploy spam) — see the PR link in
 this session's final report.
+
+---
+
+## HOTFIX — exposed secrets, round 2 (WEATHER_PROVIDER removed as a requirement)
+
+Production deploy of `main@bbffd9bd` (round 1's own hotfix) **still**
+failed Netlify's secrets scan. This session has no Netlify access and so
+could not open the failed deploy's own details to read the exact
+file/line it names (same confirmed limit as every prior round). Round 1
+already removed the one leak this session could find and reproduce (the
+literal `TAMMA_WEATHER_LAT`/`LON` values) — round 1's report said
+explicitly that if the scan still failed, Netlify's own failure details
+would be needed to find the next cause. Absent those details, the next
+most plausible cause, reasoned from first principles, is
+`WEATHER_PROVIDER=openweathermap`: **preview deploys passed, only
+production failed**, which is consistent with Netlify's secrets scan
+running only (or more strictly) against the production build context —
+i.e. only checking env vars that are actually SET for that context. The
+string `"openweathermap"` legitimately appears throughout this
+repository's own source, tests, and docs (it's the literal provider name
+in URLs, log messages, and doc examples) — entirely expected and correct
+on its own. But because `WEATHER_PROVIDER` was ALSO configured as a
+production env var with that exact value, Netlify's default scan (which
+treats the value of any configured env var as sensitive, not just
+semantically-secret ones — see round 1's section above) would flag every
+one of those legitimate appearances.
+
+**This session cannot confirm this is the actual cause** without seeing
+Netlify's real failure details. What this session CAN do, and did: remove
+the underlying condition entirely, so it stops being possible regardless
+of whether this specific guess is right.
+
+### Design change: WEATHER_PROVIDER is no longer required
+
+`getWeatherForTammaLocation()` now defaults `WEATHER_PROVIDER` to
+`'openweathermap'` when the env var is unset — `process.env.WEATHER_PROVIDER
+|| 'openweathermap'` — and only returns `unsupported_provider` when the
+var is explicitly set to something else. Production's required env vars
+are now just:
+
+```
+WEATHER_API_KEY=<the real OpenWeather key>
+TAMMA_WEATHER_LAT=<the real latitude>
+TAMMA_WEATHER_LON=<the real longitude>
+```
+
+`WEATHER_PROVIDER` is optional — the code works correctly with it unset,
+and unset is now the RECOMMENDED state precisely to keep its literal
+value out of Netlify's env-var-scanning surface.
+
+### Owner action required
+
+**Delete the `WEATHER_PROVIDER` environment variable from the Netlify
+site's production environment.** Its value (`openweathermap`) was never a
+secret, but configuring it as an env var at all is what made Netlify's
+scanner treat that value as one to search for — and the codebase legitimately
+mentions that string elsewhere, which is what (most likely) caused the
+repeated scan failure.
+
+**Do NOT delete**: `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`,
+`TAMMA_WEATHER_LON` — all three are still required and this hotfix
+doesn't change how any of them are read.
+
+### Files changed
+
+`netlify/functions/_weather-provider.ts` (default-provider logic + header
+comment rewritten to document it), `tests/weather-provider.test.ts`
+(removed the requirement that `WEATHER_PROVIDER` be set anywhere except
+the one explicit-unsupported-value test; added a dedicated
+"defaults-when-absent" test), `.env.example` (removed `WEATHER_PROVIDER`
+line entirely), `THONGTHAI_HANDOFF.md` (this section + a pointer added to
+the Phase 3 section above).
+
+### Tests added/updated
+
+`tests/weather-provider.test.ts` is now 18 tests (was 17): split the old
+combined "WEATHER_PROVIDER missing/unsupported" test into two precise
+ones — "WEATHER_PROVIDER absent: defaults to openweathermap and is NOT
+required" (asserts the real call still goes to OpenWeatherMap with no
+provider var set at all) and "WEATHER_PROVIDER explicitly set to an
+unknown value: returns unsupported_provider, no crash" (the only
+remaining case that can still fail this way). Every other existing test
+updated to no longer set `WEATHER_PROVIDER` in its setup, since production
+won't have it either once the owner deletes it.
+
+### Full test result
+
+**670/670 passing** (669 before this round + 1 net new — split one test
+into two, +1 overall).
+
+### Repo-wide secret sweep (this round)
+
+Re-ran the same sweep as round 1 (grep for `appid=`, key-shaped
+hex/alphanumeric strings, the literal env var names, and the specific
+previously-leaked coordinate values) across the whole repository, not
+just this feature's files. No real secret value found anywhere — the
+`WEATHER_API_KEY` was never in this session's possession in any round.
+
+### Main commit
+
+Round 2's hotfix PR is linked in this session's final report; the merge
+commit SHA is there too.
+
+### Deploy instruction
+
+**After the owner deletes `WEATHER_PROVIDER` from Netlify AND this
+hotfix's PR is merged, trigger exactly one production deploy.** If
+Netlify's scan still fails after both of those, the failure details
+becomes the only reliable next lead (this session still has no Netlify
+access to read them directly) — the owner or a session with Netlify
+access should open the failed deploy and report the exact file/path/line
+it names, rather than this session guessing a third time.
+
+### Confirmation
+
+No DB migration, no production transaction. Exactly one more merge to
+`main` for this hotfix — no repeated deploy spam from this session.

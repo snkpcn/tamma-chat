@@ -1,12 +1,15 @@
 // Weather provider tests -- _weather-provider.ts is the ONLY module
 // allowed to assert a live weather fact for ทำมา-ชาติ/ตาดโตน, and only
-// when WEATHER_PROVIDER, WEATHER_API_KEY, TAMMA_WEATHER_LAT, and
-// TAMMA_WEATHER_LON are ALL configured (the exact 4 Netlify env vars the
-// owner set in production). Covers: (1) unavailable -> structured result,
-// no crash; (2) configured/mocked -> the response actually uses the
-// weather data and cites freshness/source; (3) ground condition -> even
-// with weather data available, actual ground condition is never claimed
-// without a ground/staff source.
+// when WEATHER_API_KEY, TAMMA_WEATHER_LAT, and TAMMA_WEATHER_LON are ALL
+// configured. WEATHER_PROVIDER is OPTIONAL -- it defaults to
+// 'openweathermap' when unset; see THONGTHAI_HANDOFF.md's "HOTFIX --
+// exposed secrets" section for why it must not be required (its own
+// legitimate, non-secret value still tripped Netlify's secrets scan
+// purely because it was ALSO configured as an env var). Covers: (1)
+// unavailable -> structured result, no crash; (2) configured/mocked ->
+// the response actually uses the weather data and cites freshness/source;
+// (3) ground condition -> even with weather data available, actual
+// ground condition is never claimed without a ground/staff source.
 //
 // Any end-to-end test that drives processThongthaiChatCore through
 // withHarness MUST use harness.programWeatherFetch(...) for the mocked
@@ -38,8 +41,11 @@ function clearWeatherEnv(): void {
   delete process.env.TAMMA_WEATHER_LON;
 }
 
+// Deliberately does NOT set WEATHER_PROVIDER -- production won't have it
+// either once the owner deletes it (see the hotfix this test file's own
+// header comment references), and the whole point of making it optional
+// is that these 3 vars alone must be enough for the provider to work.
 function setWeatherEnv(): void {
-  process.env.WEATHER_PROVIDER = 'openweathermap';
   process.env.WEATHER_API_KEY = 'test-openweather-key';
   process.env.TAMMA_WEATHER_LAT = '10.1111111';
   process.env.TAMMA_WEATHER_LON = '99.2222222';
@@ -54,27 +60,47 @@ test('unavailable when no env vars are configured at all -- structured result, n
   assert.equal(result.temperatureCelsius, null);
 });
 
-test('unavailable when WEATHER_PROVIDER is missing/unsupported, even with a key configured', async () => {
+test('WEATHER_PROVIDER absent: defaults to openweathermap and is NOT required -- only an EXPLICIT unsupported value is rejected', async () => {
   clearWeatherEnv();
   process.env.WEATHER_API_KEY = 'test-openweather-key';
+  process.env.TAMMA_WEATHER_LAT = '10.1111111';
+  process.env.TAMMA_WEATHER_LON = '99.2222222';
+  const originalFetch = global.fetch;
+  let calledUrl: string | null = null;
+  global.fetch = (async (url: string | URL) => {
+    calledUrl = String(url);
+    return { ok: true, json: async () => ({ weather: [{ main: 'Clear' }], main: { temp: 30 } }) } as Response;
+  }) as typeof fetch;
+  try {
+    assert.equal(process.env.WEATHER_PROVIDER, undefined, 'precondition: WEATHER_PROVIDER must be unset for this test');
+    const result = await getWeatherForTammaLocation();
+    assert.match(String(calledUrl), /openweathermap\.org/u, 'missing WEATHER_PROVIDER must still call OpenWeatherMap by default');
+    assert.equal(result.status, 'ok');
+    assert.equal(result.source, 'openweathermap');
+  } finally {
+    global.fetch = originalFetch;
+    clearWeatherEnv();
+  }
+});
+
+test('WEATHER_PROVIDER explicitly set to an unknown value: returns unsupported_provider, no crash', async () => {
+  clearWeatherEnv();
+  process.env.WEATHER_API_KEY = 'test-openweather-key';
+  process.env.TAMMA_WEATHER_LAT = '10.1111111';
+  process.env.TAMMA_WEATHER_LON = '99.2222222';
+  process.env.WEATHER_PROVIDER = 'some-other-provider';
   try {
     const result = await getWeatherForTammaLocation();
     assert.equal(result.status, 'unavailable');
     assert.equal(result.unavailableReason, 'unsupported_provider');
-
-    process.env.WEATHER_PROVIDER = 'some-other-provider';
-    const result2 = await getWeatherForTammaLocation();
-    assert.equal(result2.status, 'unavailable');
-    assert.equal(result2.unavailableReason, 'unsupported_provider');
   } finally {
     clearWeatherEnv();
   }
 });
 
-test('unavailable when TAMMA_WEATHER_LAT/LON are missing or invalid, even with provider+key configured', async () => {
+test('unavailable when TAMMA_WEATHER_LAT/LON are missing or invalid, even with a key configured (WEATHER_PROVIDER left unset)', async () => {
   clearWeatherEnv();
   process.env.WEATHER_API_KEY = 'test-openweather-key';
-  process.env.WEATHER_PROVIDER = 'openweathermap';
   try {
     const result = await getWeatherForTammaLocation();
     assert.equal(result.status, 'unavailable');
@@ -90,7 +116,7 @@ test('unavailable when TAMMA_WEATHER_LAT/LON are missing or invalid, even with p
   }
 });
 
-test('all 4 env vars configured: calls OpenWeatherMap with the exact configured lat/lon, uses the real fetched data, cites source/freshness', async () => {
+test('all 3 required env vars configured (WEATHER_PROVIDER unset): calls OpenWeatherMap with the exact configured lat/lon, uses the real fetched data, cites source/freshness', async () => {
   clearWeatherEnv();
   setWeatherEnv();
   const originalFetch = global.fetch;
