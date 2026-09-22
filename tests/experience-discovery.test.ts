@@ -85,3 +85,11 @@ test('gateway preserves broad experience discovery fast path when One-Mind cutov
     /THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath/,
   );
 });
+
+test('gateway answers discovery before broad activity routing can swallow it', () => {
+  const source = readFileSync('netlify/functions/thongthai-chat.ts', 'utf8');
+  assert.ok(
+    source.indexOf('const experienceDiscovery = deterministicExperienceDiscoveryResponse(request, runtime);')
+      < source.indexOf('const deterministicActivity = await deterministicActivityResponse('),
+  );
+});

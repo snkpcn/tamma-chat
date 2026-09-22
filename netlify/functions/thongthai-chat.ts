@@ -1398,6 +1398,23 @@ export const handler: Handler = async (event: HandlerEvent) => {
     });
   }
 
+  // Broad discovery such as "มีอะไรทำบ้าง" is a core product question and
+  // must not depend on LLM availability or be swallowed by activity routing.
+  // Answer it deterministically from the shared experience catalog + live
+  // activity inventory before the broader activity interpreter runs.
+  const experienceDiscovery = deterministicExperienceDiscoveryResponse(request, runtime);
+  if (experienceDiscovery) {
+    const polished = polishedResponse(experienceDiscovery, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   const deterministicActivity = await deterministicActivityResponse(
     request,
     guestDbId,
@@ -1410,22 +1427,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
   });
   if (deterministicActivity) {
     const polished = polishedResponse(deterministicActivity, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
-      message: polished.message,
-      intent: polished.intent,
-      contextUpdates: polished.contextUpdates,
-      journeyAction: polished.journeyAction,
-      suggestedActions: polished.suggestedActions,
-    });
-  }
-
-  // Broad discovery such as "มีอะไรทำบ้าง" is a core product question and
-  // must not depend on LLM availability. Answer it deterministically from the
-  // shared experience catalog + live activity inventory before calling the model.
-  const experienceDiscovery = deterministicExperienceDiscoveryResponse(request, runtime);
-  if (experienceDiscovery) {
-    const polished = polishedResponse(experienceDiscovery, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return json(200, {
       message: polished.message,
