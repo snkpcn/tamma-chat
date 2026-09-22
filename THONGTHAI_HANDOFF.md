@@ -2674,19 +2674,28 @@ methodology (see Section 3 and Section 2 above). Full suite:
   — **closed in the care-wording follow-up round**: see
   `_service-mind-care-context.ts` and the new sample answers above.
 
-### Deploy status: NOT DEPLOYED
+### Deploy status: DEPLOYED as Service Mind v1
 
-No Netlify access used, no deploy, no DB migration applied, no
-production DB mutation, no real transaction created, no real booking/
-order/payment/redemption created in any test. All work is on
-`feature/service-mind-system` (pushed to `origin`), untouched by and
-unrelated to every other branch's own deploy state.
+Owner approved; PR #48 merged to `main` (`1570c188`). One deploy
+triggered, no repeated deploys. Feedback event **persistence/LINE
+routing is NOT live** — the `ops_feedback_events` migration is still
+NOT applied and no LINE group has bound a channel for it; every
+customer-facing conversational improvement (greeting, care-aware
+wording, sincere feedback acknowledgment) is live, the write-to-DB/
+notify-staff half of the feedback loop is integration-ready but dormant
+until the owner takes those two separate actions.
+
+This session has no Netlify access and no outbound network access to
+`tamma-chat.netlify.app` (confirmed again via both `curl` and `WebFetch`,
+both returning the same `EGRESS_BLOCKED`/403 result as every prior
+attempt this session) — the actual live-smoke verification of this
+deploy could not be performed from here; see the session's final report
+for what was and wasn't confirmed.
 
 ### Next step
 
-Owner review of: the feedback-event schema/migration (apply when ready),
-the response wording (matches the owner's own examples closely but is
-final-approval-worthy, same as every other customer-facing composer in
-this codebase), and which LINE groups should be bound to receive
-feedback notifications — then a deploy decision, following the same
-one-clean-merge discipline already used for every prior phase.
+Owner review of: the feedback-event schema/migration (apply when ready)
+and which LINE groups should be bound to receive feedback notifications.
+A real customer-facing weather/greeting/care-context smoke check from an
+environment with actual network access to production is recommended to
+close out this deploy.
