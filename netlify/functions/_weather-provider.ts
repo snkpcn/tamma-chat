@@ -29,8 +29,14 @@ export type WeatherResult = {
   forecastSummary: string | null;
   source: string | null;
   fetchedAt: string | null;
-  unavailableReason: 'no_api_key_configured' | 'location_not_resolved' | 'unsupported_provider' | 'provider_error' | null;
+  unavailableReason: 'no_api_key_configured' | 'location_not_resolved' | 'unsupported_provider' | 'timeout' | 'provider_error' | null;
 };
+
+// A hung OpenWeather call must never hang the whole customer turn (and,
+// worse, the whole Netlify function invocation) -- a slow/unresponsive
+// provider degrades to 'timeout' just like an HTTP error degrades to
+// 'provider_error', never left to escape as an uncaught rejection.
+const DEFAULT_FETCH_TIMEOUT_MS = 6000;
 
 function unavailable(reason: WeatherResult['unavailableReason']): WeatherResult {
   return {
@@ -55,8 +61,18 @@ type OpenWeatherCurrentResponse = {
  * callers depend only on this function's WeatherResult contract, not on
  * any provider-specific detail -- swapping providers later never needs a
  * caller-side change (just a new branch on WEATHER_PROVIDER).
+ *
+ * NEVER throws and NEVER hangs past `timeoutMs` (default 6s) -- a slow or
+ * unresponsive provider is reported as `status: 'unavailable'` just like
+ * every other failure mode, so a caller can always safely `await` this
+ * without its own try/catch. `timeoutMs` is a parameter (not only the
+ * env-driven default) so tests can exercise the timeout path in
+ * milliseconds instead of really waiting 6 seconds.
  */
-export async function getWeatherForTammaLocation(now: Date = new Date()): Promise<WeatherResult> {
+export async function getWeatherForTammaLocation(
+  now: Date = new Date(),
+  timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS,
+): Promise<WeatherResult> {
   const apiKey = process.env.WEATHER_API_KEY;
   if (!apiKey) return unavailable('no_api_key_configured');
 
@@ -67,9 +83,11 @@ export async function getWeatherForTammaLocation(now: Date = new Date()): Promis
   const longitude = Number(process.env.TAMMA_WEATHER_LON);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return unavailable('location_not_resolved');
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const url = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&units=metric&appid=${apiKey}`;
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
     if (!response.ok) return unavailable('provider_error');
     const data = await response.json() as OpenWeatherCurrentResponse;
 
@@ -89,7 +107,10 @@ export async function getWeatherForTammaLocation(now: Date = new Date()): Promis
       fetchedAt: now.toISOString(),
       unavailableReason: null,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') return unavailable('timeout');
     return unavailable('provider_error');
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
