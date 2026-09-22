@@ -43,6 +43,19 @@ test('a pure side-question (compare) on a task missing durationMinutes never bec
   assert.equal(plan.taskStateContainer.activeTask!.slots.compareAttribute, undefined, 'comparison metadata must never leak into task slots');
 });
 
+test('an activity inventory-count side-question with catalog metadata never becomes collect_field', () => {
+  const taskState = activityTask();
+  const input: DialogInput = {
+    semanticTurn: turn({ action: 'ask', intent: 'activity_inventory_count', entities: { activityCode: 'horse', inventoryCount: true } }),
+    conversationContext: emptyConversationContextState(NOW), taskState, channel: 'line', eventId: 'sq-inventory-1',
+  };
+  const plan = planDialogTurn(input, NOW);
+  assert.notEqual(plan.mode, 'collect_field');
+  assert.deepEqual(plan.missingFields, []);
+  assert.ok(plan.reasons.includes('task_side_question_preserved'));
+  assert.deepEqual(plan.taskStateContainer.activeTask!.missingFields, ['durationMinutes']);
+});
+
 test('a pure side-question (price ask, no entities) on a task missing durationMinutes never becomes collect_field', () => {
   const taskState = activityTask();
   const input: DialogInput = {

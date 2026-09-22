@@ -247,6 +247,20 @@ test('owner-verified horse selection starts an activity task even when recentEnt
   assert.equal(turn!.entities.horseName, 'ภาราดร');
 });
 
+test('an inventory-count question on an active activity task stays a side-question instead of resuming missing-field collection', () => {
+  const taskState: TaskStateContainer = {
+    ...emptyTaskStateContainer(),
+    activeTask: createActiveTask({ type: 'activity_booking', sourceChannel: 'line', now: NOW, initialSlots: { resourceCode: 'activity-horse' } }),
+  };
+  const turn = deriveDeterministicSemanticTurn('มีม้ากี่ตัวอะครับ', emptySemanticContext(), taskState, NOW);
+  assert.ok(turn);
+  assert.equal(turn!.domain, 'activity');
+  assert.equal(turn!.action, 'ask');
+  assert.equal(turn!.intent, 'activity_inventory_count');
+  assert.equal(turn!.entities.activityCode, 'horse');
+  assert.equal(turn!.entities.inventoryCount, true);
+});
+
 test('a price question on an active activity task is a side-question, not a slot update', () => {
   const taskState: TaskStateContainer = {
     ...emptyTaskStateContainer(),

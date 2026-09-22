@@ -251,6 +251,24 @@ const HOW_IT_WORKS_MARKER = /ยังไง|อย่างไร|(?:^|\s)\S*�
  *  'ask'/'status' are deliberately excluded from). */
 function detectActivitySideQuestion(message: string, domain: SemanticDomain | null, now: Date = new Date()): SemanticTurn | null {
   if (domain !== 'activity') return null;
+  // Inventory/count questions are read-only side questions even while an
+  // activity booking task is active. Without this precedence, the active-task
+  // path falls through to same-domain topic narrowing and gets mislabeled as
+  // "resume_active_task", which makes the Dialog Manager ask the next missing
+  // booking field (e.g. date) instead of answering "มีม้ากี่ตัว".
+  const activityTopic = findActivityTopic(message);
+  if (activityTopic && isInventoryCountQuestion(message)) {
+    return {
+      domain,
+      intent: 'activity_inventory_count',
+      action: 'ask',
+      entities: { activityCode: activityTopic.activityCode, inventoryCount: true },
+      references: [],
+      constraints: [],
+      confidence: 0.9,
+      needsClarification: false,
+    };
+  }
   if (PRICE_MARKER.test(message)) {
     return { domain, intent: 'ask_price', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false };
   }
