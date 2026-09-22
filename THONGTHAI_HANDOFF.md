@@ -1761,20 +1761,22 @@ the real link (would also surface a resolved address once
 `_weather-provider.ts` (new) exports `getWeatherForTammaLocation()`:
 current condition, precipitation chance, temperature, forecast summary,
 source, fetch timestamp if available — or a structured `unavailable`
-result (`no_api_key_configured` / `location_not_resolved` /
-`provider_error`) if not, **never** a thrown error and **never** a block
-on the concierge answer. Shaped around OpenWeatherMap's free
-current-weather endpoint (same graceful-absence pattern as
-`_thongthai-model-provider.ts`'s own `GEMINI_API_KEY`/`OPENAI_API_KEY`
-checks), but every caller depends only on the `WeatherResult` contract, so
-swapping providers later needs no caller-side change.
+result (`no_api_key_configured` / `unsupported_provider` /
+`location_not_resolved` / `provider_error`) if not, **never** a thrown
+error and **never** a block on the concierge answer. Shaped around
+OpenWeatherMap's free current-weather endpoint (same graceful-absence
+pattern as `_thongthai-model-provider.ts`'s own
+`GEMINI_API_KEY`/`OPENAI_API_KEY` checks), but every caller depends only on
+the `WeatherResult` contract, so swapping providers later needs no
+caller-side change.
 
-**Current status in this environment: unavailable on both counts** — no
-`WEATHER_API_KEY` is configured, and `TAMMA_CHART_LOCATION`'s coordinates
-are still unresolved (see above). Both are required before any live
-weather fact can ever be asserted. **Going live needs: (a) a
-`WEATHER_API_KEY` env var, and (b) resolved coordinates on
-`TAMMA_CHART_LOCATION`.**
+**Status: NOW LIVE in production config, per Phase 3 below** — the owner
+configured `WEATHER_PROVIDER`, `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`, and
+`TAMMA_WEATHER_LON` in Netlify. See the "PHASE 3" section for the exact
+env var contract, the classification of `TAMMA_WEATHER_LAT`/`LON` as its
+own coordinate source (deliberately separate from
+`TAMMA_CHART_LOCATION`'s still-unresolved Maps-link address), and the
+forecast-limitation and ground-condition handling added alongside it.
 
 `composeWeatherConditionResponse` and `composeActivitySuitabilityResponse`
 are now `async` and call `getWeatherForTammaLocation()`:
@@ -1900,3 +1902,135 @@ supplied lat/lon), the weather-provider go-live requirement
 (`WEATHER_API_KEY`), the horse-facts phrasing, then a single deploy
 decision for the whole Local Concierge Intelligence Framework (Phase 1 +
 Phase 2 together) — no partial deploy of just one phase is intended.
+
+---
+
+## LOCAL CONCIERGE INTELLIGENCE FRAMEWORK — PHASE 3 (live weather, now
+## configured in production) — still NOT DEPLOYED
+
+Same branch: `feature/local-concierge-intelligence`. The owner configured
+4 Netlify env vars for production (`WEATHER_PROVIDER=openweathermap`,
+`WEATHER_API_KEY=<set>`, `TAMMA_WEATHER_LAT=15.9565721`,
+`TAMMA_WEATHER_LON=102.0247859`). This phase wires the weather provider to
+read exactly those 4 vars and finishes the live-weather answer shapes.
+
+### What changed
+
+- **`_weather-provider.ts` rewritten** to read `WEATHER_PROVIDER`,
+  `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`, `TAMMA_WEATHER_LON` directly from
+  `process.env` (previously it read `WEATHER_API_KEY` plus
+  `TAMMA_CHART_LOCATION.latitude`/`longitude`, which are the Maps-link
+  module's own, still-unresolved coordinates). `TAMMA_WEATHER_LAT`/`LON`
+  are their own, independent coordinate source — the owner supplied them
+  specifically for weather and they do **not** depend on the Maps-link
+  address-resolution TODO in `_local-concierge-location.ts` at all, which
+  is why weather can go live even though that TODO is still open.
+  Check order: `WEATHER_API_KEY` missing → `no_api_key_configured`;
+  `WEATHER_PROVIDER` not exactly `'openweathermap'` → `unsupported_provider`
+  (a new reason code — the module implements only this one provider, and
+  says so explicitly rather than silently ignoring an unrecognized value);
+  `TAMMA_WEATHER_LAT`/`LON` missing or not parseable as a number →
+  `location_not_resolved`; non-`ok` HTTP response or a thrown fetch error →
+  `provider_error`. Every branch returns the same structured
+  `WeatherResult`, never throws.
+- **Forecast-limitation handling** (new): the provider only implements
+  OpenWeatherMap's *current*-conditions endpoint, not a real forecast API.
+  A question shaped around a future day ("พรุ่งนี้ฝนตกไหม", "มะรืนนี้...",
+  "พยากรณ์...") now gets an explicit line saying today's data is current
+  conditions only, not a confirmed forecast — never silently answered as
+  if today's reading confirms tomorrow's weather, and never a definite
+  claim about a future day either way.
+- **Ground-condition caveat** (already existed from Phase 2, reconfirmed
+  here): `composeActivitySuitabilityResponse` and
+  `composeWeatherConditionResponse` both still say "สภาพพื้นจริงหน้างานต้อง
+  ให้ทีมดูอีกทีครับ" whether or not live weather is available — rain/no-rain
+  from an API is never treated as a confirmed on-site ground reading.
+  Pure safety-shaped questions ("พื้นลื่นไหม เล่น ATV ได้ไหม") already went
+  through `composeSafetyUncertaintyResponse`, which has always deferred
+  ground condition/individual suitability to staff — reconfirmed by a new
+  end-to-end test, no code change needed there.
+
+### 1. Env var names used (exact)
+
+`WEATHER_PROVIDER`, `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`,
+`TAMMA_WEATHER_LON` — read directly in `_weather-provider.ts`, no
+aliasing, no fallback names.
+
+### 2. OpenWeatherMap endpoint used
+
+`https://api.openweathermap.org/data/2.5/weather?lat={TAMMA_WEATHER_LAT}&lon={TAMMA_WEATHER_LON}&units=metric&appid={WEATHER_API_KEY}`
+— the free current-conditions endpoint (not the forecast endpoint; see
+"Forecast-limitation handling" above for how a forecast-shaped question is
+handled without one).
+
+### Files changed (Phase 3)
+
+`_weather-provider.ts` (env-var contract rewritten), `_local-concierge-response.ts`
+(`composeWeatherConditionResponse` and `composeActivitySuitabilityResponse`
+gained forecast-limitation handling; the latter's signature now also takes
+`message`), `tests/weather-provider.test.ts` (rewritten for the new env-var
+contract, extended to 10 tests).
+
+### Tests added/updated (Phase 3)
+
+`tests/weather-provider.test.ts` — 10 tests: no env configured; provider
+missing/unsupported (with a key present); lat/lon missing or invalid (with
+provider+key present); all 4 vars configured — calls OpenWeatherMap with
+the *exact* configured lat/lon/key (asserted against the real mocked
+request URL) and uses the real fetched data; provider HTTP error degrades
+to unavailable, never throws; end-to-end "ฝนตกไหม"/"แดดออกไหม" use live
+mocked weather and cite freshness/source; end-to-end "แดดแรงไหม ไปทำอะไรดี"
+uses live weather AND gives a local recommendation; end-to-end "พรุ่งนี้
+ฝนตกไหม ขี่ม้าได้ไหม" explains the forecast limitation correctly; end-to-end
+"พื้นลื่นไหม เล่น ATV ได้ไหม" never claims actual ground condition; end-to-end
+unavailable case still says the plain honest message. All driven through
+the real `getWeatherForTammaLocation`/`processThongthaiChatCore`, weather
+data mocked only at the `global.fetch` boundary (same discipline as the
+canonical test harness's own Supabase/Gemini mocking).
+
+### Full test result
+
+**662/662 passing** (658 from Phase 1+2, +4 net new in Phase 3's rewritten
+weather-provider suite). Existing local-concierge tests (Phase 1's 8,
+Phase 2's 6) unaffected — verified by re-running the full suite after the
+env-var-contract rewrite.
+
+### Sample answers
+
+| Question | Response |
+|---|---|
+| "ฝนตกไหม" (live weather mocked available) | "จากข้อมูลล่าสุด (openweathermap): ฝนตกปรอยๆ อุณหภูมิประมาณ 26°C โอกาสฝนประมาณ 8%" + seasonal prep guidance + "สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ" |
+| "แดดแรงไหม" | "จากข้อมูลล่าสุด (openweathermap): แดดจัด อุณหภูมิประมาณ 35°C" + practical heat guidance + indoor-friendly options |
+| "พรุ่งนี้ฝนตกไหม ขี่ม้าได้ไหม" | live current-data line + "ข้อมูลนี้เป็นสภาพอากาศปัจจุบัน ยังพยากรณ์ล่วงหน้าแบบยืนยัน 100% ไม่ได้ครับ" + "ขี่ม้าเล่นได้ในสภาพอากาศปกติ แต่สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ" |
+| "พื้นลื่นไหม เล่น ATV ได้ไหม" | general safety guidance, explicitly defers ground condition/individual suitability to staff on-site — never asserts the ground is or isn't slippery |
+
+### 7. Ready to merge/deploy?
+
+**Code and tests: ready.** All 662 tests pass, including the exact-URL
+assertion that the provider calls OpenWeatherMap with the real configured
+`TAMMA_WEATHER_LAT`/`TAMMA_WEATHER_LON`/`WEATHER_API_KEY`. This session has
+**no way to verify the live OpenWeatherMap call actually succeeds against
+production's real key/coordinates** — no outbound network access in this
+sandboxed environment (same confirmed limit as earlier in this session).
+The mocked tests prove the code's *logic* is correct; they cannot prove
+the real API call from production will succeed. Recommend: after this
+merges/deploys, the owner (or a session with production access) sends one
+real weather question and confirms a live, non-"unavailable" answer comes
+back before considering weather fully verified end-to-end.
+
+Per the "one final deploy" instruction: **this PR is not deployed by this
+session.** One clean merge/deploy instruction:
+```
+git checkout main && git pull origin main
+git merge --no-ff feature/local-concierge-intelligence
+git push origin main
+# then: Netlify deploy of main (single deploy — Phase 1+2+3 together)
+```
+
+### 8. Confirmation
+
+No production transaction created, no DB migration, no unnecessary
+Netlify deploy performed by this session — all env-var reading was via
+`process.env` in code/tests only, never a live call against the owner's
+real key (every test mocks `global.fetch`). Work remains on
+`feature/local-concierge-intelligence`, pushed, not merged, not deployed.

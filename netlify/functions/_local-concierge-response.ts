@@ -47,6 +47,18 @@ function seasonHintFromMessage(message: string): LocalSeason {
   return 'cool';
 }
 
+// The provider (_weather-provider.ts) only implements OpenWeatherMap's
+// CURRENT-conditions endpoint, not a real forecast API -- a question shaped
+// around a future day ("พรุ่งนี้ฝนตกไหม") must never be answered as if
+// today's live reading confirms tomorrow's weather. Per requirement: use
+// today's data as the best available guidance, but say plainly that it
+// isn't a confirmed forecast.
+const FORECAST_QUESTION_MARKER = /พรุ่งนี้|มะรืน|พยากรณ์|forecast/iu;
+
+function isForecastQuestion(message: string): boolean {
+  return FORECAST_QUESTION_MARKER.test(message);
+}
+
 /** One short "จากข้อมูลล่าสุด..." line built from a WeatherResult that's
  *  already confirmed status: 'ok' -- the only place allowed to phrase a
  *  live weather fact for the customer, so freshness/source are always
@@ -65,22 +77,25 @@ export async function composeWeatherConditionResponse(message: string): Promise<
   const weather = await getWeatherForTammaLocation();
   const season = seasonHintFromMessage(message);
   const guidance = SEASON_GUIDANCE[season];
+  const forecastAsked = isForecastQuestion(message);
 
   if (weather.status === 'ok') {
-    return [
-      liveWeatherLine(weather),
-      guidance.prepGuidance,
-      guidance.indoorFriendlyNote.replace(/ที่ร่ม/u, `ที่ร่มอย่าง${indoorFriendlyNames()}`),
-      'สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ',
-    ].join('\n');
+    const lines = [liveWeatherLine(weather)];
+    if (forecastAsked) {
+      lines.push('ข้อมูลนี้เป็นสภาพอากาศปัจจุบัน ทองไทยยังพยากรณ์ล่วงหน้าแบบยืนยัน 100% ไม่ได้ครับ ขอใช้เป็นแนวทางไปก่อนนะครับ');
+    }
+    lines.push(guidance.prepGuidance);
+    lines.push(guidance.indoorFriendlyNote.replace(/ที่ร่ม/u, `ที่ร่มอย่าง${indoorFriendlyNames()}`));
+    lines.push('สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ');
+    return lines.join('\n');
   }
 
-  return [
-    'ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ',
-    `แต่โดยทั่วไปช่วงนี้: ${guidance.summary} — ${guidance.prepGuidance}`,
-    guidance.indoorFriendlyNote.replace(/ที่ร่ม/u, `ที่ร่มอย่าง${indoorFriendlyNames()}`),
-    'แนะนำเช็คอีกทีใกล้ๆ วันที่มา หรือสอบถามทีมงานหน้างานได้เลยครับ',
-  ].join('\n');
+  const lines = ['ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ'];
+  if (forecastAsked) lines.push('และยังพยากรณ์ล่วงหน้าแบบยืนยันไม่ได้ด้วยครับ');
+  lines.push(`แต่โดยทั่วไปช่วงนี้: ${guidance.summary} — ${guidance.prepGuidance}`);
+  lines.push(guidance.indoorFriendlyNote.replace(/ที่ร่ม/u, `ที่ร่มอย่าง${indoorFriendlyNames()}`));
+  lines.push('แนะนำเช็คอีกทีใกล้ๆ วันที่มา หรือสอบถามทีมงานหน้างานได้เลยครับ');
+  return lines.join('\n');
 }
 
 export function composeRegionPlaceResponse(): string {
@@ -117,12 +132,18 @@ export function composeVisitorJourneyResponse(message: string): string {
   return lines.join('\n');
 }
 
-export async function composeActivitySuitabilityResponse(match: LocalConciergeMatch): Promise<string> {
+export async function composeActivitySuitabilityResponse(match: LocalConciergeMatch, message: string): Promise<string> {
   const activityName = match.activityNodeId ? nodeLabel(match.activityNodeId, 'กิจกรรมนี้') : 'กิจกรรมกลางแจ้ง';
   const weather = await getWeatherForTammaLocation();
+  const forecastAsked = isForecastQuestion(message);
 
   const lines: string[] = [];
   lines.push(weather.status === 'ok' ? liveWeatherLine(weather) : 'ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ');
+  if (forecastAsked) {
+    lines.push(weather.status === 'ok'
+      ? 'ข้อมูลนี้เป็นสภาพอากาศปัจจุบัน ยังพยากรณ์ล่วงหน้าแบบยืนยัน 100% ไม่ได้ครับ'
+      : 'และยังพยากรณ์ล่วงหน้าแบบยืนยันไม่ได้ด้วยครับ');
+  }
   // Ground condition is never claimed from a weather fact alone (rain/no
   // rain does not by itself tell us the ACTUAL ground condition on site) --
   // this caveat applies whether or not live weather is available above.
@@ -176,7 +197,7 @@ export async function composeLocalConciergeResponse(match: LocalConciergeMatch, 
     case 'region_place': return composeRegionPlaceResponse();
     case 'food_culture': return composeFoodCultureResponse();
     case 'visitor_journey': return composeVisitorJourneyResponse(message);
-    case 'activity_suitability': return composeActivitySuitabilityResponse(match);
+    case 'activity_suitability': return composeActivitySuitabilityResponse(match, message);
     case 'safety_uncertainty': return composeSafetyUncertaintyResponse();
   }
 }

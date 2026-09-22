@@ -1,13 +1,25 @@
-// Weather provider abstraction for ทำมา-ชาติ's canonical location. A real-
-// time fact (category C in THONGTHAI_HANDOFF.md's data-classification
+// Weather provider abstraction for ทำมา-ชาติ/ตาดโตน's live conditions. A
+// real-time fact (category C in THONGTHAI_HANDOFF.md's data-classification
 // discipline) -- this module is the ONLY place allowed to assert a live
-// weather fact, and only when both a real API key AND resolved coordinates
-// are actually available. Never blocks the concierge answer: every caller
-// gets a structured result back, "unavailable" included, never a thrown
-// error for the ordinary case of no key configured (same "never let a
-// missing integration become a hard failure" discipline as
+// weather fact, and only when a real provider, API key, and coordinates
+// are all actually configured. Never blocks the concierge answer: every
+// caller gets a structured result back, "unavailable" included, never a
+// thrown error for the ordinary case of missing/partial config (same
+// "never let a missing integration become a hard failure" discipline as
 // _dialog-source-adapters.ts's other real adapters).
-import { TAMMA_CHART_LOCATION } from './_local-concierge-location';
+//
+// Reads exactly the 4 Netlify env vars the owner configured in production:
+//   WEATHER_PROVIDER   -- must be 'openweathermap' (the only provider this
+//                         module implements); anything else is reported as
+//                         unavailable rather than silently ignored.
+//   WEATHER_API_KEY    -- OpenWeatherMap API key.
+//   TAMMA_WEATHER_LAT  -- ทำมา-ชาติ/ตาดโตน latitude, as a plain number string.
+//   TAMMA_WEATHER_LON  -- ทำมา-ชาติ/ตาดโตน longitude, as a plain number string.
+// Deliberately its OWN coordinate source, separate from
+// _local-concierge-location.ts's TAMMA_CHART_LOCATION (which is the
+// customer-facing Maps-link/address fact, still unresolved) -- the owner
+// supplied these specifically for weather lookups, and this module must
+// not wait on the Maps-link resolution to start working.
 
 export type WeatherResult = {
   status: 'ok' | 'unavailable';
@@ -17,7 +29,7 @@ export type WeatherResult = {
   forecastSummary: string | null;
   source: string | null;
   fetchedAt: string | null;
-  unavailableReason: 'no_api_key_configured' | 'location_not_resolved' | 'provider_error' | null;
+  unavailableReason: 'no_api_key_configured' | 'location_not_resolved' | 'unsupported_provider' | 'provider_error' | null;
 };
 
 function unavailable(reason: WeatherResult['unavailableReason']): WeatherResult {
@@ -34,22 +46,26 @@ type OpenWeatherCurrentResponse = {
 };
 
 /**
- * Live current-conditions lookup for ทำมา-ชาติ's own location. Requires
- * BOTH a configured WEATHER_API_KEY AND resolved coordinates on
- * TAMMA_CHART_LOCATION (currently unresolved -- see that module's own TODO)
- * -- missing either one is reported as 'unavailable', never a guess.
+ * Live current-conditions lookup for ทำมา-ชาติ/ตาดโตน. Requires
+ * WEATHER_PROVIDER='openweathermap', a configured WEATHER_API_KEY, AND
+ * valid TAMMA_WEATHER_LAT/TAMMA_WEATHER_LON env vars -- any one missing or
+ * invalid is reported as 'unavailable', never a guess.
  *
- * Shaped around OpenWeatherMap's free current-weather endpoint (a common,
- * low-friction choice), but callers depend only on this function's
- * WeatherResult contract, not on any provider-specific detail -- swapping
- * providers later never needs a caller-side change.
+ * Calls OpenWeatherMap's free current-weather endpoint server-side, but
+ * callers depend only on this function's WeatherResult contract, not on
+ * any provider-specific detail -- swapping providers later never needs a
+ * caller-side change (just a new branch on WEATHER_PROVIDER).
  */
 export async function getWeatherForTammaLocation(now: Date = new Date()): Promise<WeatherResult> {
   const apiKey = process.env.WEATHER_API_KEY;
   if (!apiKey) return unavailable('no_api_key_configured');
 
-  const { latitude, longitude } = TAMMA_CHART_LOCATION;
-  if (latitude === null || longitude === null) return unavailable('location_not_resolved');
+  const provider = process.env.WEATHER_PROVIDER;
+  if (provider !== 'openweathermap') return unavailable('unsupported_provider');
+
+  const latitude = Number(process.env.TAMMA_WEATHER_LAT);
+  const longitude = Number(process.env.TAMMA_WEATHER_LON);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return unavailable('location_not_resolved');
 
   try {
     const url = `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&units=metric&appid=${apiKey}`;
