@@ -1234,6 +1234,22 @@ export const handler: Handler = async (event: HandlerEvent) => {
     });
   }
 
+  const earlyActivityFallback = await activityBookingFallbackResponse(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_ACTIVITY_HISTORY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (earlyActivityFallback) {
+    const polished = polishedResponse(earlyActivityFallback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   // Phase G.2 strangler cutover. OFF by default. Only task-free READ-ONLY
   // turns in the explicitly proven domains can return from One-Mind here.
   // Transactional/in-progress-task turns are inspected but not persisted and
@@ -1372,22 +1388,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
   });
   if (promotionDiscovery) {
     const polished = polishedResponse(promotionDiscovery, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
-      message: polished.message,
-      intent: polished.intent,
-      contextUpdates: polished.contextUpdates,
-      journeyAction: polished.journeyAction,
-      suggestedActions: polished.suggestedActions,
-    });
-  }
-
-  const activityFallback = await activityBookingFallbackResponse(request, guestDbId, channel).catch(error => {
-    console.error('THONGTHAI_ACTIVITY_HISTORY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return null;
-  });
-  if (activityFallback) {
-    const polished = polishedResponse(activityFallback, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return json(200, {
       message: polished.message,

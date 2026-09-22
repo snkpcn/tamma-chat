@@ -89,3 +89,11 @@ test('web chat history fallback preserves ภาราดร through slot collec
   assert.equal(draft?.customerName, 'SMOKE TEST PHARADON');
   assert.equal(draft?.phone, '0999990001');
 });
+
+test('web chat-history horse fallback runs before One-Mind cutover can clarify generically', async () => {
+  const source = await import('node:fs').then(fs => fs.readFileSync('netlify/functions/thongthai-chat.ts', 'utf8'));
+  assert.ok(
+    source.indexOf('const earlyActivityFallback = await activityBookingFallbackResponse(request, guestDbId, channel)')
+      < source.indexOf("process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'"),
+  );
+});
