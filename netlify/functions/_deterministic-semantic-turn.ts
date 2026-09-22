@@ -116,6 +116,16 @@ const STAY_TOPIC_MARKER = /ห้อง|ที่พัก|เฮือน|บ�
 const OTOP_TOPIC_MARKER = /otop|โอทอป|ของฝาก|สินค้าชุมชน/iu;
 const CAFE_TOPIC_MARKER = /กาแฟ|คาเฟ่|อินทนิน|inthanin|ลาเต้|latte|เครื่องดื่ม/iu;
 const MEMBERSHIP_TOPIC_MARKER = /สมาชิก|member|membership/iu;
+// Distinguishes an actual status QUESTION ("เป็นสมาชิกหรือยัง" -- am I
+// already a member?) from a generic membership mention, so it renders a
+// real status answer instead of the "here's how to sign up" copy. The
+// original version of this only recognized an explicit "สถานะ"/"เช็ค"/
+// "ตรวจ"/"ดู" keyword -- "ตอนนี้ผมเป็นสมาชิกหรือยัง" is a completely
+// natural, common way to ask the exact same question and contained none
+// of them, so it was silently misrouted to the sign-up prompt instead of
+// an actual status check. "หรือยัง"/"รึยัง"/"หรือเปล่า" are the ordinary
+// Thai yes-already/not-yet question particles, not a phrase table.
+const MEMBERSHIP_STATUS_ACTION_MARKER = /สถานะ|เช็ค|ตรวจ|ดู|หรือยัง|รึยัง|หรือเปล่า/u;
 
 function findStayTopic(message: string): boolean {
   return STAY_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('thamma-chat-stay'));
@@ -168,7 +178,7 @@ function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
   }
   if (findMembershipTopic(message)) {
     return {
-      domain: 'membership', intent: 'membership_topic_switch', action: /สถานะ|เช็ค|ตรวจ|ดู/u.test(message) ? 'status' : 'ask',
+      domain: 'membership', intent: 'membership_topic_switch', action: MEMBERSHIP_STATUS_ACTION_MARKER.test(message) ? 'status' : 'ask',
       entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
     };
   }
@@ -349,7 +359,7 @@ function detectNonActivitySideQuestion(message: string, domain: SemanticDomain |
     }
   }
   if (domain === 'membership' && /สถานะ|สิทธิ|สมัคร|เช็ค|ตรวจ|ดู/u.test(message)) {
-    return { domain, intent:'membership_follow_up', action:/สถานะ|เช็ค|ตรวจ|ดู/u.test(message) ? 'status' : 'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
+    return { domain, intent:'membership_follow_up', action: MEMBERSHIP_STATUS_ACTION_MARKER.test(message) ? 'status' : 'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
   }
   return null;
 }
@@ -472,6 +482,29 @@ export function deriveDeterministicSemanticTurn(
       };
     }
     return null;
+  }
+
+  // A message that structurally names a DIFFERENT domain than whatever is
+  // currently "active" (from a prior turn's reply, not necessarily an open
+  // task) must be recognized as a topic switch BEFORE any same-domain
+  // side-question shortcut gets a chance to swallow it. Those shortcuts
+  // (detectActivitySideQuestion's AVAILABILITY_STATUS_MARKER, detectNon
+  // ActivitySideQuestion's per-domain regexes) intentionally use broad,
+  // topic-agnostic words -- bare "มี", PRICE_MARKER, "ว่างไหม" -- that read
+  // naturally across EVERY domain ("มีห้องพักไหม" mid a cafe conversation
+  // contains cafe's own "มี" marker just as much as stay's "ห้อง" one), so
+  // the only reliable way to tell them apart is which domain's own
+  // STRUCTURAL marker the message actually names. Reuses the SAME per-
+  // domain marker ladder detectCrossDomainTopicSwitch already checks for
+  // the active-task case -- one topic-detection ladder, not two. Real
+  // incident this closes: "มีห้องพักไหม" mid a cafe conversation (no active
+  // task) stayed answered as an unresolved CAFE question instead of
+  // switching to stay, because cafe's own "มี" follow-up marker matched
+  // first and detectNonActivitySideQuestion never checked for a different
+  // domain's marker before claiming the turn.
+  if (effectiveDomain) {
+    const crossDomainSwitch = detectCrossDomainTopicSwitch(trimmed);
+    if (crossDomainSwitch && crossDomainSwitch.domain !== effectiveDomain) return crossDomainSwitch;
   }
 
   // No open task: a price/availability/how-it-works side-question about the
@@ -626,8 +659,8 @@ export function deriveDeterministicSemanticTurn(
   if (findMembershipTopic(trimmed)) {
     return {
       domain: 'membership',
-      intent: /สถานะ|เช็ค|ตรวจ|ดู/u.test(trimmed) ? 'membership_status' : 'membership_information',
-      action: /สถานะ|เช็ค|ตรวจ|ดู/u.test(trimmed) ? 'status' : 'ask',
+      intent: MEMBERSHIP_STATUS_ACTION_MARKER.test(trimmed) ? 'membership_status' : 'membership_information',
+      action: MEMBERSHIP_STATUS_ACTION_MARKER.test(trimmed) ? 'status' : 'ask',
       entities: {},
       references: [],
       constraints: [],
