@@ -38,9 +38,14 @@
 
 export type WeatherResult = {
   status: 'ok' | 'unavailable';
+  /** OpenWeatherMap's `weather[].main` field (e.g. "Clouds", "Rain") --
+   *  left as-is from the provider, not translated (see forecastSummary
+   *  for the customer-facing Thai text). */
   condition: string | null;
   precipitationChance: number | null;
   temperatureCelsius: number | null;
+  /** Already translated to natural Thai (see translateWeatherCondition)
+   *  -- safe to put directly into a customer-facing reply. */
   forecastSummary: string | null;
   source: string | null;
   fetchedAt: string | null;
@@ -52,6 +57,65 @@ export type WeatherResult = {
 // provider degrades to 'timeout' just like an HTTP error degrades to
 // 'provider_error', never left to escape as an uncaught rejection.
 const DEFAULT_FETCH_TIMEOUT_MS = 6000;
+
+// OpenWeatherMap's `weather[].description` field is always one of a small,
+// closed, documented set of lowercase English phrases (their own "weather
+// condition codes" reference) -- never free text. Translating it to
+// natural Thai is a bounded lookup, not a growing phrase table, same
+// discipline as every other structural marker set in this codebase.
+// Unmapped values (a future OWM phrase this table hasn't caught up to)
+// fall back to the original English string rather than a blank/guessed
+// translation -- see translateWeatherCondition's own comment.
+const WEATHER_CONDITION_TH: Readonly<Record<string, string>> = {
+  // Group 800/80x -- clear/clouds
+  'clear sky': 'ท้องฟ้าโปร่ง',
+  'few clouds': 'มีเมฆเล็กน้อย',
+  'scattered clouds': 'มีเมฆกระจาย',
+  'broken clouds': 'เมฆค่อนข้างมาก',
+  'overcast clouds': 'เมฆมาก',
+  // Group 5xx -- rain
+  'light rain': 'ฝนเล็กน้อย',
+  'moderate rain': 'ฝนปานกลาง',
+  'heavy intensity rain': 'ฝนตกหนัก',
+  'very heavy rain': 'ฝนตกหนักมาก',
+  'extreme rain': 'ฝนตกหนักรุนแรง',
+  'freezing rain': 'ฝนเยือกแข็ง',
+  'light intensity shower rain': 'ฝนซู่เล็กน้อย',
+  'shower rain': 'ฝนซู่',
+  'heavy intensity shower rain': 'ฝนซู่หนัก',
+  'ragged shower rain': 'ฝนซู่ไม่สม่ำเสมอ',
+  // Group 3xx -- drizzle
+  'light intensity drizzle': 'ฝนปรอยเล็กน้อย',
+  'drizzle': 'ฝนปรอย',
+  'heavy intensity drizzle': 'ฝนปรอยหนัก',
+  // Group 2xx -- thunderstorm
+  'thunderstorm with light rain': 'พายุฝนฟ้าคะนองมีฝนเล็กน้อย',
+  'thunderstorm with rain': 'พายุฝนฟ้าคะนอง',
+  'thunderstorm with heavy rain': 'พายุฝนฟ้าคะนองฝนตกหนัก',
+  'light thunderstorm': 'พายุฝนฟ้าคะนองเบาๆ',
+  'thunderstorm': 'พายุฝนฟ้าคะนอง',
+  'heavy thunderstorm': 'พายุฝนฟ้าคะนองรุนแรง',
+  // Group 6xx -- snow (unlikely for this location, kept for completeness)
+  'light snow': 'หิมะตกเล็กน้อย',
+  'snow': 'หิมะตก',
+  'heavy snow': 'หิมะตกหนัก',
+  // Group 7xx -- atmosphere
+  'mist': 'หมอกบางๆ',
+  'smoke': 'ควัน',
+  'haze': 'หมอกควัน',
+  'fog': 'หมอก',
+  'sand': 'ทรายฟุ้ง',
+  'dust': 'ฝุ่นฟุ้ง',
+  'tornado': 'พายุทอร์นาโด',
+};
+
+/** Translates an OpenWeatherMap `description` string to natural Thai for
+ *  the customer-facing reply. Falls back to the original English string
+ *  for anything not in the table above -- never blank, never a guess, and
+ *  never blocks the reply over a wording gap. */
+export function translateWeatherCondition(description: string): string {
+  return WEATHER_CONDITION_TH[description.toLowerCase().trim()] ?? description;
+}
 
 /** Strips any `appid=<key>` query value out of a URL or error-message-shaped
  *  string before it can ever reach a log line -- the ONLY safe way to log
@@ -124,7 +188,8 @@ export async function getWeatherForTammaLocation(
     const data = await response.json() as OpenWeatherCurrentResponse;
 
     const condition = data.weather?.[0]?.main ?? null;
-    const description = data.weather?.[0]?.description ?? null;
+    const rawDescription = data.weather?.[0]?.description ?? null;
+    const description = rawDescription !== null ? translateWeatherCondition(rawDescription) : null;
     const temperatureCelsius = typeof data.main?.temp === 'number' ? Math.round(data.main.temp) : null;
     const rainVolume = data.rain ? Object.values(data.rain)[0] : undefined;
     const precipitationChance = typeof rainVolume === 'number' ? Math.min(100, Math.round(rainVolume * 10)) : null;

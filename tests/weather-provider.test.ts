@@ -26,7 +26,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { getWeatherForTammaLocation, redactWeatherUrl } from '../netlify/functions/_weather-provider';
+import { getWeatherForTammaLocation, redactWeatherUrl, translateWeatherCondition } from '../netlify/functions/_weather-provider';
 import { withHarness, guestId, brainRequest } from './helpers/canonical-core-harness';
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
 
@@ -430,5 +430,55 @@ test('SECRETS: client bundle boundary -- no static/frontend file references the 
   for (const file of staticFiles) {
     const content = readFileSync(path.join(repoRoot, file), 'utf8');
     assert.doesNotMatch(content, forbidden, `${file} (a publicly-served static asset) must never reference the server-only weather provider or its secret`);
+  }
+});
+
+// ---------------------------------------------------------------------
+// WORDING -- live production smoke confirmed the weather API works, but
+// surfaced OpenWeatherMap's raw English condition text in the reply
+// ("few clouds"). translateWeatherCondition maps OpenWeatherMap's own
+// small, closed set of documented condition descriptions to natural Thai;
+// anything not in that set falls back to the original English rather than
+// a blank or guessed translation.
+// ---------------------------------------------------------------------
+
+test('WORDING: translateWeatherCondition maps every owner-given example to natural Thai', () => {
+  const cases: ReadonlyArray<[string, string]> = [
+    ['few clouds', 'มีเมฆเล็กน้อย'],
+    ['clear sky', 'ท้องฟ้าโปร่ง'],
+    ['scattered clouds', 'มีเมฆกระจาย'],
+    ['broken clouds', 'เมฆค่อนข้างมาก'],
+    ['overcast clouds', 'เมฆมาก'],
+    ['light rain', 'ฝนเล็กน้อย'],
+    ['moderate rain', 'ฝนปานกลาง'],
+    ['heavy intensity rain', 'ฝนตกหนัก'],
+  ];
+  for (const [english, thai] of cases) {
+    assert.equal(translateWeatherCondition(english), thai, `"${english}" must translate to "${thai}"`);
+  }
+});
+
+test('WORDING: translateWeatherCondition is case-insensitive and falls back to the original string when unmapped', () => {
+  assert.equal(translateWeatherCondition('Few Clouds'), 'มีเมฆเล็กน้อย', 'must match regardless of OpenWeatherMap-unlikely casing');
+  assert.equal(translateWeatherCondition('  clear sky  '), 'ท้องฟ้าโปร่ง', 'must tolerate incidental whitespace');
+  const unmapped = 'some future openweathermap phrase this table has not caught up to';
+  assert.equal(translateWeatherCondition(unmapped), unmapped, 'an unmapped phrase must fall back to the original string, never blank/guessed');
+});
+
+test('WORDING end-to-end: a real-shaped OpenWeatherMap response ("few clouds", matching the actual production observation) is translated in the customer-facing reply', async () => {
+  clearWeatherEnv();
+  setWeatherEnv();
+  try {
+    await withHarness(async harness => {
+      harness.programWeatherFetch({ ok: true, body: { weather: [{ main: 'Clouds', description: 'few clouds' }], main: { temp: 25 } } });
+      const gid = guestId('wording-few-clouds');
+      const r = await processThongthaiChatCore(brainRequest('ฝนตกไหม', gid, 'web'), 'evt-1');
+      assert.equal(r.statusCode, 200);
+      const text = msg(r.payload);
+      assert.match(text, /มีเมฆเล็กน้อย/u, 'must use the natural Thai translation in the customer-facing reply');
+      assert.doesNotMatch(text, /few clouds/iu, 'must never leave the raw English condition text in the customer-facing reply');
+    });
+  } finally {
+    clearWeatherEnv();
   }
 });

@@ -2374,3 +2374,52 @@ it names, rather than this session guessing a third time.
 
 No DB migration, no production transaction. Exactly one more merge to
 `main` for this hotfix — no repeated deploy spam from this session.
+
+---
+
+## WORDING IMPROVEMENT — translate OpenWeather condition text to Thai (NOT DEPLOYED, awaiting owner approval)
+
+Live production smoke (after round 2's merge) confirmed the weather
+integration works end-to-end: "จากข้อมูลล่าสุด (openweathermap): few
+clouds อุณหภูมิประมาณ 25°C ...". The only gap: OpenWeatherMap's
+`description` field comes back as raw English, so it appeared verbatim in
+an otherwise-Thai reply.
+
+`_weather-provider.ts` gained `translateWeatherCondition()` — a small,
+closed lookup table (OpenWeatherMap's `description` field is always one
+of a documented, bounded set of lowercase English phrases, never free
+text, so this is a structural mapping, not a growing phrase list) covering
+the owner's 8 given examples plus the rest of OpenWeatherMap's common
+condition vocabulary (thunderstorm/drizzle/snow/mist/fog/etc.). Applied to
+`forecastSummary` before it's returned, so every caller (the
+`weather_condition` and `activity_suitability` composers) gets
+already-Thai text with no caller-side change needed. Anything NOT in the
+table falls back to the original English string — never blank, never a
+guessed translation, never blocks the reply over a wording gap.
+
+No architecture change, no env var touched, no DB touched, no routing
+change — exactly the scope asked for.
+
+### Tests added
+
+3 new tests in `tests/weather-provider.test.ts` (now 21 total, was 18):
+all 8 owner-given examples translate correctly; case-insensitivity +
+whitespace tolerance + unmapped-phrase fallback; and an end-to-end test
+using a real-shaped mocked response (`description: 'few clouds'`, matching
+the actual production observation) confirming the composed customer
+reply contains the Thai translation and never the raw English text.
+
+### Full test result
+
+**673/673 passing** (670 before this change + 3 net new).
+
+### Deploy status
+
+**NOT DEPLOYED. No PR merged for this change** — per the explicit
+instruction, this is committed and pushed for review only; awaiting
+owner approval before any merge/deploy.
+
+### Confirmation
+
+No DB migration, no production transaction, no env var touched, no
+routing change, no deploy triggered.
