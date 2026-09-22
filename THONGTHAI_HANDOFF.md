@@ -1089,6 +1089,102 @@ cd /home/user/tamma-chat
 git fetch origin feature/thongthai-one-mind-architecture
 git checkout feature/thongthai-one-mind-architecture
 git pull --ff-only origin feature/thongthai-one-mind-architecture
-npm test   # expect 597/597 passing
+npm test   # expect 600/600 passing (see RELEASE-GATE CLOSING checkpoint below)
 git log --oneline -20
 ```
+
+---
+
+## RELEASE-GATE CLOSING — Gate 1 in progress (checkpoint, not final)
+
+Superseding the "final checkpoint of this session" framing above: this is
+a NEW session picking up the accepted `f57978a` architecture to close the
+release-acceptance gates (cross-domain stress, LINE/Web equivalence,
+stale-state, operational contract, no-hallucination, release freeze) —
+**not** another architecture rebuild. Two atomic checkpoints landed so
+far, both tested and pushed:
+
+### Checkpoint: promotion redemption loose-name bug (commit `eab940d`,
+rebased to `a1043bf`)
+
+While building `tests/helpers/canonical-core-harness.ts` (a shared
+harness that drives the real `processThongthaiChatCore` end-to-end via
+Supabase REST + Gemini `fetch` mocking only — never hand-constructed
+`SemanticTurn` objects, matching this repo's established test convention)
+and running the owner's PROMOTION flow through it, found a real bug:
+`resolvePromotionRedemption` (thongthai-chat.ts) reused
+`parseRestaurantPreorderTurn`'s "loose name" fallback — built for the
+restaurant preorder flow, where a stray aside after order commitment is
+rare. In promotion redemption, ANY short off-topic message, or a bare
+"ยืนยัน", was accepted as the customer's name once a redemption was
+pending, creating a `promotion_redemptions` row every time without the
+customer's real name ever being captured.
+
+Fix: `parseRestaurantPreorderTurn` now takes an optional
+`{ allowLooseName: false }`; `resolvePromotionRedemption`'s call site
+passes it, now requiring an explicit name marker ("ชื่อ...", "ผมชื่อ...").
+The restaurant preorder flow's own call site (`_promotion-dialog.ts`'s
+`decidePromotionFallback`, and the restaurant preorder dialog itself) is
+untouched — its loose-name behavior is a working, accepted characteristic
+of that flow, not the bug. Regression test:
+`tests/promotion-redemption-loose-name-guard.test.ts` — verified it
+actually catches the bug by reverting the fix locally and confirming the
+test fails, then restoring it.
+
+### Checkpoint: deterministic restaurant topic-switch gap (commit `0db6724`)
+
+A concurrent session pushed `tests/stay-real-text-readonly-flow.test.ts`
+(commit `90ce044`) directly to this branch while this session was
+working — merged cleanly via rebase, no conflicts. Running it surfaced a
+second real, structural bug: `findRestaurantTopicNarrow` (the regex-based
+restaurant-topic marker in `_deterministic-semantic-turn.ts`) was only
+ever consulted inside `detectCrossDomainTopicSwitch`, itself only called
+from `deriveDeterministicSemanticTurn`'s **active-task** branch. Stay has
+no task-creation mechanism at all (confirmed in the prior session's
+findings — no `AgentStateUpdate` field, no `taskState` write path for a
+stay booking draft), so `activeTask` is always `null` for a pure stay
+conversation. A message like "ร้านอาหารมีอะไร" mid a stay conversation
+therefore had **no deterministic path** to be recognized as a restaurant
+topic switch: it fell through to `null`, and — when the model provider is
+unavailable (no API key/network, e.g. in this offline harness, but
+equally a real production circuit-breaker-open scenario) — the
+orchestrator's own fallback re-used `context.activeDomain` (the stale
+'stay' domain) instead of switching, so the customer's restaurant
+question would silently be mis-routed to a stay-domain clarification.
+
+Fix: added the same `findRestaurantTopicNarrow` check to the no-active-
+task ladder in `deriveDeterministicSemanticTurn`, returning the identical
+`restaurant_topic_switch` shape `detectCrossDomainTopicSwitch` already
+returns for the active-task case — no new lexicon, no new intent, purely
+closing a missing call site.
+
+**Full suite: 600/600 passing** (597 baseline + `stay-real-text-readonly-
+flow` + 2 new promotion-redemption regression tests). Both checkpoints
+pushed to `feature/thongthai-one-mind-architecture`. Netlify/production
+untouched throughout (`process.env.THONGTHAI_ONE_MIND_CUTOVER` set only
+inside the local test harness, never in a deployed context).
+
+### Gate 1 status (cross-domain customer-level stress, 8 domains)
+
+- **Activity**: pre-existing deep coverage (16-turn flow etc.) — regression only, not re-derived.
+- **Stay**: now covered by `stay-real-text-readonly-flow.test.ts` (read-only inquiry, side-question survival, topic switch to restaurant and back, no premature task/transaction). Known gap (documented, not a bug to fix under this program's scope discipline): stay still has no booking-task-creation mechanism via the canonical core — a real booking intent for stay does not yet produce an `ActiveTask`, unlike activity.
+- **Restaurant, Promotion**: promotion redemption's missing-name path now has a dedicated regression test; broader promotion/restaurant cross-domain stress conversations (the owner's full example flows) not yet built as permanent test files this checkpoint.
+- **OTOP, Membership, Cafe, General ecosystem**: not yet built as permanent test files this checkpoint — next task.
+
+### Next task (exact resumption point)
+
+1. Build permanent stress-test files for restaurant, OTOP, membership,
+   cafe, and general-ecosystem, using `tests/helpers/canonical-core-
+   harness.ts` and the owner's exact example conversations, following the
+   same two-pass method already used successfully (an unscripted baseline
+   run first to discover true routing, then targeted `programGeminiReply`
+   calls only for turns confirmed to reach the LLM).
+2. Then Gate 2 (LINE vs Web equivalence across all domains, not just
+   activity), Gate 3 (stale/interrupted-conversation coverage beyond
+   activity), Gate 4 (restaurant-preorder-notification migration file +
+   schema tests, migration NOT applied), Gate 5 (no-hallucination checks),
+   Gate 6 (release freeze: full suite + tsc + esbuild smoke + final
+   `THONGTHAI_HANDOFF.md` "RELEASE CANDIDATE" section + the owner's
+   11-item final report).
+3. Commit and push after every meaningful checkpoint, as done for the two
+   checkpoints above — do not accumulate uncommitted work.
