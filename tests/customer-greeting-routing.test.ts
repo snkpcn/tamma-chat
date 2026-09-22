@@ -90,6 +90,20 @@ test('web chat history fallback preserves ภาราดร through slot collec
   assert.equal(draft?.phone, '0999990001');
 });
 
+test('web chat history fallback still confirms after initial horse context scrolls out of the UI window', () => {
+  const draft = activityBookingFallbackDraft(request('ยืนยัน', [
+    'เอาภาราดร',
+    '30 นาที',
+    '30 กันยายน 2026 เวลา 10:00',
+    '1 คน',
+    'SMOKE TEST PHARADON',
+    '0999990001',
+  ]));
+  assert.equal(draft?.horseName, 'ภาราดร');
+  assert.equal(draft?.durationMinutes, 30);
+  assert.equal(draft?.phone, '0999990001');
+});
+
 test('web chat-history horse fallback runs before One-Mind cutover can clarify generically', async () => {
   const source = await import('node:fs').then(fs => fs.readFileSync('netlify/functions/thongthai-chat.ts', 'utf8'));
   assert.ok(

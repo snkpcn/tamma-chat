@@ -1021,7 +1021,9 @@ export function activityBookingFallbackDraft(request: BrainRequest): Record<stri
   const selectedAsset = activityAssetFromText(text);
   if (!selectedAsset) return null;
 
-  const hasHorseBookingContext = /ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า/u.test(text);
+  const hasHorseBookingContext = /ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า/u.test(text)
+    || userTurns.length > 1
+    || activityFallbackCommit(request.message);
   if (!hasHorseBookingContext) return null;
 
   const date = extractDate(text) ?? extractThaiMonthDate(text);
