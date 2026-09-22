@@ -105,6 +105,17 @@ export async function createFeedbackEvent(input: {
       route_target: ROUTE_TARGET[input.match.businessUnit],
       status: 'new',
       notification_status: 'pending',
+      // Structured extraction for the backoffice "เสียงลูกค้า" dashboard --
+      // only written once the v2 migration is applied; until then these
+      // columns simply don't exist and Postgres/PostgREST would reject the
+      // insert, so this whole write stays inside the try/catch above and
+      // degrades gracefully like every other feedback write in this file.
+      person_mentions: input.match.personMentions,
+      business_unit_mentions: input.match.businessUnitMentions,
+      sentiment_keywords: input.match.sentimentKeywords,
+      issue_keywords: input.match.issueKeywords,
+      named_assets: input.match.namedAssets,
+      keyword_summary: input.match.keywordSummary,
     };
     const response = await dbFetch('ops_feedback_events', {
       method: 'POST',
@@ -116,9 +127,24 @@ export async function createFeedbackEvent(input: {
 
     try {
       const status = await dispatchEntityNotification('feedback_event', row.id);
+      // Reflect the real dispatch outcome on the row -- 'ignored' isn't a
+      // valid notification_status value (it only fires for a stray
+      // environment, effectively unreachable in practice), so it maps to
+      // 'not_configured', the closest existing meaning.
+      await dbFetch(`ops_feedback_events?id=eq.${row.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ notification_status: status === 'ignored' ? 'not_configured' : status }),
+      }).catch(() => undefined);
       return { eventId: row.id, notificationQueued: status === 'sent' || status === 'duplicate' };
     } catch (notifyError) {
       console.error('THONGTHAI_SERVICE_MIND_NOTIFY_ERROR', notifyError instanceof Error ? notifyError.message.slice(0, 220) : 'unknown');
+      await dbFetch(`ops_feedback_events?id=eq.${row.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          notification_status: 'failed',
+          notification_error: notifyError instanceof Error ? notifyError.message.slice(0, 220) : 'unknown',
+        }),
+      }).catch(() => undefined);
       return { eventId: row.id, notificationQueued: false };
     }
   } catch (error) {

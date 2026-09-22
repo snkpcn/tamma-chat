@@ -494,36 +494,66 @@ const FEEDBACK_SEVERITY_LABEL: Record<string, string> = {
   low: 'ทั่วไป', normal: 'ปกติ', high: 'ต้องดูแลเร็ว', urgent: 'ด่วนมาก',
 };
 
-async function notifyFeedbackEvent(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
-  const response = await dbFetch(
-    `ops_feedback_events?id=eq.${id}`
-    + '&select=id,feedback_type,business_unit,severity,summary,staff_name,channel,environment&limit=1',
-  );
-  const rows = await response.json() as Array<{
-    id: string; feedback_type: string; business_unit: string; severity: string; summary: string;
-    staff_name: string | null; channel: string; environment: string;
-  }>;
-  const event = rows[0];
-  if (!event || !['live', 'test'].includes(event.environment)) return 'ignored';
+function feedbackMessageBody(event: {
+  id: string; feedback_type: string; business_unit: string; severity: string; summary: string;
+  customer_message: string; staff_name: string | null; channel: string; environment: string;
+}, teamCode: OpsTeamCode): string {
   const environmentPrefix = event.environment === 'test' ? '🧪 TEST — ' : '';
-  const teamCode = FEEDBACK_BUSINESS_UNIT_TEAM[event.business_unit] ?? 'all';
-  const lines = [
+  return [
     `${environmentPrefix}${FEEDBACK_TYPE_LABEL[event.feedback_type] ?? 'ฟีดแบ็กลูกค้า'} — ${TEAM_LABELS[teamCode]}`,
     `ความรุนแรง: ${FEEDBACK_SEVERITY_LABEL[event.severity] ?? event.severity}`,
     `สรุป: ${cleanText(event.summary, 500)}`,
+    `ข้อความเดิม: "${cleanText(event.customer_message, 500)}"`,
     event.staff_name ? `พนักงานที่กล่าวถึง: ${event.staff_name}` : '',
     `ช่องทาง: ${event.channel.toUpperCase()}`,
-    `หลังบ้าน: ${BACKOFFICE_URL}`,
-  ].filter(Boolean);
-  return sendTeamMessage({
-    teamCode,
+    `รหัสเรื่อง: ${event.id}`,
+    `หลังบ้าน: ${BACKOFFICE_URL}customer-voice.html?event=${event.id}`,
+  ].filter(Boolean).join('\n');
+}
+
+// Urgent safety issues, and any feedback whose business unit doesn't map
+// to a real team, additionally reach the 'all' (owner/general) group --
+// same "don't over-notify" discipline the task's routing rules call for:
+// every OTHER severity/business-unit combination goes to exactly one
+// group, never a broadcast.
+async function notifyFeedbackEvent(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
+  const response = await dbFetch(
+    `ops_feedback_events?id=eq.${id}`
+    + '&select=id,feedback_type,business_unit,severity,summary,customer_message,staff_name,channel,environment&limit=1',
+  );
+  const rows = await response.json() as Array<{
+    id: string; feedback_type: string; business_unit: string; severity: string; summary: string;
+    customer_message: string; staff_name: string | null; channel: string; environment: string;
+  }>;
+  const event = rows[0];
+  if (!event || !['live', 'test'].includes(event.environment)) return 'ignored';
+  const primaryTeam = FEEDBACK_BUSINESS_UNIT_TEAM[event.business_unit] ?? 'all';
+
+  const primaryStatus = await sendTeamMessage({
+    teamCode: primaryTeam,
     entityType: 'feedback_event',
     entityId: event.id,
     deliveryType: `feedback_${event.feedback_type}`,
     idempotencyKey: `feedback_event_created:${event.id}`,
-    text: lines.join('\n'),
+    text: feedbackMessageBody(event, primaryTeam),
     payload: { feedback_type: event.feedback_type, business_unit: event.business_unit },
   });
+
+  if (event.severity === 'urgent' && primaryTeam !== 'all') {
+    await sendTeamMessage({
+      teamCode: 'all',
+      entityType: 'feedback_event',
+      entityId: event.id,
+      deliveryType: `feedback_${event.feedback_type}_owner_escalation`,
+      idempotencyKey: `feedback_event_created_owner:${event.id}`,
+      text: feedbackMessageBody(event, 'all'),
+      payload: { feedback_type: event.feedback_type, business_unit: event.business_unit, escalation: true },
+    }).catch(escalationError => {
+      console.error('THONGTHAI_FEEDBACK_OWNER_ESCALATION_ERROR', escalationError instanceof Error ? escalationError.message.slice(0, 220) : 'unknown');
+    });
+  }
+
+  return primaryStatus;
 }
 
 export async function dispatchEntityNotification(

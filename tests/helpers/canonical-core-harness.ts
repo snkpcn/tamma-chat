@@ -169,6 +169,11 @@ export type Harness = {
    *  returns a DIFFERENT guest's id with no error). Use this instead of
    *  guessing whenever a test needs getState/setState for a specific guest. */
   guestDbId: (anonymousId: string) => string | undefined;
+  /** The current (POST + any PATCH merges applied) ops_feedback_events row
+   *  for a given event id, as returned by postsTo('ops_feedback_events')'s
+   *  row id -- lets a test assert on notification_status/notification_error
+   *  after dispatch, not just the initial insert body. */
+  feedbackEventRow: (id: string) => Record<string, unknown> | undefined;
   restaurantId: string;
 };
 
@@ -360,6 +365,15 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
         const idParam = query.get('id')?.replace('eq.', '') ?? '';
         const row = feedbackEvents.get(idParam);
         return jsonResponse(row ? [row] : []);
+      }
+      if (method === 'PATCH') {
+        const idParam = query.get('id')?.replace('eq.', '') ?? '';
+        const existing = feedbackEvents.get(idParam);
+        if (existing) {
+          const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+          feedbackEvents.set(idParam, { ...existing, ...body });
+        }
+        return jsonResponse([]);
       }
     }
 
@@ -562,6 +576,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     setState: (guestDbId, state, updatedAt) => { agentState.set(guestDbId, { exists: true, state, updatedAt: updatedAt ?? new Date().toISOString() }); },
     postsTo: table => posts.get(table) ?? [],
     guestDbId: anonymousId => guests.get(anonymousId)?.id,
+    feedbackEventRow: id => feedbackEvents.get(id),
     restaurantId: RESTAURANT_ID,
   };
 }
