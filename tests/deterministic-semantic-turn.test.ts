@@ -247,6 +247,27 @@ test('owner-verified horse selection starts an activity task even when recentEnt
   assert.equal(turn!.entities.horseName, 'ภาราดร');
 });
 
+test('REGRESSION: a correction naming BOTH the rejected and the newly-chosen horse in one message resolves to the one being chosen, never the one being turned down', () => {
+  const taskState: TaskStateContainer = {
+    ...emptyTaskStateContainer(),
+    activeTask: createActiveTask({
+      type: 'activity_booking', sourceChannel: 'line', now: NOW,
+      initialSlots: { resourceCode: 'activity-horse', horseName: 'ภาราดร', durationMinutes: 60, date: '2026-10-03', time: '13:00', partySize: 2 },
+    }),
+  };
+  // Plain array order used to make ภาราดร (listed first in
+  // ACTIVITY_ASSET_SELECTIONS) win regardless of which name the customer
+  // was actually negating -- a real production bug found while building
+  // the 16-turn canonical-state stress test. Both phrasing orders must
+  // resolve correctly, since the fix is structural (negation-immediately-
+  // before-the-name), not order-specific.
+  for (const message of ['ไม่เอาภาราดรแล้ว เอาทองไทย', 'เอาทองไทย ไม่เอาภาราดรแล้ว']) {
+    const turn = deriveDeterministicSemanticTurn(message, emptySemanticContext(), taskState, NOW);
+    assert.ok(turn, message);
+    assert.equal(turn!.entities.horseName, 'ทองไทย', `${message}: must extract the CHOSEN name, never the rejected one`);
+  }
+});
+
 test('an inventory-count question on an active activity task stays a side-question instead of resuming missing-field collection', () => {
   const taskState: TaskStateContainer = {
     ...emptyTaskStateContainer(),

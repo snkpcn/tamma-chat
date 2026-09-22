@@ -68,8 +68,30 @@ function findActivityTopic(message: string): { nodeId: string; activityCode: str
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
 }
 
+// A small, closed set of negation markers, not a growing phrase table --
+// this is the same "correction marker" grammatical category
+// hasCorrectionMarker (_slot-parsers.ts) already recognizes, applied here
+// specifically to exclude a NAME immediately preceded by one of them.
+const ASSET_NEGATION_BEFORE_NAME_RE = /(?:ไม่เอา|ไม่ใช่|ไม่รับ|ไม่ได้เอา)\s*$/u;
+
+/**
+ * A correction that mentions BOTH the old and new choice in one message
+ * ("ไม่เอาภาราดรแล้ว เอาทองไทย") must resolve to the one being chosen, never
+ * the one being turned down. Plain array order (ภาราดร listed first) used
+ * to win regardless of which side of the sentence was negated -- a real
+ * production bug: the rejected name silently became the "selection".
+ * Structural, not phrase-specific: any known name whose immediately
+ * preceding text ends with a negation marker is excluded before picking a
+ * match, so this works regardless of which name is mentioned first.
+ */
 export function findKnownActivityAssetSelection(message: string): typeof ACTIVITY_ASSET_SELECTIONS[number] | null {
-  return ACTIVITY_ASSET_SELECTIONS.find(item => item.pattern.test(message)) ?? null;
+  const accepted = ACTIVITY_ASSET_SELECTIONS.filter(item => {
+    const match = item.pattern.exec(message);
+    if (!match) return false;
+    const before = message.slice(Math.max(0, match.index - 12), match.index);
+    return !ASSET_NEGATION_BEFORE_NAME_RE.test(before);
+  });
+  return accepted[0] ?? null;
 }
 
 function isInventoryCountQuestion(message: string): boolean {
