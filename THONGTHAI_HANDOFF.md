@@ -699,3 +699,94 @@ git pull --ff-only origin feature/thongthai-one-mind-architecture
 npm test   # expect 582/582 passing as of commit 2754200
 git log --oneline -12
 ```
+
+## 2026-09-22 Priority 3 + 4 Checkpoint — Channel Equivalence + LINE Business-Ownership Audit
+
+Branch: `feature/thongthai-one-mind-architecture`. HEAD (before this handoff
+commit): `48a7986`. Full suite: **583/583 passing**.
+
+### Priority 3: Web/LINE cross-channel equivalence — PROVED
+
+`tests/web-line-channel-equivalence.test.ts` runs the identical 6-turn
+activity-booking conversation through `channel:'web'` and `channel:'line'`
+(separate in-memory state per channel) and asserts equivalent semantic
+turns, dialog decisions, task slot values, and final transaction-proposal
+arguments. **Passed on the first run** — the orchestrator/semantic/dialog-
+manager layers are already genuinely channel-agnostic for business logic.
+The one legitimate divergence (LINE-only legacy-session mirror, Priority 2)
+is explicitly asserted: 0 calls for web, ≥1 for LINE across the
+conversation — correct, since that's transport-adjacent execution
+plumbing, not a business decision.
+
+### Priority 4: Audit remaining LINE business ownership
+
+Traced `_line-webhook-core.ts` (515 lines) function by function. Findings:
+
+1. **The adapter file itself contains zero domain/business decision
+   logic** for booking/membership/promotion/etc — enforced by the
+   structural test extended in Priority 1
+   (`tests/line-self-fetch-removed.test.ts`'s
+   `doesNotMatch(source, /_semantic-interpreter|_dialog-manager|
+   _knowledge-resolver|_response-composer|_task-state/)`).
+2. **`handleLineMembershipMessage`/`handleLineBookingMessage`** (imported
+   from `_operations-db.ts`, not defined in the adapter file) remain
+   justified per the owner's own explicit caveat — "do not delete
+   transaction safety before equivalent canonical behavior exists". One-
+   Mind still cannot execute a transaction (architectural constraint,
+   unchanged this session); these are the ONLY code that can execute a
+   real LINE booking/membership action. Classification unchanged from the
+   original audit: **B — keep as adapter, one-directional migration
+   target** (Priority 2 already made this one-directional for activity
+   bookings specifically).
+3. **`saveLatestJourney`/`buildJourneyFlex`** (the `action=save_journey`
+   postback and LINE Flex Message card rendering) — genuinely transport-
+   layer code: LINE-Flex-specific UI formatting and a thin "persist the
+   last computed journey" utility, not a business decision about what a
+   journey contains. **Classification: A — justified as-is.**
+4. **One real, verified channel-inconsistency found**:
+   `deterministicConstraints`/`reinforceStructuredMemory` (a small
+   deterministic regex classifier inferring an accessibility constraint —
+   currently only `limited_walking` — from raw customer text, as a
+   zero-LLM safety net) exists ONLY in `_line-webhook-core.ts`. It writes
+   into `guest_memory.constraints` via `persistCustomerSnapshot` — the
+   SAME table/field the canonical brain's own LLM-driven
+   `contextUpdates.constraints` (via `persistCustomerResult`) already
+   writes to for BOTH channels since Priority 1. So this is a genuine
+   safety-net **duplication that is LINE-only**: a web customer whose
+   message the LLM fails to correctly infer a mobility constraint from
+   gets no deterministic fallback; the identical LINE customer does.
+   **Classification: E — needs repair, NOT done this pass.** Low
+   severity (accessibility-relevant but not booking/payment-correctness;
+   never conflicts with the LLM path, since both write with
+   `resolution=merge-duplicates`), and the safe fix requires care:
+   extracting `deterministicConstraints` + the load/merge/persist
+   sequence into `_customer-db.ts` (already imported by both channels)
+   as one shared function, then finding the right single call site in
+   EACH channel's outer wrapper (LINE already calls it once, right after
+   `askThongthaiReliably` returns; `thongthai-chat.ts`'s core has many
+   early-return branches, so the natural web call site is in its own
+   thin `handler`, wrapping whatever `processThongthaiChatCore` returns,
+   not threaded through every internal branch). Deferred rather than
+   implemented this pass because it touches the shared core's calling
+   convention for a modest, non-blocking benefit, and this session
+   already made two structural changes to that exact file (Priority 1);
+   stacking a third in the same session raises risk for a low-severity
+   fix that isn't time-sensitive.
+
+### Next step
+
+Priority 5: restaurant preorder notification consistency (read-only
+verification + tests only, per the original audit's Finding 5 — no
+production DB mutation without explicit owner authorization for the
+migration).
+
+### Commands the next agent/session should run first
+
+```bash
+cd /home/user/tamma-chat
+git fetch origin feature/thongthai-one-mind-architecture
+git checkout feature/thongthai-one-mind-architecture
+git pull --ff-only origin feature/thongthai-one-mind-architecture
+npm test   # expect 583/583 passing as of commit 48a7986
+git log --oneline -14
+```
