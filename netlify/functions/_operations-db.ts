@@ -1480,6 +1480,9 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
       status: 'requested',
       source_channel: input.channel,
       customer_note: input.note?.slice(0, 1000) ?? null,
+      booking_customer_name_enc: encryptPii(input.customerName),
+      booking_phone_enc: encryptPii(cleanPhone(input.phone)),
+      booking_email_enc: encryptPii(cleanEmail(input.email)),
       environment,
     }),
   });
