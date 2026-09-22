@@ -95,6 +95,13 @@ export function extractTime(message: string): string | null {
   if (/เที่ยงครึ่ง/u.test(message)) return '12:30';
   if (/เที่ยง/u.test(message)) return '12:00';
 
+  // "บ่ายโมง" (no number at all between บ่าย and โมง) is standard colloquial
+  // Thai for 1pm specifically -- the "one" is grammatically implied/omitted
+  // before โมง, unlike every other afternoon hour which always states its
+  // number ("บ่ายสองโมง"). Checked before the general pattern below so that
+  // one doesn't need a number to match.
+  if (/บ่ายโมง/u.test(message)) return '13:00';
+
   const afternoon = message.match(/บ่าย\s*(หนึ่ง|สอง|สาม|สี่|ห้า|\d{1,2})(?:\s*โมง)?/u);
   if (afternoon) {
     const hour = thaiNumberToken(afternoon[1]);

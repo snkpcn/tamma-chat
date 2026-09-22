@@ -271,14 +271,33 @@ const HOW_IT_WORKS_MARKER = /ยังไง|อย่างไร|(?:^|\s)\S*�
  *  doesn't yet have one for. Never touches task state -- these are read-only
  *  side-questions (see TASK_WORTHY_ACTIONS in _dialog-manager.ts, which
  *  'ask'/'status' are deliberately excluded from). */
-function detectActivitySideQuestion(message: string, domain: SemanticDomain | null, now: Date = new Date()): SemanticTurn | null {
+/** ActiveTask.slots.resourceCode (e.g. "activity-horse") IS an
+ *  ACTIVITY_TOPIC_KEYWORDS nodeId -- the same identifier space, so this is
+ *  a lookup, not a second lexicon. Lets a shortened follow-up on an
+ *  already-open task ("มีกี่ตัว", no "ม้า" restated) resolve its topic from
+ *  task context instead of requiring the keyword in every message. */
+function activityTopicFromResourceCode(resourceCode: unknown): { nodeId: string; activityCode: string } | null {
+  if (typeof resourceCode !== 'string') return null;
+  const match = ACTIVITY_TOPIC_KEYWORDS.find(item => item.nodeId === resourceCode);
+  return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
+}
+
+function detectActivitySideQuestion(
+  message: string,
+  domain: SemanticDomain | null,
+  activeTaskTopic: { nodeId: string; activityCode: string } | null = null,
+  now: Date = new Date(),
+): SemanticTurn | null {
   if (domain !== 'activity') return null;
   // Inventory/count questions are read-only side questions even while an
   // activity booking task is active. Without this precedence, the active-task
   // path falls through to same-domain topic narrowing and gets mislabeled as
   // "resume_active_task", which makes the Dialog Manager ask the next missing
   // booking field (e.g. date) instead of answering "มีม้ากี่ตัว".
-  const activityTopic = findActivityTopic(message);
+  // The topic itself comes from THIS message when it's there ("มีม้ากี่ตัว"),
+  // falling back to the already-open task's own resourceCode when it isn't
+  // ("มีกี่ตัว" mid-conversation) -- never guessed when neither is present.
+  const activityTopic = findActivityTopic(message) ?? activeTaskTopic;
   if (activityTopic && isInventoryCountQuestion(message)) {
     return {
       domain,
@@ -354,7 +373,7 @@ function deriveForActiveTask(
   // reduced to whatever slot value they might incidentally also contain
   // (see the Dialog Manager's SIDE_QUESTION_ACTIONS precedence, which
   // preserves the task untouched for exactly these actions).
-  const sideQuestion = detectActivitySideQuestion(message, task.domain, now);
+  const sideQuestion = detectActivitySideQuestion(message, task.domain, activityTopicFromResourceCode(task.slots.resourceCode), now);
   if (sideQuestion) return sideQuestion;
 
   const entities: Record<string, unknown> = {};
@@ -457,7 +476,7 @@ export function deriveDeterministicSemanticTurn(
 
   // No open task: a price/availability/how-it-works side-question about the
   // current topic, asked before any selection is made.
-  const sideQuestion = detectActivitySideQuestion(trimmed, effectiveDomain, now);
+  const sideQuestion = detectActivitySideQuestion(trimmed, effectiveDomain, null, now);
   if (sideQuestion) return sideQuestion;
 
   // No active task: a selection among entities the customer already saw
