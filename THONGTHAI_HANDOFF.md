@@ -1580,3 +1580,457 @@ git pull --ff-only origin feature/thongthai-one-mind-architecture
 npm test   # expect 638/638 passing
 git log --oneline -20
 ```
+
+---
+
+## LOCAL CONCIERGE INTELLIGENCE FRAMEWORK (post-deploy, branch work — NOT DEPLOYED)
+
+Branch: `feature/local-concierge-intelligence`, based on `main` (which
+already contains the merged release candidate from PR #42,
+`main@2cb2e88`). **Not merged, not deployed.** Owner will decide deploy
+later.
+
+### Observed post-deploy gap
+
+After the release candidate went live, a real customer message —
+"อิสานมีอะไรดี ช่วงนี้ฝนตกไหมอะ" — exposed a structural gap, not a one-off
+phrase miss: Thongthai had no general way to answer local-area, weather-
+condition, food-culture, visitor-journey, activity-suitability, or safety-
+uncertainty questions. These aren't rare edge cases for a concierge for a
+real rural Isan/Chaiyaphum property — they're a normal, broad class of
+things a real visitor asks. Patching only the one observed sentence would
+have left the next 50 phrasings of the same underlying question classes
+unanswered.
+
+### Framework added
+
+Three new pure, side-effect-free modules, following the exact same
+discipline already established by `_ecosystem-entity-graph.ts` (static
+structural knowledge, never a mutable/real-time fact) and
+`_deterministic-semantic-turn.ts` (small closed marker sets, never a
+growing phrase table):
+
+- **`_local-concierge-knowledge.ts`** — the STATIC LOCAL KNOWLEDGE pack
+  (season guidance for hot/rainy/cool, region/place character, food-
+  culture style, general safety principle). A lookup table, not prose —
+  extend by adding entries, never by writing a new paragraph per phrase.
+  Explicitly documents the truth boundary: this module must never be
+  asked for a real-time fact (current weather, current availability).
+- **`_local-concierge-intent.ts`** — structural classifiers for 6
+  categories (`weather_condition`, `region_place`, `food_culture`,
+  `visitor_journey`, `activity_suitability`, `safety_uncertainty`), each a
+  small set of grammatical/vocabulary markers, plus
+  `hasExplicitTransactionIntent` — the guard that makes local-concierge
+  questions yield to a real booking/confirm/signup/accept-offer signal in
+  the same message (Routing Safety, category F below).
+- **`_local-concierge-response.ts`** — pure composer, one function per
+  category, following the required shape (direct answer → local context →
+  best options → real-time-data caveat → at most one follow-up). Every
+  business name it prints comes from `_ecosystem-entity-graph.ts`'s real
+  node labels, never invented.
+
+Wired into `thongthai-chat.ts` as `deterministicLocalConciergeResponse`,
+called from `processThongthaiChatCore` at **two** points (both required,
+found empirically while testing, not assumed up front):
+1. In the legacy deterministic chain, right after promotion-discovery and
+   right **before** the bare ecosystem broad-discovery fallback (a message
+   can match both, e.g. "ฝนตกแล้วยังทำอะไรได้บ้าง" also matches
+   `isExperienceDiscoveryIntent`'s own "ทำอะไรได้บ้าง" pattern — the more
+   specific, weather-aware answer wins) and before the activity/restaurant
+   deterministic responses (so a blended question like "ฝนตกขี่ม้าได้ไหม"
+   gets concierge reasoning, not a generic activity-inventory answer that
+   silently drops the weather framing).
+2. A matching `preserveLocalConciergeFastPath` guard added alongside the
+   **existing** `preserveExperienceDiscoveryFastPath`/
+   `preserveRestaurantFastPath` guards, right before the One-Mind cutover
+   block. **Found and fixed a real gap while testing**: without this,
+   One-Mind's own structural markers (`findActivityTopic` matching "ม้า")
+   claimed a blended message like "ฝนตกขี่ม้าได้ไหม" as plain activity-
+   topic discovery BEFORE `deterministicLocalConciergeResponse` ever got a
+   turn — confirmed by writing a permanent regression test
+   (`local-concierge-intelligence.test.ts`'s tests A2 and E) and verifying
+   it fails when this guard is disabled. This reuses the exact precedent
+   these two existing guards already established — not new architecture,
+   the same pattern extended once more.
+
+### Categories covered
+
+Weather/condition, place/region, food-culture, visitor-journey, activity-
+suitability, safety-uncertainty — all 6, per the owner's spec. General
+safety questions with a comparison shape ("ตัวไหนนิสัยดีกว่า") are
+deliberately left to the EXISTING `detectCompareEntities`/
+`cannot_verify_comparison` path in `_deterministic-semantic-turn.ts`
+(already correct, already tested in Gate 5) rather than duplicated here.
+
+**Phase 2 added `location` and `horse_comparison` — see the "PHASE 2"
+section below** for those two categories, the real owner Maps link, the
+weather-provider abstraction, and the classifier-precision fixes.
+
+### Tests added
+
+`tests/local-concierge-intelligence.test.ts` — 8 tests, grouped by
+category A-F exactly as specified, driven through the real
+`processThongthaiChatCore`, never hand-constructed `SemanticTurn`s.
+Verified the One-Mind fast-path-guard fix is load-bearing (not vacuous) by
+disabling it and confirming tests A2/E fail, then restoring it.
+
+(Phase 2 adds `tests/local-concierge-phase2.test.ts` and
+`tests/weather-provider.test.ts` — see the "PHASE 2" section below.)
+
+### Examples: before vs after
+
+| Message | Before | After |
+|---|---|---|
+| "อิสานมีอะไรดี ช่วงนี้ฝนตกไหมอะ" | generic "ไม่มีข้อมูลที่ยืนยันได้" apology | honest no-live-weather caveat + real seasonal guidance + connects to ตำมา-ชาติ/Inthanin/เฮือนสเตย์ |
+| "ฝนตกขี่ม้าได้ไหม" | plain horse-inventory listing (weather framing silently dropped) | "cannot confirm live ground conditions, generally rideable in normal weather, please confirm with staff on the day" |
+| "มีเวลา 3 ชั่วโมง จัดทริปให้หน่อย" | generic apology (fell through to unavailable LLM) | short journey suggestion touching food/stay/activity/cafe, asks the one genuinely missing detail (companions) |
+| "ทำมา-ชาติฟีลแบบไหน" | generic apology | short, real region-character answer |
+| "มีเวลา 3 ชั่วโมง จองขี่ม้าเลย" (explicit book-now) | (untested) | correctly yields to the real activity booking flow, not journey-planning copy |
+
+### Facts still missing (honest, documented)
+
+Same truth boundary as always in this program: this framework answers
+from STATIC local knowledge only. It has no live weather integration, no
+live ground-condition sensor, and does not override staff's real safety
+judgment at the property — every weather/safety response explicitly says
+so and defers to staff/"check when you arrive." If the owner wants an
+actual live weather source integrated later, that is real new
+infrastructure (a weather API adapter wired through
+`_knowledge-resolver.ts`'s existing adapter pattern), not something this
+static-knowledge framework should fake.
+
+~~Known remaining classifier gaps~~ — **fixed in Phase 2** (below): the
+"อีสาน/อิสาน" spelling variant, "มีไรดี/มีไรบ้าง" colloquial contractions,
+the "ปะ" sentence-final question particle, and bare companion/mood
+mentions ("มากับแฟน", "อยากชิล") with no other signal are now all
+recognized. See the "PHASE 2" section's "Gaps fixed" subsection for the
+exact before/after and the food-culture-vs-visitor-journey ordering fix
+that had to accompany the bare-companion broadening.
+
+### Deploy status: NOT DEPLOYED
+
+No Netlify, no deploy, no DB migration, no production DB mutation, no
+transaction created. All work is on `feature/local-concierge-intelligence`
+(pushed to `origin`), untouched by any of tonight's/this session's deploy
+activity on the actual release candidate.
+
+### Next step
+
+Owner review of the framework design and the before/after examples above,
+then a deploy decision (merge to `main` + Netlify deploy, following the
+SAME pre-deploy checklist/watch-window discipline already used for the
+release candidate itself).
+
+---
+
+## LOCAL CONCIERGE INTELLIGENCE FRAMEWORK — PHASE 2 (real location, real
+## weather provider, horse facts, precision fixes) — still NOT DEPLOYED
+
+Same branch: `feature/local-concierge-intelligence`. This phase finishes
+the ONE improvement above per the owner's own explicit scope boundary —
+**Service Mind / Feedback Operations / customer-feedback routing is a
+separate, second improvement and was deliberately NOT started.**
+
+### 1. Real location
+
+`_local-concierge-location.ts` (new) stores the owner-provided official
+Google Maps link as the canonical location fact:
+`https://maps.app.goo.gl/1Zm9D9uxyezX373J6?g_st=ic`.
+
+This session's sandboxed environment could **not** resolve that short link
+to coordinates/address — outbound network access to `maps.app.goo.gl` is
+blocked by the environment's own egress policy (confirmed via both a
+direct `curl`, which got a proxy `403`/`connect_rejected`, and the
+`WebFetch` tool, which returned an explicit `EGRESS_BLOCKED` error — not a
+timeout, not a DNS failure). Per the owner's own explicit instruction for
+this exact case, the fallback was followed exactly: the Maps link is
+stored as canonical, **no address or coordinates were invented**, and an
+explicit `TODO(owner/next session)` comment is left in the file (with the
+exact resolution failure documented) until a future session — with either
+network access to `maps.app.goo.gl` or an owner-supplied lat/lon — can
+resolve it.
+
+New `location` category in `_local-concierge-intent.ts` (`LOCATION_MARKER`
+covers อยู่ที่ไหน / ขอโลเคชั่น / ไปยังไง / ปักหมุดให้หน่อย / ใกล้อะไร) and
+`composeLocationResponse` in `_local-concierge-response.ts` answers with
+the real link (would also surface a resolved address once
+`resolutionStatus` flips to `'resolved'`).
+
+### 2. Weather provider abstraction
+
+`_weather-provider.ts` (new) exports `getWeatherForTammaLocation()`:
+current condition, precipitation chance, temperature, forecast summary,
+source, fetch timestamp if available — or a structured `unavailable`
+result (`no_api_key_configured` / `unsupported_provider` /
+`location_not_resolved` / `provider_error`) if not, **never** a thrown
+error and **never** a block on the concierge answer. Shaped around
+OpenWeatherMap's free current-weather endpoint (same graceful-absence
+pattern as `_thongthai-model-provider.ts`'s own
+`GEMINI_API_KEY`/`OPENAI_API_KEY` checks), but every caller depends only on
+the `WeatherResult` contract, so swapping providers later needs no
+caller-side change.
+
+**Status: NOW LIVE in production config, per Phase 3 below** — the owner
+configured `WEATHER_PROVIDER`, `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`, and
+`TAMMA_WEATHER_LON` in Netlify. See the "PHASE 3" section for the exact
+env var contract, the classification of `TAMMA_WEATHER_LAT`/`LON` as its
+own coordinate source (deliberately separate from
+`TAMMA_CHART_LOCATION`'s still-unresolved Maps-link address), and the
+forecast-limitation and ground-condition handling added alongside it.
+
+`composeWeatherConditionResponse` and `composeActivitySuitabilityResponse`
+are now `async` and call `getWeatherForTammaLocation()`:
+- **Available**: cites the live data with "จากข้อมูลล่าสุด..." (source +
+  condition/temperature/precipitation chance), still gives practical local
+  guidance, and — for activity-suitability specifically — still never
+  claims the actual ground condition ("สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกที
+  ครับ") since rain/no-rain from an API is not the same as a confirmed
+  on-site ground reading.
+- **Unavailable**: says exactly "ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันใน
+  ระบบครับ" (never a generic failure, never "คิดช้า"/"เชื่อมต่อไม่ได้"),
+  still gives safe seasonal guidance, suggests checking again closer to
+  arrival or with staff.
+
+`deterministicLocalConciergeResponse` in `thongthai-chat.ts` is now
+`async` (it awaits the composer); its one call site in
+`processThongthaiChatCore` now `await`s it. The
+`preserveLocalConciergeFastPath` guard stays synchronous — it only calls
+the classifier, never the composer.
+
+### 3. Horse ride-feel facts (owner-verified)
+
+`_local-concierge-knowledge.ts` gained `HORSE_FACTS` — the ENTIRE
+configured fact set for each horse, nothing more:
+- ทองไทย: "ขี่กระด้างกว่านิดนึง", ขี้เล่นน่ารัก
+- ภาราดร: "ขี่นิ่มกว่านิดหน่อย", ขี้เล่นน่ารัก
+
+New `horse_comparison` category. `composeHorseComparisonResponse` uses
+exactly these facts, in the owner's own allowed phrasing style ("ทองไทยจะ
+ให้ฟีลแน่น ๆ ขี่กระด้างกว่านิดนึง ส่วนภาราดรจะขี่นิ่มกว่านิดหน่อย แต่ทั้งคู่
+ขี้เล่นน่ารักครับ 😊"), and explicitly defers anything beyond ride-feel
+("เรื่องความเหมาะสมเฉพาะคน... ขอให้ทีมงานช่วยแนะนำหน้างานอีกที") — never a
+safety guarantee, never a beginner-suitability claim, never "X ดีกว่า Y"
+framing.
+
+**Critical guard, verified load-bearing**: `HORSE_ATTRIBUTE_EXCLUSION_MARKER`
+(นิสัย|อารมณ์|มือใหม่|เริ่มต้น|หัดขี่|อายุ|เพศ|ขนาด|น้ำหนัก — mirrors
+`_deterministic-semantic-turn.ts`'s own `COMPARE_ATTRIBUTE_KEYWORDS`
+exactly) stops `horse_comparison` from ever firing on a temperament or
+beginner-suitability question, so those keep going to the EXISTING,
+already-correct `detectCompareEntities`/`cannot_verify_comparison` path
+(Gate 5) instead of getting an irrelevant ride-feel answer. Verified this
+is load-bearing the same way the Phase 1 fast-path guard was verified: a
+blended probe message ("ตัวไหนขี่นิ่มกว่า เหมาะกับมือใหม่ไหม") was run with
+the guard temporarily removed — it incorrectly returned the ride-feel
+facts — then the guard was restored and the same probe correctly fell
+through to the honest "ไม่มีข้อมูล... ไม่ขอเดา" decline.
+
+### 4. Gaps fixed from the Phase 1 report
+
+- **Typo/casual spelling**: อีสาน**/อิสาน** now both recognized;
+  "มีไรดี"/"มีไรบ้าง" (colloquial อะไร→ไร contraction) added alongside
+  "มีอะไรดี"/"มีอะไรบ้าง"; "ปะ" added as a sentence-final "ไหม" alternative
+  ("แดดแรงปะ").
+- **Bare companion/mood mentions**: "มากับแฟน", "มากับครอบครัว", "มีเด็ก",
+  "มีผู้สูงอายุ", "พาแม่มา"/"พาลูกมา"/etc., "อยากชิล", "อยากลุย" now qualify
+  `visitor_journey` on their own (previously required pairing with a
+  planning verb or visitor-type marker).
+- **Ordering fix that had to accompany the above**: `food_culture` is now
+  checked *before* `visitor_journey` in `classifyLocalConciergeQuestion`
+  (previously the reverse) — otherwise the now-broadened bare-companion
+  match would have stolen a message like "มากับแฟนกินอะไรดี" away from
+  food_culture. Covered by its own test ("food-culture questions still win
+  over a bare companion mention").
+
+### Tests added (Phase 2)
+
+- `tests/local-concierge-phase2.test.ts` — 6 tests: location (A), typo/
+  casual-phrasing tolerance (C), bare visitor-context (D), food-culture-
+  vs-bare-companion ordering (E), horse ride-feel facts (G), and routing
+  safety for the two new categories (H) — including the guard-load-bearing
+  probe described above.
+- `tests/weather-provider.test.ts` — 6 tests: unavailable/no key
+  configured (structured result, no crash); unavailable/location not
+  resolved even with a key; configured+resolved uses real fetched data and
+  cites source/freshness; provider error degrades to unavailable, never
+  throws; end-to-end with mocked live weather (response cites freshness,
+  still never claims actual ground condition); end-to-end unavailable
+  (plain honest message, never a generic failure).
+- All driven through the real `processThongthaiChatCore` (or, for the
+  provider unit tests, the real `getWeatherForTammaLocation` — never a
+  hand-constructed `SemanticTurn` or a hand-built `WeatherResult` fed
+  straight to a composer in isolation). **Full suite: 658/658 passing**
+  (646 from Phase 1 + 12 new).
+
+### Sample improved answers
+
+| Question | Response shape |
+|---|---|
+| "วันนี้อากาศเป็นยังไงบ้าง" (rain-ish framing, no weather API configured) | "ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ" + real seasonal prep guidance + indoor-friendly options |
+| "วันนี้ขี่ม้าได้ไหม แดดแรงปะ" (with weather API mocked available) | "จากข้อมูลล่าสุด (openweathermap): แดดจัด อุณหภูมิประมาณ 34°C" + "ขี่ม้าเล่นได้ในสภาพอากาศปกติ แต่สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ" |
+| "ขอโลเคชั่นหน่อย" | the real owner Maps link, "กดลิงก์แล้วกดนำทางได้เลยครับ" |
+| "อิสานมีอะไรดี" / "อีสานมีไรดี" | real region-character answer (fixed spelling/contraction gap) |
+| "มากับแฟน" (bare, no question) | short journey-planning offer touching food/stay/activity/cafe, asks the one missing detail (available time) |
+| "ทองไทยกับภาราดรขี่ต่างกันยังไง" | "ทองไทยจะให้ฟีลแน่น ๆ ขี่กระด้างกว่านิดนึง ส่วนภาราดรจะขี่นิ่มกว่านิดหน่อย แต่ทั้งคู่ขี้เล่นน่ารักครับ 😊" + defers beginner/health suitability to staff |
+
+### Remaining gaps (honest, documented)
+
+- Maps link coordinates/address: **unresolved** (network-blocked this
+  session; TODO left in `_local-concierge-location.ts`).
+- Live weather: the provider is built and tested (with a mocked API) but
+  **not live** in any real environment yet — needs `WEATHER_API_KEY` set
+  AND the coordinates above resolved before it can ever return `status:
+  'ok'` for real.
+- Classifier precision is still a closed marker set, not a general NLU —
+  a sufficiently novel phrasing of any of these question types can still
+  structurally miss and fall through to the broader fallback chain (this
+  is the same, deliberate trade-off as `_deterministic-semantic-turn.ts`
+  itself; extend by adding a marker, never by hand-listing more exact
+  phrases).
+
+### Deploy status: NOT DEPLOYED (Phase 2)
+
+No Netlify access used, no deploy, no DB migration, no production DB
+mutation, no real transaction created. All Phase 2 work is on the same
+`feature/local-concierge-intelligence` branch (pushed to `origin`),
+untouched by and unrelated to the release candidate's own deploy.
+
+### Next step (Phase 2)
+
+Owner review of: the location TODO (resolve via network access or a
+supplied lat/lon), the weather-provider go-live requirement
+(`WEATHER_API_KEY`), the horse-facts phrasing, then a single deploy
+decision for the whole Local Concierge Intelligence Framework (Phase 1 +
+Phase 2 together) — no partial deploy of just one phase is intended.
+
+---
+
+## LOCAL CONCIERGE INTELLIGENCE FRAMEWORK — PHASE 3 (live weather, now
+## configured in production) — still NOT DEPLOYED
+
+Same branch: `feature/local-concierge-intelligence`. The owner configured
+4 Netlify env vars for production (`WEATHER_PROVIDER=openweathermap`,
+`WEATHER_API_KEY=<set>`, `TAMMA_WEATHER_LAT=15.9565721`,
+`TAMMA_WEATHER_LON=102.0247859`). This phase wires the weather provider to
+read exactly those 4 vars and finishes the live-weather answer shapes.
+
+### What changed
+
+- **`_weather-provider.ts` rewritten** to read `WEATHER_PROVIDER`,
+  `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`, `TAMMA_WEATHER_LON` directly from
+  `process.env` (previously it read `WEATHER_API_KEY` plus
+  `TAMMA_CHART_LOCATION.latitude`/`longitude`, which are the Maps-link
+  module's own, still-unresolved coordinates). `TAMMA_WEATHER_LAT`/`LON`
+  are their own, independent coordinate source — the owner supplied them
+  specifically for weather and they do **not** depend on the Maps-link
+  address-resolution TODO in `_local-concierge-location.ts` at all, which
+  is why weather can go live even though that TODO is still open.
+  Check order: `WEATHER_API_KEY` missing → `no_api_key_configured`;
+  `WEATHER_PROVIDER` not exactly `'openweathermap'` → `unsupported_provider`
+  (a new reason code — the module implements only this one provider, and
+  says so explicitly rather than silently ignoring an unrecognized value);
+  `TAMMA_WEATHER_LAT`/`LON` missing or not parseable as a number →
+  `location_not_resolved`; non-`ok` HTTP response or a thrown fetch error →
+  `provider_error`. Every branch returns the same structured
+  `WeatherResult`, never throws.
+- **Forecast-limitation handling** (new): the provider only implements
+  OpenWeatherMap's *current*-conditions endpoint, not a real forecast API.
+  A question shaped around a future day ("พรุ่งนี้ฝนตกไหม", "มะรืนนี้...",
+  "พยากรณ์...") now gets an explicit line saying today's data is current
+  conditions only, not a confirmed forecast — never silently answered as
+  if today's reading confirms tomorrow's weather, and never a definite
+  claim about a future day either way.
+- **Ground-condition caveat** (already existed from Phase 2, reconfirmed
+  here): `composeActivitySuitabilityResponse` and
+  `composeWeatherConditionResponse` both still say "สภาพพื้นจริงหน้างานต้อง
+  ให้ทีมดูอีกทีครับ" whether or not live weather is available — rain/no-rain
+  from an API is never treated as a confirmed on-site ground reading.
+  Pure safety-shaped questions ("พื้นลื่นไหม เล่น ATV ได้ไหม") already went
+  through `composeSafetyUncertaintyResponse`, which has always deferred
+  ground condition/individual suitability to staff — reconfirmed by a new
+  end-to-end test, no code change needed there.
+
+### 1. Env var names used (exact)
+
+`WEATHER_PROVIDER`, `WEATHER_API_KEY`, `TAMMA_WEATHER_LAT`,
+`TAMMA_WEATHER_LON` — read directly in `_weather-provider.ts`, no
+aliasing, no fallback names.
+
+### 2. OpenWeatherMap endpoint used
+
+`https://api.openweathermap.org/data/2.5/weather?lat={TAMMA_WEATHER_LAT}&lon={TAMMA_WEATHER_LON}&units=metric&appid={WEATHER_API_KEY}`
+— the free current-conditions endpoint (not the forecast endpoint; see
+"Forecast-limitation handling" above for how a forecast-shaped question is
+handled without one).
+
+### Files changed (Phase 3)
+
+`_weather-provider.ts` (env-var contract rewritten), `_local-concierge-response.ts`
+(`composeWeatherConditionResponse` and `composeActivitySuitabilityResponse`
+gained forecast-limitation handling; the latter's signature now also takes
+`message`), `tests/weather-provider.test.ts` (rewritten for the new env-var
+contract, extended to 10 tests).
+
+### Tests added/updated (Phase 3)
+
+`tests/weather-provider.test.ts` — 10 tests: no env configured; provider
+missing/unsupported (with a key present); lat/lon missing or invalid (with
+provider+key present); all 4 vars configured — calls OpenWeatherMap with
+the *exact* configured lat/lon/key (asserted against the real mocked
+request URL) and uses the real fetched data; provider HTTP error degrades
+to unavailable, never throws; end-to-end "ฝนตกไหม"/"แดดออกไหม" use live
+mocked weather and cite freshness/source; end-to-end "แดดแรงไหม ไปทำอะไรดี"
+uses live weather AND gives a local recommendation; end-to-end "พรุ่งนี้
+ฝนตกไหม ขี่ม้าได้ไหม" explains the forecast limitation correctly; end-to-end
+"พื้นลื่นไหม เล่น ATV ได้ไหม" never claims actual ground condition; end-to-end
+unavailable case still says the plain honest message. All driven through
+the real `getWeatherForTammaLocation`/`processThongthaiChatCore`, weather
+data mocked only at the `global.fetch` boundary (same discipline as the
+canonical test harness's own Supabase/Gemini mocking).
+
+### Full test result
+
+**662/662 passing** (658 from Phase 1+2, +4 net new in Phase 3's rewritten
+weather-provider suite). Existing local-concierge tests (Phase 1's 8,
+Phase 2's 6) unaffected — verified by re-running the full suite after the
+env-var-contract rewrite.
+
+### Sample answers
+
+| Question | Response |
+|---|---|
+| "ฝนตกไหม" (live weather mocked available) | "จากข้อมูลล่าสุด (openweathermap): ฝนตกปรอยๆ อุณหภูมิประมาณ 26°C โอกาสฝนประมาณ 8%" + seasonal prep guidance + "สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ" |
+| "แดดแรงไหม" | "จากข้อมูลล่าสุด (openweathermap): แดดจัด อุณหภูมิประมาณ 35°C" + practical heat guidance + indoor-friendly options |
+| "พรุ่งนี้ฝนตกไหม ขี่ม้าได้ไหม" | live current-data line + "ข้อมูลนี้เป็นสภาพอากาศปัจจุบัน ยังพยากรณ์ล่วงหน้าแบบยืนยัน 100% ไม่ได้ครับ" + "ขี่ม้าเล่นได้ในสภาพอากาศปกติ แต่สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ" |
+| "พื้นลื่นไหม เล่น ATV ได้ไหม" | general safety guidance, explicitly defers ground condition/individual suitability to staff on-site — never asserts the ground is or isn't slippery |
+
+### 7. Ready to merge/deploy?
+
+**Code and tests: ready.** All 662 tests pass, including the exact-URL
+assertion that the provider calls OpenWeatherMap with the real configured
+`TAMMA_WEATHER_LAT`/`TAMMA_WEATHER_LON`/`WEATHER_API_KEY`. This session has
+**no way to verify the live OpenWeatherMap call actually succeeds against
+production's real key/coordinates** — no outbound network access in this
+sandboxed environment (same confirmed limit as earlier in this session).
+The mocked tests prove the code's *logic* is correct; they cannot prove
+the real API call from production will succeed. Recommend: after this
+merges/deploys, the owner (or a session with production access) sends one
+real weather question and confirms a live, non-"unavailable" answer comes
+back before considering weather fully verified end-to-end.
+
+Per the "one final deploy" instruction: **this PR is not deployed by this
+session.** One clean merge/deploy instruction:
+```
+git checkout main && git pull origin main
+git merge --no-ff feature/local-concierge-intelligence
+git push origin main
+# then: Netlify deploy of main (single deploy — Phase 1+2+3 together)
+```
+
+### 8. Confirmation
+
+No production transaction created, no DB migration, no unnecessary
+Netlify deploy performed by this session — all env-var reading was via
+`process.env` in code/tests only, never a live call against the owner's
+real key (every test mocks `global.fetch`). Work remains on
+`feature/local-concierge-intelligence`, pushed, not merged, not deployed.

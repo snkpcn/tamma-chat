@@ -31,6 +31,8 @@ import { activityAssetFromText, formatActivityAssetNote } from './_operations-db
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
+import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent } from './_local-concierge-intent';
+import { composeLocalConciergeResponse } from './_local-concierge-response';
 import {
   clearRestaurantPreorderDraft,
   formatRestaurantSetPrompt,
@@ -860,6 +862,35 @@ function deterministicExperienceDiscoveryResponse(
   };
 }
 
+// Local Concierge: broad local-area/weather-condition/food-culture/visitor-
+// journey/activity-suitability/safety questions -- see
+// _local-concierge-intent.ts and THONGTHAI_HANDOFF.md's Local Concierge
+// Intelligence Framework section. Checked AFTER the broad ecosystem
+// discovery matcher (so "มาครั้งแรกมีอะไรแนะนำ"-style bare discovery keeps
+// its own established handler) and BEFORE the activity/restaurant
+// deterministic responses (so a blended question like "ฝนตกขี่ม้าได้ไหม"
+// gets concierge-shaped reasoning instead of a generic activity-inventory
+// answer that ignores the weather framing). Yields immediately if the
+// SAME message also carries an explicit transaction/commit signal --
+// local context must never swallow an explicit booking/confirm/signup/
+// redeem intent (see Gates 1-3's exactly-once/no-premature-transaction
+// discipline, which this must not regress).
+async function deterministicLocalConciergeResponse(request: BrainRequest): Promise<BrainResponse | null> {
+  if (hasExplicitTransactionIntent(request.message)) return null;
+  const match = classifyLocalConciergeQuestion(request.message);
+  if (!match) return null;
+  return {
+    message: await composeLocalConciergeResponse(match, request.message),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
 async function deterministicRestaurantResponse(
   request: BrainRequest,
   runtime: { agentState: Record<string, unknown> },
@@ -1261,8 +1292,20 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // isExperienceDiscoveryIntent matcher owns the entire broad-discovery class.
   const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
   const preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: {} });
+  // SAME class of guard as the two above: without it, One-Mind's own
+  // structural markers (e.g. findActivityTopic matching "ม้า") can claim a
+  // blended local-concierge question like "ฝนตกขี่ม้าได้ไหม" as plain
+  // activity-topic discovery BEFORE deterministicLocalConciergeResponse
+  // ever gets a chance -- answering the activity-inventory question while
+  // silently dropping the weather-conditional framing the customer
+  // actually asked. Reuses the exact same classifier
+  // deterministicLocalConciergeResponse itself uses (including its
+  // explicit-transaction-intent yield), so this guard and that function
+  // can never disagree about which messages this covers.
+  const preserveLocalConciergeFastPath = !hasExplicitTransactionIntent(request.message)
+    && Boolean(classifyLocalConciergeQuestion(request.message));
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
-      && !preserveRestaurantFastPath) {
+      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath) {
     try {
       const oneMind = await processOneMindCustomerTurn({
         channel,
@@ -1386,6 +1429,33 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (promotionDiscovery) {
     const polished = polishedResponse(promotionDiscovery, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Local Concierge: broad local-area/weather-condition/food-culture/
+  // visitor-journey/activity-suitability/safety questions -- checked BEFORE
+  // the bare ecosystem broad-discovery fallback below, since a message can
+  // structurally match BOTH (e.g. "ฝนตกแล้วยังทำอะไรได้บ้าง" matches
+  // isExperienceDiscoveryIntent's own "ทำอะไรได้บ้าง" pattern too) and the
+  // more specific, weather-aware answer is the better one when both apply.
+  // Also checked before the activity/restaurant deterministic responses
+  // further below (so "ฝนตกขี่ม้าได้ไหม" gets concierge-shaped reasoning,
+  // not a generic activity-inventory answer that ignores the weather
+  // framing) -- see the matching preserveLocalConciergeFastPath guard
+  // above the One-Mind cutover block, which uses the SAME classifier so
+  // One-Mind can't claim these messages first either. See
+  // deterministicLocalConciergeResponse's own header comment for the full
+  // precedence reasoning and the explicit-transaction-intent yield.
+  const localConcierge = await deterministicLocalConciergeResponse(request);
+  if (localConcierge) {
+    const polished = polishedResponse(localConcierge, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
