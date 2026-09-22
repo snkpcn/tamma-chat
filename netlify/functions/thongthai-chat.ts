@@ -47,6 +47,7 @@ import {
   isThankYouMessage,
   isVagueVisitIntentMessage,
 } from './_service-mind-conversation-flow';
+import { classifyCareContext, composeCareContextResponse } from './_service-mind-care-context';
 import {
   clearRestaurantPreorderDraft,
   formatRestaurantSetPrompt,
@@ -1296,6 +1297,26 @@ function deterministicActivityIntentStartResponse(request: BrainRequest): BrainR
   };
 }
 
+// Care-aware wording for family/children/elderly/mobility context (see
+// _service-mind-care-context.ts's own header comment for exactly which
+// combinations this claims and why it must run before local-concierge's
+// own visitor_journey/food_culture/activity_suitability composers --
+// those are correct but don't explicitly voice comfort/pace/safety care).
+function deterministicCareContextResponse(request: BrainRequest): BrainResponse | null {
+  const match = classifyCareContext(request.message);
+  if (!match) return null;
+  return {
+    message: composeCareContextResponse(match),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
 // Section 3 (after conversation): a bare "thank you" gets a warm close
 // and, per Customer Service Doctrine's "ask only at the right time," a
 // light feedback invitation -- never a survey, never spammed onto an
@@ -1407,6 +1428,19 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (serviceFeedback) {
     const polished = polishedResponse(serviceFeedback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const careContext = deterministicCareContextResponse(request);
+  if (careContext) {
+    const polished = polishedResponse(careContext, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

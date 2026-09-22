@@ -89,13 +89,67 @@ test('5. Couple itinerary: suitable journey, warm, one follow-up, no booking for
   });
 });
 
-test('6. Family with elderly/children: care-first, comfort/safety mention, one follow-up', async () => {
-  await withHarness(async () => {
+test('6. Family with elderly/children: mentions children/elderly, comfortable/gentle pace, asks mobility or food constraint, no hard sell, no booking forced', async () => {
+  await withHarness(async harness => {
     const r = await ask('sm-family', 'พาครอบครัวไป มีเด็กกับผู้สูงอายุ');
     assert.equal(r.statusCode, 200);
     const text = msg(r.payload);
     assert.doesNotMatch(text, NO_GENERIC_FAILURE);
-    assert.match(text, /กิน|ตำมา-ชาติ|พัก|เฮือนสเตย์|กิจกรรม|คาเฟ่/u);
+    assert.match(text, /เด็ก/u);
+    assert.match(text, /ผู้สูงอายุ/u);
+    assert.match(text, /เดินสบาย|ไม่แน่นเกินไป|เบา ๆ/u, 'must mention a comfortable/gentle pace, not just a generic journey list');
+    assert.match(text, /เดินไม่สะดวก|แพ้|ไม่ทานเผ็ด/u, 'must ask about mobility or a food constraint');
+    assert.doesNotMatch(text, NO_HARD_SELL);
+    assert.equal(harness.postsTo('bookings').length, 0);
+  });
+});
+
+test("6b. Low-walking / mother context: chill plan, asks mobility question, not just a generic journey answer", async () => {
+  await withHarness(async () => {
+    const r = await ask('sm-low-walking', 'พาแม่มา ไม่อยากเดินเยอะ');
+    assert.equal(r.statusCode, 200);
+    const text = msg(r.payload);
+    assert.doesNotMatch(text, NO_GENERIC_FAILURE);
+    assert.match(text, /สายชิล|ไม่ต้องเดินเยอะ|เบา ๆ/u, 'must give a low-walking/chill plan, not the generic journey composer');
+    assert.match(text, /เดินขึ้นลงสะดวกไหม|เดินสะดวกไหม/u, 'must ask a mobility question');
+  });
+});
+
+test('6c. Child + activity interest: activity guidance, safety caveat, asks child age, no fake safety guarantee', async () => {
+  await withHarness(async () => {
+    const r = await ask('sm-child-activity', 'มากับเด็ก อยากทำกิจกรรม');
+    assert.equal(r.statusCode, 200);
+    const text = msg(r.payload);
+    assert.doesNotMatch(text, NO_GENERIC_FAILURE);
+    assert.match(text, /กิจกรรมเบา ๆ/u, 'must recommend starting gentle');
+    assert.match(text, /อากาศ|สภาพพื้นจริง/u, 'must include the outdoor-safety caveat');
+    assert.match(text, /อายุประมาณกี่ขวบ/u, 'must ask the child\'s age');
+    assert.doesNotMatch(text, /ปลอดภัยแน่นอน|เล่นได้แน่นอน/u);
+  });
+});
+
+test('6d. Elderly + named-activity suitability ("ผู้สูงอายุเล่น ATV ได้ไหม"): no safety guarantee, recommends staff check, suggests gentler alternative, no transaction', async () => {
+  await withHarness(async harness => {
+    const r = await ask('sm-elderly-atv', 'ผู้สูงอายุเล่น ATV ได้ไหม');
+    assert.equal(r.statusCode, 200);
+    const text = msg(r.payload);
+    assert.doesNotMatch(text, NO_GENERIC_FAILURE);
+    assert.doesNotMatch(text, /เล่นได้แน่นอน|ปลอดภัยแน่นอน|เล่นไม่ได้แน่นอน/u, 'must never guarantee safety either way');
+    assert.match(text, /ทีม.*หน้างาน|หน้างาน.*ทีม/u, 'must recommend a staff/on-site suitability check');
+    assert.match(text, /ไม่โลดโผน|เบา ๆ/u, 'must suggest a gentler alternative');
+    assert.equal(harness.postsTo('bookings').length, 0);
+  });
+});
+
+test('6e. Child + non-spicy food constraint ("มีเด็ก ไม่กินเผ็ด"): food care, mentions mild/non-spicy, asks allergy/constraint, no fake menu', async () => {
+  await withHarness(async () => {
+    const r = await ask('sm-child-food', 'มีเด็ก ไม่กินเผ็ด');
+    assert.equal(r.statusCode, 200);
+    const text = msg(r.payload);
+    assert.doesNotMatch(text, NO_GENERIC_FAILURE);
+    assert.match(text, /รสอ่อน|ไม่เผ็ด/u, 'must mention mild/non-spicy');
+    assert.match(text, /แพ้อาหาร|ข้อจำกัด/u, 'must ask about allergy/constraint');
+    assert.doesNotMatch(text, /\d+\s*บาท/u, 'must never invent a specific menu price');
   });
 });
 

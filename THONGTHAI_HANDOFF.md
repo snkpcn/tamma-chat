@@ -2466,21 +2466,40 @@ local-concierge framework from earlier phases.
 
 ### 2. During conversation
 
-Most of the personalization categories in the spec (couple/family/
-elderly trip planning, dietary constraints, horse ride-feel facts,
-weather + outdoor activity with ground-condition caveats) **already exist
-and already work** via the Local Concierge Intelligence Framework built
-in earlier phases (`_local-concierge-intent.ts`/`_local-concierge-
-response.ts`) — verified end-to-end in `tests/service-mind.test.ts`
-(tests 5–9) rather than reimplemented, per the instruction not to create
-a parallel architecture. No new intent-classification module was built
-for weather_condition_question / itinerary_request / family_trip /
-couple_trip / horse_interest — those names map directly onto local-
-concierge's existing `weather_condition` / `visitor_journey` /
-`horse_comparison` categories.
+Most of the personalization categories in the spec (couple trip
+planning, dietary constraints, horse ride-feel facts, weather + outdoor
+activity with ground-condition caveats) **already exist and already
+work** via the Local Concierge Intelligence Framework built in earlier
+phases (`_local-concierge-intent.ts`/`_local-concierge-response.ts`) —
+verified end-to-end in `tests/service-mind.test.ts` (tests 5, 7, 8, 9)
+rather than reimplemented, per the instruction not to create a parallel
+architecture. No new intent-classification module was built for
+weather_condition_question / itinerary_request / couple_trip / horse_
+interest — those names map directly onto local-concierge's existing
+`weather_condition` / `visitor_journey` / `horse_comparison` categories.
+
+**Care-aware wording follow-up** (`_service-mind-care-context.ts`, new):
+the owner's own review found the generic `visitor_journey`/`food_
+culture`/`activity_suitability` composers, while correct, didn't
+explicitly voice comfort/pace/safety care for family/children/elderly/
+mobility context the way a real host would. Rather than modifying
+local-concierge's own files (per "do not rewrite local concierge"), this
+adds a small, narrow, EARLIER-checked classifier that only claims
+messages combining a child/elderly/mobility marker with something else
+(a family context, a mobility statement, an activity interest, a named-
+activity suitability question about an elderly person, or a food
+constraint) — 5 categories: `family_elderly_children`, `low_walking`,
+`child_activity`, `elderly_activity_suitability`,
+`child_food_constraint`. A message without one of these specific
+combinations (e.g. a bare "มากับแฟน มีเวลา 3 ชั่วโมง", no child/elderly
+word at all) is completely untouched and still falls through to
+local-concierge exactly as before — **verified via the established
+revert-and-confirm methodology**: disabling this responder broke exactly
+the 5 tests that depend on it and zero others.
 
 Genuinely new in this phase: the feedback-shaped categories the spec asks
-for that had **zero** existing coverage — see Section 3.
+for that had **zero** existing coverage, plus this care-context wording
+layer — see Section 3.
 
 ### 3. After conversation — feedback system (the new subsystem)
 
@@ -2575,15 +2594,20 @@ correctly switches to the past-tense "already sent" line.
 - `netlify/functions/_service-mind-feedback-events.ts` (new)
 - `netlify/functions/_service-mind-conversation-flow.ts` (new — vague
   visit intent, bare food/activity intent start, thank-you close)
+- `netlify/functions/_service-mind-care-context.ts` (new — family/
+  children/elderly/mobility care-aware wording, added in the care-wording
+  follow-up round; see Section 2 above)
 - `netlify/functions/_ops-notifications.ts` (extended: `'feedback_event'`
   entity, `notifyFeedbackEvent`, wired into `dispatchEntityNotification`)
-- `netlify/functions/thongthai-chat.ts` (greeting wording; 5 new
+- `netlify/functions/thongthai-chat.ts` (greeting wording; 6 new
   deterministic responders wired into the precedence chain right after
   the activity-booking fallback)
 - `tests/helpers/canonical-core-harness.ts` (extended: LINE push mock,
   `ops_notification_channels`/`ops_notification_deliveries`/
   `ops_feedback_events` mocking, `programOpsChannel`)
-- `tests/service-mind.test.ts` (new — 21 tests)
+- `tests/service-mind.test.ts` (25 tests — 21 from the initial phase + 4
+  net new from the care-wording follow-up: test 6 upgraded, tests
+  6b/6c/6d/6e added)
 - `supabase/migrations/20260922210000_ops_feedback_events_v1.sql` (new,
   **NOT APPLIED**)
 
@@ -2599,13 +2623,27 @@ stays honestly future-tense.
 
 ### Tests added
 
-`tests/service-mind.test.ts` — 21 tests covering all 20 of the owner's
-required scenarios plus one extra (the notification-actually-sent happy
-path), all driven through the real `processThongthaiChatCore`. The
-service-feedback responder's precedence placement is verified
-load-bearing via the established revert-and-confirm methodology (see
-Section 3 above). Full suite: **694/694 passing** (673 before this
-phase + 21 new).
+`tests/service-mind.test.ts` — 25 tests: 21 from the initial phase
+(covering all 20 of the owner's required scenarios plus one extra, the
+notification-actually-sent happy path), plus 4 net new from the
+care-wording follow-up round (test 6 upgraded with stronger assertions;
+tests 6b/6c/6d/6e added for low-walking, child + activity, elderly +
+named-activity suitability, and child + food constraint). All driven
+through the real `processThongthaiChatCore`. Both the service-feedback
+responder's AND the care-context responder's precedence placement are
+verified load-bearing via the established revert-and-confirm
+methodology (see Section 3 and Section 2 above). Full suite:
+**698/698 passing** (673 before this phase + 25 new).
+
+### Sample answers (care-wording follow-up)
+
+| Message | Response |
+|---|---|
+| "พาครอบครัวไป มีเด็กกับผู้สูงอายุ" | "ได้เลยครับ 😊 ถ้ามีเด็ก ๆ กับผู้สูงอายุ ทองไทยแนะนำแผนเดินสบาย ไม่แน่นเกินไปก่อนครับ เริ่มจากกินข้าว/นั่งพักในโซนสบาย ๆ แล้วค่อยเลือกกิจกรรมเบา ๆ ตามแรงของทุกคนครับ / มีใครเดินไม่สะดวก หรือมีอาหารที่แพ้/ไม่ทานเผ็ดไหมครับ" |
+| "พาแม่มา ไม่อยากเดินเยอะ" | "ได้เลยครับ แบบนี้ทองไทยจัดสายชิลให้ดีกว่าครับ 😊 เน้นกินข้าว นั่งพัก ดูบรรยากาศ แล้วค่อยเลือกกิจกรรมเบา ๆ ถ้าอากาศดี ไม่ต้องเดินเยอะครับ / คุณแม่เดินขึ้นลงสะดวกไหมครับ เดี๋ยวทองไทยช่วยจัดให้เบาที่สุด" |
+| "มากับเด็ก อยากทำกิจกรรม" | "ได้เลยครับ 😊 ถ้ามีเด็กมาด้วย ทองไทยแนะนำเริ่มจากกิจกรรมเบา ๆ และให้ทีมหน้างานช่วยดูความเหมาะสมอีกที โดยเฉพาะกิจกรรมกลางแจ้งอย่างขี่ม้า/ATV ต้องดูอากาศกับสภาพพื้นจริงเพื่อความปลอดภัยครับ / เด็กอายุประมาณกี่ขวบครับ" |
+| "ผู้สูงอายุเล่น ATV ได้ไหม" | "ทองไทยฟันธงแทนทีมงานหน้างานไม่ได้ครับ ขอให้ทีมช่วยดูความเหมาะสมของผู้สูงอายุหน้างานอีกทีเพื่อความปลอดภัยครับ ถ้าอยากได้แบบเบา ๆ ก่อน ทองไทยมีกิจกรรมที่ไม่โลดโผนเท่า ATV ให้เลือกด้วยครับ / อยากให้ทองไทยช่วยแนะนำกิจกรรมเบา ๆ เพิ่มเติมไหมครับ" |
+| "มีเด็ก ไม่กินเผ็ด" | "ได้เลยครับ 😊 มีเด็กมาด้วย ทองไทยแนะนำเมนูรสอ่อน ไม่เผ็ด ให้เด็กทานได้สบายครับ / มีใครแพ้อาหารหรือมีข้อจำกัดอื่นเพิ่มเติมไหมครับ" |
 
 ### Remaining gaps (honest, documented)
 
@@ -2629,10 +2667,12 @@ phase + 21 new).
 - Section 2's "during conversation" coverage leans on the EXISTING
   local-concierge framework rather than a from-scratch rebuild of every
   named intent category in the spec (weather_condition_question,
-  itinerary_request, family_trip, couple_trip, horse_interest,
-  mobility_constraint, etc.) — verified working, not reimplemented; see
-  the note in Section 2 above for exactly which spec category maps to
-  which existing local-concierge category.
+  itinerary_request, couple_trip, horse_interest, etc.) — verified
+  working, not reimplemented; see the note in Section 2 above for exactly
+  which spec category maps to which existing local-concierge category.
+  ~~family_trip / elderly / mobility_constraint wording was too generic~~
+  — **closed in the care-wording follow-up round**: see
+  `_service-mind-care-context.ts` and the new sample answers above.
 
 ### Deploy status: NOT DEPLOYED
 
