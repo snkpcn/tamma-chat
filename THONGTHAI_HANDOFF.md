@@ -1164,21 +1164,85 @@ pushed to `feature/thongthai-one-mind-architecture`. Netlify/production
 untouched throughout (`process.env.THONGTHAI_ONE_MIND_CUTOVER` set only
 inside the local test harness, never in a deployed context).
 
+### Checkpoint: restaurant preorder loose-name gap + harness RPC/PATCH fixes (commit `a266837`)
+
+Building `tests/restaurant-cross-domain-stress.test.ts` (menu discovery,
+dietary-constraint filtering, promotion side-question survival, and — via
+`harness.setState` seeding a `restaurantProposedSet` the same shape a
+correct LLM turn would write, matching the promotion test's established
+seeding technique — the accept/collect-missing-fields/create-preorder
+path) surfaced two real, distinct problems:
+
+1. **A production bug, sibling to the promotion one**: `parseRestaurantPreorderTurn`'s
+   loose-name fallback only checked "no name captured yet", not "date+time
+   already resolved" — its own design premise (`formatRestaurantSetPrompt`
+   always asks for date+time before name+phone). An off-topic message sent
+   right after accepting a set, while date/time were still missing, was
+   wrongly captured as the customer's name. Fixed by gating the loose
+   fallback on date+time already being known (from the draft, or from the
+   same message when given together) — preserves the designed one-shot
+   "นุ๊ก 0610169999" reply while closing the gap. **Caught only after
+   strengthening the test to check the persisted draft directly** — an
+   initial version that only checked downstream write counts passed even
+   with the bug present, because the final turn's explicit "ชื่อสมชาย"
+   silently overwrote the wrongly-captured value before any assertion saw
+   it. Verified the strengthened test actually fails on the reverted bug.
+
+2. **Two harness bugs (test infrastructure, not production)**:
+   - `guest_agent_state` PATCH — the real CAS write path used by every
+     turn after a guest's very first write — was never modeled in the
+     harness's fetch mock. Every write after turn 1 fell through to the
+     generic "unmodeled write" fallback: it returned a fake success
+     response but never actually updated the harness's in-memory state
+     map. This was invisible in earlier tests only because their
+     assertions happened to not depend on state changing after turn 1
+     (promotion redemption's pending state was fully written on turn 1
+     already, since the default catalog has exactly one promotion).
+     Fixed by adding a real PATCH handler with proper CAS-token
+     (`updated_at`) matching, mirroring PostgREST's actual conflict
+     semantics (stale token → empty array → caller-side conflict/retry).
+   - Restaurant preorder creation is the RPC `create_restaurant_preorder_v2`/
+     `_v3` (`_restaurant-sot.ts`), never a direct table insert — the
+     harness previously modeled a fake direct `restaurant_preorders`
+     POST route that real code never calls, so an early version of this
+     test's "exactly one preorder" assertion was checking a write path
+     that doesn't exist in production (it would have passed vacuously).
+     Fixed by modeling both RPCs with realistic menu-price resolution and
+     idempotency-key-based dedup (mirroring the real RPC's own
+     idempotency contract), recorded under `postsTo('restaurant_preorders_rpc')`,
+     and serving the created row back on the GET-by-id reads the
+     staff-notification path (`notifyRestaurantPreorderTeam`) depends on.
+
+**Methodology note for whoever builds the remaining domains' tests**: when
+a domain's transactional write turns out to go through an RPC rather than
+a plain table insert, grep the real implementation file (not just the
+table name) before assuming the harness's existing generic fallback is
+adequate — a vacuously-passing assertion against an unmodeled write path
+is worse than no test, because it looks like coverage.
+
+**Full suite: 604/604 passing.** Pushed to `feature/thongthai-one-mind-architecture`.
+
 ### Gate 1 status (cross-domain customer-level stress, 8 domains)
 
 - **Activity**: pre-existing deep coverage (16-turn flow etc.) — regression only, not re-derived.
-- **Stay**: now covered by `stay-real-text-readonly-flow.test.ts` (read-only inquiry, side-question survival, topic switch to restaurant and back, no premature task/transaction). Known gap (documented, not a bug to fix under this program's scope discipline): stay still has no booking-task-creation mechanism via the canonical core — a real booking intent for stay does not yet produce an `ActiveTask`, unlike activity.
-- **Restaurant, Promotion**: promotion redemption's missing-name path now has a dedicated regression test; broader promotion/restaurant cross-domain stress conversations (the owner's full example flows) not yet built as permanent test files this checkpoint.
-- **OTOP, Membership, Cafe, General ecosystem**: not yet built as permanent test files this checkpoint — next task.
+- **Stay**: covered by `stay-real-text-readonly-flow.test.ts` (read-only inquiry, side-question survival, topic switch to restaurant and back, no premature task/transaction). Known gap (documented, not a bug to fix under this program's scope discipline): stay still has no booking-task-creation mechanism via the canonical core — a real booking intent for stay does not yet produce an `ActiveTask`, unlike activity.
+- **Restaurant**: covered by `restaurant-cross-domain-stress.test.ts` (menu discovery, dietary-constraint filtering, promotion-side-question survival, accept-set → collect-missing-fields → create-exactly-once, off-topic-message-not-captured-as-name). Real bug found and fixed (see above).
+- **Promotion**: covered by `promotion-redemption-loose-name-guard.test.ts` (missing-name path). Broader promotion discovery/conditions/cross-domain-return flow from the owner's example not yet built as a dedicated file (the discovery/list/clarify paths are exercised incidentally by the restaurant and promotion tests above, but not as their own named scenario).
+- **OTOP, Membership, Cafe, General ecosystem**: not yet built as permanent test files — next task.
 
 ### Next task (exact resumption point)
 
-1. Build permanent stress-test files for restaurant, OTOP, membership,
-   cafe, and general-ecosystem, using `tests/helpers/canonical-core-
-   harness.ts` and the owner's exact example conversations, following the
-   same two-pass method already used successfully (an unscripted baseline
-   run first to discover true routing, then targeted `programGeminiReply`
-   calls only for turns confirmed to reach the LLM).
+1. Build permanent stress-test files for OTOP, membership, cafe, and
+   general-ecosystem, using `tests/helpers/canonical-core-harness.ts` and
+   the owner's exact example conversations. Before trusting any write-path
+   assertion, confirm (by grepping the real implementation, not guessing)
+   whether that domain's transactional write is a plain table insert or an
+   RPC — restaurant just turned out to be an RPC when every other domain's
+   writes so far have been plain inserts; do not assume the pattern holds
+   for OTOP/cafe without checking `_operations-db.ts` directly (a first
+   pass already found bookings/otop_orders/cafe_inquiries ARE plain
+   inserts — see the checkpoint above — but re-verify before relying on
+   that for a specific new assertion).
 2. Then Gate 2 (LINE vs Web equivalence across all domains, not just
    activity), Gate 3 (stale/interrupted-conversation coverage beyond
    activity), Gate 4 (restaurant-preorder-notification migration file +
@@ -1186,5 +1250,5 @@ inside the local test harness, never in a deployed context).
    Gate 6 (release freeze: full suite + tsc + esbuild smoke + final
    `THONGTHAI_HANDOFF.md` "RELEASE CANDIDATE" section + the owner's
    11-item final report).
-3. Commit and push after every meaningful checkpoint, as done for the two
-   checkpoints above — do not accumulate uncommitted work.
+3. Commit and push after every meaningful checkpoint, as done for the
+   three checkpoints above — do not accumulate uncommitted work.
