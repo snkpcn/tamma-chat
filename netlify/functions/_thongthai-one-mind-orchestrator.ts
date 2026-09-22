@@ -8,9 +8,17 @@
 // grounded knowledge -> dialog decision -> bounded state persistence.
 //
 // It never writes a booking/order/payment and never composes customer prose.
+// The one narrow exception is mirrorActivityTaskToLegacySession below: after
+// a LINE-sourced activity_booking task's slots are persisted, it writes
+// those slots into the legacy booking_sessions row -- never the `bookings`
+// table itself, never a transaction -- so the legacy transactional flow
+// (still the only thing that executes a real LINE booking) has a current
+// view of what this pipeline already knows. See that function's own doc
+// comment in _operations-db.ts for the full one-directional-ownership
+// contract this implements.
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { resolveCanonicalGuestId } from './_thongthai-identity';
-import { guestDbIdFromAnonymousId } from './_operations-db';
+import { guestDbIdFromAnonymousId, mirrorActivityTaskToLegacySession, activityAssetFromText } from './_operations-db';
 import {
   applyConversationContextUpdate,
   buildSemanticContext,
@@ -27,6 +35,7 @@ import {
   suspendActiveTask,
   isTerminalTaskStatus,
   type TaskStateContainer,
+  type ActiveTask,
 } from './_task-state';
 import {
   interpretSemanticTurn,
@@ -134,6 +143,7 @@ export type OneMindDependencies = {
   persistTaskState: typeof persistTaskState;
   interpretSemanticTurn: typeof interpretSemanticTurn;
   buildKnowledgeAdapters: (channel: BrainChannel, options: RealKnowledgeAdapterOptions) => KnowledgeSourceAdapters;
+  mirrorActivityTaskToLegacySession: typeof mirrorActivityTaskToLegacySession;
 };
 
 const REAL_DEPENDENCIES: OneMindDependencies = {
@@ -145,6 +155,7 @@ const REAL_DEPENDENCIES: OneMindDependencies = {
   persistTaskState,
   interpretSemanticTurn,
   buildKnowledgeAdapters: buildRealKnowledgeSourceAdapters,
+  mirrorActivityTaskToLegacySession,
 };
 
 function normalizeMessage(message: string): string {
@@ -432,6 +443,52 @@ const REAL_AUTHORITATIVE_STATE_DEPENDENCIES: AuthoritativeStateDependencies = {
   compareAndSwap:compareAndSwapGuestAgentState,
 };
 
+function activityAssetFromSlots(task: ActiveTask): { name: string; assetCode: string } | null {
+  const horseName = task.slots.horseName;
+  if (typeof horseName !== 'string' || !horseName) return null;
+  // A raw horse NAME is all taskState ever stores (see
+  // _deterministic-semantic-turn.ts's entities.horseName) -- resolve it
+  // through the SAME owner-verified lexicon the legacy flow and the web
+  // deterministic fallback both already use, rather than inventing a
+  // second name->asset mapping here.
+  return activityAssetFromText(horseName);
+}
+
+/**
+ * After a LINE-sourced activity_booking task's slots are freshly persisted,
+ * mirror them into the legacy booking_sessions row (see
+ * mirrorActivityTaskToLegacySession's own doc comment in _operations-db.ts
+ * for the full one-directional-ownership contract). A no-op for every other
+ * channel/domain/terminal-task case -- this never runs for web, and never
+ * for a task type other than activity_booking.
+ */
+async function mirrorActivityTaskIfLineSourced(
+  channel: BrainChannel,
+  guestDbId: string | null,
+  taskStateAfter: TaskStateContainer,
+  environment: 'live' | 'test' | undefined,
+  deps: OneMindDependencies,
+): Promise<void> {
+  if (channel !== 'line' || !guestDbId) return;
+  const task = taskStateAfter.activeTask;
+  if (!task || task.type !== 'activity_booking' || task.sourceChannel !== 'line') return;
+  if (isTerminalTaskStatus(task.status)) return;
+
+  const durationRaw = Number(task.slots.durationMinutes);
+  const durationMinutes = durationRaw === 30 || durationRaw === 60 || durationRaw === 90 ? (durationRaw as 30 | 60 | 90) : null;
+
+  await deps.mirrorActivityTaskToLegacySession({
+    guestDbId,
+    environment,
+    resourceCode: typeof task.slots.resourceCode === 'string' ? task.slots.resourceCode : null,
+    durationMinutes,
+    date: typeof task.slots.date === 'string' ? task.slots.date : null,
+    time: typeof task.slots.time === 'string' ? task.slots.time : null,
+    partySize: typeof task.slots.partySize === 'number' ? task.slots.partySize : null,
+    asset: activityAssetFromSlots(task),
+  });
+}
+
 /** G.2-safe authoritative variant.
  *
  * It reads ConversationContext + TaskState from ONE row snapshot, computes the
@@ -510,6 +567,7 @@ export async function processThongthaiOneMindTurnAuthoritative(
     stateWriteMs += Date.now() - stateWriteStartedAt;
 
     if (write.status === 'applied') {
+      await mirrorActivityTaskIfLineSourced(input.channel, identity.guestDbId, result.taskStateAfter, input.environment, deps);
       return {
         ...result,
         trace:{
