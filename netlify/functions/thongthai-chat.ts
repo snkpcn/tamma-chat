@@ -1006,7 +1006,7 @@ function activityFallbackName(userTurns: string[]): string | null {
     const text = turn.trim();
     if (!text || activityAssetFromText(text) || extractDurationMinutes(text) || extractDate(text) || extractThaiMonthDate(text)
         || extractTime(text) || extractPartySize(text) || /\d{8,}/u.test(text) || activityFallbackCommit(text)) continue;
-    if (/^(?:SMOKE TEST|TEST)\b/iu.test(text)) return text.slice(0, 120);
+    if (/^(?:SMOKE\s+(?:RE)?TEST|TEST)\b/iu.test(text)) return text.slice(0, 120);
   }
   return null;
 }
