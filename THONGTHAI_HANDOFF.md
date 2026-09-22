@@ -393,7 +393,7 @@ where event_object_table in ('booking_allocations','otop_order_items','restauran
 select pg_get_functiondef(oid) from pg_proc where proname = 'enqueue_tamma_ops_notification';
 ```
 
-### L. Commands the next agent/session should run first
+### L. Commands the next agent/session should run first (superseded by the section below; kept for history)
 
 ```bash
 cd /home/user/tamma-chat
@@ -403,3 +403,109 @@ git pull --ff-only origin feature/thongthai-one-mind-architecture
 npm test   # expect 558/558 passing as of commit 9fb198d
 git log --oneline -5
 ```
+
+## 2026-09-22 Priority 1 Checkpoint — LINE Self-Fetch Removed
+
+Branch: `feature/thongthai-one-mind-architecture`. HEAD: `d60cde3`.
+Working tree: clean, pushed.
+
+### What changed
+
+`netlify/functions/thongthai-chat.ts`'s handler body was mechanically
+extracted into a new exported plain function,
+`processThongthaiChatCore(request: BrainRequest, eventId: string | null):
+Promise<{statusCode: number; payload: Record<string, unknown>}>`. The HTTP
+`handler` export is now a thin wrapper: parse JSON → `normalizeRequest` →
+call the core → wrap the result as an HTTP response. Every internal
+`return json(X, Y)` became `return coreResult(X, Y)`; zero business logic
+changed (verified line-by-line via `git diff` and the full test suite).
+
+`netlify/functions/_line-webhook-core.ts` now calls
+`processThongthaiChatCore` **directly, in-process** (a live ES module
+import from `./thongthai-chat` — the exact same function object the web
+HTTP handler calls, not a re-implementation) instead of HTTP-fetching
+`/.netlify/functions/thongthai-chat`. Its `reinforceStructuredMemory`
+similarly now calls `_customer-db.ts`'s `loadCustomerMemory`/
+`persistCustomerSnapshot` directly instead of HTTP-fetching
+`/.netlify/functions/customer-memory` (mirroring that handler's own
+two-call pattern exactly, so behavior is unchanged). The dead
+`siteBaseUrl()`/`THONGTHAI_ENDPOINT`/`CUSTOMER_MEMORY_ENDPOINT` were
+removed.
+
+**Retry/fallback semantics are fully preserved**: `askThongthaiReliably`
+still throws-and-retries on a non-2xx core result exactly as it threw on
+a non-2xx HTTP response before.
+
+### How this was verified (no production access)
+
+1. Full test suite: 563/563 passing (558 baseline + 5 new).
+2. Import-graph trace: confirmed `thongthai-chat.ts`'s full import closure
+   (3 levels deep) never reaches back to `_line-webhook-core.ts` — no
+   circular import.
+3. **Real dynamic import test** (not just source grep) — both files loaded
+   via actual tsx module resolution with zero env vars set; proves no
+   import-time throw anywhere in either file's closure.
+4. **esbuild bundle test** — bundled the real `line-webhook.ts` entry point
+   with the repo's own esbuild (matching `netlify.toml`'s
+   `node_bundler = "esbuild"`), then `require()`'d the bundle and invoked
+   `handler()` with a synthetic signed LINE `ฮัลโหล` event end-to-end. The
+   stack trace confirms `askThongthai` calls `processThongthaiChatCore`
+   **synchronously in the same call stack** (no network hop), the existing
+   provider-unavailable retry-then-fallback path fired exactly as
+   designed, and the handler resolved cleanly (`200 OK`). The only
+   failures logged were this sandbox's own missing API keys/blocked
+   egress to `api.line.me` — not any code defect. Bundle size grew from
+   ~322kb (LINE webhook alone) to ~707kb (now also carrying the full
+   brain/One-Mind dependency graph inline) — still trivially within
+   Netlify Function size limits; noted as an honest trade-off (less
+   network-dependent latency risk, larger single bundle) with no observed
+   downside.
+5. Fixed one stale test (`phase-n-legacy-cleanup.test.ts`) that asserted
+   the OLD self-fetch pattern (`THONGTHAI_ENDPOINT` must appear in the
+   file) — updated to assert the new invariant (`processThongthaiChatCore`
+   imported/called; neither self-fetch endpoint string present).
+
+### Remaining self-fetch-shaped risk, explicitly NOT yet touched
+
+`_line-webhook-core.ts`'s `LINE_REPLY_ENDPOINT` fetch to `api.line.me` and
+`_ops-notifications.ts`/`_operations-db.ts`'s Supabase `dbFetch` calls are
+genuine external-service calls, not self-fetches — out of scope for this
+priority and untouched.
+
+### Definition-of-done items this closes
+
+Item 1 ("LINE no longer self-fetches its own site") and item 2 ("Web and
+LINE share one canonical brain invocation") from the owner's Definition of
+Done are now true, as far as offline/CI verification can prove (see
+Priority 1's required "FINAL PRODUCTION ACCEPTANCE GATES" note below).
+
+### Next step
+
+Priority 2: eliminate the `booking_sessions`/`taskState` split-brain, per
+section H.2 of the prior audit — now unblocked, since the self-fetch risk
+that made a prior attempt (`ee2a315`) unsafe to reason about is resolved.
+Redesign per H.2: write One-Mind's collected activity slots into the
+*same* `booking_sessions` row via the existing `special_request` marker
+mechanism, rather than an extra live `loadTaskState` fetch per turn.
+
+### Commands the next agent/session should run first
+
+```bash
+cd /home/user/tamma-chat
+git fetch origin feature/thongthai-one-mind-architecture
+git checkout feature/thongthai-one-mind-architecture
+git pull --ff-only origin feature/thongthai-one-mind-architecture
+npm test   # expect 563/563 passing as of commit d60cde3
+git log --oneline -8
+```
+
+### FINAL PRODUCTION ACCEPTANCE GATES (accumulating — not a reason to deploy now)
+
+- Netlify production deploy SHA must match this branch's merge commit
+  before any of this is live.
+- A real LINE greeting must be confirmed replying in production (the exact
+  check that failed after `ee2a315`) before any further activity-booking
+  production retest.
+- Live LINE smoke test of the full required conversation sequence.
+These require the owner's explicit go-ahead for ONE deploy; nothing above
+was performed against production.
