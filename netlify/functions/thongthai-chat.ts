@@ -687,7 +687,7 @@ async function resolvePromotionRedemption(
   guestDbId: string | null,
   channel: BrainChannel,
 ): Promise<BrainResponse> {
-  const parsed = parseRestaurantPreorderTurn(request.message, pending.draft);
+  const parsed = parseRestaurantPreorderTurn(request.message, pending.draft, new Date(), { allowLooseName: false });
   const draft: RestaurantPreorderDraft = mergeRestaurantPreorderDraft(pending.draft, parsed);
   const updatedPending: PendingPromotionRedemption = { ...pending, draft };
   const missing = missingPromotionFields(updatedPending);
@@ -1165,19 +1165,21 @@ async function executeDeterministicActivityBooking(
     ].filter(Boolean).join('\n'),
   };
 }
+export type ThongthaiChatCoreResult = { statusCode: number; payload: Record<string, unknown> };
 
-export const handler: Handler = async (event: HandlerEvent) => {
-  if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
-
-  let rawBody: unknown;
-  try {
-    rawBody = JSON.parse(event.body ?? '{}');
-  } catch {
-    return json(400, { error: 'Malformed JSON body' });
+// The single canonical entry point into Thongthai's shared brain -- called by
+// BOTH the web HTTP handler below and LINE's adapter (_line-webhook-core.ts).
+// LINE used to reach this over HTTP (a self-fetch to this same site's own
+// thongthai-chat function); it now calls this function directly, in-process.
+// See THONGTHAI_HANDOFF.md's "LINE self-fetch" finding for why that mattered.
+// `eventId` is whatever the transport already determined as a stable id for
+// this turn (LINE's own message id; the web handler's rawBody.eventId or
+// x-nf-request-id/x-request-id header), or null if transport gave us nothing
+// stable for this turn.
+export async function processThongthaiChatCore(request: BrainRequest, eventId: string | null): Promise<ThongthaiChatCoreResult> {
+  function coreResult(statusCode: number, payload: unknown): ThongthaiChatCoreResult {
+    return { statusCode, payload: payload as Record<string, unknown> };
   }
-
-  let request = normalizeRequest(rawBody);
-  if (!request) return json(400, { error: 'Missing required field: message' });
 
   const channel = getBrainChannel(request.pageContext.section);
   const providerUserKey = request.guestId;
@@ -1209,25 +1211,19 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
 
-  const rawEventId = isObject(rawBody) && isNonEmptyString(rawBody.eventId)
-    ? rawBody.eventId.trim().slice(0, 180)
-    : null;
-  const headerEventId = isNonEmptyString(event.headers?.['x-nf-request-id'])
-    ? event.headers['x-nf-request-id'].trim().slice(0, 180)
-    : (isNonEmptyString(event.headers?.['x-request-id'])
-      ? event.headers['x-request-id'].trim().slice(0, 180)
-      : null);
-  // LINE supplies its message id. Web currently gets Netlify's request id;
-  // if neither exists this unique per-invocation fallback still separates two
-  // intentional identical messages (unlike hashing message text).
-  const transportEventId = rawEventId ?? headerEventId
+  // eventId is whatever the transport layer determined (LINE's own message
+  // id; the web HTTP handler's rawBody.eventId or x-nf-request-id/x-request-id
+  // header -- see the handler below). A generated per-invocation fallback
+  // still separates two intentional identical messages when transport gave
+  // us nothing stable (unlike hashing message text).
+  const transportEventId = eventId
     ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
 
   const earlyGreeting = deterministicGreetingResponse(request);
   if (earlyGreeting) {
     const polished = polishedResponse(earlyGreeting, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
+    return coreResult(200, {
       message: polished.message,
       intent: polished.intent,
       contextUpdates: polished.contextUpdates,
@@ -1243,7 +1239,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (earlyActivityFallback) {
     const polished = polishedResponse(earlyActivityFallback, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
+    return coreResult(200, {
       message: polished.message,
       intent: polished.intent,
       contextUpdates: polished.contextUpdates,
@@ -1291,7 +1287,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
           || oneMind.turn.semanticTurn.action === 'discover'
           ? 'recommendation'
           : 'information';
-        return json(200, {
+        return coreResult(200, {
           message:oneMind.response.message,
           intent:mappedIntent,
           contextUpdates:{},
@@ -1321,7 +1317,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   // acceptance can compare the One-Mind decision against legacy behavior.
   if (process.env.THONGTHAI_ONE_MIND_SHADOW === '1'
       && process.env.THONGTHAI_ONE_MIND_CUTOVER !== '1') {
-    const shadowEventId = rawEventId ?? headerEventId ?? `shadow:${channel}:${Date.now()}`;
+    const shadowEventId = eventId ?? `shadow:${channel}:${Date.now()}`;
     try {
       const shadow = await processThongthaiOneMindTurnResilient({
         channel,
@@ -1332,7 +1328,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
         guestDbId,
         // Persist only when explicitly enabled AND the transport gave us a
         // stable event id. A generated shadow id must never mutate continuity.
-        persistState: process.env.THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1' && Boolean(rawEventId ?? headerEventId),
+        persistState: process.env.THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1' && Boolean(eventId),
       });
       console.log(
         'THONGTHAI_ONE_MIND_SHADOW',
@@ -1372,7 +1368,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (promotionContinuation) {
     const polished = polishedResponse(promotionContinuation, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
+    return coreResult(200, {
       message: polished.message,
       intent: polished.intent,
       contextUpdates: polished.contextUpdates,
@@ -1391,7 +1387,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (promotionDiscovery) {
     const polished = polishedResponse(promotionDiscovery, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
+    return coreResult(200, {
       message: polished.message,
       intent: polished.intent,
       contextUpdates: polished.contextUpdates,
@@ -1408,7 +1404,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (experienceDiscovery) {
     const polished = polishedResponse(experienceDiscovery, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
+    return coreResult(200, {
       message: polished.message,
       intent: polished.intent,
       contextUpdates: polished.contextUpdates,
@@ -1430,7 +1426,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (deterministicActivity) {
     const polished = polishedResponse(deterministicActivity, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
+    return coreResult(200, {
       message: polished.message,
       intent: polished.intent,
       contextUpdates: polished.contextUpdates,
@@ -1446,7 +1442,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (deterministicRestaurant) {
     const polished = polishedResponse(deterministicRestaurant, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
-    return json(200, {
+    return coreResult(200, {
       message: polished.message,
       intent: polished.intent,
       contextUpdates: polished.contextUpdates,
@@ -1461,7 +1457,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   } catch (error) {
     console.error('THONGTHAI_BRAIN_ERROR', error);
     if (error instanceof ProviderNotConfiguredError) {
-      return json(503, { error: 'AI provider not configured', message: 'This deployment has no LLM API key configured.' });
+      return coreResult(503, { error: 'AI provider not configured', message: 'This deployment has no LLM API key configured.' });
     }
     if (error instanceof LLMAvailabilityError) {
       // The LLM itself is unavailable -- try the deterministic promo fallback
@@ -1475,7 +1471,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
       if (promotionFallback) {
         const polished = polishedResponse(promotionFallback, channel);
         await persistBrainRuntime(guestDbId, channel, polished);
-        return json(200, {
+        return coreResult(200, {
           message: polished.message,
           intent: polished.intent,
           contextUpdates: polished.contextUpdates,
@@ -1521,7 +1517,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
           toolCalls: [],
         }, channel);
         await persistBrainRuntime(guestDbId, channel, polished);
-        return json(200, {
+        return coreResult(200, {
           message: polished.message,
           intent: polished.intent,
           contextUpdates: polished.contextUpdates,
@@ -1530,9 +1526,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
         });
       }
       const fallback = polishedResponse(availabilityBrainResponse(), channel);
-      return json(200, fallback);
+      return coreResult(200, fallback);
     }
-    return json(502, { error: 'Thongthai brain request failed. Please try again.' });
+    return coreResult(502, { error: 'Thongthai brain request failed. Please try again.' });
   }
 
   await persistCustomerResult(guestDbId, firstResponse, request.journeyContext, request.language);
@@ -1580,11 +1576,37 @@ export const handler: Handler = async (event: HandlerEvent) => {
   finalResponse = polishedResponse(finalResponse, channel);
   await persistBrainRuntime(guestDbId, channel, finalResponse);
 
-  return json(200, {
+  return coreResult(200, {
     message: finalResponse.message,
     intent: finalResponse.intent,
     contextUpdates: finalResponse.contextUpdates,
     journeyAction: finalResponse.journeyAction,
     suggestedActions: finalResponse.suggestedActions,
   });
+}
+
+export const handler: Handler = async (event: HandlerEvent) => {
+  if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
+
+  let rawBody: unknown;
+  try {
+    rawBody = JSON.parse(event.body ?? '{}');
+  } catch {
+    return json(400, { error: 'Malformed JSON body' });
+  }
+
+  const request = normalizeRequest(rawBody);
+  if (!request) return json(400, { error: 'Missing required field: message' });
+
+  const rawEventId = isObject(rawBody) && isNonEmptyString(rawBody.eventId)
+    ? rawBody.eventId.trim().slice(0, 180)
+    : null;
+  const headerEventId = isNonEmptyString(event.headers?.['x-nf-request-id'])
+    ? event.headers['x-nf-request-id'].trim().slice(0, 180)
+    : (isNonEmptyString(event.headers?.['x-request-id'])
+      ? event.headers['x-request-id'].trim().slice(0, 180)
+      : null);
+
+  const result = await processThongthaiChatCore(request, rawEventId ?? headerEventId);
+  return json(result.statusCode, result.payload);
 };

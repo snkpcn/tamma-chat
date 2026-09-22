@@ -293,7 +293,19 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     return { container, reasons };
   }
 
-  if (!container.activeTask) {
+  // A terminal task (cancelled/completed/failed/superseded) left sitting in
+  // container.activeTask must be treated exactly like "no active task" here
+  // -- the ORIGINAL check was a bare null-check, so a fresh, unrelated
+  // selection right after a cancel ("ยกเลิก" then "เอาภาราดรครับ") was
+  // wrongly merged INTO the dead task object instead of starting a clean
+  // one (startNewActiveTask itself already correctly allows replacing a
+  // terminal task -- see its own guard -- this call site just never took
+  // that branch). Real incident this closes: a cancelled booking task
+  // could be silently resurrected, un-cancelled in all but name, by the
+  // very next unrelated slot-shaped message in the same domain. Reuses the
+  // SAME hasOpenTask pattern already established elsewhere in this file.
+  const hasOpenActiveTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
+  if (!hasOpenActiveTask) {
     const defaultType = DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
     if (TASK_WORTHY_ACTIONS.has(turn.action) && defaultType) {
       container = applyTaskStateEvent(container, {
@@ -304,12 +316,12 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       reasons.push('discovery_only');
       return { container, reasons };
     }
-  } else if (container.activeTask.domain === turn.domain && Object.keys(turn.entities).length) {
+  } else if (container.activeTask!.domain === turn.domain && Object.keys(turn.entities).length) {
     const slotPatch = taskSlotPatch(turn.entities);
     if (Object.keys(slotPatch).length) {
       container = applyTaskStateEvent(container, {
         kind: 'update_slots', eventId: `${eventId}:task_merge`,
-        slotPatch, requiredFields: DOMAIN_TASK_REQUIRED_FIELDS[container.activeTask.type] ?? [],
+        slotPatch, requiredFields: DOMAIN_TASK_REQUIRED_FIELDS[container.activeTask!.type] ?? [],
       }, now);
     }
   }

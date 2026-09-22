@@ -49,6 +49,22 @@ test('conversation/task/legacy brain state writers all use the shared CAS store'
   assert.doesNotMatch(runtime,/guest_agent_state\?on_conflict=guest_id/);
 });
 
+test('the superseded pre-v3 brain runtime file was deleted, not merely stopped being imported', () => {
+  assert.throws(() => readFileSync('netlify/functions/_thongthai-runtime.ts', 'utf8'));
+});
+
+test('account-merge (LINE-link) state writer also uses the shared CAS store, not a raw upsert', () => {
+  const runtime = readFileSync('netlify/functions/_thongthai-runtime-v3.ts', 'utf8');
+  const mergeFn = runtime.slice(runtime.indexOf('export async function mergeBrainGuestData'));
+  assert.match(mergeFn, /patchGuestAgentState\(targetGuestDbId/, 'merge must write guest_agent_state through the CAS store');
+  assert.doesNotMatch(mergeFn, /guest_agent_state\?on_conflict=guest_id/, 'merge must not fall back to a raw upsert that can race a concurrent CAS write');
+});
+
+test('line-link.ts imports mergeBrainGuestData from the canonical v3 runtime, not the deleted pre-v3 file', () => {
+  const source = readFileSync('netlify/functions/line-link.ts', 'utf8');
+  assert.match(source, /mergeBrainGuestData.*from '\.\/_thongthai-runtime-v3'/s);
+});
+
 test('G.2 cutover is an explicit OFF-by-default env gate and legacy fallthrough remains present', () => {
   const source=readFileSync('netlify/functions/thongthai-chat.ts','utf8');
   assert.match(source,/THONGTHAI_ONE_MIND_CUTOVER === '1'/);

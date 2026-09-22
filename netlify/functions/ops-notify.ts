@@ -2,6 +2,18 @@ import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { dispatchEntityNotification, type OpsNotificationEntity } from './_ops-notifications';
 import { dispatchBookingFlexNotification } from './_ops-booking-notify-flex';
+import { notifyRestaurantPreorderTeam } from './_restaurant-sot';
+
+// 'restaurant_preorder' is prepared here ahead of the DB trigger that will
+// send it (see THONGTHAI_HANDOFF.md's Priority 5 section for the exact,
+// not-yet-applied migration): unlike booking/otop_order/cafe_inquiry,
+// nothing calls this endpoint with entity='restaurant_preorder' yet, so
+// this is dead/inert code in production until that migration lands --
+// safe to ship now, reusing the SAME notifyRestaurantPreorderTeam the
+// inline caller in _restaurant-sot.ts already uses (idempotent: returns
+// 'duplicate' rather than re-sending), never a second implementation.
+const RESTAURANT_PREORDER_ENTITY = 'restaurant_preorder' as const;
+type ExtendedOpsNotificationEntity = OpsNotificationEntity | typeof RESTAURANT_PREORDER_ENTITY;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPS_NOTIFICATION_WEBHOOK_SECRET_SHA256 = '0c99ca5d870b02c4b58b485c0cdf8d88158fe18ea86ba126751cc72715f506d5';
@@ -30,8 +42,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
   } catch {
     return { statusCode: 400, body: 'Invalid JSON' };
   }
-  const entity = body.entity as OpsNotificationEntity | undefined;
-  if (!entity || !['booking', 'cafe_inquiry', 'otop_order'].includes(entity)) {
+  const entity = body.entity as ExtendedOpsNotificationEntity | undefined;
+  if (!entity || !['booking', 'cafe_inquiry', 'otop_order', RESTAURANT_PREORDER_ENTITY].includes(entity)) {
     return { statusCode: 400, body: 'Invalid entity' };
   }
   if (!body.id || !UUID_RE.test(body.id)) return { statusCode: 400, body: 'Invalid id' };
@@ -39,7 +51,9 @@ export const handler: Handler = async (event: HandlerEvent) => {
   try {
     const status = entity === 'booking'
       ? await dispatchBookingFlexNotification(body.id)
-      : await dispatchEntityNotification(entity, body.id);
+      : entity === RESTAURANT_PREORDER_ENTITY
+        ? await notifyRestaurantPreorderTeam(body.id)
+        : await dispatchEntityNotification(entity, body.id);
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },

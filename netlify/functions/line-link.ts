@@ -1,6 +1,6 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { mergeBrainGuestData } from './_thongthai-runtime';
+import { mergeBrainGuestData } from './_thongthai-runtime-v3';
 
 const TAMMA_SITE_URL = 'https://tamma-chat.netlify.app';
 const OFFICIAL_MAP_URL = 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic';

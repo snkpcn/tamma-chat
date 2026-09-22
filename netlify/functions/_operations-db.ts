@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { interpretStayBookingTurn } from './_thongthai-brain-v3';
 import { CONTEXT_TTL_MS } from './_conversation-context';
 import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
+import { extractDate as extractDateShared } from './_slot-parsers';
 
 export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
 export type ServiceType = 'restaurant' | 'stay' | 'activity';
@@ -433,21 +434,33 @@ function validIsoDate(year: number, month: number, day: number): string | null {
 }
 
 function bookingDateFromText(text: string): string | null {
-  const numeric = text.match(/(?:^|\s)(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?(?:\s|$)/);
+  // "/" and "-" only, deliberately NOT ".": a period is also the activity
+  // time separator ("13.00" = 13:00, see activityTimeFromText), so a message
+  // stating both a date and a time ("3 ตุลาคม เวลา 13.00") would otherwise
+  // have its time misread as a malformed DD.MM date (month 00, invalid) --
+  // silently short-circuiting before the Thai-month check below ever ran.
+  const numeric = text.match(/(?:^|\s)(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?(?:\s|$)/);
   if (numeric) {
     const today = bangkokDateParts();
     let year = numeric[3] ? Number(numeric[3]) : today.year;
     if (year < 100) year += 2000;
     if (year > 2400) year -= 543;
-    return validIsoDate(year, Number(numeric[2]), Number(numeric[1]));
+    const resolved = validIsoDate(year, Number(numeric[2]), Number(numeric[1]));
+    if (resolved) return resolved;
   }
   const matched = text.match(/วันที่\s*(\d{1,2})(?:\s*(?:เดือน)?\s*(นี้|หน้า))?/u);
-  if (!matched) return null;
-  const today = bangkokDateParts();
-  let month = today.month + (matched[2] === 'หน้า' ? 1 : 0);
-  let year = today.year;
-  if (month > 12) { month = 1; year += 1; }
-  return validIsoDate(year, month, Number(matched[1]));
+  if (matched) {
+    const today = bangkokDateParts();
+    let month = today.month + (matched[2] === 'หน้า' ? 1 : 0);
+    let year = today.year;
+    if (month > 12) { month = 1; year += 1; }
+    return validIsoDate(year, month, Number(matched[1]));
+  }
+  // "3 ตุลาคม" / "3 ต.ค." -- a day + Thai month NAME, which neither pattern
+  // above recognizes. Reuses the SAME shared parser _deterministic-semantic-
+  // turn.ts's turn derivation already uses, rather than a second copy of the
+  // Thai month lexicon here.
+  return extractDateShared(text);
 }
 
 function checkoutDateFromText(text: string, checkIn: string | null): string | null {
@@ -618,7 +631,7 @@ function shiftBangkokDate(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function activityDateFromText(text: string): string | null {
+export function activityDateFromText(text: string): string | null {
   if (/(?:พรุ่งนี้|tomorrow)/iu.test(text)) return shiftBangkokDate(1);
   if (/(?:วันนี้|today)/iu.test(text)) return shiftBangkokDate(0);
   return bookingDateFromText(text);
@@ -631,11 +644,16 @@ function activityResourceFromText(text: string): string | null {
   return null;
 }
 
-function activityDurationFromText(text: string): 30 | 60 | 90 | null {
+export function activityDurationFromText(text: string): 30 | 60 | 90 | null {
   if (/(?:ครึ่ง\s*ชั่วโมง|half\s*(?:an\s*)?hour)/iu.test(text)) return 30;
   if (/(?:ชั่วโมง\s*ครึ่ง|one\s*and\s*a\s*half\s*hours?)/iu.test(text)) return 90;
   if (/(?:1|หนึ่ง)\s*(?:ชั่วโมง|ชม\.?|hour)/iu.test(text)) return 60;
-  const m = text.match(/(?:^|\s)(30|60|90)\s*(?:นาที|min(?:ute)?s?)(?:\s|$)/iu);
+  // No trailing boundary requirement after "นาที": Thai politeness particles
+  // (ครับ/ค่ะ/นะ) are routinely written directly attached to the preceding
+  // word with no space ("30 นาทีครับ"), which is the overwhelmingly common
+  // real phrasing -- requiring whitespace-or-end right after "นาที" rejected
+  // exactly that.
+  const m = text.match(/(?:^|\s)(30|60|90)\s*(?:นาที|min(?:ute)?s?)/iu);
   const n = Number(m?.[1]);
   return n === 30 || n === 60 || n === 90 ? n : null;
 }
@@ -685,6 +703,66 @@ export function activitySessionMarker(durationMinutes: 30 | 60 | 90 | null, asse
  *  still plain text everywhere else it's already displayed. */
 export function formatActivityAssetNote(asset: { name: string; assetCode: string }): string {
   return `เลือก: ${asset.name} [asset:${asset.assetCode}]`;
+}
+
+/**
+ * One-directional write-through, NOT a second interpreter of customer
+ * intent: mirrors an activity_booking ActiveTask's currently-known slots
+ * (One-Mind's canonical conversational state) into the legacy
+ * booking_sessions row for a LINE-sourced conversation, so
+ * handleLineBookingMessage above -- still the only thing that can
+ * actually execute a real LINE booking -- sees what One-Mind already
+ * collected the moment control flips back to it. This adds ZERO extra
+ * read to that reply-critical legacy path: it already reads its own
+ * session row (loadLineBookingSession) on every turn regardless; this
+ * only keeps that row's contents caught up, called from the ONE-MIND
+ * side of a turn instead (see _thongthai-one-mind-orchestrator.ts).
+ *
+ * This is the fix for the exact production incident `ee2a315` caused:
+ * that attempt added a live loadTaskState fetch to the LEGACY flow's own
+ * hot path on every turn. This does the opposite -- taskState is written
+ * out proactively when IT changes, so the legacy flow's existing read
+ * needs no companion fetch at all.
+ *
+ * Guardrail: only writes while the legacy session is itself still in
+ * 'collecting' status (or doesn't exist yet) and not already claimed by a
+ * different service type (e.g. an in-progress stay booking). Once the
+ * legacy flow has moved a session into any of its OWN later states
+ * (awaiting_phone, awaiting_special_request, submitted, ...), this
+ * backs off entirely -- One-Mind must never override legacy-flow-
+ * specific progression it has no visibility into. The read here exists
+ * ONLY to decide whether to defer; this function never pulls legacy
+ * values back into taskState, keeping ownership strictly one-directional.
+ */
+export async function mirrorActivityTaskToLegacySession(input: {
+  guestDbId: string | null;
+  environment?: 'live' | 'test';
+  resourceCode: string | null;
+  durationMinutes: 30 | 60 | 90 | null;
+  date: string | null;
+  time: string | null;
+  partySize: number | null;
+  asset: { name: string; assetCode: string } | null;
+}): Promise<void> {
+  if (!input.guestDbId) return;
+  try {
+    const existing = await loadLineBookingSession(input.guestDbId);
+    if (existing && existing.status !== 'collecting') return;
+    if (existing?.service_type && existing.service_type !== 'activity') return;
+    await saveLineBookingSession(input.guestDbId, input.environment ?? 'live', {
+      service_type: 'activity',
+      resource_code: input.resourceCode,
+      requested_date: input.date,
+      requested_time: input.time,
+      party_size: input.partySize,
+      quantity: input.durationMinutes ?? existing?.quantity ?? 1,
+      special_request: activitySessionMarker(input.durationMinutes, input.asset),
+      status: 'collecting',
+      booking_code: null,
+    });
+  } catch (error) {
+    console.error('ACTIVITY_TASK_MIRROR_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
 }
 
 function activityTimeFromText(text: string): string | null {

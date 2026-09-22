@@ -326,3 +326,69 @@ export async function persistBrainRuntime(guestDbId: string | null, channel: Bra
     await insertEvent(guestDbId,'brain_decision',response.intent,{channel,responseStyle:response.responseStyle,journeyAction:response.journeyAction.type,toolCount:response.toolCalls?.length??0});
   } catch (error) { console.error('THONGTHAI_RUNTIME_PERSIST_ERROR',error instanceof Error ? error.message.slice(0,180) : 'unknown'); }
 }
+
+// Migrated from the superseded _thongthai-runtime.ts (pre-v3 brain runtime,
+// otherwise fully replaced by this file) -- this was its one remaining real
+// caller (line-link.ts, merging a LINE identity into an existing web guest).
+// Behavior unchanged from the original; only the DB helpers it uses are now
+// the ones already defined in this file instead of a second private copy.
+export async function mergeBrainGuestData(sourceGuestDbId: string, targetGuestDbId: string): Promise<void> {
+  if (!sourceGuestDbId || !targetGuestDbId || sourceGuestDbId === targetGuestDbId || !configuration()) return;
+  try {
+    const [sourceMemoryResponse, targetMemoryResponse, sourceStateResponse, targetStateResponse] = await Promise.all([
+      dbFetch(`guest_semantic_memory?guest_id=eq.${eq(sourceGuestDbId)}&status=eq.active&select=memory_key,memory_value,confidence,source_channel,evidence_count,last_observed_at`),
+      dbFetch(`guest_semantic_memory?guest_id=eq.${eq(targetGuestDbId)}&status=eq.active&select=memory_key,memory_value,confidence,source_channel,evidence_count,last_observed_at`),
+      dbFetch(`guest_agent_state?guest_id=eq.${eq(sourceGuestDbId)}&select=state&limit=1`),
+      dbFetch(`guest_agent_state?guest_id=eq.${eq(targetGuestDbId)}&select=state&limit=1`),
+    ]);
+    const sourceMemory = await sourceMemoryResponse.json() as SemanticMemoryRow[];
+    const targetMemory = await targetMemoryResponse.json() as SemanticMemoryRow[];
+    const sourceState = await sourceStateResponse.json() as Array<{ state: Record<string, unknown> }>;
+    const targetState = await targetStateResponse.json() as Array<{ state: Record<string, unknown> }>;
+    const targetByKey = new Map(targetMemory.map(row => [row.memory_key, row]));
+
+    for (const source of sourceMemory) {
+      const target = targetByKey.get(source.memory_key);
+      const preferred = !target || new Date(source.last_observed_at).getTime() > new Date(target.last_observed_at).getTime() ? source : target;
+      await dbFetch('guest_semantic_memory?on_conflict=guest_id,memory_key', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({
+          guest_id: targetGuestDbId,
+          memory_key: preferred.memory_key,
+          memory_value: preferred.memory_value,
+          confidence: Math.max(Number(source.confidence), Number(target?.confidence ?? 0)),
+          source_channel: preferred.source_channel,
+          evidence_count: (source.evidence_count ?? 1) + (target?.evidence_count ?? 0),
+          status: 'active',
+          last_observed_at: preferred.last_observed_at,
+        }),
+      });
+    }
+
+    // Only carry over keys the target doesn't already have (target keeps
+    // priority on any overlap, matching this function's original merge
+    // direction). Going through patchGuestAgentState -- rather than the raw
+    // upsert this replaced -- means the target's row is re-read fresh and
+    // CAS-retried right before the write, so this can never blindly clobber
+    // a conversationContext/taskState/legacy-brain key some other writer set
+    // on the SAME row in between (see _guest-agent-state-store.ts's header
+    // comment: this is the exact race that store exists to prevent).
+    const sourceKeys = sourceState[0]?.state ?? {};
+    const targetKeys = targetState[0]?.state ?? {};
+    const newKeysFromSource = Object.fromEntries(
+      Object.entries(sourceKeys).filter(([key]) => !(key in targetKeys)),
+    );
+    if (Object.keys(newKeysFromSource).length) {
+      await patchGuestAgentState(targetGuestDbId, { set: newKeysFromSource });
+    }
+
+    await dbFetch(`guest_identities?guest_id=eq.${eq(sourceGuestDbId)}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ guest_id: targetGuestDbId, last_seen_at: new Date().toISOString() }),
+    });
+  } catch (error) {
+    console.error('THONGTHAI_RUNTIME_MERGE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+  }
+}

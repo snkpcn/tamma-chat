@@ -2,6 +2,8 @@ import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handleLineBookingMessage, handleLineMembershipMessage } from './_operations-db';
 import { splitCustomerMessageForLine } from './_chat-copy-style';
+import { processThongthaiChatCore } from './thongthai-chat';
+import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -61,8 +63,6 @@ type LineFlexMessage = { type: 'flex'; altText: string; contents: Record<string,
 type LineReplyMessage = LineTextMessage | LineFlexMessage;
 
 const TAMMA_SITE_URL = 'https://tamma-chat.netlify.app';
-const THONGTHAI_ENDPOINT = '/.netlify/functions/thongthai-chat';
-const CUSTOMER_MEMORY_ENDPOINT = '/.netlify/functions/customer-memory';
 const LINE_LINK_ENDPOINT = '/.netlify/functions/line-link';
 const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
 const OFFICIAL_MAP_URL = 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic';
@@ -104,11 +104,6 @@ function detectLanguage(text: string): 'th' | 'en' | 'zh' | 'lo' | 'vi' {
   return 'en';
 }
 
-function siteBaseUrl(): string {
-  const candidate = process.env.URL || process.env.DEPLOY_PRIME_URL || TAMMA_SITE_URL;
-  return candidate.replace(/\/$/, '');
-}
-
 function emptyGuestContext(): GuestContext {
   return {
     tripDuration: null,
@@ -133,22 +128,21 @@ function deterministicConstraints(text: string): string[] {
   return limitedWalking ? ['limited_walking'] : [];
 }
 
+// Direct in-process calls into _customer-db.ts, not an HTTP self-fetch to
+// customer-memory.ts. Deliberately mirrors that handler's own 'profile'
+// action exactly -- including its two separate loadCustomerMemory calls
+// (once to read the current context, once more implicitly before the
+// write, which is what customer-memory.ts's handler does for every action)
+// -- so this refactor changes only the transport, never the behavior.
 async function reinforceStructuredMemory(message: string, userId: string, language: string): Promise<void> {
   const inferredConstraints = deterministicConstraints(message);
   if (!inferredConstraints.length) return;
 
   const guestId = lineGuestId(userId);
-  const baseUrl = siteBaseUrl();
-  const loadResponse = await fetch(baseUrl + CUSTOMER_MEMORY_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'load', guestId, language, guestContext: emptyGuestContext() }),
-  });
+  const loaded = await loadCustomerMemory(guestId, language, emptyGuestContext());
+  if (!loaded) throw new Error('Customer memory load unavailable');
 
-  if (!loadResponse.ok) throw new Error(`Customer memory load returned ${loadResponse.status}`);
-
-  const loaded = await loadResponse.json() as CustomerLoadResponse;
-  const current = loaded.guestContext ?? emptyGuestContext();
+  const current = loaded.guestContext;
   const merged: GuestContext = {
     ...current,
     group: current.group ?? { adults: null, children: null, elderly: null },
@@ -159,40 +153,44 @@ async function reinforceStructuredMemory(message: string, userId: string, langua
     ])],
   };
 
-  const saveResponse = await fetch(baseUrl + CUSTOMER_MEMORY_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'profile', guestId, language, guestContext: merged }),
-  });
-
-  if (!saveResponse.ok) throw new Error(`Customer memory save returned ${saveResponse.status}`);
+  const reloaded = await loadCustomerMemory(guestId, language, merged);
+  if (!reloaded) throw new Error('Customer memory unavailable');
+  const saved = await persistCustomerSnapshot(
+    reloaded.guestDbId,
+    { guestContext: merged, visitedExperiences: undefined, favorites: undefined, savedPlan: null },
+    language,
+    'profile',
+  );
+  if (!saved) throw new Error('Customer memory save returned false');
   console.log('LINE_STRUCTURED_MEMORY_REINFORCED', inferredConstraints.join(','));
 }
 
+// Direct in-process call into thongthai-chat.ts's canonical core, not an
+// HTTP self-fetch to this same site's own thongthai-chat function. This is
+// the SAME function the web HTTP handler calls -- see
+// processThongthaiChatCore's own doc comment and THONGTHAI_HANDOFF.md's
+// "LINE self-fetch" finding for why the old HTTP round-trip mattered.
 async function askThongthai(message: string, userId: string, eventId?: string): Promise<ThongthaiResponse> {
-  const response = await fetch(siteBaseUrl() + THONGTHAI_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      guestId: lineGuestId(userId),
-      message,
-      language: detectLanguage(message),
-      chatHistory: [],
-      guestContext: emptyGuestContext(),
-      journeyContext: {
-        currentPlan: null,
-        savedPlan: null,
-        visitedExperiences: [],
-        favorites: [],
-        journalEntries: [],
-      },
-      pageContext: { section: 'line' },
-      ...(eventId ? { eventId } : {}),
-    }),
-  });
+  const result = await processThongthaiChatCore({
+    guestId: lineGuestId(userId),
+    message,
+    language: detectLanguage(message),
+    chatHistory: [],
+    guestContext: emptyGuestContext(),
+    journeyContext: {
+      currentPlan: null,
+      savedPlan: null,
+      visitedExperiences: [],
+      favorites: [],
+      journalEntries: [],
+    },
+    pageContext: { section: 'line' },
+  }, eventId ?? null);
 
-  if (!response.ok) throw new Error(`Thongthai endpoint returned ${response.status}`);
-  return await response.json() as ThongthaiResponse;
+  if (result.statusCode < 200 || result.statusCode >= 300) {
+    throw new Error(`Thongthai core returned ${result.statusCode}`);
+  }
+  return result.payload as ThongthaiResponse;
 }
 
 function delay(ms: number): Promise<void> {

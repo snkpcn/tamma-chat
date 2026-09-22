@@ -68,8 +68,30 @@ function findActivityTopic(message: string): { nodeId: string; activityCode: str
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
 }
 
+// A small, closed set of negation markers, not a growing phrase table --
+// this is the same "correction marker" grammatical category
+// hasCorrectionMarker (_slot-parsers.ts) already recognizes, applied here
+// specifically to exclude a NAME immediately preceded by one of them.
+const ASSET_NEGATION_BEFORE_NAME_RE = /(?:ไม่เอา|ไม่ใช่|ไม่รับ|ไม่ได้เอา)\s*$/u;
+
+/**
+ * A correction that mentions BOTH the old and new choice in one message
+ * ("ไม่เอาภาราดรแล้ว เอาทองไทย") must resolve to the one being chosen, never
+ * the one being turned down. Plain array order (ภาราดร listed first) used
+ * to win regardless of which side of the sentence was negated -- a real
+ * production bug: the rejected name silently became the "selection".
+ * Structural, not phrase-specific: any known name whose immediately
+ * preceding text ends with a negation marker is excluded before picking a
+ * match, so this works regardless of which name is mentioned first.
+ */
 export function findKnownActivityAssetSelection(message: string): typeof ACTIVITY_ASSET_SELECTIONS[number] | null {
-  return ACTIVITY_ASSET_SELECTIONS.find(item => item.pattern.test(message)) ?? null;
+  const accepted = ACTIVITY_ASSET_SELECTIONS.filter(item => {
+    const match = item.pattern.exec(message);
+    if (!match) return false;
+    const before = message.slice(Math.max(0, match.index - 12), match.index);
+    return !ASSET_NEGATION_BEFORE_NAME_RE.test(before);
+  });
+  return accepted[0] ?? null;
 }
 
 function isInventoryCountQuestion(message: string): boolean {
@@ -94,6 +116,16 @@ const STAY_TOPIC_MARKER = /ห้อง|ที่พัก|เฮือน|บ�
 const OTOP_TOPIC_MARKER = /otop|โอทอป|ของฝาก|สินค้าชุมชน/iu;
 const CAFE_TOPIC_MARKER = /กาแฟ|คาเฟ่|อินทนิน|inthanin|ลาเต้|latte|เครื่องดื่ม/iu;
 const MEMBERSHIP_TOPIC_MARKER = /สมาชิก|member|membership/iu;
+// Distinguishes an actual status QUESTION ("เป็นสมาชิกหรือยัง" -- am I
+// already a member?) from a generic membership mention, so it renders a
+// real status answer instead of the "here's how to sign up" copy. The
+// original version of this only recognized an explicit "สถานะ"/"เช็ค"/
+// "ตรวจ"/"ดู" keyword -- "ตอนนี้ผมเป็นสมาชิกหรือยัง" is a completely
+// natural, common way to ask the exact same question and contained none
+// of them, so it was silently misrouted to the sign-up prompt instead of
+// an actual status check. "หรือยัง"/"รึยัง"/"หรือเปล่า" are the ordinary
+// Thai yes-already/not-yet question particles, not a phrase table.
+const MEMBERSHIP_STATUS_ACTION_MARKER = /สถานะ|เช็ค|ตรวจ|ดู|หรือยัง|รึยัง|หรือเปล่า/u;
 
 function findStayTopic(message: string): boolean {
   return STAY_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('thamma-chat-stay'));
@@ -146,7 +178,7 @@ function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
   }
   if (findMembershipTopic(message)) {
     return {
-      domain: 'membership', intent: 'membership_topic_switch', action: /สถานะ|เช็ค|ตรวจ|ดู/u.test(message) ? 'status' : 'ask',
+      domain: 'membership', intent: 'membership_topic_switch', action: MEMBERSHIP_STATUS_ACTION_MARKER.test(message) ? 'status' : 'ask',
       entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
     };
   }
@@ -249,8 +281,45 @@ const HOW_IT_WORKS_MARKER = /ยังไง|อย่างไร|(?:^|\s)\S*�
  *  doesn't yet have one for. Never touches task state -- these are read-only
  *  side-questions (see TASK_WORTHY_ACTIONS in _dialog-manager.ts, which
  *  'ask'/'status' are deliberately excluded from). */
-function detectActivitySideQuestion(message: string, domain: SemanticDomain | null, now: Date = new Date()): SemanticTurn | null {
+/** ActiveTask.slots.resourceCode (e.g. "activity-horse") IS an
+ *  ACTIVITY_TOPIC_KEYWORDS nodeId -- the same identifier space, so this is
+ *  a lookup, not a second lexicon. Lets a shortened follow-up on an
+ *  already-open task ("มีกี่ตัว", no "ม้า" restated) resolve its topic from
+ *  task context instead of requiring the keyword in every message. */
+function activityTopicFromResourceCode(resourceCode: unknown): { nodeId: string; activityCode: string } | null {
+  if (typeof resourceCode !== 'string') return null;
+  const match = ACTIVITY_TOPIC_KEYWORDS.find(item => item.nodeId === resourceCode);
+  return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
+}
+
+function detectActivitySideQuestion(
+  message: string,
+  domain: SemanticDomain | null,
+  activeTaskTopic: { nodeId: string; activityCode: string } | null = null,
+  now: Date = new Date(),
+): SemanticTurn | null {
   if (domain !== 'activity') return null;
+  // Inventory/count questions are read-only side questions even while an
+  // activity booking task is active. Without this precedence, the active-task
+  // path falls through to same-domain topic narrowing and gets mislabeled as
+  // "resume_active_task", which makes the Dialog Manager ask the next missing
+  // booking field (e.g. date) instead of answering "มีม้ากี่ตัว".
+  // The topic itself comes from THIS message when it's there ("มีม้ากี่ตัว"),
+  // falling back to the already-open task's own resourceCode when it isn't
+  // ("มีกี่ตัว" mid-conversation) -- never guessed when neither is present.
+  const activityTopic = findActivityTopic(message) ?? activeTaskTopic;
+  if (activityTopic && isInventoryCountQuestion(message)) {
+    return {
+      domain,
+      intent: 'activity_inventory_count',
+      action: 'ask',
+      entities: { activityCode: activityTopic.activityCode, inventoryCount: true },
+      references: [],
+      constraints: [],
+      confidence: 0.9,
+      needsClarification: false,
+    };
+  }
   if (PRICE_MARKER.test(message)) {
     return { domain, intent: 'ask_price', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false };
   }
@@ -290,7 +359,7 @@ function detectNonActivitySideQuestion(message: string, domain: SemanticDomain |
     }
   }
   if (domain === 'membership' && /สถานะ|สิทธิ|สมัคร|เช็ค|ตรวจ|ดู/u.test(message)) {
-    return { domain, intent:'membership_follow_up', action:/สถานะ|เช็ค|ตรวจ|ดู/u.test(message) ? 'status' : 'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
+    return { domain, intent:'membership_follow_up', action: MEMBERSHIP_STATUS_ACTION_MARKER.test(message) ? 'status' : 'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
   }
   return null;
 }
@@ -314,7 +383,7 @@ function deriveForActiveTask(
   // reduced to whatever slot value they might incidentally also contain
   // (see the Dialog Manager's SIDE_QUESTION_ACTIONS precedence, which
   // preserves the task untouched for exactly these actions).
-  const sideQuestion = detectActivitySideQuestion(message, task.domain, now);
+  const sideQuestion = detectActivitySideQuestion(message, task.domain, activityTopicFromResourceCode(task.slots.resourceCode), now);
   if (sideQuestion) return sideQuestion;
 
   const entities: Record<string, unknown> = {};
@@ -415,9 +484,32 @@ export function deriveDeterministicSemanticTurn(
     return null;
   }
 
+  // A message that structurally names a DIFFERENT domain than whatever is
+  // currently "active" (from a prior turn's reply, not necessarily an open
+  // task) must be recognized as a topic switch BEFORE any same-domain
+  // side-question shortcut gets a chance to swallow it. Those shortcuts
+  // (detectActivitySideQuestion's AVAILABILITY_STATUS_MARKER, detectNon
+  // ActivitySideQuestion's per-domain regexes) intentionally use broad,
+  // topic-agnostic words -- bare "มี", PRICE_MARKER, "ว่างไหม" -- that read
+  // naturally across EVERY domain ("มีห้องพักไหม" mid a cafe conversation
+  // contains cafe's own "มี" marker just as much as stay's "ห้อง" one), so
+  // the only reliable way to tell them apart is which domain's own
+  // STRUCTURAL marker the message actually names. Reuses the SAME per-
+  // domain marker ladder detectCrossDomainTopicSwitch already checks for
+  // the active-task case -- one topic-detection ladder, not two. Real
+  // incident this closes: "มีห้องพักไหม" mid a cafe conversation (no active
+  // task) stayed answered as an unresolved CAFE question instead of
+  // switching to stay, because cafe's own "มี" follow-up marker matched
+  // first and detectNonActivitySideQuestion never checked for a different
+  // domain's marker before claiming the turn.
+  if (effectiveDomain) {
+    const crossDomainSwitch = detectCrossDomainTopicSwitch(trimmed);
+    if (crossDomainSwitch && crossDomainSwitch.domain !== effectiveDomain) return crossDomainSwitch;
+  }
+
   // No open task: a price/availability/how-it-works side-question about the
   // current topic, asked before any selection is made.
-  const sideQuestion = detectActivitySideQuestion(trimmed, effectiveDomain, now);
+  const sideQuestion = detectActivitySideQuestion(trimmed, effectiveDomain, null, now);
   if (sideQuestion) return sideQuestion;
 
   // No active task: a selection among entities the customer already saw
@@ -502,6 +594,24 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  // A restaurant-topic marker with no active task (e.g. mid a stay
+  // conversation that never created a task, since stay has no
+  // task-creation mechanism today -- see THONGTHAI_HANDOFF.md). Without
+  // this, findRestaurantTopicNarrow was only ever consulted inside
+  // detectCrossDomainTopicSwitch's active-task branch above, so a
+  // domain-only "active" conversation (context.activeDomain set from a
+  // prior read-only reply, no task) had no path to recognize a genuine
+  // topic switch to restaurant -- it fell through to null and, if the
+  // model was unavailable, silently re-answered as the STALE domain
+  // instead of switching. Reuses the same marker/intent shape
+  // detectCrossDomainTopicSwitch already returns, never a new lexicon.
+  if (findRestaurantTopicNarrow(trimmed)) {
+    return {
+      domain: 'restaurant', intent: 'restaurant_topic_switch', action: 'discover',
+      entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+
   if (findStayTopic(trimmed)) {
     const entities: Record<string, unknown> = {};
     const date = extractDate(trimmed, now);
@@ -549,8 +659,8 @@ export function deriveDeterministicSemanticTurn(
   if (findMembershipTopic(trimmed)) {
     return {
       domain: 'membership',
-      intent: /สถานะ|เช็ค|ตรวจ|ดู/u.test(trimmed) ? 'membership_status' : 'membership_information',
-      action: /สถานะ|เช็ค|ตรวจ|ดู/u.test(trimmed) ? 'status' : 'ask',
+      intent: MEMBERSHIP_STATUS_ACTION_MARKER.test(trimmed) ? 'membership_status' : 'membership_information',
+      action: MEMBERSHIP_STATUS_ACTION_MARKER.test(trimmed) ? 'status' : 'ask',
       entities: {},
       references: [],
       constraints: [],
