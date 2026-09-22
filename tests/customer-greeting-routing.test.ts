@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  activityBookingFallbackDraft,
   deterministicGreetingResponse,
   isSimpleGreetingMessage,
 } from '../netlify/functions/thongthai-chat';
 import type { BrainRequest } from '../netlify/functions/_thongthai-brain-v3';
 
-function request(message: string): BrainRequest {
+function request(message: string, userHistory: string[] = []): BrainRequest {
   return {
     message,
     language: 'th',
@@ -28,7 +29,7 @@ function request(message: string): BrainRequest {
       journalEntries: [],
     },
     pageContext: { section: 'home', path: '/' },
-    chatHistory: [],
+    chatHistory: userHistory.map(content => ({ role: 'user' as const, content })),
   };
 }
 
@@ -60,4 +61,31 @@ test('the glued polite-particle form of สวัสดี/หวัดดี ("
   }
   assert.equal(isSimpleGreetingMessage('สวัสดีครับ อยากจองขี่ม้า'), false);
   assert.equal(isSimpleGreetingMessage('สวัสดีค่ะ จองห้องพักได้ไหมคะ'), false);
+});
+
+test('web chat history fallback starts the real horse booking draft after "อยากขี่ม้า" -> "เอาภาราดร"', () => {
+  const draft = activityBookingFallbackDraft(request('เอาภาราดร', ['อยากขี่ม้า']));
+  assert.equal(draft?.serviceType, 'activity');
+  assert.equal(draft?.resourceCode, 'activity-horse');
+  assert.equal(draft?.horseName, 'ภาราดร');
+  assert.match(String(draft?.note), /เลือก: ภาราดร \[asset:horse-pharadon\]/u);
+});
+
+test('web chat history fallback preserves ภาราดร through slot collection and Thai month dates', () => {
+  const draft = activityBookingFallbackDraft(request('ยืนยัน', [
+    'อยากขี่ม้า',
+    'เอาภาราดร',
+    '30 นาที',
+    '30 กันยายน 2026 เวลา 10:00',
+    '1 คน',
+    'SMOKE TEST PHARADON',
+    '0999990001',
+  ]));
+  assert.equal(draft?.horseName, 'ภาราดร');
+  assert.equal(draft?.date, '2026-09-30');
+  assert.equal(draft?.time, '10:00');
+  assert.equal(draft?.durationMinutes, 30);
+  assert.equal(draft?.partySize, 1);
+  assert.equal(draft?.customerName, 'SMOKE TEST PHARADON');
+  assert.equal(draft?.phone, '0999990001');
 });

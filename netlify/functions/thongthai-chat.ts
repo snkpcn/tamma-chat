@@ -968,6 +968,147 @@ function directCommittedActivityBookingArgs(message: string): Record<string, unk
   };
 }
 
+const THAI_MONTHS: Record<string, number> = {
+  มกราคม: 1, มกรา: 1, 'ม.ค': 1,
+  กุมภาพันธ์: 2, กุมภา: 2, 'ก.พ': 2,
+  มีนาคม: 3, มีนา: 3, 'มี.ค': 3,
+  เมษายน: 4, เมษา: 4, 'เม.ย': 4,
+  พฤษภาคม: 5, พฤษภา: 5, 'พ.ค': 5,
+  มิถุนายน: 6, มิถุนา: 6, 'มิ.ย': 6,
+  กรกฎาคม: 7, กรกฎา: 7, 'ก.ค': 7,
+  สิงหาคม: 8, สิงหา: 8, 'ส.ค': 8,
+  กันยายน: 9, กันยา: 9, 'ก.ย': 9,
+  ตุลาคม: 10, ตุลา: 10, 'ต.ค': 10,
+  พฤศจิกายน: 11, พฤศจิกา: 11, 'พ.ย': 11,
+  ธันวาคม: 12, ธันวา: 12, 'ธ.ค': 12,
+};
+
+function extractThaiMonthDate(message: string): string | null {
+  const match = message.match(/(\d{1,2})\s*(มกราคม|มกรา|ม\.ค|กุมภาพันธ์|กุมภา|ก\.พ|มีนาคม|มีนา|มี\.ค|เมษายน|เมษา|เม\.ย|พฤษภาคม|พฤษภา|พ\.ค|มิถุนายน|มิถุนา|มิ\.ย|กรกฎาคม|กรกฎา|ก\.ค|สิงหาคม|สิงหา|ส\.ค|กันยายน|กันยา|ก\.ย|ตุลาคม|ตุลา|ต\.ค|พฤศจิกายน|พฤศจิกา|พ\.ย|ธันวาคม|ธันวา|ธ\.ค)\.?\s*(20\d{2}|25\d{2})?/u);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = THAI_MONTHS[match[2].replace(/\.$/, '')];
+  let year = match[3] ? Number(match[3]) : new Date().getFullYear();
+  if (year > 2400) year -= 543;
+  if (!month || day < 1 || day > 31 || year < 2000 || year > 2200) return null;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function activityFallbackCommit(message: string): boolean {
+  return hasCommitMarker(message) || /^(?:ยืนยัน|ตกลง|โอเค|confirm)(?:\s|$|ครับ|ค่ะ|คะ|คับ)/iu.test(message.trim());
+}
+
+function activityFallbackName(userTurns: string[]): string | null {
+  const joined = userTurns.join('\n');
+  const explicit = joined.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|จำนวน|ยืนยัน|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+  if (explicit) return explicit.slice(0, 120);
+  for (const turn of [...userTurns].reverse()) {
+    const text = turn.trim();
+    if (!text || activityAssetFromText(text) || extractDurationMinutes(text) || extractDate(text) || extractThaiMonthDate(text)
+        || extractTime(text) || extractPartySize(text) || /\d{8,}/u.test(text) || activityFallbackCommit(text)) continue;
+    if (/^(?:SMOKE TEST|TEST)\b/iu.test(text)) return text.slice(0, 120);
+  }
+  return null;
+}
+
+function activityFallbackPhone(text: string): string | null {
+  return text.match(/(?:เบอร์|โทร)?\s*(0\d[\d\s-]{7,18}\d)/u)?.[1]?.replace(/\D/g, '') ?? null;
+}
+
+export function activityBookingFallbackDraft(request: BrainRequest): Record<string, unknown> | null {
+  const userTurns = request.chatHistory.filter(turn => turn.role === 'user').map(turn => turn.content).concat(request.message);
+  const text = userTurns.join('\n');
+  const selectedAsset = activityAssetFromText(text);
+  if (!selectedAsset) return null;
+
+  const hasHorseBookingContext = /ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า/u.test(text);
+  if (!hasHorseBookingContext) return null;
+
+  const date = extractDate(text) ?? extractThaiMonthDate(text);
+  const time = extractTime(text);
+  const durationMinutes = extractDurationMinutes(text);
+  const partySize = extractPartySize(text);
+  const customerName = activityFallbackName(userTurns);
+  const phone = activityFallbackPhone(text);
+
+  return {
+    serviceType: 'activity',
+    resourceCode: 'activity-horse',
+    horseName: selectedAsset.name,
+    note: formatActivityAssetNote(selectedAsset),
+    ...(date ? { date } : {}),
+    ...(time ? { time } : {}),
+    ...(durationMinutes ? { durationMinutes } : {}),
+    ...(partySize ? { partySize } : {}),
+    ...(customerName ? { customerName } : {}),
+    ...(phone ? { phone } : {}),
+  };
+}
+
+function missingActivityFallbackFields(draft: Record<string, unknown>): string[] {
+  const missing: string[] = [];
+  if (!draft.date) missing.push('วันที่');
+  if (!draft.time) missing.push('เวลา');
+  if (!draft.durationMinutes) missing.push('ระยะเวลา');
+  if (!draft.partySize) missing.push('จำนวนผู้ขี่');
+  if (!draft.customerName) missing.push('ชื่อผู้จอง');
+  if (!draft.phone) missing.push('เบอร์โทร');
+  return missing;
+}
+
+function activityBookingFallbackPrompt(request: BrainRequest): BrainResponse | null {
+  const draft = activityBookingFallbackDraft(request);
+  if (!draft) return null;
+  if (activityFallbackCommit(request.message)) return null;
+  const missing = missingActivityFallbackFields(draft);
+  const horseName = String(draft.horseName);
+  const summary = [
+    `เลือกม้า: ${horseName}`,
+    draft.date ? `วันที่: ${draft.date}` : '',
+    draft.time ? `เวลา: ${draft.time}` : '',
+    draft.durationMinutes ? `ระยะเวลา: ${draft.durationMinutes} นาที` : '',
+    draft.partySize ? `จำนวนผู้ขี่: ${draft.partySize} คน` : '',
+    draft.customerName ? `ชื่อ: ${draft.customerName}` : '',
+  ].filter(Boolean);
+  return {
+    message: missing.length
+      ? [`รับทราบครับ ผมล็อกตัวเลือกเป็น ${horseName} ไว้ในบทสนทนานี้`, ...summary, `ขอเพิ่มอีกนิดครับ: ${missing.join(', ')}`].join('\n')
+      : [`สรุปคำขอจองขี่ม้า ${horseName}`, ...summary, 'ถ้าถูกต้อง พิมพ์ “ยืนยัน” เพื่อส่งคำขอจองเข้าระบบครับ'].join('\n'),
+    intent: 'booking',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+async function activityBookingFallbackResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  const draft = activityBookingFallbackDraft(request);
+  if (!draft) return null;
+  const prompt = activityBookingFallbackPrompt(request);
+  if (prompt) return prompt;
+  const missing = missingActivityFallbackFields(draft);
+  if (missing.length) {
+    return {
+      message: `ยังส่งคำขอจองไม่ได้ครับ ขอข้อมูลเพิ่มก่อน: ${missing.join(', ')}`,
+      intent: 'booking',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
+  return executeDeterministicActivityBooking(draft, request, guestDbId, channel);
+}
+
 async function executeDeterministicActivityBooking(
   args: Record<string, unknown>,
   request: BrainRequest,
@@ -1231,6 +1372,22 @@ export const handler: Handler = async (event: HandlerEvent) => {
   });
   if (promotionDiscovery) {
     const polished = polishedResponse(promotionDiscovery, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return json(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const activityFallback = await activityBookingFallbackResponse(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_ACTIVITY_HISTORY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (activityFallback) {
+    const polished = polishedResponse(activityFallback, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return json(200, {
       message: polished.message,
