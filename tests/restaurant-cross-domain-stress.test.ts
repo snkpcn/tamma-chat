@@ -19,13 +19,6 @@ import assert from 'node:assert/strict';
 import { withHarness, guestId, brainRequest } from './helpers/canonical-core-harness';
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
 
-async function internalGuestDbId(gid: string, harness: { postsTo: (t: string) => Array<Record<string, unknown>> }): Promise<string> {
-  const posts = harness.postsTo('guest_agent_state');
-  const row = posts[posts.length - 1] as { guest_id?: string } | undefined;
-  if (!row?.guest_id) throw new Error('expected a guest_agent_state write to have happened first');
-  return row.guest_id;
-}
-
 test('restaurant: menu discovery answers from the real catalog with zero premature writes', async () => {
   await withHarness(async harness => {
     const gid = guestId('restaurant-menu-discovery');
@@ -65,7 +58,7 @@ test('restaurant: accepting a proposed set collects missing fields before ever c
   await withHarness(async harness => {
     const gid = guestId('restaurant-accept-set-exactly-once');
     await processThongthaiChatCore(brainRequest('ร้านมีอะไรกิน', gid, 'web'), 'evt-1');
-    const internalId = await internalGuestDbId(gid, harness);
+    const internalId = harness.guestDbId(gid)!;
 
     // Seed the SAME shape a correct LLM turn would have written via
     // agentStateUpdate.restaurantProposedSet (see _thongthai-brain-v3.ts

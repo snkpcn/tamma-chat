@@ -134,6 +134,15 @@ export type Harness = {
    *  "exactly once" write counts (bookings, restaurant_preorders,
    *  promotion_redemptions, otop_orders, ops_notification-shaped writes). */
   postsTo: (table: string) => Array<Record<string, unknown>>;
+  /** The INTERNAL guest_agent_state row id (e.g. "guest-1-2d3094a5") for a
+   *  guest identified by their external request.guestId (the UUID from
+   *  guestId(seed)) -- these are NOT the same string (see loadCustomerMemory's
+   *  guest-row creation), and reverse-engineering the internal id from
+   *  postsTo('guest_agent_state')'s last entry breaks the moment more than
+   *  one guest has written state in the same test (a real trap: it silently
+   *  returns a DIFFERENT guest's id with no error). Use this instead of
+   *  guessing whenever a test needs getState/setState for a specific guest. */
+  guestDbId: (anonymousId: string) => string | undefined;
   restaurantId: string;
 };
 
@@ -435,6 +444,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     getState: guestDbId => agentState.get(guestDbId),
     setState: (guestDbId, state, updatedAt) => { agentState.set(guestDbId, { exists: true, state, updatedAt: updatedAt ?? new Date().toISOString() }); },
     postsTo: table => posts.get(table) ?? [],
+    guestDbId: anonymousId => guests.get(anonymousId)?.id,
     restaurantId: RESTAURANT_ID,
   };
 }
