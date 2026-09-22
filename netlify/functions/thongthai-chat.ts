@@ -687,7 +687,7 @@ async function resolvePromotionRedemption(
   guestDbId: string | null,
   channel: BrainChannel,
 ): Promise<BrainResponse> {
-  const parsed = parseRestaurantPreorderTurn(request.message, pending.draft);
+  const parsed = parseRestaurantPreorderTurn(request.message, pending.draft, new Date(), { allowLooseName: false });
   const draft: RestaurantPreorderDraft = mergeRestaurantPreorderDraft(pending.draft, parsed);
   const updatedPending: PendingPromotionRedemption = { ...pending, draft };
   const missing = missingPromotionFields(updatedPending);

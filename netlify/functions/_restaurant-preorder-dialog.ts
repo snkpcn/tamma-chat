@@ -80,12 +80,26 @@ export function parseRestaurantPreorderTurn(
   message: string,
   current: Partial<RestaurantPreorderDraft> = {},
   now = new Date(),
+  options: { allowLooseName?: boolean } = {},
 ): ParsedRestaurantPreorderTurn {
   const phone = extractPhone(message);
   const email = extractEmail(message);
   const date = extractDate(message, now);
   const time = extractTime(message);
-  const allowLooseName = !current.customerName && message.trim().length <= 80;
+  // The loose fallback ("whatever text is left once known fields are
+  // stripped, unless it contains a small restaurant-specific blocklist of
+  // words") was built for the restaurant preorder flow, where by the time
+  // a name is being collected the customer has already explicitly
+  // committed to an order -- an unrelated aside is comparatively rare and
+  // the blocklist catches the restaurant-domain ones. A caller outside
+  // that flow (promotion redemption reusing this same parser) can pass
+  // allowLooseName:false to require an EXPLICIT name marker ("ชื่อ...",
+  // "ผมชื่อ...") instead, when a wrong guess would be worse than asking
+  // again -- see resolvePromotionRedemption in thongthai-chat.ts for the
+  // real incident this closes: an unrelated question or a bare "ยืนยัน"
+  // was being accepted as the customer's name and redeeming a real
+  // promotion with no name ever actually given.
+  const allowLooseName = (options.allowLooseName ?? true) && !current.customerName && message.trim().length <= 80;
   const customerName = extractName(message, allowLooseName);
   return { date, time, customerName, phone, email };
 }
