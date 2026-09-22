@@ -2832,3 +2832,46 @@ nothing applied/deployed). **Option 2** — owner approves: apply v1 then
 v2 migrations, bind the relevant LINE groups (restaurant/activity/stay/
 cafe/owner-general), deploy the customer repo, deploy the backoffice
 repo.
+
+### Phase 1 deploy — DEPLOYED, migrations APPLIED
+
+Owner approved. Both migrations (v1, v2) applied to `tamma-customer-data`
+(project `upaokrprawzhgzeqsdke`) and verified column-by-column via direct
+schema inspection. `feature/feedback-operations-phase` merged to `main`
+in both repos (tamma-chat `089bce0`, tamma-backoffice `b1265d5`).
+Production deploy could not be independently verified from this session
+-- egress to both `*.netlify.app` domains is blocked by this session's
+network policy (`EGRESS_BLOCKED`, confirmed via both `curl` and
+`WebFetch`), same limitation noted in the prior deploy-status-fix.
+
+**Existing LINE bindings discovered** (read-only inspection of
+`ops_notification_channels`, no data mutated): `restaurant`, `activity`,
+`stay`, `cafe` were ALREADY bound from an earlier phase (real groups:
+ตำมา-ชาติ/ร้านอาหาร, ทำมา-ชาติ ผจญภัย, ทำมา-ชาติ เฮือนสเตย์, Inthanin
+Café) -- feedback for those 4 business units routes for real, no action
+needed. `owner_general` was NOT bound, AND the `ผูกทีม` bind command
+itself had no alias that could ever resolve to it (the pre-existing
+`'all'` pseudo-team was explicitly excluded from binding) -- a genuine
+code gap, not just missing data.
+
+### Hotfix — owner_general team code (`feature/owner-general-line-binding`)
+
+Added a real, independently-bindable `owner_general` team (distinct from
+the pre-existing `'all'`, which stays reserved for its narrower existing
+meaning and remains unbindable). `parseTeamCode` now accepts
+`owner`/`general`/`admin`/`เจ้าของ`/`ทั่วไป`/`แอดมิน`/`ผู้ดูแล`, all
+resolving to `owner_general`. `FEEDBACK_BUSINESS_UNIT_TEAM` routes
+membership/system/general/unknown feedback there (was `'all'`). The
+urgent-safety escalation also targets `owner_general` now, and -- new --
+its own outcome is recorded honestly in `notification_error`
+(`"owner_general escalation: not_bound"`) without ever touching
+`notification_status`, which stays governed solely by the PRIMARY
+team's real send result. No migration needed (this is pure application
+code + existing-table data, no schema change). 7 new tests (716/716
+total passing); load-bearing verified by disabling the escalation-
+recording branch and confirming exactly the dependent test fails.
+
+**Owner action to finish wiring owner_general**: add the bot to the real
+owner/general/admin LINE group, then type `ผูกทีม เจ้าของ` (or `ผูกทีม
+owner`) in that group. After that: system feedback, unknown/general
+feedback, and the urgent-safety escalation all reach it for real.
