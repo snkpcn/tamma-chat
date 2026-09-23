@@ -367,9 +367,32 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
 
     // --- ops_notification_deliveries (_ops-notifications.ts's
     // beginDelivery/finishDelivery -- idempotency-keyed delivery ledger) ---
+    //
+    // entity_type/delivery_type are checked against the REAL production
+    // CHECK constraints (ops_notification_deliveries_entity_type_check /
+    // _delivery_type_check, see supabase/migrations/2026092309*_ops_
+    // notification_deliveries_feedback_v1.sql) -- a real production
+    // incident this closes: this mock previously accepted ANY entity_type/
+    // delivery_type unconditionally, so no test in this suite could ever
+    // have caught that every feedback notification was rejected in
+    // production by a check_violation on exactly this insert. Keep this
+    // list in sync with the live constraint if either ever changes.
     if (path.startsWith('ops_notification_deliveries')) {
       if (method === 'POST') {
-        const body = JSON.parse(String(init.body ?? '{}')) as { idempotency_key: string; status?: string };
+        const body = JSON.parse(String(init.body ?? '{}')) as {
+          idempotency_key: string; status?: string; entity_type?: string | null; delivery_type?: string;
+        };
+        const entityType = body.entity_type ?? null;
+        const validEntityType = entityType === null || [
+          'booking', 'cafe_inquiry', 'otop_order', 'restaurant_preorder', 'daily_schedule', 'payment_request', 'team_settlement', 'feedback_event',
+        ].includes(entityType);
+        const deliveryType = body.delivery_type ?? '';
+        const validDeliveryType = [
+          'booking_created', 'cafe_inquiry_created', 'otop_order_created', 'restaurant_preorder_created', 'daily_schedule', 'daily_summary', 'manual_test',
+        ].includes(deliveryType) || deliveryType.startsWith('payment_') || deliveryType.startsWith('settlement_') || deliveryType.startsWith('feedback_');
+        if (!validEntityType || !validDeliveryType) {
+          return new Response(JSON.stringify({ code: '23514', message: `check_violation: entity_type=${entityType} delivery_type=${deliveryType}` }), { status: 400 });
+        }
         if (opsDeliveries.has(body.idempotency_key)) return jsonResponse([]); // on_conflict ignore-duplicates
         opsDeliverySeq += 1;
         const row = { id: `ops-delivery-${opsDeliverySeq}`, status: body.status ?? 'pending' };

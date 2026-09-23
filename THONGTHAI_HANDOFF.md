@@ -3753,3 +3753,134 @@ owner's behalf.
 
 **Confirmations**: no booking/order/payment created; no fake notification
 success; no DB migration; no unrelated production data mutated.
+
+## Feedback Delivery Constraint -- 2026-09-23
+
+Owner reported, with live evidence, that PR #63 did not actually fix
+anything the owner could observe: vague slot-filling still repeated
+"ขอรายละเอียดเพิ่มอีกนิด" after the horse health question was answered, and
+sending the exact complaint "ทองไทยอธิบายไม่รู้เรื่อง เจิดนิสัยไม่ดี" got a
+"will forward" reply while the owner group received nothing and the
+backoffice "เสียงลูกค้า" dashboard showed nothing. The task's explicit rule
+this round: **"No response text is considered fixed unless the backend
+proof exists."** Every claim below is backed by a real database query or
+a test that fails when the fix is reverted -- not by re-reading code.
+
+**Root cause 1 (the real reason the owner group received nothing) --
+found by querying REAL production `ops_feedback_events` rows directly**,
+not by re-testing against the mock harness (which had already given
+false confidence in prior rounds). A real row's `notification_error`
+column contained the literal Postgres error `{"code":"23514",...}` --
+`check_violation`. Querying `pg_constraint` showed
+`ops_notification_deliveries_entity_type_check` and
+`_delivery_type_check` had never been extended to allow
+`entity_type:'feedback_event'` / `delivery_type:'feedback_<type>'` since
+the Feedback Operations feature was first built. `beginDelivery`
+(`_ops-notifications.ts`) inserts into `ops_notification_deliveries`
+*before* attempting the actual LINE push (an idempotency-reservation
+pattern) -- so **every feedback notification, ever, failed at the
+database layer before the LINE push was even attempted**, regardless of
+whether `owner_general` was bound, regardless of any application-code fix
+from any prior round. Fixed via an additive migration
+(`supabase/migrations/20260923091310_ops_notification_deliveries_feedback_v1.sql`,
+applied directly to production), verified by re-querying the constraint
+definitions afterward and by a clean insert/delete round-trip proof
+against the live constraint (no lasting data change).
+
+**Why previous rounds claimed feedback worked but the owner saw
+nothing**: three pre-existing tests (`ops-notifications-owner-general.test.ts`
+tests 6-7, `service-mind-feedback-notifications.test.ts` test 21) asserted
+`notification_status: 'sent'` and were genuinely passing -- but as a
+FALSE POSITIVE, because `tests/helpers/canonical-core-harness.ts`'s
+`ops_notification_deliveries` mock accepted any insert unconditionally,
+never modeling the real CHECK constraints that were rejecting every
+actual feedback notification in production. Fixed the harness to
+validate against the real constraint shape, and verified this mattered
+by temporarily reverting it to the old permissive shape -- exactly those
+3 tests failed, nothing else. This closes a systemic, generalizable test-
+fidelity gap: any future code touching `ops_notification_deliveries` is
+now validated against realistic constraints.
+
+**Root cause 2 -- staff mentions silently dropped from backoffice data.**
+Inspecting the real persisted row for the exact complaint text showed
+`person_mentions: [{"kind":"role","label":"ทองไทย"}]` only -- "เจิด" was
+completely missing, even after the marker fixes from the prior round.
+`extractPersonMentions` (`_service-mind-feedback-intent.ts`) early-
+returned as soon as it found a role hit (`ROLE_WORDS` includes 'ทองไทย',
+intentionally, so a complaint about the bot itself is still recorded) --
+so a message naming BOTH Thongthai's own behavior AND a real staff member
+only ever recorded one of them. A second, compounding bug:
+`BARE_NAME_BEHAVIOR_RE` was anchored to string-start only, so it would
+not have matched "เจิด" mid-string anyway. Fixed both: the function now
+collects role and named mentions independently instead of stopping at
+the first; the anchor changed to `(?:^|\s)`.
+
+**Backoffice visibility -- investigated, no bug found in that repo.**
+Read `tamma-backoffice/netlify/functions/customer-voice.ts` directly:
+it reads `ops_feedback_events` -- the exact same canonical table
+`tamma-chat` writes to (no "table A vs table B" mismatch, confirmed by
+querying both). Its `environment=eq.live` and 30-day-window filters
+match every real row's actual `environment`/`created_at` values.
+**Refuted the "wrong table" hypothesis with direct evidence rather than
+assuming it.** The stale header comment claiming the v1/v2 migrations
+"are prepared but NOT applied" was corrected (they are applied; real
+production rows exist). Added `tamma-backoffice/tests/
+customer-voice-visibility-proof.test.ts` -- the first test in that repo
+to exercise the actual `handler` end-to-end (real signed owner cookie via
+`_auth.ts`'s `cookie()`, mocked Supabase fetch) rather than only the pure
+aggregation functions or source-text greps: seeds a row shaped exactly
+like tamma-chat's insert for the real complaint text and proves it
+surfaces in `recent`/`people`/`businessUnits` with the raw text, staff
+mention, and classification intact; a second test proves the endpoint
+never reaches the database without a valid owner cookie. Both load-bearing
+verified (disabling the owner check broke exactly the auth test).
+
+**Horse-care vague-fallback closed.** The task gave an exact 5-turn
+conversation ending in "ผมไม่เคยขี่ครับไม่กังวลครับ ไม่ปวดหลัง" and an
+exact expected next reply. Added a third step to the horse-care flow in
+`thongthai-chat.ts`: `parseHealthConcern` (recognizes
+none/present via ไม่มี/ไม่กังวล/ไม่ปวด vs ปวดหลัง/กังวลเรื่องทรงตัว
+phrasing) and `horseHealthFollowupResponse`, which fires only once
+`riderExperience`+`partySize` are already known and `healthConcern` is
+not yet set, persists the answer onto the active task's slots via the
+existing `_task-state.ts` machinery, and produces the acknowledgment +
+30-minute/60-minute duration-choice question matching the task's example
+almost verbatim. `horseCareDetailExplainerResponse` gained a guard so it
+never fires once `healthConcern` is answered (this responder now owns
+that point in the conversation).
+
+**Files changed**: `netlify/functions/_service-mind-feedback-intent.ts`
+(`extractPersonMentions`, `BARE_NAME_BEHAVIOR_RE`),
+`netlify/functions/thongthai-chat.ts` (`parseHealthConcern`,
+`horseHealthFollowupResponse`, `persistHorseHealthSlot`, a guard added to
+`horseCareDetailExplainerResponse`), `tests/helpers/
+canonical-core-harness.ts` (real constraint validation for
+`ops_notification_deliveries`), `supabase/migrations/
+20260923091310_ops_notification_deliveries_feedback_v1.sql` (applied to
+production). Backoffice repo: `netlify/functions/customer-voice.ts`
+(doc-comment correction only, no behavior change), `tests/
+customer-voice-visibility-proof.test.ts` (new).
+
+**Tests**: `tests/feedback-delivery-constraint-proof.test.ts` (new, 6
+tests, all through the full signed LINE webhook) plus the backoffice's 2
+new tests above. **tamma-chat full suite: 873/873 passing** (867 prior +
+6 new). **tamma-backoffice full suite: 67/67 passing** (65 prior + 2
+new). Load-bearing verified for: `extractPersonMentions` (reverting broke
+exactly tests 1 and 7, the two that check staff-mention capture, nothing
+else), `horseHealthFollowupResponse` (disabling broke exactly test 6,
+nothing else), the harness constraint validation (reverting broke exactly
+the 3 named pre-existing tests, nothing else), and the backoffice owner
+gate (disabling broke exactly the auth test, nothing else).
+
+**Deploy status**: cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round. The DB migration is confirmed live in production
+(applied directly via the Supabase MCP tool, not pending a deploy); the
+application-code fixes require a Netlify deploy of both repos to reach
+production, which the owner should confirm via their own dashboard.
+
+**Confirmations**: no booking/order/payment created; no fake notification
+success reported; one additive DB migration applied and verified
+non-destructive; no unrelated production data mutated (a test insert to
+`ops_notification_deliveries` was made and immediately deleted as part of
+verifying the constraint fix).
