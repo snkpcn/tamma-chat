@@ -256,3 +256,18 @@ export function classifyLocalConciergeQuestion(message: string): LocalConciergeM
 export function isHorseInfoOrComparisonQuestion(text: string): boolean {
   return classifyLocalConciergeQuestion(text)?.category === 'horse_comparison';
 }
+
+// "ตัวไหน" + an attribute keyword (นิสัย/มือใหม่/อายุ/...) -- the SAME shape
+// detectCompareEntities (_deterministic-semantic-turn.ts) owns and
+// classifyLocalConciergeQuestion deliberately yields on via
+// HORSE_ATTRIBUTE_EXCLUSION_MARKER above. Exported so a horse-SELECTION
+// guard can ALSO recognize this shape and stay out of its way -- naming
+// both horses in a temperament/beginner-suitability comparison
+// ("ภาราดรกับทองไทยตัวไหนนิสัยดีกว่า") must reach detectCompareEntities's
+// honest "ไม่มีข้อมูล" decline, never get intercepted as an ambiguous
+// selection attempt just because activityAssetFromText happens to match
+// a horse's name inside it.
+const COMPARE_ENTITIES_SHAPE_MARKER = /ตัวไหน|อันไหน|ชิ้นไหน/u;
+export function isCompareEntitiesAttributeQuestion(text: string): boolean {
+  return COMPARE_ENTITIES_SHAPE_MARKER.test(text) && HORSE_ATTRIBUTE_EXCLUSION_MARKER.test(text);
+}

@@ -31,7 +31,7 @@ import { activityAssetFromText, formatActivityAssetNote } from './_operations-db
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
-import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion } from './_local-concierge-intent';
+import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
 import { redactWeatherUrl } from './_weather-provider';
 import { classifyServiceFeedback, mentionsThongthaiResponse } from './_service-mind-feedback-intent';
@@ -58,6 +58,7 @@ import {
   type RestaurantProposedSetState,
 } from './_restaurant-preorder-dialog';
 import { processThongthaiOneMindTurnResilient } from './_thongthai-one-mind-orchestrator';
+import { loadGuestAgentStateSnapshot } from './_guest-agent-state-store';
 import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import {
@@ -1061,6 +1062,97 @@ function activityFallbackPhone(text: string): string | null {
   return text.match(/(?:เบอร์|โทร)?\s*(0\d[\d\s-]{7,18}\d)/u)?.[1]?.replace(/\D/g, '') ?? null;
 }
 
+// "ม้า"/"ขี่ม้า"/"อยากขี่" -- the same closed markers already used inside
+// activityBookingFallbackDraft's own context check, extracted here so both
+// that function and the bare-selection clarification below use IDENTICAL
+// vocabulary for what counts as "explicit horse-riding intent."
+function hasExplicitHorseBookingIntent(text: string): boolean {
+  return /ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า|อยากขี่/u.test(text);
+}
+
+// Whether a horse-booking task is already legitimately underway --
+// checked against PRIOR turns only, so a bare "เอาทองไทย" that only
+// LOOKS like a continuation because it's the second-plus message in a
+// totally unrelated conversation still gets caught (see
+// isBareAmbiguousHorseSelection below).
+function hasActiveHorseBookingContext(request: BrainRequest): boolean {
+  const priorUserText = request.chatHistory.filter(turn => turn.role === 'user').map(turn => turn.content).join('\n');
+  return hasExplicitHorseBookingIntent(priorUserText) || activityFallbackCommit(request.message);
+}
+
+// The client doesn't always resend the full visible conversation as
+// request.chatHistory (some flows, and every test that seeds task state
+// directly via guest_agent_state, send it empty) -- so "no chatHistory
+// context" alone can't safely mean "this guest has never discussed
+// horses." An activity task EVER having existed for this guest (even one
+// that's since been cancelled/completed) is real evidence the
+// conversation already established that context, and asking a
+// disambiguation question at that point would be worse than just
+// honoring the obvious selection.
+async function hasEverDiscussedActivityDomain(guestDbId: string | null): Promise<boolean> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const taskState = snapshot.state?.taskState as { activeTask?: { domain?: string } } | undefined;
+  return taskState?.activeTask?.domain === 'activity';
+}
+
+// "ทองไทย" is a real, deliberate name collision -- the bot's own name AND
+// a horse's name -- so a bare "เอาทองไทย"/"เลือกภาราดร"/a bare horse name
+// alone is genuinely ambiguous without EITHER an already-open horse-
+// booking task OR the current message itself expressing real riding
+// intent ("อยากขี่ทองไทย", "เอาม้าภาราดร"). Real production incident this
+// closes: with NO prior context at all, a bare horse-name mention was
+// silently accepted by the One-Mind semantic layer's own, separate
+// findKnownActivityAssetSelection check (_deterministic-semantic-turn.ts,
+// which has no context/intent gate of its own) and quietly opened a
+// horse-booking task the customer never asked to start, producing a
+// garbled missing-field prompt instead of ever asking what they meant.
+function isBareAmbiguousHorseSelection(request: BrainRequest): { name: string } | null {
+  const asset = activityAssetFromText(request.message);
+  if (!asset) return null;
+  if (mentionsThongthaiResponse(request.message)) return null;
+  if (isHorseInfoOrComparisonQuestion(request.message)) return null;
+  // A temperament/beginner-suitability comparison naming both horses
+  // ("ภาราดรกับทองไทยตัวไหนนิสัยดีกว่า") must reach detectCompareEntities's
+  // existing honest "ไม่มีข้อมูล" decline, not this clarification --
+  // activityAssetFromText matches a horse's name inside it exactly like a
+  // real selection attempt would, so this needs its own explicit check.
+  if (isCompareEntitiesAttributeQuestion(request.message)) return null;
+  if (hasExplicitHorseBookingIntent(request.message)) return null;
+  return asset;
+}
+
+/**
+ * A deterministic clarification for a bare, ambiguous horse-name mention
+ * with no active booking context -- see isBareAmbiguousHorseSelection's
+ * own doc comment for the incident this closes. Checked at the very top
+ * of the activity-booking precedence chain (before
+ * activityBookingFallbackResponse even runs, and long before the One-Mind
+ * orchestrator would otherwise see the message), so this always wins over
+ * silently starting a booking, but never overrides an ALREADY-open task
+ * or a message that itself clearly asks to ride.
+ */
+export async function bareHorseSelectionClarification(request: BrainRequest, guestDbId: string | null): Promise<BrainResponse | null> {
+  const ambiguous = isBareAmbiguousHorseSelection(request);
+  if (!ambiguous) return null;
+  if (hasActiveHorseBookingContext(request)) return null;
+  const everDiscussedActivity = await hasEverDiscussedActivityDomain(guestDbId).catch(() => false);
+  if (everDiscussedActivity) return null;
+
+  const message = ambiguous.name === 'ทองไทย'
+    ? 'หมายถึงอยากเลือก “ทองไทย” เป็นม้าสำหรับขี่ หรือเรียกทองไทยผู้ช่วยแชทครับ 😊'
+    : `หมายถึงม้า “${ambiguous.name}” ใช่ไหมครับ ถ้าอยากขี่ม้า พิมพ์ว่า “อยากขี่ม้า” ได้เลยครับ`;
+  return {
+    message,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
 export function activityBookingFallbackDraft(request: BrainRequest): Record<string, unknown> | null {
   const userTurns = request.chatHistory.filter(turn => turn.role === 'user').map(turn => turn.content).concat(request.message);
   const text = userTurns.join('\n');
@@ -1454,6 +1546,29 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (earlyActivityFallback) {
     const polished = polishedResponse(earlyActivityFallback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // A bare, ambiguous horse-name mention with no active booking context
+  // (see bareHorseSelectionClarification's own header comment) -- checked
+  // right after the activity-booking fallback returned nothing, and
+  // BEFORE the One-Mind orchestrator would otherwise see the message and
+  // silently open a booking task via its own, separate asset-selection
+  // check. Internally yields on feedback/comparison-shaped messages and
+  // on any already-open task, so it never overrides those.
+  const bareHorseClarification = await bareHorseSelectionClarification(request, guestDbId).catch(error => {
+    console.error('THONGTHAI_BARE_HORSE_CLARIFICATION_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (bareHorseClarification) {
+    const polished = polishedResponse(bareHorseClarification, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
