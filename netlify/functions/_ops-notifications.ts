@@ -556,12 +556,41 @@ function feedbackMessageBody(event: {
   ].filter(Boolean).join('\n');
 }
 
-// Urgent safety issues, and any feedback whose business unit doesn't map
-// to a real team, additionally reach the 'owner_general' group -- same
-// "don't over-notify" discipline the task's routing rules call for: every
-// OTHER severity/business-unit combination goes to exactly one group,
-// never a broadcast.
-async function notifyFeedbackEvent(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
+// Per-target feedback notification status. 'failed' is distinct from
+// 'not_bound' -- 'not_bound' means no LINE group has bound that team at
+// all (nothing was attempted), 'failed' means a bound channel's actual
+// LINE push threw (e.g. LINE API error) -- the customer-facing wording
+// (see _service-mind-feedback-response.ts's composeSafetyIssueResponse)
+// and the backoffice dashboard both need this distinction to stay honest.
+export type FeedbackNotifyStatus = 'sent' | 'duplicate' | 'not_bound' | 'failed';
+export type FeedbackTargetResult = { team: OpsTeamCode; status: FeedbackNotifyStatus };
+
+// safety_issue ALWAYS escalates to owner_general as well as the relevant
+// domain team -- a safety/liability report is never just that team's
+// business. (Previously this only escalated when severity === 'urgent',
+// which most real safety reports never reach -- SAFETY_CONCERN_MARKER-
+// classified messages like "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" score 'high',
+// not 'urgent', so the owner_general group never saw them. That gap is
+// what this fixes.) 'urgent' severity keeps its own existing escalation
+// too, for any non-safety feedback type severe enough to need it.
+function needsOwnerEscalation(event: { feedback_type: string; severity: string }): boolean {
+  return event.feedback_type === 'safety_issue' || event.severity === 'urgent';
+}
+
+/**
+ * Sends a feedback event's notification(s) to every real target
+ * (routeTargets = unique([domainTeam, owner_general]) for a safety issue
+ * or urgent severity; otherwise just [domainTeam]) and returns the full
+ * per-target outcome, not just one collapsed status -- this is what lets
+ * the customer-facing reply say precisely what happened (domain sent,
+ * owner failed, etc.) instead of a blanket claim. Never sends the same
+ * physical LINE group twice, even if owner_general happens to be bound to
+ * the exact same channel as the domain team.
+ */
+export async function notifyFeedbackEventTargets(id: string): Promise<{
+  overallStatus: 'sent' | 'duplicate' | 'not_bound' | 'failed' | 'ignored';
+  targets: FeedbackTargetResult[];
+}> {
   const response = await dbFetch(
     `ops_feedback_events?id=eq.${id}`
     + '&select=id,feedback_type,business_unit,severity,summary,customer_message,staff_name,channel,environment&limit=1',
@@ -571,54 +600,73 @@ async function notifyFeedbackEvent(id: string): Promise<'sent' | 'duplicate' | '
     customer_message: string; staff_name: string | null; channel: string; environment: string;
   }>;
   const event = rows[0];
-  if (!event || !['live', 'test'].includes(event.environment)) return 'ignored';
+  if (!event || !['live', 'test'].includes(event.environment)) return { overallStatus: 'ignored', targets: [] };
+
   const primaryTeam = FEEDBACK_BUSINESS_UNIT_TEAM[event.business_unit] ?? 'all';
+  const escalate = needsOwnerEscalation(event);
+  const routeTargets = escalate ? [...new Set([primaryTeam, 'owner_general' as OpsTeamCode])] : [primaryTeam];
 
-  const primaryStatus = await sendTeamMessage({
-    teamCode: primaryTeam,
-    entityType: 'feedback_event',
-    entityId: event.id,
-    deliveryType: `feedback_${event.feedback_type}`,
-    idempotencyKey: `feedback_event_created:${event.id}`,
-    text: feedbackMessageBody(event, primaryTeam),
-    payload: { feedback_type: event.feedback_type, business_unit: event.business_unit },
-  });
+  if (escalate) {
+    console.log('SAFETY_ESCALATION_TARGETS', JSON.stringify({
+      eventId: event.id, feedbackType: event.feedback_type, severity: event.severity, targets: routeTargets,
+    }));
+  }
 
-  if (event.severity === 'urgent' && primaryTeam !== 'owner_general') {
+  // Keyed by target_id_hash (the physical LINE group), not the channel
+  // row's own id -- two DIFFERENT ops_notification_channels rows (e.g.
+  // 'activity' and 'owner_general') can in principle point at the SAME
+  // real LINE group, and that must still be deduped by the group itself,
+  // not by which row happened to bind it.
+  const usedTargetHashes = new Set<string>();
+  const targets: FeedbackTargetResult[] = [];
+  for (const team of routeTargets) {
+    console.log('FEEDBACK_NOTIFY_TARGET_ATTEMPT', JSON.stringify({ eventId: event.id, team }));
+    const channel = await channelForTeam(team);
+    if (channel && usedTargetHashes.has(channel.target_id_hash)) {
+      // Same physical LINE group as an earlier target this event already
+      // sent to (e.g. owner_general happens to be bound to the same group
+      // as the domain team) -- never send the same message twice.
+      console.log('FEEDBACK_NOTIFY_TARGET_RESULT', JSON.stringify({ eventId: event.id, team, status: 'duplicate', reason: 'same_channel_as_earlier_target' }));
+      targets.push({ team, status: 'duplicate' });
+      continue;
+    }
     try {
-      const escalationStatus = await sendTeamMessage({
-        teamCode: 'owner_general',
+      const status = await sendTeamMessage({
+        teamCode: team,
         entityType: 'feedback_event',
         entityId: event.id,
-        deliveryType: `feedback_${event.feedback_type}_owner_escalation`,
-        idempotencyKey: `feedback_event_created_owner:${event.id}`,
-        text: feedbackMessageBody(event, 'owner_general'),
-        payload: { feedback_type: event.feedback_type, business_unit: event.business_unit, escalation: true },
+        deliveryType: team === primaryTeam ? `feedback_${event.feedback_type}` : `feedback_${event.feedback_type}_${team}_escalation`,
+        idempotencyKey: team === primaryTeam ? `feedback_event_created:${event.id}` : `feedback_event_created:${event.id}:${team}`,
+        text: feedbackMessageBody(event, team),
+        payload: { feedback_type: event.feedback_type, business_unit: event.business_unit, escalation: team !== primaryTeam },
       });
-      // The primary send above already decided notification_status --
-      // never let the escalation's own outcome overwrite that honest
-      // value. When the escalation itself didn't actually send (no
-      // owner/general group bound yet), record that fact in
-      // notification_error so the dashboard can show it, without ever
-      // claiming the escalation succeeded when it didn't.
-      if (escalationStatus === 'not_bound') {
-        await dbFetch(`ops_feedback_events?id=eq.${event.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ notification_error: 'owner_general escalation: not_bound' }),
-        }).catch(() => undefined);
-      }
-    } catch (escalationError) {
-      console.error('THONGTHAI_FEEDBACK_OWNER_ESCALATION_ERROR', escalationError instanceof Error ? escalationError.message.slice(0, 220) : 'unknown');
-      await dbFetch(`ops_feedback_events?id=eq.${event.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          notification_error: `owner_general escalation failed: ${escalationError instanceof Error ? escalationError.message.slice(0, 180) : 'unknown'}`,
-        }),
-      }).catch(() => undefined);
+      if (channel) usedTargetHashes.add(channel.target_id_hash);
+      console.log('FEEDBACK_NOTIFY_TARGET_RESULT', JSON.stringify({ eventId: event.id, team, status }));
+      targets.push({ team, status });
+    } catch (error) {
+      console.error('FEEDBACK_NOTIFY_TARGET_RESULT', JSON.stringify({
+        eventId: event.id, team, status: 'failed',
+        error: error instanceof Error ? error.message.slice(0, 200) : 'unknown',
+      }));
+      targets.push({ team, status: 'failed' });
     }
   }
 
-  return primaryStatus;
+  if (targets.some(t => t.status === 'not_bound' || t.status === 'failed')) {
+    console.log('FEEDBACK_NOTIFY_PARTIAL_FAILURE', JSON.stringify({ eventId: event.id, targets }));
+  }
+
+  // Preserve the existing single-status contract (used for the row's own
+  // notification_status column, and by dispatchEntityNotification's other
+  // callers) by reflecting the PRIMARY/domain team's own outcome -- an
+  // escalation-only failure must never flip the primary team's honest
+  // success into a failure, and vice versa.
+  const overallStatus = targets.find(t => t.team === primaryTeam)?.status ?? targets[0]?.status ?? 'not_bound';
+  return { overallStatus, targets };
+}
+
+async function notifyFeedbackEvent(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'failed' | 'ignored'> {
+  return (await notifyFeedbackEventTargets(id)).overallStatus;
 }
 
 export async function dispatchEntityNotification(
@@ -627,7 +675,10 @@ export async function dispatchEntityNotification(
 ): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
   if (entity === 'booking') return notifyBooking(id);
   if (entity === 'cafe_inquiry') return notifyCafeInquiry(id);
-  if (entity === 'feedback_event') return notifyFeedbackEvent(id);
+  if (entity === 'feedback_event') {
+    const status = await notifyFeedbackEvent(id);
+    return status === 'failed' ? 'not_bound' : status;
+  }
   return notifyOtopOrder(id);
 }
 

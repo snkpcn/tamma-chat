@@ -17,7 +17,7 @@
 // facing response is composed with notificationQueued:false, which
 // produces the honest "ทองไทยจะส่งต่อให้..." (future tense) wording rather
 // than falsely claiming it already happened.
-import { dispatchEntityNotification } from './_ops-notifications';
+import { notifyFeedbackEventTargets, type FeedbackTargetResult } from './_ops-notifications';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import type { ServiceFeedbackMatch } from './_service-mind-feedback-intent';
 
@@ -29,6 +29,11 @@ export type FeedbackEventResult = {
    *  _service-mind-feedback-response.ts for why this distinction matters
    *  for the customer-facing wording. */
   notificationQueued: boolean;
+  /** Per-target delivery outcome (domain team, and owner_general for a
+   *  safety issue or urgent severity) -- lets the customer-facing reply
+   *  say precisely what happened instead of one collapsed boolean. Empty
+   *  when the DB write itself failed (eventId is null). */
+  targets: FeedbackTargetResult[];
 };
 
 function dbConfig(): { url: string; key: string } | null {
@@ -123,19 +128,29 @@ export async function createFeedbackEvent(input: {
       body: JSON.stringify(body),
     });
     const row = (await response.json() as Array<{ id: string }>)[0];
-    if (!row?.id) return { eventId: null, notificationQueued: false };
+    if (!row?.id) return { eventId: null, notificationQueued: false, targets: [] };
 
     try {
-      const status = await dispatchEntityNotification('feedback_event', row.id);
-      // Reflect the real dispatch outcome on the row -- 'ignored' isn't a
-      // valid notification_status value (it only fires for a stray
-      // environment, effectively unreachable in practice), so it maps to
-      // 'not_configured', the closest existing meaning.
+      const { overallStatus, targets } = await notifyFeedbackEventTargets(row.id);
+      // Reflect the real PRIMARY-team dispatch outcome on the single
+      // notification_status column (its CHECK constraint only allows one
+      // scalar value -- see supabase/migrations/..._ops_feedback_events_v1.sql
+      // -- so it can never itself represent "domain sent, owner failed").
+      // The full per-target breakdown is stored non-destructively in
+      // internal_notes (an existing, otherwise-unused jsonb column) so
+      // nothing here required a schema change.
       await dbFetch(`ops_feedback_events?id=eq.${row.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ notification_status: status === 'ignored' ? 'not_configured' : status }),
+        body: JSON.stringify({
+          notification_status: overallStatus === 'ignored' ? 'not_configured' : overallStatus,
+          internal_notes: { notification_targets: targets },
+        }),
       }).catch(() => undefined);
-      return { eventId: row.id, notificationQueued: status === 'sent' || status === 'duplicate' };
+      return {
+        eventId: row.id,
+        notificationQueued: overallStatus === 'sent' || overallStatus === 'duplicate',
+        targets,
+      };
     } catch (notifyError) {
       console.error('THONGTHAI_SERVICE_MIND_NOTIFY_ERROR', notifyError instanceof Error ? notifyError.message.slice(0, 220) : 'unknown');
       await dbFetch(`ops_feedback_events?id=eq.${row.id}`, {
@@ -145,10 +160,10 @@ export async function createFeedbackEvent(input: {
           notification_error: notifyError instanceof Error ? notifyError.message.slice(0, 220) : 'unknown',
         }),
       }).catch(() => undefined);
-      return { eventId: row.id, notificationQueued: false };
+      return { eventId: row.id, notificationQueued: false, targets: [] };
     }
   } catch (error) {
     console.error('THONGTHAI_SERVICE_MIND_EVENT_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return { eventId: null, notificationQueued: false };
+    return { eventId: null, notificationQueued: false, targets: [] };
   }
 }

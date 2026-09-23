@@ -142,6 +142,13 @@ export type Harness = {
    *  ok:false (a provider error) rather than that misleading empty-success
    *  default. */
   programWeatherFetch: (response: { ok: boolean; body?: unknown }) => void;
+  /** Makes the NEXT (and every subsequent) LINE push to this team's bound
+   *  group fail with a real HTTP error -- for testing sendTeamMessage's
+   *  own failure path (_ops-notifications.ts throws, the caller must
+   *  degrade honestly) without needing a real LINE outage. The team must
+   *  already be bound via programOpsChannel; this only affects that one
+   *  team's channel, never other bound teams. */
+  programLinePushFailure: (teamCode: string) => void;
   /** Binds a fake LINE group to a team code (_ops-notifications.ts's
    *  OpsTeamCode) for the duration of this harness run -- without this, no
    *  team has a bound channel, `sendTeamMessage` returns 'not_bound', and
@@ -151,7 +158,12 @@ export type Harness = {
    *  actually sent" path. Uses the REAL encryptPii/piiHash
    *  (_operations-db.ts) so _ops-notifications.ts's own decryption of the
    *  stored channel round-trips correctly, exactly like production. */
-  programOpsChannel: (teamCode: string) => void;
+  /** `sharedTargetId`, when given, binds this team to that EXACT physical
+   *  LINE target instead of its own default `line-group-<teamCode>` --
+   *  lets a test set up two different team codes bound to the SAME real
+   *  LINE group, for proving _ops-notifications.ts's own "never double-
+   *  send to the same physical group" dedup. */
+  programOpsChannel: (teamCode: string, sharedTargetId?: string) => void;
   /** Directly inspect/seed a guest's persisted state row -- useful for
    *  stale-state tests that need to start from an already-existing task. */
   getState: (guestDbId: string) => GuestAgentStateSnapshot | undefined;
@@ -202,6 +214,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   let weatherFetchResponse: { ok: boolean; body: unknown } | null = null;
   const feedbackEvents = new Map<string, Record<string, unknown>>(); // id -> row (ops_feedback_events)
   const opsChannels = new Map<string, { id: string; team_code: string; target_id_enc: string; target_id_hash: string; enabled: boolean }>(); // team_code -> channel
+  const failingPushTeamCodes = new Set<string>(); // team_code -> LINE push should fail for this team's bound target
   const opsDeliveries = new Map<string, { id: string; status: string }>(); // idempotency_key -> delivery
   let feedbackEventSeq = 0;
   let opsDeliverySeq = 0;
@@ -319,7 +332,12 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     // sendTeamMessage once a channel is bound via programOpsChannel) ---
     // always succeeds in tests -- a test asserting an actual LINE-push
     // FAILURE is not a scenario this harness needs to model today.
-    if (u.includes('api.line.me/v2/bot/message/push')) return jsonResponse({});
+    if (u.includes('api.line.me/v2/bot/message/push')) {
+      const body = JSON.parse(String(init.body ?? '{}')) as { to?: string };
+      const failing = [...failingPushTeamCodes].some(team => body.to === `line-group-${team}`);
+      if (failing) return new Response(JSON.stringify({ message: 'mocked push failure' }), { status: 500 });
+      return jsonResponse({});
+    }
 
     // --- ops_notification_channels (_ops-notifications.ts's
     // channelForTeam/currentBindingForTarget) -- only populated via
@@ -650,8 +668,9 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     fetchMock,
     programGeminiReply: reply => { geminiQueue.push(reply); },
     programWeatherFetch: response => { weatherFetchResponse = { ok: response.ok, body: response.body ?? {} }; },
-    programOpsChannel: teamCode => {
-      const targetId = `line-group-${teamCode}`;
+    programLinePushFailure: teamCode => { failingPushTeamCodes.add(teamCode); },
+    programOpsChannel: (teamCode, sharedTargetId) => {
+      const targetId = sharedTargetId ?? `line-group-${teamCode}`;
       const targetEnc = encryptPii(targetId);
       const targetHash = piiHash(targetId);
       if (!targetEnc || !targetHash) throw new Error('programOpsChannel: encryption not configured (call inside withHarness)');

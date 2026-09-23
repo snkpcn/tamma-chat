@@ -6,6 +6,8 @@
 // Operational Truth Doctrine -- never say something succeeded before it
 // actually did).
 import type { ServiceFeedbackMatch, BusinessUnit } from './_service-mind-feedback-intent';
+import type { FeedbackTargetResult } from './_ops-notifications';
+import { composeLineShortReply } from './_chat-copy-style';
 
 const BUSINESS_UNIT_LABEL_TH: Record<BusinessUnit, string> = {
   restaurant: 'ร้านอาหาร',
@@ -57,16 +59,60 @@ export function composeSuggestionResponse(notificationQueued: boolean): string {
   ].join(' ');
 }
 
-export function composeSafetyIssueResponse(match: ServiceFeedbackMatch, notificationQueued: boolean): string {
-  const lines = [
-    'ขอบคุณที่แจ้งนะครับ 🙏 เรื่องความปลอดภัยทองไทยขอรับไว้ก่อนเลยครับ',
-    'สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีเพื่อความชัวร์ครับ',
-    routingLine(notificationQueued),
-  ];
-  if (match.businessUnit !== 'unknown') {
-    lines.splice(1, 0, `ทองไทยแจ้งทีม${BUSINESS_UNIT_LABEL_TH[match.businessUnit]}ให้ตรวจสอบหน้างานครับ`);
+// A safety report escalates to BOTH the relevant domain team and
+// owner_general (see _ops-notifications.ts's needsOwnerEscalation) -- the
+// reply must say precisely which of those two actually got the message,
+// never a blanket "ส่งเรียบร้อยแล้ว" that overclaims one half of a partial
+// delivery (Operational Truth Doctrine). Kept to 2 short lines (see
+// THONGTHAI_HANDOFF.md's "Post-PR67 Polish" LINE-brevity rules) --
+// safety acknowledgment first, one honest status line second.
+export function composeSafetyIssueResponse(
+  match: ServiceFeedbackMatch,
+  eventStored: boolean,
+  targets: FeedbackTargetResult[],
+): string {
+  const opener = 'ขอบคุณที่แจ้งนะครับ 🙏 เรื่องความปลอดภัยทองไทยรับไว้ก่อนเลยครับ';
+  // Never a real ground-condition/safety verdict from Thongthai itself --
+  // this line does double duty: it's the safety-doctrine hedge (no
+  // definite "ปลอดภัยแน่นอน"/"พื้นลื่นแน่นอน" claim) AND the honest "a
+  // human will actually check" reassurance, for both an on-site safety
+  // REPORT and a safety QUESTION (both classify as safety_issue).
+  const hedgeLine = 'สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีเพื่อความชัวร์ครับ';
+
+  if (!eventStored) {
+    // Storage itself failed -- never claim stored or sent (Operational
+    // Truth Doctrine's strictest case).
+    return composeLineShortReply([
+      opener,
+      'ตอนนี้ระบบบันทึกเรื่องไม่สำเร็จ ขอโทษด้วยครับ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อความชัวร์ครับ',
+    ]);
   }
-  return lines.join(' ');
+
+  const isSent = (status: FeedbackTargetResult['status']) => status === 'sent' || status === 'duplicate';
+  const domainLabel = match.businessUnit !== 'unknown' && match.businessUnit !== 'general'
+    ? BUSINESS_UNIT_LABEL_TH[match.businessUnit] : '';
+  const domainTarget = targets.find(t => t.team !== 'owner_general');
+  const ownerTarget = targets.find(t => t.team === 'owner_general');
+  const domainOk = domainTarget ? isSent(domainTarget.status) : false;
+  const ownerOk = ownerTarget ? isSent(ownerTarget.status) : false;
+
+  let statusLine: string;
+  if (!domainTarget) {
+    // business_unit itself routes straight to owner_general (general/
+    // membership/system/unknown) -- no separate domain team to mention.
+    statusLine = ownerOk
+      ? 'ทองไทยส่งให้เจ้าของตรวจสอบแล้วครับ'
+      : 'ตอนนี้ระบบแจ้งเตือนไม่สำเร็จ ทองไทยบันทึกเรื่องไว้แล้ว เดี๋ยวให้ทีมตรวจสอบครับ';
+  } else if (domainOk && ownerOk) {
+    statusLine = `ทองไทยส่งให้ทีม${domainLabel || 'ที่เกี่ยวข้อง'}และเจ้าของตรวจสอบแล้วครับ`;
+  } else if (domainOk && !ownerOk) {
+    statusLine = `ทองไทยส่งให้ทีม${domainLabel || 'ที่เกี่ยวข้อง'}แล้วครับ ส่วนแจ้งเจ้าของยังไม่สำเร็จ ทีมจะตรวจสอบต่อครับ`;
+  } else if (!domainOk && ownerOk) {
+    statusLine = 'ทีมยังไม่ได้รับแจ้งโดยตรง แต่ทองไทยส่งให้เจ้าของตรวจสอบแล้วครับ';
+  } else {
+    statusLine = 'ตอนนี้ระบบแจ้งเตือนทีมไม่สำเร็จ ทองไทยบันทึกเรื่องไว้แล้ว เดี๋ยวให้ทีมตรวจสอบครับ';
+  }
+  return composeLineShortReply([opener, hedgeLine, statusLine]);
 }
 
 export function composeSystemFeedbackResponse(notificationQueued: boolean): string {
@@ -77,12 +123,16 @@ export function composeSystemFeedbackResponse(notificationQueued: boolean): stri
   ].join(' ');
 }
 
-export function composeServiceFeedbackResponse(match: ServiceFeedbackMatch, notificationQueued: boolean): string {
+export function composeServiceFeedbackResponse(
+  match: ServiceFeedbackMatch,
+  notificationQueued: boolean,
+  eventResult?: { eventId: string | null; targets: FeedbackTargetResult[] },
+): string {
   switch (match.feedbackType) {
     case 'complaint': return composeComplaintResponse(match, notificationQueued);
     case 'compliment': return composeComplimentResponse(match, notificationQueued);
     case 'suggestion': return composeSuggestionResponse(notificationQueued);
-    case 'safety_issue': return composeSafetyIssueResponse(match, notificationQueued);
+    case 'safety_issue': return composeSafetyIssueResponse(match, eventResult?.eventId != null, eventResult?.targets ?? []);
     case 'system_feedback': return composeSystemFeedbackResponse(notificationQueued);
   }
 }

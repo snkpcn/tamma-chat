@@ -1,5 +1,36 @@
 export type CustomerChatChannel = 'line' | 'web' | 'facebook' | 'backoffice';
 
+// Cross-cutting LINE response-quality helpers (see THONGTHAI_HANDOFF.md's
+// "Post-PR67 Polish" entry) -- small, composable, applied at the specific
+// responders that were evidenced as too dense (restaurant advisor, safety
+// feedback), not a blanket rewrite of every reply in the codebase.
+
+/** Caps an advisory/recommendation list to the top N items -- "top 2-3
+ *  relevant options" instead of a full catalog dump, unless the caller
+ *  explicitly widens `max` because the customer asked for everything. */
+export function limitAdvisoryList<T>(items: readonly T[], max = 3): T[] {
+  return items.slice(0, Math.max(0, max));
+}
+
+/** Trims a per-item reason/description line so one recommendation never
+ *  balloons a LINE bubble -- cuts at a word boundary, never mid-word. */
+export function trimLongRecommendationForLine(text: string, max = 60): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  const cut = trimmed.slice(0, max - 1);
+  const lastSpace = cut.lastIndexOf(' ');
+  return `${(lastSpace > max * 0.5 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+/** Assembles a short LINE reply from ordered parts, dropping any
+ *  falsy/empty ones -- keeps a composer's own logic focused on WHAT to
+ *  say (safety/care note first, one next step) rather than manual
+ *  string-joining, and keeps the result to only the lines that actually
+ *  have content (never stray blank lines from a skipped optional part). */
+export function composeLineShortReply(parts: Array<string | null | undefined | false>): string {
+  return parts.filter((part): part is string => Boolean(part && part.trim())).join('\n');
+}
+
 const MARKDOWN_HEADING = /^\s*#{1,6}\s+/;
 const MARKDOWN_BULLET = /^\s*[-*]\s+/;
 const MARKDOWN_RULE = /^\s*(?:[-*_]\s*){3,}$/;

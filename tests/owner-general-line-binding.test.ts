@@ -99,24 +99,38 @@ test('5. Unknown/general complaint with owner_general NOT bound: event stored, n
   });
 });
 
+// NOTE: as of the "Post-PR67 Polish" round, safety_issue ALWAYS escalates
+// to owner_general (not only 'urgent' severity -- see _ops-notifications.ts's
+// needsOwnerEscalation), and the customer-facing wording now names
+// PRECISELY which target(s) actually sent instead of one collapsed
+// "already routed" line for any partial success. Tests 6-7 below were
+// updated for that more honest, more precise wording; their own intent
+// (never claim an unbound escalation succeeded) is unchanged.
 test('6. Urgent safety with activity bound but owner_general NOT bound: primary sends, escalation honestly recorded as not_bound', async () => {
   await withHarness(async harness => {
     harness.programOpsChannel('activity');
     // "บาดเจ็บ" is the actual URGENT_SAFETY_MARKER (an in-progress injury,
     // not just a scary-looking condition) -- see
     // _service-mind-feedback-intent.ts. A message like "พื้นลื่นมาก...
-    // น่ากลัว" only reaches SAFETY_CONCERN_MARKER's 'high' severity, which
-    // never triggers the owner_general escalation this test is about.
+    // น่ากลัว" reaches SAFETY_CONCERN_MARKER's 'high' severity instead,
+    // which (since PR66-production-precedence) ALSO escalates now, since
+    // every safety_issue does regardless of severity.
     const r = await ask('og-urgent-safety-partial', 'ขี่ม้าแล้วบาดเจ็บ');
     assert.equal(r.statusCode, 200);
-    assert.match(msg(r.payload), /ส่งเรื่องให้ทีมที่เกี่ยวข้องแล้วครับ/u, 'primary (activity) team is bound, so the customer sees the past-tense "already routed" wording');
+    assert.match(
+      msg(r.payload),
+      /ส่งให้ทีมกิจกรรมแล้วครับ ส่วนแจ้งเจ้าของยังไม่สำเร็จ/u,
+      'primary (activity) team is bound and sent; owner_general escalation is honestly reported as not yet sent, never faked',
+    );
     const events = harness.postsTo('ops_feedback_events');
     assert.equal(events.length, 1);
     assert.equal(events[0].feedback_type, 'safety_issue');
     assert.equal(events[0].business_unit, 'activity');
     const row = harness.feedbackEventRow(FIRST_EVENT_ID);
     assert.equal(row?.notification_status, 'sent', 'the primary activity send succeeded and must be reported as such');
-    assert.match(String(row?.notification_error ?? ''), /owner_general escalation: not_bound/u, 'the SEPARATE owner_general escalation attempt must be honestly recorded as not_bound, never silently dropped or claimed as sent');
+    const targets = (row?.internal_notes as { notification_targets?: Array<{ team: string; status: string }> } | undefined)?.notification_targets ?? [];
+    assert.deepEqual(targets.find(t => t.team === 'activity')?.status, 'sent');
+    assert.deepEqual(targets.find(t => t.team === 'owner_general')?.status, 'not_bound', 'the SEPARATE owner_general escalation attempt must be honestly recorded as not_bound, never silently dropped or claimed as sent');
   });
 });
 
@@ -135,9 +149,14 @@ test('7. After owner_general is bound in the mock: system feedback sends there, 
     harness.programOpsChannel('owner_general');
     const safetyReply = await ask('og-urgent-both-bound', 'ขี่ม้าแล้วบาดเจ็บ');
     assert.equal(safetyReply.statusCode, 200);
-    assert.match(msg(safetyReply.payload), /ส่งเรื่องให้ทีมที่เกี่ยวข้องแล้วครับ/u, 'primary activity team still sends');
+    assert.match(
+      msg(safetyReply.payload),
+      /ส่งให้ทีมกิจกรรมและเจ้าของตรวจสอบแล้วครับ/u,
+      'both the primary activity team and the owner_general escalation sent -- the reply says both, not one generic line',
+    );
     const row = harness.feedbackEventRow(FIRST_EVENT_ID);
     assert.equal(row?.notification_status, 'sent', 'primary send still succeeds');
-    assert.ok(!row?.notification_error, 'once owner_general is ALSO bound, the escalation succeeds too -- no not_bound note left behind');
+    const targets = (row?.internal_notes as { notification_targets?: Array<{ team: string; status: string }> } | undefined)?.notification_targets ?? [];
+    assert.deepEqual(targets.find(t => t.team === 'owner_general')?.status, 'sent', 'once owner_general is ALSO bound, the escalation succeeds too');
   });
 });
