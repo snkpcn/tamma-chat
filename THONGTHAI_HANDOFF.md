@@ -4476,3 +4476,104 @@ every prior round.
 notification-success claim anywhere; no unrelated production data
 mutated; restaurant menu data and prices remain sourced from the real,
 verified `restaurant_menu_live` view, never invented.
+
+## PR #68 Partial-Failure Incident -- owner_general dedup false-positive -- 2026-09-23
+
+Live production retest of PR #68 showed the activity group got the
+safety alert but the owner/general group did NOT, while Thongthai's
+customer-facing reply still claimed both were notified
+("ทองไทยส่งให้ทีมกิจกรรมและเจ้าของตรวจสอบแล้วครับ") -- a false success claim,
+not just a missing notification.
+
+**Diagnosis (direct production query, not assumption)**: queried the real
+`ops_feedback_events`/`ops_notification_deliveries`/`ops_notification_channels`
+tables in project `upaokrprawzhgzeqsdke` for the exact incident
+(customer_message "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว", created_at 2026-09-23
+13:35:02 UTC -- matches the owner's reported 20:35 Bangkok time exactly).
+Found:
+- `internal_notes.notification_targets` = `[{team:"activity",status:
+  "sent"},{team:"owner_general",status:"duplicate"}]`.
+- `ops_notification_deliveries` has exactly ONE row for this event's
+  entity_id -- the activity send. No delivery row exists for
+  owner_general at all, proving its "duplicate" status was never backed
+  by a real send attempt of any kind.
+- `ops_notification_channels` confirms activity and owner_general are
+  bound to two COMPLETELY DIFFERENT `target_id_hash` values (different
+  physical LINE groups) -- so the dedup-by-shared-group logic had no
+  legitimate reason to fire.
+
+**Root cause**: `channelForTeam`'s query (`_ops-notifications.ts`)
+selected `id,team_code,target_type,target_id_enc,display_name,enabled`
+-- it never selected `target_id_hash`, even though PR #68's own
+same-physical-group dedup logic (`notifyFeedbackEventTargets`) reads
+`channel.target_id_hash`. Real PostgREST only returns columns actually
+listed in `select=`, so `channel.target_id_hash` was `undefined` for
+EVERY channel in production. The dedup check
+(`usedTargetHashes.has(channel.target_id_hash)`) compared
+`undefined === undefined`, which is always true -- so the SECOND route
+target in ANY escalation (owner_general, always processed after the
+domain team) was unconditionally marked `'duplicate'` regardless of
+which real group it was bound to, and `composeSafetyIssueResponse`
+(correctly, given a genuine dedup) treats `'duplicate'` as a real send.
+This is why 964 passing tests never caught it: the test harness's mock
+for `ops_notification_channels`'s GET handler returned every stored
+field on the channel object regardless of what `select=` asked for --
+real PostgREST's column projection was never actually simulated.
+
+**Fix (two independent layers, so a future regression in either one
+alone still fails safe)**:
+1. `channelForTeam`'s (and every other `NotificationChannel`-returning
+   query's) select list now includes `target_id_hash`; the
+   `NotificationChannel` type declares it as a required field with a
+   doc comment explaining exactly this incident, so omitting it from a
+   future query select list is now a TypeScript error, not a silent
+   `undefined`.
+2. Defensive: the dedup comparison now requires `channel?.target_id_hash`
+   to be truthy before ever consulting the used-hashes set -- two falsy
+   hashes are never treated as "the same group" again. Verified this
+   layer alone (with the select-list bug deliberately reintroduced)
+   already prevents the incident -- worst case on a future select-list
+   mistake is now a harmless duplicate send, never a silently dropped
+   escalation reported as successful.
+3. `tests/helpers/canonical-core-harness.ts`'s `ops_notification_channels`
+   GET mock now enforces real PostgREST `select=` column projection
+   (new `projectSelect` helper) -- this is what actually would have
+   caught this bug before it ever reached production, and now protects
+   the same class of mistake for any future field this codebase adds to
+   that type.
+
+**Tests added**: `tests/safety-escalation-target-hash-incident.test.ts`,
+6 tests through the full signed LINE webhook with realistic bound
+groups -- asserts the EXACT physical LINE push call count per target
+(`postsTo('line_push')`, new harness tracking), that a real delivery row
+exists for BOTH targets (`postsTo('ops_notification_deliveries')`, also
+newly tracked), and that the reply's wording only ever claims a target
+was notified when it genuinely was.
+
+**Load-bearing verification**: reproduced the exact original bug
+(reverted `channelForTeam`'s select list to omit `target_id_hash`,
+*before* adding the defensive hash-presence guard) against the new test
+file -- 2 of 6 tests failed exactly as production did. Then verified the
+defensive guard alone (select list still broken) is now sufficient by
+itself to keep all 6 passing -- confirming the fix is genuinely two
+independent, mutually-reinforcing layers, not one fix wearing two hats.
+Restored the corrected select list; all 6 pass with both layers
+correct.
+
+**Full suite**: 970/970 passing (964 prior + 6 new), zero regressions.
+
+**Deploy status**: cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**Owner retest**: send "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" in Private OA ->
+check the Private OA reply, check the activity LINE group receives the
+alert, check the owner/general LINE group ALSO receives a NEW alert
+(not just the old 16:35 one), check backoffice "เสียงลูกค้า" shows the
+event with both targets recorded.
+
+**Confirmations**: no schema migration; no fake notification-success
+claim anywhere; verified directly against real production data (not
+assumed) both before and as part of confirming the fix's mechanism; no
+unrelated production data mutated (read-only queries only against
+`upaokrprawzhgzeqsdke`).

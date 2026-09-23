@@ -11,6 +11,18 @@ type NotificationChannel = {
   team_code: OpsTeamCode;
   target_type: TargetType | 'user';
   target_id_enc: string;
+  /** The physical LINE group's hashed target id -- used to dedupe two
+   *  different team codes bound to the SAME real group (see
+   *  notifyFeedbackEventTargets). MUST be selected by every query that
+   *  populates this type; a query that omits it leaves this `undefined`
+   *  for every row, which silently makes any dedup-by-hash comparison
+   *  match every OTHER channel too (undefined === undefined) -- a real
+   *  production incident this type annotation exists to prevent a repeat
+   *  of: channelForTeam's own select list omitted it once, and every
+   *  safety_issue owner_general escalation after the first target
+   *  silently got skipped as a false "duplicate" while still being
+   *  reported to the customer as sent. */
+  target_id_hash: string;
   display_name: string | null;
   enabled: boolean;
 };
@@ -178,7 +190,7 @@ async function currentBindingForTarget(targetId: string): Promise<NotificationCh
   if (!hash) return null;
   const response = await dbFetch(
     `ops_notification_channels?provider=eq.line&target_id_hash=eq.${hash}&enabled=eq.true`
-    + '&select=id,team_code,target_type,target_id_enc,display_name,enabled&limit=1',
+    + '&select=id,team_code,target_type,target_id_enc,target_id_hash,display_name,enabled&limit=1',
   );
   const rows = await response.json() as NotificationChannel[];
   return rows[0] ?? null;
@@ -243,7 +255,7 @@ export async function bindLineTeamChannel(input: {
 async function channelForTeam(teamCode: OpsTeamCode): Promise<NotificationChannel | null> {
   const response = await dbFetch(
     `ops_notification_channels?team_code=eq.${encodeURIComponent(teamCode)}&provider=eq.line&enabled=eq.true`
-    + '&select=id,team_code,target_type,target_id_enc,display_name,enabled&limit=1',
+    + '&select=id,team_code,target_type,target_id_enc,target_id_hash,display_name,enabled&limit=1',
   );
   const rows = await response.json() as NotificationChannel[];
   return rows[0] ?? null;
@@ -622,11 +634,21 @@ export async function notifyFeedbackEventTargets(id: string): Promise<{
   for (const team of routeTargets) {
     console.log('FEEDBACK_NOTIFY_TARGET_ATTEMPT', JSON.stringify({ eventId: event.id, team }));
     const channel = await channelForTeam(team);
-    if (channel && usedTargetHashes.has(channel.target_id_hash)) {
+    // Defensive: a falsy target_id_hash (e.g. a query that forgot to
+    // select it, exactly the incident this guards against -- see
+    // NotificationChannel's own doc comment) must NEVER be treated as a
+    // dedup match. Two falsy hashes are NOT "the same group" -- without
+    // this, `undefined === undefined` silently marked every target after
+    // the first as a false duplicate while still being reported to the
+    // customer as sent.
+    if (channel?.target_id_hash && usedTargetHashes.has(channel.target_id_hash)) {
       // Same physical LINE group as an earlier target this event already
       // sent to (e.g. owner_general happens to be bound to the same group
       // as the domain team) -- never send the same message twice.
-      console.log('FEEDBACK_NOTIFY_TARGET_RESULT', JSON.stringify({ eventId: event.id, team, status: 'duplicate', reason: 'same_channel_as_earlier_target' }));
+      console.log('FEEDBACK_NOTIFY_TARGET_RESULT', JSON.stringify({
+        eventId: event.id, team, status: 'duplicate', reason: 'same_channel_as_earlier_target',
+        targetHashPrefix: channel.target_id_hash.slice(0, 8),
+      }));
       targets.push({ team, status: 'duplicate' });
       continue;
     }
@@ -640,7 +662,7 @@ export async function notifyFeedbackEventTargets(id: string): Promise<{
         text: feedbackMessageBody(event, team),
         payload: { feedback_type: event.feedback_type, business_unit: event.business_unit, escalation: team !== primaryTeam },
       });
-      if (channel) usedTargetHashes.add(channel.target_id_hash);
+      if (channel?.target_id_hash) usedTargetHashes.add(channel.target_id_hash);
       console.log('FEEDBACK_NOTIFY_TARGET_RESULT', JSON.stringify({ eventId: event.id, team, status }));
       targets.push({ team, status });
     } catch (error) {
@@ -761,7 +783,7 @@ export async function buildTeamScheduleSummary(teamCode: OpsTeamCode, localDate:
 
 export async function sendDailyOpsSummaries(localDate = isoLocalDate()): Promise<Array<{ team: OpsTeamCode; status: string }>> {
   const response = await dbFetch(
-    'ops_notification_channels?provider=eq.line&enabled=eq.true&select=id,team_code,target_type,target_id_enc,display_name,enabled&order=team_code.asc',
+    'ops_notification_channels?provider=eq.line&enabled=eq.true&select=id,team_code,target_type,target_id_enc,target_id_hash,display_name,enabled&order=team_code.asc',
   );
   const channels = await response.json() as NotificationChannel[];
   const results: Array<{ team: OpsTeamCode; status: string }> = [];
