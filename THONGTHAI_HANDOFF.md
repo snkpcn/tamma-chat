@@ -3005,3 +3005,42 @@ passing; the fix verified load-bearing (reverting it makes exactly the
 still happens to pass by the SAME array-order coincidence that caused
 the bug, which is precisely why this needed a real fix, not a lucky
 reordering of the array).
+
+### FOURTH FIX — bare "เอาทองไทย"/"เอาภาราดร" with no context now asks first
+
+A deeper intent-safety gap: a bare "เอาทองไทย" (or "เอาภาราดร"/"เลือก
+ทองไทย"/a bare horse name alone) with NO established horse/activity
+context was silently accepted as horse selection -- not by
+`activityBookingFallbackDraft` (already correctly gated from the prior
+three fixes), but by the ENTIRELY SEPARATE One-Mind semantic layer's own
+`findKnownActivityAssetSelection` check
+(`_deterministic-semantic-turn.ts`, line ~535), which has no context or
+intent gate of its own -- any bare horse-name mention with no open task
+silently opened a booking task and produced a garbled missing-field
+prompt.
+
+Fix: a new deterministic responder, `bareHorseSelectionClarification`
+(`thongthai-chat.ts`), checked right after the activity-booking fallback
+(before the One-Mind orchestrator ever sees the message). It fires only
+when the message names a horse AND isn't feedback/comparison-shaped AND
+doesn't itself express real riding intent ("ขี่"/"ม้า" -- see the new
+`hasExplicitHorseBookingIntent`) AND there's no active context -- checked
+via BOTH prior `chatHistory` (`hasActiveHorseBookingContext`) AND, since
+the client doesn't always resend full history (several existing tests
+seed task state directly), whether an activity-domain task has EVER
+existed for this guest (`hasEverDiscussedActivityDomain`, a cheap
+`loadGuestAgentStateSnapshot` read -- this is what a real cancelled-task-
+then-reselect regression test needed to keep passing).
+
+Also had to teach the ambiguity guard to yield to
+`detectCompareEntities`'s existing temperament/beginner-suitability path
+(new `isCompareEntitiesAttributeQuestion` in `_local-concierge-intent.ts`)
+-- "ภาราดรกับทองไทยตัวไหนนิสัยดีกว่า" names both horses with no "ม้า"/
+riding wording, so without this it would have been wrongly intercepted
+as an ambiguous selection instead of reaching that path's honest
+"ไม่มีข้อมูล" decline (caught 3 real regressions in existing tests before
+landing this).
+
+15 new tests, all through the real `processThongthaiChatCore` path.
+776/776 total passing; the new guard verified load-bearing (disabling it
+makes exactly the 6 ambiguity-clarification tests fail, nothing else).
