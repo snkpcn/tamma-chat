@@ -165,7 +165,17 @@ const SAFETY_QUESTION_MARKER = /ปลอดภัยไหม|ปลอดภ�
 // that file's own marker for the canonical list this mirrors).
 const SAFETY_CONCERN_MARKER = /พื้นลื่น(?:มาก)?|น่ากลัว|เกือบ(?:ล้ม|ตก|ชน)|ไม่ปลอดภัย|เสี่ยงอันตราย|อันตรายมาก|มีปัญหาระหว่างทาง|ล้ม(?:แล้ว)?|เจ็บ(?!ไหล่|หลัง|เข่า|สะโพก|ข้อ)|ไม่มีคนดู/u;
 const SPEED_FEAR_MARKER = /กลัวเร็ว|กลัวความเร็ว|ขอช้า\s*ๆ/u;
-const LOW_WALKING_MARKER = /เดินน้อย|ไม่อยากเดินเยอะ|เดินไม่สะดวก|เดินไม่ไหว|เดินลำบาก|เดินไม่ค่อยไหว/u;
+// Production regression fix (Phase 2): "เดินไกลไม่ได้"/"เดินไม่ได้ไกล"/
+// "เดินนานไม่ได้" ("can't walk far/long") are a DIFFERENT phrasing from
+// "เดินไม่ไหว" ("can't manage walking") and were missing here even though
+// _customer-phrase-intelligence.ts's own mobility-memory regex already
+// recognized them -- so a message like "แม่เดินไกลไม่ได้" got captured
+// into guest_memory correctly but never triggered this function's own
+// caller (ecosystemFirstVisitResponse's low-walking branch below),
+// falling through to the LLM instead of a deterministic care reply.
+// Kept in sync with that other regex by hand (no shared import, to avoid
+// a layering dependency between the two modules).
+const LOW_WALKING_MARKER = /เดินน้อย|ไม่อยากเดินเยอะ|เดินไม่สะดวก|เดินไม่ไหว|เดินลำบาก|เดินไม่ค่อยไหว|เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้/u;
 
 export function prefersGentleIntensity(text: string): boolean {
   return GENTLE_MARKER.test(normalizeThai(text));
