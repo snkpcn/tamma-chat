@@ -156,6 +156,18 @@ export type Harness = {
    *  stale-state tests that need to start from an already-existing task. */
   getState: (guestDbId: string) => GuestAgentStateSnapshot | undefined;
   setState: (guestDbId: string, state: Record<string, unknown>, updatedAt?: string) => void;
+  /** Directly seed/inspect a guest's booking_sessions row (the LEGACY LINE
+   *  booking flow's own state, _operations-db.ts's loadLineBookingSession/
+   *  saveLineBookingSession -- a SEPARATE table from guest_agent_state).
+   *  Essential for any test proving behavior when a stale/leftover session
+   *  already exists for a guest, not just a brand-new one -- a real
+   *  production incident (see THONGTHAI_HANDOFF.md's "Horse UX Production
+   *  Gap" entry) was invisible to every test until this existed, because
+   *  every prior test implicitly started with an empty booking_sessions
+   *  table (the unmodeled-GET-returns-[] default silently matches "no
+   *  session", not "real production state"). */
+  getBookingSession: (guestDbId: string) => Record<string, unknown> | undefined;
+  setBookingSession: (guestDbId: string, row: Record<string, unknown>) => void;
   /** Every POST body sent to a given table, in order -- for asserting
    *  "exactly once" write counts (bookings, restaurant_preorders,
    *  promotion_redemptions, otop_orders, ops_notification-shaped writes). */
@@ -183,6 +195,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const guests = new Map<string, { id: string; anonymous_id: string; last_seen_at: string }>();
   const guestIdentities = new Map<string, string>(); // `${provider}:${providerUserKey}` -> guestDbId
   const agentState = new Map<string, GuestAgentStateSnapshot>();
+  const bookingSessions = new Map<string, Record<string, unknown>>(); // guest_id -> booking_sessions row (legacy LINE booking flow)
   const customerAccounts = new Map<string, { id: string; guest_id: string }>();
   const posts = new Map<string, Array<Record<string, unknown>>>();
   const geminiQueue: HarnessGeminiReply[] = [];
@@ -487,6 +500,24 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
       return jsonResponse([{ state: nextSnapshot.state, updated_at: nextSnapshot.updatedAt }]);
     }
 
+    // --- booking_sessions (legacy LINE booking flow's own state --
+    // _operations-db.ts's loadLineBookingSession/saveLineBookingSession,
+    // a SEPARATE table from guest_agent_state) ---
+    if (path.startsWith('booking_sessions') && method === 'GET') {
+      const guestId = query.get('guest_id')?.replace('eq.', '') ?? '';
+      const row = bookingSessions.get(guestId);
+      return jsonResponse(row ? [row] : []);
+    }
+    if (path.startsWith('booking_sessions') && method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as { guest_id?: string };
+      if (body.guest_id) {
+        const existing = bookingSessions.get(body.guest_id) ?? {};
+        bookingSessions.set(body.guest_id, { ...existing, ...body });
+      }
+      recordPost('booking_sessions', body);
+      return jsonResponse([]);
+    }
+
     // --- community_offerings / world_facts ---
     if (path.startsWith('community_offerings')) return jsonResponse([]);
     if (path.startsWith('world_facts') && method === 'GET') return jsonResponse(catalog.worldFacts);
@@ -605,6 +636,8 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     },
     getState: guestDbId => agentState.get(guestDbId),
     setState: (guestDbId, state, updatedAt) => { agentState.set(guestDbId, { exists: true, state, updatedAt: updatedAt ?? new Date().toISOString() }); },
+    getBookingSession: guestDbId => bookingSessions.get(guestDbId),
+    setBookingSession: (guestDbId, row) => { bookingSessions.set(guestDbId, { guest_id: guestDbId, ...row }); },
     postsTo: table => posts.get(table) ?? [],
     guestDbId: anonymousId => guests.get(anonymousId)?.id,
     feedbackEventRow: id => feedbackEvents.get(id),

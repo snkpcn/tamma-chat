@@ -3556,3 +3556,82 @@ stays in horse context, a following "เอาทองไทย" still selects.
 success; no DB migration (pure application-code fix, reusing the existing
 `guest_agent_state`/`_task-state.ts` machinery); no unrelated production
 data mutated.
+
+## Horse UX Production Gap -- 2026-09-23
+
+Owner confirmed PR #61 deployed (commit 640cec9, ready) and retested live
+~50 minutes later. Production still hit the legacy "เลือกระยะเวลา 30, 60
+หรือ 90 นาที" prompt for a bare "อยากขี่ม้า", and "เอาทองไทย"/"จะขี่ทองไทย"
+still got the horse-or-assistant clarification. PR #61's own tests all
+passed -- the fix was real but never actually protected production.
+
+**Why the tests passed but production didn't**: `shouldConsumeLegacyLineBookingTurn`'s
+bypass only fired `if (!session && isActivityIntentStartMessage(text))`.
+Every test in PR #61 (and, it turns out, every test in this ENTIRE
+existing suite that reaches this code path) used a brand-new guest, so
+`session` was always null. Worse: this shared test harness never modeled
+the `booking_sessions` table at all before this round -- any GET fell
+through to the generic "unmodeled table -> []" default, silently matching
+"no session" instead of real production state. A real LINE account that
+has been tested against repeatedly over this whole engagement has a real,
+non-null `booking_sessions` row (from an earlier ATV/activity test, days
+old), so the `!session` guard never fired, and the legacy flow's own
+resume logic (`session.service_type === 'activity'` branch) kept
+answering with its own transactional question regardless of what the
+customer just typed. **No test in this codebase could have caught this
+until the harness itself could model a stale session** -- fixed first
+(`tests/helpers/canonical-core-harness.ts` now models `booking_sessions`
+with `getBookingSession`/`setBookingSession`), then reproduced exactly
+(a new test seeds a 3-day-old, unrelated ATV session before sending
+"อยากขี่ม้า" and confirms the old, still-conditional bypass fails that
+exact test) before fixing the actual guard.
+
+**Fix**: the bare-intent-start bypass in `shouldConsumeLegacyLineBookingTurn`
+is now UNCONDITIONAL -- checked before the `!session` branch, not only
+when session is null. A regression test confirms a genuinely ACTIVE,
+in-progress legacy session (customer mid-way through an ATV booking,
+just supplied a duration) still continues normally -- this bypass only
+ever fires for the bare, narrow intent-start sentence itself.
+
+**Second real gap found from the owner's exact reproduction**: "จะขี่
+ทองไทย" (a riding verb attached directly to a specific horse's name, but
+without the generic word "ม้า") was being treated as ambiguous -- the
+SAME as a bare "เอาทองไทย"/"ทองไทย" -- and got the "horse or assistant?"
+clarification even with zero prior conversation, because
+`hasExplicitHorseBookingIntent`'s vocabulary only recognized "ม้า"/"ขี่ม้า"/
+"อยากขี่", not a riding verb glued directly to a proper name. Added
+`hasRidingVerbAttachedToHorseName` (`/ขี่(?:ทองไทย|ภาราดร)/u`) as a
+narrower, separate signal: unlike a bare name alone, naming a riding verb
+together with the horse's name leaves nothing genuinely ambiguous to ask
+about, so it now lets both `bareHorseSelectionClarification` (skip the
+question) and `horseSelectionWithContextResponse` (select immediately)
+treat it as sufficient context on its own, with or without a prior
+"อยากขี่ม้า" turn. A bare name with NO riding verb at all
+("เอาทองไทย"/"ทองไทย") still correctly requires established context,
+verified by dedicated tests for both shapes.
+
+**Files changed**: `netlify/functions/_operations-db.ts` (unconditional
+bypass), `netlify/functions/thongthai-chat.ts`
+(`hasRidingVerbAttachedToHorseName`), `tests/helpers/canonical-core-harness.ts`
+(new `booking_sessions` modeling -- a genuine, previously-missing harness
+capability, not just a test). **Tests**: `tests/horse-ux-production-gap.test.ts`,
+9 new tests, including the exact stale-session production reproduction
+and an active-session regression check. **Full suite: 851/851 passing**
+(842 prior + 9 new). Load-bearing verified independently for both fixes:
+reverting the unconditional bypass broke exactly the stale-session test
+(test 1) and nothing else; disabling the riding-verb detection broke
+exactly the no-context "จะขี่ทองไทย" test (test 5) and nothing else.
+
+**Owner retest checklist**: `อยากขี่ม้า` -> warm intro (should now hold
+even on the SAME LINE account that has been tested many times before,
+since the fix no longer depends on a clean session). `เอาทองไทย` ->
+selects. For a true from-scratch check: `จะขี่ทองไทย` with NO prior
+message in the conversation should ALSO select immediately (no
+clarification) -- this is the new, second fix and worth testing on its
+own, not just after "อยากขี่ม้า".
+
+**Confirmations**: no booking/order/payment created; no fake notification
+success; no DB migration; no unrelated production data mutated. This
+round also did not need to touch or seed anything in the real production
+database -- the reproduction was entirely local to this session's test
+harness.

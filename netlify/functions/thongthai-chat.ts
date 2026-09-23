@@ -1143,6 +1143,21 @@ function hasExplicitHorseBookingIntent(text: string): boolean {
   return /ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า|อยากขี่/u.test(text);
 }
 
+// "ขี่ทองไทย"/"จะขี่ทองไทย"/"อยากขี่ภาราดร" -- a riding verb attached
+// DIRECTLY to a specific horse's proper name, without the generic word
+// "ม้า" anywhere (that shape is already covered by
+// hasExplicitHorseBookingIntent and routes through the full
+// activityBookingFallbackDraft slot-filling flow instead). This is its
+// own, narrower signal: real production incident this closes -- "จะขี่
+// ทองไทย" with no prior conversation was still being treated as
+// AMBIGUOUS (same as a bare "เอาทองไทย"/"ทองไทย") and, before context was
+// established, got the "horse or assistant?" clarification even though
+// naming a riding verb together with the horse's name leaves nothing
+// genuinely ambiguous to ask about.
+function hasRidingVerbAttachedToHorseName(text: string): boolean {
+  return /ขี่(?:ทองไทย|ภาราดร)/u.test(text);
+}
+
 // Whether a horse-booking task is already legitimately underway --
 // checked against PRIOR turns only, so a bare "เอาทองไทย" that only
 // LOOKS like a continuation because it's the second-plus message in a
@@ -1207,6 +1222,7 @@ function isBareAmbiguousHorseSelection(request: BrainRequest): { name: string } 
 export async function bareHorseSelectionClarification(request: BrainRequest, guestDbId: string | null): Promise<BrainResponse | null> {
   const ambiguous = isBareAmbiguousHorseSelection(request);
   if (!ambiguous) return null;
+  if (hasRidingVerbAttachedToHorseName(request.message)) return null;
   if (hasActiveHorseBookingContext(request)) return null;
   const everDiscussedActivity = await hasEverDiscussedActivityDomain(guestDbId).catch(() => false);
   if (everDiscussedActivity) return null;
@@ -1271,7 +1287,8 @@ export async function horseSelectionWithContextResponse(
 ): Promise<BrainResponse | null> {
   const ambiguous = isBareAmbiguousHorseSelection(request);
   if (!ambiguous) return null;
-  const hasContext = hasActiveHorseBookingContext(request)
+  const hasContext = hasRidingVerbAttachedToHorseName(request.message)
+    || hasActiveHorseBookingContext(request)
     || await hasEverDiscussedActivityDomain(guestDbId).catch(() => false);
   if (!hasContext) return null;
 
