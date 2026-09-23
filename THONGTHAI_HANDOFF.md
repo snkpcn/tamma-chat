@@ -4838,3 +4838,141 @@ draft before routing to the owner -- the roadmap's own examples imply
 the former, but this is worth an explicit owner confirmation before
 building it, since it changes user-facing behavior for messages that
 currently reach the LLM today).
+
+## Master Roadmap Phase 1 -- Escalation Boundary Policy -- 2026-09-23
+
+Owner answered Phase 0's open question: for ESCALATE-class messages
+(refund, special discount, claim, accident liability, a safety-
+guarantee question, a bad-review threat, severe allergy/medical risk,
+unverified real-time availability), Thongthai must reply with an
+**immediate deterministic guardrail response**, never an LLM-drafted
+one -- "These are outside Thongthai's authority/control and can create
+legal, financial, safety, or brand risk if the model improvises."
+
+**What was built** (new module `_boundary-classifier.ts`,
+`classifyEscalationBoundary`): a closed, narrow-vocabulary classifier
+for exactly 8 categories -- `refund_request`, `special_discount`,
+`claim_request`, `accident_liability`, `safety_guarantee`,
+`bad_review_threat`, `severe_allergy_medical`, `unverified_availability`.
+Each match carries an optional `domainUnit` (detected via a small,
+closed domain-name hint list -- ม้า/ATV/ยิงธนู->activity, อาหาร/กิน/เมนู->
+restaurant, ที่พัก/เฮือน->stay, คาเฟ่/กาแฟ->cafe) and an `escalates` flag.
+Only ONE category instance does not escalate at all: a bare, generic
+"ปลอดภัย 100% ไหม" with no named activity -- per the owner's own explicit
+instruction ("If generic: answer with no guarantee, ask context"), this
+gets an honest answer with zero feedback event and zero notification.
+
+**A real, confirmed pre-existing bug this closes**:
+`_service-mind-feedback-intent.ts`'s own `URGENT_SAFETY_MARKER` already
+contains the literal substrings "อุบัติเหตุ" and "แพ้อาหารรุนแรง" (there
+for genuine in-progress-injury/emergency detection). Verified directly
+before building anything: "ถ้าเกิดอุบัติเหตุรับผิดชอบไหม" (a LIABILITY
+QUESTION -- nobody is actually hurt) and "แพ้อาหารรุนแรง" (said bare, no
+food/restaurant context) were BOTH misclassified as an urgent
+`safety_issue` REPORT by the existing classifier, producing the wrong
+reply (a ground-condition-check acknowledgment for a liability policy
+question). `deterministicEscalationResponse` is checked in
+`thongthai-chat.ts`'s precedence cascade BEFORE
+`deterministicServiceFeedbackResponse` specifically to intercept these
+two narrow cases first; every genuinely safety_issue/complaint/
+compliment/suggestion/system_feedback-shaped message (confirmed via
+direct classifier scratch-testing, including "เจิดพูดไม่ดี" and "พื้นลื่น
+มาก ตอนเล่น ATV น่ากลัว") keeps flowing through the EXISTING,
+already-correct `classifyServiceFeedback` path completely unaffected.
+
+**No schema migration.** Every escalation category reuses the EXISTING
+`ops_feedback_events`/`ops_notification_channels`/
+`ops_notification_deliveries` infrastructure (`createFeedbackEvent`,
+`notifyFeedbackEventTargets`) as-is -- `feedback_type` maps to
+`'safety_issue'` for the genuinely safety/liability/medical-risk
+categories (accident_liability, safety_guarantee-with-domain,
+severe_allergy_medical -- these get the existing automatic domain +
+owner_general escalation via `needsOwnerEscalation`'s
+`feedback_type === 'safety_issue'` rule for free) and `'complaint'` for
+the rest (refund/discount/claim/bad-review/unverified-availability --
+these route via `business_unit` alone, mostly `'general'` -> owner_general
+only). `severity` is set per-category (`'urgent'` for the safety-
+adjacent ones, `'high'`/`'normal'` for the rest) purely for the owner-
+facing label; it does not change routing beyond what `feedback_type`/
+`business_unit` already decide.
+
+**Deterministic guardrail wording** (new `composeEscalationResponse` in
+`_service-mind-feedback-response.ts`, alongside a new shared
+`composeNotificationStatusLine` helper factored OUT of the existing
+`composeSafetyIssueResponse` so both composers say precisely which
+target(s) actually sent, never a blanket claim -- `composeSafetyIssueResponse`
+itself now calls this shared helper too, a pure refactor with zero
+behavior change, confirmed by the full suite staying green). Wording
+for refund_request, special_discount, accident_liability, and both
+safety_guarantee branches is the owner's own verbatim text from their
+Phase 1 decision message; claim_request, bad_review_threat,
+severe_allergy_medical, and unverified_availability were not given
+verbatim text and were written to match the same tone/structure.
+
+**Tests added**: `tests/master-roadmap-phase1-escalation-boundary.test.ts`,
+15 tests through the full signed LINE webhook with realistic bound
+groups -- the roadmap's own 10-item list in full (tests 1-10, in order),
+plus 5 extra (domain-tied vs. domain-generic liability routing,
+not-bound honesty, bad-review routing, unverified-availability
+honesty). Test 4 ("มีอะไรแนะนำ" -> NEEDS_CONTEXT) surfaced a genuine,
+pre-existing gap while writing it: a truly BARE "มีอะไรแนะนำ" (no
+"ครั้งแรก"/"ร้านอาหาร"/other domain anchor) has no deterministic
+NEEDS_CONTEXT responder at all yet and falls through to the LLM --
+`ecosystemFirstVisitResponse`'s own `FIRST_VISIT_RECOMMEND_MARKER`
+requires "ครั้งแรก" alongside it. This belongs to the roadmap's own
+Phase 4 ("ecosystem/first-time visitor" domain playbook), not this
+phase's scope -- the test was written to assert only what Phase 1
+actually guarantees (the new classifier does not misfire on it, no
+spurious feedback event), and this gap is carried forward as a known
+item for Phase 4.
+
+**Load-bearing verification**: neutered `classifyEscalationBoundary` to
+always return `null` (simulating "Phase 1 was never built") and
+confirmed exactly the 9 escalation-dependent tests failed while the 6
+unrelated tests (CAN_ANSWER/NEEDS_CONTEXT/staff-complaint/existing-
+safety-issue) stayed green -- proving these tests actually catch a
+regression in the new classifier specifically, not passing by
+coincidence. Restored the real classifier; all 15 pass again.
+
+**Full suite**: 985/985 passing (970 prior + 15 new), zero regressions.
+
+**Deploy status**: cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**Owner retest script**:
+1. "ขอคืนเงินได้ไหม" -> deterministic guardrail reply, never an LLM-
+   drafted refund answer; check owner/general LINE group receives it.
+2. "ขอส่วนลดพิเศษ กลุ่ม 20 คน" -> guardrail reply + asks group
+   size/date/service; owner/general group notified.
+3. "ปลอดภัย 100% ไหม" (bare, no activity named) -> honest no-guarantee
+   answer, NO owner/general notification, no backoffice event.
+4. "ถ้าเกิดอุบัติเหตุระหว่างขี่ม้า รับผิดชอบไหม" -> guardrail reply; check
+   BOTH the activity LINE group and owner/general group receive it.
+5. "แม่แพ้กุ้งรุนแรง กินอะไรได้บ้าง" -> guardrail-style acknowledgment;
+   check BOTH the restaurant LINE group and owner/general group receive
+   it.
+6. "เจิดพูดไม่ดี" -> unaffected regression, still a staff complaint to
+   owner/general (confirms the new classifier didn't break the existing
+   path).
+7. "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" -> unaffected regression, still
+   activity + owner/general, never the duration-first prompt.
+
+**Confirmations**: no schema migration (every category reuses existing
+feedback_type/business_unit/severity values, no CHECK constraint
+touched); no fake notification-success claim anywhere (every escalation
+composer uses the same real per-target `composeNotificationStatusLine`
+as the existing safety-issue path); no unrelated production data
+mutated; no LLM call for any ESCALATE-class message, confirmed by the
+classifier being checked and returning before the One-Mind orchestrator
+is ever reached.
+
+**Per the roadmap's own workflow rule** ("Stop and wait for owner
+before next phase"): this phase stops here. Proposed next phase
+(pending owner review, not started): Phase 2 (Customer Intelligence
+Memory), extending the EXISTING `_customer-db.ts`/`customer-memory.ts`
+`GuestContext` system (confirmed real and working in the Phase 0 audit)
+rather than building a parallel one -- or, if the owner prefers,
+resolving Phase 3's blocker first (confirming where the backoffice
+dashboard codebase lives and granting this session access to it) so
+that phase can be scoped accurately once reached.

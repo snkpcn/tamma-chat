@@ -33,9 +33,10 @@ import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from '.
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
 import { redactWeatherUrl } from './_weather-provider';
-import { classifyServiceFeedback, mentionsThongthaiResponse } from './_service-mind-feedback-intent';
-import { composeServiceFeedbackResponse } from './_service-mind-feedback-response';
+import { classifyServiceFeedback, mentionsThongthaiResponse, type ServiceFeedbackMatch, type IssueKeyword } from './_service-mind-feedback-intent';
+import { composeServiceFeedbackResponse, composeEscalationResponse } from './_service-mind-feedback-response';
 import { createFeedbackEvent } from './_service-mind-feedback-events';
+import { classifyEscalationBoundary, type EscalationCategory } from './_boundary-classifier';
 import {
   classifyActivityIntentQualifier,
   composeActivityIntentStartResponse,
@@ -2440,6 +2441,105 @@ async function executeDeterministicActivityBooking(
 // "บริการแย่มาก ยืนยัน" needs to be handled as a complaint, not read as a
 // booking confirmation, and returning here immediately is what guarantees
 // that (see _service-mind-feedback-intent.ts's own header comment).
+// Master Roadmap Phase 1 -- Escalation Boundary Policy. A message naming
+// a topic outside Thongthai's authority (refund/discount/claim/
+// liability/safety-guarantee/reputational-threat/severe-medical-risk/
+// unverified-availability) gets a deterministic guardrail reply, never
+// an LLM-drafted one -- see _boundary-classifier.ts's own header comment
+// for the owner's explicit decision this implements. Checked BEFORE
+// deterministicServiceFeedbackResponse specifically because two of these
+// categories (accident_liability, severe_allergy_medical) would
+// otherwise be misclassified by that responder's own classifyServiceFeedback
+// (its URGENT_SAFETY_MARKER already contains "อุบัติเหตุ"/"แพ้อาหารรุนแรง"
+// for genuine in-progress-emergency detection) as an urgent safety_issue
+// REPORT, producing the wrong reply for what is actually a liability
+// QUESTION or a bare severe-medical-risk statement -- confirmed directly
+// before building this fix (see the handoff entry for the exact before/
+// after classification proof).
+const ESCALATION_ISSUE_KEYWORD: Record<EscalationCategory, IssueKeyword> = {
+  refund_request: 'payment',
+  special_discount: 'pricing',
+  claim_request: 'payment',
+  accident_liability: 'safety',
+  safety_guarantee: 'safety',
+  bad_review_threat: 'service',
+  severe_allergy_medical: 'safety',
+  unverified_availability: 'booking',
+};
+
+// safety_issue reuses the EXISTING needsOwnerEscalation rule (always
+// escalates to domain + owner_general regardless of severity) for the
+// genuinely safety/liability/medical-risk categories; 'complaint' with a
+// severity of 'high' (not 'urgent') keeps the others from ALSO triggering
+// that automatic owner_general escalation when they already route to
+// owner_general directly via business_unit='general' -- avoiding a
+// redundant double-target for a message that only ever had one real
+// target anyway.
+const ESCALATION_FEEDBACK_TYPE: Record<EscalationCategory, 'complaint' | 'safety_issue'> = {
+  refund_request: 'complaint',
+  special_discount: 'complaint',
+  claim_request: 'complaint',
+  accident_liability: 'safety_issue',
+  safety_guarantee: 'safety_issue',
+  bad_review_threat: 'complaint',
+  severe_allergy_medical: 'safety_issue',
+  unverified_availability: 'complaint',
+};
+
+const ESCALATION_SEVERITY: Record<EscalationCategory, 'normal' | 'high' | 'urgent'> = {
+  refund_request: 'high',
+  special_discount: 'normal',
+  claim_request: 'high',
+  accident_liability: 'urgent',
+  safety_guarantee: 'urgent',
+  bad_review_threat: 'high',
+  severe_allergy_medical: 'urgent',
+  unverified_availability: 'normal',
+};
+
+async function deterministicEscalationResponse(
+  request: BrainRequest,
+  channel: BrainChannel,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  const match = classifyEscalationBoundary(request.message);
+  if (!match) return null;
+
+  const respond = (message: string): BrainResponse => ({
+    message,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  });
+
+  if (!match.escalates) {
+    // The one non-escalating instance (bare, generic safety-guarantee
+    // question) -- honest answer only, no feedback event, no notification.
+    return respond(composeEscalationResponse(match, true, []));
+  }
+
+  const serviceFeedbackMatch: ServiceFeedbackMatch = {
+    feedbackType: ESCALATION_FEEDBACK_TYPE[match.category],
+    businessUnit: match.domainUnit ?? 'general',
+    severity: ESCALATION_SEVERITY[match.category],
+    staffName: null,
+    personMentions: [],
+    businessUnitMentions: [],
+    sentimentKeywords: [],
+    issueKeywords: [ESCALATION_ISSUE_KEYWORD[match.category]],
+    namedAssets: [],
+    keywordSummary: { topPositive: [], topNegative: [] },
+  };
+  const eventResult = await createFeedbackEvent({
+    match: serviceFeedbackMatch, message: request.message, channel, guestDbId,
+  });
+  return respond(composeEscalationResponse(match, eventResult.eventId != null, eventResult.targets));
+}
+
 async function deterministicServiceFeedbackResponse(
   request: BrainRequest,
   channel: BrainChannel,
@@ -2675,6 +2775,28 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   if (earlyShortUnclearText) {
     console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicShortUnclearTextResponse' }));
     const polished = polishedResponse(earlyShortUnclearText, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Master Roadmap Phase 1 -- Escalation Boundary Policy. Checked BEFORE
+  // deterministicServiceFeedbackResponse (see deterministicEscalationResponse's
+  // own header comment for exactly why: two of its categories would
+  // otherwise be misclassified by classifyServiceFeedback's own
+  // URGENT_SAFETY_MARKER first). Same "active context must never swallow
+  // this" ordering discipline as the block immediately below.
+  const escalation = await deterministicEscalationResponse(request, channel, guestDbId).catch(error => {
+    console.error('THONGTHAI_ESCALATION_BOUNDARY_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (escalation) {
+    const polished = polishedResponse(escalation, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
