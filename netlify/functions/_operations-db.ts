@@ -835,14 +835,25 @@ export function shouldConsumeLegacyLineBookingTurn(
 ): boolean {
   const text = message.trim();
   if (!text) return false;
-  // A bare "อยากขี่ม้า"/"อยากลองขี่ม้า" with NO other slot supplied and no
-  // session yet underway is a Service Mind moment (a caring question about
-  // experience/party size), not a form to fill -- this legacy flow's own
-  // first question ("เลือกระยะเวลา...") is the transactional wording this
-  // guard exists to avoid for that exact narrow shape. Anything with more
-  // structure (a duration, a horse name, a date) still starts the legacy
+  // A bare "อยากขี่ม้า"/"อยากลองขี่ม้า" with NO other slot supplied is a
+  // Service Mind moment (a caring question about experience/party size),
+  // not a form to fill -- this legacy flow's own first question
+  // ("เลือกระยะเวลา...") is the transactional wording this guard exists to
+  // avoid for that exact narrow shape. Anything with more structure (a
+  // duration, a horse name, a date) still starts/continues the legacy
   // flow normally; only the bare intent-start sentence itself defers.
-  if (!session && isActivityIntentStartMessage(text)) return false;
+  //
+  // Deliberately UNCONDITIONAL -- checked before the `!session` branch,
+  // not only when session is null. A real production incident (this guard
+  // originally only fired for a null session) showed a LEFTOVER, unrelated
+  // line_booking_sessions row from an earlier conversation still made this
+  // guard skip the deferral and resume the OLD session's own "เลือกระยะเวลา"
+  // question, even though the customer had just typed the bare intent-
+  // start sentence fresh. The bare sentence itself is a strong enough
+  // signal that the customer wants the caring intro (or, on a stale
+  // session, is effectively starting over) regardless of whatever session
+  // state happens to exist.
+  if (isActivityIntentStartMessage(text)) return false;
   const stayStart = stayBookingStartIntent(text);
   const activityStart = activityBookingStartIntent(text);
   const resume = bookingResumeIntent(text);
