@@ -127,9 +127,38 @@ async function replyToLine(
   }
 }
 
+/** Never the full id -- just enough to correlate log lines for the same
+ *  group/user across requests without leaking anything sensitive. */
+function redactId(value: string | null | undefined): string {
+  if (!value) return 'none';
+  return value.length <= 6 ? `${value.slice(0, 2)}…` : `${value.slice(0, 6)}…(len:${value.length})`;
+}
+
 async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Promise<void> {
   const sourceType = event.source?.type;
   if (sourceType !== 'group' && sourceType !== 'room') return;
+
+  // Safe, redacted diagnostic logging for EVERY group/room event this
+  // webhook receives -- including a bare 'join' event (LINE sends one
+  // when the bot is added to a group; this webhook doesn't reply to it,
+  // it's not customer-facing, so nothing more than logging it happens
+  // here). This is the only way to tell, after the fact, whether LINE
+  // ever delivered a group event to this webhook at all versus the
+  // group's own LINE Official Account settings (Chat/manual-reply mode,
+  // "allow bot into group chats", webhook toggle) intercepting it before
+  // it ever reaches here -- see THONGTHAI_HANDOFF.md's "Owner Group Bind
+  // Debug" entry for the full checklist this distinguishes.
+  console.log('LINE_OPS_EVENT_RECEIVED', JSON.stringify({
+    eventType: event.type ?? 'unknown',
+    sourceType,
+    groupId: redactId(event.source?.groupId),
+    roomId: redactId(event.source?.roomId),
+    userId: redactId(event.source?.userId),
+    messageType: event.message?.type ?? null,
+    hasReplyToken: Boolean(event.replyToken),
+    text: event.message?.type === 'text' ? (event.message.text ?? '').slice(0, 120) : null,
+  }));
+
   if (!event.replyToken) return;
   const targetId = sourceType === 'group' ? event.source?.groupId : event.source?.roomId;
   if (!targetId) return;
@@ -345,12 +374,17 @@ export const handler: Handler = async (event, context) => {
 
   if (opsEvents.length) {
     const results = await Promise.allSettled(opsEvents.map(item => handleOpsEvent(item, accessToken)));
-    for (const result of results) {
+    results.forEach((result, index) => {
       if (result.status === 'rejected') {
         const message = result.reason instanceof Error ? result.reason.message : 'Unknown LINE ops group error';
-        console.error('LINE_OPS_GROUP_ERROR', message.slice(0, 300));
+        const item = opsEvents[index];
+        console.error('LINE_OPS_GROUP_ERROR', JSON.stringify({
+          error: message.slice(0, 300),
+          eventType: item.type ?? 'unknown',
+          groupId: redactId(item.source?.groupId),
+        }));
       }
-    }
+    });
   }
 
   const customerEvents: LineWebhookEvent[] = [];
