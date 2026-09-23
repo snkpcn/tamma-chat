@@ -1064,7 +1064,18 @@ function activityFallbackPhone(text: string): string | null {
 export function activityBookingFallbackDraft(request: BrainRequest): Record<string, unknown> | null {
   const userTurns = request.chatHistory.filter(turn => turn.role === 'user').map(turn => turn.content).concat(request.message);
   const text = userTurns.join('\n');
-  const selectedAsset = activityAssetFromText(text);
+  // The CURRENT message's own explicit horse name always wins over
+  // anything named earlier in the conversation. Real production incident
+  // this closes: activityAssetFromText(text) scans the WHOLE joined
+  // history, and ACTIVITY_ASSET_SELECTIONS' array-declaration order (not
+  // recency, not the current turn) decided the winner whenever BOTH
+  // horses had been named at some point ("อยากขี่ม้า" -> "เอาภาราดร" ->
+  // "เอาทองไทย" kept re-selecting ภาราดร, since it's declared first in
+  // that array and BOTH names are still present in the joined text) --
+  // only fall back to scanning the joined history when the CURRENT
+  // message itself names no horse at all (e.g. "30 นาที" continuing an
+  // already-made selection).
+  const selectedAsset = activityAssetFromText(request.message) ?? activityAssetFromText(text);
   if (!selectedAsset) return null;
 
   // "ทองไทย" is a real, deliberate name collision: the bot's own name AND

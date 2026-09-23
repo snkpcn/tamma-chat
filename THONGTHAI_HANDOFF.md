@@ -2977,3 +2977,31 @@ check. 9 new tests build REAL multi-turn state through the actual
 including the exact 3-turn reproduction. 754/754 total passing; the new
 guard verified load-bearing (disabling it makes exactly the two active-
 task scenarios fail, nothing else).
+
+### THIRD FIX — current turn's explicit horse choice was losing to array order
+
+Reproduced the actual live failure: "อยากขี่ม้า" -> "เอาภาราดร" (selects
+ภาราดร) -> "เอาทองไทย" (should SWITCH to ทองไทย) kept saying
+"เลือกม้า: ภาราดร" -- the customer's own latest, explicit choice was
+ignored.
+
+Root cause: `activityBookingFallbackDraft` ran `activityAssetFromText`
+over the WHOLE joined history+current-message text. Once BOTH horse
+names had appeared anywhere in the conversation,
+`ACTIVITY_ASSET_SELECTIONS`' array-DECLARATION order (ภาราดร listed
+before ทองไทย in `_deterministic-semantic-turn.ts` -- an arbitrary
+detail, not recency, not the current turn) decided the winner via
+`findKnownActivityAssetSelection`'s `accepted[0]`.
+
+Fix: check the CURRENT message alone first
+(`activityAssetFromText(request.message) ?? activityAssetFromText(text)`
+-- only fall back to scanning the joined history when the current
+message itself names no horse at all, e.g. "30 นาที" continuing an
+already-made selection). 7 new tests build real, persisted multi-turn
+state through the actual `processThongthaiChatCore` path, including
+both switch directions and the exact reported scenario. 761/761 total
+passing; the fix verified load-bearing (reverting it makes exactly the
+ภาราดร-\>ทองไทย switch test fail, nothing else -- the reverse direction
+still happens to pass by the SAME array-order coincidence that caused
+the bug, which is precisely why this needed a real fix, not a lucky
+reordering of the array).
