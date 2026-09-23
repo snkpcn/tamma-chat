@@ -4222,3 +4222,132 @@ unrelated production data mutated; no fabricated fact, price, or
 availability anywhere in new responder wording (all facts trace to
 either owner-supplied static data or real, already-existing menu/asset
 data sources).
+
+## PR #66 Production Precedence Fix -- 2026-09-23
+
+The prior round ("Knowledge Base + Scenario Brain", PR #66) passed
+936/936 tests and was merged, but the owner reported 5 live production
+failures the round's own tests claimed were fixed: bare horse-fear and
+ATV-fear/safety messages still got the legacy `handleLineBookingMessage`
+flow's "รับกิจกรรม ... แล้วครับ เลือกระยะเวลา 30, 60 หรือ 90 นาทีได้เลย"
+transactional prompt instead of the care/safety responders, a restaurant
+allergy question was suspected of hallucinating menu/prices, and a bare
+ambiguous "สติ" got the generic degraded-provider apology.
+
+**Root cause (the 3 swallowed-signal failures)**: `_operations-db.ts`'s
+`shouldConsumeLegacyLineBookingTurn` guard has two unconditional checks
+that must defer to the semantic/care/safety layer regardless of whether
+a legacy `booking_sessions` row already exists for that guest --
+`isActivityIntentStartMessage` (fixed in an earlier round, with an
+explicit incident comment) and `hasCareOrRiskSignal` (added the round
+*before* this one). The second check was added scoped to `if (!session)`
+-- it protected a brand-new conversation but NOT a conversation where any
+legacy session already existed, even one an innocuous earlier message
+legitimately created (e.g. a bare "อยากขับ ATV"). A later, genuine
+safety/care message in that same conversation was never checked against
+the guard at all, and the legacy flow resumed and answered with its own
+transactional prompt, completely ignoring the safety/care content. This
+is the EXACT same bug class the first check was already fixed for once
+-- the fix was never generalized, so the second guard shipped with the
+identical mistake, undetected because every prior round's test used a
+fresh `userId` per test and therefore never exercised an EXISTING
+session. Reproduced directly (scratch test, since deleted): establish a
+bare ATV session, then send a safety message as a second turn -- got the
+identical duration prompt both times.
+
+**Fix**: `hasCareOrRiskSignal` is now unconditional, checked before ANY
+session-status branching, exactly matching `isActivityIntentStartMessage`'s
+own precedent immediately above it in the same function. Also extended
+the signal vocabulary with a new `mentionsSafetyConcern`
+(`_semantic-hospitality-interpreter.ts`), mirroring
+`_service-mind-feedback-intent.ts`'s existing `SAFETY_CONCERN_MARKER` so
+bare safety reports ("น่ากลัว", "พื้นลื่น", "ไม่มีคนดู", "ล้ม") are
+covered, not just weather/ground-specific phrasing.
+
+**Production-precedence logging (proves which handler answers, from logs
+alone, not just local reproduction)**: added `SEMANTIC_FRAME_BUILT` and
+`LEGACY_LINE_GUARD_DECISION` (with a `reason` string) at every exit of
+`shouldConsumeLegacyLineBookingTurn`; `LEGACY_BOOKING_CONSUMED` and
+`FINAL_RESPONSE_SOURCE` in `_line-webhook-core.ts` at the legacy-booking
+and LLM-core exits; `SEMANTIC_RESPONDER_SELECTED` at every relevant
+care/safety/restaurant/short-text responder's return in
+`thongthai-chat.ts`; `ACTIVITY_BOOKING_FALLBACK_SELECTED` at
+`activityBookingFallbackResponse`'s return.
+
+**Restaurant menu audit (owner asked: is the menu/price data
+fabricated? if the source isn't trusted, disable it)**: verified
+directly against the real production Supabase project
+(`upaokrprawzhgzeqsdke`, `tamma_chart_os.restaurant_menu_live`) -- 30
+real, substantial Thai dishes with real prices and ingredient lists
+(ตำลาว 79฿, ลาบปลาช่อน 169฿, ต้มแซ่บไก่บ้าน 179฿, etc.), all
+`is_orderable: true`. `_restaurant-sot.ts`'s `listRestaurantMenu()`
+queries this real view; `thongthai-chat.ts`'s `formatAdvisorMessage` is a
+hard-coded template built directly from that structured data (menu
+name/price/reason), never an LLM freeform composition -- there is no
+fabrication in this path, and no fallback to invented/placeholder data
+exists. Conclusion: the source IS trusted; nothing needed disabling. The
+real gap was wording: the existing allergy notice
+(`_restaurant-intelligence.ts`'s `adviseRestaurantMenu`) described what
+the system already filtered but never told the customer to also notify
+kitchen staff in person -- the one step that actually protects against
+cross-contact, which no ingredient list can rule out. Added that
+instruction to the notice. The shrimp-allergy ingredient cross-check
+itself (`avoidIngredients.push('กุ้ง')` catching "กุ้งแห้ง" via substring)
+was already correct from an earlier round.
+
+**Short-unclear-text responder (new)**: a bare ambiguous fragment
+("สติ", "เอ้า", "อะไร", "งง", "ห้ะ", "อืม", "ต่อ", "แล้วไง") used to fall
+all the way through to the generic "คิดช้ากว่าปกติ" degraded-provider
+apology (implying the AI was slow/down, when the real issue was the
+message being too short to interpret), or reach the LLM at all for
+something no model call could ground an answer in either. New
+`deterministicShortUnclearTextResponse`/`isShortUnclearTextMessage`
+(`thongthai-chat.ts`), checked in the same early pre-LLM slot as
+`deterministicGreetingResponse`/`deterministicCasualChatResponse`,
+anchored whole-message-only so it never fires on a message that merely
+contains one of these words alongside real content (e.g. "ร้านอาหารมีอะไร
+แนะนำ" keeps its own restaurant handling). Wired into
+`_line-webhook-core.ts`'s `LINE_PRIVATE_CHAT_ATTEMPT` bookkeeping too, so
+that log line stays accurate.
+
+**Tests added**: `tests/pr66-production-precedence.test.ts`, 8 tests
+through the full signed LINE webhook, real handler order -- the exact 5
+originally-failing phrases (horse fear, ATV fear, ATV safety, restaurant
+allergy, "สติ"), PLUS the two regression-proof tests the incident
+demanded: #4 and #5 first establish a REAL legacy `booking_sessions` row
+via a genuine prior turn (not a mock shortcut) through the real webhook,
+then send the safety/care message and assert the override still wins.
+Test #8 is a blanket negative assertion that no care/safety compound
+message across every scenario gets the legacy duration-first prompt.
+
+**Load-bearing verification**: reintroduced the exact bug (`if (!session
+&& hasCareOrRiskSignal)`) and confirmed tests #4, #5, and #8 correctly
+fail (tests #1/2/3/6/7, which don't involve an existing session, stay
+green, as expected) -- proving these tests actually catch the class of
+regression this incident was. Restored the fix; all 8 pass again.
+
+**Full suite**: 944/944 passing (936 prior + 8 new), zero regressions.
+
+**Deploy status**: cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**Owner retest script** (the exact 5 originally-failing live phrases):
+1. "อยากขี่ม้า ไม่เคยเลย กลัวตก" -> expect care-mode reply, never
+   "เลือกระยะเวลา 30, 60 หรือ 90 นาที".
+2. "อยากขับ ATV ไม่เคยขับ กลัวเร็ว" -> expect slow-start/team-briefing
+   reply, never the duration prompt.
+3. "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" -> expect a safety-acknowledgment
+   reply (never the duration prompt), sent both as a fresh message AND
+   mid-way through an already-started ATV booking.
+4. "ร้านอาหารมีอะไรแนะนำ แม่กินเผ็ดไม่ได้ แพ้กุ้ง" -> expect no
+   shrimp-containing item recommended, and an explicit "แจ้งพนักงาน"
+   instruction in the reply.
+5. "สติ" -> expect "ขอโทษครับ หมายถึงให้ทองไทยตั้งสติ/ตอบใหม่ หรืออยาก
+   ถามเรื่องไหนต่อครับ?", never "คิดช้ากว่าปกติ".
+
+**Confirmations**: no booking/order/payment created; no fake safety
+guarantee anywhere in new or existing wording; no DB migration; no
+unrelated production data mutated; no fabricated fact, price, or
+availability anywhere (restaurant menu source confirmed real via direct
+production query, not assumed).

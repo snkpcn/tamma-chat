@@ -343,8 +343,14 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   const composeMode = !compareMode && !pairingRequested && (pref.partySize != null || pref.budget != null || /จัด.*(?:ชุด|โต๊ะ)|เซ็ต|set|ครบโต๊ะ|กินกัน/u.test(query));
   const pairingMode = !compareMode && pairingRequested;
 
+  // Production incident this closes: an allergy notice that only described
+  // what the SYSTEM already did (filtered by recorded ingredients) never
+  // told the customer to also tell kitchen staff in person -- the one step
+  // that actually protects against cross-contact, which no ingredient list
+  // can rule out. Every allergy notice now explicitly asks the customer to
+  // notify staff, matching Customer Service Doctrine's food-safety wording.
   const notices: string[] = [];
-  if (pref.allergenFlags.length) notices.push('ตรวจจากวัตถุดิบที่บันทึกไว้และตัดเมนูที่มีสารก่อภูมิแพ้ตรงตัวออกแล้ว แต่ร้านยังไม่มีข้อมูลยืนยันเรื่องการปนเปื้อนข้ามอุปกรณ์/ครัว');
+  if (pref.allergenFlags.length) notices.push('ตรวจจากวัตถุดิบที่บันทึกไว้และตัดเมนูที่มีสารก่อภูมิแพ้ตรงตัวออกแล้ว แต่ร้านยังไม่มีข้อมูลยืนยันเรื่องการปนเปื้อนข้ามอุปกรณ์/ครัว ขอให้แจ้งพนักงานอีกครั้งหน้างานเพื่อความปลอดภัยครับ');
   if (!available.length) notices.push('ไม่มีเมนูที่ผ่านข้อจำกัดและขายได้ในสต๊อกปัจจุบัน');
 
   if (compareMode) {

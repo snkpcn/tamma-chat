@@ -158,6 +158,12 @@ export function interpretCustomerType(text: string): CustomerTypeSignal {
 const GENTLE_MARKER = /ไม่โหด|ไม่เอาโหด|ไม่หนัก|ชิล|เบา\s*ๆ/u;
 const WEATHER_GROUND_MARKER = /ฝนตก|ฝนเพิ่ง|พื้นลื่น|หลังฝน/u;
 const SAFETY_QUESTION_MARKER = /ปลอดภัยไหม|ปลอดภัยหรือเปล่า|อันตรายไหม|เสี่ยงไหม|ปลอดภัยที่สุด/u;
+// A safety concern already REPORTED (not asked about in advance) --
+// mirrors _service-mind-feedback-intent.ts's own SAFETY_CONCERN_MARKER
+// vocabulary exactly (that module isn't imported here to avoid a
+// circular/layering dependency; both must stay in sync by hand -- see
+// that file's own marker for the canonical list this mirrors).
+const SAFETY_CONCERN_MARKER = /พื้นลื่น(?:มาก)?|น่ากลัว|เกือบ(?:ล้ม|ตก|ชน)|ไม่ปลอดภัย|เสี่ยงอันตราย|อันตรายมาก|มีปัญหาระหว่างทาง|ล้ม(?:แล้ว)?|เจ็บ(?!ไหล่|หลัง|เข่า|สะโพก|ข้อ)|ไม่มีคนดู/u;
 const SPEED_FEAR_MARKER = /กลัวเร็ว|กลัวความเร็ว|ขอช้า\s*ๆ/u;
 const LOW_WALKING_MARKER = /เดินน้อย|ไม่อยากเดินเยอะ|เดินไม่สะดวก|เดินไม่ไหว|เดินลำบาก|เดินไม่ค่อยไหว/u;
 
@@ -171,6 +177,10 @@ export function prefersLowWalking(text: string): boolean {
 
 export function mentionsWeatherGroundConcern(text: string): boolean {
   return WEATHER_GROUND_MARKER.test(normalizeThai(text));
+}
+
+export function mentionsSafetyConcern(text: string): boolean {
+  return SAFETY_CONCERN_MARKER.test(normalizeThai(text));
 }
 
 export function asksIfSafe(text: string): boolean {
