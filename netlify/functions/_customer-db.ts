@@ -1,3 +1,6 @@
+import { extractPreferenceSignal, extractIntelligenceSignals } from './_customer-phrase-intelligence';
+import { recordIntelligenceEvent } from './_customer-intelligence-events';
+
 type GuestContextShape = {
   tripDuration: string | null;
   travelerType: string | null;
@@ -100,6 +103,13 @@ const CONSTRAINTS = new Set([
   'no_plara', 'no_peanut', 'no_shrimp', 'mild_spice',
   'peanut_allergy', 'shrimp_allergy', 'fish_allergy', 'egg_allergy',
   'authentic_isan', 'beginner_friendly', 'kid_friendly',
+  // Master Roadmap Phase 2 (Customer Intelligence Memory) -- new
+  // normalized preference keys, added to the SAME existing allowed-value
+  // set every other constraint already uses (see
+  // _customer-phrase-intelligence.ts's own header comment for why this
+  // extends, rather than duplicates, GuestContext).
+  'low_intensity', 'fear_of_falling', 'fear_of_speed', 'food_allergy',
+  'prefers_short_replies', 'prior_safety_concern',
 ]);
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -474,4 +484,71 @@ export async function persistCustomerResult(
   } catch (err) {
     safeDbError('persist', err);
   }
+}
+
+// Master Roadmap Phase 2 -- Customer Intelligence Memory. Called ONCE
+// per turn (see thongthai-chat.ts's processThongthaiChatCore, right
+// after guestDbId is resolved, BEFORE the deterministic responder
+// cascade) so a service-useful phrase is captured regardless of which
+// responder eventually answers the turn -- unlike persistCustomerResult
+// above, which only ever runs for the One-Mind/LLM path and therefore
+// never captures anything for the vast majority of turns, which are
+// answered deterministically. Extends the EXISTING guest_memory table
+// (via the SAME CONSTRAINTS/PACES/TRAVELER_TYPES allowed-value sets and
+// the SAME on_conflict=guest_id,memory_key upsert every other
+// preference already uses) -- no parallel memory system, per the
+// owner's explicit Phase 2 instruction.
+export async function capturePreferenceSignals(guestDbId: string | null, message: string): Promise<void> {
+  if (!guestDbId || !configuration()) return;
+  const text = message.trim();
+  if (!text) return;
+
+  const signal = extractPreferenceSignal(text);
+  const hasConstraintChange = signal.addConstraints.length > 0 || signal.removeConstraints.length > 0;
+  if (hasConstraintChange || signal.pace || signal.travelerType) {
+    try {
+      const rows: Array<{ guest_id: string; memory_key: string; memory_value: unknown; updated_at: string }> = [];
+      const now = new Date().toISOString();
+
+      if (hasConstraintChange) {
+        const existingRes = await dbFetch(
+          'guest_memory?guest_id=eq.' + encodeURIComponent(guestDbId)
+          + '&memory_key=eq.constraints&select=memory_value&limit=1',
+        );
+        const existing = await existingRes.json() as Array<{ memory_value: unknown }>;
+        const currentConstraints = dedupeAllowed(existing[0]?.memory_value, CONSTRAINTS);
+        const removeSet = new Set(signal.removeConstraints);
+        const merged = dedupeAllowed(
+          [...currentConstraints.filter(item => !removeSet.has(item)), ...signal.addConstraints],
+          CONSTRAINTS,
+        );
+        rows.push({ guest_id: guestDbId, memory_key: 'constraints', memory_value: merged, updated_at: now });
+      }
+      if (signal.pace && PACES.has(signal.pace)) {
+        rows.push({ guest_id: guestDbId, memory_key: 'pace', memory_value: signal.pace, updated_at: now });
+      }
+      if (signal.travelerType && TRAVELER_TYPES.has(signal.travelerType)) {
+        rows.push({ guest_id: guestDbId, memory_key: 'traveler_type', memory_value: signal.travelerType, updated_at: now });
+      }
+
+      if (rows.length) {
+        await dbFetch('guest_memory?on_conflict=guest_id,memory_key', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(rows),
+        });
+      }
+    } catch (err) {
+      safeDbError('preference_capture', err);
+    }
+  }
+
+  const intelligenceSignals = extractIntelligenceSignals(text);
+  await Promise.all(intelligenceSignals.map(signalItem => recordIntelligenceEvent({
+    eventType: signalItem.eventType,
+    category: signalItem.category,
+    domain: signalItem.domain,
+    guestDbId,
+    message: text,
+  })));
 }

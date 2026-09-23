@@ -199,6 +199,10 @@ export type Harness = {
    *  table (the unmodeled-GET-returns-[] default silently matches "no
    *  session", not "real production state"). */
   getBookingSession: (guestDbId: string) => Record<string, unknown> | undefined;
+  /** Directly inspect a guest_memory row's value by (guestDbId, memory_key)
+   *  -- Master Roadmap Phase 2's own capturePreferenceSignals/
+   *  loadCustomerMemory read/write path, real (stateful) read-after-write. */
+  getGuestMemory: (guestDbId: string, memoryKey: string) => unknown;
   setBookingSession: (guestDbId: string, row: Record<string, unknown>) => void;
   /** Every POST body sent to a given table, in order -- for asserting
    *  "exactly once" write counts (bookings, restaurant_preorders,
@@ -228,6 +232,11 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const guestIdentities = new Map<string, string>(); // `${provider}:${providerUserKey}` -> guestDbId
   const agentState = new Map<string, GuestAgentStateSnapshot>();
   const bookingSessions = new Map<string, Record<string, unknown>>(); // guest_id -> booking_sessions row (legacy LINE booking flow)
+  // `${guest_id}:${memory_key}` -> row -- stateful guest_memory (see its
+  // own GET/POST handlers' header comment for why Master Roadmap Phase 2
+  // needs real read-after-write here, unlike this table's prior
+  // write-only-recorder mock).
+  const guestMemory = new Map<string, { guest_id: string; memory_key: string; memory_value: unknown }>();
   const customerAccounts = new Map<string, { id: string; guest_id: string }>();
   const posts = new Map<string, Array<Record<string, unknown>>>();
   const geminiQueue: HarnessGeminiReply[] = [];
@@ -512,11 +521,41 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     }
     if (path.startsWith('guests') && method === 'PATCH') return jsonResponse([]);
 
-    // --- guest_memory / guest_semantic_memory / journeys (read-only history) ---
-    if (path.startsWith('guest_memory') && method === 'GET') return jsonResponse([]);
-    if (path.startsWith('guest_memory') && method === 'POST') { recordPost('guest_memory', JSON.parse(String(init.body ?? '[]'))); return jsonResponse([]); }
+    // --- guest_memory (STATEFUL -- Master Roadmap Phase 2 needs real
+    // read-after-write: _customer-db.ts's capturePreferenceSignals reads
+    // existing constraints before merging, and a LATER turn's
+    // loadCustomerMemory must see what an EARLIER turn actually wrote,
+    // to prove personalization genuinely persists across turns, not
+    // just within one call. Keyed by `${guest_id}:${memory_key}`,
+    // upserted on that same pair -- exactly matching the real table's
+    // own on_conflict=guest_id,memory_key semantics.) ---
+    if (path.startsWith('guest_memory') && method === 'GET') {
+      const guestIdParam = query.get('guest_id')?.replace('eq.', '') ?? '';
+      const memoryKeyParam = query.get('memory_key')?.replace('eq.', '') ?? null;
+      const rows = [...guestMemory.values()].filter(row => row.guest_id === guestIdParam
+        && (!memoryKeyParam || row.memory_key === memoryKeyParam));
+      return jsonResponse(rows.map(({ memory_key, memory_value }) => ({ memory_key, memory_value })));
+    }
+    if (path.startsWith('guest_memory') && method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '[]')) as Array<{ guest_id: string; memory_key: string; memory_value: unknown }>;
+      recordPost('guest_memory', body as unknown as Record<string, unknown>);
+      for (const row of body) {
+        guestMemory.set(`${row.guest_id}:${row.memory_key}`, { guest_id: row.guest_id, memory_key: row.memory_key, memory_value: row.memory_value });
+      }
+      return jsonResponse([]);
+    }
     if (path.startsWith('guest_semantic_memory') && method === 'GET') return jsonResponse([]);
     if (path.startsWith('guest_semantic_memory') && method === 'POST') { recordPost('guest_semantic_memory', JSON.parse(String(init.body ?? '{}'))); return jsonResponse([]); }
+    // --- customer_intelligence_events (Master Roadmap Phase 2's
+    // aggregate phrase/demand/risk log -- see its own migration's NOT
+    // APPLIED header; modeled here so a test can assert the exact
+    // events a given message produces, same "prove the write path even
+    // before the migration is applied" precedent as ops_feedback_events
+    // had before its own migration was applied). ---
+    if (path.startsWith('customer_intelligence_events') && method === 'POST') {
+      recordPost('customer_intelligence_events', JSON.parse(String(init.body ?? '{}')));
+      return jsonResponse([]);
+    }
     if (path.startsWith('journeys') && method === 'GET') return jsonResponse([]);
     if (path.startsWith('journeys') && method === 'POST') return jsonResponse([]);
     if (path.startsWith('guest_events') && method === 'POST') return jsonResponse([]);
@@ -701,6 +740,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     getState: guestDbId => agentState.get(guestDbId),
     setState: (guestDbId, state, updatedAt) => { agentState.set(guestDbId, { exists: true, state, updatedAt: updatedAt ?? new Date().toISOString() }); },
     getBookingSession: guestDbId => bookingSessions.get(guestDbId),
+    getGuestMemory: (guestDbId, memoryKey) => guestMemory.get(`${guestDbId}:${memoryKey}`)?.memory_value,
     setBookingSession: (guestDbId, row) => { bookingSessions.set(guestDbId, { guest_id: guestDbId, ...row }); },
     postsTo: table => posts.get(table) ?? [],
     guestDbId: anonymousId => guests.get(anonymousId)?.id,

@@ -4976,3 +4976,230 @@ rather than building a parallel one -- or, if the owner prefers,
 resolving Phase 3's blocker first (confirming where the backoffice
 dashboard codebase lives and granting this session access to it) so
 that phase can be scoped accurately once reached.
+
+## Master Roadmap Phase 2 -- Customer Intelligence Memory -- 2026-09-23
+
+Owner's instruction this round: "Thongthai should remember valuable
+customer-provided information and repeated customer language in a
+privacy-safe, service-useful way... This is not creepy tracking. This
+is service intelligence." Explicit architectural constraint: extend the
+EXISTING `_customer-db.ts`/GuestContext/`guest_memory` system -- no
+`guest_memory_v2`, no parallel memory system, no new split-brain (the
+owner's own reason: "We already suffered from split-brain state between
+guest_agent_state and legacy booking_sessions").
+
+**1. Existing memory system audited.** Read `_customer-db.ts` in full.
+Confirmed the owner's own claim: a real, already-working memory
+foundation exists -- `GuestContext` (`tripDuration`, `travelerType`,
+`group`, `interests`, `pace`, `budget`, `constraints`), backed by the
+`guest_memory` table (`guest_id`, `memory_key`, `memory_value`, upserted
+on `guest_id,memory_key`), with an allowed-value-set discipline already
+enforced per field (`CONSTRAINTS`/`PACES`/`TRAVELER_TYPES` Sets +
+`dedupeAllowed`) -- i.e. a real privacy guardrail already existed (only
+whitelisted normalized keys can ever be written, never arbitrary text).
+`loadCustomerMemory` re-hydrates `GuestContext` from `guest_memory` on
+every turn; `persistCustomerResult` writes it back. Critical gap found:
+`persistCustomerResult` is only ever called from the One-Mind/LLM
+fallback path in `thongthai-chat.ts` -- never from any of the ~30
+deterministic responder branches that answer the vast majority of real
+production turns. This is *why* memory personalization wasn't already
+happening for most conversations: not a missing schema, a missing
+capture call.
+
+**2. Exact extension chosen.** Two additive pieces, both reusing the
+existing foundation:
+- A new capture function, `capturePreferenceSignals` (new export in
+  `_customer-db.ts`), called ONCE per turn from a single insertion
+  point in `thongthai-chat.ts`'s `processThongthaiChatCore` -- right
+  after `registerGuestIdentity`, before the entire deterministic
+  responder cascade (including Phase 1's own escalation check). This
+  guarantees every turn's message is scanned for service-useful signal
+  regardless of which responder eventually answers, and structurally
+  cannot affect response routing: it is a pure async side effect on
+  `request.message`, never touches which responder fires, never calls
+  the LLM.
+- A new pure classifier module, `_customer-phrase-intelligence.ts`
+  (`extractPreferenceSignal` for durable per-guest constraints/pace/
+  traveler-type; `extractIntelligenceSignals` for one-off aggregate
+  phrase/demand/risk signals), plus a new append-only aggregate event
+  writer, `_customer-intelligence-events.ts` -- see item 8 below for
+  why aggregate counting needs its own table.
+
+**3. Schema migration needed?** Yes, but narrowly: ONE new additive
+table, `customer_intelligence_events`
+(`supabase/migrations/20260923142552_customer_intelligence_events_v1.sql`,
+**NOT APPLIED -- prepared for owner review only**, same discipline as
+`ops_feedback_events`'s own migration before it was approved). No
+existing table, column, trigger, or constraint is touched.
+`guest_memory` itself needed NO migration -- its existing `CONSTRAINTS`
+Set was simply extended with 6 new allowed values (below), the same
+mechanism every prior constraint already used.
+
+**4. Why existing structure is insufficient for the aggregate piece.**
+`guest_memory` is guest_id-scoped: one row per `(guest_id, memory_key)`,
+upserted -- correct for "what does THIS guest prefer," but it cannot
+represent "how many DIFFERENT guests said this phrase this month"
+without attaching a shared counter to every guest's own row, which
+would conflate per-guest state with cross-guest business intelligence
+and risk write races. `customer_intelligence_events` is a plain
+append-only log instead -- same design philosophy as the existing
+`guest_events` table (event log, not a maintained counter; counting
+happens at query time, by a future dashboard). Until the migration is
+applied, every write attempt fails gracefully (caught, logged, never
+thrown) -- nothing customer-facing depends on this table; the actual
+shipped personalization (item 7 below) reads only `guest_memory`.
+
+**5. Memory keys/categories added.** `guest_memory`'s `CONSTRAINTS` Set
+gained 6 new normalized keys, added the same way every existing one
+was: `low_intensity`, `fear_of_falling`, `fear_of_speed`, `food_allergy`,
+`prefers_short_replies`, `prior_safety_concern`. Existing keys already
+covered several of the owner's own examples with no change needed
+(`limited_walking`, `shrimp_allergy`, `no_spicy`/mild_spice family,
+`elderly_friendly`, `child_friendly`). `customer_intelligence_events`
+(once applied) adds `event_type` (`phrase`/`demand`/`risk`), `category`,
+`domain`, optional `guest_id`, and a redacted example.
+
+**6. Phrase intelligence supported.** `extractPreferenceSignal` and
+`extractIntelligenceSignals` (`_customer-phrase-intelligence.ts`) cover
+the owner's own phrase examples with normalized meanings, e.g.
+"เอาแบบไม่โหด" -> `low_intensity`, "กลัวตก" -> `fear_of_falling`,
+"แม่เดินไม่ไหว"/"เดินไกลไม่ได้" -> `limited_walking`, "กินไม่เผ็ด" ->
+`no_spicy`, "แพ้กุ้ง" -> `shrimp_allergy`, "ขอแบบชิล ๆ" -> pace `relaxed`
++ aggregate `chill_pace`, "มีอะไรเด็ด" -> aggregate demand
+`signature_recommendation_request`, "พื้นลื่น" -> aggregate risk
+`ground_condition_risk`, "ตอบยาวไป" -> `prefers_short_replies`. Only the
+normalized meaning is ever stored -- never the raw phrase (see item 9).
+
+**7. Customer preference memory supported.** Durable, per-guest,
+correctable. `capturePreferenceSignals` reads the guest's current
+`constraints` row, merges in new additions, removes any the current
+message corrects away (a dedicated correction pattern -- "จริง ๆ
+กินเผ็ดได้..." -- is checked BEFORE the bare "กินเผ็ด" substring match so
+a correction always wins), and upserts via the SAME
+`on_conflict=guest_id,memory_key` path every other constraint uses --
+never a permanent lock on a wrong value. One real, working,
+customer-facing personalization ships this round as proof the
+architecture actually changes a reply, not just stores data silently:
+`ecosystemFirstVisitResponse` (the "ครั้งแรก...มีอะไรแนะนำ" responder)
+now checks `guestContext.constraints` for `limited_walking` and, if
+present, answers with the owner's own exact wording ("ถ้ามากับคุณแม่
+เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ...") instead of the generic
+3-path pitch. Separately, the EXISTING restaurant advisor
+(`deterministicRestaurantResponse` -> `restaurantMenuAdvice` ->
+`_restaurant-intelligence.ts`'s `FOOD_CONSTRAINT_ALIASES`, which already
+mapped `shrimp_allergy` to an allergen filter) was already fully wired
+end-to-end -- fixing the capture gap alone was sufficient to make
+"remembered allergy quietly shapes a later restaurant reply" genuinely
+work, with zero changes to the restaurant responder itself. Honest
+scope note: `fear_of_falling`/`fear_of_speed` are captured into memory
+this round (proven by tests 2 and 12) but no horse/ATV responder yet
+reads them back for gentler framing -- that behavioral wiring is not
+part of this round's shipped slice.
+
+**8. Demand/risk insight signals supported.** `extractIntelligenceSignals`
+classifies a message into `phrase`/`demand`/`risk` + `category` + domain
+(`restaurant`/`activity`/`stay`/`cafe`/`system`/`general`), fired in
+parallel with the preference-memory write, landing in
+`customer_intelligence_events` (once its migration is applied) --
+covering the owner's own examples: top-asked/popular/signature requests
+(demand), allergy/mobility/ground-condition/bot-quality signals (risk),
+repeated low-intensity/chill-pace phrasing (phrase). Query-time
+aggregation (counts, top categories) is left to a future owner
+dashboard, per the owner's own explicit "do NOT build dashboard UI in
+Phase 2" instruction.
+
+**9. Privacy guardrails.** Only normalized keys from the existing
+`CONSTRAINTS`/`PACES`/`TRAVELER_TYPES` allowed-value sets are ever
+written to `guest_memory` -- the raw message text is never stored
+there (proven by test 1 and test 7: `JSON.stringify` of every
+`guest_memory` POST body is asserted to never contain the customer's
+actual phrase, even for a pregnancy disclosure, which is deliberately
+NOT captured as a constraint at all). `customer_intelligence_events`'
+own `redactExample` truncates to 80 characters, trimmed and
+whitespace-collapsed -- a short snippet, never a chat dump (test 7).
+Sensitive medical/pregnancy detail is never normalized into a stored
+key unless it maps to an existing safety-relevant category; a bare
+pregnancy mention produces no constraint write at all this round.
+
+**10. Non-creepy wording rule.** The one shipped personalization
+(`ecosystemFirstVisitResponse`'s mobility branch) uses the owner's own
+exact good-example wording verbatim ("ถ้ามากับคุณแม่เหมือนเดิม...") --
+test 8 asserts this exact string, and both tests 3 and 8 assert the
+reply never matches a timestamped "you told me before" pattern
+(`ครั้งก่อนคุณบอก`/`ตอนเวลา`/`เมื่อกี้คุณบอก`), matching the owner's own bad
+example to avoid.
+
+**11. Tests added.** `tests/master-roadmap-phase2-customer-intelligence.test.ts`,
+16 tests through the full signed LINE webhook against a now-STATEFUL
+`guest_memory` mock (`tests/helpers/canonical-core-harness.ts` was
+previously write-only for this table -- fixed first, since Phase 2's
+whole value proposition is real read-after-write across turns) --
+covering the roadmap's own 14-item list in full (test 14 split into
+14a/14b/14c for the three named regression phrases), in order.
+
+**12. Full test result.** 1001/1001 passing (985 prior + 16 new), zero
+regressions.
+
+**13. Load-bearing proof.** Four separate mutations, each reverted
+immediately after confirming the expected failures, with the final
+file state diffed byte-for-byte against a pre-mutation backup to
+confirm a clean restore:
+   - **Memory writes disabled** (capture call replaced with a no-op in
+     `thongthai-chat.ts`): 8 of 16 tests failed (1, 2, 4, 5, 6, 9, 11,
+     12) -- proving the capture pipeline is load-bearing, not
+     decorative. (Test 3 alone survived, via a separate, pre-existing
+     LLM-path memory write unrelated to this round's new function.)
+   - **Raw-chat privacy guardrail violated** (temporarily appended the
+     raw message text into the stored `constraints` row): tests 1, 4,
+     and 6 failed -- proving the privacy assertions actually inspect
+     stored content, not just presence of a write.
+   - **Phase 1 boundary priority bypassed** (`classifyEscalationBoundary`
+     temporarily forced to always return `null`, simulating Phase 1
+     never having been built): tests 10 and 12 failed -- proving these
+     tests catch a real regression if memory-era code ever came before
+     or replaced the boundary check, not passing by coincidence.
+   - **Repeated-phrase/aggregate counting disabled**
+     (`recordIntelligenceEvent` short-circuited to a no-op): tests 5,
+     9, 11, and 12 failed -- proving the aggregate event count is
+     genuinely produced by the write path under test, not asserted
+     against a vacuously-true default.
+
+**14. THONGTHAI_HANDOFF.md update.** This entry.
+
+**15. Deploy status.** Cannot be verified from this session -- egress
+to `*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as
+in every prior round. Verify via the Netlify dashboard after merge.
+
+**16. Owner retest script** (exact 8 phrases, in order, same LINE
+conversation where noted):
+1. "เอาแบบไม่โหด" -> reply unaffected; `low_intensity` captured silently.
+2. "อยากขี่ม้า แต่กลัวตก" -> still gets the existing horse care-mode
+   reply; `fear_of_falling` captured silently (no behavioral change
+   yet -- see item 7's honest scope note).
+3. "แม่เดินไกลไม่ได้" -> reply unaffected; `limited_walking` captured.
+4. "กินไม่เผ็ด แพ้กุ้ง" -> reply unaffected; `no_spicy` +
+   `shrimp_allergy` captured.
+5. "มีอะไรแนะนำ" (same conversation as #3, after "ครั้งแรก" context) ->
+   should now open with "ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อน
+   นะครับ" -- never a timestamped callback.
+6. "ร้านอาหารมีอะไรแนะนำ" (same conversation as #4) -> shrimp dishes must
+   not appear in the recommendation, without the message re-stating the
+   allergy.
+7. "ขอคืนเงินได้ไหม" -> Phase 1's deterministic guardrail reply, exactly
+   as before -- confirms memory capture never delays or overrides
+   escalation routing.
+8. "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" -> Phase 1/existing safety routing
+   unaffected (activity + owner/general notified, no booking-flow
+   prompt); `ground_condition_risk` recorded in the aggregate log once
+   its migration is applied.
+
+**Confirmations**: no `guest_memory_v2` or any parallel memory table
+created or written to anywhere in this round's code (test 13, plus
+direct inspection) -- `guest_memory` remains the single source of
+truth for per-guest preference state, extended in place exactly as
+instructed.
+
+**Per the roadmap's own workflow rule**: this phase stops here, per
+the owner's explicit final instruction ("Stop after Phase 2. Do not
+start Phase 3."). `customer_intelligence_events`'s migration remains
+unapplied pending owner approval; Phase 3 (backoffice) is untouched.

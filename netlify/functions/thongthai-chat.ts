@@ -18,6 +18,7 @@ import {
   loadCustomerMemory,
   loadVerifiedCommunityOfferings,
   persistCustomerResult,
+  capturePreferenceSignals,
 } from './_customer-db';
 import { resolveCanonicalGuestId } from './_thongthai-identity';
 import {
@@ -2185,6 +2186,20 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
   const message = request.message;
 
   if (FIRST_VISIT_RECOMMEND_MARKER.test(message)) {
+    // Master Roadmap Phase 2 -- non-creepy personalization: a
+    // remembered mobility need (guestContext.constraints, re-hydrated
+    // from guest_memory by loadCustomerMemory at the top of
+    // processThongthaiChatCore) softly shapes THIS reply, never a
+    // timestamped "you told me before" callback (see
+    // THONGTHAI_HANDOFF.md's "Master Roadmap Phase 2" entry for the
+    // exact good/bad wording contrast this follows).
+    if (request.guestContext.constraints?.includes('limited_walking')) {
+      return {
+        message: 'ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ 😊\nอยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?',
+        intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+        suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+      };
+    }
     return {
       message: [
         'ถ้ามาครั้งแรก ทองไทยแนะนำให้ดูเป็น 3 แบบครับ 😊',
@@ -2729,6 +2744,20 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   }
 
   await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
+
+  // Master Roadmap Phase 2 -- Customer Intelligence Memory. Run ONCE,
+  // unconditionally, for every turn -- BEFORE the deterministic
+  // responder cascade (including Phase 1's escalation boundary check
+  // right below) so a service-useful phrase is captured regardless of
+  // which responder eventually answers, and so it can never delay or
+  // interfere with that cascade's own routing decision. A pure side
+  // effect on the customer's own message text -- it never calls the
+  // LLM, never changes which responder answers this turn, and never
+  // overrides Phase 1's boundary policy (see
+  // _customer-phrase-intelligence.ts's own header comment).
+  await capturePreferenceSignals(guestDbId, request.message).catch(error => {
+    console.error('THONGTHAI_PREFERENCE_CAPTURE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+  });
 
   // eventId is whatever the transport layer determined (LINE's own message
   // id; the web HTTP handler's rawBody.eventId or x-nf-request-id/x-request-id
