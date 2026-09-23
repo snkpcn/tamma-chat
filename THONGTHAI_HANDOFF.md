@@ -3044,3 +3044,84 @@ landing this).
 15 new tests, all through the real `processThongthaiChatCore` path.
 776/776 total passing; the new guard verified load-bearing (disabling it
 makes exactly the 6 ambiguity-clarification tests fail, nothing else).
+
+### OWNER GROUP BIND DEBUG — "ผูกทีม เจ้าของ" produced no bot response
+
+Owner created a new LINE group, added the bot, typed `ผูกทีม เจ้าของ` /
+`ผูกทีม owner` / `ผูกทีม admin` in it, and got no response at all.
+
+**Was the webhook receiving the messages? Could not be determined from
+this session** -- there is no log line anywhere in `line-webhook.ts`
+that fires on receiving a group event, so a genuinely silent group
+(LINE never even calling the webhook) and "received it but something
+inside silently dropped it" were indistinguishable from existing
+Netlify function logs. That gap is now closed (see below).
+
+**Where it would drop if the webhook DID receive it: nowhere.** Traced
+the full path by hand and confirmed with tests: `handleOpsEvent` ->
+`handleLinePaymentGroupText`/`paymentTypedConfirmationGuard`/
+`handleLineFuelText`/`handleRestaurantStockText` (all four correctly
+return `null` immediately for an unbound, brand-new group -- none of
+them throw) -> `handleLineOpsGroupMessage` -> `handleBookingOpsCommand`
+(doesn't match, returns `{handled:false}` immediately, no DB call) ->
+the `ผูกทีม` regex match -> `parseTeamCode` (already accepts เจ้าของ/
+owner/admin/general/ทั่วไป/แอดมิน/ผู้ดูแล from the earlier owner_general
+fix) -> `bindLineTeamChannel` -> success reply. Every one of these steps
+is now covered by a direct test using the real `handleLineOpsGroupMessage`
+entry point, and all pass. **The code, when actually invoked, works
+correctly for the exact commands the owner typed.**
+
+**Two real gaps found and fixed along the way** (neither explains "zero
+response," both are genuine hardening):
+
+1. **No authorization existed at all** on the `ผูกทีม` command -- any
+   LINE user present in ANY group with the bot could rebind that
+   group's team, rerouting all future notifications for that team.
+   Added `isAuthorizedForTeamBind` (`_ops-notifications.ts`), gated by a
+   new `LINE_OPS_ADMIN_USER_IDS` env var (comma-separated LINE userIds).
+   **Opt-in by design**: unset (the current, unconfigured state) means
+   every sender is still authorized, exactly matching today's behavior
+   -- so this fix cannot be what caused "no response," and deploying it
+   does not lock the owner out of anything they haven't explicitly
+   configured. When unauthorized, the bot now replies
+   "คำสั่งนี้ใช้ได้เฉพาะผู้ดูแลระบบครับ" -- never silent.
+2. **No safe diagnostic logging existed** for incoming group/room
+   events. Added a redacted `LINE_OPS_EVENT_RECEIVED` log line (event
+   type, source type, partially-redacted groupId/roomId/userId, message
+   type, first 120 chars of text, whether a replyToken was present) that
+   fires for EVERY group/room event this webhook receives, including a
+   bare `join` event (LINE sends one when the bot is added to a group;
+   this webhook still doesn't reply to it -- not customer-facing, no
+   action needed -- but it will now be VISIBLE in logs instead of
+   silently doing nothing). Also correlated `LINE_OPS_GROUP_ERROR`'s
+   existing catch-all log with which event/group it came from. Never
+   logs the LINE channel secret or access token (verified by test).
+
+**If the code is correct but the webhook received nothing at all --
+owner action required, in this order:**
+1. LINE Developers Console -> the Messaging API channel -> **Webhook
+   settings**: "Use webhook" must be ON, and the webhook URL must point
+   at this project's `line-webhook` Netlify function (verify it matches
+   the actual deployed URL, not a stale one from an earlier project).
+2. LINE Official Account Manager -> **Response settings** -> **Chat**:
+   if this is set to "Chat" (manual reply) instead of the webhook/API
+   mode, LINE routes messages to the OA Manager inbox for a human and
+   NEVER calls the webhook at all. This is the single most common cause
+   of "bot added to a group, types a command, gets nothing" and is
+   entirely outside this codebase's control.
+3. Same screen -> confirm **"Allow bot to join group chats"** is
+   enabled -- without it, group functionality may not work even though
+   the bot can technically be added.
+4. LINE Developers Console -> the channel's **webhook event log**
+   (if available on the plan) -- check whether a `message`/`join` event
+   for this group even appears there. If it doesn't, the problem is
+   entirely on LINE's side (settings above), not this codebase.
+5. Once verified/fixed, retest with exactly: `ผูกทีม เจ้าของ` -- expect
+   "✅ ผูกกลุ่มนี้กับทีม เจ้าของ/ทั่วไป แล้วครับ...". If it now works, check
+   the new `LINE_OPS_EVENT_RECEIVED` log line in Netlify's function logs
+   for this invocation to confirm exactly what changed.
+
+Files changed: `netlify/functions/line-webhook.ts` (safe redacted
+logging), `netlify/functions/_ops-notifications.ts` (opt-in
+authorization gate). 8 new tests (784/784 total passing); the
+authorization guard verified load-bearing.

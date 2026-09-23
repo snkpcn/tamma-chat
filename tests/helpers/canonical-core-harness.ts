@@ -320,6 +320,37 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
         : [...opsChannels.values()].find(c => c.target_id_hash === targetHash);
       return jsonResponse(channel ? [channel] : []);
     }
+    // bindLineTeamChannel's own write path (_ops-notifications.ts) --
+    // upserts by (team_code, provider). Recorded via recordPost so tests
+    // can assert on the exact team_code a "ผูกทีม ..." command actually
+    // wrote, not just its reply text; also updates the SAME opsChannels
+    // map programOpsChannel uses, so a bind-then-notify test sees the
+    // newly-bound channel exactly like the real table would.
+    if (path.startsWith('ops_notification_channels') && method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as { team_code: string; target_id_enc: string; target_id_hash: string; display_name?: string; enabled?: boolean };
+      recordPost('ops_notification_channels', body);
+      opsChannels.set(body.team_code, {
+        id: `ops-channel-${body.team_code}`, team_code: body.team_code,
+        target_id_enc: body.target_id_enc, target_id_hash: body.target_id_hash, enabled: body.enabled ?? true,
+      });
+      return jsonResponse([]);
+    }
+    if (path.startsWith('ops_notification_channels') && method === 'PATCH') {
+      const body = JSON.parse(String(init.body ?? '{}')) as { team_code?: string; target_id_enc?: string; target_id_hash?: string; enabled?: boolean };
+      recordPost('ops_notification_channels', body);
+      if (body.team_code) {
+        const existing = opsChannels.get(body.team_code);
+        opsChannels.set(body.team_code, {
+          id: existing?.id ?? `ops-channel-${body.team_code}`, team_code: body.team_code,
+          target_id_enc: body.target_id_enc ?? existing?.target_id_enc ?? '', target_id_hash: body.target_id_hash ?? existing?.target_id_hash ?? '',
+          enabled: body.enabled ?? existing?.enabled ?? true,
+        });
+      }
+      return jsonResponse([]);
+    }
+    if (path.startsWith('ops_notification_channels') && method === 'DELETE') {
+      return jsonResponse([]);
+    }
 
     // --- ops_notification_deliveries (_ops-notifications.ts's
     // beginDelivery/finishDelivery -- idempotency-keyed delivery ledger) ---

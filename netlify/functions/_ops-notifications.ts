@@ -149,6 +149,23 @@ function parseTeamCode(raw: string): OpsTeamCode | null {
   return aliases.find(([pattern]) => pattern.test(value))?.[1] ?? null;
 }
 
+// Rebinding a team's LINE group reroutes ALL future notifications for
+// that team, so it's the one command in this file worth gating -- unlike
+// every other ops-group command here, whose only real access boundary is
+// "you're physically in the group the bot was added to."
+//
+// OPT-IN by design: if LINE_OPS_ADMIN_USER_IDS is unset, every sender is
+// authorized, exactly matching this codebase's existing behavior (group
+// membership as the access boundary) -- so deploying this fix never locks
+// an owner out of a bind command they haven't configured an allowlist
+// for yet. Once set (comma-separated LINE userIds), only those senders
+// may rebind a team.
+function isAuthorizedForTeamBind(userId: string | null): boolean {
+  const allowlist = (process.env.LINE_OPS_ADMIN_USER_IDS ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  if (allowlist.length === 0) return true;
+  return typeof userId === 'string' && allowlist.includes(userId);
+}
+
 async function currentBindingForTarget(targetId: string): Promise<NotificationChannel | null> {
   const hash = piiHash(targetId);
   if (!hash) return null;
@@ -793,6 +810,9 @@ export async function handleLineOpsGroupMessage(input: {
 
   const bindMatch = text.match(/^ผูกทีม\s+(.+)$/iu);
   if (bindMatch) {
+    if (!isAuthorizedForTeamBind(input.userId ?? null)) {
+      return 'คำสั่งนี้ใช้ได้เฉพาะผู้ดูแลระบบครับ';
+    }
     const teamCode = parseTeamCode(bindMatch[1]);
     if (!teamCode || teamCode === 'all') {
       return 'ยังไม่รู้จักชื่อนี้ครับ ใช้: restaurant / stay / activity / cafe / otop / เจ้าของ (owner)';
