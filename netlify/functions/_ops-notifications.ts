@@ -196,9 +196,17 @@ export async function bindLineTeamChannel(input: {
 
   const existingByTarget = await currentBindingForTarget(input.targetId);
   const now = new Date().toISOString();
+  // service_type's own CHECK constraint only allows the five real business
+  // unit codes (or NULL) -- 'all' and 'owner_general' are both pseudo-teams
+  // with no corresponding service_type row, so both map to NULL here rather
+  // than widening that constraint to accept values it was never meant to
+  // describe. team_code is the column with an owner_general-specific
+  // migration (see supabase/migrations); service_type deliberately stays
+  // untouched.
+  const NON_SERVICE_TEAM_CODES: OpsTeamCode[] = ['all', 'owner_general'];
   const payload = {
     team_code: input.teamCode,
-    service_type: input.teamCode === 'all' ? null : input.teamCode,
+    service_type: NON_SERVICE_TEAM_CODES.includes(input.teamCode) ? null : input.teamCode,
     provider: 'line',
     target_type: input.targetType,
     target_id_enc: targetEncrypted,
@@ -846,7 +854,15 @@ export async function handleLineOpsGroupMessage(input: {
       });
     } catch (error) {
       logBindAttempt(true, 'db_error');
-      throw error;
+      // A bind command must NEVER go silent, including on a DB-side
+      // failure (e.g. a CHECK constraint rejecting a team code the schema
+      // hasn't been migrated for yet) -- rethrowing here left the group
+      // with zero reply while LINE_OPS_GROUP_ERROR logged the real cause
+      // invisibly. Reply with an honest, specific error instead of a
+      // generic one so a schema mismatch is distinguishable in the group
+      // itself, not just in logs.
+      console.error('LINE_GROUP_BIND_DB_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+      return 'ผูกทีมไม่สำเร็จครับ ระบบฐานข้อมูลยังไม่รองรับทีมนี้ ทีมงานกำลังแก้ไขครับ ลองใหม่อีกครั้งในภายหลัง';
     }
     logBindAttempt(true, 'success');
     return `✅ ผูกกลุ่มนี้กับทีม ${TEAM_LABELS[teamCode]} แล้วครับ\nจากนี้งานใหม่และสรุปตารางงานของทีมนี้จะส่งเข้ากลุ่มนี้`;
