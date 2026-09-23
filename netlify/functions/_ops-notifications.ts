@@ -166,6 +166,13 @@ function isAuthorizedForTeamBind(userId: string | null): boolean {
   return typeof userId === 'string' && allowlist.includes(userId);
 }
 
+/** Redacted group/room id for LINE_GROUP_BIND_ATTEMPT logging -- never the
+ *  full LINE target id. */
+function redactBindTargetId(value: string | null | undefined): string {
+  if (!value) return 'none';
+  return value.length <= 6 ? `${value.slice(0, 2)}…` : `${value.slice(0, 6)}…(len:${value.length})`;
+}
+
 async function currentBindingForTarget(targetId: string): Promise<NotificationChannel | null> {
   const hash = piiHash(targetId);
   if (!hash) return null;
@@ -810,19 +817,38 @@ export async function handleLineOpsGroupMessage(input: {
 
   const bindMatch = text.match(/^ผูกทีม\s+(.+)$/iu);
   if (bindMatch) {
+    const rawTeamCode = bindMatch[1];
+    const teamCode = parseTeamCode(rawTeamCode);
+    const logBindAttempt = (authorized: boolean, result: string) => {
+      console.log('LINE_GROUP_BIND_ATTEMPT', JSON.stringify({
+        teamCodeRaw: rawTeamCode.slice(0, 40),
+        teamCodeParsed: teamCode ?? null,
+        targetId: redactBindTargetId(input.targetId),
+        authorized,
+        result,
+      }));
+    };
+
     if (!isAuthorizedForTeamBind(input.userId ?? null)) {
+      logBindAttempt(false, 'not_authorized');
       return 'คำสั่งนี้ใช้ได้เฉพาะผู้ดูแลระบบครับ';
     }
-    const teamCode = parseTeamCode(bindMatch[1]);
     if (!teamCode || teamCode === 'all') {
+      logBindAttempt(true, 'invalid_team');
       return 'ยังไม่รู้จักชื่อนี้ครับ ใช้: restaurant / stay / activity / cafe / otop / เจ้าของ (owner)';
     }
-    await bindLineTeamChannel({
-      teamCode,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      createdByUserId: input.userId,
-    });
+    try {
+      await bindLineTeamChannel({
+        teamCode,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        createdByUserId: input.userId,
+      });
+    } catch (error) {
+      logBindAttempt(true, 'db_error');
+      throw error;
+    }
+    logBindAttempt(true, 'success');
     return `✅ ผูกกลุ่มนี้กับทีม ${TEAM_LABELS[teamCode]} แล้วครับ\nจากนี้งานใหม่และสรุปตารางงานของทีมนี้จะส่งเข้ากลุ่มนี้`;
   }
 

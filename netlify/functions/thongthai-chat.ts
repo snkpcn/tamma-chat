@@ -2,7 +2,6 @@ import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
   LLMAvailabilityError,
   ProviderNotConfiguredError,
-  availabilityBrainResponse,
   getBrainChannel,
   runThongthaiBrain,
   type AgentStateUpdate,
@@ -144,6 +143,77 @@ export function deterministicGreetingResponse(request: BrainRequest): BrainRespo
       ? 'สวัสดีครับ ผมทองไทยครับ 😊 วันนี้อยากให้ช่วยเรื่องกิน พัก กิจกรรม โลเคชั่น อากาศ หรือจัดทริปให้ดีครับ'
       : "Hi, I'm Thongthai 😊 I can help with dining, stays, activities, location, weather, or planning your trip.",
     intent: 'greeting',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// Bare attention-getting interjections ("เห้ยยย", "ฮัลโหล") and presence
+// checks ("อยู่ไหม", "มีใครอยู่ไหม") -- unlike SIMPLE_GREETING_RE these carry
+// no greeting word at all, so they need their own narrow, whole-message-only
+// markers. Anchored start-to-end on purpose: this must never fire on a
+// message that merely CONTAINS one of these words alongside real content
+// (e.g. "ทองไทยอยู่ไหมกิจกรรมม้า"), only on the bare interjection itself.
+// This is checked in the SAME early, pre-LLM slot as deterministicGreetingResponse
+// so a casual message never depends on LLM/provider availability at all --
+// see THONGTHAI_HANDOFF.md's "LINE Full Audit" entry for why a generic
+// "คิดช้า" apology was reaching messages like this one before.
+const CASUAL_ATTENTION_RE = /^(?:เห้ย+|เฮ้ย+|ฮัลโหล+|เอ้ย+)(?:ครับ|ค่ะ|คะ|คับ|จ้า|จ๊ะ)?[\s!ๆ.,?？~]*$/iu;
+const PRESENCE_CHECK_RE = /^(?:มีใครอยู่(?:ไหม|มั้ย|ป่าว|เปล่า|บ้าง)|(?:ทองไทย\s*)?อยู่(?:ไหม|มั้ย|ป่าว|เปล่า))[\s!.,?？~]*$/iu;
+
+export function isCasualAttentionMessage(message: string): boolean {
+  const trimmed = message.trim();
+  return CASUAL_ATTENTION_RE.test(trimmed) || PRESENCE_CHECK_RE.test(trimmed);
+}
+
+export function deterministicCasualChatResponse(request: BrainRequest): BrainResponse | null {
+  if (!isCasualAttentionMessage(request.message)) return null;
+  const isThai = request.language === 'th' || /[฀-๿]/u.test(request.message);
+  return {
+    message: isThai
+      ? 'ครับผม ทองไทยอยู่นี่ครับ 😊 มีอะไรให้ช่วยไหมครับ'
+      : "Yep, Thongthai's here 😊 What can I help you with?",
+    intent: 'greeting',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// Per-intent-category degraded response when the LLM/provider is genuinely
+// unavailable AND no deterministic composer (promotion fallback, One-Mind
+// pipeline) could compose a grounded answer either. A single flat "คิดช้า"
+// apology for every category is what produced the generic-fallback bug --
+// this at least tells a weather/booking/feedback question something
+// relevant to what it actually asked, and never claims an action (a
+// booking, a saved feedback note) that did not actually happen.
+type DegradedFallbackCategory = 'weather' | 'booking' | 'feedback' | 'casual';
+
+export function categorizeDegradedFallback(message: string): DegradedFallbackCategory {
+  if (classifyServiceFeedback(message)) return 'feedback';
+  if (classifyLocalConciergeQuestion(message)?.category === 'weather_condition') return 'weather';
+  if (hasExplicitTransactionIntent(message) || OPERATIONAL_TOPIC_RE.test(message)) return 'booking';
+  return 'casual';
+}
+
+export function degradedFallbackResponse(category: DegradedFallbackCategory): BrainResponse {
+  const message = category === 'weather'
+    ? 'ตอนนี้ทองไทยเช็กสภาพอากาศไม่ทันครับ ลองถามอีกครั้งในอีกสักครู่ หรือเช็กแอปพยากรณ์อากาศคู่กันไปก่อนนะครับ'
+    : category === 'booking'
+      ? 'ตอนนี้ระบบจองของทองไทยตอบช้ากว่าปกติครับ ข้อมูลที่พิมพ์มายังไม่หายไปไหน ลองส่งอีกครั้งในอีกสักครู่นะครับ'
+      : category === 'feedback'
+        ? 'ขอบคุณสำหรับข้อความนี้ครับ ตอนนี้ระบบตอบช้ากว่าปกติเล็กน้อย รบกวนส่งอีกครั้งในอีกสักครู่ เพื่อให้ทองไทยรับเรื่องไว้อย่างถูกต้องครับ'
+        : 'ทองไทยอยู่นี่ครับ แต่ตอนนี้คิดช้ากว่าปกตินิดหนึ่ง ลองพิมพ์อีกครั้งในอีกสักครู่นะครับ 😊';
+  return {
+    message,
+    intent: 'conversation',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
     suggestedActions: [],
@@ -1540,6 +1610,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Same reasoning as earlyGreeting above: a bare "เห้ยยย"/"อยู่ไหม" must
+  // never depend on the LLM being up, on any channel (LINE private chat
+  // shares this exact function -- see processThongthaiChatCore's callers).
+  const earlyCasualChat = deterministicCasualChatResponse(request);
+  if (earlyCasualChat) {
+    const polished = polishedResponse(earlyCasualChat, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   const earlyActivityFallback = await activityBookingFallbackResponse(request, guestDbId, channel).catch(error => {
     console.error('THONGTHAI_ACTIVITY_HISTORY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
@@ -1985,7 +2071,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           suggestedActions: polished.suggestedActions,
         });
       }
-      const fallback = polishedResponse(availabilityBrainResponse(), channel);
+      const fallback = polishedResponse(degradedFallbackResponse(categorizeDegradedFallback(request.message)), channel);
       return coreResult(200, fallback);
     }
     return coreResult(502, { error: 'Thongthai brain request failed. Please try again.' });

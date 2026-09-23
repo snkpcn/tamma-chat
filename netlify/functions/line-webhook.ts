@@ -134,6 +134,56 @@ function redactId(value: string | null | undefined): string {
   return value.length <= 6 ? `${value.slice(0, 2)}…` : `${value.slice(0, 6)}…(len:${value.length})`;
 }
 
+/** First/last-only redaction, as specified for LINE_EVENT_RECEIVED --
+ *  distinct style from redactId's first-chunk style, kept separate rather
+ *  than reused so each log's exact shape stays intentional. */
+function redactFirstLast(value: string | null | undefined): string {
+  if (!value) return 'none';
+  if (value.length <= 8) return `${value.slice(0, 2)}…`;
+  return `${value.slice(0, 4)}…${value.slice(-4)}`;
+}
+
+type LineRoute = 'group_ops_command' | 'private_chat' | 'notification' | 'ignored' | 'error';
+
+function classifyRoute(event: LineWebhookEvent): { route: LineRoute; reason: string } {
+  const sourceType = event.source?.type;
+  if (sourceType === 'group' || sourceType === 'room') {
+    return { route: 'group_ops_command', reason: `source.type=${sourceType} routed to ops group handler` };
+  }
+  if (sourceType === 'user') {
+    return { route: 'private_chat', reason: 'source.type=user routed to customer/private chat handler' };
+  }
+  return { route: 'ignored', reason: `unrecognized source.type=${sourceType ?? 'missing'}` };
+}
+
+/** Logged once per inbound event, before any routing decision, so a
+ *  "the bot never responded" report can always be checked against whether
+ *  LINE delivered the event to this webhook at all -- never logs the
+ *  channel secret/access token or a full group/user id. */
+function logEventReceived(event: LineWebhookEvent): void {
+  console.log('LINE_EVENT_RECEIVED', JSON.stringify({
+    eventType: event.type ?? 'unknown',
+    sourceType: event.source?.type ?? 'unknown',
+    hasGroupId: Boolean(event.source?.groupId),
+    groupId: redactFirstLast(event.source?.groupId),
+    hasUserId: Boolean(event.source?.userId),
+    messageType: event.message?.type ?? null,
+    text: event.message?.type === 'text' && typeof event.message.text === 'string'
+      ? event.message.text.slice(0, 40)
+      : null,
+    hasReplyToken: Boolean(event.replyToken),
+  }));
+}
+
+function logRouteSelected(event: LineWebhookEvent, route: LineRoute, reason: string): void {
+  console.log('LINE_ROUTE_SELECTED', JSON.stringify({
+    route,
+    reason,
+    eventType: event.type ?? 'unknown',
+    sourceType: event.source?.type ?? 'unknown',
+  }));
+}
+
 async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Promise<void> {
   const sourceType = event.source?.type;
   if (sourceType !== 'group' && sourceType !== 'room') return;
@@ -360,6 +410,11 @@ export const handler: Handler = async (event, context) => {
   }
 
   const allEvents = Array.isArray(payload.events) ? payload.events : [];
+  for (const item of allEvents) {
+    logEventReceived(item);
+    const { route, reason } = classifyRoute(item);
+    logRouteSelected(item, route, reason);
+  }
   const opsEvents = allEvents.filter(item => item.source?.type === 'group' || item.source?.type === 'room');
   const customerCandidates = allEvents.filter(item => item.source?.type !== 'group' && item.source?.type !== 'room');
 
