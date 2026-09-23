@@ -3125,3 +3125,130 @@ Files changed: `netlify/functions/line-webhook.ts` (safe redacted
 logging), `netlify/functions/_ops-notifications.ts` (opt-in
 authorization gate). 8 new tests (784/784 total passing); the
 authorization guard verified load-bearing.
+
+## LINE Full Audit (group bind + private chat) -- 2026-09-23
+
+Owner reported two live symptoms: (1) the group bind command still
+produced zero response after the prior "Owner Group Bind Debug" fix, and
+(2) a private LINE OA chat with a casual interjection ("เห้ยยย") got the
+generic "ตอนนี้ทองไทยคิดช้ากว่าปกตินิดหนึงครับ..." fallback instead of a
+friendly reply. Audited the whole LINE pipeline end to end rather than
+patching either symptom in isolation.
+
+**Architecture clarified**: `line-webhook.ts` is the ONLY Netlify entry
+point. It classifies each inbound event by `source.type`: group/room ->
+`handleOpsEvent` (in the same file); everything else -> re-signed and
+forwarded to `_line-webhook-core.ts`'s own exported `handler`
+(`coreHandler`), which does its own independent signature verification
+and then calls `askThongthaiReliably` -> `processThongthaiChatCore` (from
+`thongthai-chat.ts`) -- **the exact same function the web HTTP handler
+calls**. Confirmed: LINE private chat does NOT bypass the web core; there
+is no separate/duplicate brain for LINE. One real gap: `_line-webhook-
+core.ts`'s `askThongthai` always builds `chatHistory: []` for the core
+call -- multi-turn continuity for LINE customers comes entirely from
+persisted `guest_agent_state` (guestDbId-keyed, survives across
+turns/webhooks), not from chatHistory. This is why B7's two-turn LINE
+test below still works (state persists) even though each call's
+chatHistory is empty.
+
+**Finding 1 -- group bind**: re-verified the ENTIRE path from a fully
+signed LINE webhook HTTP request (not just calling
+`handleLineOpsGroupMessage` directly, as the prior debug round did) for
+"ผูกทีม เจ้าของ" / "owner" / "admin" / an invalid team / an unauthorized
+sender / a reply-send failure. All six behave correctly and are covered
+by new tests (`tests/line-full-audit.test.ts`, Group A). **No code defect
+found this round either.** Added `LINE_GROUP_BIND_ATTEMPT` logging
+(teamCodeRaw, teamCodeParsed, redacted targetId, authorized, result:
+success/not_authorized/invalid_team/db_error) directly in the bind
+handler in `_ops-notifications.ts`, and top-level `LINE_EVENT_RECEIVED` /
+`LINE_ROUTE_SELECTED` logging in `line-webhook.ts` for EVERY inbound
+event (not just group/room ones) so a genuinely silent group can now be
+distinguished, from the logs alone, between "LINE never delivered the
+event" (no `LINE_EVENT_RECEIVED` line at all) and "delivered but the
+reply send failed" (`LINE_OPS_GROUP_ERROR`, already existed). Given the
+code is proven correct end-to-end twice now, a still-silent group most
+likely means: (a) the fix from the prior round has not actually reached
+production yet (this session cannot verify a live Netlify deploy --
+egress to `*.netlify.app` is blocked here), or (b) the LINE Official
+Account Manager "Response Settings -> Chat" mode is intercepting the
+message before the webhook ever fires (see the prior handoff entry's
+owner checklist -- unchanged and still the most likely explanation).
+
+**Finding 2 -- private chat generic fallback -- REAL BUG, FIXED**: no
+deterministic responder existed for bare attention-getting interjections
+("เห้ยยย", "ฮัลโหล") or presence checks ("อยู่ไหม", "มีใครอยู่ไหม") --
+only actual greeting words (สวัสดี/หวัดดี/hello/hi) had one
+(`deterministicGreetingResponse`). A casual interjection therefore fell
+all the way through to the real LLM call, and when that call hit a
+genuine provider failure, the ONLY fallback for the LLM-unavailable case
+was one flat message ("ตอนนี้ทองไทยคิดช้ากว่าปกติ...") used for every
+category of question -- weather, booking, feedback, and plain chit-chat
+alike.
+
+Fixed with two independent changes in `thongthai-chat.ts`:
+1. `deterministicCasualChatResponse` (new) -- checked in the SAME early,
+   pre-LLM slot as the existing greeting responder (`earlyCasualChat`,
+   right after `earlyGreeting`), so a casual message now gets
+   "ครับผม ทองไทยอยู่นี่ครับ 😊 มีอะไรให้ช่วยไหมครับ" **regardless of LLM/
+   provider availability**, on every channel (web and LINE both call the
+   same `processThongthaiChatCore`). Matched by `CASUAL_ATTENTION_RE`
+   (เห้ย/เฮ้ย/ฮัลโหล/เอ้ย, repeated letters and trailing politeness
+   particles allowed) and `PRESENCE_CHECK_RE` (มีใครอยู่ไหม/อยู่ไหม, with
+   an optional "ทองไทย" prefix), both anchored start-to-end so a message
+   that merely contains one of these words alongside real content (e.g.
+   a horse-booking message) is never intercepted.
+2. `categorizeDegradedFallback` + `degradedFallbackResponse` (new) --
+   replaces the single `availabilityBrainResponse()` call in the
+   `LLMAvailabilityError` catch block (after the existing promotion-
+   fallback and One-Mind deterministic-degradation attempts both still
+   fail to compose) with a per-category apology: weather / booking /
+   feedback / casual, each honest about what didn't happen (never claims
+   a booking was made or feedback was saved) and none of them the old
+   flat "คิดช้า" text verbatim.
+
+**Files changed**: `netlify/functions/thongthai-chat.ts` (both fixes,
+plus the now-shared `categorizeDegradedFallback`/`isCasualAttentionMessage`
+exports), `netlify/functions/_line-webhook-core.ts` (`LINE_PRIVATE_CHAT_
+ATTEMPT` logging: textCategory, deterministicResponder, llmAttempted,
+llmErrorType, finalResponseKind -- imports the new classifiers from
+`thongthai-chat.ts` rather than re-implementing them), `netlify/
+functions/line-webhook.ts` (`LINE_EVENT_RECEIVED`/`LINE_ROUTE_SELECTED`),
+`netlify/functions/_ops-notifications.ts` (`LINE_GROUP_BIND_ATTEMPT`).
+Never logs the channel secret, access token, or a full group/user id in
+any of the four new log lines.
+
+**Tests**: `tests/line-full-audit.test.ts`, 16 new tests. Group A (6):
+full signed-webhook group bind scenarios (success x3 team-alias
+variants, invalid team, unauthorized sender, reply-send failure).
+Group B (7): full signed-webhook PRIVATE chat scenarios -- "เห้ยยย"
+never gets the generic apology; "สวัสดี" matches web-quality greeting;
+"มีใครอยู่ไหม" gets the friendly reply; "ทองไทยตอบยาวไป" is not
+misrouted as horse selection; "อยากขี่ม้า" starts the activity flow;
+bare "เอาทองไทย" with no context asks for clarification; "อยากขี่ม้า"
+then "เอาทองไทย" selects the horse once context is established (proves
+LINE's turn-to-turn persisted-state continuity, despite chatHistory
+always being `[]` for this transport). Group C (3): an unscripted/
+open-ended message still gets a real delivered reply (never
+silence/crash); a casual message with zero LLM programming still gets
+the deterministic reply, proving it never depended on the LLM; and a
+direct unit check that `categorizeDegradedFallback`/
+`degradedFallbackResponse` produce four genuinely distinct, honest,
+non-generic messages. **Full suite: 800/800 passing** (784 prior + 16
+new). Load-bearing verified: disabling `deterministicCasualChatResponse`
+made exactly B1, B3, and C2 fail and no others; restoring returns the
+suite to 800/800.
+
+**Owner retest checklist**: private LINE chat -- "เห้ยยย" should now
+reply "ครับผม ทองไทยอยู่นี่ครับ 😊 มีอะไรให้ช่วยไหมครับ", never the
+"คิดช้า" message. Group bind -- retest "ผูกทีม เจ้าของ" in the "owner"
+group; if STILL silent, check the new `LINE_EVENT_RECEIVED` log line in
+Netlify's function logs for that exact timestamp: if it's absent
+entirely, the problem is the LINE OA "Response Settings -> Chat" mode
+(see checklist in the prior handoff entry), not this codebase.
+
+**Confirmations**: no DB migration (pure application-code fix); no
+booking/order/payment created by this work; no fake notification
+success (both bind and chat failure paths report their real outcome,
+never a claimed success); no unrelated production data mutated; deploy
+completion cannot be verified from this session (egress to
+`*.netlify.app` is blocked here, as in every prior round).

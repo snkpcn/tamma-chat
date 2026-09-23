@@ -3,6 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handleLineBookingMessage, handleLineMembershipMessage } from './_operations-db';
 import { splitCustomerMessageForLine } from './_chat-copy-style';
 import { processThongthaiChatCore } from './thongthai-chat';
+import { isSimpleGreetingMessage, isCasualAttentionMessage, categorizeDegradedFallback } from './thongthai-chat';
 import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
 
 type LineSource = {
@@ -197,7 +198,12 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function askThongthaiReliably(message: string, userId: string, eventId?: string): Promise<ThongthaiResponse> {
+async function askThongthaiReliably(
+  message: string,
+  userId: string,
+  eventId?: string,
+  onAttemptError?: (errorType: string) => void,
+): Promise<ThongthaiResponse> {
   try {
     return await askThongthai(message, userId, eventId);
   } catch (firstError) {
@@ -205,6 +211,7 @@ async function askThongthaiReliably(message: string, userId: string, eventId?: s
       'LINE_THONGTHAI_FIRST_ATTEMPT_ERROR',
       firstError instanceof Error ? firstError.message.slice(0, 240) : 'unknown',
     );
+    onAttemptError?.(firstError instanceof Error ? firstError.constructor.name : 'unknown');
   }
 
   // A retry is safe for write actions because operational creates (including restaurant preorders)
@@ -218,6 +225,7 @@ async function askThongthaiReliably(message: string, userId: string, eventId?: s
       'LINE_THONGTHAI_SECOND_ATTEMPT_ERROR',
       secondError instanceof Error ? secondError.message.slice(0, 240) : 'unknown',
     );
+    onAttemptError?.(secondError instanceof Error ? secondError.constructor.name : 'unknown');
     return {
       message: [
         'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
@@ -441,9 +449,35 @@ async function handleEvent(
 
   const message = event.message.text;
   const language = detectLanguage(message);
+
+  // Coarse pre-LLM category, purely for the LINE_PRIVATE_CHAT_ATTEMPT log --
+  // never used to route the message, only to distinguish "casual message got
+  // the generic fallback" from "a real booking/weather/feedback question got
+  // it" after the fact. See THONGTHAI_HANDOFF.md's "LINE Full Audit" entry.
+  const textCategory = isSimpleGreetingMessage(message) || isCasualAttentionMessage(message)
+    ? 'casual_greeting'
+    : categorizeDegradedFallback(message);
+  let deterministicResponder: string | null = null;
+  let llmAttempted = false;
+  let llmErrorType: string | null = null;
+  let finalResponseKind: string = 'thongthai_core';
+
+  const logPrivateChatAttempt = () => {
+    console.log('LINE_PRIVATE_CHAT_ATTEMPT', JSON.stringify({
+      textCategory,
+      deterministicResponder,
+      llmAttempted,
+      llmErrorType,
+      finalResponseKind,
+    }));
+  };
+
   try {
     const membershipReply = await handleLineMembershipMessage(lineGuestId(userId), userId, message);
     if (membershipReply) {
+      deterministicResponder = 'membership';
+      finalResponseKind = 'membership';
+      logPrivateChatAttempt();
       await replyToLine(replyToken, splitText(membershipReply).map(text => ({ type: 'text', text })), accessToken);
       return;
     }
@@ -453,13 +487,21 @@ async function handleEvent(
   try {
     const bookingReply = await handleLineBookingMessage(lineGuestId(userId), userId, message);
     if (bookingReply) {
+      deterministicResponder = 'booking';
+      finalResponseKind = 'booking';
+      logPrivateChatAttempt();
       await replyToLine(replyToken, splitText(bookingReply).map(text => ({ type: 'text', text })), accessToken);
       return;
     }
   } catch (error) {
     console.error('LINE_BOOKING_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
   }
-  const result = await askThongthaiReliably(message, userId, event.message.id);
+  llmAttempted = true;
+  const result = await askThongthaiReliably(message, userId, event.message.id, errorType => {
+    llmErrorType = errorType;
+  });
+  finalResponseKind = llmErrorType ? 'degraded_fallback' : 'thongthai_core';
+  logPrivateChatAttempt();
 
   try {
     await reinforceStructuredMemory(message, userId, language);
