@@ -4577,3 +4577,264 @@ claim anywhere; verified directly against real production data (not
 assumed) both before and as part of confirming the fix's mechanism; no
 unrelated production data mutated (read-only queries only against
 `upaokrprawzhgzeqsdke`).
+
+## Master Roadmap Phase 0 -- Baseline Audit / Checkpoint -- 2026-09-23
+
+Owner asked to stop doing one-off patch rounds and start a structured,
+phased rebuild (Phase 0 through Phase 8, see the roadmap message itself
+for full phase scope). This entry is Phase 0 ONLY -- audit and
+checkpoint, no feature changes, no code touched.
+
+### Checkpoint
+
+- **Latest merged PR**: #69 ("Fix false owner_general escalation
+  success: channelForTeam never selected target_id_hash"), merge commit
+  `7994f92`.
+- **Current `main` head**: `7994f92` (verified via `git fetch origin
+  main` + `git log`), local `main` fast-forwarded to match.
+- **Full test suite**: `npm test` -> **970/970 passing, 0 failed**, run
+  directly on `main` at this commit (not a feature branch).
+- No production DB mutation this phase; the only production access was
+  a read-only Supabase query already reported in the PR #69 entry above.
+
+### Architecture map
+
+**Request entry points** (`netlify/functions/*.ts`, Netlify Functions,
+one file = one HTTP endpoint):
+- `line-webhook.ts` -> thin signature-verification wrapper around
+  `_line-webhook-core.ts`'s real `handleEvent`.
+- `thongthai-chat.ts` -- also the entry point for the **web** channel
+  AND the shared core (`processThongthaiChatCore`) every channel funnels
+  through. 3,450 lines -- by far the largest file in the codebase; holds
+  the full deterministic responder cascade (order matters -- see its own
+  inline precedence comments) plus the One-Mind LLM fallback.
+- `customer-memory.ts`, `customer-account.ts`, `line-link.ts`,
+  `restaurant-menu.ts`, `ops-*.ts` (daily-schedule/health/notify/
+  payment-notify/settlement-notify), `staff-line-contact.ts`,
+  `thongthai-brain-status.ts`, `chess-*.ts` (an unrelated side feature)
+  -- narrower single-purpose endpoints.
+
+**Core conversation pipeline** (`thongthai-chat.ts`'s
+`processThongthaiChatCore`, in the ACTUAL checked order -- this order
+IS the precedence policy, and has been the direct cause of several real
+production incidents this engagement fixed when a narrower responder
+was checked too late):
+1. `deterministicGreetingResponse` / `deterministicCasualChatResponse` /
+   `deterministicShortUnclearTextResponse` -- zero-LLM, pre-authority
+   replies for bare greetings/interjections/ambiguous fragments.
+2. `deterministicServiceFeedbackResponse` (`_service-mind-feedback-*.ts`)
+   -- compliment/complaint/suggestion/safety_issue/system_feedback,
+   checked before ANY active-task continuation so a complaint mid-
+   booking is never swallowed.
+3. Horse/ATV/archery care & scenario responders (`horseCareFearResponse`,
+   `horseSafetyQuestionResponse`, `horseCompoundCareIntentResponse`,
+   `horseScenarioSignalResponse`, `atvCareIntentResponse`,
+   `archeryCareIntentResponse`) -- semantic care/risk signals, powered by
+   `_semantic-hospitality-interpreter.ts`.
+4. `homestayFactsResponse`, `ecosystemFirstVisitResponse` -- owner-
+   supplied static facts (`_tamma-domain-knowledge.ts`).
+5. `activityBookingFallbackResponse`, bare-horse-selection responders.
+6. `deterministicLocalConciergeResponse` (`_local-concierge-intent.ts` +
+   `_local-concierge-knowledge.ts` + `_local-concierge-response.ts`) --
+   broad local-area/weather/food-culture/visitor-journey/activity-
+   suitability questions. Now (as of the "Post-PR67 Polish" round)
+   yields to the restaurant advisor when a specific allergy is named.
+7. `deterministicRestaurantResponse` (`_restaurant-intelligence.ts`
+   scoring/filtering + `_restaurant-sot.ts` real Supabase menu source +
+   `formatAdvisorMessage` in `thongthai-chat.ts` for host-style
+   presentation).
+8. Promotion continuation/discovery, experience discovery, deterministic
+   activity response.
+9. One-Mind LLM orchestration (`_thongthai-one-mind-orchestrator.ts`,
+   `_thongthai-model-provider.ts`, `_dialog-manager.ts`) as the final
+   fallback when nothing deterministic matched -- Gemini primary, OpenAI
+   optional paid fallback, deterministic zero-cost degradation
+   (`_deterministic-semantic-turn.ts`, `_graceful-degradation.ts`) when
+   the provider is down.
+
+Every branch funnels through `polishedResponse` ->
+`_chat-copy-style.ts`'s `polishCustomerMessage` (channel-aware plain-
+text/spacing cleanup) before reaching the customer -- the one true
+single choke point every reply passes through, and where the LINE-
+brevity helpers (`limitAdvisoryList`, `trimLongRecommendationForLine`,
+`composeLineShortReply`) added in the "Post-PR67 Polish" round live.
+
+**State**: two SEPARATE systems, a known architectural seam (already the
+root cause of two real production incidents this engagement fixed --
+see the "PR #66 Production Precedence" and its own predecessor "Horse
+UX Production Gap" entries above):
+- `guest_agent_state` (JSONB blob, `_guest-agent-state-store.ts`) --
+  the REAL, current-generation state: `taskState` (`_task-state.ts`,
+  domain-generic `ActiveTask` container), `conversationContext`,
+  `restaurantAdvisorContext`, `restaurantProposedSet`,
+  `pendingPromotionRedemption`.
+- `booking_sessions` (its own Postgres table, `_operations-db.ts`'s
+  `loadLineBookingSession`/`saveLineBookingSession`) -- the LEGACY,
+  LINE-only transactional booking flow
+  (`handleLineBookingMessage`), checked BEFORE `askThongthaiReliably`
+  in `_line-webhook-core.ts`, entirely bypassing the One-Mind pipeline.
+  `shouldConsumeLegacyLineBookingTurn` is the guard that decides whether
+  a turn belongs to this legacy flow or should defer to the pipeline
+  above -- this guard has needed the SAME class of fix (an unconditional
+  check scoped too narrowly to `!session`) twice already.
+
+**Notifications / ops** (`_ops-notifications.ts`, 968 lines):
+`ops_notification_channels` (team_code -> LINE group binding, via
+"ผูกทีม ..."), `ops_notification_deliveries` (idempotency-keyed delivery
+ledger), `dispatchEntityNotification` (booking/cafe_inquiry/otop_order/
+feedback_event). `notifyFeedbackEventTargets` (added in "Post-PR67
+Polish", fixed in the "PR #68 Partial-Failure Incident" entry) is the
+current multi-target safety-escalation mechanism -- routes a
+`safety_issue` (or any `urgent` severity) to `unique([domainTeam,
+owner_general])`, storing the per-target result in
+`ops_feedback_events.internal_notes` (a real, applied migration; see
+`supabase/migrations/20260922210000_ops_feedback_events_v1.sql` and its
+two follow-up migrations -- despite that first file's own header saying
+"NOT APPLIED", it and its two follow-ups ARE live in production,
+confirmed directly via Supabase query this round and the prior one).
+
+**Feedback classification** (`_service-mind-feedback-intent.ts`, 315
+lines): `classifyServiceFeedback` -- a closed set of structural/
+vocabulary markers (never a growing phrase table) producing
+`{feedbackType, businessUnit, severity, staffName, personMentions,
+businessUnitMentions, sentimentKeywords, issueKeywords, namedAssets,
+keywordSummary}`. This is the closest existing thing to Phase 1's
+"boundary classifier" -- it already knows safety_issue/complaint/
+suggestion/compliment/system_feedback and severity low/normal/high/
+urgent, but has NO concept yet of CAN_ANSWER/NEEDS_CONTEXT/ESCALATE/
+ANSWER_AND_ESCALATE as the roadmap's Phase 1 asks for, and does not run
+on EVERY message (only ones that already look like feedback) -- a plain
+factual question or a vague "อยากพัก" never reaches it today.
+
+**Customer memory (already exists, narrower than Phase 2's ask)**:
+`_customer-db.ts` + `customer-memory.ts` endpoint -- `customer_accounts`-
+keyed `GuestContext` (tripDuration, travelerType, group composition,
+interests, pace, budget, constraints) with explicit actions (profile/
+favorite/visited/save_journey). Already enforces a real privacy
+guardrail: `FORBIDDEN_RAW_CHAT_KEYS` rejects storing raw chat
+text/transcript/prompt content, mirroring `guest_events`'s own
+`guest_events_no_chat_text` constraint. This is real, working
+infrastructure Phase 2 should EXTEND (phrase memory, per-customer
+preference confidence, demand aggregation), not duplicate.
+
+**Domain knowledge** (`_tamma-domain-knowledge.ts`, only 63 lines --
+intentionally small): `ECOSYSTEM_PATHS` (owner's 3-path framing) and
+`HOMESTAY_FACTS` (owner-supplied static facts only, no invented
+availability). `_local-concierge-knowledge.ts` (110 lines) holds
+`HORSE_FACTS` and `INDOOR_FRIENDLY_BUSINESS_UNITS` similarly. Both
+modules follow the same discipline: owner-provided, owner-verified,
+nothing beyond it, and an honest "team confirms" answer wherever real
+data has no source (e.g. night-by-night room availability).
+
+**Backoffice / customer-voice dashboard**: referenced only by URL
+(`BACKOFFICE_URL = 'https://tamma-backoffice.netlify.app/'` in
+`_ops-notifications.ts`, and `customer-voice.html?event=<id>` deep
+links in the feedback notification body) -- **no backoffice code exists
+in this repository**. This session's GitHub access is scoped to
+`snkpcn/tamma-chat` only; a `tamma-backoffice` repo (or wherever that
+Netlify site's source actually lives) is NOT currently accessible from
+this session. **This is a hard blocker for Phase 3** (Owner Dashboard)
+as written -- it cannot be scoped or implemented from inside this repo
+alone. Needs owner confirmation of where that codebase lives and this
+session's access extended to it (`add_repo`) before Phase 3 can start.
+
+**Test infrastructure**: 109 test files, 970 tests, `node --test` +
+`tsx`, no separate typecheck step configured (no root `tsconfig.json`;
+type errors surface only if `tsx` itself trips on them, not via a
+dedicated `tsc --noEmit` gate). `tests/helpers/canonical-core-harness.ts`
+is the shared, actively-maintained mock -- drives the REAL
+`processThongthaiChatCore` and the REAL full signed LINE webhook end to
+end, mocking only Supabase REST and the LLM provider's raw HTTP
+endpoint. As of the "PR #68 Partial-Failure Incident" entry, this mock
+now enforces real PostgREST `select=` column projection on
+`ops_notification_channels`'s GET handler specifically -- NOT yet swept
+across every other mocked table, which is a real, known residual gap
+(see "Known gaps" below).
+
+### Known gaps (honest inventory, not yet fixed this phase)
+
+1. **No CAN_ANSWER/NEEDS_CONTEXT/ESCALATE/ANSWER_AND_ESCALATE
+   classifier exists anywhere.** This is exactly Phase 1's job, from
+   scratch -- `classifyServiceFeedback` is adjacent but answers a
+   different question (what KIND of feedback is this) and only fires on
+   messages that already look like feedback.
+2. **No refund/discount/compensation escalation path exists at all.**
+   "ขอคืนเงินได้ไหม"/"ขอส่วนลดพิเศษ" today would most likely reach the
+   One-Mind LLM fallback with no deterministic guardrail against it
+   inventing a policy answer -- a real gap Phase 1's ESCALATE class is
+   meant to close.
+3. **No phrase-memory or demand-aggregation tables exist.** Phase 2
+   needs new schema (`guest_phrase_memory`/`guest_preference_memory`/
+   `demand_insights_daily`/`bot_lessons` or equivalent) -- all additive,
+   none of it exists today beyond the narrower `customer_accounts`
+   `GuestContext` described above.
+4. **Backoffice/dashboard code is inaccessible from this session** (see
+   above) -- blocks Phase 3 outright until resolved.
+5. **The mock harness's real-`select=`-projection enforcement covers
+   only ONE table** (`ops_notification_channels`'s GET handler) --
+   every other mocked GET handler in `canonical-core-harness.ts` still
+   returns every stored field regardless of the real query's `select=`
+   list, which is the EXACT class of bug the PR #68 incident was. A
+   future field-selection mistake anywhere else in the codebase would
+   currently go uncaught the same way, until each handler gets the same
+   `projectSelect` treatment.
+6. **No `bot_lessons`/learning-loop mechanism exists** (Phase 5)
+   -- corrections today are pure code changes by this engagement, not a
+   data-driven, owner-approvable lesson store.
+7. **`THONGTHAI_HANDOFF.md` itself is now 4,579 lines** -- still fully
+   readable and append-only by design, but worth the owner knowing this
+   is getting large; no action taken this phase (out of Phase 0's own
+   "no feature changes" scope, and restructuring a living handoff
+   document mid-roadmap has its own risk).
+8. **No root `tsconfig.json`/typecheck gate** -- `npm test` runs via
+   `tsx` directly; a type error that `tsx` doesn't trip on at runtime
+   could currently slip through CI undetected. Not new this phase, but
+   relevant to Phase 1+'s "small atomic changes, tests, load-bearing
+   proof" discipline -- tests are the only correctness gate that exists.
+
+### Exact Phase 1 scope (proposed, pending owner review)
+
+Per the roadmap's own explicit instruction ("Do not start Phase 2 until
+owner reviews" -- applies equally to starting Phase 1 after this Phase 0
+report), this section is a PROPOSAL, not started work:
+
+- New module `_boundary-classifier.ts` (or extend
+  `_service-mind-feedback-intent.ts` if a single owner review prefers
+  one classifier module over two adjacent ones -- open question for the
+  owner) implementing the 4-class policy (CAN_ANSWER/NEEDS_CONTEXT/
+  ESCALATE/ANSWER_AND_ESCALATE) with the routing table from the
+  roadmap's own examples.
+- New responder in `thongthai-chat.ts`'s precedence cascade, positioned
+  carefully relative to the EXISTING `deterministicServiceFeedbackResponse`
+  (safety_issue/complaint already handled there) to avoid a duplicate/
+  conflicting classification of the same message by two different
+  classifiers -- likely: this NEW classifier only fires for the classes
+  `classifyServiceFeedback` does NOT already cover (refund/discount/
+  compensation-specific ESCALATE cases, safety-guarantee-question
+  ESCALATE cases like "ปลอดภัย 100% ไหม", and the CAN_ANSWER/
+  NEEDS_CONTEXT distinction for plain factual vs. vague-intent
+  messages), reusing `classifyServiceFeedback`'s own output where a
+  message already IS feedback rather than re-classifying it.
+- Reuses the EXISTING `notifyFeedbackEventTargets` routing/delivery
+  machinery for ESCALATE/ANSWER_AND_ESCALATE cases -- no new
+  notification infrastructure needed, per the roadmap's own routing
+  table (refund/compensation -> owner_general; severe allergy ->
+  restaurant + owner_general; etc. all map onto the EXISTING
+  `FEEDBACK_BUSINESS_UNIT_TEAM`/`needsOwnerEscalation` mechanism with,
+  at most, new feedback_type/severity values if the CHECK constraints
+  need widening -- additive migration, owner-approved, per the
+  roadmap's own DB rules).
+- 10 tests from the roadmap's own Phase 1 list, via the full signed
+  LINE webhook, plus load-bearing verification.
+- Handoff update + checkpoint commit + PR, stop for owner review before
+  Phase 2.
+
+No code changes are included in this Phase 0 report -- this section is
+the plan for Phase 1, to be executed only once the owner confirms scope
+(in particular: confirm whether ESCALATE-class messages like "ขอคืนเงิน
+ได้ไหม" should get a deterministic guardrail reply immediately, or
+whether some of them should still reach the LLM for a nuanced first
+draft before routing to the owner -- the roadmap's own examples imply
+the former, but this is worth an explicit owner confirmation before
+building it, since it changes user-facing behavior for messages that
+currently reach the LLM today).
