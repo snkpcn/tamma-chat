@@ -8,9 +8,17 @@ import {
   interpretOverallHealthConcern,
   interpretCustomerType,
   prefersGentleIntensity,
+  prefersLowWalking,
   mentionsWeatherGroundConcern,
   asksIfSafe,
   mentionsSpeedFear,
+  interpretActivityGoal,
+  interpretFirmnessPreference,
+  mentionsWeightOrSizeConcern,
+  mentionsSupportRequest,
+  mentionsBrakeQuestion,
+  mentionsChildPassengerQuestion,
+  wantsIntenseExperience,
 } from '../netlify/functions/_semantic-hospitality-interpreter';
 
 test('normalizeThai fixes only unambiguous typos from the owner-supplied list', () => {
@@ -67,6 +75,16 @@ test('interpretCustomerType: elderly companion and child, with age when stated',
   assert.deepEqual(interpretCustomerType('เด็กขึ้นได้ไหม'), { kind: 'child', ageYears: null });
   assert.equal(interpretCustomerType('แม่ครัวทำอาหารเก่งมาก'), null, 'must never false-positive on the compound noun แม่ครัว');
   assert.equal(interpretCustomerType('แม่บ้านดูแลดี'), null, 'must never false-positive on the compound noun แม่บ้าน');
+  assert.deepEqual(interpretCustomerType('ลูก 8 ขวบอยากขี่'), { kind: 'child', ageYears: 8 }, 'ลูก (one\'s own child) must be recognized, not only เด็ก');
+  assert.equal(interpretCustomerType('ลูกค้าต้องการอะไร'), null, 'must never false-positive on the compound noun ลูกค้า');
+  assert.equal(interpretCustomerType('ลูกทีมดูแลดี'), null, 'must never false-positive on the compound noun ลูกทีม');
+  assert.deepEqual(interpretCustomerType('พาแม่ไป อยากได้เดินน้อย'), { kind: 'elderly', ageYears: null }, 'พา...ไป phrasing must be recognized, not only พา...มา');
+});
+
+test('prefersLowWalking', () => {
+  assert.equal(prefersLowWalking('อยากได้เดินน้อย'), true);
+  assert.equal(prefersLowWalking('ไม่อยากเดินเยอะ'), true);
+  assert.equal(prefersLowWalking('อยากขี่ม้า'), false);
 });
 
 test('prefersGentleIntensity / mentionsWeatherGroundConcern / asksIfSafe / mentionsSpeedFear', () => {
@@ -80,4 +98,31 @@ test('prefersGentleIntensity / mentionsWeatherGroundConcern / asksIfSafe / menti
   assert.equal(asksIfSafe('อยากขี่ม้า'), false);
   assert.equal(mentionsSpeedFear('กลัวเร็ว'), true);
   assert.equal(mentionsSpeedFear('ขอช้าๆ'.replace('ๆ', ' ๆ')), true);
+});
+
+test('interpretActivityGoal: photo-only vs touch-only vs no goal stated', () => {
+  assert.equal(interpretActivityGoal('ขอถ่ายรูปกับม้าเฉย ๆ ได้ไหม'), 'photo_only');
+  assert.equal(interpretActivityGoal('ขอแค่ถ่ายรูป'), 'photo_only');
+  assert.equal(interpretActivityGoal('ดูม้าเฉย ๆ ได้ไหม'), 'touch_only');
+  assert.equal(interpretActivityGoal('ให้อาหารม้าได้ไหม'), 'touch_only');
+  assert.equal(interpretActivityGoal('อยากขี่ม้า'), null);
+});
+
+test('interpretFirmnessPreference: softer vs firmer horse preference', () => {
+  assert.equal(interpretFirmnessPreference('เอาตัวนิ่มกว่า'), 'softer');
+  assert.equal(interpretFirmnessPreference('เอาตัวที่ขี่แน่นกว่า'), 'firmer');
+  assert.equal(interpretFirmnessPreference('อยากขี่ม้า'), null);
+});
+
+test('mentionsWeightOrSizeConcern / mentionsSupportRequest / mentionsBrakeQuestion / mentionsChildPassengerQuestion / wantsIntenseExperience', () => {
+  assert.equal(mentionsWeightOrSizeConcern('ผมตัวใหญ่ ขี่ได้ไหม'), true);
+  assert.equal(mentionsWeightOrSizeConcern('น้ำหนักเยอะ ขี่ได้ไหม'), true);
+  assert.equal(mentionsWeightOrSizeConcern('อยากขี่ม้า'), false);
+  assert.equal(mentionsSupportRequest('ให้คนจูงได้ไหม'), true);
+  assert.equal(mentionsSupportRequest('มีคนจูงไหม'), true);
+  assert.equal(mentionsBrakeQuestion('ถ้าเบรกไม่เป็นทำไง'), true);
+  assert.equal(mentionsChildPassengerQuestion('เด็กซ้อน ATV ได้ไหม'), true);
+  assert.equal(mentionsChildPassengerQuestion('ซ้อนเฉย ๆ ได้ไหม'), true);
+  assert.equal(wantsIntenseExperience('อยากมันส์ ๆ เร็ว ๆ'), true);
+  assert.equal(wantsIntenseExperience('รถแรงไหม'), true);
 });

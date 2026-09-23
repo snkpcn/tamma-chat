@@ -82,16 +82,25 @@ import {
   hasCommitMarker,
 } from './_slot-parsers';
 import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask } from './_task-state';
-import { HORSE_FACTS } from './_local-concierge-knowledge';
+import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
+import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
 import {
   asksIfSafe,
+  interpretActivityGoal,
   interpretCustomerType,
   interpretExperience,
   interpretFear,
+  interpretFirmnessPreference,
   interpretHealthConcerns,
+  mentionsBrakeQuestion,
+  mentionsChildPassengerQuestion,
   mentionsSpeedFear,
+  mentionsSupportRequest,
+  mentionsWeightOrSizeConcern,
   interpretOverallHealthConcern,
   noSafetyGuaranteeMessage,
+  prefersLowWalking,
+  wantsIntenseExperience,
   type CustomerTypeSignal,
 } from './_semantic-hospitality-interpreter';
 
@@ -1693,7 +1702,8 @@ export async function horseCompoundCareIntentResponse(
 
   const customerType = interpretCustomerType(request.message);
   const health = interpretOverallHealthConcern(request.message);
-  if (!customerType && health !== 'present') return null;
+  const fear = interpretFear(request.message);
+  if (!customerType && health !== 'present' && fear !== 'concerned') return null;
 
   const found = await loadHorseBookingTask(guestDbId).catch(() => null);
   if (found && found.task.slots.riderExperience && found.task.slots.partySize) return null;
@@ -1701,6 +1711,7 @@ export async function horseCompoundCareIntentResponse(
   await markActivityIntentStarted(guestDbId, channel);
   if (customerType) await persistHorseCustomerTypeSlot(guestDbId, customerType);
   if (health === 'present') await persistHorseHealthSlot(guestDbId, 'present');
+  if (fear === 'concerned') await persistHorseFearSlot(guestDbId, 'concerned');
 
   let careNote: string;
   if (customerType?.kind === 'elderly') {
@@ -1709,6 +1720,8 @@ export async function horseCompoundCareIntentResponse(
   } else if (customerType?.kind === 'child') {
     const ageLabel = customerType.ageYears ? `เด็ก ${customerType.ageYears} ขวบ` : 'น้อง ๆ';
     careNote = `เข้าใจครับ ${ageLabel}อยากขี่ม้าด้วยใช่ไหมครับ 😊 ทองไทยแนะนำให้ทีมงานช่วยประเมินความพร้อมและดูแลใกล้ ๆ ตลอดนะครับ ผู้ปกครองอยู่ด้วยได้เลยครับ ทองไทยไม่ขอการันตีความปลอดภัย 100% แต่ทีมจะดูแลอย่างดีที่สุดครับ`;
+  } else if (fear === 'concerned') {
+    careNote = 'เข้าใจครับ ไม่ต้องกังวลนะครับ 😊 ทองไทยแนะนำให้เริ่มแบบชิล ๆ ก่อน ทีมงานจะช่วยดูใกล้ ๆ ตลอดและเริ่มช้า ๆ ให้ครับ ทองไทยไม่ขอการันตีความปลอดภัย 100% แต่ทีมจะดูแลอย่างดีที่สุดครับ';
   } else {
     careNote = 'เข้าใจครับ ทองไทยแนะนำให้ทีมงานช่วยประเมินและดูแลใกล้ ๆ ก่อนขึ้นม้านะครับ เริ่มจากช้า ๆ ได้ครับ ทองไทยไม่ขอการันตีความปลอดภัย 100% แต่ทีมจะดูแลอย่างดีที่สุดครับ';
   }
@@ -1723,6 +1736,84 @@ export async function horseCompoundCareIntentResponse(
     semanticMemoryUpdates: [],
     toolCalls: [],
   };
+}
+
+// Additional horse-riding scenario signals: a goal that doesn't need a
+// full ride at all (photo-only / touch-only), a stated ride-feel
+// preference between the two real configured horses ("นิ่มกว่า" ->
+// ภาราดร, "แน่นกว่า" -> ทองไทย -- see _local-concierge-knowledge.ts's
+// HORSE_FACTS, never a claim beyond what's configured there), a weight/
+// size concern, or a request for hands-on support ("ให้คนจูงได้ไหม").
+// Fires on either an explicit horse-intent opening message OR an already-
+// active horse task, mirroring horseCareFearResponse/
+// horseSafetyQuestionResponse's own dual entry point.
+export async function horseScenarioSignalResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  if (mentionsThongthaiResponse(request.message)) return null;
+  const hasIntent = hasExplicitHorseBookingIntent(request.message);
+  // Broader than loadHorseBookingTask (which requires a horse ALREADY
+  // selected) -- a firmness preference/goal/support question can arrive
+  // right after a bare "อยากขี่ม้า" opener, before any specific horse name
+  // has been chosen, so this only needs "an activity conversation is
+  // already underway" (the same signal isBareAmbiguousHorseSelection's own
+  // hasActiveHorseBookingContext/hasEverDiscussedActivityDomain checks
+  // use), not a fully-resolved horse task.
+  const alreadyInActivityContext = hasActiveHorseBookingContext(request)
+    || await hasEverDiscussedActivityDomain(guestDbId).catch(() => false);
+  if (!alreadyInActivityContext && !hasIntent) return null;
+
+  const goal = interpretActivityGoal(request.message);
+  if (goal === 'photo_only') {
+    return {
+      message: 'ได้เลยครับ 😊 ถ่ายรูปกับม้าได้โดยไม่ต้องขี่เลยครับ ทีมงานจะช่วยพาเข้าไปใกล้ ๆ แบบปลอดภัยให้ครับ',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+  if (goal === 'touch_only') {
+    return {
+      message: 'ได้เลยครับ 😊 ดูใกล้ ๆ หรือให้อาหารม้าได้โดยไม่ต้องขี่ครับ ทีมงานจะดูแลให้ปลอดภัยตลอดครับ',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  const firmness = interpretFirmnessPreference(request.message);
+  if (firmness) {
+    const horseName = firmness === 'softer' ? 'ภาราดร' : 'ทองไทย';
+    const facts = firmness === 'softer' ? HORSE_FACTS.pharadon : HORSE_FACTS.thongthai;
+    await persistHorseSelection(guestDbId, channel, horseName);
+    return {
+      message: [
+        `ได้ครับ เลือก${horseName}นะครับ 😊`,
+        `${horseName}จะ${facts.rideFeelTh} คาแรกเตอร์${facts.personalityTh}ครับ`,
+        'เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?',
+      ].join('\n'),
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  if (mentionsWeightOrSizeConcern(request.message)) {
+    return {
+      message: 'ไม่ต้องกังวลนะครับ 😊 ม้าที่นี่รับน้ำหนักได้ในเกณฑ์ทั่วไปครับ แต่ขอให้ทีมงานช่วยเช็คความเหมาะสมอีกทีตอนถึงหน้างานเพื่อความชัวร์ครับ',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  if (mentionsSupportRequest(request.message)) {
+    return {
+      message: 'มีครับ 😊 ทีมงานช่วยจูง/ประคองใกล้ ๆ ได้ตลอดครับ โดยเฉพาะช่วงขึ้น-ลงม้าและตอนเริ่มต้นครับ',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  return null;
 }
 
 // ATV's own care-intro -- a minimal, narrowly-scoped counterpart to the
@@ -1742,17 +1833,91 @@ export function hasExplicitAtvIntent(text: string): boolean {
   return ATV_INTENT_MARKER.test(text);
 }
 
-export async function atvCareIntentResponse(request: BrainRequest): Promise<BrainResponse | null> {
-  if (!hasExplicitAtvIntent(request.message)) return null;
+// ATV context tracking mirrors horse riding's hasEverDiscussedActivityDomain
+// pattern but scoped to ATV specifically -- a follow-up question like "ถ้า
+// เบรกไม่เป็นทำไง" doesn't re-name "ATV" every turn, so a bare
+// hasExplicitAtvIntent check on the CURRENT message alone would miss it.
+async function hasEverDiscussedAtv(guestDbId: string | null): Promise<boolean> {
+  if (!guestDbId) return false;
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(() => null);
+  const taskState = snapshot?.state?.taskState as { activeTask?: { slots?: Record<string, unknown> } } | undefined;
+  return taskState?.activeTask?.slots?.resourceCode === 'activity-atv';
+}
+
+async function markAtvIntentStarted(guestDbId: string | null, channel: BrainChannel): Promise<void> {
+  if (!guestDbId) return;
+  try {
+    const container = await loadTaskState(guestDbId);
+    const reusable = container.activeTask && container.activeTask.type === 'activity_booking' && !isTerminalTaskStatus(container.activeTask.status);
+    const task = reusable
+      ? mergeTaskSlots(container.activeTask!, { resourceCode: 'activity-atv' }, ACTIVITY_BOOKING_REQUIRED_FIELDS)
+      : mergeTaskSlots(
+        createActiveTask({ type: 'activity_booking', sourceChannel: channel, requiredFields: ACTIVITY_BOOKING_REQUIRED_FIELDS }),
+        { resourceCode: 'activity-atv' },
+        ACTIVITY_BOOKING_REQUIRED_FIELDS,
+      );
+    await persistTaskState(guestDbId, { ...container, activeTask: task });
+  } catch (error) {
+    console.error('THONGTHAI_ATV_TASK_START_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
+}
+
+export async function atvCareIntentResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  const hasIntent = hasExplicitAtvIntent(request.message);
+  // "เบรก"/"ซ้อน" are unambiguous enough on their own in this business
+  // (only ATV has brakes or a passenger seat) to answer even without
+  // confirmed prior ATV context -- unlike the generic experience/fear/
+  // health branch below, which genuinely needs SOME ATV signal (current
+  // or past) to avoid misreading an unrelated message.
+  const childPassenger = mentionsChildPassengerQuestion(request.message);
+  const brakeQuestion = mentionsBrakeQuestion(request.message);
+  if (!hasIntent && !childPassenger && !brakeQuestion) {
+    const alreadyDiscussed = await hasEverDiscussedAtv(guestDbId).catch(() => false);
+    if (!alreadyDiscussed) return null;
+  }
+
+  if (childPassenger) {
+    await markAtvIntentStarted(guestDbId, channel);
+    return {
+      message: 'ต้องขอถามอายุเด็กก่อนนะครับ 😊 บางช่วงอายุนั่งซ้อนได้ แต่ต้องให้ทีมงานประเมินหน้างานอีกทีครับ ทองไทยไม่ขอการันตีล่วงหน้าครับ\nเด็กอายุประมาณเท่าไหร่ครับ?',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  if (brakeQuestion) {
+    return {
+      message: 'ทีมงานจะสอนวิธีเบรกและควบคุมรถก่อนเริ่มเสมอครับ 😊 ถ้ายังไม่มั่นใจตอนซ้อมสามารถถามทีมงานซ้ำได้เลยครับ ไม่ต้องรีบเริ่มจนกว่าจะโอเคก่อนครับ',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  if (wantsIntenseExperience(request.message)) {
+    await markAtvIntentStarted(guestDbId, channel);
+    return {
+      message: 'เข้าใจครับ 😊 ความเร็ว/ความมันส์จะปรับตามเส้นทางและการประเมินหน้างานของทีมงานครับ ทองไทยไม่ขอการันตีระดับความเร็วล่วงหน้า แต่ทีมจะช่วยดูให้เหมาะกับคนขับจริง ๆ ครับ\nเคยขับ ATV มาก่อนไหมครับ?',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
 
   const experience = interpretExperience(request.message);
   const speedFear = mentionsSpeedFear(request.message);
-  if (experience !== 'beginner' && !speedFear) return null;
+  const health = interpretOverallHealthConcern(request.message);
+  if (experience !== 'beginner' && !speedFear && health !== 'present') return null;
+
+  await markAtvIntentStarted(guestDbId, channel);
 
   const parts = [
     'เข้าใจครับ',
     experience === 'beginner' ? 'มือใหม่' : null,
     speedFear ? 'กลัวความเร็ว' : null,
+    health === 'present' ? 'มีเรื่องสุขภาพที่กังวล' : null,
   ].filter(Boolean).join(' ');
 
   return {
@@ -1782,18 +1947,141 @@ export function hasExplicitArcheryIntent(text: string): boolean {
   return ARCHERY_INTENT_MARKER.test(text);
 }
 
-export async function archeryCareIntentResponse(request: BrainRequest): Promise<BrainResponse | null> {
-  if (!hasExplicitArcheryIntent(request.message)) return null;
+async function hasEverDiscussedArchery(guestDbId: string | null): Promise<boolean> {
+  if (!guestDbId) return false;
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(() => null);
+  const taskState = snapshot?.state?.taskState as { activeTask?: { slots?: Record<string, unknown> } } | undefined;
+  return taskState?.activeTask?.slots?.resourceCode === 'activity-archery';
+}
+
+async function markArcheryIntentStarted(guestDbId: string | null, channel: BrainChannel): Promise<void> {
+  if (!guestDbId) return;
+  try {
+    const container = await loadTaskState(guestDbId);
+    const reusable = container.activeTask && container.activeTask.type === 'activity_booking' && !isTerminalTaskStatus(container.activeTask.status);
+    const task = reusable
+      ? mergeTaskSlots(container.activeTask!, { resourceCode: 'activity-archery' }, ACTIVITY_BOOKING_REQUIRED_FIELDS)
+      : mergeTaskSlots(
+        createActiveTask({ type: 'activity_booking', sourceChannel: channel, requiredFields: ACTIVITY_BOOKING_REQUIRED_FIELDS }),
+        { resourceCode: 'activity-archery' },
+        ACTIVITY_BOOKING_REQUIRED_FIELDS,
+      );
+    await persistTaskState(guestDbId, { ...container, activeTask: task });
+  } catch (error) {
+    console.error('THONGTHAI_ARCHERY_TASK_START_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
+}
+
+export async function archeryCareIntentResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  const hasIntent = hasExplicitArcheryIntent(request.message);
+  if (!hasIntent) {
+    const alreadyDiscussed = await hasEverDiscussedArchery(guestDbId).catch(() => false);
+    if (!alreadyDiscussed) return null;
+  }
+
+  const customerType = interpretCustomerType(request.message);
+  const goal = interpretActivityGoal(request.message);
+
+  if (goal === 'photo_only' && /ธนู/u.test(request.message)) {
+    return {
+      message: 'ได้เลยครับ 😊 ถ่ายรูปกับธนูได้โดยไม่ต้องยิงเลยครับ ทีมงานช่วยดูแลความปลอดภัยระหว่างถ่ายรูปให้ครับ',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  if (customerType?.kind === 'child') {
+    await markArcheryIntentStarted(guestDbId, channel);
+    const ageLabel = customerType.ageYears ? `${customerType.ageYears} ขวบ` : null;
+    return {
+      message: [
+        `เข้าใจครับ${ageLabel ? ` เด็ก ${ageLabel}` : ''} ทองไทยแนะนำให้ทีมงานสอนวิธีจับธนูและกติกาความปลอดภัยก่อนเริ่มเสมอครับ 😊`,
+        'ผู้ปกครองอยู่ดูใกล้ ๆ ได้เลยครับ ทองไทยไม่ขอการันตีความปลอดภัย 100% แต่ทีมจะดูแลอย่างใกล้ชิดครับ',
+      ].join('\n'),
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
 
   const health = interpretHealthConcerns(request.message);
   const hasShoulderOrArmConcern = health.shoulder === true;
-  if (!hasShoulderOrArmConcern) return null;
+  const experience = interpretExperience(request.message);
+
+  if (hasShoulderOrArmConcern) {
+    return {
+      message: [
+        'เข้าใจครับ ถ้าไหล่ไม่ค่อยสะดวก ทองไทยแนะนำให้แจ้งทีมงานก่อนเริ่มนะครับ ทีมจะช่วยดูท่าและปรับความหนักของธนูให้เหมาะกับไหล่ได้ครับ',
+        'ไม่ต้องฝืนถ้าไม่ไหวนะครับ ลองแค่ไม่กี่ดอกก่อนก็ได้ครับ 😊',
+      ].join('\n'),
+      intent: 'information',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
+
+  if (experience === 'beginner') {
+    await markArcheryIntentStarted(guestDbId, channel);
+    return {
+      message: 'ได้เลยครับ 😊 ทีมงานจะสอนวิธีจับธนูและท่ายิงพื้นฐานก่อนเริ่มเสมอครับ ไม่ต้องกังวลนะครับ',
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  return null;
+}
+
+// Homestay (เฮือนสเตย์) -- a NEW, minimal domain responder using the real
+// owner-provided facts in _tamma-domain-knowledge.ts's HOMESTAY_FACTS
+// (house/room-type counts, check-in/out times, room-service hours,
+// booking window, final-confirmation channels). Deliberately answers ONLY
+// what those static facts cover -- room COUNT and TYPE MIX, check-in/out
+// timing -- and NEVER invents night-by-night availability, which changes
+// daily and has no data source here; that question always gets an honest
+// "team confirms" answer instead of a guess. No dedicated booking-task
+// flow (matching ATV/archery's minimal-responder precedent, not horse
+// riding's deeper existing infrastructure).
+const HOMESTAY_INTENT_MARKER = /อยากพัก|มีที่พักไหม|เฮือนสเตย์|เช็กอิน|เช็คอิน|เช็กเอาท์|เช็คเอาท์|ห้องนอน|พักที่นี่/u;
+const HOMESTAY_ROOM_COUNT_QUESTION = /กี่ห้องนอน|บ้านกี่ห้อง|มีบ้านกี่/u;
+const HOMESTAY_CHECKIN_QUESTION = /เช็กอิน|เช็คอิน|เช็กเอาท์|เช็คเอาท์|ดึกได้ไหม/u;
+const HOMESTAY_AVAILABILITY_QUESTION = /ว่างไหม|คืนนี้ว่าง|วันนี้ว่าง|มีห้องว่าง/u;
+
+export function hasExplicitHomestayIntent(text: string): boolean {
+  return HOMESTAY_INTENT_MARKER.test(text);
+}
+
+export function homestayFactsResponse(request: BrainRequest): BrainResponse | null {
+  if (!hasExplicitHomestayIntent(request.message)) return null;
+
+  const facts = HOMESTAY_FACTS;
+  let message: string;
+
+  if (HOMESTAY_AVAILABILITY_QUESTION.test(request.message)) {
+    message = `ขอโทษนะครับ ทองไทยไม่มีข้อมูลห้องว่างแบบเรียลไทม์ตรงนี้ครับ ${facts.bookingWindowTh} และ${facts.finalConfirmationChannelsTh} ทองไทยช่วยเริ่มจองเบื้องต้นให้ได้เลยครับ`;
+  } else if (HOMESTAY_ROOM_COUNT_QUESTION.test(request.message)) {
+    message = `ที่เฮือนสเตย์มีทั้งหมด ${facts.totalHouses} หลังครับ แบบ 2 ห้องนอน ${facts.twoBedroomHouses} หลัง และแบบ 1 ห้องนอน ${facts.oneBedroomHouses} หลัง\nพักกี่คน แล้วต้องการกี่คืนครับ?`;
+  } else if (HOMESTAY_CHECKIN_QUESTION.test(request.message)) {
+    message = `${facts.checkInByTh} และ${facts.checkOutByTh}ครับ ถ้ามาถึงดึกกว่านั้นต้องแจ้งทีมงานล่วงหน้านะครับ ${facts.finalConfirmationChannelsTh}`;
+  } else {
+    const customerType = interpretCustomerType(request.message);
+    const careNote = customerType?.kind === 'elderly'
+      ? 'ทองไทยจะช่วยเลือกห้องที่เดินทางสะดวกให้นะครับ 🙏 '
+      : customerType?.kind === 'child'
+        ? 'พาเด็กเล็กมาพักได้ครับ 😊 '
+        : '';
+    message = `${careNote}ขอถามก่อนนะครับ พักวันไหน กี่คน แล้วกี่คืนครับ? (${facts.checkInByTh}, ${facts.checkOutByTh})`;
+  }
 
   return {
-    message: [
-      'เข้าใจครับ ถ้าไหล่ไม่ค่อยสะดวก ทองไทยแนะนำให้แจ้งทีมงานก่อนเริ่มนะครับ ทีมจะช่วยดูท่าและปรับความหนักของธนูให้เหมาะกับไหล่ได้ครับ',
-      'ไม่ต้องฝืนถ้าไม่ไหวนะครับ ลองแค่ไม่กี่ดอกก่อนก็ได้ครับ 😊',
-    ].join('\n'),
+    message,
     intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
@@ -1802,6 +2090,72 @@ export async function archeryCareIntentResponse(request: BrainRequest): Promise<
     semanticMemoryUpdates: [],
     toolCalls: [],
   };
+}
+
+// Ecosystem / first-time-visitor -- a NEW, narrowly-scoped responder for
+// the owner's exact "3-path" opener (สายชิล/สายกิจกรรม/สายพัก, see
+// _tamma-domain-knowledge.ts's ECOSYSTEM_PATHS) plus two ecosystem-level
+// (no specific business unit named) care/weather scenarios that
+// previously fell through to the generic "no verified info" apology.
+// Deliberately does NOT touch _experience-discovery.ts (marked LEGACY
+// COMPATIBILITY FALLBACK ONLY, "MUST NOT be expanded") -- this is a
+// separate, higher-precedence responder for the specific shapes below;
+// _experience-discovery.ts's own broader discovery patterns still own
+// everything this doesn't claim.
+const FIRST_VISIT_RECOMMEND_MARKER = /(?:มาครั้งแรก|ครั้งแรก).*(?:มีอะไรแนะนำ|แนะนำอะไร|แนะนำ)/u;
+const ECOSYSTEM_RAIN_WHERE_MARKER = /ฝนตก.*(?:ไปไหนดี|ที่ไหนดี|ไปที่ไหน)/u;
+
+export function ecosystemFirstVisitResponse(request: BrainRequest): BrainResponse | null {
+  const message = request.message;
+
+  if (FIRST_VISIT_RECOMMEND_MARKER.test(message)) {
+    return {
+      message: [
+        'ถ้ามาครั้งแรก ทองไทยแนะนำให้ดูเป็น 3 แบบครับ 😊',
+        ...ECOSYSTEM_PATHS.map((path, index) => `${index + 1}) ${path.labelTh}: ${path.descriptionTh}`),
+        '',
+        'ขอถามนิดนึงครับ มากี่คน แล้วอยากได้ชิล ๆ หรือมีกิจกรรมด้วยครับ?',
+      ].join('\n'),
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  if (ECOSYSTEM_RAIN_WHERE_MARKER.test(message)) {
+    const indoorLabels = INDOOR_FRIENDLY_BUSINESS_UNITS.map(id => ({
+      'thamma-chat-restaurant': 'ตำมา-ชาติ (ร้านอาหาร)',
+      inthanin: 'Inthanin (คาเฟ่)',
+      'thamma-chat-stay': 'ทำมา-ชาติ เฮือนสเตย์',
+    } as Record<string, string>)[id] ?? id);
+    return {
+      message: `ฝนตกแนะนำแวะที่ร่มก่อนครับ 😊 ${indoorLabels.join(' / ')} เดี๋ยวรอฝนซาแล้วค่อยดูกิจกรรมกลางแจ้งอีกทีได้ครับ`,
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  const customerType = interpretCustomerType(message);
+  const lowWalking = prefersLowWalking(message);
+  // Defers to _service-mind-care-context.ts's classifyCareContext when IT
+  // already recognizes the message (its own bounded ELDERLY_COMPANION_
+  // MARKER/MOBILITY_MARKER) -- that existing responder gives a more
+  // specific reply (e.g. a real follow-up mobility question) for the
+  // phrasings it covers. This branch exists only for the phrasings it
+  // does NOT cover (e.g. "พาแม่ไป" instead of "พาแม่มา", "เดินน้อย" instead
+  // of "ไม่อยากเดินเยอะ") -- confirmed via classifyCareContext returning
+  // null for those exact real gaps.
+  if (customerType && lowWalking && !classifyCareContext(message)
+    && !hasExplicitHorseBookingIntent(message) && !hasExplicitAtvIntent(message)
+    && !hasExplicitArcheryIntent(message) && !hasExplicitHomestayIntent(message)) {
+    const who = customerType.kind === 'elderly' ? 'ผู้ใหญ่' : 'เด็ก';
+    return {
+      message: `เข้าใจครับ พา${who}มาด้วยและอยากเดินน้อย ๆ ใช่ไหมครับ 😊 ทองไทยแนะนำแนวคาเฟ่ + ร้านอาหาร + ชมวิวใกล้ ๆ ก่อน ไม่ต้องเดินไกลครับ\nมากี่คน แล้วมีเวลาประมาณเท่าไหร่ครับ?`,
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  return null;
 }
 
 export function activityBookingFallbackDraft(request: BrainRequest): Record<string, unknown> | null {
@@ -2329,7 +2683,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  const atvCare = await atvCareIntentResponse(request).catch(error => {
+  const horseScenario = await horseScenarioSignalResponse(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_HORSE_SCENARIO_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (horseScenario) {
+    const polished = polishedResponse(horseScenario, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const atvCare = await atvCareIntentResponse(request, guestDbId, channel).catch(error => {
     console.error('THONGTHAI_ATV_CARE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
   });
@@ -2345,12 +2715,38 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  const archeryCare = await archeryCareIntentResponse(request).catch(error => {
+  const archeryCare = await archeryCareIntentResponse(request, guestDbId, channel).catch(error => {
     console.error('THONGTHAI_ARCHERY_CARE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
   });
   if (archeryCare) {
     const polished = polishedResponse(archeryCare, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const homestayFacts = homestayFactsResponse(request);
+  if (homestayFacts) {
+    const polished = polishedResponse(homestayFacts, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const ecosystemFirstVisit = ecosystemFirstVisitResponse(request);
+  if (ecosystemFirstVisit) {
+    const polished = polishedResponse(ecosystemFirstVisit, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

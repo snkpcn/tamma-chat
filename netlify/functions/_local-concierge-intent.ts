@@ -33,7 +33,7 @@ export type LocalConciergeMatch = {
 
 // --- structural markers -----------------------------------------------
 
-const LOCATION_MARKER = /โลเคชั่น|โลเคชัน|อยู่ที่ไหน|อยู่ไหน|ไปยังไง|ปักหมุด|ใกล้อะไร|เส้นทาง/u;
+const LOCATION_MARKER = /โลเคชั่น|โลเคชัน|อยู่ที่ไหน|อยู่ตรงไหน|อยู่ไหน|ไปยังไง|ปักหมุด|ใกล้อะไร|เส้นทาง|ขอแผนที่/u;
 
 // "แดดแรงปะ" -- "ปะ" is the colloquial, sentence-final shorthand for "ไหม"
 // (matches this codebase's existing precedent of recognizing informal

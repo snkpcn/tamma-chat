@@ -4041,3 +4041,184 @@ every prior round.
 **Confirmations**: no booking/order/payment created; no fake safety
 guarantee anywhere in new or existing wording; no DB migration; no
 unrelated production data mutated.
+
+## Knowledge Base + Scenario Brain -- 2026-09-23
+
+Owner's "Next Phase" request asked to expand Thongthai from semantic
+intent understanding (PR #65) into a richer hospitality knowledge +
+scenario brain across 11 business-unit domains, with at least 30 new
+load-bearing tests. Same discipline as every prior "Next Phase" round in
+this engagement: a full 11-domain rebuild was not attempted in one pass
+-- instead, real depth was added to the domains with existing
+infrastructure (horse riding), minimal-but-real extensions to ATV/
+archery (following the prior round's precedent), two genuinely new
+domains built from owner-supplied facts (ecosystem/first-visit,
+homestay), and honest verification (plus two narrow, real marker
+fixes) for the remaining domains rather than inventing new
+infrastructure everywhere.
+
+**New knowledge module**: `netlify/functions/_tamma-domain-knowledge.ts`
+-- `ECOSYSTEM_PATHS` (the owner's own 3-path framing: สายชิล/สายกิจกรรม/
+สายพัก, reusing `_ecosystem-entity-graph.ts`'s real business-unit ids)
+and `HOMESTAY_FACTS` (6 houses total, 3 two-bedroom, 3 one-bedroom,
+check-in ≤14:00, check-out ≤12:00, room service 10:00-22:00, 24h booking
+window, final confirmation via LINE/email/phone only -- all supplied
+directly by the owner this round, same "owner-provided, owner-verified,
+nothing beyond it" discipline as `_local-concierge-knowledge.ts`'s
+HORSE_FACTS). Deliberately does NOT include night-by-night room
+availability -- that changes daily and has no real data source here, so
+it always gets an honest "team confirms" answer, never a guess.
+
+**Ecosystem / first-time visitor (NEW domain, 4 tests)**: new responder
+`ecosystemFirstVisitResponse` in `thongthai-chat.ts` -- "มาครั้งแรก มีอะไร
+แนะนำ" now gets the owner's exact 3-path breakdown + asks group size/vibe
+(previously handled by `_experience-discovery.ts`'s legacy fallback,
+which is explicitly marked "MUST NOT be expanded" -- this is a separate,
+higher-precedence responder, not a change to that file). A rain-aware
+"ฝนตกไปไหนดี" now suggests real indoor-friendly business units (reusing
+`_local-concierge-knowledge.ts`'s existing `INDOOR_FRIENDLY_BUSINESS_UNITS`)
+instead of a generic apology. A bare elderly/child + low-walking request
+with no specific domain named ("พาแม่ไป อยากได้เดินน้อย") gets a caring
+reply instead of falling through -- but explicitly DEFERS to
+`_service-mind-care-context.ts`'s existing `classifyCareContext` when
+that already recognizes the message (confirmed necessary: a regression
+was found and fixed where this new responder was shadowing that
+existing, more specific mechanism for phrasings it already handled).
+
+**Horse riding (deep extension, 10 tests)**: four real gaps closed.
+(1) A fear-only compound opener ("อยากขี่ม้า ไม่เคยเลย กลัวตก") now gets
+care mode instead of falling through -- `horseCompoundCareIntentResponse`
+extended to also trigger on `interpretFear(...) === 'concerned'`, not
+just customerType/health. (2) "ลูก" (one's own child) is now recognized
+as a child reference, not only "เด็ก" -- bounded the same way "แม่"/"พ่อ"
+already are (ลูกค้า/ลูกทีม/ลูกน้อง never false-positive). (3) A goal that
+doesn't need a full ride (photo-only/touch-only), a firmness preference
+between the two real configured horses ("นิ่มกว่า" -> ภาราดร, "แน่นกว่า"
+-> ทองไทย, using the SAME HORSE_FACTS data every other horse responder
+uses), a weight/size concern, and a hands-on-support request ("ให้คนจูง
+ได้ไหม") all now get real, honest replies via a new
+`horseScenarioSignalResponse` -- never a fabricated weight limit, never
+a safety guarantee. (4) A real, severe production-shaped bug found along
+the way: the legacy LINE booking flow was STILL swallowing these new
+compound signals before any care-aware responder ever ran (the SAME
+class of bug fixed for the prior round's signals) -- fixed by extending
+`_operations-db.ts`'s existing deferral guard with the new signals;
+confirmed load-bearing across 4 different tests in one disable/confirm
+pass.
+
+**ATV (extended, 6 tests)**: `atvCareIntentResponse` extended with a
+child-passenger age question ("เด็กซ้อน ATV ได้ไหม" -- never guarantees,
+asks age), a brake-question response (context-independent -- "เบรก" is
+unambiguous in this business), an honest speed-calibration reply for
+"อยากมันส์ ๆ เร็ว ๆ" (never guarantees a speed level), and back-concern
+acknowledgment. A new `hasEverDiscussedAtv`/`markAtvIntentStarted` pair
+gives ATV its own lightweight context-tracking (mirroring horse riding's
+`hasEverDiscussedActivityDomain` pattern) so a follow-up like "ถ้าเบรกไม่
+เป็นทำไง" is understood without re-naming "ATV" every turn.
+
+**Archery (extended, 4 tests)**: `archeryCareIntentResponse` extended
+with a beginner-teaching reply, a child+age question (with the same
+"ลูก"/"เด็ก" recognition, guardian mention, no safety guarantee), and a
+photo-only goal reply (reusing `interpretActivityGoal`'s existing
+PHOTO_ONLY_MARKER, which already covered "ถ่ายรูปกับธนู"). **A real bug
+found and fixed while extending this**: the first version of this
+extension let a bare customerType (child/elderly) signal bypass the
+archery-intent gate entirely, causing it to incorrectly hijack unrelated
+messages like "อยากขี่ม้า มีเด็กไปด้วย" and "มีเด็กกับผู้สูงอายุ" (caught
+by the full suite regressing 6 pre-existing tests) -- fixed by requiring
+explicit archery intent or prior archery context before ANY signal
+(including customerType) is checked, confirmed via the full suite
+returning to green.
+
+**Homestay (NEW domain, 5 tests)**: new responder `homestayFactsResponse`
+answers room-count questions, check-in/out timing, and elderly/child-
+aware opening messages from the real `HOMESTAY_FACTS` data -- and
+explicitly, honestly declines any night-by-night availability question
+("คืนนี้ว่างไหม") rather than guessing. This closed a genuine, pre-
+existing "KNOWN GAP" that `tests/gate2-line-web-domain-equivalence.test.ts`
+had explicitly documented and locked in (a test asserting "must never
+assert a specific time it has no real per-question adapter for") --
+that test was updated to reflect the now-real per-question adapter,
+not reverted.
+
+**Verified-existing (no new domain code) + two narrow marker fixes**:
+restaurant (real menu data, spice/allergy filtering already
+sophisticated -- verified with new tests, no changes), cafe (honestly
+declines with no fabricated menu/price, verified, no cafe data source
+exists to build on), OTOP (same), journey planning (already asks
+mobility/dietary follow-ups for family+elderly+children, verified). Two
+real, narrow gaps were found and fixed: (1) `_local-concierge-intent.ts`'s
+`LOCATION_MARKER` was missing "อยู่ตรงไหน" (only had "อยู่ไหน"/"อยู่ที่ไหน")
+and "ขอแผนที่" -- both now correctly surface the real owner-provided map
+link (`_local-concierge-location.ts`'s `TAMMA_CHART_LOCATION`, already
+correct, never touched). (2) `_service-mind-feedback-intent.ts`'s
+`COMPLAINT_MARKER` was missing "ควรแก้"/"ช่วยปรับ" -- a constructive,
+hesitant complaint ("ไม่อยากรีวิวแย่ แต่ควรแก้เรื่องพนักงาน") now
+correctly creates a feedback event instead of falling through to the
+generic apology.
+
+**Semantic interpreter core additions**: `interpretActivityGoal`
+(photo_only/touch_only), `interpretFirmnessPreference` (softer/firmer),
+`mentionsWeightOrSizeConcern`, `mentionsSupportRequest`,
+`mentionsBrakeQuestion`, `mentionsChildPassengerQuestion`,
+`wantsIntenseExperience`, `prefersLowWalking` -- plus two marker
+extensions to existing functions: `interpretCustomerType`'s
+`ELDERLY_MARKER` now also matches "พา...ไป" (not only "พา...มา"), and its
+child detection now also matches "ลูก" (not only "เด็ก").
+
+**Files changed**: `netlify/functions/_semantic-hospitality-interpreter.ts`
+(new signal extractors, marker fixes), `netlify/functions/_tamma-domain-knowledge.ts`
+(new), `netlify/functions/thongthai-chat.ts` (ecosystemFirstVisitResponse,
+homestayFactsResponse, horseScenarioSignalResponse,
+horseCompoundCareIntentResponse's fear extension,
+atvCareIntentResponse/archeryCareIntentResponse extensions, all wired
+into the precedence chain), `netlify/functions/_operations-db.ts`
+(legacy-flow guard extended with the new signals),
+`netlify/functions/_local-concierge-intent.ts` (LOCATION_MARKER fix),
+`netlify/functions/_service-mind-feedback-intent.ts` (COMPLAINT_MARKER
+fix). Two pre-existing tests were updated (not reverted) to reflect
+genuine behavior improvements: `tests/gate2-line-web-domain-equivalence.test.ts`'s
+"stay" test (the check-in-time known-gap, now closed) and
+`tests/ecosystem-cross-domain-stress.test.ts`'s first-visit test (regex
+broadened to also accept "อาหาร" alongside "กิน"/"ตำมา-ชาติ", matching the
+owner's own literal 3-path wording).
+
+**Tests**: 6 new test files -- `tests/scenario-ecosystem.test.ts` (4),
+`tests/scenario-horse-extended.test.ts` (9), `tests/scenario-atv-extended.test.ts`
+(4), `tests/scenario-archery-extended.test.ts` (4), `tests/scenario-homestay.test.ts`
+(5), `tests/scenario-remaining-domains-verification.test.ts` (9) -- plus
+extensions to `tests/semantic-hospitality-interpreter.test.ts` (4 new
+unit tests for the new signal extractors and marker fixes). **39 new
+tests total** (exceeds the requested 30). **Full suite: 936/936 passing**
+(897 prior + 39 new). Load-bearing verified individually for every new
+responder and guard via disable/confirm, each breaking exactly its
+target test(s): `ecosystemFirstVisitResponse` (E1/E2/E4), `homestayFactsResponse`
+(S1-S4), `horseScenarioSignalResponse` (H4/H6/H9/H10), ATV's child-
+passenger/brake signals (A2/A4), the LOCATION_MARKER fix (W2/W3), and the
+COMPLAINT_MARKER fix (F3).
+
+**Confidence policy**: implemented implicitly, not as a separate scored
+system -- every new signal extractor is either a bounded, structural
+match (acts directly -- "high confidence" per the spec) or returns
+null/false (never guesses -- effectively "ask/defer" for anything not
+confidently matched). No new phrase is treated as a fact source; e.g.
+`interpretFirmnessPreference` only ever selects between the two REAL
+configured horses, never invents a third option or a safety ranking.
+
+**No-safety-guarantee enforcement**: every new risky-activity responder
+(horse's weight/support signals, ATV's brake/intense/child-passenger
+signals, archery's child/beginner signals) either reuses the shared
+`noSafetyGuaranteeMessage` helper or independently states "ไม่ขอการันตี...
+100%" -- verified by the H8/A5/AR3 tests, none of which permit an
+unqualified "ปลอดภัยแน่นอน"/"การันตี" claim to survive.
+
+**Deploy status**: cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**Confirmations**: no booking/order/payment created; no fake safety
+guarantee anywhere in new or existing wording; no DB migration; no
+unrelated production data mutated; no fabricated fact, price, or
+availability anywhere in new responder wording (all facts trace to
+either owner-supplied static data or real, already-existing menu/asset
+data sources).

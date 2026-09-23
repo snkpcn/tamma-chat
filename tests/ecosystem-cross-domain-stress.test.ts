@@ -15,7 +15,7 @@ test('ecosystem: a first-visit discovery question surfaces every business catego
     const message = String((r.payload as { message: string }).message);
     // Must mention at least restaurant, activity, and stay -- never collapse
     // a genuinely broad "what's here" question into a single business unit.
-    assert.match(message, /กิน|ตำมา-ชาติ/);
+    assert.match(message, /กิน|ตำมา-ชาติ|อาหาร/);
     assert.match(message, /กิจกรรม|ขี่ม้า/);
     assert.match(message, /พัก|เฮือนสเตย์/);
   });

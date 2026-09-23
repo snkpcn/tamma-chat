@@ -97,11 +97,11 @@ test('11. อยากกินกาแฟ ไม่เข้ม หวาน�
   });
 });
 
-test('12. อยากพัก พาแม่มา เดินไกลไม่ได้: mobility signal already reinforced into memory, asks a real follow-up (existing behavior, not new)', async () => {
+test('12. อยากพัก พาแม่มา เดินไกลไม่ได้: homestay-specific care-aware reply (NOW HANDLED -- see tests/scenario-homestay.test.ts for the dedicated homestay responder this round added)', async () => {
   await withHarnessAndLine(async (_harness, replies) => {
     await callLineWebhook([privateEvent('อยากพัก พาแม่มา เดินไกลไม่ได้', 'diag-user-12')]);
     const t = text(replies, 0);
-    assert.match(t, /เที่ยว|จัดแผน|เวลา/u, 'must give a relevant, non-generic reply');
+    assert.match(t, /กี่คน|กี่คืน|เดินทางสะดวก/u, 'must give a relevant, homestay-specific reply');
     assert.doesNotMatch(t, /ห้อง\s*\d+|ราคา\s*\d+/u, 'must never fabricate a specific room/price with no verified room-availability source');
   });
 });
