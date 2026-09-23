@@ -6,6 +6,7 @@
 // Operational Truth Doctrine -- never say something succeeded before it
 // actually did).
 import type { ServiceFeedbackMatch, BusinessUnit } from './_service-mind-feedback-intent';
+import type { EscalationMatch, EscalationCategory } from './_boundary-classifier';
 import type { FeedbackTargetResult } from './_ops-notifications';
 import { composeLineShortReply } from './_chat-copy-style';
 
@@ -59,13 +60,38 @@ export function composeSuggestionResponse(notificationQueued: boolean): string {
   ].join(' ');
 }
 
+/** Shared by every composer that needs to say PRECISELY which
+ *  notification target(s) actually sent -- never a blanket "ส่งเรียบร้อย
+ *  แล้ว" that overclaims one half of a partial delivery (Operational
+ *  Truth Doctrine). `domainLabel` is null when there is no separate
+ *  domain team target at all (the message routes to owner_general only). */
+export function composeNotificationStatusLine(domainLabel: string | null, targets: FeedbackTargetResult[]): string {
+  const isSent = (status: FeedbackTargetResult['status']) => status === 'sent' || status === 'duplicate';
+  const domainTarget = targets.find(t => t.team !== 'owner_general');
+  const ownerTarget = targets.find(t => t.team === 'owner_general');
+  const domainOk = domainTarget ? isSent(domainTarget.status) : false;
+  const ownerOk = ownerTarget ? isSent(ownerTarget.status) : false;
+
+  if (!domainTarget) {
+    return ownerOk
+      ? 'ทองไทยส่งให้เจ้าของตรวจสอบแล้วครับ'
+      : 'ตอนนี้ระบบแจ้งเตือนไม่สำเร็จ ทองไทยบันทึกเรื่องไว้แล้ว เดี๋ยวให้ทีมตรวจสอบครับ';
+  }
+  const label = domainLabel || 'ที่เกี่ยวข้อง';
+  if (domainOk && ownerOk) return `ทองไทยส่งให้ทีม${label}และเจ้าของตรวจสอบแล้วครับ`;
+  if (domainOk && !ownerOk) return `ทองไทยส่งให้ทีม${label}แล้วครับ ส่วนแจ้งเจ้าของยังไม่สำเร็จ ทีมจะตรวจสอบต่อครับ`;
+  if (!domainOk && ownerOk) return 'ทีมยังไม่ได้รับแจ้งโดยตรง แต่ทองไทยส่งให้เจ้าของตรวจสอบแล้วครับ';
+  return 'ตอนนี้ระบบแจ้งเตือนทีมไม่สำเร็จ ทองไทยบันทึกเรื่องไว้แล้ว เดี๋ยวให้ทีมตรวจสอบครับ';
+}
+
 // A safety report escalates to BOTH the relevant domain team and
 // owner_general (see _ops-notifications.ts's needsOwnerEscalation) -- the
 // reply must say precisely which of those two actually got the message,
 // never a blanket "ส่งเรียบร้อยแล้ว" that overclaims one half of a partial
-// delivery (Operational Truth Doctrine). Kept to 2 short lines (see
+// delivery (Operational Truth Doctrine). Kept to 3 short lines (see
 // THONGTHAI_HANDOFF.md's "Post-PR67 Polish" LINE-brevity rules) --
-// safety acknowledgment first, one honest status line second.
+// safety acknowledgment, the no-definite-verdict hedge, then one honest
+// status line.
 export function composeSafetyIssueResponse(
   match: ServiceFeedbackMatch,
   eventStored: boolean,
@@ -88,31 +114,9 @@ export function composeSafetyIssueResponse(
     ]);
   }
 
-  const isSent = (status: FeedbackTargetResult['status']) => status === 'sent' || status === 'duplicate';
   const domainLabel = match.businessUnit !== 'unknown' && match.businessUnit !== 'general'
-    ? BUSINESS_UNIT_LABEL_TH[match.businessUnit] : '';
-  const domainTarget = targets.find(t => t.team !== 'owner_general');
-  const ownerTarget = targets.find(t => t.team === 'owner_general');
-  const domainOk = domainTarget ? isSent(domainTarget.status) : false;
-  const ownerOk = ownerTarget ? isSent(ownerTarget.status) : false;
-
-  let statusLine: string;
-  if (!domainTarget) {
-    // business_unit itself routes straight to owner_general (general/
-    // membership/system/unknown) -- no separate domain team to mention.
-    statusLine = ownerOk
-      ? 'ทองไทยส่งให้เจ้าของตรวจสอบแล้วครับ'
-      : 'ตอนนี้ระบบแจ้งเตือนไม่สำเร็จ ทองไทยบันทึกเรื่องไว้แล้ว เดี๋ยวให้ทีมตรวจสอบครับ';
-  } else if (domainOk && ownerOk) {
-    statusLine = `ทองไทยส่งให้ทีม${domainLabel || 'ที่เกี่ยวข้อง'}และเจ้าของตรวจสอบแล้วครับ`;
-  } else if (domainOk && !ownerOk) {
-    statusLine = `ทองไทยส่งให้ทีม${domainLabel || 'ที่เกี่ยวข้อง'}แล้วครับ ส่วนแจ้งเจ้าของยังไม่สำเร็จ ทีมจะตรวจสอบต่อครับ`;
-  } else if (!domainOk && ownerOk) {
-    statusLine = 'ทีมยังไม่ได้รับแจ้งโดยตรง แต่ทองไทยส่งให้เจ้าของตรวจสอบแล้วครับ';
-  } else {
-    statusLine = 'ตอนนี้ระบบแจ้งเตือนทีมไม่สำเร็จ ทองไทยบันทึกเรื่องไว้แล้ว เดี๋ยวให้ทีมตรวจสอบครับ';
-  }
-  return composeLineShortReply([opener, hedgeLine, statusLine]);
+    ? BUSINESS_UNIT_LABEL_TH[match.businessUnit] : null;
+  return composeLineShortReply([opener, hedgeLine, composeNotificationStatusLine(domainLabel, targets)]);
 }
 
 export function composeSystemFeedbackResponse(notificationQueued: boolean): string {
@@ -135,4 +139,63 @@ export function composeServiceFeedbackResponse(
     case 'safety_issue': return composeSafetyIssueResponse(match, eventResult?.eventId != null, eventResult?.targets ?? []);
     case 'system_feedback': return composeSystemFeedbackResponse(notificationQueued);
   }
+}
+
+// Master Roadmap Phase 1 -- deterministic guardrail wording for a
+// message naming a topic outside Thongthai's authority (refund/
+// discount/claim/liability/safety-guarantee/reputational-threat/severe-
+// medical-risk/unverified-availability). The LLM never drafts these --
+// this composer is the ENTIRE reply, always, per the owner's explicit
+// Phase 1 decision ("Do NOT let the LLM draft a nuanced answer before
+// routing"). Wording for refund_request, special_discount,
+// accident_liability, and the domain-tied/generic safety_guarantee
+// cases is the owner's own verbatim text from that decision; the
+// remaining categories (claim_request, bad_review_threat,
+// severe_allergy_medical, unverified_availability) were not given
+// verbatim text and were written to match the same tone/structure.
+const ESCALATION_OPENER: Record<EscalationCategory, string> = {
+  refund_request: 'เรื่องคืนเงิน/เงื่อนไขการชำระ ทองไทยขอไม่ยืนยันแทนเจ้าของนะครับ 🙏',
+  special_discount: 'ส่วนลดพิเศษอาจต้องให้เจ้าของหรือทีมดูแลราคาเช็กเงื่อนไขให้ครับ 😊',
+  claim_request: 'เรื่องเคลม/ค่าเสียหาย ทองไทยขอไม่ตัดสินใจแทนเจ้าของนะครับ 🙏',
+  accident_liability: 'เรื่องความรับผิดชอบกรณีอุบัติเหตุ ทองไทยขอไม่ตอบแทนเจ้าของแบบมั่ว ๆ นะครับ 🙏',
+  safety_guarantee: 'ทองไทยไม่อยากรับประกันแทนทีมแบบ 100% นะครับ 🙏\nทีมหน้างานจะช่วยประเมินและดูแลตามสถานการณ์จริงให้ดีที่สุดครับ',
+  bad_review_threat: 'ขอบคุณที่บอกความรู้สึกตรง ๆ นะครับ 🙏 ทองไทยไม่อยากให้เรื่องนี้ค้างคาใจแน่นอนครับ',
+  severe_allergy_medical: 'ขอบคุณที่บอกนะครับ 🙏 เรื่องนี้ทองไทยไม่อยากเดาแทนทีมครับ',
+  unverified_availability: 'ห้องว่างช่วงนี้ทองไทยขอเช็กกับทีมให้ชัวร์อีกทีนะครับ 🙏 ไม่อยากเดาให้ผิดพลาดครับ',
+};
+
+const ESCALATION_NEXT_QUESTION: Partial<Record<EscalationCategory, string>> = {
+  special_discount: 'ขอทราบวัน เวลา และบริการที่สนใจคร่าว ๆ ได้ไหมครับ?',
+};
+
+export function composeEscalationResponse(
+  match: EscalationMatch,
+  eventStored: boolean,
+  targets: FeedbackTargetResult[],
+): string {
+  // The one non-escalating instance: a bare, generic safety-guarantee
+  // question with no named activity -- owner's own instruction: "If
+  // generic: answer with no guarantee, ask context." No feedback event,
+  // no notification, just the honest answer.
+  if (match.category === 'safety_guarantee' && !match.escalates) {
+    return composeLineShortReply([
+      'ทองไทยไม่อยากรับประกันแทนทีมแบบ 100% นะครับ 🙏',
+      'ทีมหน้างานจะช่วยประเมินและดูแลตามสถานการณ์จริงให้ดีที่สุดครับ',
+      'ถ้ามีเด็ก ผู้สูงอายุ หรือกังวลเรื่องสุขภาพ บอกทองไทยได้เลยครับ เดี๋ยวช่วยส่งให้ทีมดูให้เหมาะครับ',
+    ]);
+  }
+
+  const opener = ESCALATION_OPENER[match.category];
+  if (!eventStored) {
+    return composeLineShortReply([
+      opener,
+      'ตอนนี้ระบบบันทึกเรื่องไม่สำเร็จ ขอโทษด้วยครับ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อความชัวร์ครับ',
+    ]);
+  }
+  const domainLabel = match.domainUnit ? BUSINESS_UNIT_LABEL_TH[match.domainUnit] : null;
+  return composeLineShortReply([
+    opener,
+    composeNotificationStatusLine(domainLabel, targets),
+    ESCALATION_NEXT_QUESTION[match.category] ?? '',
+  ]);
 }
