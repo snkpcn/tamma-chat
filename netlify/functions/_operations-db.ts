@@ -3,6 +3,7 @@ import { interpretStayBookingTurn } from './_thongthai-brain-v3';
 import { CONTEXT_TTL_MS } from './_conversation-context';
 import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
 import { extractDate as extractDateShared } from './_slot-parsers';
+import { isActivityIntentStartMessage } from './_service-mind-conversation-flow';
 
 export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
 export type ServiceType = 'restaurant' | 'stay' | 'activity';
@@ -834,6 +835,14 @@ export function shouldConsumeLegacyLineBookingTurn(
 ): boolean {
   const text = message.trim();
   if (!text) return false;
+  // A bare "อยากขี่ม้า"/"อยากลองขี่ม้า" with NO other slot supplied and no
+  // session yet underway is a Service Mind moment (a caring question about
+  // experience/party size), not a form to fill -- this legacy flow's own
+  // first question ("เลือกระยะเวลา...") is the transactional wording this
+  // guard exists to avoid for that exact narrow shape. Anything with more
+  // structure (a duration, a horse name, a date) still starts the legacy
+  // flow normally; only the bare intent-start sentence itself defers.
+  if (!session && isActivityIntentStartMessage(text)) return false;
   const stayStart = stayBookingStartIntent(text);
   const activityStart = activityBookingStartIntent(text);
   const resume = bookingResumeIntent(text);

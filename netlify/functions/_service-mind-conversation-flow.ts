@@ -48,21 +48,55 @@ export function composeFoodIntentStartResponse(): string {
   return 'ได้เลยครับ ทานเผ็ดได้ไหมครับ แล้วมีใครแพ้อาหารหรือไม่ทานปลาร้าไหมครับ เดี๋ยวทองไทยช่วยเลือกให้ครับ';
 }
 
-// "อยากขี่ม้า" alone -- deliberately narrower than
-// _local-concierge-intent.ts's ACTIVITY_NODE_MARKERS matching (which
-// covers ม้า/ขี่ม้า as part of larger structural categories like
-// activity_suitability/horse_comparison); this only claims the bare,
-// unstructured "I want to ride" statement, replacing what would otherwise
-// be a plain asset-inventory listing with a caring question about
-// experience/preferred feel first (matches Section 1's own D example).
-const ACTIVITY_INTENT_START_MARKER = /^(?:อยากขี่ม้า|อยากลองขี่ม้า)[\s.ๆ!]*$/u;
+// "อยากขี่ม้า"/"อยากลองขี่ม้า"/"ขี่ม้าได้ไหม"/"มีกิจกรรมขี่ม้าไหม", optionally
+// with one short qualifier appended (มือใหม่/มีเด็กไปด้วย/มีผู้สูงอายุไปด้วย)
+// -- deliberately narrower than _local-concierge-intent.ts's
+// ACTIVITY_NODE_MARKERS matching (which covers ม้า/ขี่ม้า as part of
+// larger structural categories like activity_suitability/horse_comparison);
+// this only claims the bare, unstructured "I want to ride" statement (plus
+// that one qualifier), replacing what would otherwise be a plain
+// asset-inventory listing -- or, over LINE, the legacy booking flow's
+// "เลือกระยะเวลา" prompt (see shouldConsumeLegacyLineBookingTurn's own
+// guard in _operations-db.ts) -- with a caring question about experience/
+// party size first (matches Section 1's own D example).
+const ACTIVITY_INTENT_START_PHRASE = '(?:อยากขี่ม้า|อยากลองขี่ม้า|ขี่ม้าได้ไหม|มีกิจกรรมขี่ม้าไหม)';
+const ACTIVITY_INTENT_QUALIFIER_PHRASE = '(?:มือใหม่|มีเด็ก(?:ไปด้วย)?|เด็กไปด้วย|มีผู้สูงอายุ(?:ไปด้วย)?|ผู้สูงอายุไปด้วย)';
+const ACTIVITY_INTENT_START_MARKER = new RegExp(
+  `^${ACTIVITY_INTENT_START_PHRASE}(?:\\s+${ACTIVITY_INTENT_QUALIFIER_PHRASE})?[\\s.ๆ!?？]*$`,
+  'u',
+);
 
 export function isActivityIntentStartMessage(message: string): boolean {
   return ACTIVITY_INTENT_START_MARKER.test(message.trim());
 }
 
-export function composeActivityIntentStartResponse(): string {
-  return 'ได้เลยครับ 😊 เคยขี่ม้ามาก่อนไหมครับ หรืออยากได้ฟีลชิล ๆ เป็นหลัก เดี๋ยวทองไทยช่วยเลือกให้เหมาะครับ';
+export type ActivityIntentQualifier = 'beginner' | 'family' | null;
+
+/** Which of the two care-question branches (if any) the appended
+ *  qualifier calls for. Never used to claim a horse is "safer" for either
+ *  group -- both branches route the actual judgment to the team, per
+ *  Customer Service Doctrine's no-fake-certainty rule. */
+export function classifyActivityIntentQualifier(message: string): ActivityIntentQualifier {
+  const text = message.trim();
+  if (/มือใหม่/u.test(text)) return 'beginner';
+  if (/(?:มีเด็ก|เด็กไปด้วย|มีผู้สูงอายุ|ผู้สูงอายุไปด้วย)/u.test(text)) return 'family';
+  return null;
+}
+
+export function composeActivityIntentStartResponse(qualifier: ActivityIntentQualifier = null): string {
+  const intro = [
+    'ได้เลยครับ 😊 ที่ทำมา-ชาติมีขี่ม้าให้เลือกกับม้า 2 ตัวครับ',
+    '• ทองไทย — ฟีลแน่น ขี่กระด้างกว่านิดนึง คาแรกเตอร์น่ารัก',
+    '• ภาราดร — ฟีลนิ่มกว่านิดหน่อย คาแรกเตอร์น่ารักเหมือนกัน',
+  ].join('\n');
+
+  if (qualifier === 'beginner') {
+    return `${intro}\n\nเป็นมือใหม่ไม่ต้องกังวลครับ ทีมงานจะช่วยดูแลและแนะนำจังหวะที่เหมาะสมให้ครับ แล้วมากันกี่คนครับ?`;
+  }
+  if (qualifier === 'family') {
+    return `${intro}\n\nพาเด็ก/ผู้สูงอายุไปด้วยก็ขี่ได้ครับ ขอถามอายุคร่าว ๆ และเคยขี่ม้ามาก่อนไหมครับ ทีมงานจะช่วยดูแลความปลอดภัยให้เหมาะกับแต่ละท่านครับ`;
+  }
+  return `${intro}\n\nขอถามนิดนึงนะครับ เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ จะได้แนะนำตัวม้าและระยะเวลาให้เหมาะครับ`;
 }
 
 const THANK_YOU_MARKER = /^(?:ขอบคุณ(?:ครับ|ค่ะ|คะ|มาก)?|thanks?(?:\s*you)?|thank\s*you)[\s!.ๆ]*$/iu;
