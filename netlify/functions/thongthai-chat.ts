@@ -31,7 +31,7 @@ import { activityAssetFromText, formatActivityAssetNote } from './_operations-db
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
-import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent } from './_local-concierge-intent';
+import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
 import { redactWeatherUrl } from './_weather-provider';
 import { classifyServiceFeedback, mentionsThongthaiResponse } from './_service-mind-feedback-intent';
@@ -1076,6 +1076,21 @@ export function activityBookingFallbackDraft(request: BrainRequest): Record<stri
   // SAME closed marker set the feedback classifier itself uses, so the
   // two paths can never disagree about what counts as "about Thongthai").
   if (mentionsThongthaiResponse(request.message)) return null;
+
+  // A horse info/comparison question ("ทองไทยกับภาราดรต่างกันยังไง") must
+  // NEVER be read as selecting/reselecting a horse -- checked BEFORE the
+  // context check below on purpose. Real incident this closes: with an
+  // ALREADY-OPEN horse-booking task (e.g. ทองไทย selected in an earlier
+  // turn), asking to compare the two horses named BOTH of them, and
+  // activityAssetFromText matched whichever horse happened to be named
+  // LAST in the joined text -- silently re-selecting a DIFFERENT horse
+  // than the one already chosen and re-asking for booking details, even
+  // though the customer was only asking a question. See
+  // _local-concierge-intent.ts's isHorseInfoOrComparisonQuestion, which
+  // reuses the SAME classifyLocalConciergeQuestion markers the horse-
+  // facts composer itself answers from, so this guard and that composer
+  // can never disagree about what counts as a comparison question.
+  if (isHorseInfoOrComparisonQuestion(request.message)) return null;
 
   // A blanket "more than one turn ever exchanged" used to count as horse-
   // booking context on its own -- that's what let an UNRELATED second
