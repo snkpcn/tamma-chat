@@ -1399,9 +1399,60 @@ export async function horseCareDetailExplainerResponse(
   if (!found) return null;
   const { task } = found;
   if (!task.slots.riderExperience || !task.slots.partySize) return null;
+  if (task.slots.healthConcern) return null; // horseHealthFollowupResponse owns anything once the health question is answered
 
   return {
     message: 'ขอโทษครับ ทองไทยหมายถึงข้อมูลคนขี่นิดนึงครับ เช่น มีเจ็บหลัง/เข่า/สะโพกไหม หรือกังวลเรื่องการทรงตัวไหมครับ จะได้ให้ทีมดูแลเหมาะขึ้นครับ',
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// The third step: once rider experience + party size + the health/balance
+// question are all answered, acknowledge everything understood so far and
+// move to the one remaining useful question (duration) -- instead of
+// falling through to a generic "need more detail" again. Real production
+// incident this closes: the customer answered "ไม่กังวลครับ" (no health
+// concern) and the bot asked for "more detail" a second time, because
+// nothing captured that answer at all.
+function parseHealthConcern(text: string): 'none' | 'present' | null {
+  if (/ไม่(?:มี|กังวล|ปวด|เจ็บ)/u.test(text)) return 'none';
+  if (/(?:ปวด|เจ็บ)(?:หลัง|เข่า|สะโพก)|กังวล(?:เรื่อง)?(?:การ)?ทรงตัว/u.test(text)) return 'present';
+  return null;
+}
+
+export async function horseHealthFollowupResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  const found = await loadHorseBookingTask(guestDbId).catch(() => null);
+  if (!found) return null;
+  const { task } = found;
+  if (!task.slots.riderExperience || !task.slots.partySize) return null;
+  if (task.slots.healthConcern) return null; // already answered -- nothing more for this responder to add
+
+  const healthConcern = parseHealthConcern(request.message);
+  if (!healthConcern) return null;
+
+  await persistHorseHealthSlot(guestDbId, healthConcern);
+
+  const experienceLabel = task.slots.riderExperience === 'beginner' ? 'มือใหม่' : null;
+  const partyLabel = task.slots.partySize === 1 ? 'มาคนเดียว' : null;
+  const healthLabel = healthConcern === 'none' ? 'ไม่มีอาการเจ็บหลัง/กังวลเรื่องทรงตัวนะครับ' : null;
+  const ack = ['รับทราบครับ', experienceLabel, partyLabel, healthLabel && 'และ' + healthLabel].filter(Boolean).join(' ');
+
+  return {
+    message: [
+      `${ack} 😊`,
+      'แบบนี้ทองไทยแนะนำให้เริ่มแบบชิล ๆ ก่อน ทีมจะช่วยดูใกล้ ๆ ตอนขึ้น-ลงม้าและเริ่มช้า ๆ ได้ครับ',
+      'อยากเริ่ม 30 นาทีแบบลองก่อน หรืออยากเก็บบรรยากาศนานขึ้นเป็น 60 นาทีครับ?',
+    ].join('\n'),
     intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
@@ -1431,6 +1482,24 @@ async function persistHorseCareSlots(
     await persistTaskState(guestDbId, { ...container, activeTask: task });
   } catch (error) {
     console.error('THONGTHAI_HORSE_CARE_SLOT_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
+}
+
+async function persistHorseHealthSlot(
+  guestDbId: string | null,
+  healthConcern: 'none' | 'present',
+): Promise<void> {
+  if (!guestDbId) return;
+  try {
+    const container = await loadTaskState(guestDbId);
+    const reusable = container.activeTask
+      && container.activeTask.type === 'activity_booking'
+      && !isTerminalTaskStatus(container.activeTask.status);
+    if (!reusable) return;
+    const task = mergeTaskSlots(container.activeTask!, { healthConcern }, ACTIVITY_BOOKING_REQUIRED_FIELDS);
+    await persistTaskState(guestDbId, { ...container, activeTask: task });
+  } catch (error) {
+    console.error('THONGTHAI_HORSE_HEALTH_SLOT_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
   }
 }
 
@@ -1988,6 +2057,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (horseCareDetailExplainer) {
     const polished = polishedResponse(horseCareDetailExplainer, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Third step: the customer's answer to the health/balance question
+  // ("ไม่กังวลครับ") -- acknowledge everything understood so far and move
+  // to the one remaining useful question (duration), instead of a
+  // generic "need more detail" a second time.
+  const horseHealthFollowup = await horseHealthFollowupResponse(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_HORSE_HEALTH_FOLLOWUP_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (horseHealthFollowup) {
+    const polished = polishedResponse(horseHealthFollowup, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

@@ -137,22 +137,38 @@ const ROLE_WORDS: readonly string[] = [
 const STAFF_NAME_RE = /(พี่|คุณ|น้อง)([ก-๙a-zA-Z]+?)(?=ดูแล|บริการ|เสิร์ฟ|ต้อนรับ|ช่วย|แนะนำ|เก่ง|น่ารัก|พูด|ทำ|\s|$|ครับ|ค่ะ|คะ|คับ)/u;
 
 // A bare name (no honorific) immediately followed by a negative-behavior
-// verb -- "เจิดพูดไม่ดี". Deliberately narrow: only fires when the leading
-// token is NOT one of the known role words (checked first, above), so a
-// role complaint is never misread as this shape.
-const BARE_NAME_BEHAVIOR_RE = /^([ก-๙a-zA-Z]{2,10}?)(?=พูดไม่ดี|ทำไม่ดี|นิสัยไม่ดี|หยาบคาย|ไม่สุภาพ|เย็นชา)/u;
+// verb -- "เจิดพูดไม่ดี". Deliberately narrow: the name token itself is
+// still required to not BE one of the known role words (a role complaint
+// is never misread as this shape). Anchored to string-start OR a
+// preceding whitespace/sentence boundary, not ONLY string-start -- a real
+// production row proved a mixed message like "ทองไทยอธิบายไม่รู้เรื่อง
+// เจิดนิสัยไม่ดี" needs to find "เจิด" even though it isn't the first
+// token in the message.
+const BARE_NAME_BEHAVIOR_RE = /(?:^|\s)([ก-๙a-zA-Z]{2,10}?)(?=พูดไม่ดี|ทำไม่ดี|นิสัยไม่ดี|หยาบคาย|ไม่สุภาพ|เย็นชา)/u;
 
+// Real production incident this closes: "ทองไทยอธิบายไม่รู้เรื่อง เจิดนิสัย
+// ไม่ดี" was persisted with person_mentions=[{kind:'role',label:'ทองไทย'}]
+// only -- the staff mention "เจิด" was silently lost. ROLE_WORDS includes
+// 'ทองไทย' (so a complaint ABOUT Thongthai itself is still recorded as a
+// role mention), but the old code returned on the FIRST match found
+// (role OR named), so a message mentioning BOTH Thongthai's own behavior
+// AND a real staff member's name only ever recorded one of them. Now
+// checks both independently and returns every mention actually present,
+// instead of stopping at the first.
 function extractPersonMentions(text: string): PersonMention[] {
+  const mentions: PersonMention[] = [];
   const roleHit = ROLE_WORDS.find(role => text.includes(role));
-  if (roleHit) return [{ label: roleHit, kind: 'role' }];
+  if (roleHit) mentions.push({ label: roleHit, kind: 'role' });
 
   const honorificMatch = text.match(STAFF_NAME_RE);
-  if (honorificMatch) return [{ label: `${honorificMatch[1]}${honorificMatch[2]}`, kind: 'named' }];
+  if (honorificMatch) {
+    mentions.push({ label: `${honorificMatch[1]}${honorificMatch[2]}`, kind: 'named' });
+  } else {
+    const bareMatch = text.match(BARE_NAME_BEHAVIOR_RE);
+    if (bareMatch && !ROLE_WORDS.includes(bareMatch[1])) mentions.push({ label: bareMatch[1], kind: 'named' });
+  }
 
-  const bareMatch = text.match(BARE_NAME_BEHAVIOR_RE);
-  if (bareMatch) return [{ label: bareMatch[1], kind: 'named' }];
-
-  return [];
+  return mentions;
 }
 
 // --- keyword extraction (for the backoffice dashboard) -------------------
