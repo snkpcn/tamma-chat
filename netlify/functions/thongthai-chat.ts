@@ -37,6 +37,7 @@ import { classifyServiceFeedback, mentionsThongthaiResponse } from './_service-m
 import { composeServiceFeedbackResponse } from './_service-mind-feedback-response';
 import { createFeedbackEvent } from './_service-mind-feedback-events';
 import {
+  classifyActivityIntentQualifier,
   composeActivityIntentStartResponse,
   composeFoodIntentStartResponse,
   composeThankYouCloseResponse,
@@ -80,6 +81,8 @@ import {
   extractTime,
   hasCommitMarker,
 } from './_slot-parsers';
+import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask } from './_task-state';
+import { HORSE_FACTS } from './_local-concierge-knowledge';
 
 export type {
   BrainRequest as ChatRequest,
@@ -1223,6 +1226,76 @@ export async function bareHorseSelectionClarification(request: BrainRequest, gue
   };
 }
 
+const ACTIVITY_BOOKING_REQUIRED_FIELDS = ['assetSelection', 'duration', 'date', 'time', 'partySize', 'customerName', 'phone'] as const;
+
+// Persists a horse choice onto the guest's activity_booking ActiveTask
+// (creating one if none is open) so a LATER turn -- including on LINE,
+// where chatHistory is always empty -- still knows which horse was
+// picked. Reuses the same _task-state.ts machinery every other domain
+// uses rather than a bespoke JSONB shape.
+async function persistHorseSelection(guestDbId: string | null, channel: BrainChannel, horseName: string): Promise<void> {
+  if (!guestDbId) return;
+  try {
+    const container = await loadTaskState(guestDbId);
+    const reusable = container.activeTask
+      && container.activeTask.type === 'activity_booking'
+      && !isTerminalTaskStatus(container.activeTask.status);
+    const task = reusable
+      ? mergeTaskSlots(container.activeTask!, { assetSelection: horseName, resourceCode: 'activity-horse' }, ACTIVITY_BOOKING_REQUIRED_FIELDS)
+      : mergeTaskSlots(
+        createActiveTask({ type: 'activity_booking', sourceChannel: channel, requiredFields: ACTIVITY_BOOKING_REQUIRED_FIELDS }),
+        { assetSelection: horseName, resourceCode: 'activity-horse' },
+        ACTIVITY_BOOKING_REQUIRED_FIELDS,
+      );
+    await persistTaskState(guestDbId, { ...container, activeTask: task });
+  } catch (error) {
+    console.error('THONGTHAI_HORSE_SELECTION_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
+}
+
+// Once a horse-booking conversation is already established (chatHistory
+// showing explicit riding intent, OR -- for LINE, where chatHistory never
+// carries prior turns -- a persisted activity-domain task from an earlier
+// turn), a bare horse-name mention is no longer ambiguous: it's a real
+// selection. bareHorseSelectionClarification already declines to ask the
+// "horse or assistant?" question in exactly this situation; this is what
+// actually DOES something with the selection instead of silently falling
+// through toward the LLM -- confirms the choice warmly (ride-feel +
+// personality, the same HORSE_FACTS data the horse-comparison responder
+// uses, so the two never drift), asks the one caring question that
+// matters next (rider experience + party size), and persists the pick.
+export async function horseSelectionWithContextResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  const ambiguous = isBareAmbiguousHorseSelection(request);
+  if (!ambiguous) return null;
+  const hasContext = hasActiveHorseBookingContext(request)
+    || await hasEverDiscussedActivityDomain(guestDbId).catch(() => false);
+  if (!hasContext) return null;
+
+  const facts = ambiguous.name === 'ทองไทย' ? HORSE_FACTS.thongthai : HORSE_FACTS.pharadon;
+  const message = [
+    `ได้ครับ เลือก${ambiguous.name}นะครับ 😊`,
+    `${ambiguous.name}จะ${facts.rideFeelTh} คาแรกเตอร์${facts.personalityTh}ครับ`,
+    'เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?',
+  ].join('\n');
+
+  await persistHorseSelection(guestDbId, channel, ambiguous.name);
+
+  return {
+    message,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
 export function activityBookingFallbackDraft(request: BrainRequest): Record<string, unknown> | null {
   const userTurns = request.chatHistory.filter(turn => turn.role === 'user').map(turn => turn.content).concat(request.message);
   const text = userTurns.join('\n');
@@ -1493,7 +1566,7 @@ function deterministicFoodIntentStartResponse(request: BrainRequest): BrainRespo
 function deterministicActivityIntentStartResponse(request: BrainRequest): BrainResponse | null {
   if (!isActivityIntentStartMessage(request.message)) return null;
   return {
-    message: composeActivityIntentStartResponse(),
+    message: composeActivityIntentStartResponse(classifyActivityIntentQualifier(request.message)),
     intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
@@ -1502,6 +1575,37 @@ function deterministicActivityIntentStartResponse(request: BrainRequest): BrainR
     semanticMemoryUpdates: [],
     toolCalls: [],
   };
+}
+
+// composeActivityIntentStartResponse's care-question reply is pure text --
+// it never used to persist anything, so a LATER bare horse-name mention in
+// the SAME conversation (e.g. "เอาทองไทย" right after "อยากขี่ม้า") had no
+// way to know an activity conversation was already underway.
+// bareHorseSelectionClarification's own hasEverDiscussedActivityDomain
+// guard reads taskState.activeTask.domain === 'activity' from persisted
+// guest_agent_state precisely to cover this -- LINE always passes an
+// empty chatHistory (see _line-webhook-core.ts's askThongthai), so
+// persisted state is the ONLY memory that survives between LINE turns.
+// Starting a real (not fake) activity_booking task here, via the same
+// _task-state.ts machinery every other domain uses, is what makes that
+// guard see this conversation as already in progress. Never overwrites an
+// unrelated task the guest may already have active elsewhere.
+async function markActivityIntentStarted(guestDbId: string | null, channel: BrainChannel): Promise<void> {
+  if (!guestDbId) return;
+  try {
+    const container = await loadTaskState(guestDbId);
+    if (container.activeTask && !['completed', 'cancelled', 'failed', 'superseded'].includes(container.activeTask.status)) {
+      return;
+    }
+    const next = startNewActiveTask(container, {
+      type: 'activity_booking',
+      sourceChannel: channel,
+      requiredFields: ACTIVITY_BOOKING_REQUIRED_FIELDS,
+    });
+    await persistTaskState(guestDbId, next);
+  } catch (error) {
+    console.error('THONGTHAI_ACTIVITY_INTENT_TASK_START_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
 }
 
 // Care-aware wording for family/children/elderly/mobility context (see
@@ -1665,6 +1769,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // The other side of bareHorseSelectionClarification: when context IS
+  // already established, actually select the horse and ask the one
+  // caring question that matters next, instead of silently falling
+  // through toward the LLM.
+  const horseSelection = await horseSelectionWithContextResponse(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_HORSE_SELECTION_CONTEXT_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (horseSelection) {
+    const polished = polishedResponse(horseSelection, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   // Service Mind -- see deterministicServiceFeedbackResponse's own header
   // comment for why this must be checked this early (before any
   // transaction-processing code, before One-Mind, before domain routing).
@@ -1727,6 +1851,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   if (activityIntentStart) {
     const polished = polishedResponse(activityIntentStart, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
+    await markActivityIntentStarted(guestDbId, channel);
     return coreResult(200, {
       message: polished.message,
       intent: polished.intent,

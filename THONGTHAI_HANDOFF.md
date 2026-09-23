@@ -3443,3 +3443,116 @@ success); no unrelated production data mutated (only the one CHECK
 constraint was touched, confirmed via direct query before and after); the
 one production mutation in this round is the explicitly-authorized,
 tested, additive schema migration itself.
+
+## Horse Service Mind UX -- 2026-09-23
+
+Owner retest showed the system replying, but with the wrong FEEL: "อยากขี่ม้า"
+jumped straight to "เลือกระยะเวลา 30, 60 หรือ 90 นาที" (transactional, form-
+like), and a follow-up bare "เอาทองไทย" kept re-asking "horse or assistant?"
+even after horse context was clearly established.
+
+**Root cause 1 (why "อยากขี่ม้า" jumped straight to duration)**: discovered
+a SECOND, entirely separate, LINE-only booking system that this session had
+not previously read: `_operations-db.ts`'s `handleLineBookingMessage`, with
+its own `line_booking_sessions` state table, called directly from
+`_line-webhook-core.ts`'s `handleEvent` BEFORE `askThongthaiReliably`/
+`processThongthaiChatCore` is ever reached. Its `shouldConsumeLegacyLineBookingTurn`
+guard treated a bare "อยากขี่ม้า" as "clearly belongs to the booking" and
+answered with its own transactional prompt -- `thongthai-chat.ts`'s
+Service Mind responder (`deterministicActivityIntentStartResponse`,
+built in an EARLIER phase of this engagement, already existed and already
+asked a caring question) never got a chance to run at all. This corrects
+an earlier conclusion in this session's own "LINE Full Audit" entry that
+LINE private chat always uses "the exact same core" as web -- true for
+casual/greeting messages, NOT true for activity-booking-shaped messages,
+which this legacy flow intercepts first. Fixed: `shouldConsumeLegacyLineBookingTurn`
+now defers (returns false) for exactly the bare, unstructured activity-
+intent-start shape (`isActivityIntentStartMessage`); anything with more
+structure (a duration, a horse name, a date) still starts the legacy flow
+normally, unchanged.
+
+**Root cause 2 (why "เอาทองไทย" kept re-asking after context was
+established)**: `composeActivityIntentStartResponse`'s reply was pure
+text -- it never persisted anything. `bareHorseSelectionClarification`'s
+own `hasEverDiscussedActivityDomain` guard (added in an earlier round)
+reads persisted `guest_agent_state.taskState.activeTask.domain` for
+exactly this continuity, but nothing was ever writing it for this
+responder, and LINE's `chatHistory` is always empty (`_line-webhook-
+core.ts`'s `askThongthai`), so there was no other memory available
+between turns. Reproduced precisely via the full signed LINE webhook
+across 3 turns before fixing, confirming this diagnosis empirically
+rather than by inspection alone.
+
+**Fixes applied** (`thongthai-chat.ts`):
+- `markActivityIntentStarted` -- starts a real `activity_booking`
+  `ActiveTask` (via `_task-state.ts`, the same machinery every other
+  domain already uses) when the intent-start responder fires, so a later
+  turn's `hasEverDiscussedActivityDomain` check sees it.
+- `horseSelectionWithContextResponse` (new) -- the other half of
+  `bareHorseSelectionClarification`: once context is established
+  (chatHistory OR persisted state), a bare horse-name mention now
+  actually SELECTS the horse (warm confirmation + ride-feel/personality
+  from the same `HORSE_FACTS` data the horse-comparison responder already
+  uses, so the two never drift) and asks the one caring question that
+  matters next (rider experience + party size), persisting the pick via
+  `persistHorseSelection`, instead of silently falling through toward the
+  LLM once the clarification stopped firing.
+- `composeActivityIntentStartResponse` (`_service-mind-conversation-
+  flow.ts`) rewritten to introduce both horses by name with a one-line
+  ride-feel/personality each (matching the task's own example almost
+  verbatim), and `ACTIVITY_INTENT_START_MARKER` broadened to also cover
+  "ขี่ม้าได้ไหม"/"มีกิจกรรมขี่ม้าไหม" and an optional beginner/family
+  qualifier (`classifyActivityIntentQualifier`), each branching to its
+  own caring wording -- team supervision for a beginner, age/comfort for
+  a family, never a claimed safety guarantee for either (per the
+  session's explicit "never say beginner-safe" instruction).
+
+**Explicitly deferred, NOT built this round**: the full 9-step slot
+reorder (rider-experience answer -> party-size answer -> THEN duration ->
+date/time -> ... -> payment) across further turns. This round covers the
+two turns the live bug report was actually about (intent start, then
+horse selection) end to end and correctly; continuing correctly once the
+customer ANSWERS the care question (e.g. "เคยขี่มาก่อนครับ") would need
+the REST of the slot-filling pipeline (`activityBookingFallbackDraft`) to
+also read persisted `taskState.slots` rather than only `chatHistory` --
+that pipeline is heavily tested and load-bearing for existing behavior
+(duration/date/time extraction, multi-duration disambiguation, etc.), and
+extending it safely to be LINE-native (persisted-state-driven, not just
+chatHistory-driven) end to end is a larger, separate piece of work this
+round intentionally did not touch, to keep this fix scoped and verifiable.
+
+**Feedback pipeline (Fix 6)**: verified, not re-implemented.
+`deterministicServiceFeedbackResponse` already calls `createFeedbackEvent`
+(persists to `ops_feedback_events`, the same table the tamma-backoffice
+"customer voice" dashboard reads, built in an earlier phase) and
+`composeServiceFeedbackResponse` already reflects the REAL
+`notificationQueued` result rather than claiming success unconditionally.
+The one real blocker (the `owner_general` LINE group never being
+bindable) was fixed in the immediately-prior "Final LINE Stabilization"
+round; this round only added regression tests confirming feedback still
+persists and stays honest with and without a bound `owner_general`
+channel.
+
+**Files changed**: `netlify/functions/thongthai-chat.ts` (task-state
+persistence + new horse-selection responder), `netlify/functions/
+_service-mind-conversation-flow.ts` (richer intro text, broadened
+markers, qualifier classification), `netlify/functions/_operations-db.ts`
+(legacy-flow bypass for the bare intent-start shape). **Tests**:
+`tests/horse-service-mind-ux.test.ts`, 14 new tests, all through the full
+signed LINE webhook. **Full suite: 842/842 passing** (828 prior + 14
+new). Load-bearing verified twice: disabling the legacy-flow bypass broke
+exactly A1/A2/A3/A6/A7/A8; separately disabling `horseSelectionWithContextResponse`
+broke exactly A2/A3/A6 -- both restores return the suite to 842/842.
+
+**Owner retest checklist**: "อยากขี่ม้า" -> warm intro naming both horses,
+asks rider experience + party size, never jumps to duration. Then
+"เอาทองไทย" -> "ได้ครับ เลือกทองไทยนะครับ 😊 ทองไทยจะขี่กระด้างกว่านิดนึง
+คาแรกเตอร์ขี้เล่นน่ารักครับ เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?" (never
+re-asks horse-or-assistant). "ทองไทยกับภาราดรต่างกันยังไง" -> comparison,
+stays in horse context, a following "เอาทองไทย" still selects. "วันนี้
+ฝนตกปะ", "ทองไทยตอบยาวไป" -> unchanged from the prior round.
+
+**Confirmations**: no booking/order/payment created; no fake notification
+success; no DB migration (pure application-code fix, reusing the existing
+`guest_agent_state`/`_task-state.ts` machinery); no unrelated production
+data mutated.
