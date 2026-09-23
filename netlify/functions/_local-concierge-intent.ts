@@ -236,3 +236,23 @@ export function classifyLocalConciergeQuestion(message: string): LocalConciergeM
 
   return null;
 }
+
+/**
+ * True when the message's SHAPE is a horse info/comparison question (the
+ * SAME 'horse_comparison' markers classifyLocalConciergeQuestion already
+ * uses -- never a second, independently-drifting marker set). Exported so
+ * any horse-SELECTION path can refuse to ever read such a question as
+ * selecting/reselecting a horse.
+ *
+ * This matters even when a horse-booking task is ALREADY open: a
+ * selection path that treats "any mention of a horse's name" as
+ * "continuing the active task" will otherwise let a later comparison
+ * question naming BOTH horses ("ทองไทยกับภาราดรต่างกันยังไง", asked right
+ * after already selecting ทองไทย) silently re-select whichever horse
+ * happens to be named LAST in the text -- a real production incident,
+ * not a hypothetical (see thongthai-chat.ts's activityBookingFallbackDraft,
+ * the first caller of this guard).
+ */
+export function isHorseInfoOrComparisonQuestion(text: string): boolean {
+  return classifyLocalConciergeQuestion(text)?.category === 'horse_comparison';
+}

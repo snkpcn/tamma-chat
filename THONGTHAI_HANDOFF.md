@@ -2948,3 +2948,32 @@ it can never collide with that), and an explicit comparison request
 scoped to an actual horse/riding mention ("ขอเปรียบเทียบม้าสองตัว").
 5 more tests (18 total this round, 745/745 overall), load-bearing
 verified.
+
+### REAL FIX — horse comparison hijacked by an ALREADY-OPEN booking task
+
+The previous round's investigation was right that a single-turn,
+no-active-task comparison question already worked -- but wrong to stop
+there. Reproduced the actual live failure: with a horse-booking task
+ALREADY OPEN (e.g. "อยากขี่ม้า" then "เอาทองไทย" selects ทองไทย), asking
+"ทองไทยกับภาราดรต่างกันยังไง" next silently RE-SELECTED ภาราดร (the
+horse named LAST in the joined text) and re-asked for booking details --
+exactly the reported production response
+("รับทราบครับ ผมล็อกตัวเลือกเป็น ภาราดร ... เลือกม้า: ภาราดร ...").
+
+Root cause: `activityBookingFallbackDraft`'s only non-selection guard
+was `mentionsThongthaiResponse` (from the "system feedback" bugfix
+above) -- it has nothing to do with comparison questions, so it never
+fired here, and `hasHorseBookingContext` was already satisfied by the
+EARLIER turn's "ม้า" mention.
+
+Fix: new exported `isHorseInfoOrComparisonQuestion` in
+`_local-concierge-intent.ts` -- deliberately reuses
+`classifyLocalConciergeQuestion`'s existing `horse_comparison` markers
+(never a second, independently-drifting marker set), checked in
+`activityBookingFallbackDraft` right alongside the existing
+`mentionsThongthaiResponse` guard, BEFORE the horse-booking-context
+check. 9 new tests build REAL multi-turn state through the actual
+`processThongthaiChatCore` path (no hand-constructed classifier calls),
+including the exact 3-turn reproduction. 754/754 total passing; the new
+guard verified load-bearing (disabling it makes exactly the two active-
+task scenarios fail, nothing else).
