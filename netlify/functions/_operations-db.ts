@@ -5,10 +5,18 @@ import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn'
 import { extractDate as extractDateShared } from './_slot-parsers';
 import { isActivityIntentStartMessage } from './_service-mind-conversation-flow';
 import {
+  interpretActivityGoal,
   interpretCustomerType,
+  interpretExperience,
   interpretFear,
+  interpretFirmnessPreference,
   interpretOverallHealthConcern,
+  mentionsBrakeQuestion,
+  mentionsChildPassengerQuestion,
+  mentionsSupportRequest,
   mentionsWeatherGroundConcern,
+  mentionsWeightOrSizeConcern,
+  wantsIntenseExperience,
 } from './_semantic-hospitality-interpreter';
 
 export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
@@ -882,7 +890,15 @@ export function shouldConsumeLegacyLineBookingTurn(
     const hasCareOrRiskSignal = Boolean(interpretCustomerType(text))
       || interpretOverallHealthConcern(text) === 'present'
       || mentionsWeatherGroundConcern(text)
-      || interpretFear(text) === 'concerned';
+      || interpretFear(text) === 'concerned'
+      || Boolean(interpretActivityGoal(text))
+      || Boolean(interpretFirmnessPreference(text))
+      || mentionsWeightOrSizeConcern(text)
+      || mentionsSupportRequest(text)
+      || mentionsBrakeQuestion(text)
+      || mentionsChildPassengerQuestion(text)
+      || wantsIntenseExperience(text)
+      || (interpretExperience(text) === 'beginner' && /ธนู/u.test(text));
     if (hasCareOrRiskSignal) return false;
   }
 

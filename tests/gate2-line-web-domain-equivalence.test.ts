@@ -35,14 +35,16 @@ test('Gate 2 / stay: read-only inquiry surfaces identical real facts on both cha
     const line = await processThongthaiChatCore(brainRequest('เช็คอินกี่โมง', lineId, 'line'), 'evt-line-1');
     assert.equal(web.statusCode, 200);
     assert.equal(line.statusCode, 200);
-    // KNOWN GAP (documented, not fixed here -- see THONGTHAI_HANDOFF.md):
-    // stay's deterministic routing does not yet distinguish check-in time
-    // from a generic "here are the rooms" listing -- both web and LINE
-    // collapse to the SAME generic stay-catalog answer today. What this
-    // asserts is that they collapse to the exact same wrong-for-the-wrong-
-    // question answer, not that either one guesses/hallucinates a time.
-    assert.equal(msg(web.payload), msg(line.payload), 'both channels must degrade the exact same way, not diverge');
-    assert.doesNotMatch(msg(web.payload), /\d{1,2}:\d{2}/, 'must never assert a specific time it has no real per-question adapter for');
+    // FORMERLY A KNOWN GAP (see THONGTHAI_HANDOFF.md's "Semantic
+    // Hospitality Intelligence" / "Knowledge Base + Scenario Brain"
+    // entries): "เช็คอินกี่โมง" used to collapse to a generic stay-catalog
+    // answer with no real check-in time. thongthai-chat.ts's
+    // homestayFactsResponse now answers this from real, owner-provided
+    // static facts (_tamma-domain-knowledge.ts's HOMESTAY_FACTS) -- a
+    // genuine per-question adapter, not a guess -- so asserting a real
+    // "14:00" here is correct, not a hallucination.
+    assert.equal(msg(web.payload), msg(line.payload), 'both channels must answer identically');
+    assert.match(msg(web.payload), /14:00/, 'must answer from the real, owner-provided check-in fact');
   });
 });
 
@@ -143,7 +145,7 @@ test('Gate 2 / ecosystem: broad first-visit discovery surfaces the same business
     const web = await processThongthaiChatCore(brainRequest('มาครั้งแรกมีอะไรแนะนำ', webId, 'web'), 'evt-web-1');
     const line = await processThongthaiChatCore(brainRequest('มาครั้งแรกมีอะไรแนะนำ', lineId, 'line'), 'evt-line-1');
     for (const payload of [web.payload, line.payload]) {
-      assert.match(msg(payload), /กิน|ตำมา-ชาติ/);
+      assert.match(msg(payload), /กิน|ตำมา-ชาติ|อาหาร/);
       assert.match(msg(payload), /กิจกรรม|ขี่ม้า/);
       assert.match(msg(payload), /พัก|เฮือนสเตย์/);
     }

@@ -135,9 +135,14 @@ export function interpretOverallHealthConcern(text: string): 'none' | 'present' 
 // พ่อค้า all contain it as a false-positive substring) -- bounded to a
 // standalone person-reference immediately followed by a verb/negation
 // that only makes sense addressed to a person, never a compound noun.
-const ELDERLY_MARKER = /(?:แม่|พ่อ)(?=อยาก|จะ|ขอ|ไม่|เดิน|ขี่|มา(?!ก)|พา)|ผู้สูงอายุ|คุณยาย|คุณตา|คุณแม่|คุณพ่อ/u;
-const CHILD_WITH_AGE_RE = /เด็ก\s*(\d{1,2})\s*ขวบ/u;
-const CHILD_MARKER = /เด็ก/u;
+const ELDERLY_MARKER = /(?:พา)?(?:แม่|พ่อ)(?=อยาก|จะ|ขอ|ไม่|เดิน|ขี่|มา(?!ก)|ไป|พา)|ผู้สูงอายุ|คุณยาย|คุณตา|คุณแม่|คุณพ่อ/u;
+// "ลูก" (one's own child) bare is risky the same way "แม่"/"พ่อ" is --
+// ลูกค้า (customer), ลูกทีม (teammate), ลูกน้อง (subordinate), ลูกบอล
+// (ball) all contain it as a false-positive substring -- bounded the same
+// way: a standalone person-reference immediately followed by an age/verb
+// that only makes sense addressed to a person.
+const CHILD_WITH_AGE_RE = /(?:เด็ก|ลูก)\s*(\d{1,2})\s*ขวบ/u;
+const CHILD_MARKER = /เด็ก|ลูก(?=อยาก|จะ|ขอ|ไม่|ขี่|เดิน|มา(?!ก))/u;
 
 export function interpretCustomerType(text: string): CustomerTypeSignal {
   const t = normalizeThai(text);
@@ -154,9 +159,14 @@ const GENTLE_MARKER = /ไม่โหด|ไม่เอาโหด|ไม่�
 const WEATHER_GROUND_MARKER = /ฝนตก|ฝนเพิ่ง|พื้นลื่น|หลังฝน/u;
 const SAFETY_QUESTION_MARKER = /ปลอดภัยไหม|ปลอดภัยหรือเปล่า|อันตรายไหม|เสี่ยงไหม|ปลอดภัยที่สุด/u;
 const SPEED_FEAR_MARKER = /กลัวเร็ว|กลัวความเร็ว|ขอช้า\s*ๆ/u;
+const LOW_WALKING_MARKER = /เดินน้อย|ไม่อยากเดินเยอะ|เดินไม่สะดวก|เดินไม่ไหว|เดินลำบาก|เดินไม่ค่อยไหว/u;
 
 export function prefersGentleIntensity(text: string): boolean {
   return GENTLE_MARKER.test(normalizeThai(text));
+}
+
+export function prefersLowWalking(text: string): boolean {
+  return LOW_WALKING_MARKER.test(normalizeThai(text));
 }
 
 export function mentionsWeatherGroundConcern(text: string): boolean {
@@ -169,6 +179,69 @@ export function asksIfSafe(text: string): boolean {
 
 export function mentionsSpeedFear(text: string): boolean {
   return SPEED_FEAR_MARKER.test(normalizeThai(text));
+}
+
+// --- activity goal / preference / support-request signals -----------------
+
+// What the customer actually wants out of a risky/physical activity --
+// distinct from experience/fear: someone can be an experienced rider who
+// JUST wants a photo, or a total beginner who wants the full ride. Never
+// assumed from experience level alone.
+export type ActivityGoal = 'photo_only' | 'touch_only' | 'full_activity';
+
+const PHOTO_ONLY_MARKER = /ถ่ายรูป(?:กับม้า|กับธนู)?เฉย\s*ๆ|ขอแค่ถ่ายรูป|แค่ถ่ายรูป/u;
+const TOUCH_ONLY_MARKER = /ดูม้าเฉย\s*ๆ|ให้อาหารม้า|ลูบม้า|ไม่ขี่.*(?:ดู|ให้อาหาร)/u;
+
+export function interpretActivityGoal(text: string): ActivityGoal | null {
+  if (PHOTO_ONLY_MARKER.test(text)) return 'photo_only';
+  if (TOUCH_ONLY_MARKER.test(text)) return 'touch_only';
+  return null;
+}
+
+// A stated preference between two named horses' ride feel -- "เอาตัวนิ่ม
+// กว่า"/"เอาตัวที่นิ่งกว่า" (softer/calmer) vs. "เอาตัวที่ขี่แน่นกว่า"
+// (firmer). Only ever used to help the customer pick between the two REAL
+// configured horses (see _local-concierge-knowledge.ts's HORSE_FACTS) --
+// never to invent a claim beyond what's configured.
+export type FirmnessPreference = 'softer' | 'firmer' | null;
+
+const SOFTER_MARKER = /นิ่มกว่า|นิ่งกว่า|เอาตัวที่นิ่ม|เอาตัวที่เบา/u;
+const FIRMER_MARKER = /แน่นกว่า|กระด้างกว่า|เอาตัวที่แรง/u;
+
+export function interpretFirmnessPreference(text: string): FirmnessPreference {
+  if (SOFTER_MARKER.test(text)) return 'softer';
+  if (FIRMER_MARKER.test(text)) return 'firmer';
+  return null;
+}
+
+const WEIGHT_OR_SIZE_MARKER = /ตัวใหญ่|น้ำหนักเยอะ|น้ำหนักตัวเยอะ|(?<!ไม่)อ้วน/u;
+
+export function mentionsWeightOrSizeConcern(text: string): boolean {
+  return WEIGHT_OR_SIZE_MARKER.test(text);
+}
+
+const SUPPORT_REQUEST_MARKER = /ให้คนจูง|มีคนจูงไหม|มีคนช่วยจูง|คนช่วยประคอง/u;
+
+export function mentionsSupportRequest(text: string): boolean {
+  return SUPPORT_REQUEST_MARKER.test(text);
+}
+
+const BRAKE_QUESTION_MARKER = /เบรกไม่เป็น|เบรกไม่ทัน|ถ้าเบรก/u;
+
+export function mentionsBrakeQuestion(text: string): boolean {
+  return BRAKE_QUESTION_MARKER.test(text);
+}
+
+const CHILD_PASSENGER_MARKER = /เด็กซ้อน|ซ้อนเฉย\s*ๆ|เด็กนั่งได้ไหม/u;
+
+export function mentionsChildPassengerQuestion(text: string): boolean {
+  return CHILD_PASSENGER_MARKER.test(text);
+}
+
+const WANTS_INTENSE_MARKER = /อยากมันส์|เร็ว\s*ๆ|เอาแบบมันส์|โหด\s*ๆ|รถแรงไหม/u;
+
+export function wantsIntenseExperience(text: string): boolean {
+  return WANTS_INTENSE_MARKER.test(text);
 }
 
 // --- the combined frame ---------------------------------------------------
