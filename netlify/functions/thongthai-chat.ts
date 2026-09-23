@@ -34,7 +34,7 @@ import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from '.
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
 import { redactWeatherUrl } from './_weather-provider';
-import { classifyServiceFeedback } from './_service-mind-feedback-intent';
+import { classifyServiceFeedback, mentionsThongthaiResponse } from './_service-mind-feedback-intent';
 import { composeServiceFeedbackResponse } from './_service-mind-feedback-response';
 import { createFeedbackEvent } from './_service-mind-feedback-events';
 import {
@@ -1067,9 +1067,28 @@ export function activityBookingFallbackDraft(request: BrainRequest): Record<stri
   const selectedAsset = activityAssetFromText(text);
   if (!selectedAsset) return null;
 
-  const hasHorseBookingContext = /ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า/u.test(text)
-    || userTurns.length > 1
-    || activityFallbackCommit(request.message);
+  // "ทองไทย" is a real, deliberate name collision: the bot's own name AND
+  // a horse's name. activityAssetFromText matches it purely on lexical
+  // grounds, so a message about THONGTHAI'S OWN ANSWERS ("ทองไทยตอบยาวไป")
+  // must never be read as selecting the horse -- checked first, and wins
+  // regardless of any other signal below (see
+  // _service-mind-feedback-intent.ts's THONGTHAI_RESPONSE_MENTION, the
+  // SAME closed marker set the feedback classifier itself uses, so the
+  // two paths can never disagree about what counts as "about Thongthai").
+  if (mentionsThongthaiResponse(request.message)) return null;
+
+  // A blanket "more than one turn ever exchanged" used to count as horse-
+  // booking context on its own -- that's what let an UNRELATED second
+  // turn (e.g. a safety complaint followed by unrelated feedback) get
+  // misread as continuing a horse selection that was never actually
+  // happening. Real context requires the conversation to actually mention
+  // riding/horses (bare "ม้า" covers "ขี่ม้า"/"จองม้า"/"อยาก...ม้า" as
+  // substrings) or express an explicit intent to ride ("อยากขี่ทองไทย" --
+  // naming a specific horse instead of the word "ม้า"). Deliberately NOT
+  // a bare "ขี่" alone -- that also matches a horse-FACTS question like
+  // "ทองไทยขี่ยังไง" (how does it ride), which must reach the horse-facts
+  // composer, not this booking fallback.
+  const hasHorseBookingContext = /ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า|อยากขี่/u.test(text) || activityFallbackCommit(request.message);
   if (!hasHorseBookingContext) return null;
 
   const date = extractDate(text) ?? extractThaiMonthDate(text);

@@ -2875,3 +2875,47 @@ recording branch and confirming exactly the dependent test fails.
 owner/general/admin LINE group, then type `ผูกทีม เจ้าของ` (or `ผูกทีม
 owner`) in that group. After that: system feedback, unknown/general
 feedback, and the urgent-safety escalation all reach it for real.
+
+### URGENT BUGFIX — "ทองไทย" name collision misrouted feedback as horse selection
+
+Production smoke found: after a safety complaint about ATV, a follow-up
+"ทองไทยตอบยาวไป" (system feedback about Thongthai's own answers) was
+misread as SELECTING THE HORSE named ทองไทย and asked for booking
+details. Root cause: `activityBookingFallbackDraft`'s
+`hasHorseBookingContext` check (thongthai-chat.ts) treated ANY second-
+plus conversation turn as sufficient "we're mid horse-booking" context,
+regardless of what the conversation was actually about -- a real,
+general bug, not specific to this one phrase.
+
+Fix (`hotfix/system-feedback-horse-selection-collision`):
+1. Removed the blanket `userTurns.length > 1` clause -- real context now
+   requires the conversation to actually mention riding/horses (`ม้า`,
+   or `อยากขี่` naming a specific horse instead of the word `ม้า`).
+2. Added an explicit guard: a message matching
+   `_service-mind-feedback-intent.ts`'s new exported
+   `THONGTHAI_RESPONSE_MENTION`/`mentionsThongthaiResponse` (commenting on
+   Thongthai's own answers/behavior -- ตอบยาว/ตอบสั้น/ตอบไม่ตรง/ตอบมั่ว/
+   พูดเยอะ/พูดไม่รู้เรื่อง/แนะนำไม่ตรง/ควรถาม/ควรตอบ, plus the pre-existing
+   บอทตอบ/แชทบอท/ระบบแชท/ระบบจอง markers) never triggers horse selection,
+   even if an earlier turn in the SAME conversation was legitimately
+   about horse riding (a case the first fix alone doesn't cover).
+3. The SAME `THONGTHAI_RESPONSE_MENTION` marker now also drives
+   `_service-mind-feedback-intent.ts`'s classification (`SYSTEM_FEEDBACK_MARKER`
+   widened to cover ยาว/สั้น/มั่ว/พูดเยอะ/พูดไม่รู้เรื่อง/แนะนำไม่ตรง/ควรถาม/
+   ควรตอบ, not just the one originally-reported "ยาวไป") and business-unit
+   inference (`BUSINESS_UNIT_MARKERS`'s 'system' entry now reuses the same
+   marker, so a COMPLIMENT about Thongthai's own answers, e.g. "ทองไทยช่วยดี
+   มาก", also correctly infers business_unit 'system' -- `COMPLIMENT_MARKER`
+   gained "ช่วยดี" for this).
+
+12 new tests (727/727 total passing) -- including the exact reported
+2-turn scenario, the "legitimate horse turn then feedback turn" edge
+case the guard specifically protects, and confirmation that real horse
+selection ("อยากขี่ทองไทย", "อยากขี่ม้า" → "เอาทองไทย") and horse-facts
+questions ("ทองไทยกับภาราดรต่างกันยังไง", "ทองไทยขี่ยังไง") still work
+exactly as before. Both new guards verified load-bearing individually
+(each disabled in turn, confirmed exactly its own dependent test(s)
+fail, nothing else). `brainRequest()` test helper gained an optional
+4th `history` parameter so multi-turn scenarios can be tested at all
+(it previously always sent an empty `chatHistory`, which is why this
+class of bug had no prior test coverage).
