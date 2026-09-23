@@ -3,7 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handleLineBookingMessage, handleLineMembershipMessage } from './_operations-db';
 import { splitCustomerMessageForLine } from './_chat-copy-style';
 import { processThongthaiChatCore } from './thongthai-chat';
-import { isSimpleGreetingMessage, isCasualAttentionMessage, categorizeDegradedFallback } from './thongthai-chat';
+import { isSimpleGreetingMessage, isCasualAttentionMessage, isShortUnclearTextMessage, categorizeDegradedFallback } from './thongthai-chat';
 import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
 
 type LineSource = {
@@ -456,17 +456,21 @@ async function handleEvent(
   // it" after the fact. See THONGTHAI_HANDOFF.md's "LINE Full Audit" entry.
   const isGreeting = isSimpleGreetingMessage(message);
   const isCasualAttention = isCasualAttentionMessage(message);
-  const textCategory = isGreeting || isCasualAttention ? 'casual_greeting' : categorizeDegradedFallback(message);
-  // deterministicGreetingResponse/deterministicCasualChatResponse are the
-  // FIRST two checks processThongthaiChatCore runs, unconditionally, before
-  // any LLM call -- so isGreeting/isCasualAttention being true here is a
+  const isShortUnclearText = isShortUnclearTextMessage(message);
+  const textCategory = isGreeting || isCasualAttention || isShortUnclearText
+    ? 'casual_greeting' : categorizeDegradedFallback(message);
+  // deterministicGreetingResponse/deterministicCasualChatResponse/
+  // deterministicShortUnclearTextResponse are the FIRST three checks
+  // processThongthaiChatCore runs, unconditionally, before any LLM call --
+  // so isGreeting/isCasualAttention/isShortUnclearText being true here is a
   // guarantee the core will short-circuit deterministically, not a guess.
   // Logging this accurately (rather than always marking llmAttempted=true)
   // is what let this exact "casual message secretly still called the LLM"
   // production symptom get diagnosed in the first place.
   let deterministicResponder: string | null = isGreeting
     ? 'casual_greeting'
-    : isCasualAttention ? 'casual_presence' : null;
+    : isCasualAttention ? 'casual_presence'
+      : isShortUnclearText ? 'short_unclear_text' : null;
   let llmAttempted = deterministicResponder === null;
   let llmErrorType: string | null = null;
   let finalResponseKind: string = deterministicResponder ? 'deterministic' : 'thongthai_core';
@@ -498,6 +502,8 @@ async function handleEvent(
     if (bookingReply) {
       deterministicResponder = 'booking';
       finalResponseKind = 'booking';
+      console.log('LEGACY_BOOKING_CONSUMED', JSON.stringify({ replyPreview: bookingReply.slice(0, 80) }));
+      console.log('FINAL_RESPONSE_SOURCE', JSON.stringify({ source: 'legacy_line_booking' }));
       logPrivateChatAttempt();
       await replyToLine(replyToken, splitText(bookingReply).map(text => ({ type: 'text', text })), accessToken);
       return;
@@ -515,6 +521,7 @@ async function handleEvent(
     llmErrorType = errorType;
   });
   if (!deterministicResponder) finalResponseKind = llmErrorType ? 'degraded_fallback' : 'thongthai_core';
+  console.log('FINAL_RESPONSE_SOURCE', JSON.stringify({ source: deterministicResponder ?? finalResponseKind }));
   logPrivateChatAttempt();
 
   try {

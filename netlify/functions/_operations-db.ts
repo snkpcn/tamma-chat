@@ -14,6 +14,7 @@ import {
   mentionsBrakeQuestion,
   mentionsChildPassengerQuestion,
   mentionsSupportRequest,
+  mentionsSafetyConcern,
   mentionsWeatherGroundConcern,
   mentionsWeightOrSizeConcern,
   wantsIntenseExperience,
@@ -842,13 +843,23 @@ function sessionIsStale(session: LineBookingSession, now: Date): boolean {
 /** Legacy LINE booking is an operational compatibility layer, not a
  * conversational router. Only clearly booking-related turns are consumed;
  * everything else falls through to One-Mind. */
+// Production-precedence proof (see THONGTHAI_HANDOFF.md's "PR #66 production
+// precedence" entry): every exit from this guard is logged with WHY it
+// decided that way, so a live incident can be diagnosed from logs alone --
+// "which handler answered this exact phrase" -- instead of only being
+// reproducible by re-running the message through a local test.
+function logLegacyGuardDecision(consumed: boolean, reason: string): boolean {
+  console.log('LEGACY_LINE_GUARD_DECISION', JSON.stringify({ consumed, reason }));
+  return consumed;
+}
+
 export function shouldConsumeLegacyLineBookingTurn(
   session: LineBookingSession | null,
   message: string,
   now: Date = new Date(),
 ): boolean {
   const text = message.trim();
-  if (!text) return false;
+  if (!text) return logLegacyGuardDecision(false, 'empty_message');
   // A bare "อยากขี่ม้า"/"อยากลองขี่ม้า" with NO other slot supplied is a
   // Service Mind moment (a caring question about experience/party size),
   // not a form to fill -- this legacy flow's own first question
@@ -867,50 +878,72 @@ export function shouldConsumeLegacyLineBookingTurn(
   // signal that the customer wants the caring intro (or, on a stale
   // session, is effectively starting over) regardless of whatever session
   // state happens to exist.
-  if (isActivityIntentStartMessage(text)) return false;
+  if (isActivityIntentStartMessage(text)) return logLegacyGuardDecision(false, 'bare_activity_intent_start');
   const stayStart = stayBookingStartIntent(text);
   const activityStart = activityBookingStartIntent(text);
   const resume = bookingResumeIntent(text);
   const readOnlyQuestion = isReadOnlyBookingQuestion(text);
 
-  // A compound OPENING message that names a care/risk signal alongside the
-  // booking intent -- a family/elderly companion, a child, a health
-  // concern, a weather/ground worry, or fear -- e.g. "แม่อยากขี่ม้า เข่าไม่
-  // ค่อยดี" or "เด็ก 8 ขวบอยากขี่". Real production gap this closes: unlike
-  // the bare isActivityIntentStartMessage phrases above, these compound
-  // messages don't match that tightly-anchored check, so they were still
-  // being consumed by this transactional flow's own "เลือกระยะเวลา..."
-  // question -- silently skipping every care-aware responder in
-  // thongthai-chat.ts (horseCompoundCareIntentResponse and friends) that
-  // exists specifically to handle them. Scoped to a genuinely fresh
-  // conversation (`!session`) only -- an ALREADY in-progress legacy
+  // A message that names a care/risk/safety signal -- a family/elderly
+  // companion, a child, a health concern, a weather/ground worry, fear,
+  // or an activity-preference/support-request signal -- e.g. "แม่อยากขี่ม้า
+  // เข่าไม่ค่อยดี" or "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" said MID-BOOKING.
+  //
+  // SEVERE PRODUCTION INCIDENT this closes (found via a live report after
+  // this guard's first version shipped): this check was originally scoped
+  // to `!session` only, on the theory that "an ALREADY in-progress legacy
   // session still resumes normally; a later aside mid-booking is not this
-  // guard's concern.
-  if (!session) {
-    const hasCareOrRiskSignal = Boolean(interpretCustomerType(text))
-      || interpretOverallHealthConcern(text) === 'present'
-      || mentionsWeatherGroundConcern(text)
-      || interpretFear(text) === 'concerned'
-      || Boolean(interpretActivityGoal(text))
-      || Boolean(interpretFirmnessPreference(text))
-      || mentionsWeightOrSizeConcern(text)
-      || mentionsSupportRequest(text)
-      || mentionsBrakeQuestion(text)
-      || mentionsChildPassengerQuestion(text)
-      || wantsIntenseExperience(text)
-      || (interpretExperience(text) === 'beginner' && /ธนู/u.test(text));
-    if (hasCareOrRiskSignal) return false;
-  }
+  // guard's concern." That reasoning was wrong, and it repeated the EXACT
+  // same class of bug isActivityIntentStartMessage's own check above
+  // already had to be fixed for once (see that comment): a customer who
+  // said "อยากขับ ATV" (no risk signal, legitimately starts a legacy
+  // session) and THEN said "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" -- a genuine
+  // safety report -- got the SAME "เลือกระยะเวลา 30, 60 หรือ 90 นาที"
+  // transactional prompt back, completely ignoring the safety content,
+  // because the guard only checked this signal when session was null.
+  // Reproduced directly: establish a bare activity session, then send a
+  // safety/care message, and watch it get swallowed. Now UNCONDITIONAL,
+  // checked before ANY session-status branching below, exactly like
+  // isActivityIntentStartMessage -- a genuine safety/care signal must
+  // defer regardless of whether a booking is in progress, submitted, or
+  // awaiting payment, matching Customer Service Doctrine's own explicit
+  // priority order (safety/complaint/care always outrank booking
+  // continuation).
+  const hasCareOrRiskSignal = Boolean(interpretCustomerType(text))
+    || interpretOverallHealthConcern(text) === 'present'
+    || mentionsWeatherGroundConcern(text)
+    || mentionsSafetyConcern(text)
+    || interpretFear(text) === 'concerned'
+    || Boolean(interpretActivityGoal(text))
+    || Boolean(interpretFirmnessPreference(text))
+    || mentionsWeightOrSizeConcern(text)
+    || mentionsSupportRequest(text)
+    || mentionsBrakeQuestion(text)
+    || mentionsChildPassengerQuestion(text)
+    || wantsIntenseExperience(text)
+    || (interpretExperience(text) === 'beginner' && /ธนู/u.test(text));
+  console.log('SEMANTIC_FRAME_BUILT', JSON.stringify({
+    hasCareOrRiskSignal,
+    hasSession: Boolean(session),
+    sessionStatus: session?.status ?? null,
+    sessionServiceType: session?.service_type ?? null,
+  }));
+  if (hasCareOrRiskSignal) return logLegacyGuardDecision(false, 'care_or_risk_signal');
 
-  if (!session) return !readOnlyQuestion && (stayStart || activityStart);
+  if (!session) return logLegacyGuardDecision(!readOnlyQuestion && (stayStart || activityStart), 'no_session');
   if (session.status === 'submitted') {
-    return stayStart || activityStart || /(?:สถานะ|เรียบร้อย|เลข(?:ที่)?จอง|คำขอจอง)/u.test(text);
+    return logLegacyGuardDecision(
+      stayStart || activityStart || /(?:สถานะ|เรียบร้อย|เลข(?:ที่)?จอง|คำขอจอง)/u.test(text),
+      'session_submitted',
+    );
   }
   if (session.status === 'cancelled' || session.status === 'failed') {
-    return !readOnlyQuestion && (stayStart || activityStart);
+    return logLegacyGuardDecision(!readOnlyQuestion && (stayStart || activityStart), 'session_cancelled_or_failed');
   }
-  if (sessionIsStale(session, now) && !resume && !stayStart && !activityStart) return false;
-  if (readOnlyQuestion && !resume) return false;
+  if (sessionIsStale(session, now) && !resume && !stayStart && !activityStart) {
+    return logLegacyGuardDecision(false, 'session_stale');
+  }
+  if (readOnlyQuestion && !resume) return logLegacyGuardDecision(false, 'read_only_question');
 
   if (session.service_type === 'activity') {
     const suppliesField = Boolean(
@@ -922,15 +955,18 @@ export function shouldConsumeLegacyLineBookingTurn(
       || phoneFromText(text)
       || lineOnlyContactIntent(text)
     );
-    return resume || activityStart || suppliesField;
+    return logLegacyGuardDecision(resume || activityStart || suppliesField, 'activity_session_continuation');
   }
 
   if (session.service_type === 'stay') {
     if (session.status === 'awaiting_phone') {
-      return resume || stayStart || Boolean(phoneFromText(text)) || lineOnlyContactIntent(text);
+      return logLegacyGuardDecision(
+        resume || stayStart || Boolean(phoneFromText(text)) || lineOnlyContactIntent(text),
+        'stay_awaiting_phone',
+      );
     }
     if (session.status === 'awaiting_special_request') {
-      return resume || stayStart || explicitSpecialRequestAnswer(text);
+      return logLegacyGuardDecision(resume || stayStart || explicitSpecialRequestAnswer(text), 'stay_awaiting_special_request');
     }
     const checkIn = bookingDateFromText(text) ?? session.requested_date;
     const suppliesField = Boolean(
@@ -943,10 +979,10 @@ export function shouldConsumeLegacyLineBookingTurn(
       || /(?:^|\s)ชื่อ\s*[^,\n]+/u.test(text)
       || lineOnlyContactIntent(text)
     );
-    return resume || stayStart || suppliesField;
+    return logLegacyGuardDecision(resume || stayStart || suppliesField, 'stay_session_continuation');
   }
 
-  return !readOnlyQuestion && (stayStart || activityStart || resume);
+  return logLegacyGuardDecision(!readOnlyQuestion && (stayStart || activityStart || resume), 'other_service_type');
 }
 
 function thaiLocalTime(iso: string): string {

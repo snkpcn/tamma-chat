@@ -188,6 +188,39 @@ export function deterministicGreetingResponse(request: BrainRequest): BrainRespo
 const CASUAL_ATTENTION_RE = /^(?:เห้ย+|เฮ้ย+|ฮัลโหล+|เอ้ย+)(?:ครับ|ค่ะ|คะ|คับ|จ้า|จ๊ะ)?[\s!ๆ.,?？~]*$/iu;
 const PRESENCE_CHECK_RE = /^(?:มีใครอยู่(?:ไหม|มั้ย|ป่าว|เปล่า|บ้าง)|(?:ทองไทย\s*)?อยู่(?:ไหม|มั้ย|ป่าว|เปล่า))[\s!.,?？~]*$/iu;
 
+// A bare, ambiguous fragment with no real content ("สติ", "อะไร", "งง")
+// carries no domain topic and no slot -- neither the LLM nor any
+// deterministic responder can ground an answer in it. Production incident
+// this closes: such a message used to fall all the way through to the
+// generic "คิดช้ากว่าปกติ" degraded-provider apology (implying the AI was
+// slow/down, when the real issue was the message itself being too short to
+// interpret) or, worse, reached the LLM at all for something a template can
+// answer instantly. Checked in the SAME early, pre-LLM slot as
+// deterministicGreetingResponse/deterministicCasualChatResponse so this
+// never depends on LLM/provider availability. Anchored whole-message-only,
+// exactly like CASUAL_ATTENTION_RE above, so it never fires on a message
+// that merely CONTAINS one of these words alongside real content (e.g.
+// "ร้านอาหารมีอะไรแนะนำ" keeps its own restaurant-advisor handling).
+const SHORT_UNCLEAR_TEXT_RE = /^(?:สติ|เอ้า+|อะไร|งง+|ห้ะ+|อืม+|ต่อ|แล้วไง)(?:ครับ|ค่ะ|คะ|คับ|จ้า|จ๊ะ|อะ|นะ)?[\s!ๆ.,?？~]*$/iu;
+
+export function isShortUnclearTextMessage(message: string): boolean {
+  return SHORT_UNCLEAR_TEXT_RE.test(message.trim());
+}
+
+export function deterministicShortUnclearTextResponse(request: BrainRequest): BrainResponse | null {
+  if (!isShortUnclearTextMessage(request.message)) return null;
+  return {
+    message: 'ขอโทษครับ หมายถึงให้ทองไทยตั้งสติ/ตอบใหม่ หรืออยากถามเรื่องไหนต่อครับ?',
+    intent: 'conversation',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
 export function isCasualAttentionMessage(message: string): boolean {
   const trimmed = message.trim();
   return CASUAL_ATTENTION_RE.test(trimmed) || PRESENCE_CHECK_RE.test(trimmed);
@@ -2592,6 +2625,24 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Same reasoning again: a bare, ambiguous fragment ("สติ", "งง", "อะไร")
+  // must be answered with a clarifying question instantly, never routed to
+  // the LLM (or its degraded-provider apology) at all -- see
+  // deterministicShortUnclearTextResponse's own header comment.
+  const earlyShortUnclearText = deterministicShortUnclearTextResponse(request);
+  if (earlyShortUnclearText) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicShortUnclearTextResponse' }));
+    const polished = polishedResponse(earlyShortUnclearText, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   // Service Mind / global override -- checked BEFORE any active-task
   // continuation code (activityBookingFallbackResponse, the bare-horse
   // responders, and everything after them), not just before transaction-
@@ -2640,6 +2691,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return null;
   });
   if (horseFear) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'horseCareFearResponse' }));
     const polished = polishedResponse(horseFear, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
@@ -2656,6 +2708,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return null;
   });
   if (horseSafety) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'horseSafetyQuestionResponse' }));
     const polished = polishedResponse(horseSafety, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
@@ -2672,6 +2725,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return null;
   });
   if (horseCompoundCare) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'horseCompoundCareIntentResponse' }));
     const polished = polishedResponse(horseCompoundCare, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
@@ -2688,6 +2742,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return null;
   });
   if (horseScenario) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'horseScenarioSignalResponse' }));
     const polished = polishedResponse(horseScenario, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
@@ -2704,6 +2759,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return null;
   });
   if (atvCare) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'atvCareIntentResponse' }));
     const polished = polishedResponse(atvCare, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
@@ -2720,6 +2776,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return null;
   });
   if (archeryCare) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'archeryCareIntentResponse' }));
     const polished = polishedResponse(archeryCare, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
@@ -2762,6 +2819,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return null;
   });
   if (earlyActivityFallback) {
+    console.log('ACTIVITY_BOOKING_FALLBACK_SELECTED', JSON.stringify({ responder: 'activityBookingFallbackResponse' }));
     const polished = polishedResponse(earlyActivityFallback, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
@@ -3177,6 +3235,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return null;
   });
   if (deterministicRestaurant) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicRestaurantResponse' }));
     const polished = polishedResponse(deterministicRestaurant, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
