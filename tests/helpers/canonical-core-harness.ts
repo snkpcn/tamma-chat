@@ -641,14 +641,24 @@ export function guestId(seed: string): string {
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20, 32)}`;
 }
 
-export function brainRequest(message: string, guestDbId: string, channel: 'web' | 'line' = 'web'): {
-  guestId: string; message: string; language: 'th'; chatHistory: never[];
+export function brainRequest(
+  message: string,
+  guestDbId: string,
+  channel: 'web' | 'line' = 'web',
+  /** Prior turns to send as request.chatHistory -- the real client sends
+   *  the whole visible conversation on every request (this pipeline has
+   *  no server-side chat-history store), so a test proving multi-turn
+   *  behavior (e.g. a domain switch across turns) must populate this
+   *  itself; it's empty by default because most tests are single-turn. */
+  history: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+): {
+  guestId: string; message: string; language: 'th'; chatHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
   guestContext: { tripDuration: null; travelerType: null; group: { adults: null; children: null; elderly: null }; interests: never[]; pace: null; budget: null; constraints: never[] };
   journeyContext: { currentPlan: null; savedPlan: null; visitedExperiences: never[]; favorites: never[]; journalEntries: never[] };
   pageContext: { section: string };
 } {
   return {
-    guestId: guestDbId, message, language: 'th', chatHistory: [],
+    guestId: guestDbId, message, language: 'th', chatHistory: history,
     guestContext: { tripDuration: null, travelerType: null, group: { adults: null, children: null, elderly: null }, interests: [], pace: null, budget: null, constraints: [] },
     journeyContext: { currentPlan: null, savedPlan: null, visitedExperiences: [], favorites: [], journalEntries: [] },
     pageContext: { section: channel },

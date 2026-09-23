@@ -65,15 +65,37 @@ const URGENT_SAFETY_MARKER = /ไฟไหม้|ไฟลุก|ไฟช็อ
 const SAFETY_CONCERN_MARKER = /พื้นลื่น(?:มาก)?|น่ากลัว|เกือบ(?:ล้ม|ตก|ชน)|ไม่ปลอดภัย|เสี่ยงอันตราย|อันตรายมาก|มีปัญหาระหว่างทาง|ดูเหนื่อย/u;
 
 const COMPLAINT_MARKER = /แย่มาก|แย่จัง|ห่วย|รอนาน|นานมาก|ช้า|ไม่พอใจ|ผิดหวัง|ไม่ประทับใจ|บริการแย่|ไม่(?:ค่อย)?สะอาด|สกปรก|เย็นชา|หยาบคาย|ไม่สุภาพ|พูดไม่ดี|ทำไม่ดี|ตำหนิ|ร้องเรียน|มีปัญหา|ไม่โอเค|ตอบมั่ว|ไม่ตรง|ไม่ขึ้น/u;
-const COMPLIMENT_MARKER = /ดูแลดีมาก|ดูแลดี|ประทับใจ|ชื่นชม|ขอชม|เก่งมาก|น่ารัก|บริการดี(?:มาก)?|ดีมากเลย|ยอดเยี่ยม|อร่อย|ตอบดี/u;
+const COMPLIMENT_MARKER = /ดูแลดีมาก|ดูแลดี|ประทับใจ|ชื่นชม|ขอชม|เก่งมาก|น่ารัก|บริการดี(?:มาก)?|ดีมากเลย|ยอดเยี่ยม|อร่อย|ตอบดี|ช่วยดี/u;
 const SUGGESTION_MARKER = /น่าจะมี|เสนอแนะ|ข้อเสนอแนะ|อยากให้|เสนอไอเดีย|ลองทำ.*ดูไหม|น่าจะเพิ่ม|ควรเพิ่ม/u;
 
+// Any phrase where the customer is commenting on THONGTHAI ITSELF (its
+// answers, response length/accuracy, or its own conversational behavior)
+// -- shared by SYSTEM_FEEDBACK_MARKER below (classification) and the
+// 'system' business-unit marker (business_unit inference), so a
+// compliment about Thongthai's own answers ("ทองไทยช่วยดีมาก") infers
+// business_unit 'system' exactly the same way a complaint about it does.
+// Exported so thongthai-chat.ts's activity-booking fallback can use the
+// SAME closed marker set to recognize "this is response-quality
+// commentary, not a horse-name selection" -- "ทองไทย" is a real, deliberate
+// name collision (the bot's own name AND a horse's name), and this is the
+// one shared vocabulary both sides must agree on to resolve it.
+export const THONGTHAI_RESPONSE_MENTION = /ทองไทยตอบ|ทองไทยเข้าใจ|ทองไทยช้า|ทองไทยงง|ทองไทยพิมพ์|ทองไทยพูดเยอะ|ทองไทยพูดไม่รู้เรื่อง|ทองไทยแนะนำไม่ตรง|ทองไทยช่วยดี|ทองไทยควรถาม|ทองไทยควรตอบ|บอทตอบ|แชทบอท|ระบบแชท|ระบบจอง|เว็บไซต์|เว็บค้าง|line\s*ไม่แจ้งเตือน|แอป/iu;
+
+/** True when the message is commenting on Thongthai's own behavior/
+ *  answers -- see THONGTHAI_RESPONSE_MENTION's own doc comment for why
+ *  this exists and who else uses it. */
+export function mentionsThongthaiResponse(text: string): boolean {
+  return THONGTHAI_RESPONSE_MENTION.test(text);
+}
+
 // Feedback specifically about Thongthai's OWN answers/behavior (not the
-// physical business) -- requires an actual NEGATIVE quality descriptor,
-// not just the word "ทองไทย"/"ตอบ" alone, so a genuine compliment like
-// "ทองไทยตอบดี" is never misclassified here (COMPLIMENT_MARKER's own
-// "ตอบดี" must win for that message -- see classification order below).
-const SYSTEM_FEEDBACK_MARKER = /ทองไทยตอบ(?:ยาวไป|ไม่ตรง|สั้นไป|งง)|ทองไทย(?:เข้าใจผิด|ช้า|งง|พิมพ์ผิด)|บอทตอบ(?:ยาวไป|ช้า)|แชทบอท(?:ตอบช้า|ค้าง)|ระบบแชทค้าง|ระบบจองใช้ยาก|line\s*ไม่แจ้งเตือน|เว็บค้าง/iu;
+// physical business) -- requires an actual NEGATIVE (or neutral-
+// instructional, e.g. "ควรตอบสั้นกว่านี้") quality descriptor, not just
+// the word "ทองไทย"/"ตอบ" alone, so a genuine compliment like
+// "ทองไทยตอบดี"/"ทองไทยช่วยดีมาก" is never misclassified here (the bare
+// "ทองไทยตอบดี" pre-check and COMPLIMENT_MARKER's own "ตอบดี"/"ช่วยดี"
+// must win for those messages -- see classification order below).
+const SYSTEM_FEEDBACK_MARKER = /ทองไทยตอบ(?:ยาว(?:ไป)?|ไม่ตรง|สั้นไป|งง|มั่ว)|ทองไทย(?:เข้าใจผิด|ช้า|งง|พิมพ์ผิด|พูดเยอะ(?:ไป)?|พูดไม่รู้เรื่อง|แนะนำไม่ตรง|ควรถาม|ควรตอบ)|บอทตอบ(?:ยาว(?:ไป)?|ช้า|ไม่ตรง|มั่ว)|แชทบอท(?:ตอบ(?:ช้า|ไม่ตรง|ยาว(?:ไป)?|มั่ว)|ค้าง)|ระบบแชทค้าง|ระบบจองใช้ยาก|line\s*ไม่แจ้งเตือน|เว็บค้าง/iu;
 
 // --- business-unit inference --------------------------------------------
 
@@ -87,7 +109,7 @@ const BUSINESS_UNIT_MARKERS: ReadonlyArray<{ unit: BusinessUnit; pattern: RegExp
   { unit: 'stay', pattern: /ห้องพัก|เช็คอิน|เช็กอิน|เช็คเอาท์|เช็กเอาท์|แม่บ้าน|ที่พัก|เฮือน(?:สเตย์)?|ห้องน้ำในห้อง/u },
   { unit: 'cafe', pattern: /คาเฟ่|inthanin|อินทนิน|กาแฟ|เครื่องดื่ม/iu },
   { unit: 'membership', pattern: /สมาชิก|แต้ม|สิทธิ์|โปรโมชั่น|จ่ายเงิน|ชำระเงิน|บัตร|ราคา/u },
-  { unit: 'system', pattern: /ทองไทยตอบ|ทองไทยเข้าใจ|ทองไทยช้า|ทองไทยงง|ทองไทยพิมพ์|บอทตอบ|แชทบอท|ระบบแชท|ระบบจอง|เว็บไซต์|เว็บค้าง|line\s*ไม่แจ้งเตือน|แอป/iu },
+  { unit: 'system', pattern: THONGTHAI_RESPONSE_MENTION },
 ];
 
 function inferBusinessUnit(message: string): BusinessUnit {
