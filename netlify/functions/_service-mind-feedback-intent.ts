@@ -64,7 +64,7 @@ const URGENT_SAFETY_MARKER = /ไฟไหม้|ไฟลุก|ไฟช็อ
 // service complaint.
 const SAFETY_CONCERN_MARKER = /พื้นลื่น(?:มาก)?|น่ากลัว|เกือบ(?:ล้ม|ตก|ชน)|ไม่ปลอดภัย|เสี่ยงอันตราย|อันตรายมาก|มีปัญหาระหว่างทาง|ดูเหนื่อย/u;
 
-const COMPLAINT_MARKER = /แย่มาก|แย่จัง|ห่วย|รอนาน|นานมาก|ช้า|ไม่พอใจ|ผิดหวัง|ไม่ประทับใจ|บริการแย่|ไม่(?:ค่อย)?สะอาด|สกปรก|เย็นชา|หยาบคาย|ไม่สุภาพ|พูดไม่ดี|ทำไม่ดี|ตำหนิ|ร้องเรียน|มีปัญหา|ไม่โอเค|ตอบมั่ว|ไม่ตรง|ไม่ขึ้น/u;
+const COMPLAINT_MARKER = /แย่มาก|แย่จัง|ห่วย|รอนาน|นานมาก|ช้า|ไม่พอใจ|ผิดหวัง|ไม่ประทับใจ|บริการแย่|ไม่(?:ค่อย)?สะอาด|สกปรก|เย็นชา|หยาบคาย|ไม่สุภาพ|พูดไม่ดี|ทำไม่ดี|นิสัยไม่ดี|ตำหนิ|ร้องเรียน|มีปัญหา|ไม่โอเค|ตอบมั่ว|ไม่ตรง|ไม่ขึ้น/u;
 const COMPLIMENT_MARKER = /ดูแลดีมาก|ดูแลดี|ประทับใจ|ชื่นชม|ขอชม|เก่งมาก|น่ารัก|บริการดี(?:มาก)?|ดีมากเลย|ยอดเยี่ยม|อร่อย|ตอบดี|ช่วยดี/u;
 const SUGGESTION_MARKER = /น่าจะมี|เสนอแนะ|ข้อเสนอแนะ|อยากให้|เสนอไอเดีย|ลองทำ.*ดูไหม|น่าจะเพิ่ม|ควรเพิ่ม/u;
 
@@ -79,7 +79,7 @@ const SUGGESTION_MARKER = /น่าจะมี|เสนอแนะ|ข้อ
 // commentary, not a horse-name selection" -- "ทองไทย" is a real, deliberate
 // name collision (the bot's own name AND a horse's name), and this is the
 // one shared vocabulary both sides must agree on to resolve it.
-export const THONGTHAI_RESPONSE_MENTION = /ทองไทยตอบ|ทองไทยเข้าใจ|ทองไทยช้า|ทองไทยงง|ทองไทยพิมพ์|ทองไทยพูดเยอะ|ทองไทยพูดไม่รู้เรื่อง|ทองไทยแนะนำไม่ตรง|ทองไทยช่วยดี|ทองไทยควรถาม|ทองไทยควรตอบ|บอทตอบ|แชทบอท|ระบบแชท|ระบบจอง|เว็บไซต์|เว็บค้าง|line\s*ไม่แจ้งเตือน|แอป/iu;
+export const THONGTHAI_RESPONSE_MENTION = /ทองไทยตอบ|ทองไทยเข้าใจ|ทองไทยช้า|ทองไทยงง|ทองไทยพิมพ์|ทองไทยพูดเยอะ|ทองไทยพูดไม่รู้เรื่อง|ทองไทยอธิบาย(?:ไม่รู้เรื่อง|ไม่ชัด|ไม่เข้าใจ)|ทองไทยแนะนำไม่ตรง|ทองไทยช่วยดี|ทองไทยควรถาม|ทองไทยควรตอบ|บอทตอบ|แชทบอท|ระบบแชท|ระบบจอง|เว็บไซต์|เว็บค้าง|line\s*ไม่แจ้งเตือน|แอป/iu;
 
 /** True when the message is commenting on Thongthai's own behavior/
  *  answers -- see THONGTHAI_RESPONSE_MENTION's own doc comment for why
@@ -95,7 +95,7 @@ export function mentionsThongthaiResponse(text: string): boolean {
 // "ทองไทยตอบดี"/"ทองไทยช่วยดีมาก" is never misclassified here (the bare
 // "ทองไทยตอบดี" pre-check and COMPLIMENT_MARKER's own "ตอบดี"/"ช่วยดี"
 // must win for those messages -- see classification order below).
-const SYSTEM_FEEDBACK_MARKER = /ทองไทยตอบ(?:ยาว(?:ไป)?|ไม่ตรง|สั้นไป|งง|มั่ว)|ทองไทย(?:เข้าใจผิด|ช้า|งง|พิมพ์ผิด|พูดเยอะ(?:ไป)?|พูดไม่รู้เรื่อง|แนะนำไม่ตรง|ควรถาม|ควรตอบ)|บอทตอบ(?:ยาว(?:ไป)?|ช้า|ไม่ตรง|มั่ว)|แชทบอท(?:ตอบ(?:ช้า|ไม่ตรง|ยาว(?:ไป)?|มั่ว)|ค้าง)|ระบบแชทค้าง|ระบบจองใช้ยาก|line\s*ไม่แจ้งเตือน|เว็บค้าง/iu;
+const SYSTEM_FEEDBACK_MARKER = /ทองไทยตอบ(?:ยาว(?:ไป)?|ไม่ตรง|สั้นไป|งง|มั่ว)|ทองไทย(?:เข้าใจผิด|ช้า|งง|พิมพ์ผิด|พูดเยอะ(?:ไป)?|พูดไม่รู้เรื่อง|แนะนำไม่ตรง|ควรถาม|ควรตอบ)|ทองไทยอธิบาย(?:ไม่รู้เรื่อง|ไม่ชัด|ไม่เข้าใจ)|บอทตอบ(?:ยาว(?:ไป)?|ช้า|ไม่ตรง|มั่ว)|แชทบอท(?:ตอบ(?:ช้า|ไม่ตรง|ยาว(?:ไป)?|มั่ว)|ค้าง)|ระบบแชทค้าง|ระบบจองใช้ยาก|line\s*ไม่แจ้งเตือน|เว็บค้าง/iu;
 
 // --- business-unit inference --------------------------------------------
 
@@ -140,7 +140,7 @@ const STAFF_NAME_RE = /(พี่|คุณ|น้อง)([ก-๙a-zA-Z]+?)(?=�
 // verb -- "เจิดพูดไม่ดี". Deliberately narrow: only fires when the leading
 // token is NOT one of the known role words (checked first, above), so a
 // role complaint is never misread as this shape.
-const BARE_NAME_BEHAVIOR_RE = /^([ก-๙a-zA-Z]{2,10}?)(?=พูดไม่ดี|ทำไม่ดี|หยาบคาย|ไม่สุภาพ|เย็นชา)/u;
+const BARE_NAME_BEHAVIOR_RE = /^([ก-๙a-zA-Z]{2,10}?)(?=พูดไม่ดี|ทำไม่ดี|นิสัยไม่ดี|หยาบคาย|ไม่สุภาพ|เย็นชา)/u;
 
 function extractPersonMentions(text: string): PersonMention[] {
   const roleHit = ROLE_WORDS.find(role => text.includes(role));
@@ -179,7 +179,7 @@ const ISSUE_KEYWORD_MARKERS: ReadonlyArray<{ issue: IssueKeyword; pattern: RegEx
   { issue: 'cleanliness', pattern: /สะอาด|สกปรก/u },
   { issue: 'delay', pattern: /รอนาน|นานมาก|ช้า/u },
   { issue: 'food_quality', pattern: /อาหาร|เมนู|รสชาติ|อร่อย/u },
-  { issue: 'staff_behavior', pattern: /พูดไม่ดี|ทำไม่ดี|หยาบคาย|ไม่สุภาพ|เย็นชา|ดูแลดี|น่ารัก/u },
+  { issue: 'staff_behavior', pattern: /พูดไม่ดี|ทำไม่ดี|นิสัยไม่ดี|หยาบคาย|ไม่สุภาพ|เย็นชา|ดูแลดี|น่ารัก/u },
   { issue: 'pricing', pattern: /ราคา|แพง|ไม่ตรง(?:ราคา)?/u },
   { issue: 'booking', pattern: /จอง(?:แล้วไม่ขึ้น)?|ระบบจอง/u },
   { issue: 'payment', pattern: /จ่ายเงิน|ชำระเงิน|payment/iu },

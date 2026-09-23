@@ -1313,6 +1313,127 @@ export async function horseSelectionWithContextResponse(
   };
 }
 
+// The continuation half of horseSelectionWithContextResponse's care
+// question ("เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?"). Real production
+// incident this closes: the customer's answer ("ไม่เคยครับมาคนเดียว") named
+// no horse and no activity keyword, so it matched NOTHING deterministic
+// and fell all the way through to the One-Mind orchestrator's generic
+// "ขอรายละเอียดเพิ่มอีกนิดครับ จะได้ช่วยต่อให้ตรงเรื่อง" clarification --
+// which never says what detail is missing, so asking "รายละเอียดอะไรครับ?"
+// back just got the SAME vague line again. This only claims the turn when
+// there is a real, active horse selection still waiting on rider
+// experience/party size, and only when the message actually parses as an
+// answer to that -- otherwise it defers exactly like before.
+function parseRiderExperience(text: string): 'beginner' | 'experienced' | null {
+  if (/ไม่เคย/u.test(text)) return 'beginner';
+  if (/เคย/u.test(text)) return 'experienced';
+  return null;
+}
+
+function parsePartySizeFromCareAnswer(text: string): number | null {
+  if (/คนเดียว/u.test(text)) return 1;
+  return extractPartySize(text);
+}
+
+const HORSE_DETAIL_CLARIFICATION_QUESTION = 'มีเจ็บหลัง เจ็บเข่า เจ็บสะโพก หรือกังวลเรื่องการทรงตัวไหมครับ?';
+
+const DETAIL_CONFUSION_MARKER = /รายละเอียดอะไร|หมายถึงอะไร|คืออะไร|อะไรบ้างครับ|อะไรบ้างคะ/u;
+
+async function loadHorseBookingTask(guestDbId: string | null) {
+  if (!guestDbId) return null;
+  const container = await loadTaskState(guestDbId);
+  const task = container.activeTask;
+  if (!task || task.type !== 'activity_booking' || isTerminalTaskStatus(task.status)) return null;
+  if (!task.slots.assetSelection) return null;
+  return { container, task };
+}
+
+export async function horseCareFollowupResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  const found = await loadHorseBookingTask(guestDbId).catch(() => null);
+  if (!found) return null;
+  const { task } = found;
+
+  if (task.slots.riderExperience && task.slots.partySize) return null; // care basics already known -- horseCareDetailExplainerResponse owns anything further
+
+  const experience = parseRiderExperience(request.message);
+  const partySize = parsePartySizeFromCareAnswer(request.message);
+  if (!experience && !partySize) return null;
+
+  await persistHorseCareSlots(guestDbId, channel, {
+    riderExperience: experience ?? (task.slots.riderExperience as string | undefined) ?? null,
+    partySize: partySize ?? (task.slots.partySize as number | undefined) ?? null,
+  });
+
+  const experienceLabel = (experience ?? task.slots.riderExperience) === 'beginner' ? 'มือใหม่' : null;
+  const partyLabel = (partySize ?? task.slots.partySize) === 1 ? 'มาคนเดียว' : null;
+  const ack = ['รับทราบครับ', experienceLabel, partyLabel].filter(Boolean).join(' ');
+
+  return {
+    message: `${ack} เดี๋ยวทีมช่วยดูใกล้ ๆ ได้ครับ 😊\n${HORSE_DETAIL_CLARIFICATION_QUESTION}`,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// If the customer answers the health-question with confusion ("รายละเอียด
+// อะไรครับ?") instead of an answer, explain exactly what's being asked
+// rather than repeating anything vague. Checked as its own responder
+// (not folded into horseCareFollowupResponse above) because by this point
+// riderExperience/partySize are already persisted, so the condition is
+// simpler to express standalone.
+export async function horseCareDetailExplainerResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (!DETAIL_CONFUSION_MARKER.test(request.message)) return null;
+  const found = await loadHorseBookingTask(guestDbId).catch(() => null);
+  if (!found) return null;
+  const { task } = found;
+  if (!task.slots.riderExperience || !task.slots.partySize) return null;
+
+  return {
+    message: 'ขอโทษครับ ทองไทยหมายถึงข้อมูลคนขี่นิดนึงครับ เช่น มีเจ็บหลัง/เข่า/สะโพกไหม หรือกังวลเรื่องการทรงตัวไหมครับ จะได้ให้ทีมดูแลเหมาะขึ้นครับ',
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+async function persistHorseCareSlots(
+  guestDbId: string | null,
+  channel: BrainChannel,
+  slots: { riderExperience: string | null; partySize: number | null },
+): Promise<void> {
+  if (!guestDbId) return;
+  try {
+    const container = await loadTaskState(guestDbId);
+    const reusable = container.activeTask
+      && container.activeTask.type === 'activity_booking'
+      && !isTerminalTaskStatus(container.activeTask.status);
+    if (!reusable) return;
+    const patch: Record<string, unknown> = {};
+    if (slots.riderExperience !== null) patch.riderExperience = slots.riderExperience;
+    if (slots.partySize !== null) patch.partySize = slots.partySize;
+    const task = mergeTaskSlots(container.activeTask!, patch, ACTIVITY_BOOKING_REQUIRED_FIELDS);
+    await persistTaskState(guestDbId, { ...container, activeTask: task });
+  } catch (error) {
+    console.error('THONGTHAI_HORSE_CARE_SLOT_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
+}
+
 export function activityBookingFallbackDraft(request: BrainRequest): Record<string, unknown> | null {
   const userTurns = request.chatHistory.filter(turn => turn.role === 'user').map(turn => turn.content).concat(request.message);
   const text = userTurns.join('\n');
@@ -1747,6 +1868,39 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Service Mind / global override -- checked BEFORE any active-task
+  // continuation code (activityBookingFallbackResponse, the bare-horse
+  // responders, and everything after them), not just before transaction-
+  // processing and One-Mind as the original comment on this block said.
+  // Real production incident this closes: a mid-conversation complaint
+  // ("ทองไทยอธิบายไม่รู้เรื่อง เจิดนิสัยไม่ดี", sent right after selecting a
+  // horse) was being swallowed by horseSelectionWithContextResponse --
+  // classifyServiceFeedback's own marker gaps meant it didn't even
+  // classify as feedback at the time (fixed alongside this reorder: see
+  // THONGTHAI_RESPONSE_MENTION/SYSTEM_FEEDBACK_MARKER/COMPLAINT_MARKER in
+  // _service-mind-feedback-intent.ts), and because it happened to contain
+  // "ทองไทย", the bare-horse-selection machinery treated it as a horse
+  // pick instead. An active booking/activity context must NEVER be able
+  // to swallow a complaint, staff mention, safety report, compliment, or
+  // system-quality comment -- this is now enforced by ORDER, not by each
+  // downstream responder having to individually remember to yield to
+  // feedback (which is exactly what silently broke before).
+  const serviceFeedback = await deterministicServiceFeedbackResponse(request, channel, guestDbId).catch(error => {
+    console.error('THONGTHAI_SERVICE_FEEDBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (serviceFeedback) {
+    const polished = polishedResponse(serviceFeedback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   const earlyActivityFallback = await activityBookingFallbackResponse(request, guestDbId, channel).catch(error => {
     console.error('THONGTHAI_ACTIVITY_HISTORY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
@@ -1806,15 +1960,34 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  // Service Mind -- see deterministicServiceFeedbackResponse's own header
-  // comment for why this must be checked this early (before any
-  // transaction-processing code, before One-Mind, before domain routing).
-  const serviceFeedback = await deterministicServiceFeedbackResponse(request, channel, guestDbId).catch(error => {
-    console.error('THONGTHAI_SERVICE_FEEDBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+  // The continuation of horseSelection's own care question -- answers it
+  // ("ไม่เคยครับมาคนเดียว") and asks the next specific question, instead of
+  // falling through to a generic "need more detail" that never says what.
+  const horseCareFollowup = await horseCareFollowupResponse(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_HORSE_CARE_FOLLOWUP_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
   });
-  if (serviceFeedback) {
-    const polished = polishedResponse(serviceFeedback, channel);
+  if (horseCareFollowup) {
+    const polished = polishedResponse(horseCareFollowup, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // If the customer is confused by the health/balance question itself
+  // ("รายละเอียดอะไรครับ?"), explain exactly what's being asked rather than
+  // repeating anything vague.
+  const horseCareDetailExplainer = await horseCareDetailExplainerResponse(request, guestDbId).catch(error => {
+    console.error('THONGTHAI_HORSE_CARE_DETAIL_EXPLAINER_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (horseCareDetailExplainer) {
+    const polished = polishedResponse(horseCareDetailExplainer, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

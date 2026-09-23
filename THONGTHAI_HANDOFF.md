@@ -3635,3 +3635,121 @@ success; no DB migration; no unrelated production data mutated. This
 round also did not need to touch or seed anything in the real production
 database -- the reproduction was entirely local to this session's test
 harness.
+
+## Global Feedback Override (scoped subset of "Master Rebuild") -- 2026-09-23
+
+Owner requested a full "Central Conversation OS" rebuild spanning 12
+business units, a new global-priority engine, a new state schema, and 20
+acceptance tests. **That full rebuild was not attempted this round** --
+it is a multi-week architectural initiative, and building it in one pass
+without the same reproduction/load-bearing-verification rigor this whole
+engagement has required would risk exactly the "claimed fixed, production
+still broken" pattern from the two immediately-prior rounds. This round
+instead fixed the two concrete, SEVERE, precisely-specified live failures
+(D and E) with full rigor, plus the one precedence rule the task called
+"mandatory": feedback/safety must never be swallowed by an active task.
+
+**Failure E (severe) -- root cause found and fixed.** The exact
+reproduction ("ทองไทยอธิบายไม่รู้เรื่อง เจิดนิสัยไม่ดี", sent right after
+selecting a horse) did not classify as feedback AT ALL:
+`classifyServiceFeedback`'s markers only recognized "ทองไทยพูดไม่รู้เรื่อง"
+(verb พูด), not "อธิบายไม่รู้เรื่อง" (verb อธิบาย), and only recognized
+"พูดไม่ดี"/"ทำไม่ดี" for a staff complaint, not "นิสัยไม่ดี" -- a genuinely
+common, natural Thai phrase for "bad attitude." Because it didn't
+classify, and because the message happened to contain the substring
+"ทองไทย", `isBareAmbiguousHorseSelection`/`horseSelectionWithContextResponse`
+treated it as a horse pick instead (horse context was already active).
+Fixed both marker gaps (`THONGTHAI_RESPONSE_MENTION`, `SYSTEM_FEEDBACK_
+MARKER`, `COMPLAINT_MARKER`, `BARE_NAME_BEHAVIOR_RE`, the `staff_behavior`
+issue-keyword pattern -- all in `_service-mind-feedback-intent.ts`).
+
+**Also moved `deterministicServiceFeedbackResponse` to run BEFORE any
+active-task continuation code** in `thongthai-chat.ts`'s precedence chain
+(previously after `activityBookingFallbackResponse` and the bare-horse
+responders) -- this directly implements the task's own "mandatory"
+global-priority requirement (feedback must outrank active-task
+continuation) as an ORDERING guarantee, not something each downstream
+responder has to individually remember. **Honesty check on this specific
+change**: empirically verified (by reverting JUST the reorder while
+keeping the marker fixes) that the reorder was NOT independently load-
+bearing for this round's test set -- the marker fixes alone were
+sufficient, because `activityBookingFallbackDraft`/`isBareAmbiguousHorseSelection`
+both already had their own `mentionsThongthaiResponse` veto, which the
+broadened marker now correctly triggers regardless of check order. The
+reorder is kept anyway as genuine architectural hardening (protects
+against a FUTURE marker gap, or a future active-task responder that
+doesn't share that same veto) and because the task explicitly required it
+as a standing rule -- but it is reported honestly as defense-in-depth
+here, not falsely claimed as the fix that made today's tests pass.
+
+**Failure D -- root cause found and fixed.** `horseSelectionWithContextResponse`'s
+own care question ("เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?", added the
+previous round) had no continuation -- the customer's answer named no
+horse/activity keyword, matched nothing deterministic, and fell through
+to the One-Mind orchestrator's generic "ขอรายละเอียดเพิ่มอีกนิดครับ"
+clarification, which never says what's missing -- so asking "รายละเอียด
+อะไรครับ?" back just got the SAME vague line again. Added (both in
+`thongthai-chat.ts`):
+- `horseCareFollowupResponse` -- parses the answer (`ไม่เคย`/`เคย` for
+  rider experience, `คนเดียว`/a number for party size via the existing
+  `extractPartySize`), persists it onto the active `activity_booking`
+  task's `slots` (via `_task-state.ts`'s `mergeTaskSlots`), and asks the
+  next SPECIFIC question (health/balance concerns) -- matches the task's
+  own example reply almost verbatim.
+- `horseCareDetailExplainerResponse` -- if the customer is confused by
+  that question ("รายละเอียดอะไรครับ?"), explains EXACTLY what's being
+  asked instead of repeating anything vague -- matches the task's own
+  example reply verbatim.
+
+**Explicitly NOT built this round** (the rest of the "Master Rebuild"
+ask): a single `_conversation-os.ts`/global-priority-engine file; the
+11-item global message processing order (safety/complaint/staff-mention/
+compliment/system-feedback/change-topic/weather/domain-intent/active-
+task/slot-filling/LLM) as one unified ordering rule across ALL domains
+(this round only ordered feedback ahead of horse-booking continuation
+specifically); domain care-profiles/playbooks for ATV, archery,
+restaurant, cafe, homestay, OTOP, journey planning, or the first-time-
+visitor ecosystem overview (these still use their existing, separately-
+built deterministic responders from earlier phases of this engagement,
+which were NOT audited or rebuilt this round); the full state schema
+(group_size/customer_type/has_child/child_age/accessibility_needs/etc.)
+-- only `riderExperience`/`partySize` were added, scoped to the horse
+domain; explicit safety/compliment/change-topic global overrides for
+domains other than horse-riding; and the `CONVERSATION_OS_ROUTE`/
+`GLOBAL_OVERRIDE_DETECTED`/etc. observability log lines. A mixed
+complaint's customer-facing REPLY text also still reflects only ONE
+`feedbackType` (whichever of system_feedback/complaint the classifier's
+if/else chain matches first) even though the structured DATA capture
+(`person_mentions`, `issue_keywords`, `staff_name`) correctly includes
+BOTH halves regardless -- the task's own example reply explicitly
+acknowledges both halves in one sentence, which would need a genuine
+multi-classification composer this round did not build.
+
+**Files changed**: `netlify/functions/_service-mind-feedback-intent.ts`
+(marker fixes), `netlify/functions/thongthai-chat.ts` (precedence
+reorder, `horseCareFollowupResponse`, `horseCareDetailExplainerResponse`,
+`persistHorseCareSlots`, `loadHorseBookingTask`). **Tests**: `tests/
+global-feedback-override.test.ts`, 16 new tests, all through the full
+signed LINE webhook, covering the exact D and E reproductions plus 10
+regression checks (horse flow, weather, casual, group ops, compliment
+classification, horse comparison). **Full suite: 867/867 passing** (851
+prior + 16 new). Load-bearing verified for the marker fix (disabling
+`นิสัยไม่ดี` broke exactly the one dependent test) and for the care-
+followup responders (disabling broke exactly the two dependent tests);
+the precedence reorder was checked and found NOT independently load-
+bearing for this test set, reported honestly above rather than claimed.
+
+**Owner's stated acceptance bar** ("the system must feel like a real
+ทำมา-ชาติ host across all business units") is **not yet met** by this
+round alone -- only the horse-riding domain and the feedback-override
+mechanism were addressed. If the owner wants the remaining 10+ business
+units built out to the same before/during/after playbook depth (ATV,
+archery, restaurant, cafe, homestay, OTOP, journey, ecosystem overview,
+plus explicit global safety/compliment/change-topic overrides for all of
+them, plus the full state schema and observability logging), that is
+recommended as a separate, explicitly-scoped follow-up initiative -- this
+round's honest recommendation, not a decision made unilaterally on the
+owner's behalf.
+
+**Confirmations**: no booking/order/payment created; no fake notification
+success; no DB migration; no unrelated production data mutated.
