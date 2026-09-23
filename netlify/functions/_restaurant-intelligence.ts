@@ -152,10 +152,24 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
   if (hasNegative(text,'ปลาร้า')) avoidIngredients.push('น้ำปลาร้า');
   if (hasNegative(text,'กุ้ง(?:แห้ง)?')) avoidIngredients.push('กุ้งแห้ง');
   if (hasNegative(text,'ถั่ว(?:ลิสง)?')) avoidIngredients.push('ถั่วลิสงคั่ว');
-  if (hasAllergy(text,'ถั่ว(?:ลิสง)?')) allergenFlags.push('peanut');
-  if (hasAllergy(text,'กุ้ง')) allergenFlags.push('shrimp');
-  if (hasAllergy(text,'ไข่')) allergenFlags.push('egg');
-  if (hasAllergy(text,'ปลา')) allergenFlags.push('fish');
+  // Allergy safety net: a curated menu item's profile.allergenFlags tag
+  // (checked in isHardExcluded) requires someone to have manually tagged
+  // that item -- real production data (and this repo's own test seed
+  // data) routinely has NO curated profile at all, which left an allergy
+  // statement relying SOLELY on a tag that's usually never set. A real
+  // incident this closes: "แพ้กุ้ง" (shrimp allergy) still recommended
+  // "ต้มยำกุ้ง" (shrimp tom yum) because its curated allergenFlags was
+  // empty, even though its raw ingredient_names literally lists "กุ้ง".
+  // Also pushing the bare ingredient word into avoidIngredients makes the
+  // existing raw-ingredient-name cross-check (see isHardExcluded below)
+  // catch this independent of curated-profile completeness -- the
+  // conservative choice for a food-safety check: an occasional over-broad
+  // exclusion (e.g. "ถั่วงอก" bean sprouts sharing the "ถั่ว" root with
+  // peanut) is far safer than serving an allergen.
+  if (hasAllergy(text,'ถั่ว(?:ลิสง)?')) { allergenFlags.push('peanut'); avoidIngredients.push('ถั่ว'); }
+  if (hasAllergy(text,'กุ้ง')) { allergenFlags.push('shrimp'); avoidIngredients.push('กุ้ง'); }
+  if (hasAllergy(text,'ไข่')) { allergenFlags.push('egg'); avoidIngredients.push('ไข่'); }
+  if (hasAllergy(text,'ปลา')) { allergenFlags.push('fish'); avoidIngredients.push('ปลา'); }
 
   const constraintsText = norm((input.constraints ?? []).join(' '));
 
@@ -177,9 +191,9 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
   if (/ไม่กินปลา|งดปลา/u.test(constraintsText)) avoidProteins.push('fish');
   if (/ไม่กินไข่|งดไข่/u.test(constraintsText)) avoidProteins.push('egg');
   if (/ไม่เอาปลาร้า|ไม่กินปลาร้า/u.test(constraintsText)) avoidIngredients.push('น้ำปลาร้า');
-  if (/แพ้ถั่ว/u.test(constraintsText)) allergenFlags.push('peanut');
-  if (/แพ้กุ้ง/u.test(constraintsText)) allergenFlags.push('shrimp');
-  if (/แพ้ไข่/u.test(constraintsText)) allergenFlags.push('egg');
+  if (/แพ้ถั่ว/u.test(constraintsText)) { allergenFlags.push('peanut'); avoidIngredients.push('ถั่ว'); }
+  if (/แพ้กุ้ง/u.test(constraintsText)) { allergenFlags.push('shrimp'); avoidIngredients.push('กุ้ง'); }
+  if (/แพ้ไข่/u.test(constraintsText)) { allergenFlags.push('egg'); avoidIngredients.push('ไข่'); }
 
   if (includesAny(text, [/มาครั้งแรก/u,/ครั้งแรก/u,/signature/i,/ซิกเนเจอร์/u,/ขึ้นชื่อ/u,/แนะนำ.*ร้าน/u])) goals.push('signature');
   if (includesAny(text, [/อีสานแท้/u,/พื้นบ้าน/u,/local/u,/authentic/i])) goals.push('authentic');
