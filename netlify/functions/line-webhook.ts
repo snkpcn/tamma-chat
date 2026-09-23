@@ -289,6 +289,29 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
 
   if (event.message?.type !== 'text' || typeof event.message.text !== 'string') return;
 
+  // ผูกทีม must be handled BEFORE any other group-text handler, and
+  // regardless of whether this group is already bound to a team -- that
+  // is the entire point of the bind command (an unbound group is the
+  // NORMAL, expected state for a group that has never been bound yet).
+  // Every handler below this point (payment/fuel/restaurant-stock/ops)
+  // already looks up this group's EXISTING binding and safely returns
+  // null/false when there isn't one, so in practice none of them could
+  // ever swallow a bind command -- but checking bind first removes even
+  // the theoretical risk of a future change in one of those handlers
+  // silently shadowing it, and matches the owner's own stated invariant.
+  // See THONGTHAI_HANDOFF.md's "LINE Full Audit" / "Owner Group Only"
+  // entries.
+  if (/^ผูกทีม\s+/iu.test(event.message.text.trim())) {
+    const bindReply = await handleLineOpsGroupMessage({
+      targetType: sourceType,
+      targetId,
+      userId: event.source?.userId ?? null,
+      text: event.message.text,
+    });
+    if (bindReply) await replyToLine(event.replyToken, bindReply, accessToken);
+    return;
+  }
+
   const paymentReply = await handleLinePaymentGroupText({
     targetId,
     userId: event.source?.userId ?? null,

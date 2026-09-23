@@ -3252,3 +3252,82 @@ success (both bind and chat failure paths report their real outcome,
 never a claimed success); no unrelated production data mutated; deploy
 completion cannot be verified from this session (egress to
 `*.netlify.app` is blocked here, as in every prior round).
+
+## Owner Group Only -- 2026-09-23
+
+New live evidence: an EXISTING, already-bound "activity" group replies
+correctly ("รับงาน" / "300"), proving the webhook, group receipt, group
+reply, and ops routing all work in general right now. A brand-new "owner"
+group (bot just added) is silent for "ผูกทีม เจ้าของ"/"owner"/"admin".
+
+**What this session could and could not check.** This sandbox has no
+access to this project's live Netlify function logs (no log-query tool
+or API is available here) -- it cannot pull the actual `LINE_EVENT_
+RECEIVED`/`LINE_ROUTE_SELECTED`/`LINE_GROUP_BIND_ATTEMPT` lines for the
+12:34-12:35 window the owner reported. **The owner (or anyone with
+Netlify dashboard/CLI access) needs to pull those logs directly** --
+that is the one piece of evidence that would conclusively separate
+"LINE never delivered the owner-group event" from "it arrived and
+something here dropped it," and this session cannot substitute for it.
+
+**What WAS checked, exhaustively, at the code level**: re-read every
+single handler in the group-text precedence chain (`handleLinePayment
+GroupText`, `paymentTypedConfirmationGuard`, `handleLineFuelText`,
+`handleRestaurantStockText`, `handleBookingOpsCommand`) that runs BEFORE
+`handleLineOpsGroupMessage`'s bind-command handling, specifically testing
+the round's own hypothesis ("a bound-group-only guard silently drops the
+bind command before it's reached"). Every one of them either (a) doesn't
+even look up a binding for text shaped like "ผูกทีม ...' (their regexes
+require a booking code, a payment code, or a digit amount -- none of
+those patterns match), or (b) looks up the binding and returns null/false
+immediately when none exists. None of them throw for an unbound group.
+This was proven, not assumed: `tests/owner-group-only.test.ts` reproduces
+the owner's EXACT 4-message rapid-rebind sequence against a brand-new,
+never-touched target id through the FULL signed webhook handler, and all
+four get the correct success reply. **No code defect reproduces this
+symptom.**
+
+**Change made anyway**: restructured `line-webhook.ts`'s `handleOpsEvent`
+so a `ผูกทีม ...` message is checked and handled FIRST, before any of
+the four handlers above, per the owner's own stated invariant ("binding
+must work in an unbound group -- that's the whole point"). This is
+defensive/architectural, not a bug fix for the reported symptom (proven
+by disabling it and re-running `tests/owner-group-only.test.ts`: all 7
+tests still passed, confirming the four upstream handlers were already
+safe for this text before the reorder). It does remove the theoretical
+risk of a FUTURE change to one of those handlers accidentally shadowing
+the bind command.
+
+**Given the code is now proven correct at this level of detail twice
+in a row**, and the activity group proves the OA-wide webhook/response
+mode is not the blocker, the remaining live hypotheses are things this
+session cannot observe from here:
+- The prior LINE Full Audit fix has not actually reached the live
+  Netlify deployment yet (this session cannot verify a deploy).
+- Something specific to how this particular new group was created
+  (invited vs added directly, or a delay in LINE's own webhook
+  registration for a just-created group) is preventing LINE itself from
+  delivering `message` events for THIS group specifically, even though
+  OA-wide settings are fine. Owner action: check the LINE Developers
+  Console webhook event log filtered to this group's timeframe -- if
+  no event appears there at all, this is entirely LINE-side, not this
+  codebase.
+
+**Files changed**: `netlify/functions/line-webhook.ts` (bind-first
+precedence). **Tests**: `tests/owner-group-only.test.ts`, 7 new tests,
+all through the full signed webhook, including the owner's exact 4-
+message sequence against a fresh group id and a check that an ALREADY-
+BOUND activity group's own commands are unaffected by the reorder.
+**Full suite: 807/807 passing** (800 prior + 7 new).
+
+**Owner retest / diagnosis needed from your side**: pull Netlify function
+logs for the owner group's exact timestamp and check for `LINE_EVENT_
+RECEIVED`. Absent entirely -> LINE-side (see LINE Developers Console
+webhook event log). Present but no `LINE_GROUP_BIND_ATTEMPT` -> report
+back immediately, that would be a genuine code-path finding this session
+did not manage to reproduce and would need the exact log line to chase
+further.
+
+**Confirmations**: no DB migration; no booking/order/payment created; no
+fake notification success; no unrelated production data mutated; deploy
+completion not verifiable from this session.
