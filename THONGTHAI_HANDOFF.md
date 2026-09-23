@@ -2919,3 +2919,32 @@ fail, nothing else). `brainRequest()` test helper gained an optional
 4th `history` parameter so multi-turn scenarios can be tested at all
 (it previously always sent an empty `chatHistory`, which is why this
 class of bug had no prior test coverage).
+
+### FOLLOW-UP BUGFIX — horse comparison vs. selection collision
+
+A second production smoke report claimed "ทองไทยกับภาราดรต่างกันยังไง"
+(asking how the two horses differ) was ALSO being misread as selecting
+ภาราดร and prompting for booking details.
+
+Investigation: this exact phrase, plus all 13 scenarios the report's own
+test list required, were already answered correctly by the previous fix
+above (`composeHorseComparisonResponse` in `_local-concierge-response.ts`
+already produces owner-configured ride-feel/personality facts for it,
+almost verbatim to the report's own "expected" wording) -- confirmed via
+13 new regression tests, all passing against the already-merged code
+with zero further changes needed. Most likely explanation: the report
+was run against a stale production deploy that hadn't yet picked up the
+previous fix (this session still cannot verify Netlify deploy completion
+-- egress to `tamma-chat.netlify.app` remains blocked).
+
+Still extended coverage for a few additional phrase shapes the report's
+broader "REQUIRED BEHAVIOR" section named beyond the strict test list,
+all narrowly scoped (`_local-concierge-intent.ts`'s `horse_comparison`
+classifier): bare "ต่างกัน" (was "ต่างกันยังไง" only, so "ต่างกันไหม" now
+matches too), a single named horse's personality question
+("ทองไทยนิสัยเป็นไง" -- deliberately a different shape than the
+"ตัวไหน + attribute" comparison `detectCompareEntities` already owns, so
+it can never collide with that), and an explicit comparison request
+scoped to an actual horse/riding mention ("ขอเปรียบเทียบม้าสองตัว").
+5 more tests (18 total this round, 745/745 overall), load-bearing
+verified.
