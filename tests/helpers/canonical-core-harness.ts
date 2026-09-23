@@ -47,6 +47,26 @@ function decodeQuery(url: string): URLSearchParams {
   return new URLSearchParams(qIndex >= 0 ? url.slice(qIndex + 1) : '');
 }
 
+/** Real PostgREST only returns the columns actually listed in `select=` --
+ *  a query that forgets to select a column it later reads gets `undefined`
+ *  back, not a value the mock happened to have lying around. A real
+ *  production incident this closes: channelForTeam's own select list
+ *  omitted target_id_hash, so the safety_issue owner_general dedup
+ *  compared `undefined === undefined` and silently skipped every
+ *  escalation after the first target -- invisible to every test here
+ *  because this mock, before this fix, returned every stored field
+ *  regardless of `select=`. Applied narrowly at ops_notification_channels'
+ *  own GET handler (where the incident was), not swept across every
+ *  mocked table in this file. */
+function projectSelect<T extends Record<string, unknown>>(row: T, query: URLSearchParams): Partial<T> {
+  const selectParam = query.get('select');
+  if (!selectParam) return row;
+  const columns = selectParam.split(',').map(col => col.trim()).filter(Boolean);
+  const projected: Partial<T> = {};
+  for (const column of columns) projected[column as keyof T] = row[column as keyof T];
+  return projected;
+}
+
 /** A minimal, realistic default catalog -- enough for every domain's
  *  discovery/read-only questions to get a real, non-empty, honest answer
  *  instead of "no data" purely because the mock is empty. Individual
@@ -334,6 +354,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     // FAILURE is not a scenario this harness needs to model today.
     if (u.includes('api.line.me/v2/bot/message/push')) {
       const body = JSON.parse(String(init.body ?? '{}')) as { to?: string };
+      recordPost('line_push', body);
       const failing = [...failingPushTeamCodes].some(team => body.to === `line-group-${team}`);
       if (failing) return new Response(JSON.stringify({ message: 'mocked push failure' }), { status: 500 });
       return jsonResponse({});
@@ -349,7 +370,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
       const channel = teamCode
         ? opsChannels.get(teamCode)
         : [...opsChannels.values()].find(c => c.target_id_hash === targetHash);
-      return jsonResponse(channel ? [channel] : []);
+      return jsonResponse(channel ? [projectSelect(channel, query)] : []);
     }
     // bindLineTeamChannel's own write path (_ops-notifications.ts) --
     // upserts by (team_code, provider). Recorded via recordPost so tests
@@ -415,6 +436,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
         opsDeliverySeq += 1;
         const row = { id: `ops-delivery-${opsDeliverySeq}`, status: body.status ?? 'pending' };
         opsDeliveries.set(body.idempotency_key, row);
+        recordPost('ops_notification_deliveries', { ...body, id: row.id });
         return jsonResponse([row]);
       }
       if (method === 'GET') {
