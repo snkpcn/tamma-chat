@@ -28,7 +28,7 @@ import {
 } from './_thongthai-runtime-v3';
 import { activityAssetFromText, formatActivityAssetNote } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
-import { polishCustomerMessage } from './_chat-copy-style';
+import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
@@ -581,7 +581,17 @@ function formatRestaurantConstraintAck(advisor: any): string {
   return unique.length ? `✅ คัดเมนูตามที่บอกให้แล้วครับ: ${unique.join(' · ')}` : '';
 }
 
-function formatAdvisorMessage(advisor: any): string {
+// "Do not dump long menu/product lists unless user asks for a list" (see
+// THONGTHAI_HANDOFF.md's "Post-PR67 Polish" entry) -- an explicit request
+// for the full catalog or prices widens formatAdvisorMessage's default
+// top-3 host-style cap back out, instead of always showing everything.
+const FULL_MENU_LIST_MARKER = /ขอเมนูทั้งหมด|เอามาหมด|ขอดูเมนูทั้งหมด|ส่งเมนูละเอียด|มีอะไรบ้าง.*(?:หมด|ทั้งหมด)/u;
+
+function wantsFullRestaurantList(message: string): boolean {
+  return FULL_MENU_LIST_MARKER.test(message);
+}
+
+function formatAdvisorMessage(advisor: any, fullList = false): string {
   const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
   if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
     const [first, second] = advisor.comparison;
@@ -617,22 +627,43 @@ function formatAdvisorMessage(advisor: any): string {
       'ถ้าชุดนี้โอเค พิมพ์ “เอาชุดนี้” ได้เลยครับ',
     ].filter(Boolean).join('\n');
   }
-  const rows = Array.isArray(advisor?.recommendations) ? advisor.recommendations.slice(0, advisor.mode === 'pairing' ? 3 : 4) : [];
-  if (rows.length) {
+  // Host-style, not a menu dump: allergy/spice caution (if any) leads,
+  // top 3 items by default -- the full catalog only when the customer
+  // explicitly asks (wantsFullRestaurantList) -- and one useful next step
+  // instead of a per-item sales pitch. See THONGTHAI_HANDOFF.md's
+  // "Post-PR67 Polish" entry for the evidence this closes: a real
+  // production reply for an allergy question led with a long item/price
+  // dump instead of care first.
+  const allRows = Array.isArray(advisor?.recommendations) ? advisor.recommendations : [];
+  if (allRows.length) {
+    const shown = limitAdvisoryList(allRows, fullList ? allRows.length : 3);
+    const moreAvailable = allRows.length > shown.length;
     const constraintAck = formatRestaurantConstraintAck(advisor);
+    const allergyNotice = notices.find((notice: string) => /สารก่อภูมิแพ้/u.test(notice));
+    const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
+    const partySizeKnown = parsed?.partySize != null;
     const intro = advisor?.mode === 'pairing'
-      ? '🍽️ มีเมนูนี้แล้ว เพิ่มอีกนิดจะบาลานซ์โต๊ะกำลังดีครับ'
-      : constraintAck ? '🍽️ จากเมนูที่มีตอนนี้ ทองไทยแนะนำ' : '🍽️ เมนูที่น่าลองตอนนี้';
-    return [
+      ? 'มีเมนูนี้แล้ว เพิ่มนี้จะบาลานซ์โต๊ะกำลังดีครับ'
+      : (constraintAck || allergyNotice) ? 'จากเมนูที่มี ทองไทยแนะนำ' : '🍽️ เมนูที่น่าลองตอนนี้';
+    const closing = advisor?.mode === 'pairing'
+      ? ''
+      : !partySizeKnown ? 'มากี่คนครับ เดี๋ยวทองไทยช่วยจัดให้พอดีโต๊ะครับ'
+        : moreAvailable && !fullList ? 'ถ้าอยากดูเมนูละเอียด ทองไทยส่งต่อให้ได้ครับ' : '';
+    return composeLineShortReply([
+      // Allergy/dietary caution always leads (hard rule: care/safety
+      // note first) -- constraintAck confirms exactly what was filtered
+      // ("ไม่มีกุ้งแห้ง · เลี่ยงกุ้ง"), allergyNotice adds the staff-notify
+      // caution a filtered ingredient list alone can't guarantee.
       constraintAck,
+      allergyNotice,
       intro,
-      '',
-      ...rows.map((row: any) => {
-        const reason = Array.isArray(row.reasons) && row.reasons.length ? row.reasons[0] : '';
-        return `• ${row.name} — ${formatMoney(row.price)}${reason ? `\n  ${reason}` : ''}`;
+      ...shown.map((row: any) => {
+        const reason = fullList && Array.isArray(row.reasons) && row.reasons.length
+          ? trimLongRecommendationForLine(row.reasons[0]) : '';
+        return `• ${row.name} — ${formatMoney(row.price)}${reason ? ` (${reason})` : ''}`;
       }),
-      notices[0] ? `\n⚠️ ${notices[0]}` : '',
-    ].filter(Boolean).join('\n');
+      closing,
+    ]);
   }
   return notices[0] ?? 'ตอนนี้ยังไม่มีเมนูที่ตรงเงื่อนไขและพร้อมขายในสต๊อกครับ';
 }
@@ -1017,10 +1048,21 @@ function deterministicExperienceDiscoveryResponse(
 // local context must never swallow an explicit booking/confirm/signup/
 // redeem intent (see Gates 1-3's exactly-once/no-premature-transaction
 // discipline, which this must not regress).
+// A specific food allergy ("แพ้กุ้ง กินอะไรได้บ้าง") must defer to the
+// restaurant SOT advisor below (deterministicRestaurantResponse), which
+// does real per-item, ingredient-based allergy filtering against the
+// live menu -- local concierge's food_culture answer is a generic Isan-
+// cuisine description with no allergy awareness at all, and would
+// otherwise win here first (FOOD_VISITOR_MARKER's "กินอะไรได้" matches
+// this exact phrasing). Same "defer to the more specific, safety-aware
+// handler" precedent as every care/safety guard in this codebase.
+const LOCAL_CONCIERGE_ALLERGY_DEFER_RE = /แพ้\s*(?:ถั่ว(?:ลิสง)?|กุ้ง|ไข่|ปลา|อาหารทะเล|นม)/u;
+
 async function deterministicLocalConciergeResponse(request: BrainRequest): Promise<BrainResponse | null> {
   if (hasExplicitTransactionIntent(request.message)) return null;
   const match = classifyLocalConciergeQuestion(request.message);
   if (!match) return null;
+  if (match.category === 'food_culture' && LOCAL_CONCIERGE_ALLERGY_DEFER_RE.test(request.message)) return null;
   return {
     message: await composeLocalConciergeResponse(match, request.message),
     intent: 'information',
@@ -1051,7 +1093,7 @@ async function deterministicRestaurantResponse(
   });
   const advisorContext = restaurantAdvisorContextUpdate(request, runtime);
   return {
-    message: formatAdvisorMessage(advice),
+    message: formatAdvisorMessage(advice, wantsFullRestaurantList(request.message)),
     intent: advice.mode === 'compare' ? 'information' : 'recommendation',
     contextUpdates:{},
     journeyAction:{type:'none',journey:null},
@@ -2405,11 +2447,11 @@ async function deterministicServiceFeedbackResponse(
 ): Promise<BrainResponse | null> {
   const match = classifyServiceFeedback(request.message);
   if (!match) return null;
-  const { notificationQueued } = await createFeedbackEvent({
+  const eventResult = await createFeedbackEvent({
     match, message: request.message, channel, guestDbId,
   });
   return {
-    message: composeServiceFeedbackResponse(match, notificationQueued),
+    message: composeServiceFeedbackResponse(match, eventResult.notificationQueued, eventResult),
     intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },

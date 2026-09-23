@@ -4351,3 +4351,128 @@ guarantee anywhere in new or existing wording; no DB migration; no
 unrelated production data mutated; no fabricated fact, price, or
 availability anywhere (restaurant menu source confirmed real via direct
 production query, not assumed).
+
+## Post-PR67 Polish -- safety escalation, LINE brevity, host-style restaurant -- 2026-09-23
+
+After PR #67 fixed the legacy-booking precedence bug, the owner reported
+production was much better but not yet polished: a safety report's
+owner/general LINE group notification was invisible even though the
+activity team's own group got it; restaurant/advisory replies were too
+dense for LINE; and a partial notification failure wasn't reflected
+precisely in the customer-facing reply. Same "fix the cross-cutting rule,
+not each symptom one by one" instruction as the round itself asked for.
+
+**Root cause (Task 1)**: `_ops-notifications.ts`'s owner_general
+escalation for a feedback event was scoped to `severity === 'urgent'`
+only. A real safety report classified via `SAFETY_CONCERN_MARKER`
+("พื้นลื่นมาก ตอนเล่น ATV น่ากลัว", "เกือบล้ม", "ไม่มีคนดู", etc.) scores
+`severity: 'high'`, not `'urgent'` -- `URGENT_SAFETY_MARKER` is reserved
+for an in-progress injury ("บาดเจ็บ"). So almost every real safety report
+never triggered the escalation at all, and the owner/general group
+never saw it, exactly matching the live evidence.
+
+**Fix (Task 1)**: `needsOwnerEscalation` now returns true for
+`feedback_type === 'safety_issue'` OR `severity === 'urgent'` -- a safety
+report escalates to `unique([domainTeam, owner_general])` regardless of
+severity, matching the task's own explicit routing rule. New
+`notifyFeedbackEventTargets` (replacing the old single-status
+`notifyFeedbackEvent` internals) sends to every route target, deduping
+by the PHYSICAL LINE group (`target_id_hash`, not the channel row id --
+two different team codes could in principle be bound to the same real
+group) so the same message is never pushed twice. `dispatchEntityNotification`
+keeps its existing single-status contract for its other callers
+(`ops-notify.ts`) by reflecting the primary/domain team's own outcome.
+
+**Per-target status representation (Task 1)**: `notification_status`'s
+real CHECK constraint (`supabase/migrations/..._ops_feedback_events_v1.sql`)
+only allows one scalar value -- adding a "partial" state would need a
+schema migration. Instead, the full per-target breakdown
+(`Array<{team, status}>`) is written non-destructively into
+`internal_notes`, an existing jsonb column no other code was using. Logs
+added: `SAFETY_ESCALATION_TARGETS`, `FEEDBACK_NOTIFY_TARGET_ATTEMPT`,
+`FEEDBACK_NOTIFY_TARGET_RESULT`, `FEEDBACK_NOTIFY_PARTIAL_FAILURE`.
+
+**Customer reply matches notification result (Task 4)**: `_service-mind-
+feedback-response.ts`'s `composeSafetyIssueResponse` now takes the real
+per-target result and picks precise wording -- both sent ("ส่งให้ทีม...
+และเจ้าของตรวจสอบแล้วครับ"), domain sent/owner failed ("...ส่วนแจ้งเจ้าของ
+ยังไม่สำเร็จ ทีมจะตรวจสอบต่อครับ"), owner sent/domain not bound, neither
+sent ("ตอนนี้ระบบแจ้งเตือนทีมไม่สำเร็จ...บันทึกเรื่องไว้แล้ว"), and storage
+itself failing (never claims stored or sent at all). Distinguishes
+`not_bound` (no channel exists) from a genuine `failed` push (channel
+bound, the LINE API call itself threw) -- both degrade honestly, neither
+is ever reported as success.
+
+**LINE response style (Task 2)**: three small, reusable helpers added to
+`_chat-copy-style.ts` -- `limitAdvisoryList` (caps a recommendation list,
+default 3), `trimLongRecommendationForLine` (word-boundary-safe
+truncation for a per-item reason line), `composeLineShortReply` (joins
+non-empty parts, dropping any skipped optional line). Applied at the two
+responders the round's own evidence named as too dense (restaurant
+advisor, safety feedback reply) rather than a blanket rewrite of every
+reply in the codebase -- a global automatic "ครับ"-repetition stripper
+was considered and rejected as too high-regression-risk against ~950
+existing wording assertions; the two evidenced flows were fixed directly
+instead.
+
+**Restaurant host-style (Task 3)**: `formatAdvisorMessage`'s recommend/
+pairing branch (`thongthai-chat.ts`) now leads with the allergy/
+constraint caution (never a menu list first), caps items at 3 by default
+via `limitAdvisoryList`, drops the per-item sales-pitch reason line
+unless the customer explicitly asked for the full catalog
+(`wantsFullRestaurantList` -- "ขอเมนูทั้งหมด", "เอามาหมด", "ส่งเมนูละเอียด",
+etc.), and asks exactly one next question (group size, or a "more detail
+available" nudge once it's already known). A real precedence gap was
+also found and fixed along the way: `_local-concierge-intent.ts`'s
+`FOOD_VISITOR_MARKER` ("กินอะไรได้") matched "แพ้กุ้ง กินอะไรได้บ้าง" and
+answered with a generic, allergy-blind Isan-cuisine description BEFORE
+the restaurant advisor (which does real per-item ingredient filtering)
+ever got a turn -- `deterministicLocalConciergeResponse` now defers when
+the message names a specific allergy, the same "defer to the more
+specific, safety-aware handler" precedent used throughout this
+engagement.
+
+**Tests added**: `tests/post-pr67-polish.test.ts`, 20 tests -- Section A
+(5 tests, Task 1's exact routing/storage combinations: both bound, owner-
+only, domain-only, neither, and the same-physical-group dedup case),
+Task 4 (4 tests, using a new harness capability `programLinePushFailure`
+to simulate a genuine LINE API failure distinct from `not_bound`),
+Section B (4 tests, Task 3's exact restaurant scenarios), Section C (7
+tests, Task 5's regression list through the full signed LINE webhook).
+`tests/owner-general-line-binding.test.ts`'s tests 6-7 were updated (not
+just left broken) to assert the new, more precise per-target wording
+instead of the old, less accurate collapsed-boolean wording they
+previously encoded -- their own original intent (never fake an unbound
+escalation as sent) is unchanged.
+
+**Load-bearing verification**: reintroduced the exact routing bug
+(`needsOwnerEscalation` reverted to `severity === 'urgent'` only) and
+confirmed exactly the 8 tests tied to it (Section A's 5 + Task 4's
+first 3) failed, while the unrelated 12 tests (Task 4d, Section B,
+Section C) stayed green -- proving the new tests actually catch this
+class of regression, not just pass by coincidence. Restored the fix;
+all 20 pass again.
+
+**Full suite**: 964/964 passing (944 prior + 20 new), zero regressions.
+
+**Deploy status**: cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**Owner retest script**:
+1. "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" -> check the activity LINE group AND
+   the owner/general LINE group both receive the alert (bind both first
+   via "ผูกทีม activity" / "ผูกทีม เจ้าของ" if not already bound); check
+   backoffice "เสียงลูกค้า" shows the event.
+2. "ร้านอาหารมีอะไรแนะนำ แม่กินเผ็ดไม่ได้ แพ้กุ้ง" -> short, host-style
+   reply: allergy caution first, at most 3 items, asks group size.
+3. "สติ" -> clarification question, never the generic slow-fallback
+   apology.
+4. "อยากขับ ATV ไม่เคยขับ กลัวเร็ว" -> slow-start/team-briefing care
+   reply, never the legacy duration-first prompt.
+
+**Confirmations**: no booking/order/payment created; no schema migration
+(internal_notes is an existing, previously-unused column); no fake
+notification-success claim anywhere; no unrelated production data
+mutated; restaurant menu data and prices remain sourced from the real,
+verified `restaurant_menu_live` view, never invented.
