@@ -100,8 +100,19 @@ const SAFETY_MARKER = /ปลอดภัยไหม|พื้นลื่น|�
 // data, and never steals a case the existing mechanism already correctly
 // declines honestly.
 const HORSE_NAME_MARKER = /ภาราดร|ทองไทย/u;
-const HORSE_RIDE_FEEL_MARKER = /ขี่(?:นิ่ม|กระด้าง)|ขี่ยังไง|ขี่แบบไหน|ต่างกันยังไง/u;
+const HORSE_RIDE_FEEL_MARKER = /ขี่(?:นิ่ม|กระด้าง)|ขี่ยังไง|ขี่แบบไหน|ต่างกัน/u;
 const HORSE_CHOICE_MARKER = /ตัวไหนดี|ควรเลือกตัวไหน|เลือกตัวไหนดี/u;
+// A single named horse's personality question ("ทองไทยนิสัยเป็นไง") --
+// deliberately a DIFFERENT shape than the "ตัวไหน + attribute" comparison
+// HORSE_ATTRIBUTE_EXCLUSION_MARKER defers to detectCompareEntities for
+// (that shape always needs COMPARE_MARKER too, so it can never collide
+// with this one), just the horse's proper name asked about directly.
+const HORSE_NAMED_PERSONALITY_MARKER = /นิสัยเป็น(?:ไง|ยังไง)/u;
+// "ขอเปรียบเทียบม้าสองตัว" -- scoped to an actual horse/riding mention so a
+// generic "เปรียบเทียบ" elsewhere (e.g. comparing room rates) is never
+// misread as a horse question.
+const HORSE_MENTION_MARKER = /ม้า|ภาราดร|ทองไทย/u;
+const COMPARE_REQUEST_MARKER = /เปรียบเทียบ/u;
 const HORSE_ATTRIBUTE_EXCLUSION_MARKER = /นิสัย|อารมณ์|มือใหม่|เริ่มต้น|หัดขี่|อายุ|เพศ|ขนาด|น้ำหนัก/u;
 
 // --- explicit-transaction guard -----------------------------------------
@@ -165,9 +176,11 @@ export function classifyLocalConciergeQuestion(message: string): LocalConciergeM
   // generic activity answer. Yields on anything the existing compare-
   // entities mechanism already correctly owns (see
   // HORSE_ATTRIBUTE_EXCLUSION_MARKER's own comment above).
-  if (!HORSE_ATTRIBUTE_EXCLUSION_MARKER.test(text)
-    && (HORSE_RIDE_FEEL_MARKER.test(text) || (HORSE_NAME_MARKER.test(text) && HORSE_CHOICE_MARKER.test(text))
-      || (findActivityNode(text) === 'activity-horse' && HORSE_CHOICE_MARKER.test(text)))) {
+  if ((!HORSE_ATTRIBUTE_EXCLUSION_MARKER.test(text)
+      && (HORSE_RIDE_FEEL_MARKER.test(text) || (HORSE_NAME_MARKER.test(text) && HORSE_CHOICE_MARKER.test(text))
+        || (findActivityNode(text) === 'activity-horse' && HORSE_CHOICE_MARKER.test(text))))
+    || (HORSE_NAME_MARKER.test(text) && HORSE_NAMED_PERSONALITY_MARKER.test(text))
+    || (HORSE_MENTION_MARKER.test(text) && COMPARE_REQUEST_MARKER.test(text))) {
     return { category: 'horse_comparison' };
   }
 
