@@ -83,6 +83,17 @@ import {
 } from './_slot-parsers';
 import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask } from './_task-state';
 import { HORSE_FACTS } from './_local-concierge-knowledge';
+import {
+  asksIfSafe,
+  interpretCustomerType,
+  interpretExperience,
+  interpretFear,
+  interpretHealthConcerns,
+  mentionsSpeedFear,
+  interpretOverallHealthConcern,
+  noSafetyGuaranteeMessage,
+  type CustomerTypeSignal,
+} from './_semantic-hospitality-interpreter';
 
 export type {
   BrainRequest as ChatRequest,
@@ -1325,14 +1336,25 @@ export async function horseSelectionWithContextResponse(
 // experience/party size, and only when the message actually parses as an
 // answer to that -- otherwise it defers exactly like before.
 function parseRiderExperience(text: string): 'beginner' | 'experienced' | null {
-  if (/ไม่เคย/u.test(text)) return 'beginner';
-  if (/เคย/u.test(text)) return 'experienced';
-  return null;
+  return interpretExperience(text);
 }
+
+// A first-person-singular self-reference with no companion mention
+// anywhere in the message ("ผมไม่เคยขี่ครับ...") -- a genuine, if soft,
+// solo signal, used only as a last resort when neither an explicit
+// number nor "คนเดียว" is present. Real gap this closes: a compound
+// answer that names experience/health but never separately states party
+// size ("ผมไม่เคยขี่ครับ ไม่กังวลครับ ไม่ปวดหลัง") otherwise stalled the
+// flow waiting on a party-size question the customer had already
+// implicitly answered by speaking only about themselves.
+const SOLO_SELF_REFERENCE_RE = /^(?:ผม|ดิฉัน|หนู)(?!.*(?:กับ|พา|หลายคน|\d+\s*คน|มากัน))/u;
 
 function parsePartySizeFromCareAnswer(text: string): number | null {
   if (/คนเดียว/u.test(text)) return 1;
-  return extractPartySize(text);
+  const explicit = extractPartySize(text);
+  if (explicit) return explicit;
+  if (SOLO_SELF_REFERENCE_RE.test(text.trim())) return 1;
+  return null;
 }
 
 const HORSE_DETAIL_CLARIFICATION_QUESTION = 'มีเจ็บหลัง เจ็บเข่า เจ็บสะโพก หรือกังวลเรื่องการทรงตัวไหมครับ?';
@@ -1363,13 +1385,40 @@ export async function horseCareFollowupResponse(
   const partySize = parsePartySizeFromCareAnswer(request.message);
   if (!experience && !partySize) return null;
 
-  await persistHorseCareSlots(guestDbId, channel, {
-    riderExperience: experience ?? (task.slots.riderExperience as string | undefined) ?? null,
-    partySize: partySize ?? (task.slots.partySize as number | undefined) ?? null,
-  });
+  const resolvedExperience = experience ?? (task.slots.riderExperience as string | undefined) ?? null;
+  const resolvedPartySize = partySize ?? (task.slots.partySize as number | undefined) ?? null;
+  await persistHorseCareSlots(guestDbId, channel, { riderExperience: resolvedExperience, partySize: resolvedPartySize });
 
-  const experienceLabel = (experience ?? task.slots.riderExperience) === 'beginner' ? 'มือใหม่' : null;
-  const partyLabel = (partySize ?? task.slots.partySize) === 1 ? 'มาคนเดียว' : null;
+  const experienceLabel = resolvedExperience === 'beginner' ? 'มือใหม่' : null;
+  const partyLabel = resolvedPartySize === 1 ? 'มาคนเดียว' : null;
+
+  // A compound message can answer experience/party AND the health/balance
+  // question in one shot ("ผมไม่เคยขี่ครับ ไม่กังวลครับ ไม่ปวดหลัง") -- once
+  // both basics are resolved, check for that in the SAME message instead
+  // of asking a question the customer already answered.
+  if (resolvedExperience && resolvedPartySize) {
+    const healthConcern = interpretOverallHealthConcern(request.message);
+    if (healthConcern) {
+      await persistHorseHealthSlot(guestDbId, healthConcern);
+      const healthLabel = healthConcern === 'none' ? 'ไม่มีอาการเจ็บหลัง/กังวลเรื่องทรงตัวนะครับ' : null;
+      const ack = ['รับทราบครับ', experienceLabel, partyLabel, healthLabel && 'และ' + healthLabel].filter(Boolean).join(' ');
+      return {
+        message: [
+          `${ack} 😊`,
+          'แบบนี้ทองไทยแนะนำให้เริ่มแบบชิล ๆ ก่อน ทีมจะช่วยดูใกล้ ๆ ตอนขึ้น-ลงม้าและเริ่มช้า ๆ ได้ครับ',
+          'อยากเริ่ม 30 นาทีแบบลองก่อน หรืออยากเก็บบรรยากาศนานขึ้นเป็น 60 นาทีครับ?',
+        ].join('\n'),
+        intent: 'information',
+        contextUpdates: {},
+        journeyAction: { type: 'none', journey: null },
+        suggestedActions: [],
+        responseStyle: 'direct',
+        semanticMemoryUpdates: [],
+        toolCalls: [],
+      };
+    }
+  }
+
   const ack = ['รับทราบครับ', experienceLabel, partyLabel].filter(Boolean).join(' ');
 
   return {
@@ -1421,9 +1470,7 @@ export async function horseCareDetailExplainerResponse(
 // concern) and the bot asked for "more detail" a second time, because
 // nothing captured that answer at all.
 function parseHealthConcern(text: string): 'none' | 'present' | null {
-  if (/ไม่(?:มี|กังวล|ปวด|เจ็บ)/u.test(text)) return 'none';
-  if (/(?:ปวด|เจ็บ)(?:หลัง|เข่า|สะโพก)|กังวล(?:เรื่อง)?(?:การ)?ทรงตัว/u.test(text)) return 'present';
-  return null;
+  return interpretOverallHealthConcern(text);
 }
 
 export async function horseHealthFollowupResponse(
@@ -1501,6 +1548,260 @@ async function persistHorseHealthSlot(
   } catch (error) {
     console.error('THONGTHAI_HORSE_HEALTH_SLOT_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
   }
+}
+
+async function persistHorseFearSlot(guestDbId: string | null, fear: 'concerned' | 'not_worried'): Promise<void> {
+  if (!guestDbId) return;
+  try {
+    const container = await loadTaskState(guestDbId);
+    const reusable = container.activeTask
+      && container.activeTask.type === 'activity_booking'
+      && !isTerminalTaskStatus(container.activeTask.status);
+    if (!reusable) return;
+    const task = mergeTaskSlots(container.activeTask!, { fearOrConfidence: fear }, ACTIVITY_BOOKING_REQUIRED_FIELDS);
+    await persistTaskState(guestDbId, { ...container, activeTask: task });
+  } catch (error) {
+    console.error('THONGTHAI_HORSE_FEAR_SLOT_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
+}
+
+async function persistHorseCustomerTypeSlot(guestDbId: string | null, customerType: NonNullable<CustomerTypeSignal>): Promise<void> {
+  if (!guestDbId) return;
+  try {
+    const container = await loadTaskState(guestDbId);
+    const reusable = container.activeTask
+      && container.activeTask.type === 'activity_booking'
+      && !isTerminalTaskStatus(container.activeTask.status);
+    if (!reusable) return;
+    const task = mergeTaskSlots(
+      container.activeTask!,
+      { customerType: customerType.kind, customerAgeYears: customerType.ageYears },
+      ACTIVITY_BOOKING_REQUIRED_FIELDS,
+    );
+    await persistTaskState(guestDbId, { ...container, activeTask: task });
+  } catch (error) {
+    console.error('THONGTHAI_HORSE_CUSTOMER_TYPE_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  }
+}
+
+// Fear/concern expressed at ANY point in the horse-care flow before the
+// health question is answered -- e.g. "กังวลนิดนึง" said in place of an
+// experience/party or health answer. Real gap this closes: neither
+// horseCareFollowupResponse's nor horseHealthFollowupResponse's parsers
+// recognize a bare expression of concern as an answer to anything, so it
+// fell all the way through to the generic vague fallback -- exactly the
+// "keyword-triggered, doesn't actually understand" gap the owner's
+// semantic-intelligence request is about. Never steals a turn that ALSO
+// answers a still-open slot (e.g. a message naming both experience AND
+// concern) -- horseCareFollowupResponse/horseHealthFollowupResponse still
+// own those, unchanged.
+export async function horseCareFearResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  const found = await loadHorseBookingTask(guestDbId).catch(() => null);
+  if (!found) return null;
+  const { task } = found;
+  if (task.slots.healthConcern) return null; // fully resolved -- nothing left for this responder
+
+  const fear = interpretFear(request.message);
+  if (fear !== 'concerned') return null;
+
+  const needsExperience = !task.slots.riderExperience || !task.slots.partySize;
+  if (needsExperience && interpretExperience(request.message) !== null) return null;
+  if (!needsExperience && interpretOverallHealthConcern(request.message) !== null) return null;
+
+  await persistHorseFearSlot(guestDbId, 'concerned');
+
+  const reassurance = needsExperience
+    ? 'เข้าใจครับ ไม่ต้องกังวลนะครับ ทีมจะช่วยดูใกล้ ๆ ให้ตลอดครับ 😊'
+    : 'เข้าใจครับ ถ้ากังวลนิดนึง แนะนำเริ่ม 30 นาทีแบบชิล ๆ ก่อนครับ ทีมจะช่วยดูใกล้ ๆ ตอนขึ้น-ลงม้า และเริ่มช้า ๆ ได้ครับ';
+  const nextQuestion = needsExperience
+    ? 'เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?'
+    : HORSE_DETAIL_CLARIFICATION_QUESTION;
+
+  return {
+    message: `${reassurance}\n${nextQuestion}`,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// "ปลอดภัยไหม"/"ขอแบบปลอดภัยที่สุด" during an active horse-care conversation
+// -- never a guarantee (see _semantic-hospitality-interpreter.ts's
+// noSafetyGuaranteeMessage doc comment for why this is shared wording
+// meant for every risky activity, not just horses), then continues asking
+// whatever is still missing so the question never dead-ends the flow.
+export async function horseSafetyQuestionResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (!asksIfSafe(request.message)) return null;
+  const found = await loadHorseBookingTask(guestDbId).catch(() => null);
+  if (!found) return null;
+  const { task } = found;
+
+  const needsExperience = !task.slots.riderExperience || !task.slots.partySize;
+  const nextQuestion = task.slots.healthConcern
+    ? null
+    : needsExperience ? 'เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?' : HORSE_DETAIL_CLARIFICATION_QUESTION;
+
+  return {
+    message: nextQuestion ? `${noSafetyGuaranteeMessage('ขี่ม้า')}\n${nextQuestion}` : noSafetyGuaranteeMessage('ขี่ม้า'),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// A compound opening message that both expresses horse-riding intent AND
+// names a care-relevant signal in the SAME message -- a family/elderly
+// companion, a child (with age if stated), or a health concern -- e.g.
+// "แม่อยากขี่ม้า เข่าไม่ค่อยดี" or "เด็ก 8 ขวบอยากขี่". Real gap this
+// closes: these compound messages matched neither
+// isActivityIntentStartMessage's tightly-anchored exact phrases nor
+// isBareAmbiguousHorseSelection's named-horse check, so they fell through
+// to a generic response that never acknowledged the care context at all.
+// Deliberately never promises safety and never rushes to duration -- team
+// assessment is offered instead of a guarantee, matching every other
+// risky-activity responder in this file.
+//
+// Defers to isActivityIntentStartMessage whenever IT already matches
+// (e.g. "อยากขี่ม้า มีเด็กไปด้วย") -- that phrase-anchored mechanism (see
+// _service-mind-conversation-flow.ts's ACTIVITY_INTENT_QUALIFIER_PHRASE)
+// already asks a MORE specific age/comfort question for exactly that
+// shape; this responder exists only for compound messages that mechanism
+// doesn't cover (an unanchored companion mention, a stated age, a health
+// concern with no qualifier phrase match).
+export async function horseCompoundCareIntentResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  if (!hasExplicitHorseBookingIntent(request.message)) return null;
+  if (mentionsThongthaiResponse(request.message)) return null;
+  if (isActivityIntentStartMessage(request.message)) return null;
+
+  const customerType = interpretCustomerType(request.message);
+  const health = interpretOverallHealthConcern(request.message);
+  if (!customerType && health !== 'present') return null;
+
+  const found = await loadHorseBookingTask(guestDbId).catch(() => null);
+  if (found && found.task.slots.riderExperience && found.task.slots.partySize) return null;
+
+  await markActivityIntentStarted(guestDbId, channel);
+  if (customerType) await persistHorseCustomerTypeSlot(guestDbId, customerType);
+  if (health === 'present') await persistHorseHealthSlot(guestDbId, 'present');
+
+  let careNote: string;
+  if (customerType?.kind === 'elderly') {
+    const healthClause = health === 'present' ? 'และมีเรื่องสุขภาพที่กังวลด้วยใช่ไหมครับ' : '';
+    careNote = `เข้าใจครับ พาผู้ใหญ่มาด้วย${healthClause ? healthClause : 'ด้วย'} 🙏 ทองไทยแนะนำให้ทีมงานช่วยประเมินและดูแลใกล้ ๆ ก่อนขึ้นม้านะครับ เริ่มจากช้า ๆ ได้ ถ้าถึงหน้างานแล้วรู้สึกไม่พร้อม ทีมจะช่วยแนะนำทางเลือกอื่นให้ครับ`;
+  } else if (customerType?.kind === 'child') {
+    const ageLabel = customerType.ageYears ? `เด็ก ${customerType.ageYears} ขวบ` : 'น้อง ๆ';
+    careNote = `เข้าใจครับ ${ageLabel}อยากขี่ม้าด้วยใช่ไหมครับ 😊 ทองไทยแนะนำให้ทีมงานช่วยประเมินความพร้อมและดูแลใกล้ ๆ ตลอดนะครับ ผู้ปกครองอยู่ด้วยได้เลยครับ ทองไทยไม่ขอการันตีความปลอดภัย 100% แต่ทีมจะดูแลอย่างดีที่สุดครับ`;
+  } else {
+    careNote = 'เข้าใจครับ ทองไทยแนะนำให้ทีมงานช่วยประเมินและดูแลใกล้ ๆ ก่อนขึ้นม้านะครับ เริ่มจากช้า ๆ ได้ครับ ทองไทยไม่ขอการันตีความปลอดภัย 100% แต่ทีมจะดูแลอย่างดีที่สุดครับ';
+  }
+
+  return {
+    message: `${careNote}\nแล้วมากี่คนครับ?`,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// ATV's own care-intro -- a minimal, narrowly-scoped counterpart to the
+// horse-riding responders above. ATV has no existing dedicated booking-
+// task flow to extend (unlike horse riding), so this only covers the
+// specific gap the "Next Phase" spec asks for: a beginner and/or a fear-
+// of-speed signal in the SAME opening message ("อยากขับ ATV ไม่เคยขับ
+// กลัวเร็ว") gets a genuine care-aware reply -- team briefing, slow start
+// -- instead of the legacy flow's transactional "เลือกระยะเวลา" prompt.
+// Does not attempt full ATV domain coverage (no worst-case policy for
+// every ATV scenario, no dedicated task-state slots) -- see
+// THONGTHAI_HANDOFF.md's "Semantic Hospitality Intelligence" entry for
+// what's scoped in vs. deferred.
+const ATV_INTENT_MARKER = /อยากขับ\s*atv|ขับ\s*atv|เล่น\s*atv|ลอง\s*atv|atv|เอทีวี/iu;
+
+export function hasExplicitAtvIntent(text: string): boolean {
+  return ATV_INTENT_MARKER.test(text);
+}
+
+export async function atvCareIntentResponse(request: BrainRequest): Promise<BrainResponse | null> {
+  if (!hasExplicitAtvIntent(request.message)) return null;
+
+  const experience = interpretExperience(request.message);
+  const speedFear = mentionsSpeedFear(request.message);
+  if (experience !== 'beginner' && !speedFear) return null;
+
+  const parts = [
+    'เข้าใจครับ',
+    experience === 'beginner' ? 'มือใหม่' : null,
+    speedFear ? 'กลัวความเร็ว' : null,
+  ].filter(Boolean).join(' ');
+
+  return {
+    message: [
+      `${parts} ไม่ต้องกังวลนะครับ 😊 ทีมงานจะบรีฟวิธีขับและกติกาความปลอดภัยก่อนเริ่มเสมอ แนะนำให้เริ่มขับช้า ๆ ก่อน ค่อยเพิ่มความเร็วทีหลังได้ครับ`,
+      'แล้วมากี่คนครับ?',
+    ].join('\n'),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// Archery's own care-intro -- same minimal, narrowly-scoped shape as
+// atvCareIntentResponse above. Real gap this closes: "อยากยิงธนู แต่เจ็บ
+// ไหล่" (shoulder pain) previously fell through to a generic "no matching
+// option" line that never acknowledged the health concern at all -- see
+// THONGTHAI_HANDOFF.md's "Semantic Hospitality Intelligence" entry for
+// what else archery does/doesn't cover this round.
+const ARCHERY_INTENT_MARKER = /ยิงธนู|ธนู/u;
+
+export function hasExplicitArcheryIntent(text: string): boolean {
+  return ARCHERY_INTENT_MARKER.test(text);
+}
+
+export async function archeryCareIntentResponse(request: BrainRequest): Promise<BrainResponse | null> {
+  if (!hasExplicitArcheryIntent(request.message)) return null;
+
+  const health = interpretHealthConcerns(request.message);
+  const hasShoulderOrArmConcern = health.shoulder === true;
+  if (!hasShoulderOrArmConcern) return null;
+
+  return {
+    message: [
+      'เข้าใจครับ ถ้าไหล่ไม่ค่อยสะดวก ทองไทยแนะนำให้แจ้งทีมงานก่อนเริ่มนะครับ ทีมจะช่วยดูท่าและปรับความหนักของธนูให้เหมาะกับไหล่ได้ครับ',
+      'ไม่ต้องฝืนถ้าไม่ไหวนะครับ ลองแค่ไม่กี่ดอกก่อนก็ได้ครับ 😊',
+    ].join('\n'),
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
 }
 
 export function activityBookingFallbackDraft(request: BrainRequest): Record<string, unknown> | null {
@@ -1960,6 +2261,96 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (serviceFeedback) {
     const polished = polishedResponse(serviceFeedback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Semantic care/risk signals that can arrive at almost any point in the
+  // horse-care conversation -- fear/concern instead of a direct slot
+  // answer, a "ปลอดภัยไหม" safety question, a compound opening message
+  // naming a family/elderly/child/health context, or a weather/ground
+  // concern. Checked BEFORE activityBookingFallbackResponse: that
+  // responder's own asset/duration-driven draft logic has no concept of
+  // care signals and would otherwise silently start (or continue) a plain
+  // booking, swallowing the very information this section exists to
+  // notice -- see each responder's own doc comment for the specific
+  // production gap it closes.
+  const horseFear = await horseCareFearResponse(request, guestDbId).catch(error => {
+    console.error('THONGTHAI_HORSE_FEAR_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (horseFear) {
+    const polished = polishedResponse(horseFear, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const horseSafety = await horseSafetyQuestionResponse(request, guestDbId).catch(error => {
+    console.error('THONGTHAI_HORSE_SAFETY_QUESTION_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (horseSafety) {
+    const polished = polishedResponse(horseSafety, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const horseCompoundCare = await horseCompoundCareIntentResponse(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_HORSE_COMPOUND_CARE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (horseCompoundCare) {
+    const polished = polishedResponse(horseCompoundCare, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const atvCare = await atvCareIntentResponse(request).catch(error => {
+    console.error('THONGTHAI_ATV_CARE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (atvCare) {
+    const polished = polishedResponse(atvCare, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const archeryCare = await archeryCareIntentResponse(request).catch(error => {
+    console.error('THONGTHAI_ARCHERY_CARE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (archeryCare) {
+    const polished = polishedResponse(archeryCare, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

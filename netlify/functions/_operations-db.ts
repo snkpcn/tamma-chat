@@ -4,6 +4,12 @@ import { CONTEXT_TTL_MS } from './_conversation-context';
 import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
 import { extractDate as extractDateShared } from './_slot-parsers';
 import { isActivityIntentStartMessage } from './_service-mind-conversation-flow';
+import {
+  interpretCustomerType,
+  interpretFear,
+  interpretOverallHealthConcern,
+  mentionsWeatherGroundConcern,
+} from './_semantic-hospitality-interpreter';
 
 export type OpsChannel = 'web' | 'line' | 'facebook' | 'messenger' | 'backoffice';
 export type ServiceType = 'restaurant' | 'stay' | 'activity';
@@ -858,6 +864,27 @@ export function shouldConsumeLegacyLineBookingTurn(
   const activityStart = activityBookingStartIntent(text);
   const resume = bookingResumeIntent(text);
   const readOnlyQuestion = isReadOnlyBookingQuestion(text);
+
+  // A compound OPENING message that names a care/risk signal alongside the
+  // booking intent -- a family/elderly companion, a child, a health
+  // concern, a weather/ground worry, or fear -- e.g. "แม่อยากขี่ม้า เข่าไม่
+  // ค่อยดี" or "เด็ก 8 ขวบอยากขี่". Real production gap this closes: unlike
+  // the bare isActivityIntentStartMessage phrases above, these compound
+  // messages don't match that tightly-anchored check, so they were still
+  // being consumed by this transactional flow's own "เลือกระยะเวลา..."
+  // question -- silently skipping every care-aware responder in
+  // thongthai-chat.ts (horseCompoundCareIntentResponse and friends) that
+  // exists specifically to handle them. Scoped to a genuinely fresh
+  // conversation (`!session`) only -- an ALREADY in-progress legacy
+  // session still resumes normally; a later aside mid-booking is not this
+  // guard's concern.
+  if (!session) {
+    const hasCareOrRiskSignal = Boolean(interpretCustomerType(text))
+      || interpretOverallHealthConcern(text) === 'present'
+      || mentionsWeatherGroundConcern(text)
+      || interpretFear(text) === 'concerned';
+    if (hasCareOrRiskSignal) return false;
+  }
 
   if (!session) return !readOnlyQuestion && (stayStart || activityStart);
   if (session.status === 'submitted') {

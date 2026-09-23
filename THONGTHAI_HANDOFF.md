@@ -3884,3 +3884,160 @@ success reported; one additive DB migration applied and verified
 non-destructive; no unrelated production data mutated (a test insert to
 `ops_notification_deliveries` was made and immediately deleted as part of
 verifying the constraint fix).
+
+## Semantic Hospitality Intelligence -- 2026-09-23
+
+Owner's "Next Phase" request asked for a full semantic-understanding layer
+across all 12 business units (typo/colloquial normalization, fear/health/
+customer-type/intensity/weather signal extraction, worst-case policies,
+18 numbered tests) -- explicitly warning against "keyword-triggered, not
+understanding" behavior. Given the same discipline as the prior "Master
+Rebuild" round (see that entry above), a full 12-domain buildout was not
+attempted in one pass -- that risks exactly the "claimed fixed, still
+broken" pattern this whole engagement has fought. Instead: a genuinely
+reusable semantic-interpreter CORE was built with real tests, then wired
+deeply into the domain with the most existing infrastructure and the
+richest worked examples (horse riding), a minimal but real extension for
+ATV and archery, and honest, tested verification (not new code) for
+feedback and restaurant. Cafe/homestay/journey got no new domain code
+this round -- reported honestly below, not claimed.
+
+**New module**: `netlify/functions/_semantic-hospitality-interpreter.ts`
+-- `normalizeThai` (a deliberately SHORT typo table: only pairs with no
+other plausible meaning, e.g. "ขี้ม้า"->"ขี่ม้า", "ทองทัย"->"ทองไทย",
+"พาราดร"->"ภาราดร", "กังวน"->"กังวล" -- skips genuinely ambiguous cases
+like "ขี่มา" rather than guess), `interpretFear` (concern vs. explicit
+no-concern, correctly disambiguating "ไม่ค่อยมั่นใจ" from "มั่นใจ"),
+`interpretHealthConcerns`/`interpretOverallHealthConcern` (per-body-part
+back/knee/hip/shoulder, negation-aware), `interpretExperience`,
+`interpretCustomerType` (elderly companion / child with age, bounded
+against false positives like "แม่ครัว"/"แม่บ้าน"), `prefersGentleIntensity`,
+`mentionsWeatherGroundConcern`, `asksIfSafe`, `mentionsSpeedFear`, and a
+shared `noSafetyGuaranteeMessage` so every risky-activity responder says
+the same honest thing (team assesses/supervises/starts slow, never a
+guarantee). 7 unit tests in `tests/semantic-hospitality-interpreter.test.ts`.
+
+**Horse riding (deep integration, tests 1-6 + 16-18, all 9 passing)**:
+`parseRiderExperience`/`parseHealthConcern` now delegate to the
+interpreter (broader coverage, same call sites). Four new responders in
+`thongthai-chat.ts`: `horseCareFearResponse` (fear/concern expressed
+instead of answering the current slot -- e.g. "กังวลนิดนึง" -- reassures
+and re-asks instead of falling through to the vague fallback),
+`horseSafetyQuestionResponse` ("ปลอดภัยไหม" mid-flow -- never a
+guarantee), `horseCompoundCareIntentResponse` (a compound OPENING message
+naming a family/elderly/child/health signal in the same sentence, e.g.
+"แม่อยากขี่ม้า เข่าไม่ค่อยดี" or "เด็ก 8 ขวบอยากขี่" -- team-assessment
+caveat, never rushes to duration; explicitly defers to
+`isActivityIntentStartMessage`'s existing, more specific qualifier
+mechanism for shapes it already owns, e.g. "อยากขี่ม้า มีเด็กไปด้วย").
+`horseCareFollowupResponse` extended to recognize a compound single-
+message answer ("ผมไม่เคยขี่ครับ ไม่กังวลครับ ไม่ปวดหลัง") including a new
+`SOLO_SELF_REFERENCE_RE` fallback (a first-person-singular self-reference
+with no companion mention, used only as a last resort when neither an
+explicit number nor "คนเดียว" is present).
+
+**A real, severe production-shaped bug found and fixed along the way**:
+the legacy LINE booking flow (`_operations-db.ts`'s
+`shouldConsumeLegacyLineBookingTurn`/`handleLineBookingMessage` -- the
+SAME flow multiple earlier rounds already fought to suppress for the
+"อยากขี่ม้า"/"เอาทองไทย" cases) was still consuming compound care-signal
+OPENING messages it wasn't specifically patched for, producing its
+transactional "เลือกระยะเวลา..." prompt instead of ever reaching any
+care-aware responder. Fixed with a new, narrowly-scoped guard (only for a
+genuinely fresh conversation, `!session`): defer to the richer core
+whenever the message carries a customerType/health/weather/fear signal.
+This single fix is what actually makes tests 4, 7, 8, and 9 possible --
+confirmed by disabling it and watching exactly those 4 tests fail.
+
+**A second real bug found and fixed via test 10's own assertion failing
+against ACTUAL behavior**: `_restaurant-intelligence.ts`'s allergy filter
+relied solely on a curated `menu_item.profile.allergenFlags` tag (from a
+separate, rarely-populated profile table) -- a customer saying "แพ้กุ้ง"
+(shrimp allergy) still got "ต้มยำกุ้ง" (shrimp tom yum) recommended,
+because that item's curated profile was empty even though its raw
+`ingredient_names` literally lists "กุ้ง". Fixed by also pushing the bare
+allergen keyword into `avoidIngredients`, which the existing raw-
+ingredient-name cross-check already uses -- a food-safety-appropriate
+"better an occasional over-broad exclusion than serving an allergen"
+trade-off (documented in the code).
+
+**ATV (minimal, test 7-8, both passing)**: one new responder,
+`atvCareIntentResponse` -- beginner and/or speed-fear signal in the
+opening message gets a team-briefing/slow-start reply instead of the
+legacy flow's transactional prompt. No full ATV booking-task flow built
+(unlike horse riding, which already had one from a prior round). Test 8
+(safety feedback, "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว") needed NO new code --
+the existing feedback pipeline's `SAFETY_CONCERN_MARKER` and 'activity'
+business-unit inference already covered it; only a new test was added to
+prove it, plus the legacy-flow guard fix above (without it, this message
+was ALSO being swallowed by the transactional flow before ever reaching
+feedback classification).
+
+**Archery (minimal, test 9, passing)**: one new responder,
+`archeryCareIntentResponse` -- a stated shoulder concern ("อยากยิงธนู แต่
+เจ็บไหล่") gets team guidance instead of the prior generic "ไม่มีตัวเลือก
+ที่ตรง" (no matching option) non-answer.
+
+**Feedback (test 14-15) and restaurant (test 10) -- verified against
+EXISTING infrastructure, no new classification code**: test 14 (the exact
+complaint text) already has comprehensive coverage from a prior round
+(`tests/feedback-delivery-constraint-proof.test.ts`). Test 15 ("พี่เจิด
+ดูแลดีมาก") already worked via the existing `COMPLIMENT_MARKER`/
+`STAFF_NAME_RE` -- a new test proves it. Test 10 (restaurant allergy/
+spice) needed the allergy bug fix above; the spice/allergen PARSING
+itself (`_restaurant-intelligence.ts`) already existed and is genuinely
+sophisticated.
+
+**Explicitly NOT built this round (cafe, homestay, journey -- tests 11,
+13, 12)**: no dedicated domain intent/care module exists for these
+(unlike horse riding's task-state flow or even ATV/archery's minimal
+responders). Diagnosed their CURRENT behavior honestly instead of
+guessing: cafe preference ("อยากกินกาแฟ ไม่เข้ม หวานน้อย") gets an honest
+"no verified data, won't guess" reply -- safe (never invents a coffee
+menu/price that doesn't exist) but doesn't acknowledge the specific
+preference. Homestay ("อยากพัก พาแม่มา เดินไกลไม่ได้") and journey
+("มาเที่ยว 1 วัน ไม่อยากเดินเยอะ") already behave reasonably (the mobility
+signal is reinforced into structured memory; a real, relevant follow-up
+question is asked) via existing local-concierge/service-mind-care-context
+infrastructure -- not full semantic care-awareness matching horse
+riding's depth, but not hallucinating either. New tests lock in this
+honest baseline. Building full domain playbooks for these three (plus
+full worst-case policies, dedicated task-state flows, and the remaining
+9 domains from the original 12-domain ask) is recommended as a separate,
+explicitly-scoped follow-up -- this round's honest recommendation, not a
+decision made unilaterally on the owner's behalf.
+
+**Files changed**: `netlify/functions/_semantic-hospitality-interpreter.ts`
+(new), `netlify/functions/thongthai-chat.ts` (parseRiderExperience/
+parseHealthConcern delegation, horseCareFearResponse,
+horseSafetyQuestionResponse, horseCompoundCareIntentResponse,
+horseCareFollowupResponse's compound-answer + solo-self-reference
+extension, atvCareIntentResponse, archeryCareIntentResponse, all wired
+into processThongthaiChatCore's precedence chain before
+activityBookingFallbackResponse), `netlify/functions/_operations-db.ts`
+(shouldConsumeLegacyLineBookingTurn's new care-signal deferral guard),
+`netlify/functions/_restaurant-intelligence.ts` (allergy-to-ingredient
+safety-net fix).
+
+**Tests**: `tests/semantic-hospitality-interpreter.test.ts` (7, new),
+`tests/semantic-horse-understanding.test.ts` (9, new, full signed LINE
+webhook), `tests/semantic-atv-understanding.test.ts` (2, new),
+`tests/semantic-feedback-restaurant-verification.test.ts` (2, new),
+`tests/semantic-diagnostic-remaining-domains.test.ts` (4, new).
+**Full suite: 897/897 passing** (873 prior + 24 new). Load-bearing
+verified individually for every new responder/guard (disabling each one
+broke exactly its target test(s), confirmed by name): horseCareFearResponse
+(tests 2, 17), horseSafetyQuestionResponse (test 18),
+horseCompoundCareIntentResponse (tests 4, 5), atvCareIntentResponse
+(test 7), archeryCareIntentResponse (test 9), the
+shouldConsumeLegacyLineBookingTurn guard (tests 4, 7, 8, 9 -- broader
+than any single responder, confirming it's the real root-cause fix), and
+the restaurant allergy-to-ingredient fix (test 10).
+
+**Deploy status**: cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**Confirmations**: no booking/order/payment created; no fake safety
+guarantee anywhere in new or existing wording; no DB migration; no
+unrelated production data mutated.
