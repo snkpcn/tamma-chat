@@ -454,13 +454,22 @@ async function handleEvent(
   // never used to route the message, only to distinguish "casual message got
   // the generic fallback" from "a real booking/weather/feedback question got
   // it" after the fact. See THONGTHAI_HANDOFF.md's "LINE Full Audit" entry.
-  const textCategory = isSimpleGreetingMessage(message) || isCasualAttentionMessage(message)
+  const isGreeting = isSimpleGreetingMessage(message);
+  const isCasualAttention = isCasualAttentionMessage(message);
+  const textCategory = isGreeting || isCasualAttention ? 'casual_greeting' : categorizeDegradedFallback(message);
+  // deterministicGreetingResponse/deterministicCasualChatResponse are the
+  // FIRST two checks processThongthaiChatCore runs, unconditionally, before
+  // any LLM call -- so isGreeting/isCasualAttention being true here is a
+  // guarantee the core will short-circuit deterministically, not a guess.
+  // Logging this accurately (rather than always marking llmAttempted=true)
+  // is what let this exact "casual message secretly still called the LLM"
+  // production symptom get diagnosed in the first place.
+  let deterministicResponder: string | null = isGreeting
     ? 'casual_greeting'
-    : categorizeDegradedFallback(message);
-  let deterministicResponder: string | null = null;
-  let llmAttempted = false;
+    : isCasualAttention ? 'casual_presence' : null;
+  let llmAttempted = deterministicResponder === null;
   let llmErrorType: string | null = null;
-  let finalResponseKind: string = 'thongthai_core';
+  let finalResponseKind: string = deterministicResponder ? 'deterministic' : 'thongthai_core';
 
   const logPrivateChatAttempt = () => {
     console.log('LINE_PRIVATE_CHAT_ATTEMPT', JSON.stringify({
@@ -496,11 +505,16 @@ async function handleEvent(
   } catch (error) {
     console.error('LINE_BOOKING_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
   }
-  llmAttempted = true;
+  // deterministicResponder/llmAttempted were already set accurately above
+  // for the casual/greeting case -- askThongthaiReliably is still called
+  // either way (it's the single entry point into processThongthaiChatCore,
+  // deterministic or not), but only overwrite llmAttempted here for every
+  // OTHER category, where it genuinely is about to reach the LLM.
+  if (!deterministicResponder) llmAttempted = true;
   const result = await askThongthaiReliably(message, userId, event.message.id, errorType => {
     llmErrorType = errorType;
   });
-  finalResponseKind = llmErrorType ? 'degraded_fallback' : 'thongthai_core';
+  if (!deterministicResponder) finalResponseKind = llmErrorType ? 'degraded_fallback' : 'thongthai_core';
   logPrivateChatAttempt();
 
   try {

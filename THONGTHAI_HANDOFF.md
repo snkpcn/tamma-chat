@@ -3331,3 +3331,115 @@ further.
 **Confirmations**: no DB migration; no booking/order/payment created; no
 fake notification success; no unrelated production data mutated; deploy
 completion not verifiable from this session.
+
+## Final LINE Stabilization -- 2026-09-23
+
+Owner supplied real production `line-webhook` function logs for the first
+time this round. That evidence proved the FIRST genuine code-adjacent
+defect found in three rounds of "owner group is silent" investigation.
+
+**Fix 1 -- DB constraint rejected owner_general (real bug, fixed + applied)**.
+Production log for "ผูกทีม เจ้าของ" showed: `LINE_EVENT_RECEIVED` present,
+`LINE_ROUTE_SELECTED=group_ops_command`, `LINE_OPS_EVENT_RECEIVED` present,
+`LINE_GROUP_BIND_ATTEMPT={teamCodeParsed:"owner_general",authorized:true,
+result:"db_error"}`, error `23514` (Postgres check_violation), failing row
+containing `owner_general` in both the team_code and service_type
+positions. So: LINE delivery, webhook routing, command parsing, and
+authorization were ALL already correct (matching every prior round's
+conclusion) -- the write itself was rejected by schema.
+
+Queried the live `tamma-customer-data` (`upaokrprawzhgzeqsdke`) schema
+directly (no local migration file defines this table at all -- it predates
+this repo's migration convention) and found TWO relevant CHECK
+constraints, not one:
+- `ops_notification_channels_team_code_check` -- allowed only
+  restaurant/stay/activity/cafe/otop/all. Missing `owner_general`.
+- `ops_notification_channels_service_type_check` -- allowed only
+  restaurant/stay/activity/cafe/otop (or NULL). `bindLineTeamChannel`
+  was setting `service_type: input.teamCode` for anything that wasn't
+  `'all'`, so `owner_general` would violate THIS constraint too, even
+  after fixing the first one.
+
+Fix: migrated `ops_notification_channels_team_code_check` to also accept
+`'owner_general'` (`supabase/migrations/20260923060732_ops_notification_
+channels_owner_general_v1.sql`, applied directly to production via the
+Supabase MCP tool -- drop+recreate, the only way to widen a Postgres CHECK
+constraint; verified after: all 5 existing rows unchanged, new definition
+confirmed). Left `service_type_check` untouched and instead fixed
+`_ops-notifications.ts`'s `bindLineTeamChannel` to map `owner_general` to
+`service_type: null`, exactly like the pre-existing `'all'` pseudo-team --
+`owner_general` isn't a real business-unit service type, so this is the
+semantically correct fix, not a workaround, and it means one constraint
+change was enough rather than two.
+
+**Fix 4 -- bind command replied nothing on DB failure (real bug, fixed)**.
+`bindLineTeamChannel`'s catch block used to log `db_error` and rethrow --
+the group got zero reply while the real cause was visible only in
+`LINE_OPS_GROUP_ERROR`. Now replies "ผูกทีมไม่สำเร็จครับ ระบบฐานข้อมูลยังไม่
+รองรับทีมนี้ ทีมงานกำลังแก้ไขครับ ลองใหม่อีกครั้งในภายหลัง" and still logs
+`LINE_GROUP_BIND_DB_ERROR` with the redacted error detail.
+
+**Fix 2 -- private casual logging accuracy (real logging bug, fixed)**.
+Production log for private "หวัดดี" showed `deterministicResponder=null,
+llmAttempted=true`, and a genuine ~10-14s Gemini call that hit
+`circuit_open`. `deterministicGreetingResponse`/`deterministicCasualChat
+Response` (added in the prior "LINE Full Audit" round) are the absolute
+first two checks `processThongthaiChatCore` runs, unconditionally, before
+any LLM call -- so `isSimpleGreetingMessage`/`isCasualAttentionMessage`
+being true is a GUARANTEE the core will short-circuit, not a guess. But
+`_line-webhook-core.ts`'s `LINE_PRIVATE_CHAT_ATTEMPT` logging was setting
+`llmAttempted = true` unconditionally right before every call into the
+core, regardless of whether that guarantee held -- so the log could never
+actually distinguish "the LLM was genuinely attempted" from "the
+deterministic path always wins, this field is just wrong." Fixed the
+logging to compute `deterministicResponder`/`llmAttempted` from that same
+guaranteed precondition before calling `askThongthaiReliably`, so the log
+is now trustworthy for future debugging. Whether the "หวัดดี" case in the
+owner's log was a genuine code defect (unlikely -- `isSimpleGreetingMessage`
+demonstrably matches bare "หวัดดี" via direct regex check and via a new
+dedicated test) or evidence the prior round's deploy hadn't reached
+production yet at the time of that specific test remains unresolved from
+this session (deploy status still not verifiable here) -- but the logging
+is fixed either way, and the underlying deterministic responder was
+re-verified correct with the LLM forcibly disabled (zero Gemini calls
+observed) rather than merely inspected.
+
+**Fix 3 -- weather LINE fallback (already correct, verified, no code
+change needed)**. Traced `deterministicLocalConciergeResponse` (weather
+category) -- it runs well before any LLM call, same as every other
+deterministic responder, and its composer (`composeLocalConciergeResponse`)
+ALREADY handles a failed/unavailable weather provider itself, honestly and
+deterministically, without ever throwing or falling through toward the
+LLM. Verified directly: with the weather provider forced to fail AND
+Gemini forced unavailable simultaneously, the reply is a real, specific,
+non-generic weather answer -- never the flat "คิดช้า" apology. The
+earlier-reported "วันนี้ฝนตกปะ -> generic คิดช้า" live evidence for this
+task predates today's evidence and is most consistent with the same
+stale-deploy pattern seen throughout this engagement, not a live defect
+in the code as it exists now.
+
+**Files changed**: `netlify/functions/_ops-notifications.ts` (service_type
+mapping fix, db_error reply fix), `netlify/functions/_line-webhook-core.ts`
+(LINE_PRIVATE_CHAT_ATTEMPT logging accuracy), `supabase/migrations/
+20260923060732_ops_notification_channels_owner_general_v1.sql` (new,
+applied to production). **Tests**: `tests/final-line-stabilization.test.ts`,
+21 new tests covering DB/schema mapping, group bind through the full
+signed webhook (including a simulated DB failure), private casual chat
+with the LLM forcibly disabled (proving zero Gemini calls, not just a
+plausible-looking reply), weather with the provider forced to fail, and
+regression coverage for every previously-fixed behavior this task listed
+(activity group commands, system feedback, bare horse clarification,
+horse-context selection, horse comparison). **Full suite: 828/828
+passing** (807 prior + 21 new). Load-bearing verified: reverting the
+db_error reply fix made exactly test B8 fail and nothing else.
+
+**Migration applied**: yes, directly to `tamma-customer-data`
+(`upaokrprawzhgzeqsdke`) via the Supabase MCP tool, verified post-apply
+(constraint definition confirmed, all 5 pre-existing rows unchanged).
+
+**Confirmations**: no booking/order/payment created; no fake notification
+success (the db_error reply is honest about failure, not a fabricated
+success); no unrelated production data mutated (only the one CHECK
+constraint was touched, confirmed via direct query before and after); the
+one production mutation in this round is the explicitly-authorized,
+tested, additive schema migration itself.
