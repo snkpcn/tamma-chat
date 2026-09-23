@@ -5203,3 +5203,133 @@ instructed.
 the owner's explicit final instruction ("Stop after Phase 2. Do not
 start Phase 3."). `customer_intelligence_events`'s migration remains
 unapplied pending owner approval; Phase 3 (backoffice) is untouched.
+
+## Master Roadmap Phase 2 -- Production Regression Fix -- 2026-09-23
+
+Owner's production retest of PR #72 (commit `428a2bc`) failed: "แม่เดินไกลไม่ได้"
+got the generic clarify fallback ("ขอรายละเอียดเพิ่มอีกนิดครับ จะได้ช่วยต่อให้ตรงเรื่อง")
+instead of a care-aware reply, and a following bare "มีอะไรแนะนำ" got the
+SAME generic fallback instead of the mobility-aware recommendation the
+first Phase 2 round shipped and tested.
+
+**1. Root cause.** Two independent gaps, not one:
+   - `_semantic-hospitality-interpreter.ts`'s `LOW_WALKING_MARKER` (used
+     by `prefersLowWalking`, the ONLY thing gating
+     `ecosystemFirstVisitResponse`'s existing generic low-walking-care
+     branch) recognized "เดินไม่ไหว" but not "เดินไกลไม่ได้"/"เดินไม่ได้ไกล"/
+     "เดินนานไม่ได้" -- a different phrasing that Phase 2's OWN
+     `_customer-phrase-intelligence.ts` memory-capture regex already
+     recognized. The two regexes, built in the same round for related
+     purposes, drifted out of sync by hand. So the message was captured
+     into `guest_memory` correctly (proven by the original Phase 2 test
+     suite) but never triggered the existing care-aware responder branch
+     that reads it back -- `prefersLowWalking("แม่เดินไกลไม่ได้")` was
+     simply `false`.
+   - A truly BARE "มีอะไรแนะนำ" (no "ครั้งแรก" context) had ZERO
+     deterministic coverage at all -- a known, real gap already flagged
+     and explicitly deferred in this file's own Phase 1 entry ("a truly
+     BARE 'มีอะไรแนะนำ'... has no deterministic NEEDS_CONTEXT responder
+     at all yet and falls through to the LLM"). The original Phase 2
+     test suite's own test 3 used "มาครั้งแรก มีอะไรแนะนำ" (WITH the
+     "ครั้งแรก" anchor) rather than the owner's actual bare retest
+     phrase -- a real fidelity gap in that test, not just the code.
+
+**2. Which responder swallowed the message.** Neither statement matched
+any deterministic responder in the precedence cascade -- both fell all
+the way through to the One-Mind/LLM orchestrator, whose `dialog.mode`
+resolved to `clarify`, producing `_response-composer.ts`'s generic
+`clarify` string. The test harness's stubbed LLM never exercises this
+`clarify` branch (it always returns a coherent reply), which is why the
+original Phase 2 test suite passed while production failed -- a real
+gap between the mock and real LLM behavior under ambiguity, not a
+mocking bug to fix; the actual fix is to make BOTH turns fully
+deterministic so the LLM's clarify behavior is never reached at all,
+per the owner's explicit "should be deterministic... do not rely on
+LLM" instruction.
+
+**3. Was memory written?** Yes, both before and after this fix --
+`capturePreferenceSignals`'s own regex already recognized "เดินไกลไม่ได้"
+and wrote `limited_walking` to `guest_memory` correctly. This was never
+broken; only the READ side (which responder consults that memory) was.
+
+**4. Was memory read on the next turn?** No, before this fix -- there
+was no deterministic responder for a bare "มีอะไรแนะนำ" at all, so
+nothing ever consulted `guestContext.constraints` for it. Fixed by item
+5 below.
+
+**5. Exact fix.**
+   - `_semantic-hospitality-interpreter.ts`: extended `LOW_WALKING_MARKER`
+     with `เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้`, matching
+     `_customer-phrase-intelligence.ts`'s existing mobility regex.
+     Confirmed single-use (only `prefersLowWalking`, only consumed by
+     `ecosystemFirstVisitResponse`'s existing generic branch) before
+     widening it, so the blast radius is exactly one responder. This
+     alone makes `ecosystemFirstVisitResponse`'s pre-existing
+     `customerType && lowWalking && !classifyCareContext(...)` branch
+     fire for "แม่เดินไกลไม่ได้" (already-existing `interpretCustomerType`
+     recognized "แม่" via its ELDERLY_MARKER; only `lowWalking` was
+     false) -- no new responder needed for requirement A.
+   - `thongthai-chat.ts`: added a new, deliberately narrow
+     `BARE_RECOMMEND_MARKER` (anchored to the WHOLE message, so it can
+     never claim a longer domain-anchored message like "ร้านอาหารมีอะไร
+     แนะนำ") plus a new branch inside `ecosystemFirstVisitResponse` that
+     fires ONLY when the bare marker matches AND
+     `guestContext.constraints` includes `limited_walking` -- reusing
+     the exact wording already shipped and tested in the "ครั้งแรก"
+     branch, for consistency. A bare "มีอะไรแนะนำ" with no memory signal
+     is deliberately still left to the existing fallback -- building the
+     full first-time-visitor 3-path pitch for every anonymous "มีอะไร
+     แนะนำ" remains the same known Phase 4 item, not expanded by this
+     fix.
+   - Both fixes are fully deterministic -- neither touches the LLM/
+     One-Mind path in any way; they only add coverage earlier in the
+     existing precedence cascade so that path is never reached for
+     these two exact messages.
+
+**6. Tests added/fixed.**
+`tests/master-roadmap-phase2-mobility-regression-fix.test.ts` (new, 7
+tests, through the full signed LINE webhook, using the OWNER'S EXACT
+production phrases verbatim): (1) "แม่เดินไกลไม่ได้" gets a care-aware
+reply, never the generic clarify fallback, and stores `limited_walking`;
+(2) a following bare "มีอะไรแนะนำ" uses the remembered mobility context,
+never the generic fallback; (3) load-bearing -- the same assertion fails
+if memory was never captured; (4) load-bearing -- the exact mobility-
+aware string only the bare-recommendation responder produces, proving
+it (not some other path) answered; (5)-(7) regressions ("สติ", "ขอคืนเงิน
+ได้ไหม", "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว").
+
+**7. Full test result.** 1008/1008 passing (1001 prior + 7 new), zero
+regressions.
+
+**8. Load-bearing proof.** Two mutations, each reverted immediately
+after confirming the expected failures, with both files diffed
+byte-for-byte against pre-mutation backups to confirm a clean restore:
+   - **`LOW_WALKING_MARKER` fix reverted** (back to its pre-fix form):
+     test 1 failed (generic fallback returns for "แม่เดินไกลไม่ได้" again);
+     tests 2-4 stayed green, correctly proving memory capture itself
+     (a separate mechanism, Phase 2's own regex) was never broken by
+     this bug -- only the read side was.
+   - **Bare-recommendation responder's memory check short-circuited**
+     (`&& false &&` inserted before the constraint check): tests 2 and
+     4 failed (the mobility-aware reply for bare "มีอะไรแนะนำ" never
+     fires without it) -- tests 1, 3, 5-7 stayed green as expected.
+
+**9. Deploy status.** Cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round. Verify via the Netlify dashboard and the owner
+retest script below after merge.
+
+**10. Owner retest script** (same LINE conversation):
+1. "แม่เดินไกลไม่ได้" -> a care-aware reply mentioning เดินน้อย (never
+   "ขอรายละเอียดเพิ่มอีกนิดครับ"); `limited_walking` captured.
+2. "มีอะไรแนะนำ" (same conversation) -> "ถ้ามากับคุณแม่เหมือนเดิม ทองไทย
+   แนะนำแบบเดินน้อยก่อนนะครับ 😊 อยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?"
+   -- never the generic fallback.
+
+**Confirmations**: no new memory keys, no schema migration, no dashboard
+work, no aggregate migration applied -- a pure precedence/regex fix
+within the existing Phase 2 architecture, per the owner's explicit
+"this is a Phase 2 fix" scope.
+
+**Per the roadmap's own workflow rule**: stops here, per the owner's
+explicit instruction ("Stop after this fix. Do not start Phase 3.").

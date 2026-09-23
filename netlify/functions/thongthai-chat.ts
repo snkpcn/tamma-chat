@@ -2180,6 +2180,21 @@ export function homestayFactsResponse(request: BrainRequest): BrainResponse | nu
 // _experience-discovery.ts's own broader discovery patterns still own
 // everything this doesn't claim.
 const FIRST_VISIT_RECOMMEND_MARKER = /(?:มาครั้งแรก|ครั้งแรก).*(?:มีอะไรแนะนำ|แนะนำอะไร|แนะนำ)/u;
+// Production regression fix (Phase 2): a truly BARE "มีอะไรแนะนำ" (no
+// "ครั้งแรก" context, no other domain anchor) had NO deterministic
+// coverage at all -- a real, known gap flagged in THONGTHAI_HANDOFF.md's
+// Phase 1 entry and deferred at the time. It falls through everything to
+// the One-Mind/LLM path, which in production returned the generic
+// "clarify" fallback instead of using a remembered mobility need --
+// exactly the failure the owner's retest caught. Deliberately narrow
+// (anchored to the WHOLE message, so it never claims a longer message
+// like "ร้านอาหารมีอะไรแนะนำ", which the restaurant responder already
+// owns) and deliberately only fires when guest memory actually has
+// something to shape the answer with -- see the guestContext.constraints
+// check below. A bare "มีอะไรแนะนำ" with NO memory signal is still left
+// to the existing fallback; building the full first-time-visitor 3-path
+// pitch for every anonymous "มีอะไรแนะนำ" remains out of scope here.
+const BARE_RECOMMEND_MARKER = /^(?:มีอะไรแนะนำ|แนะนำอะไรดี|แนะนำอะไรบ้าง)(?:ครับ|คะ|ค่ะ)?[\s?？!.]*$/u;
 const ECOSYSTEM_RAIN_WHERE_MARKER = /ฝนตก.*(?:ไปไหนดี|ที่ไหนดี|ไปที่ไหน)/u;
 
 export function ecosystemFirstVisitResponse(request: BrainRequest): BrainResponse | null {
@@ -2207,6 +2222,14 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
         '',
         'ขอถามนิดนึงครับ มากี่คน แล้วอยากได้ชิล ๆ หรือมีกิจกรรมด้วยครับ?',
       ].join('\n'),
+      intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  if (BARE_RECOMMEND_MARKER.test(message.trim()) && request.guestContext.constraints?.includes('limited_walking')) {
+    return {
+      message: 'ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ 😊\nอยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?',
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
       suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
     };
