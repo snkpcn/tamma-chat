@@ -3519,7 +3519,31 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // guard, not a phrase-by-phrase answer patch: the shared
   // isExperienceDiscoveryIntent matcher owns the entire broad-discovery class.
   const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
-  const preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: {} });
+
+  // Production LINE sends chatHistory: [], so a bare restaurant follow-up
+  // ("มีอะไรแนะนำอีก") cannot prove its topic from transport history alone.
+  // The deterministic restaurant path already persists restaurantAdvisorContext
+  // in guest_agent_state; consult that SMALL server-side snapshot before the
+  // One-Mind cutover gets a chance to claim a generic recommendation turn.
+  //
+  // Keep this lookup narrow: explicit food turns already classify correctly
+  // with empty state, and unrelated generic recommendations should not pay an
+  // extra state read. Only RECOMMENDATION_ONLY turns need continuity proof.
+  let preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: {} });
+  if (!preserveRestaurantFastPath
+      && classifyRestaurantDietaryIntent(request.message) === 'RECOMMENDATION_ONLY'
+      && guestDbId) {
+    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+      console.error(
+        'THONGTHAI_RESTAURANT_PRECUTOVER_STATE_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return { state: null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
+    });
+    if (isObject(snapshot.state)) {
+      preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: snapshot.state });
+    }
+  }
   // SAME class of guard as the two above: without it, One-Mind's own
   // structural markers (e.g. findActivityTopic matching "ม้า") can claim a
   // blended local-concierge question like "ฝนตกขี่ม้าได้ไหม" as plain
