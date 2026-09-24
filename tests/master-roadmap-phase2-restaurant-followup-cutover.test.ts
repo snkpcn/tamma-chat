@@ -8,8 +8,13 @@
 //
 // Why existing tests missed it: LINE sends chatHistory: [], and the old
 // preserveRestaurantFastPath inspected an EMPTY agent state before One-Mind
-// cutover. The prior continuous restaurant test did not force the production
-// THONGTHAI_ONE_MIND_CUTOVER=1 path with competing activity state.
+// cutover. Existing continuous restaurant tests checked only the FINAL reply.
+// In the harness, One-Mind's default semantic answer happened to return
+// legacy_required, so the request eventually fell through to the deterministic
+// restaurant responder and looked correct. Production's real model can instead
+// compose a generic clarification and stop there. This test therefore proves
+// the stronger invariant: a persisted restaurant follow-up must not call the
+// model/One-Mind at all before the deterministic restaurant responder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
