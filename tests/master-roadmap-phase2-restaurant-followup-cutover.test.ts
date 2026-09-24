@@ -71,7 +71,7 @@ test('production cutover: restaurant follow-up survives empty LINE history and p
   process.env.THONGTHAI_ONE_MIND_CUTOVER = '1';
 
   try {
-    await withHarness(async () => {
+    await withHarness(async harness => {
       const capture = installReplyCapture();
       try {
         const user = 'phase2-prod-restaurant-followup';
