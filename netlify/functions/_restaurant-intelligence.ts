@@ -111,7 +111,11 @@ function thaiAmount(text: string): number | null {
 }
 
 function hasNegative(text: string, word: string): boolean {
-  return new RegExp(`(?:ไม่กิน|ไม่เอา|งด|เลี่ยง|ไม่ชอบ|แพ้)\\s*${word}`, 'u').test(text);
+  // "ไม่มี..." ("without/no...") is a real production phrasing for an
+  // explicit-menu-request qualifier ("ขอเมนูทั้งหมดที่ไม่มีกุ้ง") -- was
+  // missing here even though it means the same avoidance as "ไม่กิน"/
+  // "เลี่ยง" for the same word.
+  return new RegExp(`(?:ไม่กิน|ไม่เอา|งด|เลี่ยง|ไม่ชอบ|แพ้|ไม่มี)\\s*${word}`, 'u').test(text);
 }
 
 function hasAllergy(text: string, word: string): boolean {
@@ -150,7 +154,12 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
   if (hasNegative(text,'ปลา')) avoidProteins.push('fish'); else if (hasAffirmative(current,'ปลา')) preferProteins.push('fish');
   if (hasNegative(text,'ไข่')) avoidProteins.push('egg');
   if (hasNegative(text,'ปลาร้า')) avoidIngredients.push('น้ำปลาร้า');
-  if (hasNegative(text,'กุ้ง(?:แห้ง)?')) avoidIngredients.push('กุ้งแห้ง');
+  // Also excludes bare "กุ้ง" (fresh shrimp), not just "กุ้งแห้ง" (dried) --
+  // same conservative reasoning as the allergy safety net just below: a
+  // real production phrase ("ขอเมนูทั้งหมดที่ไม่มีกุ้ง") that says only
+  // "กุ้ง" must still exclude a fresh-shrimp dish like "ต้มยำกุ้ง", not
+  // just the dried-shrimp ingredient specifically.
+  if (hasNegative(text,'กุ้ง(?:แห้ง)?')) avoidIngredients.push('กุ้งแห้ง', 'กุ้ง');
   if (hasNegative(text,'ถั่ว(?:ลิสง)?')) avoidIngredients.push('ถั่วลิสงคั่ว');
   // Allergy safety net: a curated menu item's profile.allergenFlags tag
   // (checked in isHardExcluded) requires someone to have manually tagged

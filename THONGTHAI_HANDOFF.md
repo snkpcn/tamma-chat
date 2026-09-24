@@ -5333,3 +5333,142 @@ within the existing Phase 2 architecture, per the owner's explicit
 
 **Per the roadmap's own workflow rule**: stops here, per the owner's
 explicit instruction ("Stop after this fix. Do not start Phase 3.").
+
+## Master Roadmap Phase 2 -- Restaurant Memory UX Fix -- 2026-09-24
+
+Owner's production retest of PR #73 caught a real UX/composition
+failure, NOT a memory-capture failure: "กินไม่เผ็ด แพ้กุ้ง" correctly
+stored `no_spicy`/`shrimp_allergy` and correctly avoided shrimp, but the
+reply was a long menu-dump block (constraint checklist + allergy
+caution + intro + item list + closing question), and a following
+"ร้านอาหารมีอะไรแนะนำ" repeated the EXACT SAME long block verbatim.
+
+**1. Root cause.** `deterministicRestaurantResponse`
+(`thongthai-chat.ts`) never distinguished a bare constraint/allergy
+DECLARATION from a genuine recommendation REQUEST -- both always called
+`restaurantMenuAdvice` + the full `formatAdvisorMessage` path. Separately,
+nothing in `formatAdvisorMessage` suppressed the caution block
+(`formatRestaurantConstraintAck` + the allergy staff-notify notice) on a
+turn that didn't restate the constraint itself -- so a later
+recommendation request, reading the SAME remembered constraint, showed
+the identical block again.
+
+**2. Which responder handled each message.** Both
+"กินไม่เผ็ด แพ้กุ้ง" and "ร้านอาหารมีอะไรแนะนำ" are handled by the SAME
+`deterministicRestaurantResponse` -> `formatAdvisorMessage` pair --
+`isRestaurantAdvisorTurn`'s `explicitFood` marker already matches both
+("เผ็ด"/"กุ้ง" for the first, "ร้านอาหาร"/"แนะนำ" for the second).
+
+**3. Why both produced the same long block.** Because nothing
+downstream of `isRestaurantAdvisorTurn` ever asked "is this turn just
+stating a preference, or actually asking what to eat" -- every restaurant-
+advisor turn got the identical recommendation-composition function with
+identical inputs (the same remembered constraints), producing
+line-for-line identical output whenever the underlying `advisor.parsed`
+was unchanged.
+
+**4. Exact UX fix.**
+   - New `isBareRestaurantConstraintDeclaration(message)`
+     (`thongthai-chat.ts`): true when the message mentions a constraint/
+     allergy marker (`RESTAURANT_CONSTRAINT_MENTION_MARKER`, the same
+     vocabulary `_restaurant-intelligence.ts`'s own `parsePreferences`
+     checks) but does NOT also match a recommendation-request marker
+     (`RESTAURANT_RECOMMEND_REQUEST_MARKER` -- "มีอะไร", "แนะนำอะไร",
+     "อยากกิน", "ขอเมนู", etc.). When true, AND there is no already-
+     active restaurant conversation (`currentRestaurantAdvisorContext`/
+     `currentRestaurantSet` both empty -- otherwise a mid-flow
+     refinement like "จริงๆ ขอเผ็ดน้อย" would wrongly lose its
+     already-shown recommendation list), `deterministicRestaurantResponse`
+     returns a new short, two-line acknowledgment
+     (`formatConstraintDeclarationAck`) instead of calling the full
+     recommendation formatter -- reusing `restaurantMenuAdvice`'s OWN
+     `parsed` output so the acknowledgment wording always matches what
+     was actually filtered, never a second, separately-maintained copy.
+   - New `mentionsRestaurantConstraintNow(message)` -- same marker,
+     tested on the CURRENT message only (never chat history). Passed as
+     `formatAdvisorMessage`'s new third parameter,
+     `constraintMentionedNow`. When false (the constraint is only
+     remembered, not restated this turn), the full
+     `formatRestaurantConstraintAck` + allergy-notice caution block is
+     suppressed entirely, replaced by a short natural phrase from new
+     `naturalRestaurantConstraintPhrase(advisor)` -- e.g. "ถ้ายังเลี่ยงกุ้ง
+     และไม่เผ็ดอยู่ ทองไทยแนะนำเริ่มจาก 2–3 อย่างนี้ครับ 😊" -- matching the
+     owner's own exact expected wording.
+   - The existing `limitAdvisoryList(allRows, fullList ? allRows.length : 3)`
+     cap and `wantsFullRestaurantList` (explicit "ขอเมนูทั้งหมด..." widen)
+     were already correct and untouched -- confirmed still load-bearing
+     (item 7 below).
+   - Two small, pre-existing parsing gaps in `_restaurant-intelligence.ts`
+     were fixed along the way, both required for the owner's own Test 5
+     ("ขอเมนูทั้งหมดที่ไม่มีกุ้ง") to behave correctly: `hasNegative` didn't
+     recognize "ไม่มี..." ("without/no...") as an avoidance phrasing
+     (only "ไม่กิน"/"ไม่เอา"/"งด"/"เลี่ยง"/"ไม่ชอบ"/"แพ้"); and the
+     negation path only pushed the bare "กุ้งแห้ง" (dried shrimp) string
+     into `avoidIngredients`, never bare "กุ้ง" (fresh shrimp) -- meaning
+     a plain "ไม่กินกุ้ง"/"ไม่มีกุ้ง" statement (not phrased as an allergy)
+     still recommended "ต้มยำกุ้ง" (fresh-shrimp tom yum). Fixed the same
+     conservative way the allergy path already handles this (see that
+     code's own comment): push both the specific and the bare ingredient
+     name.
+
+**5. Tests added.**
+`tests/master-roadmap-phase2-restaurant-memory-ux.test.ts`, 10 tests
+through the full signed LINE webhook, using the owner's exact production
+phrases: (1) declaration gets a short ack, no menu, includes staff
+caution, stores both constraints; (2) a following recommendation request
+uses the remembered constraint naturally, caps at 3, never repeats the
+prior block, no shrimp; (3) without prior memory, no remembered-constraint
+phrase appears; (4) the cap is real (proven against a seeded 6-item menu,
+since the default 3-item fixture can't distinguish "capped" from
+"coincidentally small"); (5) an explicit full-menu request widens the cap
+and still excludes shrimp; (6) severe allergy still gets Phase 1's
+escalation, no guarantee; (7)-(9) regressions (mobility memory, refund
+guardrail, ATV safety routing); (10) a mid-conversation constraint
+REFINEMENT (already-active recommendation flow) still shows an updated
+list, never downgrades to the bare declaration ack.
+
+**6. Full test result.** 1018/1018 passing (1008 prior + 10 new), zero
+regressions.
+
+**7. Load-bearing proof.** Four separate mutations, each reverted
+immediately after confirming the expected failures, with the final file
+state diffed byte-for-byte against a pre-mutation backup to confirm a
+clean restore:
+   - **Restaurant follow-up ignores GuestContext** (both
+     `constraints: request.guestContext.constraints` AND
+     `recentMessages: restaurantAdvisorRecentMessages(...)` replaced
+     with empty arrays -- removing GuestContext alone wasn't enough,
+     since the conversation-history path independently re-derives the
+     same constraint from the SAME conversation's own prior turns, by
+     design): test 2 failed, all others stayed green.
+   - **Menu cap removed** (`limitAdvisoryList(allRows, allRows.length)`
+     unconditionally): test 4 failed (proven against the seeded 6-item
+     menu -- the default 3-item fixture is too small to show this),
+     all others stayed green.
+   - **Declaration turn's short-circuit disabled** (forced `false`):
+     test 1 failed (the declaration turn dumped the full menu again),
+     all others stayed green.
+   - **Duplicate-block suppression removed** (`constraintMentionedNow`
+     forced to always `true`): test 2 failed (the full caution block
+     reappeared on the follow-up turn), all others stayed green.
+
+**8. Deploy status.** Cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**9. Owner retest script** (same LINE conversation):
+1. "กินไม่เผ็ด แพ้กุ้ง" -> "รับทราบครับ 🙏 เดี๋ยวทองไทยจะเลี่ยงกุ้ง/กุ้งแห้ง และ
+   เลือกแบบไม่เผ็ดให้นะครับ / หน้างานขอให้แจ้งพนักงานอีกครั้งเรื่องแพ้อาหาร เพื่อ
+   กันการปนเปื้อนครับ" -- short, no menu list.
+2. "ร้านอาหารมีอะไรแนะนำ" -> "ถ้ายังเลี่ยงกุ้งและไม่เผ็ดอยู่ ทองไทยแนะนำเริ่มจาก
+   2–3 อย่างนี้ครับ 😊" followed by up to 3 non-shrimp items and "มากี่คนครับ
+   เดี๋ยวทองไทยช่วยจัดให้พอดีโต๊ะครับ" -- never repeats turn 1's caution block.
+
+**Confirmations**: no memory-capture code touched (constraint capture
+was already correct); no schema migration; no dashboard work; no
+aggregate migration applied -- a response-composition fix plus two
+narrowly-scoped pre-existing parsing gaps, entirely within the existing
+Phase 2 restaurant advisor.
+
+**Per the roadmap's own workflow rule**: stops here, per the owner's
+explicit instruction ("Stop after this fix. Do not start Phase 3.").
