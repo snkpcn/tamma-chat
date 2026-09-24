@@ -86,6 +86,7 @@ import {
 import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask } from './_task-state';
 import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
+import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
 import {
   asksIfSafe,
   interpretActivityGoal,
@@ -236,6 +237,33 @@ export function deterministicCasualChatResponse(request: BrainRequest): BrainRes
       ? 'ครับผม ทองไทยอยู่นี่ครับ 😊 มีอะไรให้ช่วยไหมครับ'
       : "Yep, Thongthai's here 😊 What can I help you with?",
     intent: 'greeting',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// Phase 2 stabilization: when "ทองไทย" is clearly being used as the
+// assistant's name, answer as the assistant instead of letting the lexical
+// horse-name collision reach activity selection. This is deliberately narrow;
+// explicit horse/riding phrasing is classified HORSE_RELATED and never enters
+// this responder.
+export function deterministicBotAddressResponse(request: BrainRequest): BrainResponse | null {
+  if (classifyTopLevelSemanticIntent(request.message) !== 'BOT_ADDRESS') return null;
+  const text = request.message.trim();
+  const message = /ขอบคุณ/u.test(text)
+    ? 'ยินดีครับ 😊 ทองไทยอยู่นี่ครับ ถ้ามีอะไรให้ช่วยต่อบอกได้เลยครับ'
+    : /สวัสดี/u.test(text)
+      ? 'สวัสดีครับ 😊 ทองไทยอยู่นี่ครับ วันนี้อยากให้ช่วยเรื่องกิน พัก กิจกรรม โลเคชั่น อากาศ หรือจัดทริปครับ?'
+      : /ตอบใหม่|อธิบาย/u.test(text)
+        ? 'ได้ครับ บอกจุดที่อยากให้ทองไทยตอบใหม่หรืออธิบายเพิ่มได้เลยครับ'
+        : 'ได้ครับ 😊 อยากให้ทองไทยช่วยแนะนำเรื่องกิน พัก กิจกรรม โลเคชั่น อากาศ หรือจัดทริปครับ?';
+  return {
+    message,
+    intent: 'conversation',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
     suggestedActions: [],
@@ -1511,6 +1539,7 @@ async function hasEverDiscussedActivityDomain(guestDbId: string | null): Promise
 // horse-booking task the customer never asked to start, producing a
 // garbled missing-field prompt instead of ever asking what they meant.
 function isBareAmbiguousHorseSelection(request: BrainRequest): { name: string } | null {
+  if (topLevelIntentBlocksHorseTokenRouting(classifyTopLevelSemanticIntent(request.message))) return null;
   const asset = activityAssetFromText(request.message);
   if (!asset) return null;
   if (mentionsThongthaiResponse(request.message)) return null;
@@ -2492,6 +2521,11 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
 }
 
 export function activityBookingFallbackDraft(request: BrainRequest): Record<string, unknown> | null {
+  // Whole-sentence intent wins over stale horse history/entity tokens. A
+  // location/weather/bot-address turn must never be consumed as a horse
+  // continuation merely because "ทองไทย" is also a horse name or because an
+  // old activity task exists.
+  if (topLevelIntentBlocksHorseTokenRouting(classifyTopLevelSemanticIntent(request.message))) return null;
   const userTurns = request.chatHistory.filter(turn => turn.role === 'user').map(turn => turn.content).concat(request.message);
   const text = userTurns.join('\n');
   // The CURRENT message's own explicit horse name always wins over
@@ -3009,6 +3043,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const transportEventId = eventId
     ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
 
+  const topLevelSemanticIntent = classifyTopLevelSemanticIntent(request.message);
+  console.log('TOP_LEVEL_SEMANTIC_INTENT', JSON.stringify({ intent: topLevelSemanticIntent }));
+
   const earlyGreeting = deterministicGreetingResponse(request);
   if (earlyGreeting) {
     const polished = polishedResponse(earlyGreeting, channel);
@@ -3101,6 +3138,43 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (serviceFeedback) {
     const polished = polishedResponse(serviceFeedback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Phase 2 stabilization — meaning-first semantic gate. Explicit location
+  // and weather questions are answered BEFORE any horse/activity continuation
+  // can inspect entity tokens or stale task state. Safety/escalation and
+  // service feedback remain above this block and keep higher precedence.
+  if (topLevelSemanticIntent === 'LOCATION_REQUEST' || topLevelSemanticIntent === 'WEATHER_REQUEST') {
+    const semanticConcierge = await deterministicLocalConciergeResponse(request).catch(error => {
+      console.error('THONGTHAI_SEMANTIC_GATE_CONCIERGE_ERROR', error instanceof Error ? redactWeatherUrl(error.message.slice(0, 220)) : 'unknown');
+      return null;
+    });
+    if (semanticConcierge) {
+      console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'semanticGateLocalConcierge', intent: topLevelSemanticIntent }));
+      const polished = polishedResponse(semanticConcierge, channel);
+      await persistBrainRuntime(guestDbId, channel, polished);
+      return coreResult(200, {
+        message: polished.message,
+        intent: polished.intent,
+        contextUpdates: polished.contextUpdates,
+        journeyAction: polished.journeyAction,
+        suggestedActions: polished.suggestedActions,
+      });
+    }
+  }
+
+  const botAddress = deterministicBotAddressResponse(request);
+  if (botAddress) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicBotAddressResponse' }));
+    const polished = polishedResponse(botAddress, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
