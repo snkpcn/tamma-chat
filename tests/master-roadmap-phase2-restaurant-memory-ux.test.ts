@@ -281,12 +281,25 @@ test('9. regression: "พื้นลื่นมาก ตอนเล่น AT
   });
 });
 
-test('10. regression: mid-conversation constraint REFINEMENT still shows an updated recommendation list (never swaps to bare ack)', async () => {
+// SUPERSEDED (see the follow-up "restaurant declaration still dumps a
+// menu" round, 2026-09-24): this test originally required a constraint
+// REFINEMENT mid an active recommendation flow to keep showing an
+// updated list. The owner's later, explicit, unconditional product rule
+// ("a customer telling Thongthai a constraint is not the same as asking
+// for a menu ... only recommend when asked") overrides that -- a
+// "recently active conversation" recency check was tried and rejected
+// because it could not tell "moments ago" from "an hour ago" reliably
+// (a constraint update sent moments after a real recommendation kept
+// re-triggering the recommendation dump, which is the exact bug that
+// round fixed). A bare constraint mention ALWAYS gets the short ack now,
+// with no exception for recency, only for a concrete pending order.
+test('10. regression: constraint REFINEMENT mid an active recommendation flow still gets the short ack, never re-dumps the list', async () => {
   await withHarnessAndLine(async (_harness, replies) => {
     const userId = 'phase2-rux-10';
     await callLineWebhook([privateEvent('ร้านมีอะไรกิน', userId)]);
     await callLineWebhook([privateEvent('จริงๆ ขอเผ็ดน้อย', userId)]);
     const t = text(replies, 1);
-    assert.match(t, /ไม่เผ็ดจัด|บาท/u, 'a refinement mid an ALREADY ACTIVE recommendation flow must still show the updated list, not a bare ack');
+    assert.doesNotMatch(t, /บาท/u, 'a bare constraint refinement must never dump a menu, even mid an active recommendation flow');
+    assert.match(t, /รับทราบ|เผ็ดน้อย/u);
   });
 });
