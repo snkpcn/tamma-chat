@@ -147,6 +147,9 @@ export type Harness = {
    *  provider. If the queue is empty, a safe generic "conversation" reply
    *  is returned (never a hallucinated business fact). */
   programGeminiReply: (reply: HarnessGeminiReply) => void;
+  /** Number of raw Gemini HTTP completions consumed so far. Useful for
+   * proving a deterministic fast path did not accidentally call the model. */
+  modelCallCount: () => number;
   /** Script the NEXT call to the OpenWeatherMap endpoint
    *  (_weather-provider.ts's getWeatherForTammaLocation) -- ok:true + body
    *  for a scripted success, ok:false for a scripted provider error. THIS
@@ -240,6 +243,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const customerAccounts = new Map<string, { id: string; guest_id: string }>();
   const posts = new Map<string, Array<Record<string, unknown>>>();
   const geminiQueue: HarnessGeminiReply[] = [];
+  let geminiCalls = 0;
   let weatherFetchResponse: { ok: boolean; body: unknown } | null = null;
   const feedbackEvents = new Map<string, Record<string, unknown>>(); // id -> row (ops_feedback_events)
   const opsChannels = new Map<string, { id: string; team_code: string; target_id_enc: string; target_id_hash: string; enabled: boolean }>(); // team_code -> channel
@@ -342,6 +346,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
 
     // --- LLM provider (Gemini) ---
     if (u.includes('generativelanguage.googleapis.com')) {
+      geminiCalls += 1;
       const reply = geminiQueue.shift() ?? { message: 'ขอโทษนะครับ ตอนนี้ทองไทยยังไม่มีข้อมูลที่ยืนยันได้สำหรับเรื่องนี้ครับ', intent: 'conversation' };
       return jsonResponse({ candidates: [{ content: { parts: [{ text: JSON.stringify(reply) }] } }] });
     }
@@ -728,6 +733,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   return {
     fetchMock,
     programGeminiReply: reply => { geminiQueue.push(reply); },
+    modelCallCount: () => geminiCalls,
     programWeatherFetch: response => { weatherFetchResponse = { ok: response.ok, body: response.body ?? {} }; },
     programLinePushFailure: teamCode => { failingPushTeamCodes.add(teamCode); },
     programOpsChannel: (teamCode, sharedTargetId) => {

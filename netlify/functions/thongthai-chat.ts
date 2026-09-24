@@ -3519,7 +3519,31 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // guard, not a phrase-by-phrase answer patch: the shared
   // isExperienceDiscoveryIntent matcher owns the entire broad-discovery class.
   const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
-  const preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: {} });
+
+  // Production LINE sends chatHistory: [], so a bare restaurant follow-up
+  // ("มีอะไรแนะนำอีก") cannot prove its topic from transport history alone.
+  // The deterministic restaurant path already persists restaurantAdvisorContext
+  // in guest_agent_state; consult that SMALL server-side snapshot before the
+  // One-Mind cutover gets a chance to claim a generic recommendation turn.
+  //
+  // Keep this lookup narrow: explicit food turns already classify correctly
+  // with empty state, and unrelated generic recommendations should not pay an
+  // extra state read. Only RECOMMENDATION_ONLY turns need continuity proof.
+  let preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: {} });
+  if (!preserveRestaurantFastPath
+      && classifyRestaurantDietaryIntent(request.message) === 'RECOMMENDATION_ONLY'
+      && guestDbId) {
+    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+      console.error(
+        'THONGTHAI_RESTAURANT_PRECUTOVER_STATE_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return { state: null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
+    });
+    if (isObject(snapshot.state)) {
+      preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: snapshot.state });
+    }
+  }
   // SAME class of guard as the two above: without it, One-Mind's own
   // structural markers (e.g. findActivityTopic matching "ม้า") can claim a
   // blended local-concierge question like "ฝนตกขี่ม้าได้ไหม" as plain
@@ -3717,6 +3741,32 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Restaurant topic continuity must win BEFORE the activity semantic
+  // interpreter. deterministicActivityResponse invokes One-Mind/model semantic
+  // interpretation even for a turn that later proves not to be activity.
+  // With LINE chatHistory empty and an old horse task still present, the real
+  // model could claim a bare restaurant follow-up ("มีอะไรแนะนำอีก") and
+  // compose a generic/activity clarification before the deterministic
+  // restaurant responder ever ran. isRestaurantAdvisorTurn already rejects
+  // explicit horse/ATV/archery turns, so putting the grounded restaurant
+  // responder first is a domain-level precedence fix, not a phrase patch.
+  const deterministicRestaurant = await deterministicRestaurantResponse(request, runtime, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_RESTAURANT_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (deterministicRestaurant) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicRestaurantResponse' }));
+    const polished = polishedResponse(deterministicRestaurant, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   const deterministicActivity = await deterministicActivityResponse(
     request,
     guestDbId,
@@ -3729,23 +3779,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (deterministicActivity) {
     const polished = polishedResponse(deterministicActivity, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return coreResult(200, {
-      message: polished.message,
-      intent: polished.intent,
-      contextUpdates: polished.contextUpdates,
-      journeyAction: polished.journeyAction,
-      suggestedActions: polished.suggestedActions,
-    });
-  }
-
-  const deterministicRestaurant = await deterministicRestaurantResponse(request, runtime, guestDbId, channel).catch(error => {
-    console.error('THONGTHAI_RESTAURANT_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return null;
-  });
-  if (deterministicRestaurant) {
-    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicRestaurantResponse' }));
-    const polished = polishedResponse(deterministicRestaurant, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
