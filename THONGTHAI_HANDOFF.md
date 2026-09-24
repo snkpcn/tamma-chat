@@ -5472,3 +5472,100 @@ Phase 2 restaurant advisor.
 
 **Per the roadmap's own workflow rule**: stops here, per the owner's
 explicit instruction ("Stop after this fix. Do not start Phase 3.").
+
+## Master Roadmap Phase 2 -- Restaurant Declaration Still Dumped a Menu (Stale Context) -- 2026-09-24
+
+Owner's production retest of PR #74 showed the follow-up recommendation
+turn was now fixed, but the FIRST turn ("กินไม่เผ็ด แพ้กุ้ง") STILL
+returned a full menu recommendation (constraint checklist, allergy
+caution, 3 items, party-size question) instead of the short
+acknowledgment PR #74 was supposed to guarantee.
+
+**1. Root cause.** PR #74's own `isBareRestaurantConstraintDeclaration`
+branch was gated by `!hasActiveRestaurantConversation`, where that gate
+checked only whether `restaurantAdvisorContext`/`restaurantProposedSet`
+exist AT ALL in the guest's persisted agent state -- with no expiry.
+Reproduced directly: a genuinely brand-new LINE guest sending only
+"กินไม่เผ็ด แพ้กุ้ง" got the correct short ack (confirmed via a probe
+against the real webhook handler) -- but the owner's actual LINE test
+account had leftover `restaurantAdvisorContext` from an EARLIER,
+unrelated retest (a prior PR round, well over an hour before this one).
+Since that context never expires on its own, the new declaration was
+wrongly treated as a same-conversation refinement of stale history,
+permanently blocking the short-ack path for that specific returning
+guest -- exactly matching the owner's report ("still dumps a menu")
+while every fresh-guest test kept passing.
+
+**2. Exact condition that separates a declaration from a request.**
+Unchanged from PR #74's own classifiers
+(`isBareRestaurantConstraintDeclaration` /
+`RESTAURANT_RECOMMEND_REQUEST_MARKER` /
+`RESTAURANT_CONSTRAINT_MENTION_MARKER`) -- the actual fix is in what
+counts as "an already-active restaurant conversation" that should defer
+to the full recommendation path instead of the short ack:
+`isRestaurantConversationRecentlyActive(runtime)` (new,
+`thongthai-chat.ts`) now returns true only when
+- a concrete, in-progress proposed order (`currentRestaurantSet`)
+  exists -- always counts, regardless of age (abandoning a real
+  in-progress order over a constraint declaration would be worse), OR
+- `restaurantAdvisorContext.updatedAt` is within the last 10 minutes
+  (`RESTAURANT_ACTIVE_CONVERSATION_WINDOW_MS`) -- a conversation that's
+  genuinely still going, not a leftover from an earlier session.
+
+A constraint declaration therefore now ALWAYS gets the short ack unless
+the guest is either mid an actual pending order or has interacted with
+the restaurant advisor within the last 10 minutes.
+
+**3. Tests added/fixed.**
+`tests/master-roadmap-phase2-restaurant-stale-context-fix.test.ts`, 7
+tests through the full signed LINE webhook: (1) bare declaration -- short
+ack, memory stored, no bullets/prices, staff caution, no party-size ask;
+(2) follow-up recommendation uses remembered constraints, capped, no
+duplicated warning; (3) declaration+request combined in one message
+still recommends (with the caution, since it's stated this turn); (4)
+regression -- explicit full-menu request still works; **(5) the actual
+production bug, reproduced directly**: seeds a real guest's
+`restaurantAdvisorContext.updatedAt` to one hour in the past (via
+`harness.setState`, simulating the owner's real returning-guest account)
+and confirms a fresh declaration still gets the short ack, not a menu
+dump; (6)-(7) regressions (severe-allergy Phase 1 escalation, and the
+pre-existing "mid-conversation refinement with still-RECENT context"
+behavior from `restaurant-cross-domain-stress.test.ts`, confirmed
+unaffected since that test's two calls happen within milliseconds, well
+inside the 10-minute window).
+
+**4. Full test result.** 1025/1025 passing (1018 prior + 7 new), zero
+regressions.
+
+**5. Load-bearing proof.**
+   - **Constraint-only detection disabled** (`isBareRestaurantConstraintDeclaration`
+     call replaced with `false`): tests 1 and 5 failed (both fresh and
+     stale-context declarations dumped a menu again).
+   - **Recommendation-request detection disabled**
+     (`RESTAURANT_RECOMMEND_REQUEST_MARKER` replaced with a never-matching
+     regex): tests 3 and 4 failed (a combined declaration+request, and an
+     explicit full-menu request, were both misread as bare declarations).
+   Both reverted immediately after confirming the expected failures,
+   file diffed byte-for-byte against a pre-mutation backup to confirm a
+   clean restore.
+
+**6. Deploy status.** Cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**7. Owner retest script:**
+1. "กินไม่เผ็ด แพ้กุ้ง" -> short ack only ("รับทราบครับ 🙏 เดี๋ยวทองไทยจะ
+   เลี่ยงกุ้ง/กุ้งแห้ง และเลือกแบบไม่เผ็ดให้นะครับ / หน้างานขอให้แจ้งพนักงาน
+   อีกครั้งเรื่องแพ้อาหาร เพื่อกันการปนเปื้อนครับ"), even on the SAME LINE
+   account used for every prior retest.
+2. "ร้านอาหารมีอะไรแนะนำ" -> "ถ้ายังเลี่ยงกุ้งและไม่เผ็ดอยู่ ทองไทยแนะนำเริ่ม
+   จาก 2–3 อย่างนี้ครับ 😊" + up to 3 non-shrimp items + party-size
+   question, never repeating turn 1's caution block.
+
+**Confirmations**: no memory-capture code touched; no schema migration;
+no dashboard work; no aggregate migration applied -- a single, narrowly-
+scoped recency fix to an existing "is this conversation still active"
+check, within the existing Phase 2 restaurant advisor.
+
+**Per the roadmap's own workflow rule**: stops here, per the owner's
+explicit instruction ("Do not start Phase 3.").
