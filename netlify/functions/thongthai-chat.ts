@@ -569,7 +569,7 @@ export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentS
   // context existed yet for restaurantFollowUp's own history/context
   // check to fall back on), even though the semantically identical
   // "กินไม่เผ็ด แพ้กุ้ง มีอะไรแนะนำ" always worked correctly.
-  const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง|ไก่|หมู|เนื้อ)/u.test(text);
+  const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง|ไก่|หมู|เนื้อ|พริก)/u.test(text);
   if (explicitFood) return true;
   // "แนะนำ" alone (e.g. "มีอะไรแนะนำอีก" -- a natural "what else do you
   // recommend" follow-up) was missing here -- real production gap: with
@@ -577,8 +577,8 @@ export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentS
   // matched none of the other markers and fell all the way through to a
   // generic, unrelated "no confirmed data" fallback instead of re-
   // running the recommendation with the guest's remembered constraints.
-  // Safe to add broadly here (unlike in isBareRestaurantConstraintDeclaration's
-  // own marker) because this whole branch only fires when
+  // Safe to add broadly here (unlike in classifyRestaurantDietaryIntent's
+  // own constraint marker) because this whole branch only fires when
   // hasRestaurantHistory/hasRestaurantServerContext is ALREADY true --
   // i.e. the guest is already in a restaurant-topic conversation.
   const restaurantFollowUp = /(งบ|แพ้|ไม่กิน|ไม่เอา|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน|เอาชุด|ชุดเมื่อกี้|อันเมื่อกี้|อันนั้น|ราคา|กี่บาท|เผ็ด|จืด|หวาน|เค็ม|\d+\s*คน|คนเดียว|สองคน|สามคน|สี่คน|แนะนำ)/u.test(text);
@@ -657,14 +657,38 @@ const RESTAURANT_RECOMMEND_REQUEST_MARKER = /มีอะไร|แนะนำ�
 // by hand, same discipline as every other cross-module marker pair in
 // this codebase (see _semantic-hospitality-interpreter.ts's
 // LOW_WALKING_MARKER comment for the precedent this follows).
-const RESTAURANT_CONSTRAINT_MENTION_MARKER = /เผ็ด|แพ้|ปลาร้า|ถั่ว(?:ลิสง)?|กุ้ง|ไม่กิน|ไม่เอา|มังสวิรัติ|งด(?:หมู|เนื้อ|ไก่|ปลา|ไข่)/u;
+const RESTAURANT_CONSTRAINT_MENTION_MARKER = /เผ็ด|แพ้|ปลาร้า|ถั่ว(?:ลิสง)?|กุ้ง|พริก|ไม่กิน|ไม่เอา|มังสวิรัติ|งด(?:หมู|เนื้อ|ไก่|ปลา|ไข่)/u;
+// A CORRECTION ("จริง ๆ กินไก่ได้" -- "actually I can eat chicken") is
+// still a constraint-related message, not a recommendation request --
+// but it contains none of RESTAURANT_CONSTRAINT_MENTION_MARKER's own
+// "new restriction" vocabulary (no "ไม่กิน"/"ไม่เอา"/"งด..."), so without
+// this it would classify as OTHER and fall through to a full menu dump.
+// Kept as a separate, narrow marker (rather than broadening the general
+// one with bare "ไก่"/"หมู"/"เนื้อ") so an unrelated food mention like
+// "มีเมนูไก่ไหม" never gets misread as a dietary constraint.
+const RESTAURANT_CONSTRAINT_CORRECTION_MARKER = /(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินเผ็ดได้|ทานเผ็ดได้|กินไก่ได้|ทานไก่ได้|กินหมูได้|ทานหมูได้|กินเนื้อได้|ทานเนื้อได้|กินกุ้งได้|ทานกุ้งได้)/u;
 
-function isBareRestaurantConstraintDeclaration(message: string): boolean {
-  return RESTAURANT_CONSTRAINT_MENTION_MARKER.test(message) && !RESTAURANT_RECOMMEND_REQUEST_MARKER.test(message);
+export type RestaurantDietaryIntent =
+  | 'CONSTRAINT_ONLY'
+  | 'RECOMMENDATION_ONLY'
+  | 'CONSTRAINT_AND_RECOMMENDATION'
+  | 'OTHER';
+
+// The single hard gate this whole feature rests on: a dietary constraint
+// message is NEVER inferred to be a menu request just because a
+// constraint is present. Only an explicit recommendation-trigger word
+// (RESTAURANT_RECOMMEND_REQUEST_MARKER) ever allows a recommendation.
+export function classifyRestaurantDietaryIntent(message: string): RestaurantDietaryIntent {
+  const hasConstraint = RESTAURANT_CONSTRAINT_MENTION_MARKER.test(message) || RESTAURANT_CONSTRAINT_CORRECTION_MARKER.test(message);
+  const hasRecommendRequest = RESTAURANT_RECOMMEND_REQUEST_MARKER.test(message);
+  if (hasConstraint && hasRecommendRequest) return 'CONSTRAINT_AND_RECOMMENDATION';
+  if (hasConstraint) return 'CONSTRAINT_ONLY';
+  if (hasRecommendRequest) return 'RECOMMENDATION_ONLY';
+  return 'OTHER';
 }
 
-function mentionsRestaurantConstraintNow(message: string): boolean {
-  return RESTAURANT_CONSTRAINT_MENTION_MARKER.test(message);
+function mentionsRestaurantConstraintNow(intent: RestaurantDietaryIntent): boolean {
+  return intent === 'CONSTRAINT_ONLY' || intent === 'CONSTRAINT_AND_RECOMMENDATION';
 }
 
 function restaurantConstraintAvoidLabels(advisor: any): string[] {
@@ -684,10 +708,19 @@ function restaurantConstraintAvoidLabels(advisor: any): string[] {
 
 // Short acknowledgment-only reply for a bare constraint declaration --
 // never the full menu-recommendation format. Reuses restaurantMenuAdvice's
-// OWN parsed constraints (so the wording always matches what was
-// actually filtered, never a second, separately-maintained copy) but
+// OWN parsed constraints (so the "what I'll avoid" wording always
+// matches what was actually filtered, cumulative across the whole
+// conversation, never a second, separately-maintained copy) but
 // composes a two-line acknowledgment instead of a recommendation list.
-function formatConstraintDeclarationAck(advisor: any): string {
+// The staff/cross-contamination CAUTION, unlike the avoid-list, is
+// gated on the CURRENT message only ("แพ้" mentioned THIS turn) -- real
+// production bug this closes: advisor.parsed.allergenFlags reflects the
+// whole rolling recentMessages window, so a LATER, unrelated constraint
+// update (e.g. "ไม่กินไก่" sent after an earlier "แพ้กุ้ง") kept re-
+// showing the full caution block every single turn, exactly the
+// "repeated full allergy warning" the owner's own example explicitly
+// shows should NOT happen on a follow-up constraint update.
+function formatConstraintDeclarationAck(advisor: any, message: string): string {
   const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
   const avoidLabels = restaurantConstraintAvoidLabels(advisor);
   const spice = parsed?.spice;
@@ -698,8 +731,31 @@ function formatConstraintDeclarationAck(advisor: any): string {
     ? `รับทราบครับ 🙏 เดี๋ยวทองไทยจะ${actionParts.join(' และ')}ให้นะครับ`
     : 'รับทราบครับ 🙏 เดี๋ยวทองไทยจะช่วยเลือกเมนูที่เหมาะกับที่บอกให้นะครับ';
   const hasAllergyFlag = Array.isArray(parsed?.allergenFlags) && (parsed!.allergenFlags as unknown[]).length > 0;
-  const caution = hasAllergyFlag ? 'หน้างานขอให้แจ้งพนักงานอีกครั้งเรื่องแพ้อาหาร เพื่อกันการปนเปื้อนครับ' : '';
+  const allergyMentionedNow = /แพ้/u.test(message);
+  const caution = (hasAllergyFlag && allergyMentionedNow) ? 'หน้างานขอให้แจ้งพนักงานอีกครั้งเรื่องแพ้อาหาร เพื่อกันการปนเปื้อนครับ' : '';
   return composeLineShortReply([lead, caution]);
+}
+
+// A CORRECTION ("จริง ๆ กินไก่ได้") needs its OWN short reply, never
+// formatConstraintDeclarationAck's -- that function derives its wording
+// from advisor.parsed, which is re-computed from the rolling
+// recentMessages window and would STILL contain the just-corrected
+// restriction from an earlier turn in the same window, wrongly saying
+// "จะเลี่ยงไก่" right after the customer said they CAN eat it. This reads
+// the correction directly off the current message instead, matching the
+// exact per-item vocabulary RESTAURANT_CONSTRAINT_CORRECTION_MARKER
+// already recognizes. Returns null for a non-correction message.
+function formatConstraintCorrectionAck(message: string): string | null {
+  const corrected = (
+    /(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินเผ็ดได้|ทานเผ็ดได้)/u.test(message) ? 'เผ็ด' :
+    /(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินไก่ได้|ทานไก่ได้)/u.test(message) ? 'ไก่' :
+    /(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินหมูได้|ทานหมูได้)/u.test(message) ? 'หมู' :
+    /(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินเนื้อได้|ทานเนื้อได้)/u.test(message) ? 'เนื้อ' :
+    /(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินกุ้งได้|ทานกุ้งได้)/u.test(message) ? 'กุ้ง' :
+    null
+  );
+  if (!corrected) return null;
+  return `รับทราบครับ 🙏 ถ้างั้นทาน${corrected}ได้ตามปกติเลยครับ`;
 }
 
 // Natural, non-repeating phrase for a recommendation reply that's using
@@ -1232,21 +1288,21 @@ async function deterministicRestaurantResponse(
     recentMessages: restaurantAdvisorRecentMessages(request, runtime),
   });
   const advisorContext = restaurantAdvisorContextUpdate(request, runtime);
-  // Master Roadmap Phase 2 fix -- a bare constraint/allergy DECLARATION
-  // or UPDATE ("กินไม่เผ็ด แพ้กุ้ง", or "ไม่กินไก่" sent moments after a
-  // real recommendation) always gets a short acknowledgment only, never
-  // the full recommendation dump -- see
-  // isBareRestaurantConstraintDeclaration's own comment. The owner's own
+  // Master Roadmap Phase 2 fix -- the ONE hard gate: a dietary constraint
+  // message is NEVER a menu request. CONSTRAINT_ONLY always gets a short
+  // acknowledgment only, never the full recommendation dump -- see
+  // classifyRestaurantDietaryIntent's own comment. The owner's own
   // product rule is unconditional here: telling Thongthai a constraint
   // is never the same as asking for a menu, no matter how recently a
   // recommendation was shown. Never claims a compare/compose_set turn
   // (those have their own, already-correct formats), or a message
   // sent while a CONCRETE proposed order is pending
   // (hasPendingRestaurantOrder's own comment).
+  const dietaryIntent = classifyRestaurantDietaryIntent(request.message);
   if (advice.mode !== 'compare' && advice.mode !== 'compose_set' && !hasPendingRestaurantOrder(runtime)
-    && isBareRestaurantConstraintDeclaration(request.message)) {
+    && dietaryIntent === 'CONSTRAINT_ONLY') {
     return {
-      message: formatConstraintDeclarationAck(advice),
+      message: formatConstraintCorrectionAck(request.message) ?? formatConstraintDeclarationAck(advice, request.message),
       intent: 'information',
       contextUpdates: {},
       journeyAction: { type: 'none', journey: null },
@@ -1258,7 +1314,7 @@ async function deterministicRestaurantResponse(
     };
   }
   return {
-    message: formatAdvisorMessage(advice, wantsFullRestaurantList(request.message), mentionsRestaurantConstraintNow(request.message)),
+    message: formatAdvisorMessage(advice, wantsFullRestaurantList(request.message), mentionsRestaurantConstraintNow(dietaryIntent)),
     intent: advice.mode === 'compare' ? 'information' : 'recommendation',
     contextUpdates:{},
     journeyAction:{type:'none',journey:null},

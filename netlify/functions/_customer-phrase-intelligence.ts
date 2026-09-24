@@ -77,10 +77,18 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   // correctly filtered for THAT turn (ephemeral, from the message text
   // itself) but never persisted, so it would be forgotten in a later
   // session.
-  if (/ไม่กินไก่|ไม่เอาไก่|งดไก่/u.test(text)) addConstraints.push('no_chicken');
-  if (/ไม่กินหมู|ไม่เอาหมู|งดหมู/u.test(text)) addConstraints.push('no_pork');
-  if (/ไม่กินเนื้อ(?:วัว)?|ไม่เอาเนื้อ(?:วัว)?|งดเนื้อ(?:วัว)?/u.test(text)) addConstraints.push('no_beef');
-  if (/ไม่กินกุ้ง|ไม่เอากุ้ง|งดกุ้ง/u.test(text) && !/แพ้กุ้ง/u.test(text)) addConstraints.push('no_shrimp');
+  // Correction FIRST, same discipline as no_spicy's own correction above
+  // -- "จริง ๆ กินไก่ได้" must win and never also re-add no_chicken (it
+  // contains no "ไม่กินไก่"/"ไม่เอาไก่"/"งดไก่" substring, so there's no
+  // clash, but the removal itself still needs to be explicit here).
+  if (/(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินไก่ได้|ทานไก่ได้)/u.test(text)) removeConstraints.push('no_chicken');
+  else if (/ไม่กินไก่|ไม่เอาไก่|งดไก่/u.test(text)) addConstraints.push('no_chicken');
+  if (/(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินหมูได้|ทานหมูได้)/u.test(text)) removeConstraints.push('no_pork');
+  else if (/ไม่กินหมู|ไม่เอาหมู|งดหมู/u.test(text)) addConstraints.push('no_pork');
+  if (/(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินเนื้อได้|ทานเนื้อได้)/u.test(text)) removeConstraints.push('no_beef');
+  else if (/ไม่กินเนื้อ(?:วัว)?|ไม่เอาเนื้อ(?:วัว)?|งดเนื้อ(?:วัว)?/u.test(text)) addConstraints.push('no_beef');
+  if (/(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินกุ้งได้|ทานกุ้งได้)/u.test(text)) removeConstraints.push('no_shrimp');
+  else if (/ไม่กินกุ้ง|ไม่เอากุ้ง|งดกุ้ง/u.test(text) && !/แพ้กุ้ง/u.test(text)) addConstraints.push('no_shrimp');
 
   if (/เอาแบบไม่โหด|ไม่เอาโหด|ไม่เอาหนัก/u.test(text)) addConstraints.push('low_intensity');
   if (/กลัวตก/u.test(text)) addConstraints.push('fear_of_falling');

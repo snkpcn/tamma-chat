@@ -5704,3 +5704,85 @@ restaurant advisor.
 **Per the roadmap's own workflow rule**: stops here, per the owner's
 explicit instruction ("Do not start Phase 3. Do not apply aggregate
 migration yet.").
+
+## Master Roadmap Phase 2 -- Restaurant Dietary Intent Gate (Final Focus Fix) -- 2026-09-24
+
+Owner's instruction: fix the ONE bug -- "a dietary constraint update
+must not trigger a menu recommendation" -- completely, via a single
+named intent gate and a full continuous 7-turn conversation test, no
+scope widening.
+
+**1. Root cause.** A brand-new guest was already handled correctly
+(confirmed by direct reproduction before any code change). The owner's
+retest exposed two DIFFERENT genuine remaining gaps in the previous
+rounds' fixes: (a) a correction ("จริง ๆ กินไก่ได้") matched neither the
+constraint-mention marker nor the recommend-request marker, classifying
+as OTHER and falling through to a full menu dump; (b) once a correction
+turn's own reply was fixed, it still wrongly repeated the FULL staff/
+cross-contamination caution block on every later constraint-only turn,
+because that caution was derived from `advisor.parsed.allergenFlags`
+-- accumulated over the whole rolling `recentMessages` window -- rather
+than whether the allergy was mentioned THIS turn. Separately, the
+owner's own retest surfaced a genuinely new bug in the underlying menu
+filter: `isHardExcluded` only hard-excluded a spicy item when someone
+had manually curated its `spiceLevel >= 3`; an uncurated ส้มตำ/ยำ/ลาบ
+dish (the common case -- curated profiles routinely don't exist) slipped
+through even with `no_spicy` active.
+
+**2. Exact intent gate implemented.** `classifyRestaurantDietaryIntent(text)`
+(`thongthai-chat.ts`, exported), returning exactly one of
+`CONSTRAINT_ONLY` / `RECOMMENDATION_ONLY` / `CONSTRAINT_AND_RECOMMENDATION`
+/ `OTHER`. Built from the same two marker sets the prior round already
+had (`RESTAURANT_CONSTRAINT_MENTION_MARKER`,
+`RESTAURANT_RECOMMEND_REQUEST_MARKER`), now consolidated into one named
+function instead of two separately-called boolean helpers, plus a new
+`RESTAURANT_CONSTRAINT_CORRECTION_MARKER` OR'd into the constraint check
+so a correction is never misclassified as OTHER. `deterministicRestaurantResponse`
+computes this once per turn and gates on it: `CONSTRAINT_ONLY` always
+gets the short ack (`formatConstraintDeclarationAck`/`formatConstraintCorrectionAck`)
+unless a concrete pending order exists (`hasPendingRestaurantOrder`);
+recommendation only ever runs for the other three buckets.
+
+**3. Exact memory keys.** `no_spicy` (spice), `shrimp_allergy` (allergy)
+/ `no_shrimp` (plain avoidance, non-allergy), `no_chicken`, `no_pork`,
+`no_beef` -- all in `_customer-db.ts`'s pre-existing `CONSTRAINTS` set;
+`no_chicken`/`no_pork`/`no_beef`/`no_shrimp` capture was added to
+`_customer-phrase-intelligence.ts` two rounds ago and is unchanged here,
+now with symmetric corrections (`removeConstraints`) for all four, not
+just spice.
+
+**4. Exact menu filter rule.** `_restaurant-intelligence.ts`'s
+`isHardExcluded` now also hard-excludes any item whose name/category
+matches `SPICY_RISK_CATEGORY_RE` (`ตำ|ส้มตำ|ยำ|ลาบ`) when `pref.spice
+=== 'none'`, REGARDLESS of curated `spiceLevel` -- same conservative
+"an occasional over-broad exclusion beats serving the wrong thing"
+principle already used for allergens.
+
+**5. Tests added.**
+`tests/master-roadmap-phase2-restaurant-dietary-intent-gate.test.ts`:
+a direct unit-level check of every `classifyRestaurantDietaryIntent`
+example the owner listed; one full 7-turn continuous conversation test
+(not isolated turns) covering the owner's entire required sequence
+including the correction; a dedicated somtam/yam/laab exclusion test
+against a seeded uncurated menu; three regressions.
+
+**6. Full test result.** 1040/1040 passing (1034 prior + 6 new), zero
+regressions.
+
+**7. Load-bearing proof.** Five mutations, each reverted immediately
+after confirming the expected failure, files diffed byte-for-byte
+against pre-mutation backups: CONSTRAINT_ONLY gate disabled, `no_chicken`
+capture disabled, GuestContext constraints ignored, the spice safety net
+disabled, and the correction's `removeConstraints` disabled -- each
+broke exactly the test(s) meant to catch it.
+
+**8. Deploy status.** Cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox.
+
+**9. Owner retest script:** "กินไม่เผ็ด แพ้กุ้ง" -> short ack; "ร้านอาหารมีอะไร
+แนะนำ" -> up to 3 filtered items; "ไม่กินไก่" -> short ack, no repeated
+caution block; "มีอะไรแนะนำอีก" -> up to 3 items excluding shrimp, spice-
+risk, AND chicken together.
+
+**Per the roadmap's own workflow rule**: stops here, per the owner's
+explicit instruction.
