@@ -3741,6 +3741,32 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Restaurant topic continuity must win BEFORE the activity semantic
+  // interpreter. deterministicActivityResponse invokes One-Mind/model semantic
+  // interpretation even for a turn that later proves not to be activity.
+  // With LINE chatHistory empty and an old horse task still present, the real
+  // model could claim a bare restaurant follow-up ("มีอะไรแนะนำอีก") and
+  // compose a generic/activity clarification before the deterministic
+  // restaurant responder ever ran. isRestaurantAdvisorTurn already rejects
+  // explicit horse/ATV/archery turns, so putting the grounded restaurant
+  // responder first is a domain-level precedence fix, not a phrase patch.
+  const deterministicRestaurant = await deterministicRestaurantResponse(request, runtime, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_RESTAURANT_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (deterministicRestaurant) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicRestaurantResponse' }));
+    const polished = polishedResponse(deterministicRestaurant, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   const deterministicActivity = await deterministicActivityResponse(
     request,
     guestDbId,
@@ -3753,23 +3779,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (deterministicActivity) {
     const polished = polishedResponse(deterministicActivity, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return coreResult(200, {
-      message: polished.message,
-      intent: polished.intent,
-      contextUpdates: polished.contextUpdates,
-      journeyAction: polished.journeyAction,
-      suggestedActions: polished.suggestedActions,
-    });
-  }
-
-  const deterministicRestaurant = await deterministicRestaurantResponse(request, runtime, guestDbId, channel).catch(error => {
-    console.error('THONGTHAI_RESTAURANT_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return null;
-  });
-  if (deterministicRestaurant) {
-    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicRestaurantResponse' }));
-    const polished = polishedResponse(deterministicRestaurant, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

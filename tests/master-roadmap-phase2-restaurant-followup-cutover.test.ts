@@ -3,8 +3,10 @@
 // Real LINE production sequence (2026-09-25):
 // horse context existed -> dietary constraint -> restaurant recommendation ->
 // "มีอะไรแนะนำอีก".
-// The final turn fell through to One-Mind's generic clarification even though
-// restaurantAdvisorContext had just been persisted server-side.
+// The final turn was exposed to One-Mind/activity semantic interpretation
+// before the grounded restaurant responder even though restaurantAdvisorContext
+// had just been persisted server-side. The real model then produced the
+// generic clarification seen by the owner.
 //
 // Why existing tests missed it: LINE sends chatHistory: [], and the old
 // preserveRestaurantFastPath inspected an EMPTY agent state before One-Mind
@@ -14,7 +16,8 @@
 // restaurant responder and looked correct. Production's real model can instead
 // compose a generic clarification and stop there. This test therefore proves
 // the stronger invariant: a persisted restaurant follow-up must not call the
-// model/One-Mind at all before the deterministic restaurant responder.
+// model/One-Mind/activity interpreter at all before the deterministic
+// restaurant responder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
