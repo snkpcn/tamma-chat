@@ -5786,3 +5786,56 @@ risk, AND chicken together.
 
 **Per the roadmap's own workflow rule**: stops here, per the owner's
 explicit instruction.
+
+
+## Master Roadmap Phase 2 Stabilization — Meaning-First Semantic Intent Gate — 2026-09-24
+
+**Checkpoint baseline:** main `67a36f4ccc4ffad366c1bc467e83f8d493855019` (PR #77).
+
+**Production incident that triggered this phase:** after valid horse/activity context had existed, the customer sent `ขอโลเคชั่นหน่อยทองไทย`. The system treated the lexical token `ทองไทย` as the horse name and answered as if the customer selected that horse, even though the whole sentence was unambiguously a location request. The same architecture could let stale activity context hijack other assistant-name turns.
+
+**Root cause:** the responder cascade had good domain-specific handlers but no small top-level meaning gate before horse/activity continuation. `activityBookingFallbackDraft` and the bare/contextual horse-selection path could inspect entity tokens + old activity context before Local Concierge (location/weather) ran much later in the cascade.
+
+**Change:**
+- Added `netlify/functions/_top-level-intent.ts` with a deliberately small, high-confidence classifier:
+  - `LOCATION_REQUEST`
+  - `WEATHER_REQUEST`
+  - `BOT_ADDRESS`
+  - `HORSE_RELATED`
+  - `GENERAL_RECOMMENDATION`
+  - `OTHER`
+- Whole-sentence location/weather intent now outranks the `ทองไทย` entity collision.
+- Explicit location/weather goes through the existing deterministic Local Concierge **before** horse/activity continuation.
+- Assistant-address wording such as `ทองไทยแนะนำหน่อย` gets a deterministic assistant response and never becomes a horse selection.
+- `activityBookingFallbackDraft` and `isBareAmbiguousHorseSelection` both yield when the top-level meaning is location/weather/bot-address/general-recommendation.
+- Explicit horse language (`อยากขี่ม้าทองไทย`, `เอาทองไทย`) is not stolen by the new gate; the existing horse-context/ambiguity logic remains authoritative.
+- Existing precedence above the new gate is unchanged: Phase 1 escalation boundary and service-feedback/safety still win first.
+- Added `TOP_LEVEL_SEMANTIC_INTENT` observability log.
+
+**CI hardening:** updated `.github/workflows/one-mind-branch-ci.yml` so every PR targeting `main` runs `npm ci && npm test`, while preserving the existing One-Mind branch push CI. This closes the process gap where Netlify deploy-preview success alone did not prove the full test suite.
+
+**Tests:** added `tests/master-roadmap-phase2-semantic-intent-gate.test.ts`, including full signed LINE webhook coverage for:
+1. stale horse context + `ขอโลเคชั่นหน่อยทองไทย` => location/map, never horse selection;
+2. stale horse context + `ทองไทยแนะนำหน่อย` => assistant request, never horse selection;
+3. explicit `อยากขี่ม้าทองไทย` remains horse-related;
+4. restaurant constraint declaration regression;
+5. refund boundary regression;
+6. ATV safety regression;
+plus direct classifier coverage.
+
+**Full CI result on branch head `5599698163f1844db8b94d41422cfb7909368bb2`: 1047/1047 passing, 0 failures.** GitHub Actions job `test` succeeded. Netlify deploy preview for PR #78 is ready.
+
+**No DB migration. No production DB mutation. No Phase 3 work.**
+
+**Owner production retest after merge:**
+1. establish horse context: `อยากขี่ม้า ไม่เคยเลย กลัวตก`
+2. `ขอโลเคชั่นหน่อยทองไทย` -> must return map/location, never `เลือกทองไทย`
+3. `ทองไทยแนะนำหน่อย` -> assistant/general helper response, never horse
+4. fresh context: `เอาทองไทย` -> existing ambiguity/context rule, never blind booking
+5. `อยากขี่ม้าทองไทย` -> horse intent remains valid
+6. `ตอนนี้ฝนตกไหม` -> weather
+7. regression: `กินไม่เผ็ด แพ้กุ้ง`
+8. regression: `ขอคืนเงินได้ไหม`
+9. regression: `พื้นลื่นมาก ตอนเล่น ATV น่ากลัว`
+
+**Stop/checkpoint rule:** merge this phase only after final head CI is green, then owner performs the production smoke above before any next semantic-routing expansion.
