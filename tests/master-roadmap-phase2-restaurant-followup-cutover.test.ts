@@ -87,12 +87,26 @@ test('production cutover: restaurant follow-up survives empty LINE history and p
 
         // This exact production turn must continue restaurant context despite
         // LINE chatHistory being empty and One-Mind cutover being enabled.
+        // The load-bearing property is stronger than just "eventually got a
+        // menu": once server-side restaurant context proves the topic, the
+        // follow-up must NEVER spend an LLM/One-Mind call first. Production's
+        // real model sometimes composed a generic clarification there instead
+        // of falling back, which is exactly what the owner observed.
+        const modelCallsBeforeFollowup = harness.modelCallCount();
         await callLineWebhook('มีอะไรแนะนำอีก', user);
         const followup = replyText(capture.replies, 3);
 
+        assert.equal(
+          harness.modelCallCount(),
+          modelCallsBeforeFollowup,
+          'restaurant follow-up with persisted context must bypass One-Mind/model cutover',
+        );
         assert.doesNotMatch(followup, /ขอรายละเอียดเพิ่มอีกนิด|ช่วยต่อให้ตรงเรื่อง/u);
-        assert.ok(menuLines(followup).length >= 1, 'follow-up should return another grounded restaurant recommendation');
-        assert.doesNotMatch(followup, /กุ้ง/u, 'remembered shrimp allergy must still filter the follow-up');
+        const followupItems = menuLines(followup);
+        assert.ok(followupItems.length >= 1, 'follow-up should return another grounded restaurant recommendation');
+        for (const line of followupItems) {
+          assert.doesNotMatch(line, /กุ้ง/u, 'remembered shrimp allergy must filter recommended item lines');
+        }
       } finally {
         capture.restore();
       }
