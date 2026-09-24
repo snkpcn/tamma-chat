@@ -227,6 +227,23 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
   };
 }
 
+// A ส้มตำ/ยำ/ลาบ dish is inherently spice-risk BY NAME/CATEGORY,
+// regardless of whether anyone has ever tagged its curated spiceLevel --
+// which routinely never happens (same gap the allergy safety net below
+// already closes for ingredients: normalizeRestaurantProfile's own
+// bounded() defaults an untagged spiceLevel to 0, indistinguishable from
+// "verified mild"). Real production incident this closes: a no_spicy
+// guest was still recommended a somtam/yam/laab item because its
+// curated spiceLevel was simply never set. The conservative choice here
+// mirrors the allergy safety net's own reasoning: an occasional over-
+// broad exclusion is far safer than recommending a spicy dish to someone
+// who explicitly said "ไม่เผ็ด."
+const SPICY_RISK_CATEGORY_RE = /ตำ|ส้มตำ|ยำ|ลาบ/u;
+
+function isUnverifiedSpicyRiskItem(item: RestaurantAdvisorItem): boolean {
+  return SPICY_RISK_CATEGORY_RE.test(item.name) || SPICY_RISK_CATEGORY_RE.test(item.category);
+}
+
 function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): boolean {
   if (!item.orderable || item.availableServings <= 0 || item.unavailableIngredients.length) return true;
   if (pref.vegetarian && item.profile.proteinTags.some(tag => ['pork','beef','chicken','fish','shrimp'].includes(tag))) return true;
@@ -235,6 +252,7 @@ function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): b
   const ingredients = item.ingredients.map(norm);
   if (pref.avoidIngredients.some(avoid => ingredients.some(ingredient => ingredient.includes(norm(avoid))))) return true;
   if (pref.spice === 'none' && item.profile.spiceLevel >= 3) return true;
+  if (pref.spice === 'none' && isUnverifiedSpicyRiskItem(item)) return true;
   return false;
 }
 

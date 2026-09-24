@@ -15,7 +15,7 @@ import { isPromotionDiscoveryIntent, isPromotionAcceptIntent, isPromotionMention
 import type { SemanticDomain } from './_semantic-interpreter';
 
 // Mirrors thongthai-chat.ts's `explicitFood` regex exactly (see isRestaurantAdvisorTurn).
-const LEGACY_EXPLICIT_FOOD_RE = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง|ไก่|หมู|เนื้อ)/u;
+const LEGACY_EXPLICIT_FOOD_RE = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง|ไก่|หมู|เนื้อ|พริก)/u;
 const LEGACY_NON_RESTAURANT_RE = /(ขี่ม้า|atv|เอทีวี|ยิงธนู|ห้องพัก|ที่พัก|เฮือน|otop|กาแฟ|คาเฟ่)/iu;
 
 export type LegacyShadowResult = {
