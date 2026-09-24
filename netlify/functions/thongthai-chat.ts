@@ -593,7 +593,93 @@ function wantsFullRestaurantList(message: string): boolean {
   return FULL_MENU_LIST_MARKER.test(message);
 }
 
-function formatAdvisorMessage(advisor: any, fullList = false): string {
+// Master Roadmap Phase 2 fix -- restaurant memory UX regression (owner's
+// retest of PR #72/#73 caught this): a bare constraint/allergy
+// DECLARATION ("กินไม่เผ็ด แพ้กุ้ง") was getting the SAME full
+// recommendation dump formatAdvisorMessage produces for an actual
+// recommendation REQUEST ("ร้านอาหารมีอะไรแนะนำ") -- and the later,
+// genuine recommendation request then repeated that exact same long
+// caution+menu block again, since nothing distinguished "just declaring
+// a constraint" from "asking what to eat," and nothing suppressed the
+// caution block on a turn that didn't restate the allergy itself. Two
+// small, closed marker sets close this without touching how constraints
+// are captured or stored (that part -- _customer-db.ts's
+// capturePreferenceSignals plus GuestContext.constraints -- was already
+// correct; this is a response-composition fix only).
+// "มีอะไร..." ("what is there...") is itself a discovery/recommendation
+// construction regardless of what follows it -- "มีอะไรไม่เผ็ด" ("what
+// do you have that's not spicy") is a real production phrasing that
+// combines a constraint AND a request in one, and must still get the
+// full (filtered) recommendation list, never the short ack alone.
+const RESTAURANT_RECOMMEND_REQUEST_MARKER = /มีอะไร|แนะนำอะไร|อยากกิน|กินอะไรดี|ขอเมนู|มีเมนู|จัดชุด|จัดโต๊ะ|อะไรอร่อย|มีไรกิน|ไรกิน/u;
+// The SAME constraint vocabulary _restaurant-intelligence.ts's own
+// parsePreferences checks -- but tested against ONLY the current
+// message (never chat history), to tell "the customer just stated this"
+// apart from "this is only known because it's remembered." Kept in sync
+// by hand, same discipline as every other cross-module marker pair in
+// this codebase (see _semantic-hospitality-interpreter.ts's
+// LOW_WALKING_MARKER comment for the precedent this follows).
+const RESTAURANT_CONSTRAINT_MENTION_MARKER = /เผ็ด|แพ้|ปลาร้า|ถั่ว(?:ลิสง)?|กุ้ง|ไม่กิน|ไม่เอา|มังสวิรัติ|งด(?:หมู|เนื้อ|ไก่|ปลา|ไข่)/u;
+
+function isBareRestaurantConstraintDeclaration(message: string): boolean {
+  return RESTAURANT_CONSTRAINT_MENTION_MARKER.test(message) && !RESTAURANT_RECOMMEND_REQUEST_MARKER.test(message);
+}
+
+function mentionsRestaurantConstraintNow(message: string): boolean {
+  return RESTAURANT_CONSTRAINT_MENTION_MARKER.test(message);
+}
+
+function restaurantConstraintAvoidLabels(advisor: any): string[] {
+  const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
+  const labels: string[] = [];
+  if (!parsed) return labels;
+  const allergens = Array.isArray(parsed.allergenFlags) ? parsed.allergenFlags.map(String) : [];
+  const allergenAvoidLabels: Record<string, string> = { shrimp: 'กุ้ง/กุ้งแห้ง', peanut: 'ถั่ว', fish: 'ปลา', egg: 'ไข่' };
+  for (const allergen of allergens) if (allergenAvoidLabels[allergen] && !labels.includes(allergenAvoidLabels[allergen])) labels.push(allergenAvoidLabels[allergen]);
+  const avoidIngredients = Array.isArray(parsed.avoidIngredients) ? parsed.avoidIngredients.map(String) : [];
+  if (avoidIngredients.some(value => value.includes('ปลาร้า')) && !labels.includes('ปลาร้า')) labels.push('ปลาร้า');
+  const avoidProteins = Array.isArray(parsed.avoidProteins) ? parsed.avoidProteins.map(String) : [];
+  const proteinLabels: Record<string, string> = { pork: 'หมู', beef: 'เนื้อวัว', chicken: 'ไก่', fish: 'ปลา', egg: 'ไข่' };
+  for (const protein of avoidProteins) if (proteinLabels[protein] && !labels.includes(proteinLabels[protein])) labels.push(proteinLabels[protein]);
+  return labels;
+}
+
+// Short acknowledgment-only reply for a bare constraint declaration --
+// never the full menu-recommendation format. Reuses restaurantMenuAdvice's
+// OWN parsed constraints (so the wording always matches what was
+// actually filtered, never a second, separately-maintained copy) but
+// composes a two-line acknowledgment instead of a recommendation list.
+function formatConstraintDeclarationAck(advisor: any): string {
+  const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
+  const avoidLabels = restaurantConstraintAvoidLabels(advisor);
+  const spice = parsed?.spice;
+  const spicePart = spice === 'none' ? 'เลือกแบบไม่เผ็ด' : spice === 'mild' ? 'เลือกแบบเผ็ดน้อย' : '';
+  const avoidPart = avoidLabels.length ? `เลี่ยง${avoidLabels.join('/')}` : '';
+  const actionParts = [avoidPart, spicePart].filter(Boolean);
+  const lead = actionParts.length
+    ? `รับทราบครับ 🙏 เดี๋ยวทองไทยจะ${actionParts.join(' และ')}ให้นะครับ`
+    : 'รับทราบครับ 🙏 เดี๋ยวทองไทยจะช่วยเลือกเมนูที่เหมาะกับที่บอกให้นะครับ';
+  const hasAllergyFlag = Array.isArray(parsed?.allergenFlags) && (parsed!.allergenFlags as unknown[]).length > 0;
+  const caution = hasAllergyFlag ? 'หน้างานขอให้แจ้งพนักงานอีกครั้งเรื่องแพ้อาหาร เพื่อกันการปนเปื้อนครับ' : '';
+  return composeLineShortReply([lead, caution]);
+}
+
+// Natural, non-repeating phrase for a recommendation reply that's using
+// a REMEMBERED constraint (not restated this turn) -- e.g. "เลี่ยงกุ้งและ
+// ไม่เผ็ด" -- so formatAdvisorMessage can say "ถ้ายัง...อยู่" instead of
+// re-showing the full caution block every single turn.
+function naturalRestaurantConstraintPhrase(advisor: any): string {
+  const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
+  if (!parsed) return '';
+  const avoidLabels = restaurantConstraintAvoidLabels(advisor).map(label => label.replace('/กุ้งแห้ง', ''));
+  const parts: string[] = [];
+  if (avoidLabels.length) parts.push(`เลี่ยง${avoidLabels.join('/')}`);
+  if (parsed.spice === 'none') parts.push('ไม่เผ็ด');
+  else if (parsed.spice === 'mild') parts.push('เผ็ดน้อย');
+  return parts.join('และ');
+}
+
+function formatAdvisorMessage(advisor: any, fullList = false, constraintMentionedNow = true): string {
   const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
   if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
     const [first, second] = advisor.comparison;
@@ -640,13 +726,25 @@ function formatAdvisorMessage(advisor: any, fullList = false): string {
   if (allRows.length) {
     const shown = limitAdvisoryList(allRows, fullList ? allRows.length : 3);
     const moreAvailable = allRows.length > shown.length;
-    const constraintAck = formatRestaurantConstraintAck(advisor);
-    const allergyNotice = notices.find((notice: string) => /สารก่อภูมิแพ้/u.test(notice));
+    // Master Roadmap Phase 2 fix -- the full caution block (constraintAck
+    // + allergyNotice) only leads when THIS message is the one restating
+    // the constraint; on a later turn using a REMEMBERED constraint
+    // (constraintMentionedNow=false), that block is dropped in favor of
+    // a short "ถ้ายัง...อยู่" phrase below -- otherwise every follow-up
+    // recommendation request re-dumps the exact same long block the
+    // customer already saw (the owner's own retest catch).
+    const constraintAck = constraintMentionedNow ? formatRestaurantConstraintAck(advisor) : '';
+    const allergyNotice = constraintMentionedNow
+      ? notices.find((notice: string) => /สารก่อภูมิแพ้/u.test(notice))
+      : undefined;
+    const rememberedConstraintPhrase = constraintMentionedNow ? '' : naturalRestaurantConstraintPhrase(advisor);
     const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
     const partySizeKnown = parsed?.partySize != null;
     const intro = advisor?.mode === 'pairing'
       ? 'มีเมนูนี้แล้ว เพิ่มนี้จะบาลานซ์โต๊ะกำลังดีครับ'
-      : (constraintAck || allergyNotice) ? 'จากเมนูที่มี ทองไทยแนะนำ' : '🍽️ เมนูที่น่าลองตอนนี้';
+      : rememberedConstraintPhrase
+        ? `ถ้ายัง${rememberedConstraintPhrase}อยู่ ทองไทยแนะนำเริ่มจาก 2–3 อย่างนี้ครับ 😊`
+        : (constraintAck || allergyNotice) ? 'จากเมนูที่มี ทองไทยแนะนำ' : '🍽️ เมนูที่น่าลองตอนนี้';
     const closing = advisor?.mode === 'pairing'
       ? ''
       : !partySizeKnown ? 'มากี่คนครับ เดี๋ยวทองไทยช่วยจัดให้พอดีโต๊ะครับ'
@@ -655,7 +753,9 @@ function formatAdvisorMessage(advisor: any, fullList = false): string {
       // Allergy/dietary caution always leads (hard rule: care/safety
       // note first) -- constraintAck confirms exactly what was filtered
       // ("ไม่มีกุ้งแห้ง · เลี่ยงกุ้ง"), allergyNotice adds the staff-notify
-      // caution a filtered ingredient list alone can't guarantee.
+      // caution a filtered ingredient list alone can't guarantee. Both
+      // are '' /undefined (never shown) when the constraint is only
+      // remembered, not restated this turn -- see rememberedConstraintPhrase.
       constraintAck,
       allergyNotice,
       intro,
@@ -1094,8 +1194,34 @@ async function deterministicRestaurantResponse(
     recentMessages: restaurantAdvisorRecentMessages(request, runtime),
   });
   const advisorContext = restaurantAdvisorContextUpdate(request, runtime);
+  // Master Roadmap Phase 2 fix -- a bare constraint/allergy declaration
+  // ("กินไม่เผ็ด แพ้กุ้ง") gets a short acknowledgment only, never the
+  // full recommendation dump -- see isBareRestaurantConstraintDeclaration's
+  // own comment. Never claims a compare/compose_set turn (those have
+  // their own, already-correct formats), and never claims a REFINEMENT
+  // mid an already-active restaurant conversation (context or a proposed
+  // set already exists) -- there, the customer is already looking at a
+  // list and a new constraint should re-filter it, not swap to a bare
+  // ack (real regression this avoided: "จริงๆ ขอเผ็ดน้อย" said right
+  // after an existing recommendation list must still show the updated,
+  // filtered list).
+  const hasActiveRestaurantConversation = Boolean(currentRestaurantAdvisorContext(runtime)) || Boolean(currentRestaurantSet(runtime));
+  if (advice.mode !== 'compare' && advice.mode !== 'compose_set' && !hasActiveRestaurantConversation
+    && isBareRestaurantConstraintDeclaration(request.message)) {
+    return {
+      message: formatConstraintDeclarationAck(advice),
+      intent: 'information',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      agentStateUpdate: advisorContext,
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
   return {
-    message: formatAdvisorMessage(advice, wantsFullRestaurantList(request.message)),
+    message: formatAdvisorMessage(advice, wantsFullRestaurantList(request.message), mentionsRestaurantConstraintNow(request.message)),
     intent: advice.mode === 'compare' ? 'information' : 'recommendation',
     contextUpdates:{},
     journeyAction:{type:'none',journey:null},
