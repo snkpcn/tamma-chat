@@ -219,12 +219,20 @@ test('6. regression: "แม่แพ้กุ้งรุนแรง กิน
   });
 });
 
-test('7. regression: mid-conversation refinement (still-recent context) keeps showing an updated list', async () => {
+// SUPERSEDED (see the follow-up "restaurant declaration still dumps a
+// menu" round, 2026-09-24): the 10-minute recency window this test was
+// added to prove is exactly what let a constraint UPDATE sent moments
+// after a real recommendation ("ไม่กินไก่" right after "ร้านอาหารมีอะไร
+// แนะนำ") keep re-triggering the full recommendation dump -- the owner's
+// own next production retest caught this. The recency window was
+// removed entirely; only a concrete pending order now overrides the
+// short ack (see hasPendingRestaurantOrder's own comment).
+test('7. regression: a bare constraint refinement mid an active recommendation flow still gets the short ack, never re-dumps the list', async () => {
   await withHarnessAndLine(async (_harness, replies) => {
     const userId = 'phase2-stale-7';
     await callLineWebhook([privateEvent('ร้านมีอะไรกิน', userId)]);
     await callLineWebhook([privateEvent('จริงๆ ขอเผ็ดน้อย', userId)]);
     const t = text(replies, 1);
-    assert.match(t, /ไม่เผ็ดจัด|บาท/u);
+    assert.doesNotMatch(t, /บาท/u);
   });
 });

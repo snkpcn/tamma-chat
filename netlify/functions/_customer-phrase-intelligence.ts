@@ -63,8 +63,24 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   if (/(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินเผ็ดได้|ทานเผ็ดได้)/u.test(text)) {
     removeConstraints.push('no_spicy');
   } else {
-    if (/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้/u.test(text)) addConstraints.push('no_spicy');
+    if (/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้|ไม่ใส่พริก/u.test(text)) addConstraints.push('no_spicy');
   }
+
+  // Plain protein/ingredient avoidance -- a PREFERENCE ("ไม่กินไก่"), not
+  // an allergy statement ("แพ้กุ้ง", handled separately below). All map
+  // to keys already in _customer-db.ts's own CONSTRAINTS set (added
+  // pre-Phase-2, alongside every other protein exclusion the restaurant
+  // advisor already understands from a same-turn mention via
+  // _restaurant-intelligence.ts's own hasNegative) -- this only makes
+  // them durable across sessions, no new memory key needed. Real
+  // production gap this closes: "ไม่กินไก่" sent as its own message was
+  // correctly filtered for THAT turn (ephemeral, from the message text
+  // itself) but never persisted, so it would be forgotten in a later
+  // session.
+  if (/ไม่กินไก่|ไม่เอาไก่|งดไก่/u.test(text)) addConstraints.push('no_chicken');
+  if (/ไม่กินหมู|ไม่เอาหมู|งดหมู/u.test(text)) addConstraints.push('no_pork');
+  if (/ไม่กินเนื้อ(?:วัว)?|ไม่เอาเนื้อ(?:วัว)?|งดเนื้อ(?:วัว)?/u.test(text)) addConstraints.push('no_beef');
+  if (/ไม่กินกุ้ง|ไม่เอากุ้ง|งดกุ้ง/u.test(text) && !/แพ้กุ้ง/u.test(text)) addConstraints.push('no_shrimp');
 
   if (/เอาแบบไม่โหด|ไม่เอาโหด|ไม่เอาหนัก/u.test(text)) addConstraints.push('low_intensity');
   if (/กลัวตก/u.test(text)) addConstraints.push('fear_of_falling');
@@ -102,7 +118,10 @@ export function extractIntelligenceSignals(message: string): IntelligenceSignal[
   if (/กลัวตก/u.test(text)) signals.push({ eventType: 'risk', category: 'fear_of_falling', domain: 'activity' });
   if (/กลัวเร็ว/u.test(text)) signals.push({ eventType: 'risk', category: 'fear_of_speed', domain: 'activity' });
   if (/เดินไม่ไหว|เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้/u.test(text)) signals.push({ eventType: 'risk', category: 'mobility_need', domain: 'general' });
-  if (/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้/u.test(text)) signals.push({ eventType: 'phrase', category: 'low_spice', domain: 'restaurant' });
+  if (/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้|ไม่ใส่พริก/u.test(text)) signals.push({ eventType: 'phrase', category: 'low_spice', domain: 'restaurant' });
+  if (/ไม่กินไก่|ไม่เอาไก่|งดไก่/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_chicken', domain: 'restaurant' });
+  if (/ไม่กินหมู|ไม่เอาหมู|งดหมู/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_pork', domain: 'restaurant' });
+  if (/ไม่กินเนื้อ(?:วัว)?|ไม่เอาเนื้อ(?:วัว)?|งดเนื้อ(?:วัว)?/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_beef', domain: 'restaurant' });
   if (/แพ้กุ้ง/u.test(text)) signals.push({ eventType: 'risk', category: 'shrimp_allergy', domain: 'restaurant' });
   if (/แพ้อาหาร/u.test(text)) signals.push({ eventType: 'risk', category: 'food_allergy', domain: 'restaurant' });
   if (/(?:เอา|ขอ)?แบบชิล\s*ๆ?|ขอชิล\s*ๆ?/u.test(text)) signals.push({ eventType: 'phrase', category: 'chill_pace', domain: 'general' });

@@ -31,13 +31,25 @@ test('restaurant: menu discovery answers from the real catalog with zero prematu
   });
 });
 
-test('restaurant: a dietary constraint mid-conversation filters the recommendation without proposing a transaction', async () => {
+// Updated (Master Roadmap Phase 2, "restaurant declaration still dumps a
+// menu" round, 2026-09-24): this test originally expected a bare
+// constraint statement mid-conversation to still show a filtered
+// recommendation list. The owner's later, explicit, unconditional
+// product rule -- "a customer telling Thongthai a constraint is not the
+// same as asking for a menu ... only recommend when asked" -- overrides
+// that: a bare constraint mention now always gets a short acknowledgment,
+// never a recommendation dump, regardless of how recently a
+// recommendation was shown (see thongthai-chat.ts's
+// isBareRestaurantConstraintDeclaration / hasPendingRestaurantOrder).
+// The "never proposes a transaction" guarantee this test exists to prove
+// still holds.
+test('restaurant: a dietary constraint mid-conversation gets a short acknowledgment, never proposing a transaction', async () => {
   await withHarness(async harness => {
     const gid = guestId('restaurant-dietary-constraint');
     await processThongthaiChatCore(brainRequest('ร้านมีอะไรกิน', gid, 'web'), 'evt-1');
     const r = await processThongthaiChatCore(brainRequest('จริงๆ ขอเผ็ดน้อย', gid, 'web'), 'evt-2');
     assert.equal(r.statusCode, 200);
-    assert.match(String((r.payload as { message: string }).message), /ไม่เผ็ดจัด/);
+    assert.doesNotMatch(String((r.payload as { message: string }).message), /บาท/u, 'a bare constraint statement must never dump a menu');
     assert.equal(harness.postsTo('restaurant_preorders_rpc').length, 0, 'a constraint statement alone must never create an order');
   });
 });

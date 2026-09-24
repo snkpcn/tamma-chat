@@ -491,30 +491,25 @@ function normThai(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
-// Master Roadmap Phase 2 fix -- production regression found in the
-// owner's own retest of PR #74: restaurantAdvisorContext persists
-// INDEFINITELY once set (correct for staying on-topic across a genuinely
-// continuous conversation), but the SAME LINE test account carried
-// leftover restaurantAdvisorContext from an earlier, unrelated retest
-// (from a prior PR round, well over an hour before), which made a
-// brand-new "กินไม่เผ็ด แพ้กุ้ง" statement wrongly look like a same-
-// conversation refinement of that stale context -- permanently blocking
-// the short-ack path for that returning guest, even on a truly fresh
-// topic. Bounded to a short recency window so only a conversation that
-// is GENUINELY still going counts as "active" for this specific
-// declaration-vs-refinement decision. A real, concrete in-progress
-// proposed order (currentRestaurantSet) always counts regardless of
-// age, since silently abandoning that over a constraint declaration
-// would be a worse failure than this one.
-const RESTAURANT_ACTIVE_CONVERSATION_WINDOW_MS = 10 * 60 * 1000;
-
-function isRestaurantConversationRecentlyActive(runtime: { agentState: Record<string, unknown> }): boolean {
-  if (currentRestaurantSet(runtime)) return true;
-  const context = currentRestaurantAdvisorContext(runtime);
-  if (!context) return false;
-  const updatedAt = Date.parse(context.updatedAt);
-  if (!Number.isFinite(updatedAt)) return false;
-  return Date.now() - updatedAt <= RESTAURANT_ACTIVE_CONVERSATION_WINDOW_MS;
+// Master Roadmap Phase 2 fix -- superseded an earlier, WRONG attempt at
+// this same gate (see git history: a 10-minute "recently active"
+// recency window on restaurantAdvisorContext). That attempt still
+// broke the owner's explicit, unconditional product rule: "a customer
+// telling Thongthai a constraint is not the same as asking for a menu
+// ... only recommend when asked" -- a constraint UPDATE sent right
+// after a genuine recommendation (e.g. "ไม่กินไก่" moments after
+// "ร้านอาหารมีอะไรแนะนำ") refreshes restaurantAdvisorContext.updatedAt
+// to "now," so it was ALWAYS inside that window and ALWAYS fell through
+// to the full recommendation dump again -- exactly the bug this closes.
+// The only thing that legitimately overrides a bare declaration now is
+// a CONCRETE, in-progress proposed order (currentRestaurantSet) --
+// silently abandoning an actual pending order over a constraint mention
+// would be a worse failure than this one. No other notion of "the
+// conversation is still active" survives: conversational recency can
+// never distinguish "moments ago" from "an hour ago" reliably enough to
+// safely gate this, as the prior attempt's own regression proved.
+function hasPendingRestaurantOrder(runtime: { agentState: Record<string, unknown> }): boolean {
+  return Boolean(currentRestaurantSet(runtime));
 }
 
 function currentRestaurantSet(runtime: { agentState: Record<string, unknown> }): RestaurantProposedSetState | null {
@@ -567,9 +562,26 @@ export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentS
   // that phrasing missed every deterministic branch above and fell through to
   // a full LLM round trip, which the legacy path only reaches as a One-Mind
   // safety net that's already spent most of the request's time budget.
-  const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง)/u.test(text);
+  // "ไก่"/"หมู"/"เนื้อ" (bare protein words) were missing here even though
+  // "เผ็ด"/"ปลาร้า"/"ถั่ว"/"กุ้ง" already worked the same way -- real
+  // production gap: "ไม่กินไก่ มีอะไรแนะนำ" as a customer's very FIRST
+  // message never reached the restaurant advisor at all (no restaurant
+  // context existed yet for restaurantFollowUp's own history/context
+  // check to fall back on), even though the semantically identical
+  // "กินไม่เผ็ด แพ้กุ้ง มีอะไรแนะนำ" always worked correctly.
+  const explicitFood = /(ที่ร้าน|ร้านอาหาร|ตำมา-ชาติ|ตำมา|เมนู|อาหาร|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย|ตำ|ลาบ|น้ำตก|ยำ|ต้มแซ่บ|คอหมู|เสือร้องไห้|ไก่บ้าน|ปลาช่อน|ปลานิล|ข้าวเหนียว|เผ็ด|ปลาร้า|ถั่ว|กุ้ง|ไก่|หมู|เนื้อ)/u.test(text);
   if (explicitFood) return true;
-  const restaurantFollowUp = /(งบ|แพ้|ไม่กิน|ไม่เอา|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน|เอาชุด|ชุดเมื่อกี้|อันเมื่อกี้|อันนั้น|ราคา|กี่บาท|เผ็ด|จืด|หวาน|เค็ม|\d+\s*คน|คนเดียว|สองคน|สามคน|สี่คน)/u.test(text);
+  // "แนะนำ" alone (e.g. "มีอะไรแนะนำอีก" -- a natural "what else do you
+  // recommend" follow-up) was missing here -- real production gap: with
+  // restaurant context already established, this colloquial follow-up
+  // matched none of the other markers and fell all the way through to a
+  // generic, unrelated "no confirmed data" fallback instead of re-
+  // running the recommendation with the guest's remembered constraints.
+  // Safe to add broadly here (unlike in isBareRestaurantConstraintDeclaration's
+  // own marker) because this whole branch only fires when
+  // hasRestaurantHistory/hasRestaurantServerContext is ALREADY true --
+  // i.e. the guest is already in a restaurant-topic conversation.
+  const restaurantFollowUp = /(งบ|แพ้|ไม่กิน|ไม่เอา|จัด.*ชุด|จัด.*โต๊ะ|เพิ่มอะไร|ต่างกัน|อันไหน|เอาชุด|ชุดเมื่อกี้|อันเมื่อกี้|อันนั้น|ราคา|กี่บาท|เผ็ด|จืด|หวาน|เค็ม|\d+\s*คน|คนเดียว|สองคน|สามคน|สี่คน|แนะนำ)/u.test(text);
   return (hasRestaurantHistory || hasRestaurantServerContext) && restaurantFollowUp;
 }
 
@@ -1220,19 +1232,18 @@ async function deterministicRestaurantResponse(
     recentMessages: restaurantAdvisorRecentMessages(request, runtime),
   });
   const advisorContext = restaurantAdvisorContextUpdate(request, runtime);
-  // Master Roadmap Phase 2 fix -- a bare constraint/allergy declaration
-  // ("กินไม่เผ็ด แพ้กุ้ง") gets a short acknowledgment only, never the
-  // full recommendation dump -- see isBareRestaurantConstraintDeclaration's
-  // own comment. Never claims a compare/compose_set turn (those have
-  // their own, already-correct formats), and never claims a REFINEMENT
-  // mid an already-active restaurant conversation (context or a proposed
-  // set already exists) -- there, the customer is already looking at a
-  // list and a new constraint should re-filter it, not swap to a bare
-  // ack (real regression this avoided: "จริงๆ ขอเผ็ดน้อย" said right
-  // after an existing recommendation list must still show the updated,
-  // filtered list).
-  const hasActiveRestaurantConversation = isRestaurantConversationRecentlyActive(runtime);
-  if (advice.mode !== 'compare' && advice.mode !== 'compose_set' && !hasActiveRestaurantConversation
+  // Master Roadmap Phase 2 fix -- a bare constraint/allergy DECLARATION
+  // or UPDATE ("กินไม่เผ็ด แพ้กุ้ง", or "ไม่กินไก่" sent moments after a
+  // real recommendation) always gets a short acknowledgment only, never
+  // the full recommendation dump -- see
+  // isBareRestaurantConstraintDeclaration's own comment. The owner's own
+  // product rule is unconditional here: telling Thongthai a constraint
+  // is never the same as asking for a menu, no matter how recently a
+  // recommendation was shown. Never claims a compare/compose_set turn
+  // (those have their own, already-correct formats), or a message
+  // sent while a CONCRETE proposed order is pending
+  // (hasPendingRestaurantOrder's own comment).
+  if (advice.mode !== 'compare' && advice.mode !== 'compose_set' && !hasPendingRestaurantOrder(runtime)
     && isBareRestaurantConstraintDeclaration(request.message)) {
     return {
       message: formatConstraintDeclarationAck(advice),

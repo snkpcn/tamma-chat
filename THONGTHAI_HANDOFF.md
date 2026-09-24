@@ -5569,3 +5569,138 @@ check, within the existing Phase 2 restaurant advisor.
 
 **Per the roadmap's own workflow rule**: stops here, per the owner's
 explicit instruction ("Do not start Phase 3.").
+
+## Master Roadmap Phase 2 -- Restaurant Constraint vs. Recommendation Intent Split -- 2026-09-24
+
+Owner's next production retest showed the SAME symptom (a bare
+constraint statement dumping a menu) with a DIFFERENT, more specific
+trigger than the previous round's fix addressed: a constraint UPDATE
+sent moments after a real recommendation ("ไม่กินไก่" right after
+"ร้านอาหารมีอะไรแนะนำ") still dumped the full block again.
+
+**1. Root cause.** The previous round's fix ("stale restaurantAdvisorContext"
+entry above) bounded the "already an active conversation" gate to a
+10-minute recency window on `restaurantAdvisorContext.updatedAt`. That
+window was, by definition, ALWAYS satisfied immediately after a
+recommendation had just been shown (the recommendation turn itself
+refreshes `updatedAt` to "now"), so a constraint update sent right after
+always fell through to the full recommendation composer again. Any
+notion of "the conversation is still active" based on conversational
+recency turned out unable to distinguish "the customer is refining what
+they just saw" from "the customer is stating a brand-new constraint" --
+both look identical from a timestamp's point of view. The owner's own
+product rule is, and was always meant to be, unconditional: a customer
+declaring or updating a dietary constraint is never the same as asking
+for a menu, no matter how recently a recommendation was shown.
+
+**2. Exact intent split added.** No new classifier logic --
+`isBareRestaurantConstraintDeclaration` / `RESTAURANT_RECOMMEND_REQUEST_MARKER`
+/ `RESTAURANT_CONSTRAINT_MENTION_MARKER` (from the earlier "restaurant
+memory UX" round) are unchanged. What changed is the ONLY thing allowed
+to override the bare-declaration short ack: new `hasPendingRestaurantOrder`
+(`thongthai-chat.ts`) checks ONLY for a CONCRETE, in-progress proposed
+order (`currentRestaurantSet`) -- no recency window, no "conversation
+context exists" check of any kind. Silently abandoning an actual pending
+order over a constraint mention would be a worse failure than this one;
+every other notion of "still active" was removed as unsafe. Two
+supporting gaps found and fixed while reproducing the owner's exact
+scenario:
+   - `isRestaurantAdvisorTurn`'s own `explicitFood` anchor list had
+     "เผ็ด"/"ปลาร้า"/"ถั่ว"/"กุ้ง" as bare trigger words but only
+     "ไก่บ้าน" (a specific dish name), not bare "ไก่"/"หมู"/"เนื้อ" -- so
+     "ไม่กินไก่ มีอะไรแนะนำ" as a customer's very FIRST message never
+     reached the restaurant advisor at all. Added the three bare protein
+     words, mirrored into `_semantic-interpreter-shadow.ts`'s own exact
+     copy of this regex (that module's own comment says it must match
+     "exactly").
+   - `isRestaurantAdvisorTurn`'s `restaurantFollowUp` marker didn't
+     recognize a bare "แนะนำ" ("มีอะไรแนะนำอีก" -- a natural "what else do
+     you recommend" follow-up), so with restaurant context already
+     established it still fell through to an unrelated generic fallback
+     instead of re-running the recommendation. Safe to add broadly here
+     (unlike in the declaration marker) because this branch only fires
+     when restaurant history/context is ALREADY established.
+
+**3. Supported dietary exclusions.** Extended `_customer-phrase-intelligence.ts`'s
+`extractPreferenceSignal`/`extractIntelligenceSignals` to capture plain
+protein/ingredient avoidance as a durable preference (previously only
+allergy-flavored statements like "แพ้กุ้ง" were captured; a plain "ไม่กิน
+ไก่" was filtered correctly for that one turn via the existing ephemeral
+recentMessages mechanism, but never persisted): `ไม่กินไก่`/`ไม่เอาไก่`/
+`งดไก่` -> `no_chicken`; `ไม่กินหมู`/`ไม่เอาหมู`/`งดหมู` -> `no_pork`;
+`ไม่กินเนื้อ(วัว)?`/`ไม่เอาเนื้อ(วัว)?`/`งดเนื้อ(วัว)?` -> `no_beef`;
+`ไม่กินกุ้ง`/`ไม่เอากุ้ง`/`งดกุ้ง` (non-allergy phrasing only, i.e. not also
+matching `แพ้กุ้ง`) -> `no_shrimp`. `ขอไม่ใส่พริก` was also added to the
+existing `no_spicy` pattern.
+
+**4. Whether a new memory key was needed.** No. `no_pork`, `no_beef`,
+`no_chicken`, `no_fish`, `no_egg`, and `no_shrimp` already existed in
+`_customer-db.ts`'s own `CONSTRAINTS` allowed-value set from before Phase
+2 -- they were simply never DETECTED by Phase 2's own phrase-capture
+regex. This round only teaches the existing capture pipeline to
+recognize phrasing that already had a valid, allowed home to write to.
+
+**5. Tests added.**
+`tests/master-roadmap-phase2-restaurant-declaration-intent-split.test.ts`,
+9 tests through the full signed LINE webhook: (1) bare declaration --
+short ack, no menu, no prices, no party-size CTA, allergy caution; (2)
+follow-up recommendation uses remembered constraints; **(3) the actual
+production bug, reproduced directly**: "ไม่กินไก่" sent immediately after
+a real recommendation stores `no_chicken` and still gets the short ack,
+never a menu dump; (4) a further recommendation request
+("มีอะไรแนะนำอีก") uses ALL three remembered constraints together; (5)-(6)
+combined declaration+request in one message, shrimp and chicken variants;
+(7)-(9) regressions (mobility memory, ATV safety routing, refund
+guardrail). Also updated three PRE-EXISTING tests whose expectations the
+owner's new unconditional rule explicitly supersedes (each updated with
+a comment explaining why, pointing back to this entry):
+`tests/master-roadmap-phase2-restaurant-memory-ux.test.ts` test 10,
+`tests/master-roadmap-phase2-restaurant-stale-context-fix.test.ts` test
+7, and `tests/restaurant-cross-domain-stress.test.ts`'s own "a dietary
+constraint mid-conversation" test (this last one predates all of Phase
+2) -- all three previously required a mid-conversation constraint
+refinement to still show a filtered recommendation; all three now
+require the short ack instead, per the owner's own explicit rule.
+
+**6. Full test result.** 1034/1034 passing (1025 prior + 9 new), zero
+regressions.
+
+**7. Load-bearing proof.** Three separate mutations, each reverted
+immediately after confirming the expected failures, all three files
+diffed byte-for-byte against pre-mutation backups to confirm a clean
+restore:
+   - **Declaration detection disabled** (`isBareRestaurantConstraintDeclaration`
+     call replaced with `false`): tests 1 and 3 failed.
+   - **`no_chicken` capture disabled** (that one detection line replaced
+     with `false`): test 3 failed (the one that directly checks
+     `guest_memory` for `no_chicken`) -- test 4 stayed green, confirming
+     the ephemeral recentMessages-based re-derivation is a genuinely
+     independent, redundant mechanism, not the same code path.
+   - **Recommendation composer made to ignore remembered exclusions**
+     (`constraints`/`recentMessages` both replaced with empty arrays):
+     tests 2 and 4 failed (both rely purely on REMEMBERED constraints,
+     not the current message) -- tests 5 and 6 stayed green, since they
+     restate the constraint in the same message.
+
+**8. Deploy status.** Cannot be verified from this session -- egress to
+`*.netlify.app`/`api.netlify.com` is blocked from this sandbox, as in
+every prior round.
+
+**9. Owner retest script:**
+1. "กินไม่เผ็ด แพ้กุ้ง" -> short ack only.
+2. "ร้านอาหารมีอะไรแนะนำ" -> up to 3 non-shrimp items using the
+   remembered constraint, no repeated warning block.
+3. "ไม่กินไก่" -> short ack only ("รับทราบครับ 🙏 เดี๋ยวทองไทยจะเลี่ยงกุ้ง/
+   กุ้งแห้ง/ไก่ และเลือกแบบไม่เผ็ดให้นะครับ..."), even sent immediately
+   after the recommendation above -- never a menu dump.
+4. "มีอะไรแนะนำอีก" -> up to 3 items avoiding shrimp, spice, AND chicken
+   together.
+
+**Confirmations**: no schema migration; no dashboard work; no aggregate
+migration applied -- an intent-gating fix plus a narrow, already-allowed
+memory-key capture extension, entirely within the existing Phase 2
+restaurant advisor.
+
+**Per the roadmap's own workflow rule**: stops here, per the owner's
+explicit instruction ("Do not start Phase 3. Do not apply aggregate
+migration yet.").
