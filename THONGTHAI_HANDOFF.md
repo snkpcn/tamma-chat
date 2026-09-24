@@ -5839,3 +5839,30 @@ plus direct classifier coverage.
 9. regression: `พื้นลื่นมาก ตอนเล่น ATV น่ากลัว`
 
 **Stop/checkpoint rule:** merge this phase only after final head CI is green, then owner performs the production smoke above before any next semantic-routing expansion.
+
+
+## Master Roadmap Phase 2 Stabilization — Restaurant Follow-up Precedence — 2026-09-25
+
+**Owner production smoke that exposed this:** after horse context, the guest said `กินไม่เผ็ด แพ้กุ้ง` -> `ร้านอาหารมีอะไรแนะนำ` -> `มีอะไรแนะนำอีก`. The final LINE turn returned the generic clarification `ขอรายละเอียดเพิ่มอีกนิดครับ จะได้ช่วยต่อให้ตรงเรื่อง` instead of continuing the restaurant recommendation.
+
+**Root cause:** LINE intentionally sends `chatHistory: []`. Restaurant continuity was correctly persisted in `guest_agent_state.restaurantAdvisorContext`, but routing still had two model-bearing layers ahead of the grounded restaurant responder:
+1. the early One-Mind cutover guard originally checked restaurant intent with an empty agent state, so a bare follow-up could not prove its topic;
+2. even after preserving the cutover, `deterministicActivityResponse` still ran before `deterministicRestaurantResponse` and invokes One-Mind semantic interpretation. With an old horse task present, the real model could claim/clarify the turn before restaurant logic ran.
+
+**Fix:**
+- For `RECOMMENDATION_ONLY` turns that are not explicit food phrases, the pre-cutover guard now reads the small persisted `guest_agent_state` snapshot and re-runs the existing `isRestaurantAdvisorTurn` classifier with real server context.
+- After the full runtime is loaded, the grounded deterministic restaurant responder now runs **before** the model-bearing activity semantic responder. `isRestaurantAdvisorTurn` already rejects explicit horse/ATV/archery messages, so activity intents keep their existing path.
+- No new phrase-specific answer was added; this is routing/precedence based on persisted topic context.
+- Added test-harness Gemini call counting so tests can prove a deterministic fast path truly used zero model completions, instead of merely producing the right final answer after an unnecessary model call.
+
+**Load-bearing production-shaped test:** `tests/master-roadmap-phase2-restaurant-followup-cutover.test.ts` runs a signed LINE sequence with `THONGTHAI_ONE_MIND_CUTOVER=1`, empty LINE history, and pre-existing horse/activity context. It asserts that after a restaurant recommendation, `มีอะไรแนะนำอีก`:
+- does not call Gemini/One-Mind at all,
+- does not return the generic clarification,
+- returns grounded menu recommendation item(s),
+- keeps the remembered shrimp-allergy filter on recommended item lines.
+
+**Verified code head:** `1057abbabd9c2368a5f9f380919895c2f5f2cd3b` — GitHub Actions **1048/1048 passing, 0 failures**. Targeted test #458 passed with logs showing `SEMANTIC_RESPONDER_SELECTED deterministicRestaurantResponse` immediately after the top-level intent log, with no model-provider call on that follow-up.
+
+**No DB migration. No production DB mutation. No Phase 3 work.**
+
+**Owner retest after production deploy:** use the same existing LINE conversation and send `มีอะไรแนะนำอีก`. Expected: another short restaurant recommendation that respects remembered constraints; never the generic `ขอรายละเอียดเพิ่มอีกนิด` reply.
