@@ -491,6 +491,32 @@ function normThai(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+// Master Roadmap Phase 2 fix -- production regression found in the
+// owner's own retest of PR #74: restaurantAdvisorContext persists
+// INDEFINITELY once set (correct for staying on-topic across a genuinely
+// continuous conversation), but the SAME LINE test account carried
+// leftover restaurantAdvisorContext from an earlier, unrelated retest
+// (from a prior PR round, well over an hour before), which made a
+// brand-new "กินไม่เผ็ด แพ้กุ้ง" statement wrongly look like a same-
+// conversation refinement of that stale context -- permanently blocking
+// the short-ack path for that returning guest, even on a truly fresh
+// topic. Bounded to a short recency window so only a conversation that
+// is GENUINELY still going counts as "active" for this specific
+// declaration-vs-refinement decision. A real, concrete in-progress
+// proposed order (currentRestaurantSet) always counts regardless of
+// age, since silently abandoning that over a constraint declaration
+// would be a worse failure than this one.
+const RESTAURANT_ACTIVE_CONVERSATION_WINDOW_MS = 10 * 60 * 1000;
+
+function isRestaurantConversationRecentlyActive(runtime: { agentState: Record<string, unknown> }): boolean {
+  if (currentRestaurantSet(runtime)) return true;
+  const context = currentRestaurantAdvisorContext(runtime);
+  if (!context) return false;
+  const updatedAt = Date.parse(context.updatedAt);
+  if (!Number.isFinite(updatedAt)) return false;
+  return Date.now() - updatedAt <= RESTAURANT_ACTIVE_CONVERSATION_WINDOW_MS;
+}
+
 function currentRestaurantSet(runtime: { agentState: Record<string, unknown> }): RestaurantProposedSetState | null {
   const raw = runtime.agentState.restaurantProposedSet;
   if (!isObject(raw) || !Array.isArray(raw.items)) return null;
@@ -1205,7 +1231,7 @@ async function deterministicRestaurantResponse(
   // ack (real regression this avoided: "จริงๆ ขอเผ็ดน้อย" said right
   // after an existing recommendation list must still show the updated,
   // filtered list).
-  const hasActiveRestaurantConversation = Boolean(currentRestaurantAdvisorContext(runtime)) || Boolean(currentRestaurantSet(runtime));
+  const hasActiveRestaurantConversation = isRestaurantConversationRecentlyActive(runtime);
   if (advice.mode !== 'compare' && advice.mode !== 'compose_set' && !hasActiveRestaurantConversation
     && isBareRestaurantConstraintDeclaration(request.message)) {
     return {
