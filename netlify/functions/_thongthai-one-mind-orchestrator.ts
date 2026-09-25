@@ -349,8 +349,19 @@ function deterministicNeedsLanguageRefinement(
   taskState: TaskStateContainer,
 ): boolean {
   if (!turn) return true;
+
+  // A topic-switch candidate tells us only the destination domain. It cannot
+  // safely represent compound human meaning such as "drop the old thing and
+  // let's eat first". Phase 2 now gives the semantic brain privacy-safe task
+  // context, so this deliberately coarse class may be refined even while a
+  // working task is active. Low-confidence/provider-outage still falls back
+  // to this exact deterministic candidate below.
+  if (turn.intent === 'restaurant_topic_switch') return true;
+
+  // Every other mature active-task parser remains authoritative in this
+  // checkpoint: slot fills, corrections, side-questions, inventory, etc.
   if (hasLiveActiveTask(taskState)) return false;
-  return turn.intent === 'restaurant_topic_switch';
+  return false;
 }
 
 function modelRefinementIsUsable(turn: SemanticTurn): boolean {
