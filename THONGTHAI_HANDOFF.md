@@ -7039,3 +7039,105 @@ Backoffice must aggregate and visibly surface:
 - actual Bot Quality signals above
 
 Then production deploy/status must be verified. No extra owner click test is required for aggregate sections unless production behavior contradicts CI/runtime evidence.
+
+
+---
+
+## Phase 4 — All-domain Hospitality Playbook — Checkpoint 1 — 2026-09-25
+
+**STATUS: ALL-DOMAIN HOST ENTRYPOINT + GROUNDED CAFE BOUNDARY GREEN; PR #99 PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY.**
+
+### Scope closed in this checkpoint
+
+This checkpoint does NOT replace the existing domain responders. It adds one acceptance gate over the canonical `processThongthaiChatCore` entry point and closes the documented ecosystem-entry gap.
+
+Covered through one canonical hospitality matrix:
+- restaurant
+- cafe
+- horse
+- ATV
+- archery
+- homestay
+- location
+- weather
+- safety
+- complaint
+- compliment
+- refund / payment authority boundary
+- booking support
+
+### Bare recommendation gap
+
+Before this checkpoint, a truly bare:
+
+`มีอะไรแนะนำ`
+
+with no remembered mobility context could still fall through to One-Mind / model fallback.
+
+It is now handled deterministically by the ecosystem host:
+- สายชิล — คาเฟ่ + ถ่ายรูป + อาหาร
+- สายกิจกรรม — ขี่ม้า / ATV / ยิงธนู
+- สายพัก — เฮือนสเตย์ + ธรรมชาติ
+- one useful follow-up asks party size and whether the guest wants chill vs activity
+
+The existing privacy-safe personalization behavior remains:
+- limited-walking memory still gets the low-walking branch
+- food-constraint context is not stolen from the restaurant advisor
+
+The regression requires `modelCallCount() === 0` for the bare host opener.
+
+### Cafe grounding incident caught by full CI
+
+An initial Phase 4 attempt incorrectly treated synthetic harness `world_facts` rows as verified cafe production facts and produced:
+- latte price: 65 THB
+- cafe hours: 07:00–18:00
+
+Full regression CI correctly failed the existing no-hallucination / LINE-Web-equivalence suites.
+
+Read-only production DB inspection then proved:
+- `public.world_facts` has the expected verified/active schema
+- **there are currently zero production rows where category='cafe'**
+
+Therefore:
+- the speculative cafe adapter / new world-facts reader was removed from this PR
+- cafe price/menu/hours remain an explicit information boundary
+- cafe questions are preserved across the One-Mind cutover so the model cannot invent an answer
+- the deterministic cafe response says the data is not verified and offers useful ecosystem next steps
+- no synthetic 65-THB / 07:00–18:00 fact can reach customers
+
+No production DB mutation was performed.
+
+### All-domain acceptance contract
+
+New test:
+- `tests/phase4-all-domain-hospitality.test.ts`
+
+It proves the canonical core:
+- returns HTTP 200
+- avoids generic failure wording
+- stays relevant to the requested domain
+- keeps location grounded on the canonical Maps link
+- uses weather provider data for weather
+- preserves safety / complaint / compliment / refund boundaries
+- keeps booking support in the booking domain
+- keeps cafe helpful without inventing operational facts
+
+### RED / GREEN evidence
+
+Earlier Phase 4 head:
+- `0451225831cc6dc85fd8267c4794f31a132b228f`
+- GitHub Actions run `36146842025`
+- failed because synthetic cafe fixtures leaked as customer facts and one acceptance assertion did not match the real Maps-link contract
+
+Corrected grounded head:
+- `e01fe8546a562f1ccef0712377e6b86e77b05116`
+- GitHub Actions run `36154114723`
+- **1085 / 1085 PASS**
+
+### Next Phase 4 checkpoint
+
+After this PR is merged and production deploy is verified:
+- audit domain handoff continuity as a host, especially cross-domain switching and follow-up questions
+- keep existing explicit transaction precedence
+- do not add facts without a verified source
+- only then mark the whole Phase 4 complete

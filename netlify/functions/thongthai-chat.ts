@@ -1331,6 +1331,46 @@ async function promotionDiscoveryFallbackResponse(
   return resolvePromotionRedemption(decision.pending, request, guestDbId, channel);
 }
 
+
+const CAFE_EXPLICIT_MARKER = /(?:คาเฟ่|กาแฟ|ลาเต้|อเมริกาโน่|คาปูชิโน่|เอสเปรสโซ่|อินทนิน|inthanin)/iu;
+const CAFE_READ_ONLY_FOLLOWUP_MARKER = /^(?:ราคาเท่าไหร่|ราคาเท่าไร|กี่บาท|เปิดกี่โมง|ปิดกี่โมง|เปิดถึงกี่โมง|มีอะไรบ้าง|มีเมนูอะไร)(?:ครับ|คะ|ค่ะ)?[\s?？!.]*$/u;
+
+function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
+  const text = message.trim();
+  if (hasExplicitTransactionIntent(text)) return false;
+  if (CAFE_EXPLICIT_MARKER.test(text)) return true;
+  return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
+}
+
+function deterministicCafeResponse(
+  request: BrainRequest,
+  runtime: BrainRuntimeContext,
+): BrainResponse | null {
+  const message = request.message.trim();
+  if (!isCafeReadOnlyTurn(message, runtime.agentState?.active_topic)) return null;
+
+  // There is currently no verified live cafe menu / price / hours source in
+  // production. Stay useful without fabricating operational facts: acknowledge
+  // the cafe domain, be explicit about the information boundary, and offer a
+  // real next step within the ecosystem.
+  const answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเมนู ราคา หรือเวลาเปิดปิดของคาเฟ่ที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิด แต่ถ้าอยากวางทริปสายชิล ทองไทยช่วยต่อคาเฟ่กับร้านอาหารหรือที่พักให้ได้ครับ';
+
+  return {
+    message: answer,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type:'none', journey:null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    agentStateUpdate: {
+      activeTopic: 'cafe',
+      unresolvedNeed: 'cafe_read_only_inquiry',
+    },
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
 function deterministicExperienceDiscoveryResponse(
   request: BrainRequest,
   runtime: BrainRuntimeContext,
@@ -2630,14 +2670,40 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
     };
   }
 
-  if (BARE_RECOMMEND_MARKER.test(message.trim()) && request.guestContext.constraints?.includes('limited_walking')) {
+  if (BARE_RECOMMEND_MARKER.test(message.trim())) {
+    if (request.guestContext.constraints?.includes('limited_walking')) {
+      return {
+        message: 'ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ 😊\nอยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?',
+        intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+        suggestedActions: [], responseStyle: 'direct',
+        agentStateUpdate: {
+          activeTopic: 'ecosystem',
+          unresolvedNeed: 'choose_food_cafe_or_light_activity',
+          pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
+        },
+        semanticMemoryUpdates: [], toolCalls: [],
+      };
+    }
+    const restaurantConstraintKeys = new Set([
+      'vegetarian','no_spicy','mild_spice','no_pork','no_beef','no_chicken','no_fish','no_egg',
+      'no_plara','no_peanut','no_shrimp','peanut_allergy','shrimp_allergy','fish_allergy','egg_allergy',
+      'food_allergy','authentic_isan',
+    ]);
+    if ((request.guestContext.constraints ?? []).some(item => restaurantConstraintKeys.has(item))) {
+      return null;
+    }
     return {
-      message: 'ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ 😊\nอยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?',
+      message: [
+        'ถ้ายังไม่ได้ล็อกว่าอยากทำอะไร ทองไทยแนะนำให้เลือกฟีลก่อนครับ 😊',
+        ...ECOSYSTEM_PATHS.map((path, index) => `${index + 1}) ${path.labelTh}: ${path.descriptionTh}`),
+        '',
+        'มากี่คน แล้วอยากได้ชิล ๆ หรือมีกิจกรรมด้วยครับ?',
+      ].join('\n'),
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
       suggestedActions: [], responseStyle: 'direct',
       agentStateUpdate: {
         activeTopic: 'ecosystem',
-        unresolvedNeed: 'choose_food_cafe_or_light_activity',
+        unresolvedNeed: 'choose_ecosystem_path',
         pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
       },
       semanticMemoryUpdates: [], toolCalls: [],
@@ -3977,8 +4043,30 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // can never disagree about which messages this covers.
   const preserveLocalConciergeFastPath = !hasExplicitTransactionIntent(request.message)
     && Boolean(classifyLocalConciergeQuestion(request.message));
+
+  // Phase 4 Cafe: the production One-Mind cutover runs before the legacy
+  // deterministic responder. Preserve this read-only class exactly like
+  // restaurant/local-concierge so the honest no-verified-data boundary cannot
+  // be swallowed by a model-composed or stale-domain answer. For a
+  // transport-history-free follow-up
+  // ("ราคาเท่าไร"), consult only the bounded active_topic snapshot.
+  let preserveCafeFastPath = isCafeReadOnlyTurn(request.message);
+  if (!preserveCafeFastPath
+      && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(request.message.trim())
+      && guestDbId) {
+    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+      console.error(
+        'THONGTHAI_CAFE_PRECUTOVER_STATE_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return { state: null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
+    });
+    preserveCafeFastPath = isObject(snapshot.state)
+      && isCafeReadOnlyTurn(request.message, snapshot.state.active_topic);
+  }
+
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
-      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath) {
+      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath && !preserveCafeFastPath) {
     try {
       const oneMind = await processOneMindCustomerTurn({
         channel,
@@ -4102,6 +4190,19 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (promotionDiscovery) {
     const polished = polishedResponse(promotionDiscovery, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const deterministicCafe = deterministicCafeResponse(request, runtime);
+  if (deterministicCafe) {
+    const polished = polishedResponse(deterministicCafe, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

@@ -105,6 +105,7 @@ async function activityCatalogAdapter(request: KnowledgeRequest, now: Date = new
   } catch (error) { return unavailable('activity_catalog_live', 'activity_live', error, now); }
 }
 
+
 /** Reuses loadActivePromotionsWorldFact(channel) exactly -- the real
  *  eligibility filtering (active window, channel scope, redemption limits)
  *  already lives there; this adapter never re-derives it. */
