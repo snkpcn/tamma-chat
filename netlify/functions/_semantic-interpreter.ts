@@ -313,8 +313,18 @@ Classify the CURRENT message only (use context to interpret it, not to answer a 
 SEMANTIC COMPLETENESS RULES:
 - A domain noun tells you WHERE the customer is talking about; the rest of the sentence tells you WHAT they want.
   Never collapse a richer question into generic discovery merely because it mentions a restaurant, room, horse, cafe, or product.
+- BROAD DISCOVERY: when the customer broadly asks what there is to do/play/experience and names no specific domain,
+  use domain=ecosystem, action=discover, informationNeed=catalog. Do not narrow it to activity merely because the wording sounds playful.
 - Preserve the customer's actual predicate/question: availability/status, price, recommendation, booking, cancellation,
   comparison, how-it-works, complaint, or ordinary conversation are different meanings even inside the same domain.
+- SELECTION IS NOT BOOKING: choosing a previously offered entity/set/horse is a selection/confirm action, never book or order
+  unless the CURRENT message explicitly asks to make/commit the reservation or order.
+- SLOT ANSWER: when context is waiting on a task slot (date, time, party size, duration, quantity, etc.) and the customer simply
+  answers with that value, use action=provide_information. Supplying a slot is not a confirmation and is not a booking.
+- AVAILABILITY IS READ-ONLY: asking whether a table/room/activity/time is free or available is action=ask or status with
+  informationNeed=availability, never book/booking merely because the customer supplied a concrete date or time.
+- CONTEXT-RESOLVED ELLIPSIS: a short follow-up such as "ม้าล่ะ", "ตัวไหน", or another deictic fragment should not require
+  clarification when recent entities/context already resolve what it refers to. Emit the reference and keep needsClarification=false.
 - Extract concrete date/time/party-size/preferences the customer actually said. Do not drop them just because the domain is obvious.
 - The CURRENT utterance outranks stale context and long-term memory. Prior context may resolve references, but must not turn
   a new availability/status question into an old recommendation or transaction topic.
