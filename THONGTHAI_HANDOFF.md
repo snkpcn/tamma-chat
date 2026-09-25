@@ -9006,3 +9006,171 @@ After docs-inclusive CI is green:
 7. repeat until human-grade semantic contract is met
 
 Do NOT quote the old **3.16%** as semantic accuracy. It was primarily an availability artifact.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5.5 — Quota-safe live certification + semantic adjudication — 2026-09-26
+
+**STATUS: IMPLEMENTATION + BRANCH VERIFICATION GREEN; PENDING PR CI / EXACT MERGE / AUTO PRODUCTION CERT.**
+
+### Production evidence that triggered Phase 5.5
+
+Production commit before this work:
+`ee8d3712bad9a841b5f0324ad7ecfb9b9e098a39`
+
+Netlify production deploy:
+`6ab6dd0bc092750008f39e8f`
+
+Verified:
+- READY
+- context = production
+- branch = main
+- commit_ref = `ee8d3712bad9a841b5f0324ad7ecfb9b9e098a39`
+- manual_deploy = false
+
+The one-shot live certification artifact from that deploy was:
+
+- totalCorpusCases = 158
+- evaluated = 17
+- semanticEvaluated = 16
+- pass = 11
+- semanticFailed = 5
+- providerFailed = 1
+- passPct = 68.75% of semantic-evaluated cases only
+- availabilityComplete = false
+- status = incomplete_provider
+
+This is NOT a valid whole-corpus semantic score because provider availability failed before the corpus completed.
+
+### Provider failure evidence
+
+The first provider-blocked case was `promotion-01`.
+
+Safe attempt diagnostics showed:
+- gemini-3.8-flash -> 429 rate_limited
+- gemini-3.7-flash -> 429 rate_limited
+- gemini-3.6-flash -> 429 rate_limited
+- gemini-3.5-flash -> timeout after the shared budget was nearly exhausted
+- gemini-3.5-flash-lite -> no usable remaining attempt budget
+
+Official Gemini documentation confirms:
+- all configured IDs are current supported Gemini 3 model IDs
+- rate limits are applied per project and vary by model/tier
+- therefore fallback model IDs are useful for runtime resilience, but certification must not assume they provide an independent fresh project RPM budget
+
+No paid OpenAI fallback was enabled.
+
+### Certification pacing change
+
+`runSemanticCertification` now supports:
+`interCaseDelayMs`
+
+The production one-shot runner now defaults to:
+`SEMANTIC_CERT_INTER_CASE_DELAY_MS = 4250` when no override is supplied.
+
+Pacing applies:
+- between cases inside a batch
+- across batch boundaries
+- only to the observational certification harness
+- never to customer runtime chat traffic
+
+Existing safeguards remain:
+- provider failures separated from semantic failures
+- stop on provider failure
+- availability retry
+- 61-second availability cooldown retry
+- semantic pass % excludes provider failures
+- certification never becomes a transaction path
+- certification failure never takes production down
+
+### Real semantic mismatches from the first 16 evaluated cases
+
+Observed real mismatches:
+
+1. `discover-01`
+   - broad “what is there to do” meaning was narrowed to activity
+2. `discover-04`
+   - broad colloquial discovery was narrowed to activity
+3. `discover-07`
+   - broad couple discovery was narrowed to activity
+4. `restaurant-02`
+   - model returned restaurant + discover + catalog
+   - old gold expected recommend
+5. `stay-02`
+   - text omitted the object (“tomorrow available?”)
+   - old fixture silently assumed stay without supplying stay context
+
+### Honest adjudication
+
+The corpus was NOT changed merely to increase score.
+
+`restaurant-02` was adjudicated because asking what menu exists is catalog discovery, not a recommendation request:
+- domain = restaurant
+- action = discover
+- informationNeed = catalog
+
+`stay-02` was adjudicated because an omitted-object availability question requires relevant context:
+- fixture now supplies activeDomain = stay
+- action = status
+- informationNeed = availability
+
+The broad-discovery cases remain true model failures and are NOT relabeled.
+
+### Semantic doctrine change
+
+The Language Brain prompt now states generalized principles:
+
+- broad cross-business “what can I do here?” meaning -> ecosystem unless current utterance/relevant context anchors to one business/resource
+- do not narrow broad discovery to activity just because “doing/playing” could involve activities
+- catalog/listing != recommendation
+- omitted-object availability must inherit domain only from genuinely relevant current context
+- current utterance still outranks stale context/memory
+
+No Thai runtime keyword list or regex intent expansion was added.
+
+### RED-first / regression evidence
+
+RED test checkpoint:
+`0251c9070505242a39e8b43e4b6e73c61ea7813a`
+
+First branch verification:
+GitHub Actions run `36188945717` = FAILURE
+
+It correctly exposed three stale test assumptions:
+- one new prompt assertion was line-layout brittle
+- old restaurant equivalence test forced every menu-shaped utterance to `recommend`
+- old stay equivalence test forced every availability utterance to `ask`
+
+Those tests were made more semantically precise, not weakened.
+
+Final branch verification:
+GitHub Actions run `36189158558` = SUCCESS
+
+Result:
+- **1161 / 1161 PASS**
+- fail 0
+- exact Netlify build command = SUCCESS
+- live certification correctly skipped outside production/main
+
+### Scope / safety
+
+No DB/schema change.
+No transaction executor change.
+No booking/order/payment behavior change.
+No backoffice change.
+No new repo/site/database.
+No fake production transaction.
+No paid OpenAI fallback.
+No manual Netlify deploy.
+
+Temporary GitHub branch-verification workflow was removed before PR.
+
+### Next acceptance
+
+1. Run normal PR CI with Deploy Preview explicitly skipped.
+2. Merge exact verified PR head only.
+3. Production auto deploy once, with merge commit carrying `[semantic-cert]`.
+4. Read `semantic-certification-result.json`.
+5. Require providerFailed = 0 and availabilityComplete = true before interpreting the full semantic score.
+6. Fix/adjudicate any remaining real semantic failures by pattern, never exact sentence patching.
