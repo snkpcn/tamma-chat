@@ -72,16 +72,18 @@ test('Phase 5.7 RED: a closed read-only informationNeed outranks provide_informa
 
 test('Phase 5.7 RED: semantic doctrine distinguishes capacity policy, catalog existence, support vagueness, and journey save',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.match(prompt,/capacity[sS]{0,260}policy[sS]{0,260}availability/i);
-  assert.match(prompt,/catalog[sS]{0,320}exist[sS]{0,320}availability/i);
-  assert.match(prompt,/vague[sS]{0,220}help[sS]{0,220}support/i);
-  assert.match(prompt,/save[sS]{0,220}journey[sS]{0,220}not[sS]{0,160}book/i);
+  assert.match(prompt,/Capacity\/policy and live availability are different meanings/i);
+  assert.match(prompt,/Catalog existence and live availability are different meanings/i);
+  assert.match(prompt,/vague help request with no business object or domain belongs to support/i);
+  assert.match(prompt,/Saving\/storing the current journey or plan is journey state management/i);
+  assert.match(prompt,/NOT a booking/i);
 });
 
 test('Phase 5.7 RED: semantic doctrine distinguishes profile/status from benefits catalog and correction from intentional modify',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.match(prompt,/membership[sS]{0,300}(?:profile|record)[sS]{0,300}(?:benefit|catalog)/i);
-  assert.match(prompt,/correct_previous[sS]{0,320}(?:mistake|wrong)[sS]{0,320}modify[sS]{0,320}(?:intentional|change)/i);
+  assert.match(prompt,/Membership profile\/record\/status and membership benefits\/catalog are different meanings/i);
+  assert.match(prompt,/correct_previous means the customer says an earlier value\/selection was mistaken or wrong/i);
+  assert.match(prompt,/modify means an intentional change to an existing choice/i);
 });
 
 test('Phase 5.7 RED: corpus gold matches the human semantic-v3 distinctions',()=>{
