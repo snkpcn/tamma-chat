@@ -483,7 +483,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
       if (method === 'POST') {
         const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
         feedbackEventSeq += 1;
-        const row = { id: `feedback-event-${feedbackEventSeq}`, environment: 'test', ...body };
+        const row = { id: `feedback-event-${feedbackEventSeq}`, environment: 'test', internal_notes: [], ...body };
         feedbackEvents.set(row.id, row);
         recordPost('ops_feedback_events', body);
         return jsonResponse([row]);
