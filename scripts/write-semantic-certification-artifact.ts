@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import {
   runSemanticCertification,
@@ -7,14 +8,29 @@ import { SEMANTIC_INTERPRETER_VERSION } from '../netlify/functions/_semantic-int
 
 const OUTPUT='semantic-certification-result.json';
 
+function currentCommitMessage(): string {
+  try {
+    return execFileSync('git',['log','-1','--pretty=%B'],{
+      encoding:'utf8',
+      stdio:['ignore','pipe','ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
 async function main() {
   const isProductionMain =
     process.env.CONTEXT === 'production'
     && process.env.BRANCH === 'main';
+  const commitMessage=currentCommitMessage();
+  const explicitOneShot=
+    process.env.RUN_SEMANTIC_CERTIFICATION === '1'
+    || commitMessage.includes('[semantic-cert]');
 
-  if (process.env.RUN_SEMANTIC_CERTIFICATION !== '1' || !isProductionMain) {
+  if (!explicitOneShot || !isProductionMain) {
     console.log('LIVE_SEMANTIC_CERTIFICATION_SKIPPED', JSON.stringify({
-      enabled: process.env.RUN_SEMANTIC_CERTIFICATION === '1',
+      enabled: explicitOneShot,
       context: process.env.CONTEXT ?? null,
       branch: process.env.BRANCH ?? null,
     }));
