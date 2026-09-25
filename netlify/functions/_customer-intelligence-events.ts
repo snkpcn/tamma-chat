@@ -1,23 +1,19 @@
-// Master Roadmap Phase 2 -- Customer Intelligence Memory: aggregate
-// (cross-guest) phrase/demand/risk signal log, for a future owner
-// dashboard insight ("top repeated phrases", "common allergy mentions",
-// "common mobility concerns"). This is DELIBERATELY a separate,
-// additive table from guest_memory -- guest_memory is guest_id-scoped
-// (one row per key, per guest, upserted -- correct for "what does THIS
-// guest prefer"), which cannot represent "how many DIFFERENT guests
-// said this phrase" without a schema change to every existing row.
-// customer_intelligence_events is a plain append-only log (same
-// design philosophy as the existing guest_events table): counting
-// happens at QUERY time (a future dashboard groups by category), never
-// by maintaining a running counter column here.
+import { createHash } from 'node:crypto';
+
+// Phase 2.7 -- aggregate (cross-guest) customer intelligence event log.
 //
-// Storage: supabase/migrations/<timestamp>_customer_intelligence_events_v1.sql
-// -- NOT APPLIED, prepared for owner review only, same discipline as
-// ops_feedback_events's own migration before it was applied. Until it's
-// applied, every write here fails gracefully (caught below) -- nothing
-// customer-facing ever depends on this table existing; preference
-// memory (guest_memory, via _customer-db.ts) is the ONLY memory this
-// round's customer-facing personalization actually reads.
+// This is intentionally separate from guest_memory:
+// - guest_memory answers "what should Thongthai remember about THIS guest?"
+// - customer_intelligence_events answers "what patterns are customers showing
+//   across many turns/guests?"
+//
+// Writes are best-effort and never customer-path critical. The table is
+// service-role only and append-only from the application's point of view.
+//
+// IMPORTANT:
+// A LINE/core retry can execute this module more than once for the SAME
+// transport message. Counts must therefore be idempotent on a one-way
+// source_event_key. Never persist the raw LINE/web transport event id.
 function dbConfig(): { url: string; key: string } | null {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -44,14 +40,32 @@ async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> 
   return response;
 }
 
-/** Never the full raw message -- a short, truncated snippet only, per
- *  the roadmap's own privacy rule ("if examples are needed, store
- *  short redacted snippets only"). Capped well below any real message
- *  length, and never includes anything beyond the plain text itself
- *  (no PII fields exist to strip here -- this module never receives a
- *  phone/name/address, only the message text). */
-function redactExample(message: string): string {
-  return message.trim().replace(/\s+/g, ' ').slice(0, 80);
+function sourceEventKey(channel: string, sourceEventId: string): string {
+  return createHash('sha256')
+    .update(`${channel.trim().toLowerCase()}:${sourceEventId.trim()}`, 'utf8')
+    .digest('hex');
+}
+
+/**
+ * Keep only a short example and redact common direct identifiers before it
+ * ever reaches storage. This is deliberately conservative: aggregate
+ * intelligence needs customer wording patterns, not contact details.
+ *
+ * This is NOT presented as perfect NER. It removes the common direct
+ * identifiers we can deterministically recognize (URL/email/phone/@handle)
+ * and then hard-caps the result to 80 characters. Phase 3 should prefer the
+ * normalized category/domain fields for dashboards and surface snippets only
+ * when genuinely useful.
+ */
+export function redactIntelligenceExample(message: string): string {
+  return message
+    .trim()
+    .replace(/https?:\/\/\S+|www\.\S+/giu, '[url]')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[email]')
+    .replace(/(?:\+?66|0)[\s.-]?[1-9](?:[\s.-]?\d){7,9}/gu, '[phone]')
+    .replace(/(^|\s)@[A-Za-z0-9._-]{2,}/gu, '$1[handle]')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80);
 }
 
 export async function recordIntelligenceEvent(input: {
@@ -60,20 +74,34 @@ export async function recordIntelligenceEvent(input: {
   domain: string;
   guestDbId: string | null;
   message: string;
+  channel: 'web' | 'line' | 'other';
+  sourceEventId: string;
 }): Promise<void> {
   try {
-    await dbFetch('customer_intelligence_events', {
-      method: 'POST',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify({
-        event_type: input.eventType,
-        category: input.category,
-        domain: input.domain,
-        guest_id: input.guestDbId,
-        redacted_example: redactExample(input.message),
-      }),
-    });
+    const key = sourceEventKey(input.channel, input.sourceEventId);
+    await dbFetch(
+      'customer_intelligence_events'
+      + '?on_conflict=source_event_key,event_type,category,domain',
+      {
+        method: 'POST',
+        headers: {
+          Prefer: 'resolution=ignore-duplicates,return=minimal',
+        },
+        body: JSON.stringify({
+          event_type: input.eventType,
+          category: input.category,
+          domain: input.domain,
+          guest_id: input.guestDbId,
+          channel: input.channel,
+          source_event_key: key,
+          redacted_example: redactIntelligenceExample(input.message),
+        }),
+      },
+    );
   } catch (error) {
-    console.error('THONGTHAI_INTELLIGENCE_EVENT_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+    console.error(
+      'THONGTHAI_INTELLIGENCE_EVENT_ERROR',
+      error instanceof Error ? error.message.slice(0, 200) : 'unknown',
+    );
   }
 }
