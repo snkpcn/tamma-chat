@@ -118,7 +118,7 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     expected: { domain: 'ecosystem', action: 'discover' },
     simulatedModelOutput: { domain: 'ecosystem', intent: 'broad_experience_discovery', action: 'discover', entities: { travelerType: 'couple' }, references: [], constraints: [], confidence: 0.82, needsClarification: false } },
 
-  // --- Semantic equivalence group: restaurant recommendation (3 variants, user-specified) ---
+  // --- Restaurant listing/catalog vs recommendation: wording that asks what exists is not advice ---
   { id: 'restaurant-01', group: 'restaurant_catalog', category: 'colloquial', domainArea: 'restaurant',
     message: 'ร้านมีไรกิน',
     expected: { domain: 'restaurant', action: 'discover' },
