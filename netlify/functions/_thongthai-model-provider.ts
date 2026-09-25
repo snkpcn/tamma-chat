@@ -59,7 +59,7 @@ export class LLMAvailabilityError extends LLMRequestError {
   }
 }
 
-const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'] as const;
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'] as const;
 type GeminiModel = (typeof GEMINI_MODELS)[number];
 const OPENAI_MODEL = 'gpt-5.6-luna';
 
