@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v1';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v2';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -58,7 +58,7 @@ export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v1';
  */
 export const SEMANTIC_EVAL_STATUS = {
   staticNetworkFreeSemanticContract: 'pass_fail_in_npm_test',
-  liveModelSemanticConformance: 'not_yet_executed',
+  liveModelSemanticConformance: 'partial_live_certification_in_progress',
 } as const;
 
 export type SemanticDomain =
