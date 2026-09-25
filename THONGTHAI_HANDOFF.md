@@ -7370,3 +7370,133 @@ No manual Netlify deploy.
 
 After merge + exact automatic production deploy verification:
 **Phase 6 is CLOSED** and the roadmap proceeds to **Phase 7 — Production E2E Smoke Matrix**.
+
+
+---
+
+## Phase 7 — Production E2E Smoke Matrix — 2026-09-25
+
+**STATUS: REAL-CHANNEL MATRIX GREEN; PR #102 PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY.**
+
+This phase deliberately avoids creating another production booking/order/workflow transaction.
+
+There is no authenticated Cloud Browser available in the current execution environment, so this phase does **not** claim an automated authenticated browser smoke that was not actually run.
+
+Instead it combines:
+1. real signed LINE webhook integration through the production handler code path,
+2. canonical durable state / DB harness behavior,
+3. read-only production DB verification,
+4. owner-proven iPhone Backoffice workflow evidence from Phase 3,
+5. exact current Netlify deployment verification.
+
+### Real LINE channel matrix
+
+New test:
+- `tests/phase7-production-e2e-matrix.test.ts`
+
+Every LINE turn is a separate signed webhook delivery. The LINE transport itself provides no chat history, so continuity in these tests comes from the same persisted server-side mechanisms production LINE depends on.
+
+The matrix proves:
+
+1. **LINE chatHistory-free durable memory**
+   - turn 1: `ไม่กินไก่ ไม่กินกุ้ง`
+   - turn 2: `ร้านอาหารมีอะไรแนะนำ`
+   - durable constraints contain `no_chicken` + `no_shrimp`
+   - only eligible menu item lines are recommended
+
+2. **Contextual follow-up**
+   - `มีอะไรแนะนำ`
+   - later webhook: `สายกิจกรรม`
+   - response preserves horse / ATV / archery
+   - discovery creates no booking transaction
+
+3. **Horse + exact asset selection + cross-domain protection**
+   - `อยากขี่ม้า`
+   - `เอาภาราดร`
+   - selection remains **ภาราดร**, never silently changes to ทองไทย
+   - later location and weather questions override stale horse state
+   - no old horse missing-field prompt leaks into those answers
+
+4. **ATV safety + escalation + owner notification**
+   - activity + owner_general channels are bound in the real notification harness
+   - safety message creates exactly one `ops_feedback_events` case
+   - business unit = activity
+   - both activity and owner deliveries are recorded `sent`
+   - one LINE push goes to each target
+   - response does not fall into a booking-duration prompt
+
+5. **Refund / payment authority boundary**
+   - owner_general is bound
+   - no refund approval/guarantee is invented
+   - owner escalation case is created
+   - owner delivery is `sent`
+
+6. **Durable personalization + explicit-current-intent precedence**
+   - prior chill/couple context shapes a later broad recommendation
+   - a later explicit location request still wins completely
+   - personalization cannot hijack the new domain
+
+### RED / test correction
+
+Initial matrix head:
+- `b2a490e449333b5490be5878318ec9fb3e13c9d0`
+- GitHub Actions run `36160597599`
+
+Only one assertion failed, and inspection proved the product behavior was correct:
+- response acknowledged “เลี่ยงกุ้ง/ไก่”
+- the only recommended item was `ข้าวผัดหมู`
+
+The test had incorrectly banned the word “ไก่” from the **entire reply**, so it rejected the assistant's correct explanation of the remembered constraint.
+
+The load-bearing assertion was corrected to inspect only menu-item bullet lines for forbidden ingredients.
+
+Corrected head:
+- `7fae692196626b7ffa81c9c0f40c8472763230ec`
+- GitHub Actions run `36160773852`
+- **1103 / 1103 PASS**
+
+No product code was weakened to satisfy this assertion.
+
+### Production Backoffice evidence (read-only)
+
+The owner already performed the one requested real iPhone production workflow smoke on feedback:
+
+`f38293ea-21e0-4dba-9817-ab8a42692774`
+
+Current read-only production DB verification still shows:
+- status = `closed`
+- assigned_to = `owner test`
+- acknowledged_at / assigned_at / resolved_at / closed_at all present
+- false_alarm = false
+- training_signal = false
+
+Current audit history still contains, in order:
+- acknowledged
+- assigned
+- started
+- resolved
+- closed
+
+This reuses the already-proven production workflow instead of creating another test mutation.
+
+Backoffice current production remains:
+- deploy `6ab6984be2cdef0008a085b0`
+- READY
+- Phase 5 main commit `00b9acdc386f1d24609faf67a8f0bc00ccd1bce5`
+
+### Customer production before this PR
+
+Current customer production before Phase 7 merge:
+- deploy `6ab69f6472352c0008b8f38a`
+- READY
+- commit `ba3fff45c7d8f9ba70691d6e5deb7cf8f22ca063`
+- automatic deploy
+
+### Phase 7 closure rule
+
+After PR #102 docs-inclusive CI is green, merged, and the automatic Netlify production deploy is verified at the exact merge commit:
+
+**Phase 7 is CLOSED.**
+
+The remaining roadmap phase is:
+- **Phase 8 — Operational Polish**
