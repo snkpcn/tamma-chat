@@ -2586,10 +2586,10 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
       suggestedActions: [], responseStyle: 'direct',
       agentStateUpdate: {
-          activeTopic: 'ecosystem',
-          unresolvedNeed: 'choose_food_cafe_or_light_activity',
-          pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
-        },
+        activeTopic: 'ecosystem',
+        unresolvedNeed: 'choose_food_cafe_or_light_activity',
+        pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
+      },
       semanticMemoryUpdates: [], toolCalls: [],
     };
   }
@@ -2676,19 +2676,22 @@ async function pendingQuestionContinuationResponse(
   const pending = normalizePendingQuestion(snapshot.state.pending_question);
   if (!pending) return null;
 
-  const resolution = resolvePendingQuestionAnswer(request.message, pending);
-  if (!resolution) {
-    if (isExplicitSwitchAwayFromPendingQuestion(request, pending)) {
-      await patchGuestAgentState(guestDbId, { removeKeys: ['pending_question'] }).catch(error => {
-        console.error(
-          'THONGTHAI_PENDING_QUESTION_CLEAR_ERROR',
-          error instanceof Error ? error.message.slice(0, 220) : 'unknown',
-        );
-        return false;
-      });
-    }
+  // A clear new domain wins even if its sentence happens to contain one
+  // of the old choice labels (e.g. "ขอโลเคชั่นคาเฟ่"). Only a pending
+  // question from THAT domain should be allowed to consume such a turn.
+  if (isExplicitSwitchAwayFromPendingQuestion(request, pending)) {
+    await patchGuestAgentState(guestDbId, { removeKeys: ['pending_question'] }).catch(error => {
+      console.error(
+        'THONGTHAI_PENDING_QUESTION_CLEAR_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return false;
+    });
     return null;
   }
+
+  const resolution = resolvePendingQuestionAnswer(request.message, pending);
+  if (!resolution) return null;
 
   if (resolution.domain !== 'general_recommendation'
       || resolution.kind !== 'preference_choice'
