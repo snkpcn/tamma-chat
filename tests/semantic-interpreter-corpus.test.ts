@@ -103,24 +103,34 @@ test('semantic equivalence group "broad_discovery": 7 differently-worded variant
   }
 });
 
-test('semantic equivalence group "restaurant_recommendation": 3 variants all classify as restaurant/recommend', () => {
+test('restaurant menu group preserves restaurant domain while distinguishing catalog listing from recommendation', () => {
   const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'restaurant_recommendation');
   assert.equal(group.length, 3);
-  for (const evalCase of group) {
-    const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), emptySemanticContext());
-    assert.equal(turn.domain, 'restaurant');
-    assert.equal(turn.action, 'recommend');
-  }
+  const turns = new Map(group.map(evalCase => [
+    evalCase.id,
+    parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), evalCase.context ?? emptySemanticContext()),
+  ]));
+  assert.equal(turns.get('restaurant-01')?.domain, 'restaurant');
+  assert.equal(turns.get('restaurant-01')?.action, 'recommend');
+  assert.equal(turns.get('restaurant-02')?.domain, 'restaurant');
+  assert.equal(turns.get('restaurant-02')?.action, 'discover');
+  assert.equal(turns.get('restaurant-02')?.informationNeed, 'catalog');
+  assert.equal(turns.get('restaurant-03')?.domain, 'restaurant');
+  assert.equal(turns.get('restaurant-03')?.action, 'recommend');
 });
 
-test('semantic equivalence group "stay_availability": 2 variants both classify as stay/ask', () => {
+test('stay availability group preserves stay domain while allowing explicit query vs contextual status semantics', () => {
   const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'stay_availability');
   assert.equal(group.length, 2);
-  for (const evalCase of group) {
-    const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), emptySemanticContext());
-    assert.equal(turn.domain, 'stay');
-    assert.equal(turn.action, 'ask');
-  }
+  const turns = new Map(group.map(evalCase => [
+    evalCase.id,
+    parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), evalCase.context ?? emptySemanticContext()),
+  ]));
+  assert.equal(turns.get('stay-01')?.domain, 'stay');
+  assert.equal(turns.get('stay-01')?.action, 'ask');
+  assert.equal(turns.get('stay-02')?.domain, 'stay');
+  assert.equal(turns.get('stay-02')?.action, 'status');
+  assert.equal(turns.get('stay-02')?.informationNeed, 'availability');
 });
 
 // --- reference resolution: the specific worked example from the Phase B brief ---
