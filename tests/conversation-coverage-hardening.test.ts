@@ -68,7 +68,7 @@ function horseCatalogFacts(): GroundedFact[] {
 const GENERIC_APOLOGY = /ตอบเรื่องนี้ให้แม่นไม่ได้|คิดช้ากว่าปกติ/;
 const DURATION_PROMPT = /เลือกระยะเวลา|ขอระยะเวลา/;
 
-test('conversation-coverage hardening: the exact multi-turn LINE UAT script, forced provider outage, zero LLM calls', async () => {
+test('conversation-coverage hardening: exact multi-turn LINE UAT survives provider outage; only coarse read-only turns attempt Language Brain', async () => {
   const state = memoryState();
   let modelCallCount = 0;
   const deps: Partial<OneMindDependencies> = {
@@ -205,9 +205,13 @@ test('conversation-coverage hardening: the exact multi-turn LINE UAT script, for
   assert.equal(t11.dialogDecision.actionProposal, undefined, 'no transaction executed anywhere in this script');
   assert.equal(t11.taskStateAfter.activeTask?.status, 'collecting', 'never silently marked ready/executing/confirmed');
 
-  // The deterministic deriver covered every turn -- the real (forced-
-  // throwing) model was never actually reached, end to end.
-  assert.equal(modelCallCount, 0, 'the full hardened script must cost zero LLM calls end-to-end');
+  // Human Brain 5.2 deliberately lets coarse READ-ONLY turns attempt semantic
+  // understanding first. With the provider forced unavailable, those attempts
+  // must fall back to the exact deterministic candidate while transactional
+  // slot/correction/cancel turns remain model-free. The five attempts in this
+  // script are the bounded read-only questions/switches only.
+  assert.equal(modelCallCount, 5,
+    'only the five coarse read-only turns may attempt Language Brain; transactional state turns must remain deterministic');
 });
 
 test('a comparison for beginner-suitability with no verified data is also honest, never hallucinated', async () => {
