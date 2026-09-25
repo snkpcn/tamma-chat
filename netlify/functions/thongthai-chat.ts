@@ -1747,13 +1747,31 @@ export async function horseSelectionWithContextResponse(
   if (!hasContext) return null;
 
   const facts = ambiguous.name === 'ทองไทย' ? HORSE_FACTS.thongthai : HORSE_FACTS.pharadon;
+
+  await persistHorseSelection(guestDbId, channel, ambiguous.name);
+
+  // Read the persisted activity task AFTER selection so the follow-up asks
+  // only for genuinely missing care basics. LINE carries no chatHistory, so
+  // the task slots are the authoritative cross-turn continuation state.
+  const selectedTask = await loadTaskState(guestDbId).catch(() => null);
+  const slots = selectedTask?.activeTask?.type === 'activity_booking'
+    ? selectedTask.activeTask.slots
+    : {};
+  const hasExperience = Boolean(slots.riderExperience);
+  const hasPartySize = typeof slots.partySize === 'number' && slots.partySize > 0;
+  const nextQuestion = !hasExperience && !hasPartySize
+    ? 'เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?'
+    : !hasExperience
+      ? 'เคยขี่ม้ามาก่อนไหมครับ?'
+      : !hasPartySize
+        ? 'แล้วมากี่คนครับ?'
+        : HORSE_DETAIL_CLARIFICATION_QUESTION;
+
   const message = [
     `ได้ครับ เลือก${ambiguous.name}นะครับ 😊`,
     `${ambiguous.name}จะ${facts.rideFeelTh} คาแรกเตอร์${facts.personalityTh}ครับ`,
-    'เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?',
+    nextQuestion,
   ].join('\n');
-
-  await persistHorseSelection(guestDbId, channel, ambiguous.name);
 
   return {
     message,
@@ -2137,12 +2155,24 @@ export async function horseCompoundCareIntentResponse(
   const customerType = interpretCustomerType(request.message);
   const health = interpretOverallHealthConcern(request.message);
   const fear = interpretFear(request.message);
+  const riderExperience = interpretExperience(request.message);
+  const partySize = parsePartySizeFromCareAnswer(request.message);
   if (!customerType && health !== 'present' && fear !== 'concerned') return null;
 
   const found = await loadHorseBookingTask(guestDbId).catch(() => null);
   if (found && found.task.slots.riderExperience && found.task.slots.partySize) return null;
 
   await markActivityIntentStarted(guestDbId, channel);
+
+  // Persist every care fact already expressed in this opening turn. The reply
+  // below already uses these signals semantically; failing to store them made
+  // the next LINE webhook re-ask questions the customer had answered.
+  if (riderExperience || partySize) {
+    await persistHorseCareSlots(guestDbId, channel, {
+      riderExperience,
+      partySize,
+    });
+  }
   if (customerType) await persistHorseCustomerTypeSlot(guestDbId, customerType);
   if (health === 'present') await persistHorseHealthSlot(guestDbId, 'present');
   if (fear === 'concerned') await persistHorseFearSlot(guestDbId, 'concerned');
@@ -2160,8 +2190,16 @@ export async function horseCompoundCareIntentResponse(
     careNote = 'เข้าใจครับ ทองไทยแนะนำให้ทีมงานช่วยประเมินและดูแลใกล้ ๆ ก่อนขึ้นม้านะครับ เริ่มจากช้า ๆ ได้ครับ ทองไทยไม่ขอการันตีความปลอดภัย 100% แต่ทีมจะดูแลอย่างดีที่สุดครับ';
   }
 
+  const nextQuestion = riderExperience && partySize
+    ? HORSE_DETAIL_CLARIFICATION_QUESTION
+    : riderExperience
+      ? 'แล้วมากี่คนครับ?'
+      : partySize
+        ? 'เคยขี่ม้ามาก่อนไหมครับ?'
+        : 'เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?';
+
   return {
-    message: `${careNote}\nแล้วมากี่คนครับ?`,
+    message: `${careNote}\n${nextQuestion}`,
     intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
