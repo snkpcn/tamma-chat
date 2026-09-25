@@ -9006,3 +9006,181 @@ After docs-inclusive CI is green:
 7. repeat until human-grade semantic contract is met
 
 Do NOT quote the old **3.16%** as semantic accuracy. It was primarily an availability artifact.
+
+
+---
+
+## Human Brain Phase 5.5 — semantic contract + quota-safe resumable certification (2026-09-26)
+
+### Production evidence that triggered this phase
+
+Authoritative production main before this phase:
+`ee8d3712bad9a841b5f0324ad7ecfb9b9e098a39`
+
+Authoritative Netlify production deploy:
+`6ab6dd0bc092750008f39e8f`
+
+Verified:
+- `state = ready`
+- `commit_ref = ee8d3712bad9a841b5f0324ad7ecfb9b9e098a39`
+- `branch = main`
+- `context = production`
+- `manual_deploy = false`
+- non-production SSO remained enabled
+
+The published live semantic artifact was read back without making any business transaction:
+
+- `totalCorpusCases = 158`
+- `evaluated = 17`
+- `semanticEvaluated = 16`
+- `pass = 11`
+- `semanticFailed = 5`
+- `providerFailed = 1`
+- `passPct = 68.75` over semantic-evaluated cases only
+- `availabilityComplete = false`
+
+Therefore **68.75% is NOT a valid full-corpus semantic score**.
+
+The provider boundary case was `promotion-01`.
+Safe attempt diagnostics showed:
+
+- `gemini-3.8-flash` -> HTTP 429
+- `gemini-3.7-flash` -> HTTP 429
+- `gemini-3.6-flash` -> HTTP 429
+- `gemini-3.5-flash` -> timeout after the remaining per-attempt budget
+- `gemini-3.5-flash-lite` -> no useful remaining shared budget
+
+This proved that per-model circuit isolation fixed the old global-circuit bug, but a bursty production certification could still exhaust project-level free-provider capacity.
+
+Google's current Gemini documentation was rechecked before this phase:
+- the configured 3.8 / 3.7 / 3.6 / 3.5 / 3.5-lite model IDs are current supported model IDs
+- rate limits are project-scoped and can be RPM/TPM/RPD constrained
+- actual capacity varies by project/model/tier
+- transient 429 handling should use bounded backoff rather than aggressive retry
+
+Paid OpenAI fallback remains OFF.
+
+### Real semantic mismatches observed before the provider boundary
+
+The five real semantic mismatches in the first 16 semantic evaluations were:
+
+- `discover-01`: broad ecosystem discovery narrowed to `activity`
+- `discover-04`: broad ecosystem discovery narrowed to `activity`
+- `discover-07`: broad ecosystem discovery narrowed to `activity`
+- `restaurant-02`: model returned `restaurant / discover / catalog` while stale gold expected `recommend`
+- `stay-02`: contextless `พรุ่งนี้ว่างไหม` was incorrectly forced by stale gold into the stay domain
+
+### Honest corpus adjudication
+
+No gold label was changed merely to improve a score.
+
+The semantic doctrine is now explicit:
+
+1. **Broad cross-ecosystem discovery**
+   - if the customer broadly asks what there is to do/experience and does not name a narrower business/resource, the domain is `ecosystem`
+   - wording such as “ทำ” or “เล่น” alone must not force `activity`
+
+2. **Catalog vs recommendation**
+   - “what exists / what menu/items/options are there?” = `discover + catalog`
+   - “what should I choose / what do you recommend / what suits me?” = `recommend`
+
+   Therefore:
+   - `ร้านมีไรกิน` and `มีเมนูไรมั่ง` are catalog/listing requests
+   - `แนะนำอะไรกินหน่อย` remains a recommendation request
+
+3. **Contextless availability**
+   - `พรุ่งนี้ว่างไหม` with no named resource/domain and no resolving conversation context is genuinely ambiguous
+   - the Language Brain must not invent “room/stay”
+   - expected meaning is now `unknown / status / availability` with clarification required
+
+These are principle-level semantic rules, not runtime keyword/regex patches.
+
+### Quota-safe certification architecture
+
+Phase 5.5 adds build-only inter-case pacing:
+- `interCaseDelayMs = 2000` in the production certification runner
+- pacing does **not** affect customer runtime traffic
+- provider outage remains separated from semantic failure
+
+Phase 5.5 also adds contract-hash resumability:
+- the cert artifact includes a hash of the semantic interpreter, live-cert logic, and both corpus sources
+- a later one-shot cert run may resume only when the previous production artifact has the **exact same contract hash**
+- only contiguous semantic coverage is carried forward
+- the provider-failed boundary case is retried, never counted as semantic coverage
+- prior provider errors are not carried into the new semantic score
+- a changed prompt/corpus/interpreter automatically invalidates the old partial artifact and starts from case 0
+
+This makes repeated controlled free-tier runs observational and resumable instead of brute-forcing the same first cases repeatedly.
+
+### RED / implementation checkpoints
+
+RED contract test:
+`a19457c9f12363b7b20be8355c5f3ba43c446eec`
+
+Implementation checkpoints:
+- `38a88a1192b5f34aaa65455b281efef204cc219b` — resumable cert state
+- `4894b00bbec9b840d9168fb1c353f1e047a1c065` — semantic arbitration doctrine
+- `4790d2ca63f3e1bf23e0eea74af0f2ad50fd0671` — honest legacy-gold adjudication
+- `2182e4bc98a88bb465a338a3496676433c846b0f` — inter-case pacing
+- `95fa0405c3dd5ab2cccc12a4619a9d792d53db21` — production resume/pacing runner
+
+The first PR CI correctly failed three regression tests because two old equivalence assertions still encoded the pre-adjudication gold and one resume test fixture was internally inconsistent. The implementation guard was **not** weakened.
+
+Repair checkpoints:
+- `b748e3a92283925074b8d68d541984226687b657`
+- `580a9f7453442651538c75fee5490a9bee6c6352`
+- `9cc0c6e2b3f199879f1b2fa70dd63f90f1265d79`
+
+### GREEN evidence before this docs checkpoint
+
+One Mind Branch CI:
+run `36189015977`
+
+Result:
+**1164 / 1164 PASS**
+**fail 0**
+
+Netlify Build Command Guard:
+run `36189016055`
+
+Result:
+**PASS**
+
+Human Brain Live Semantic Certification workflow:
+run `36189016034`
+
+Result:
+**SKIPPED as expected** because GitHub Actions has no live model secret and this workflow is not the production Netlify cert path.
+
+### Scope safety
+
+No transaction executor change.
+No booking/order/payment write-policy change.
+No DB/schema change.
+No production business-state mutation.
+No backoffice change.
+No new repo or database.
+No paid OpenAI fallback.
+No manual Netlify deploy.
+No runtime keyword/regex expansion.
+
+### Merge / production acceptance gate
+
+Do not call Phase 5.5 complete merely because CI is green.
+
+Before merge:
+1. verify exact PR head and current main again
+2. rerun docs-inclusive CI
+3. require One Mind + exact Netlify build guard green
+4. merge exact expected head only
+
+After merge:
+1. Netlify auto deploy only
+2. require READY + exact merge commit + `manual_deploy=false`
+3. read the new production semantic artifact
+4. if `providerFailed > 0` or `availabilityComplete=false`, treat it as availability/incomplete coverage, not semantic failure
+5. resume only under the same contract hash
+6. only when all 158 cases are semantically evaluated with provider availability complete is the full score meaningful
+7. fix any remaining semantic failures by pattern/doctrine, never by sentence-trigger patches
+
+Human Brain remains **not yet certified complete** until that live acceptance is satisfied.
