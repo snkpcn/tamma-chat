@@ -66,6 +66,7 @@ import { processThongthaiOneMindTurnResilient } from './_thongthai-one-mind-orch
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
+import type { DurableMemorySnapshot } from './_memory-relevance';
 import {
   buildPendingPromotionRedemption,
   decidePromotionFallback,
@@ -379,6 +380,18 @@ function normalizeRequest(body: unknown): BrainRequest | null {
     guestContext: normalizeGuestContext(body.guestContext),
     journeyContext: normalizeJourneyContext(body.journeyContext),
     pageContext,
+  };
+}
+
+function durableMemoryFromRequest(request: BrainRequest): DurableMemorySnapshot {
+  return {
+    travelerType: request.guestContext.travelerType,
+    pace: request.guestContext.pace,
+    interests: [...request.guestContext.interests],
+    constraints: [...request.guestContext.constraints],
+    group: { ...request.guestContext.group },
+    favorites: [...request.journeyContext.favorites],
+    visitedExperiences: [...request.journeyContext.visitedExperiences],
   };
 }
 
@@ -1516,6 +1529,7 @@ async function deterministicActivityResponse(
     providerUserKey: providerUserKey ?? request.guestId,
     canonicalAnonymousId: request.guestId,
     guestDbId,
+    durableMemory: durableMemoryFromRequest(request),
     persistState: true,
   });
 
@@ -4214,6 +4228,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         providerUserKey:providerUserKey ?? request.guestId,
         canonicalAnonymousId:request.guestId,
         guestDbId,
+        durableMemory:durableMemoryFromRequest(request),
         persistState:true,
       });
       if (oneMind.status === 'composed') {
@@ -4268,6 +4283,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         providerUserKey: providerUserKey ?? request.guestId,
         canonicalAnonymousId: request.guestId,
         guestDbId,
+        durableMemory: durableMemoryFromRequest(request),
         // Persist only when explicitly enabled AND the transport gave us a
         // stable event id. A generated shadow id must never mutate continuity.
         persistState: process.env.THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1' && Boolean(eventId),
@@ -4522,6 +4538,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         providerUserKey: providerUserKey ?? request.guestId,
         canonicalAnonymousId: request.guestId,
         guestDbId,
+        durableMemory: durableMemoryFromRequest(request),
         persistState: true,
       }, {
         interpretSemanticTurn: async () => { throw error; },

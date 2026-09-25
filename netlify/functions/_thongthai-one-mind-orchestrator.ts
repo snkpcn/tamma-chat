@@ -61,6 +61,12 @@ import {
 } from './_dialog-source-adapters';
 import type { KnowledgeBundle, KnowledgeSourceAdapters } from './_knowledge-resolver';
 import {
+  planMemoryRelevance,
+  semanticTurnForDialog,
+  type DurableMemorySnapshot,
+  type MemoryRelevancePlan,
+} from './_memory-relevance';
+import {
   planKnowledgeDegradation,
   planModelDegradation,
   type DegradationPlan,
@@ -87,6 +93,10 @@ export type OneMindTurnInput = {
    * enable bounded conversation/task persistence after cutover gates pass. */
   persistState?: boolean;
   environment?: 'live' | 'test';
+  /** Already-normalized durable customer memory. It is deliberately NOT
+   * included in the semantic-interpreter prompt. The current utterance is
+   * understood first; relevance is selected only afterwards. */
+  durableMemory?: DurableMemorySnapshot | null;
 };
 
 export type OneMindIdentity = {
@@ -110,6 +120,11 @@ export type OneMindTrace = {
     status: string;
   }>;
   actionProposed: boolean;
+  memory: {
+    appliedKeys: string[];
+    ignoredKeys: string[];
+    relevantConstraintCount: number;
+  };
   statePersisted: boolean;
   stateConflictRetries?: number;
   timingsMs?: {
@@ -128,6 +143,7 @@ export type OneMindTurnResult = {
   dialogDecision: DialogDecision;
   groundedKnowledge: KnowledgeBundle[];
   knowledgeDegradation: DegradationPlan;
+  memoryRelevance: MemoryRelevancePlan;
   conversationContextBefore: ConversationContextState;
   conversationContextAfter: ConversationContextState;
   taskStateBefore: TaskStateContainer;
@@ -496,6 +512,13 @@ async function computeOneMindTurnFromState(
   const semanticStartedAt = Date.now();
   const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, deps, now);
   const semanticMs = Date.now() - semanticStartedAt;
+
+  // Human Brain Phase 3: durable memory is evaluated only AFTER current-turn
+  // meaning exists. It cannot alter domain/intent/action/informationNeed.
+  // Only the relevance-selected subset is allowed into downstream planning.
+  const memoryRelevance = planMemoryRelevance(semanticTurn, input.durableMemory);
+  const dialogSemanticTurn = semanticTurnForDialog(semanticTurn, memoryRelevance);
+
   const adapters = deps.buildKnowledgeAdapters(input.channel, {
     guestDbId: identity.guestDbId,
     environment: input.environment ?? 'live',
@@ -503,7 +526,7 @@ async function computeOneMindTurnFromState(
 
   const dialogStartedAt = Date.now();
   const dialog = await processDialogTurnDetailed({
-    semanticTurn,
+    semanticTurn: dialogSemanticTurn,
     conversationContext: conversationContextBefore,
     taskState: taskStateBefore,
     channel: input.channel,
@@ -528,6 +551,7 @@ async function computeOneMindTurnFromState(
     dialogDecision: dialog.decision,
     groundedKnowledge: dialog.bundles,
     knowledgeDegradation: planKnowledgeDegradation(dialog.bundles),
+    memoryRelevance,
     conversationContextBefore,
     conversationContextAfter,
     taskStateBefore,
@@ -546,6 +570,11 @@ async function computeOneMindTurnFromState(
         status: source.status,
       }))),
       actionProposed: Boolean(dialog.decision.actionProposal),
+      memory: {
+        appliedKeys: [...memoryRelevance.appliedKeys],
+        ignoredKeys: [...memoryRelevance.ignoredKeys],
+        relevantConstraintCount: memoryRelevance.relevantConstraints.length,
+      },
       statePersisted: false,
       stateConflictRetries: 0,
       timingsMs:{
