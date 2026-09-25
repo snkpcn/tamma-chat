@@ -1,4 +1,4 @@
-name: Read Production Semantic Certification
+name: Read Production Semantic Certification Final
 
 on:
   push:
@@ -13,16 +13,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fetch production semantic certification artifact
+      - name: Fetch production certification result
         run: |
           set -euo pipefail
           curl --fail --silent --show-error \
-            --retry 5 --retry-delay 3 \
+            --retry 4 --retry-delay 2 \
             https://tamma-chat.netlify.app/semantic-certification-result.json \
             -o semantic-certification-result.json
-          node -e "const x=require('./semantic-certification-result.json'); console.log(JSON.stringify({status:x.status,evaluated:x.evaluated,pass:x.pass,failed:x.failed,passPct:x.passPct,totalCorpusCases:x.totalCorpusCases,semanticVersion:x.semanticVersion},null,2))"
+          node -e "const x=require('./semantic-certification-result.json'); console.log(JSON.stringify({status:x.status,totalCorpusCases:x.totalCorpusCases,evaluated:x.evaluated,pass:x.pass,failed:x.failed,passPct:x.passPct},null,2))"
       - uses: actions/upload-artifact@v4
         with:
-          name: semantic-certification-result-production
+          name: semantic-certification-result-final
           path: semantic-certification-result.json
           if-no-files-found: error
