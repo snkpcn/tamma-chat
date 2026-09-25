@@ -439,11 +439,27 @@ export function resolveReferences(references: SemanticReference[], context: Sema
   });
 }
 
+const READ_ONLY_ACTIONS_FOR_FACET_NORMALIZATION: ReadonlySet<SemanticAction> = new Set([
+  'ask','discover','recommend','status',
+]);
+
+function canonicalizeReadOnlyAction(
+  action: SemanticAction,
+  informationNeed: SemanticInformationNeed,
+): SemanticAction {
+  if (!READ_ONLY_ACTIONS_FOR_FACET_NORMALIZATION.has(action)) return action;
+
+  if (informationNeed === 'availability' || informationNeed === 'transaction_status') return 'status';
+  if (informationNeed === 'catalog') return 'discover';
+  if (informationNeed === 'recommendation') return 'recommend';
+  return action;
+}
+
 export function parseSemanticTurnResponse(rawText: string, context: SemanticContext): SemanticTurn {
   const parsed = JSON.parse(stripCodeFences(rawText)) as Record<string, unknown>;
 
   const domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
-  const action = VALID_ACTIONS.includes(parsed.action as SemanticAction) ? parsed.action as SemanticAction : 'unknown';
+  const parsedAction = VALID_ACTIONS.includes(parsed.action as SemanticAction) ? parsed.action as SemanticAction : 'unknown';
   const taskDirective = VALID_TASK_DIRECTIVES.includes(parsed.taskDirective as SemanticTaskDirective)
     ? parsed.taskDirective as SemanticTaskDirective
     : undefined;
@@ -451,6 +467,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const informationNeed = VALID_INFORMATION_NEEDS.includes(parsed.informationNeed as SemanticInformationNeed)
     ? parsed.informationNeed as SemanticInformationNeed
     : 'none';
+  const action = canonicalizeReadOnlyAction(parsedAction, informationNeed);
   const confidenceRaw = Number(parsed.confidence);
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
