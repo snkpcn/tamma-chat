@@ -1,0 +1,28 @@
+name: Read Production Semantic Certification
+
+on:
+  push:
+    branches:
+      - ops/semantic-cert-readback-20260926
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch production certification artifact
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 3 \
+            https://tamma-chat.netlify.app/semantic-certification-result.json \
+            -o semantic-certification-result.json
+          node -e "const x=require('./semantic-certification-result.json'); console.log(JSON.stringify({status:x.status,evaluated:x.evaluated,pass:x.pass,failed:x.failed,passPct:x.passPct,totalCorpusCases:x.totalCorpusCases},null,2))"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: semantic-certification-result
+          path: semantic-certification-result.json
+          if-no-files-found: error
