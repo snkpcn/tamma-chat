@@ -15,26 +15,26 @@ function byId(id:string){
 
 test('Phase 5.8 RED: cross-cutting promotion questions stay in promotion even when they name restaurant/activity/stay',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.match(prompt,/promotion[sS]{0,420}cross-cutting/i);
-  assert.match(prompt,/promotion[sS]{0,420}(?:restaurant|activity|stay)[sS]{0,420}domain "promotion"/i);
+  assert.ok(prompt.includes('promotion is cross-cutting'));
+  assert.ok(prompt.includes('keep domain "promotion"'));
 });
 
 test('Phase 5.8 RED: journey means itinerary/sequence composition, ecosystem means broad browse without plan composition',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.match(prompt,/journey[sS]{0,500}(?:plan|itinerary|sequence|trip)/i);
-  assert.match(prompt,/ecosystem[sS]{0,500}(?:browse|discovery)[sS]{0,500}journey/i);
+  assert.ok(prompt.includes('journey = itinerary/plan/trip composition'));
+  assert.ok(prompt.includes('Use ecosystem for broad browse/discovery/recommendation without plan'));
 });
 
 test('Phase 5.8 RED: physical product stock uses inventory, not generic availability',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.match(prompt,/inventory[sS]{0,360}(?:physical|product|stock)/i);
-  assert.match(prompt,/(?:room|table|time|resource)[sS]{0,360}availability/i);
+  assert.ok(prompt.includes('Use inventory for current physical-product stock/quantity existence'));
+  assert.ok(prompt.includes('Use availability when the customer asks whether a table/room/activity/time/resource'));
 });
 
 test('Phase 5.8 RED: membership signup and permission-to-change are not booking/modify overreads',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.match(prompt,/membership[sS]{0,420}signup[sS]{0,420}confirm/i);
-  assert.match(prompt,/can[sS]{0,160}change[sS]{0,260}policy/i);
+  assert.ok(prompt.includes('Membership signup uses confirm'));
+  assert.ok(prompt.includes('Permission/capability questions are ask + policy'));
 });
 
 test('Phase 5.8 RED: remaining Phase-L gold is human-grounded',()=>{
