@@ -7141,3 +7141,119 @@ After this PR is merged and production deploy is verified:
 - keep existing explicit transaction precedence
 - do not add facts without a verified source
 - only then mark the whole Phase 4 complete
+
+
+---
+
+## Phase 4 — All-domain Hospitality Playbook — Checkpoint 2 — 2026-09-25
+
+**STATUS: STATEFUL HOSPITALITY CONTINUITY GREEN; PR #100 PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY. PHASE 4 CLOSES AFTER PRODUCTION DEPLOY VERIFICATION.**
+
+Checkpoint 1 established the all-domain canonical acceptance gate and the deterministic bare `มีอะไรแนะนำ` host opener.
+
+Checkpoint 2 tests the harder requirement: the SAME guest must be able to move naturally between the ecosystem host and specific domains without stale pending state hijacking the new intent.
+
+### RED findings
+
+New stateful regression:
+- `tests/phase4-hospitality-continuity.test.ts`
+
+RED commit:
+- `bd91365b435a5c1118ec86c07a5f86187e93370a`
+
+GitHub Actions run:
+- `36154641603`
+
+Three real continuity gaps were reproduced:
+
+1. Broad opener → `สายกิจกรรม`
+   - the old general-recommendation pending choices reused the **low-walking** `light_activity` branch
+   - response omitted ATV and incorrectly framed the guest as wanting only gentle activity
+
+2. Broad opener → `สายพัก`
+   - the advertised 3-path host prompt had no actual `สายพัก` choice contract
+   - the follow-up fell to a generic no-verified-info failure
+
+3. Broad opener → `คาเฟ่มีลาเต้ไหม`
+   - the stale general pending question matched the word `คาเฟ่`
+   - it swallowed the customer's specific cafe fact question instead of yielding to the grounded cafe information boundary
+
+The same RED suite proved these were NOT global precedence failures:
+- complaint still preempted the pending host question
+- refund/authority boundary still preempted it
+- explicit location, weather and booking switches still won
+
+### Fix
+
+A separate pending-question contract now represents the actual advertised ecosystem paths:
+
+- `ecosystem_chill`
+- `ecosystem_activity`
+- `ecosystem_stay`
+
+It is distinct from `ECOSYSTEM_FOCUS_PENDING_QUESTION`, which remains dedicated to the personalized low-walking prompt:
+- restaurant
+- cafe
+- light activity
+
+This prevents the general host from silently inheriting mobility-mode semantics.
+
+General ecosystem continuations now behave as follows:
+
+- **สายชิล**
+  - cafe + photo + food framing
+  - asks party size / available time
+  - no cafe menu/price/hours invention
+
+- **สายกิจกรรม**
+  - preserves the full verified category set: horse / ATV / archery
+  - asks which activity to explore
+  - does not create a booking merely because the guest chose the path
+
+- **สายพัก**
+  - stays at the verified homestay + nature level
+  - asks party size / number of nights
+  - explicitly does not claim live room availability
+
+The generic first-visit 3-path opener now persists the same path-choice contract, so its own follow-up is meaningful across channels that do not transport chat history.
+
+### Specific-domain override
+
+While a general ecosystem preference question is pending, a **specific cafe fact inquiry** such as:
+
+`คาเฟ่มีลาเต้ไหม`
+
+now clears the stale general pending question and reaches the deterministic cafe boundary.
+
+It therefore remains honest:
+- no fake menu
+- no fake price
+- no fake hours
+- no model needed to answer the known information boundary
+
+Bare path choices are still handled as path choices; only a structurally specific cafe fact inquiry overrides the prompt.
+
+### GREEN evidence
+
+Implementation commit:
+- `0dcef2f966f6c67052e806b62de7a570cc9ff1b5`
+
+GitHub Actions run:
+- `36154865495`
+- **1090 / 1090 PASS**
+
+No DB/schema/site changes.
+No production transaction.
+No manual Netlify deploy.
+
+### Phase 4 definition after this checkpoint
+
+Once PR #100 is merged and its automatic production deploy is verified:
+- all required Phase 4 domains have canonical acceptance coverage
+- broad host entry is deterministic
+- stateful path selection is coherent
+- explicit new-domain intent wins over stale host state
+- complaint/refund/safety authority precedence remains intact
+- cafe remains grounded to the actual production source boundary
+
+At that point **Phase 4 is CLOSED** and the roadmap proceeds to **Phase 5 — Learning Loop / Bot Lessons**.
