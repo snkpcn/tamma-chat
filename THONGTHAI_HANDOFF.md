@@ -9269,3 +9269,143 @@ Temporary verification workflow removed before PR.
 PR must skip Deploy Preview to preserve Netlify credits.
 Merge only exact verified head SHA.
 Production merge commit must contain `[semantic-cert]` and must NOT contain `[skip netlify]`, so the single real production auto deploy runs the quota-safe live corpus.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5 / Checkpoint 5.7 — Live Failure Adjudication + Semantic v3 — 2026-09-26
+
+**STATUS: IMPLEMENTATION + FULL BRANCH VERIFICATION GREEN; PENDING DOCS-INCLUSIVE REVERIFY / PR / EXACT AUTO DEPLOY / LIVE CERT.**
+
+### Evidence that triggered this checkpoint
+
+Semantic-v2 production artifact from auto deploy `6ab6e163193d2c0008fa61f9`
+(commit `8b10e3a0794c1e17031d87d41bc5c48e35febf13`) reached much farther than the earlier run:
+
+- total corpus = 158
+- evaluated = 102
+- semanticEvaluated = 101
+- pass = 73
+- semanticFailed = 28
+- reported providerFailed = 1
+- passPct = 72.28% of semantic-evaluated cases only
+- availabilityComplete = false
+
+The final reported provider failure was NOT actually provider availability:
+
+- case = `l-stay-04`
+- error = `SyntaxError`
+- provider attempts = []
+
+This proved a certification taxonomy bug: malformed structured model output was incorrectly counted as provider outage and stopped the corpus.
+
+### Certification error taxonomy fix
+
+`_semantic-live-certification.ts` now separates:
+
+- provider/config/network failure with safe provider attempt evidence
+- malformed model JSON (`SyntaxError`) as semantic/model-contract failure
+- unexpected internal exception as an exception, not fake provider outage
+
+A malformed model response:
+- increments `semanticFailed`
+- remains part of `semanticEvaluated`
+- does NOT increment `providerFailed`
+- does NOT stop the remaining corpus merely because `stopOnProviderFailure=true`
+
+### Live semantic-v2 failure adjudication
+
+The 28 real semantic mismatches were grouped by meaning rather than patched sentence-by-sentence.
+
+Honest ground-truth corrections include:
+- current/date-specific availability -> `status + availability`
+- stable category/type existence -> `discover + catalog`
+- explicit recommendation request -> `recommend + recommendation`
+- capacity/rule question -> `ask + policy`
+- requesting a payment QR -> ordinary payment `ask`, not transaction status
+- viewing a saved journey -> ordinary journey `ask`
+- deliberate requested change -> `modify`
+- explicit selection plus slot values -> `confirm` while preserving slot entities
+- broad low-effort experience request with no activity anchor -> ecosystem recommendation
+
+Fixtures that previously required impossible inference were repaired with real context:
+- saving “this plan” now includes a current journey entity
+- resume-horse-booking now includes a real suspended activity task
+- restaurant party/budget/diet slot values now include the open question they answer
+- singular “this horse” confirmation fixture now has one actual antecedent
+
+Real model failures remain model failures and were NOT relabeled to inflate score, including:
+- interrogative/deictic reference becoming `confirm`
+- ambiguous singular entity selection being guessed
+- slot-shaped availability question becoming `provide_information`
+- generic order problem becoming `transaction_status`
+- capacity question becoming resource availability
+- plan save/resume being turned into a hospitality transaction
+
+### Semantic v3 doctrine
+
+`SEMANTIC_INTERPRETER_VERSION = semantic-v3`.
+
+General doctrine now explicitly separates:
+- question/deictic interrogative vs selection confirmation
+- singular entity ambiguity vs compare/recommend over a candidate set
+- explicit current entity/topic vs invented stale reference
+- suspended-task resume vs confirm/book/order
+- journey planning-state work vs hospitality transactions
+- support/problem report vs explicit transaction-status lookup
+- current availability vs stable catalog existence
+- operating capacity/rules vs availability
+- deliberate modification vs correction of a mistaken prior value
+- question predicate vs slot-shaped words
+- selection+slot values vs slot-only continuation
+
+No runtime phrase/keyword list was added.
+
+### Deterministic reference validation hardening
+
+Reference resolution now distinguishes:
+- entity-selection references
+- context-only continuation references such as `implicit_continuation` / `previous_turn`
+
+Multiple entity candidates are marked ambiguous for singular selection/status/mutation paths.
+
+Compare/recommend may intentionally operate over a resolved candidate set without being forced into a clarification.
+
+This preserves the canonical horse-comparison anti-hallucination flow while preventing “เอาตัวนั้น / เอาห้องนั้น” from silently choosing one of several candidates.
+
+### Regression evidence
+
+Initial Phase 5.7 verification exposed two real contract regressions:
+- compare over multiple horses was incorrectly forced into `clarify_ambiguous_entity`
+- context-only slot continuation was incorrectly treated as multi-entity selection
+
+Both were repaired at the reference-type/policy layer, not with sentence-specific patches.
+
+Final implementation verification before this docs append:
+
+GitHub Actions run:
+`36191498477`
+
+Result:
+- **1175 / 1175 PASS**
+- fail 0
+- exact Netlify build command SUCCESS
+- live semantic cert correctly gated off outside production/main
+
+No DB/schema change.
+No transaction executor change.
+No booking/order/payment write-policy change.
+No backoffice change.
+No paid OpenAI fallback.
+No fake production transaction.
+No manual Netlify deploy.
+
+### Remaining closeout
+
+1. docs-inclusive full CI must remain green
+2. merge exact verified head only
+3. production auto deploy only
+4. run full live semantic-v3 corpus with quota-safe pacing
+5. require `providerFailed=0` and `availabilityComplete=true`
+6. adjudicate/fix any remaining semantic failures honestly
+7. only after a clean full corpus, run small harmless production conversational E2E
