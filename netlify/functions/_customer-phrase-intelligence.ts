@@ -130,6 +130,7 @@ export function extractIntelligenceSignals(message: string): IntelligenceSignal[
   if (/ไม่กินไก่|ไม่เอาไก่|งดไก่/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_chicken', domain: 'restaurant' });
   if (/ไม่กินหมู|ไม่เอาหมู|งดหมู/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_pork', domain: 'restaurant' });
   if (/ไม่กินเนื้อ(?:วัว)?|ไม่เอาเนื้อ(?:วัว)?|งดเนื้อ(?:วัว)?/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_beef', domain: 'restaurant' });
+  if (/ไม่กินกุ้ง|ไม่เอากุ้ง|งดกุ้ง/u.test(text) && !/แพ้กุ้ง/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_shrimp', domain: 'restaurant' });
   if (/แพ้กุ้ง/u.test(text)) signals.push({ eventType: 'risk', category: 'shrimp_allergy', domain: 'restaurant' });
   if (/แพ้อาหาร/u.test(text)) signals.push({ eventType: 'risk', category: 'food_allergy', domain: 'restaurant' });
   if (/(?:เอา|ขอ)?แบบชิล\s*ๆ?|ขอชิล\s*ๆ?/u.test(text)) signals.push({ eventType: 'phrase', category: 'chill_pace', domain: 'general' });
