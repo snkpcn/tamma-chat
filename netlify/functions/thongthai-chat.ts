@@ -4143,9 +4143,20 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // Keep this lookup narrow: explicit food turns already classify correctly
   // with empty state, and unrelated generic recommendations should not pay an
   // extra state read. Only RECOMMENDATION_ONLY turns need continuity proof.
-  let preserveRestaurantFastPath = isRestaurantAdvisorTurn(request, { agentState: {} });
+  // Human Brain Phase 1: the legacy restaurant advisor owns the specific
+  // jobs it is proven to do well (dietary declarations and explicit menu/
+  // recommendation requests). A message is NOT reserved for that responder
+  // merely because it contains a restaurant/food domain noun.
+  //
+  // This distinction is semantic-class based, not a phrase patch. It prevents
+  // a richer restaurant question (availability/status/etc.) from being reduced
+  // to "restaurant topic" before One-Mind can read the whole sentence, while
+  // keeping every established dietary/menu fast path intact.
+  const restaurantIntentClass = classifyRestaurantDietaryIntent(request.message);
+  let preserveRestaurantFastPath = restaurantIntentClass !== 'OTHER'
+    && isRestaurantAdvisorTurn(request, { agentState: {} });
   if (!preserveRestaurantFastPath
-      && classifyRestaurantDietaryIntent(request.message) === 'RECOMMENDATION_ONLY'
+      && restaurantIntentClass === 'RECOMMENDATION_ONLY'
       && guestDbId) {
     const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
       console.error(
