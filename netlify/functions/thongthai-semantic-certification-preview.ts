@@ -16,13 +16,13 @@ function json(statusCode:number,body:unknown){
   };
 }
 
-function isDeployPreview():boolean{
-  return process.env.CONTEXT === 'deploy-preview'
-    || /deploy-preview-/u.test(process.env.DEPLOY_PRIME_URL ?? '');
+export function isDeployPreviewHost(headers:Record<string,string|undefined>):boolean{
+  const host=(headers.host ?? headers['x-forwarded-host'] ?? '').toLowerCase();
+  return /^deploy-preview-\d+--tamma-chat\.netlify\.app(?::\d+)?$/u.test(host);
 }
 
 export const handler:Handler=async event=>{
-  if(!isDeployPreview()) return json(404,{error:'Not found'});
+  if(!isDeployPreviewHost(event.headers ?? {})) return json(404,{error:'Not found'});
   if(event.httpMethod!=='GET') return json(405,{error:'Method not allowed'});
 
   const profile:SemanticCertificationProfile=
