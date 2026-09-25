@@ -3,6 +3,10 @@ import {
   runSemanticCertification,
   type SemanticCertificationProfile,
 } from './_semantic-live-certification';
+import {
+  emptySemanticContext,
+  interpretSemanticTurn,
+} from './_semantic-interpreter';
 
 function json(statusCode:number,body:unknown){
   return {
@@ -24,6 +28,26 @@ export function isDeployPreviewHost(headers:Record<string,string|undefined>):boo
 export const handler:Handler=async event=>{
   if(!isDeployPreviewHost(event.headers ?? {})) return json(404,{error:'Not found'});
   if(event.httpMethod!=='GET') return json(405,{error:'Method not allowed'});
+
+  if(event.queryStringParameters?.probe === '1'){
+    try{
+      const turn=await interpretSemanticTurn('มีอะไรทำบ้าง',emptySemanticContext());
+      return json(200,{ok:true,semantic:{
+        domain:turn.domain,
+        action:turn.action,
+        informationNeed:turn.informationNeed ?? 'none',
+        confidence:turn.confidence,
+        needsClarification:turn.needsClarification,
+      }});
+    }catch(error){
+      const safe=error as {name?:unknown;message?:unknown;attempts?:unknown};
+      return json(200,{ok:false,error:{
+        name:typeof safe?.name==='string'?safe.name:'unknown',
+        message:typeof safe?.message==='string'?safe.message.slice(0,240):'unknown',
+        attempts:Array.isArray(safe?.attempts)?safe.attempts:[],
+      }});
+    }
+  }
 
   const profile:SemanticCertificationProfile=
     event.queryStringParameters?.profile === 'production-smoke'
