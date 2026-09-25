@@ -321,6 +321,34 @@ SEMANTIC COMPLETENESS RULES:
 - If the customer is simply talking conversationally rather than requesting a business action, classify that meaning honestly
   instead of forcing the message into the nearest business trigger.
 
+DOMAIN-SCOPE TAXONOMY:
+- ecosystem = generic whole-property discovery when the customer asks what there is to do, play, visit, or experience and does NOT
+  name a specific business domain/activity/entity and context does not unambiguously narrow it.
+- Generic verbs such as do/play/visit are NOT enough by themselves to narrow the domain to activity. They can describe the whole
+  TAMMA ecosystem. Use activity only when a specific activity/activity entity is stated (horse, ATV, archery, etc.) or the relevant
+  conversation context unambiguously establishes activity.
+- Never hallucinate a business domain for an elliptical question such as a bare date + "available?". If neither the message nor
+  relevant context identifies what should be available, use unknown and needsClarification=true.
+
+ACTION TAXONOMY (apply by meaning, not keywords):
+- discover = the customer asks what options/catalog/items/categories EXIST or are available to browse. Asking what menu/items/options
+  are there is discover, even inside restaurant/cafe/OTOP. discovery does not mean the assistant should choose one for them.
+- recommend = the customer asks the assistant to HELP CHOOSE, suggest, personalize, or say what is suitable/better for them.
+- status = the customer asks the CURRENT STATE of something: whether a table/room/activity/resource is available, free, full, open,
+  still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
+  pair an existing booking/order/payment status with informationNeed=transaction_status.
+- ask = an informational/factual question that is not better represented by status, compare, recommend, or discover.
+- compare = the customer asks to compare two or more known options/attributes.
+- confirm = the customer explicitly selects/accepts a previously presented or referenced option. Selection alone does NOT create a
+  booking/order. "Take that one / the previous one / this horse" in selection context is confirm, not book/order.
+- book/order = explicit TRANSACTION intent to create/submit a booking or order now. Do not infer book/order merely because a customer
+  selected an entity or because an active task exists.
+- provide_information = the customer supplies values requested by the current open question/task (date, time, party size, name, etc.)
+  without asking a new question. It is slot information, not confirmation or transaction execution.
+- correct_previous = the customer explicitly corrects/replaces something they said or selected before.
+- A short contextual interrogative such as "which one?" or "what about the horse?" is ask unless it explicitly requests a recommendation,
+  comparison, availability/status, or transaction.
+
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
 action: one of ask | discover | recommend | compare | book | order | modify | cancel | confirm | status | provide_information | correct_previous | unknown
