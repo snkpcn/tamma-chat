@@ -453,7 +453,6 @@ export function resolveReferences(references: SemanticReference[], context: Sema
     if (inDomain.length === 1) return { ...reference, resolvedEntityId: inDomain[0]!.id };
     if (inDomain.length > 1) return {
       ...reference,
-      ambiguous:true,
       resolvedEntityIds:inDomain.map(entity => entity.id),
     };
     return reference;
