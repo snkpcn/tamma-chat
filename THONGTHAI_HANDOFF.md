@@ -6740,3 +6740,63 @@ Production retest required after deployment:
   - `no_shrimp`
 
 Do not start Phase 3 until this production retest passes.
+
+
+---
+
+## Phase 2.7 Production Privacy Fix — Direct identifiers in feedback events — 2026-09-25
+
+**STATUS: CODE FIXED; CI GREEN; PENDING PR #96 MERGE + PRODUCTION RETEST.**
+
+Owner privacy smoke sent a synthetic safety message containing:
+- phone
+- email
+- external URL
+
+The aggregate `customer_intelligence_events` write succeeded, but the owner LINE notification visibly exposed all three direct identifiers because `ops_feedback_events.customer_message` and `summary` still stored the raw customer text.
+
+### Test-first proof
+
+Test-only commit:
+- `275463f6af8d7db9d71c032754bb2e32bc112307`
+
+GitHub Actions run:
+- `36128872803`
+
+Exact failure:
+- stored `customer_message` and `summary` still contained the raw phone/email/url
+
+### Fix
+
+New shared helper:
+- `netlify/functions/_direct-identifier-redaction.ts`
+
+Before operational feedback is persisted, deterministic direct identifiers are replaced:
+- URL -> `[url]`
+- email -> `[email]`
+- phone -> `[phone]`
+- @handle -> `[handle]`
+
+Because staff LINE notifications read the persisted feedback event, the same redacted text now flows to:
+- `ops_feedback_events.customer_message`
+- `ops_feedback_events.summary`
+- owner/activity/team LINE notification bodies
+- future backoffice reads of newly-created events
+
+The aggregate intelligence writer now reuses the same helper to avoid privacy logic drifting across subsystems.
+
+### Verification
+
+Implementation head:
+- `d93e66222cbe8e6993c920bd72bacd42cfa050b6`
+
+GitHub Actions run:
+- `36129003394`
+
+Result:
+- **1076 / 1076 PASS**
+
+The load-bearing regression requires both stored feedback and the actual captured LINE push payload to contain `[phone]`, `[email]`, `[url]` and none of the raw synthetic identifiers.
+
+No historical production rows were rewritten by this code fix.
+No Phase 3 work started.

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { redactDirectIdentifiers } from './_direct-identifier-redaction';
 
 // Phase 2.7 -- aggregate (cross-guest) customer intelligence event log.
 //
@@ -58,14 +59,7 @@ function sourceEventKey(channel: string, sourceEventId: string): string {
  * when genuinely useful.
  */
 export function redactIntelligenceExample(message: string): string {
-  return message
-    .trim()
-    .replace(/https?:\/\/\S+|www\.\S+/giu, '[url]')
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[email]')
-    .replace(/(?:\+?66|0)[\s.-]?[1-9](?:[\s.-]?\d){7,9}/gu, '[phone]')
-    .replace(/(^|\s)@[A-Za-z0-9._-]{2,}/gu, '$1[handle]')
-    .replace(/\s+/g, ' ')
-    .slice(0, 80);
+  return redactDirectIdentifiers(message, 80);
 }
 
 export async function recordIntelligenceEvent(input: {

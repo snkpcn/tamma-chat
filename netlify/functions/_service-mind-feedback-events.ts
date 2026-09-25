@@ -20,6 +20,7 @@
 import { notifyFeedbackEventTargets, type FeedbackTargetResult } from './_ops-notifications';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import type { ServiceFeedbackMatch } from './_service-mind-feedback-intent';
+import { redactDirectIdentifiers } from './_direct-identifier-redaction';
 
 export type FeedbackEventResult = {
   eventId: string | null;
@@ -98,13 +99,18 @@ export async function createFeedbackEvent(input: {
   guestDbId: string | null;
 }): Promise<FeedbackEventResult> {
   try {
+    // Customer Voice needs the operational meaning of the report, not
+    // copied contact details or external URLs. Redact direct identifiers
+    // BEFORE persistence so the same safe text is what backoffice and LINE
+    // staff notifications read later.
+    const safeCustomerMessage = redactDirectIdentifiers(input.message, 2000);
     const body = {
       guest_id: input.guestDbId,
       feedback_type: input.match.feedbackType,
       business_unit: input.match.businessUnit,
       severity: input.match.severity,
-      customer_message: input.message.slice(0, 2000),
-      summary: summarize(input.message),
+      customer_message: safeCustomerMessage,
+      summary: summarize(safeCustomerMessage),
       channel: channelForEvent(input.channel),
       staff_name: input.match.staffName,
       route_target: ROUTE_TARGET[input.match.businessUnit],
