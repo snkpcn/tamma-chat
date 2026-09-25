@@ -240,6 +240,12 @@ export function buildSemanticContext(state: ConversationContextState, now: Date 
     recentEntities: live.recentEntities.map(({ observedAt: _observedAt, ...entity }) => entity),
     lastAction: live.lastAction ?? undefined,
     openQuestion: live.openQuestion ?? undefined,
+    activeTopic: live.activeTopic ?? undefined,
+    rollingSummary: live.rollingSummary || undefined,
+    // recentTurns are already redacted and bounded at write time by this
+    // module. Passing that same bounded evidence to the semantic layer gives
+    // natural short follow-ups real context without creating a second chat log.
+    recentTurns: live.recentTurns.map(turn => ({ role:turn.role, content:turn.content })),
   };
 }
 
