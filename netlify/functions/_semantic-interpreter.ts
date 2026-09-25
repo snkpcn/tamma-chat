@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v2';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v3';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -346,8 +346,25 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 - provide_information = the customer supplies values requested by the current open question/task (date, time, party size, name, etc.)
   without asking a new question. It is slot information, not confirmation or transaction execution.
 - correct_previous = the customer explicitly corrects/replaces something they said or selected before.
-- A short contextual interrogative such as "which one?" or "what about the horse?" is ask unless it explicitly requests a recommendation,
-  comparison, availability/status, or transaction.
+- A short contextual interrogative that asks identity/choice ("which one?", "which option?") is a QUESTION, not confirmation.
+  confirm requires an affirmative selection/acceptance of one identifiable option. If several candidates remain plausible, do not guess.
+- A short topic-narrow follow-up that names a canonical business/category/resource after broad discovery may narrow the domain without
+  inventing a prior-entity reference. If the customer is simply asking what that category offers, use discover + catalog and do not
+  demand clarification merely because no individual recent entity exists.
+- Capacity/policy and live availability are different meanings. A question about how many units/people may operate/use something
+  simultaneously as a rule is ask + policy. availability/status is for whether a resource/time is free, open, ready, or available
+  in the current/date-specific state.
+- Catalog existence and live availability are different meanings. Asking whether an item/type exists in the offering/catalog, with
+  no date/time/current-state predicate, is discover + catalog. Asking whether it is free/open/in stock/ready at a current or stated
+  time is status with availability or inventory as appropriate.
+- A completely vague help request with no business object or domain belongs to support and needs clarification; do not reinterpret
+  generic requests for help as ecosystem discovery.
+- Saving/storing the current journey or plan is journey state management (confirm the current plan), NOT a booking. Use book/order only
+  for an explicit reservation/order transaction.
+- Membership profile/record/status and membership benefits/catalog are different meanings. A personal/current membership record is
+  status; benefits, perks, or what membership includes are discover + catalog.
+- correct_previous means the customer says an earlier value/selection was mistaken or wrong and replaces it. modify means an intentional
+  change to an existing choice, preference, schedule, or plan without claiming the earlier value was a mistake.
 
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
@@ -434,13 +451,17 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       ? context.recentEntities.filter(entity => entity.domain === context.activeDomain)
       : context.recentEntities;
     if (inDomain.length === 1) return { ...reference, resolvedEntityId: inDomain[0]!.id };
-    if (inDomain.length > 1) return { ...reference, resolvedEntityIds: inDomain.map(entity => entity.id) };
+    if (inDomain.length > 1) return {
+      ...reference,
+      ambiguous:true,
+      resolvedEntityIds:inDomain.map(entity => entity.id),
+    };
     return reference;
   });
 }
 
 const READ_ONLY_ACTIONS_FOR_FACET_NORMALIZATION: ReadonlySet<SemanticAction> = new Set([
-  'ask','discover','recommend','status',
+  'ask','discover','recommend','status','provide_information',
 ]);
 
 function canonicalizeReadOnlyAction(
@@ -490,6 +511,8 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && !reference.resolvedEntityId
     && !reference.resolvedEntityIds?.length
     && !reference.resolvedTaskSlot);
+  const hasAmbiguousReference = references.some(reference =>
+    reference.ambiguous === true || (reference.resolvedEntityIds?.length ?? 0) > 1);
 
   return {
     domain,
@@ -504,10 +527,11 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: parsed.needsClarification === true || hasUnresolvedReference,
+    needsClarification: parsed.needsClarification === true || hasUnresolvedReference || hasAmbiguousReference,
     clarificationReason: typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
       ? parsed.clarificationReason.trim()
-      : (hasUnresolvedReference ? 'unresolved_reference' : undefined),
+      : (hasAmbiguousReference ? 'ambiguous_reference'
+        : (hasUnresolvedReference ? 'unresolved_reference' : undefined)),
     taskDirective,
   };
 }
