@@ -1,4 +1,4 @@
-name: Probe Preview Semantic Provider
+name: Read Production Semantic Certification
 
 on:
   push:
@@ -9,19 +9,20 @@ permissions:
   contents: read
 
 jobs:
-  probe:
+  fetch-certification:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fetch safe semantic provider probe
+      - name: Fetch production semantic certification artifact
         run: |
           set -euo pipefail
           curl --fail --silent --show-error \
-            "https://deploy-preview-122--tamma-chat.netlify.app/.netlify/functions/thongthai-semantic-certification-preview?probe=1" \
-            -o semantic-provider-probe.json
-          cat semantic-provider-probe.json
+            --retry 5 --retry-delay 3 \
+            https://tamma-chat.netlify.app/semantic-certification-result.json \
+            -o semantic-certification-result.json
+          node -e "const x=require('./semantic-certification-result.json'); console.log(JSON.stringify({status:x.status,evaluated:x.evaluated,pass:x.pass,failed:x.failed,passPct:x.passPct,totalCorpusCases:x.totalCorpusCases,semanticVersion:x.semanticVersion},null,2))"
       - uses: actions/upload-artifact@v4
         with:
-          name: semantic-provider-probe
-          path: semantic-provider-probe.json
+          name: semantic-certification-result-production
+          path: semantic-certification-result.json
           if-no-files-found: error
