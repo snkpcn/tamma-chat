@@ -123,10 +123,14 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     message: 'ร้านมีไรกิน',
     expected: { domain: 'restaurant', action: 'recommend' },
     simulatedModelOutput: { domain: 'restaurant', intent: 'menu_recommendation_request', action: 'recommend', entities: {}, references: [], constraints: [], confidence: 0.88, needsClarification: false } },
+  // Adjudicated in Human Brain 5.5: this wording asks what menu exists,
+  // not which item Thongthai recommends. Catalog discovery is the more human
+  // interpretation and matches the closed informationNeed contract.
   { id: 'restaurant-02', group: 'restaurant_recommendation', category: 'colloquial', domainArea: 'restaurant',
     message: 'มีเมนูไรมั่ง',
-    expected: { domain: 'restaurant', action: 'recommend' },
-    simulatedModelOutput: { domain: 'restaurant', intent: 'menu_recommendation_request', action: 'recommend', entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
+    expected: { domain: 'restaurant', action: 'discover' },
+    simulatedModelOutput: { domain: 'restaurant', intent: 'menu_catalog_request', action: 'discover', informationNeed: 'catalog',
+      entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
   { id: 'restaurant-03', group: 'restaurant_recommendation', category: 'formal', domainArea: 'restaurant',
     message: 'แนะนำอะไรกินหน่อย',
     expected: { domain: 'restaurant', action: 'recommend' },
@@ -160,10 +164,15 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     message: 'มีห้องปะ',
     expected: { domain: 'stay', action: 'ask' },
     simulatedModelOutput: { domain: 'stay', intent: 'room_availability_query', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.83, needsClarification: false } },
+  // Adjudicated in Human Brain 5.5: the utterance omits the object entirely.
+  // To test stay ellipsis honestly, provide the stay context a human would need
+  // rather than smuggling "room" through domainArea metadata the model never sees.
   { id: 'stay-02', group: 'stay_availability', category: 'formal', domainArea: 'stay',
     message: 'พรุ่งนี้ว่างไหม',
-    expected: { domain: 'stay', action: 'ask' },
-    simulatedModelOutput: { domain: 'stay', intent: 'room_availability_query', action: 'ask', entities: { date: 'พรุ่งนี้' }, references: [], constraints: [], confidence: 0.75, needsClarification: false } },
+    context: { activeDomain: 'stay', recentEntities: [], lastAction: 'ask' },
+    expected: { domain: 'stay', action: 'status' },
+    simulatedModelOutput: { domain: 'stay', intent: 'room_availability_query', action: 'status', informationNeed: 'availability',
+      entities: { date: 'พรุ่งนี้' }, references: [], constraints: [], confidence: 0.75, needsClarification: false } },
 
   // --- Semantic equivalence group: promotion discovery/status (2 variants, user-specified) ---
   { id: 'promotion-01', group: 'promotion_discovery', category: 'colloquial', domainArea: 'promotion',
