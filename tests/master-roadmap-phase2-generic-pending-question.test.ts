@@ -14,6 +14,7 @@ import { createHash, createHmac } from 'node:crypto';
 import { withHarness, type Harness } from './helpers/canonical-core-harness';
 import { handler as lineWebhookHandler } from '../netlify/functions/line-webhook';
 import { resolvePendingQuestionAnswer } from '../netlify/functions/_conversation-continuity';
+import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
 
 const SECRET='phase2-generic-pending-question-secret';
 type CapturedReply={messages:Array<{type:string;text?:string}>};
@@ -276,8 +277,8 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         // 10 — horse-name collision is now correctly interpreted inside horse context.
         await callLine('เอาทองไทย',user);
         const horseChoice=textOf(capture.replies[9]);
-        assert.match(horseChoice,/เลือกทองไทย|ทองไทย/u);
-        assert.doesNotMatch(horseChoice,/โลเคชั่น|แผนที่/u);
+        assert.match(horseChoice,/^ได้ครับ เลือกทองไทย/u);
+        assert.doesNotMatch(horseChoice,/หมายถึงอยากเลือก|ผู้ช่วยแชท|โลเคชั่น|แผนที่/u);
 
         // 11 — authority boundary overrides the active horse task.
         await callLine('ขอคืนเงินได้ไหม',user);
@@ -321,5 +322,73 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
     if(oldWeatherKey===undefined) delete process.env.WEATHER_API_KEY; else process.env.WEATHER_API_KEY=oldWeatherKey;
     if(oldLat===undefined) delete process.env.TAMMA_WEATHER_LAT; else process.env.TAMMA_WEATHER_LAT=oldLat;
     if(oldLon===undefined) delete process.env.TAMMA_WEATHER_LON; else process.env.TAMMA_WEATHER_LON=oldLon;
+  }
+});
+
+
+test('full signed LINE regression: explicit horse intent suspends stale unrelated task, so เอาทองไทย resolves as the horse',async()=>{
+  const old=process.env.LINE_CHANNEL_SECRET;
+  process.env.LINE_CHANNEL_SECRET=SECRET;
+  try{
+    await withHarness(async h=>{
+      const capture=installCapture();
+      try{
+        const user='phase2-horse-after-stale-unrelated-task';
+
+        // Establish the canonical LINE guest first, then reproduce the real
+        // production condition: an old unrelated task is still active from a
+        // previous domain when the customer explicitly switches to horse care.
+        await callLine('สวัสดี',user);
+        const gid=h.guestDbId(lineGuestId(user));
+        assert.ok(gid);
+
+        const staleRestaurantTask=createActiveTask({
+          type:'restaurant_preorder',
+          sourceChannel:'line',
+          requiredFields:['date','time','customerName','phone'],
+        });
+        h.setState(gid!,{
+          taskState:{
+            ...emptyTaskStateContainer(),
+            activeTask:staleRestaurantTask,
+          },
+        });
+
+        const callsBeforeHorse=h.modelCallCount();
+        await callLine('อยากขี่ม้า ไม่เคยเลย กลัวตก',user);
+        const care=textOf(capture.replies[1]);
+        assert.match(care,/ขี่ม้า|ทีมงาน|ช้า|กลัว/u);
+        assert.doesNotMatch(care,/ขอรายละเอียดเพิ่มอีกนิด/u);
+        assert.equal(h.modelCallCount(),callsBeforeHorse,'explicit horse care must be deterministic');
+
+        const afterCare=stateFor(h,user).taskState as {
+          activeTask?:{domain?:string;type?:string;slots?:Record<string,unknown>}|null;
+          suspendedTask?:{domain?:string;type?:string}|null;
+        }|undefined;
+
+        // Load-bearing architectural proof: a clear domain switch must make
+        // activity the active task while preserving, not overwriting, the old
+        // unrelated task in the bounded suspended slot.
+        assert.equal(afterCare?.activeTask?.domain,'activity');
+        assert.equal(afterCare?.activeTask?.type,'activity_booking');
+        assert.equal(afterCare?.suspendedTask?.domain,'restaurant');
+
+        await callLine('เอาทองไทย',user);
+        const selection=textOf(capture.replies[2]);
+
+        assert.match(selection,/^ได้ครับ เลือกทองไทย/u);
+        assert.doesNotMatch(selection,/หมายถึงอยากเลือก|เรียกทองไทยผู้ช่วยแชท/u);
+        assert.equal(h.modelCallCount(),callsBeforeHorse,'contextual horse selection must be deterministic');
+
+        const afterSelection=stateFor(h,user).taskState as {
+          activeTask?:{domain?:string;slots?:Record<string,unknown>}|null;
+        }|undefined;
+        assert.equal(afterSelection?.activeTask?.domain,'activity');
+        assert.equal(afterSelection?.activeTask?.slots?.assetSelection,'ทองไทย');
+      } finally { capture.restore(); }
+    });
+  } finally {
+    if(old===undefined) delete process.env.LINE_CHANNEL_SECRET;
+    else process.env.LINE_CHANNEL_SECRET=old;
   }
 });

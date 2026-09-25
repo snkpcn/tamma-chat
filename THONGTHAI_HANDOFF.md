@@ -6256,3 +6256,81 @@ Start with **one message at a time**:
 Do not start Phase 2.7 or Phase 3 until the owner confirms the production smoke passes the Phase 2 Definition of Done.
 
 Phase 2.7 `customer_intelligence_events` migration remains **NOT APPROVED / NOT APPLIED** and still requires explicit owner approval.
+
+
+---
+
+## Phase 2 Production Smoke Fix — Horse context after explicit domain switch — 2026-09-25
+
+**STATUS: FIXED IN PR #90; PHASE 2 STILL AWAITS OWNER PRODUCTION SMOKE.**
+
+Owner production LINE smoke failed at closeout turn 10:
+
+- prior turn: `อยากขี่ม้า ไม่เคยเลย กลัวตก`
+- Thongthai correctly entered horse-care behavior and asked `แล้วมากี่คนครับ?`
+- next turn: `เอาทองไทย`
+- wrong production reply: `หมายถึงอยากเลือก “ทองไทย” เป็นม้าสำหรับขี่ หรือเรียกทองไทยผู้ช่วยแชทครับ 😊`
+
+This proved the earlier closeout test was too weak: it only asserted that the response contained `ทองไทย` / `เลือกทองไทย`, so the bad clarification could accidentally satisfy it.
+
+### Root cause
+
+LINE has `chatHistory: []`, so the horse-name disambiguator relies on persisted task context.
+
+`horseCompoundCareIntentResponse` called `markActivityIntentStarted`, but that helper returned early whenever **any** unfinished task was already active. A stale unrelated restaurant/other-domain task could therefore remain active even after a clear explicit horse-domain switch.
+
+Result:
+
+- horse-care wording was returned for the current turn;
+- server-side active task still said `restaurant`;
+- next webhook `เอาทองไทย` saw no persisted activity context;
+- the correct bare-name safety clarification fired.
+
+### Test-first proof
+
+Test-only RED commit: `7a38318e53db66abdc3b9f1e1b6c7857d49c93b3`
+
+GitHub Actions run: `36110907138`
+
+Failure:
+- expected active task domain: `activity`
+- actual: `restaurant`
+
+The new regression uses the real signed LINE webhook with `chatHistory=[]`, seeds a legitimate stale unrelated active task, then sends:
+
+1. `อยากขี่ม้า ไม่เคยเลย กลัวตก`
+2. `เอาทองไทย`
+
+### Architectural fix
+
+Explicit horse/activity intent now uses the existing bounded task-stack semantics:
+
+- if the current unfinished task is already `activity`, reuse it;
+- if an unfinished task belongs to another domain, call `suspendActiveTask`;
+- start the new `activity_booking` task;
+- preserve the old task in `suspendedTask` instead of overwriting or silently dropping it.
+
+The same protection was added to direct horse-selection persistence so an explicit named-horse selection cannot overwrite an unrelated active task either.
+
+No phrase-specific `if text == "เอาทองไทย"` patch was added.
+
+### Load-bearing expectations
+
+The regression now requires:
+
+- active task becomes `activity_booking`;
+- old unrelated task remains in bounded `suspendedTask`;
+- `เอาทองไทย` reply begins `ได้ครับ เลือกทองไทย...`;
+- reply must NOT contain `หมายถึงอยากเลือก` / `ผู้ช่วยแชท`;
+- selected horse persists as `assetSelection = ทองไทย`;
+- horse care + horse selection use zero model calls.
+
+Fixed code head: `1327f7338fd72af81709cc9d54ec1d3b3e7a2854`
+
+GitHub Actions run `36111060758`: **1071 / 1071 PASS**.
+
+No DB migration. No production DB mutation. No Phase 2.7 or Phase 3 work.
+
+Owner production retest after automatic deployment:
+- send exactly `เอาทองไทย` in the CURRENT horse conversation.
+- expected: direct horse selection, never assistant-vs-horse clarification.
