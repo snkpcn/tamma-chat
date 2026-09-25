@@ -181,6 +181,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** Certification pacing is a minimum START-to-START interval, not an
+ *  unconditional post-call sleep. Slow provider calls therefore satisfy part
+ *  or all of the quota spacing themselves instead of doubling build time. */
+export function computeInterCaseWaitMs(
+  minimumStartIntervalMs: number,
+  elapsedSincePreviousStartMs: number,
+): number {
+  const minimum = Math.max(0, Math.floor(minimumStartIntervalMs));
+  const elapsed = Math.max(0, Math.floor(elapsedSincePreviousStartMs));
+  return Math.max(0, minimum - elapsed);
+}
+
 export async function runSemanticCertification(options: {
   profile?: SemanticCertificationProfile;
   start?: number;
@@ -212,15 +224,26 @@ export async function runSemanticCertification(options: {
   let providerFailed = 0;
   let semanticFailed = 0;
   const failures: SemanticCertificationFailure[] = [];
+  let previousCaseStartedAt:number|null=null;
 
   for (let selectedIndex = 0; selectedIndex < selected.length; selectedIndex += 1) {
     const item = selected[selectedIndex]!;
-    // Certification is observational, not a load test. Pace across both
-    // intra-batch and inter-batch boundaries so the harness does not create
-    // its own provider 429s. Customer runtime traffic is unaffected.
-    if (interCaseDelayMs > 0 && (start > 0 || selectedIndex > 0)) {
-      await sleep(interCaseDelayMs);
+    // Certification is observational, not a load test. Pace provider CALL
+    // STARTS rather than adding a fixed sleep after already-slow calls.
+    if (interCaseDelayMs > 0) {
+      if (previousCaseStartedAt === null) {
+        // A nonzero start means this is a resumed/new batch. Give the previous
+        // batch one clean interval even though its local timestamp is gone.
+        if (start > 0) await sleep(interCaseDelayMs);
+      } else {
+        const waitMs=computeInterCaseWaitMs(
+          interCaseDelayMs,
+          Date.now()-previousCaseStartedAt,
+        );
+        if (waitMs>0) await sleep(waitMs);
+      }
     }
+    previousCaseStartedAt=Date.now();
     let availabilityAttempt = 0;
 
     while (true) {
