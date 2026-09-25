@@ -344,19 +344,40 @@ function hasLiveActiveTask(taskState: TaskStateContainer): boolean {
  * proven deterministic suspend/resume path in this checkpoint. Later Human
  * Brain phases can expand this gate only with their own RED/full-CI evidence.
  */
+/**
+ * Cheap clause-shape detector ONLY for arbitration. It never classifies an
+ * intent, domain, entity, or action. Its sole purpose is to notice that a
+ * deterministic single-intent candidate may cover only one clause of a
+ * natural utterance, so the language model should read the whole sentence.
+ *
+ * Keeping this separate from semantic interpretation is important: words
+ * like "แล้ว/แต่/ทีนี้/ละ ..." do not themselves mean cancel/switch/etc.
+ */
+function mayContainMultipleClauses(message: string): boolean {
+  const normalized = message.trim();
+  return /(?:แล้ว(?:ก็)?|แต่|ทีนี้|จากนั้น|อีกอย่าง)s*/u.test(normalized)
+    || /ละs+S/u.test(normalized)
+    || /[;,]s*S/u.test(normalized);
+}
+
 function deterministicNeedsLanguageRefinement(
   turn: SemanticTurn | null,
   taskState: TaskStateContainer,
+  message: string,
 ): boolean {
   if (!turn) return true;
 
-  // A topic-switch candidate tells us only the destination domain. It cannot
-  // safely represent compound human meaning such as "drop the old thing and
-  // let's eat first". Phase 2 now gives the semantic brain privacy-safe task
-  // context, so this deliberately coarse class may be refined even while a
-  // working task is active. Low-confidence/provider-outage still falls back
-  // to this exact deterministic candidate below.
-  if (turn.intent === 'restaurant_topic_switch') return true;
+  if (turn.intent === 'restaurant_topic_switch') {
+    // Phase 1: with no live working task, this coarse class is always refined
+    // because it previously swallowed richer restaurant questions.
+    if (!hasLiveActiveTask(taskState)) return true;
+
+    // Phase 2: preserve the mature zero-model pure topic switch ("ร้านมีไรกิน")
+    // while allowing a compound utterance ("...ละ ร้าน...") to be read as a
+    // whole. The cue decides only whether to ask the semantic brain, never
+    // what the sentence means.
+    return mayContainMultipleClauses(message);
+  }
 
   // Every other mature active-task parser remains authoritative in this
   // checkpoint: slot fills, corrections, side-questions, inventory, etc.
@@ -383,7 +404,7 @@ async function resolveSemanticTurn(
 
   // Preserve every mature deterministic path unless this checkpoint has
   // explicitly proven that its classification is too coarse.
-  if (deterministic && !deterministicNeedsLanguageRefinement(deterministic, taskState)) {
+  if (deterministic && !deterministicNeedsLanguageRefinement(deterministic, taskState, message)) {
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
       semantic_owner: 'deterministic_proven_path',
       deterministic_turn: true,
