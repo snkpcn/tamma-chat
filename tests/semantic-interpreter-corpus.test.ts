@@ -8,14 +8,10 @@
 //   accepts each corpus case's simulatedModelOutput and resolves references
 //   against real context. Does NOT call any model.
 //
-// LIVE MODEL SEMANTIC CONFORMANCE: NOT YET EXECUTED.
-//   Whether the real configured provider (Gemini/OpenAI) actually classifies
-//   each corpus message the way its `expected`/`simulatedModelOutput` says it
-//   should has not been checked -- no API keys in this dev environment, and
-//   `npm test` stays network-free by this repo's own convention (same as the
-//   pre-existing interpretStayBookingTurn). This must run as a live
-//   acceptance job before Phase O's final integration. See
-//   _semantic-interpreter.ts's SEMANTIC_EVAL_STATUS constant.
+// LIVE MODEL SEMANTIC CONFORMANCE: PARTIAL LIVE CERTIFICATION IN PROGRESS.
+//   Production live-provider certification now runs separately from npm test.
+//   npm test intentionally remains network-free; see SEMANTIC_EVAL_STATUS and
+//   the Phase 5.4/5.5 handoff checkpoints for live evidence.
 // ==========================================================================
 //
 // What IS fully tested here (network-free):
@@ -41,9 +37,9 @@ import {
 import { legacyShadowRoute } from '../netlify/functions/_semantic-interpreter-shadow';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 
-test('eval status is explicit: static contract has run, live model conformance has not', () => {
+test('eval status is explicit: static contract is network-free and live certification is tracked separately', () => {
   assert.equal(SEMANTIC_EVAL_STATUS.staticNetworkFreeSemanticContract, 'pass_fail_in_npm_test');
-  assert.equal(SEMANTIC_EVAL_STATUS.liveModelSemanticConformance, 'not_yet_executed');
+  assert.equal(SEMANTIC_EVAL_STATUS.liveModelSemanticConformance, 'partial_live_certification_in_progress');
 });
 
 test(`golden eval corpus has at least 40 cases (has ${SEMANTIC_EVAL_CORPUS.length})`, () => {
@@ -103,23 +99,37 @@ test('semantic equivalence group "broad_discovery": 7 differently-worded variant
   }
 });
 
-test('semantic equivalence group "restaurant_recommendation": 3 variants all classify as restaurant/recommend', () => {
-  const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'restaurant_recommendation');
-  assert.equal(group.length, 3);
-  for (const evalCase of group) {
-    const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), emptySemanticContext());
+test('semantic taxonomy: restaurant catalog browsing is discover while explicit recommendation stays recommend', () => {
+  const catalog = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'restaurant_catalog');
+  assert.equal(catalog.length, 2);
+  for (const evalCase of catalog) {
+    const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), evalCase.context ?? emptySemanticContext());
     assert.equal(turn.domain, 'restaurant');
-    assert.equal(turn.action, 'recommend');
+    assert.equal(turn.action, 'discover');
+    assert.equal(turn.informationNeed, 'catalog');
   }
+
+  const recommendation = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'restaurant_recommendation');
+  assert.equal(recommendation.length, 1);
+  const turn = parseSemanticTurnResponse(
+    JSON.stringify(recommendation[0]!.simulatedModelOutput),
+    recommendation[0]!.context ?? emptySemanticContext(),
+  );
+  assert.equal(turn.domain, 'restaurant');
+  assert.equal(turn.action, 'recommend');
 });
 
-test('semantic equivalence group "stay_availability": 2 variants both classify as stay/ask', () => {
+test('semantic equivalence group "stay_availability": variants classify as stay/status using relevant context', () => {
   const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'stay_availability');
   assert.equal(group.length, 2);
   for (const evalCase of group) {
-    const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), emptySemanticContext());
+    const turn = parseSemanticTurnResponse(
+      JSON.stringify(evalCase.simulatedModelOutput),
+      evalCase.context ?? emptySemanticContext(),
+    );
     assert.equal(turn.domain, 'stay');
-    assert.equal(turn.action, 'ask');
+    assert.equal(turn.action, 'status');
+    assert.equal(turn.informationNeed, 'availability');
   }
 });
 
