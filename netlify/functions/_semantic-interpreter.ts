@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v2';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v3';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -304,6 +304,13 @@ CONVERSATION-REFERENCE RULES:
   These directives describe conversation working state only; they NEVER mean cancel/confirm/execute a real booking/order.
   Omit taskDirective when the customer did not explicitly express one.
 - Recent turns and rolling summary are evidence for ellipsis/references only. The CURRENT message still outranks them.
+- A question/deictic interrogative ("which one?", "what about X?") is NEVER a confirmation merely because prior entities exist.
+  confirm requires actual acceptance/selection language. If a deictic selection points to multiple equally plausible entities,
+  keep the reference ambiguous and set needsClarification=true instead of guessing.
+- If the CURRENT message itself explicitly names the entity/topic (for example horse/ATV/room), do not invent a prior-context
+  reference or clarification just because the turn follows an earlier topic.
+- If the customer explicitly resumes a paused topic and suspended task evidence exists, use that suspended task's domain and
+  taskDirective=resume_suspended. Resuming a task is not itself confirm/book/order.
 
 ECOSYSTEM VOCABULARY (canonical -- from the Bible, do not use a different version of this elsewhere):
 ${THONGTHAI_BIBLE_SECTIONS.ecosystemVocabulary}
@@ -329,6 +336,11 @@ DOMAIN-SCOPE TAXONOMY:
   conversation context unambiguously establishes activity.
 - Never hallucinate a business domain for an elliptical question such as a bare date + "available?". If neither the message nor
   relevant context identifies what should be available, use unknown and needsClarification=true.
+- journey = planning-state work such as saving, viewing, restoring, continuing, or changing an itinerary/plan. Saving a plan is
+  NOT a hospitality booking/order transaction.
+- support = asking for human help, reporting a service/order problem, or a vague help request that does not identify another
+  business question clearly. A problem ABOUT an order is not automatically transaction_status; only an explicit request for the
+  order's current state/status uses transaction_status.
 
 ACTION TAXONOMY (apply by meaning, not keywords):
 - discover = the customer asks what options/catalog/items/categories EXIST or are available to browse. Asking what menu/items/options
@@ -345,17 +357,29 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   selected an entity or because an active task exists.
 - provide_information = the customer supplies values requested by the current open question/task (date, time, party size, name, etc.)
   without asking a new question. It is slot information, not confirmation or transaction execution.
-- correct_previous = the customer explicitly corrects/replaces something they said or selected before.
+- correct_previous = the customer corrects a mistaken prior value/selection ("not that / I meant... / actually...").
+  A deliberate requested change to an existing plan/order/task ("change the pickup time to...") is modify.
+- Question meaning outranks slot-shaped wording: when a customer supplies a time/date/quantity AND asks whether it works/is available,
+  classify the question (usually status/availability or ask/policy), not provide_information.
+- If one turn explicitly selects a previously offered option AND also supplies requested slot values, confirm is the primary action;
+  preserve the supplied values in entities. provide_information is for slot answers without a simultaneous selection/acceptance.
 - A short contextual interrogative such as "which one?" or "what about the horse?" is ask unless it explicitly requests a recommendation,
-  comparison, availability/status, or transaction.
+  comparison, availability/status, or transaction. It is never confirm merely because candidates exist.
 
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
 action: one of ask | discover | recommend | compare | book | order | modify | cancel | confirm | status | provide_information | correct_previous | unknown
 informationNeed: one of none | availability | price | schedule | inventory | catalog | recommendation | ingredients | policy | transaction_status
 - informationNeed is a CLOSED machine-facing meaning facet, independent of the free-form intent label.
-- Use availability when the customer asks whether a table/room/activity/resource is free, full, open, or available.
-- Use transaction_status only when asking the status of an already-existing booking/order/payment/member transaction.
+- Use availability for CURRENT mutable state: whether a specific resource/time/date is free, full, open, ready, or available now/then.
+- Use catalog when asking whether a stable category/type/item exists in the offering (menu category, room type, drink type), unless
+  the wording clearly asks current stock/availability for a time/date.
+- Use policy for operating rules/capacity constraints such as whether multiple ATVs can go out simultaneously, age/weight limits,
+  or what is permitted. Use inventory when the customer asks how many units/items exist or remain.
+- Use ingredients for ingredient/allergen composition questions. A request asking which dishes fit/avoid an allergy may also be recommend.
+- Use recommendation when the customer asks what is suitable/best/which option to choose.
+- Use transaction_status only when explicitly asking the current state of an already-existing booking/order/payment/member transaction.
+  A complaint/problem mentioning a transaction is support unless it actually asks that transaction's status.
 - Use none when the turn is conversational or the question is not an information lookup.
 taskDirective: OPTIONAL one of cancel_active | suspend_active | resume_suspended, only for the bounded conversational working task as described above
 entities: an object of whatever concrete values the message actually states (e.g. {"partySize":2}, {"date":"พรุ่งนี้"}, {"time":"บ่ายสาม"}, {"horseName":"ภาราดร"}) -- never invent a value that wasn't stated
