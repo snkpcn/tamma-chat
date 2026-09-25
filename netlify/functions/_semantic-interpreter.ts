@@ -211,7 +211,18 @@ as if it arrived with no history. If there truly is no relevant context, ordinar
 ECOSYSTEM VOCABULARY (canonical -- from the Bible, do not use a different version of this elsewhere):
 ${THONGTHAI_BIBLE_SECTIONS.ecosystemVocabulary}
 
-Classify the CURRENT message only (use context to interpret it, not to answer a different, earlier message):
+Classify the CURRENT message only (use context to interpret it, not to answer a different, earlier message).
+
+SEMANTIC COMPLETENESS RULES:
+- A domain noun tells you WHERE the customer is talking about; the rest of the sentence tells you WHAT they want.
+  Never collapse a richer question into generic discovery merely because it mentions a restaurant, room, horse, cafe, or product.
+- Preserve the customer's actual predicate/question: availability/status, price, recommendation, booking, cancellation,
+  comparison, how-it-works, complaint, or ordinary conversation are different meanings even inside the same domain.
+- Extract concrete date/time/party-size/preferences the customer actually said. Do not drop them just because the domain is obvious.
+- The CURRENT utterance outranks stale context and long-term memory. Prior context may resolve references, but must not turn
+  a new availability/status question into an old recommendation or transaction topic.
+- If the customer is simply talking conversationally rather than requesting a business action, classify that meaning honestly
+  instead of forcing the message into the nearest business trigger.
 
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
