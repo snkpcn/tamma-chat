@@ -17,7 +17,7 @@ test('semantic certification marker names expose only bounded machine metadata',
     }],
   });
   assert.equal(names[0],'semcert-s-p148-f11-t159-r9308');
-  assert.match(names[1]!,/^semcert-f01-[a-z0-9-]+-dres-asta-navai-c0-q96$/);
+  assert.match(names[1]!,/^semcert-f01-[a-z0-9-]+-dres-astat-navai-c0-q96$/);
   assert.ok(names.every(name=>name.length<64));
   assert.doesNotMatch(names.join(' '),/โต๊ะ|พรุ่งนี้|18:00/u);
 });
