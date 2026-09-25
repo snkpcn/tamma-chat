@@ -1,6 +1,8 @@
-// Phase L expansion: 70 additional meaningful semantic scenarios.
-// Combined with the existing 89-case corpus this gives 159 stored semantic
+// Phase L expansion: 80 additional meaningful semantic scenarios.
+// Combined with the current 78-case base corpus this gives 158 stored semantic
 // ground-truth cases before multi-turn/task/source/composer regression suites.
+// Keep this comment aligned with the exported arrays; the older 70 + 89 = 159
+// note was stale and did not match the actual executable fixtures.
 //
 // These are intentionally different customer goals/state shapes rather than
 // spelling-only duplicates. They remain network-free contract fixtures; the
