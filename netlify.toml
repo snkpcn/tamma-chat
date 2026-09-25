@@ -12,9 +12,6 @@
   # fallback for domains not yet cut over and for any real transaction.
   THONGTHAI_ONE_MIND_CUTOVER = "1"
 
-  # Phase 5.3 one-shot production-only live semantic certification.
-  # The script itself refuses to run unless CONTEXT=production and BRANCH=main.
-  RUN_SEMANTIC_CERTIFICATION = "1"
 
 [functions]
   node_bundler = "esbuild"
