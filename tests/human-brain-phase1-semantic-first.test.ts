@@ -165,8 +165,9 @@ test('Human Brain Phase 1 canonical gate: dietary memory cannot hijack a later r
     // the real model is instructed to return.
     (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
       domain: 'restaurant',
-      intent: 'restaurant_table_availability',
+      intent: 'table_availability_check',
       action: 'status',
+      informationNeed: 'availability',
       entities: { date: 'พรุ่งนี้', time: '18:00' },
       references: [],
       constraints: [],
@@ -187,5 +188,8 @@ test('Human Brain Phase 1 canonical gate: dietary memory cannot hijack a later r
       'the real customer entrypoint must let the semantic brain read this whole sentence');
     assert.doesNotMatch(reply, /ผัดไทย|ต้มยำกุ้ง|ข้าวผัดหมู/u,
       'a table-availability question must never be turned into a dietary menu recommendation');
+    assert.match(reply, /โต๊ะ|ที่นั่ง/u);
+    assert.match(reply, /พรุ่งนี้/u);
+    assert.match(reply, /18:00/u);
   });
 });
