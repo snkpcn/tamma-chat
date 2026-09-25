@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { withHarness, type Harness } from './helpers/canonical-core-harness';
 import { handler as lineWebhookHandler } from '../netlify/functions/line-webhook';
+import { resolvePendingQuestionAnswer } from '../netlify/functions/_conversation-continuity';
 
 const SECRET='phase2-generic-pending-question-secret';
 type CapturedReply={messages:Array<{type:string;text?:string}>};
@@ -137,5 +138,187 @@ test('full signed LINE: Thongthai persists a semantic pending question and resol
   } finally {
     if(old===undefined) delete process.env.LINE_CHANNEL_SECRET;
     else process.env.LINE_CHANNEL_SECRET=old;
+  }
+});
+
+
+test('generic resolver is domain-agnostic: entity choice + Thai-digit party size, with ambiguity rejected',()=>{
+  const horse = {
+    domain:'horse_selection',
+    kind:'entity_choice' as const,
+    choices:[
+      {value:'horse_thongthai',aliases:['ทองไทย']},
+      {value:'horse_pharadon',aliases:['ภาราดร']},
+    ],
+  };
+  assert.equal(resolvePendingQuestionAnswer('เอาทองไทยครับ',horse)?.value,'horse_thongthai');
+  assert.equal(resolvePendingQuestionAnswer('ภาราดรดีกว่า',horse)?.value,'horse_pharadon');
+  assert.equal(resolvePendingQuestionAnswer('ทองไทยหรือภาราดรดี',horse),null,'must not guess when two offered choices are named');
+
+  assert.equal(
+    resolvePendingQuestionAnswer('๔ คนครับ',{domain:'booking',kind:'party_size',slot:'party_size'})?.value,
+    4,
+  );
+});
+
+test('full signed LINE: stale ecosystem pending question yields to a clear horse domain switch and is discarded',async()=>{
+  const old=process.env.LINE_CHANNEL_SECRET;
+  process.env.LINE_CHANNEL_SECRET=SECRET;
+  try{
+    await withHarness(async h=>{
+      const capture=installCapture();
+      try{
+        const user='phase2-pending-switch-horse';
+        await establishMobilityChoice(user);
+        const before=stateFor(h,user);
+        assert.ok(before.pending_question,'precondition: ecosystem question is pending');
+
+        const modelCallsBefore=h.modelCallCount();
+        await callLine('อยากขี่ม้า ไม่เคยเลย กลัวตก',user);
+        const horse=textOf(capture.replies[2]);
+
+        assert.match(horse,/ขี่ม้า|ทีมงาน|ช้า/u);
+        assert.doesNotMatch(horse,/คาเฟ่|เน้นกินข้าว|ขอรายละเอียดเพิ่มอีกนิด/u);
+        assert.equal(h.modelCallCount(),modelCallsBefore,'explicit horse care must remain deterministic');
+        assert.equal(stateFor(h,user).pending_question,undefined,'explicit new domain must retire stale pending question');
+      } finally { capture.restore(); }
+    });
+  } finally {
+    if(old===undefined) delete process.env.LINE_CHANNEL_SECRET;
+    else process.env.LINE_CHANNEL_SECRET=old;
+  }
+});
+
+test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, clean domain switches, authority and safety precedence',async()=>{
+  const oldSecret=process.env.LINE_CHANNEL_SECRET;
+  const oldWeatherKey=process.env.WEATHER_API_KEY;
+  const oldLat=process.env.TAMMA_WEATHER_LAT;
+  const oldLon=process.env.TAMMA_WEATHER_LON;
+  process.env.LINE_CHANNEL_SECRET=SECRET;
+  process.env.WEATHER_API_KEY='test-weather-key';
+  process.env.TAMMA_WEATHER_LAT='15.80';
+  process.env.TAMMA_WEATHER_LON='102.03';
+
+  try{
+    await withHarness(async h=>{
+      h.programOpsChannel('owner_general');
+      h.programOpsChannel('activity');
+      const capture=installCapture();
+      try{
+        const user='phase2-closeout-matrix';
+        const safeNames=['คอหมูทอดสมุนไพร','ไข่เจียวหมูสับ','ปลานิลทอดน้ำปลา','ต้มจืดหมูสับ','ข้าวผัดหมู'];
+
+        // 1 — durable mobility memory.
+        await callLine('แม่เดินไกลไม่ได้',user);
+
+        // 2 — recommendation shaped by durable memory; own question persisted.
+        await callLine('มีอะไรแนะนำ',user);
+        const chooser=textOf(capture.replies[1]);
+        assert.match(chooser,/เดินน้อย/u);
+        assert.match(chooser,/อยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา/u);
+        assert.ok(stateFor(h,user).pending_question);
+
+        // 3 — obvious answer to Thongthai's own question, no generic clarify.
+        const callsBeforeFood=h.modelCallCount();
+        await callLine('อยากเน้นกินข้าว',user);
+        const foodStart=textOf(capture.replies[2]);
+        assert.doesNotMatch(foodStart,/ขอรายละเอียดเพิ่มอีกนิด|ช่วยต่อให้ตรงเรื่อง/u);
+        assert.match(foodStart,/บาท|เมนู|คอหมูทอดสมุนไพร|ไข่เจียวหมูสับ/u);
+        assert.equal(h.modelCallCount(),callsBeforeFood);
+        assert.equal(stateFor(h,user).pending_question,undefined);
+
+        // 4 — constraint declaration is acknowledgement only, never a menu dump.
+        await callLine('ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง',user);
+        const constraintAck=textOf(capture.replies[3]);
+        assert.match(constraintAck,/เผ็ด|ไก่|กุ้ง/u);
+        assert.doesNotMatch(constraintAck,/\d+\s*บาท/u);
+
+        // 5 — grounded menu obeys all current constraints.
+        await callLine('มีอะไรแนะนำบ้าง',user);
+        const menu1=textOf(capture.replies[4]);
+        assert.ok(safeNames.some(name=>menu1.includes(name)),'must recommend at least one real safe menu row');
+        assert.doesNotMatch(menu1,/ไก่ย่าง|กุ้งทอด|ยำพริกสด/u);
+
+        // 6 — another recommendation never blindly repeats the same page.
+        await callLine('มีอะไรแนะนำอีก',user);
+        const menu2=textOf(capture.replies[5]);
+        const shown1=safeNames.filter(name=>menu1.includes(name));
+        const shown2=safeNames.filter(name=>menu2.includes(name));
+        const honestNoMore=/ไม่มี.*(?:เมนู|ตัวเลือก)|หมดแล้ว|เท่านี้|ยังไม่มี/u.test(menu2);
+        assert.ok(honestNoMore || shown2.some(name=>!shown1.includes(name)),'must show an unseen grounded item or honestly say there are no more');
+
+        // 7 — assistant name must not become the horse entity.
+        await callLine('ขอโลเคชั่นหน่อยทองไทย',user);
+        const location=textOf(capture.replies[6]);
+        assert.match(location,/maps\.app\.goo\.gl|พิกัด|แผนที่|นำทาง/u);
+        assert.doesNotMatch(location,/เลือกทองไทย|เคยขี่ม้ามาก่อนไหม/u);
+
+        // 8 — weather is explicit current intent, not stale restaurant context.
+        h.programWeatherFetch({ok:true,body:{
+          weather:[{main:'Rain',description:'light rain'}],
+          main:{temp:28},
+          rain:{'1h':0.8},
+        }});
+        await callLine('ตอนนี้ฝนตกไหม',user);
+        const weather=textOf(capture.replies[7]);
+        assert.match(weather,/ฝน|อากาศ|28/u);
+        assert.doesNotMatch(weather,/เมนู|เลือกทองไทย|ขอรายละเอียดเพิ่มอีกนิด/u);
+
+        // 9 — explicit new horse intent cleanly switches domain.
+        const callsBeforeHorse=h.modelCallCount();
+        await callLine('อยากขี่ม้า ไม่เคยเลย กลัวตก',user);
+        const horseCare=textOf(capture.replies[8]);
+        assert.match(horseCare,/ขี่ม้า|ทีมงาน|ช้า|กลัว/u);
+        assert.doesNotMatch(horseCare,/ชำระเงิน|เลือกระยะเวลา\s*30/u);
+        assert.equal(h.modelCallCount(),callsBeforeHorse);
+
+        // 10 — horse-name collision is now correctly interpreted inside horse context.
+        await callLine('เอาทองไทย',user);
+        const horseChoice=textOf(capture.replies[9]);
+        assert.match(horseChoice,/เลือกทองไทย|ทองไทย/u);
+        assert.doesNotMatch(horseChoice,/โลเคชั่น|แผนที่/u);
+
+        // 11 — authority boundary overrides the active horse task.
+        await callLine('ขอคืนเงินได้ไหม',user);
+        const refund=textOf(capture.replies[10]);
+        assert.match(refund,/ไม่ยืนยันแทนเจ้าของ|เจ้าของ.*ตรวจสอบ/u);
+        assert.doesNotMatch(refund,/เคยขี่ม้ามาก่อนไหม|เลือกระยะเวลา/u);
+
+        // 12 — urgent safety overrides every active task and notifies activity + owner.
+        await callLine('พื้นลื่นมาก ตอนเล่น ATV น่ากลัว',user);
+        const safety=textOf(capture.replies[11]);
+        assert.match(safety,/ทีมกิจกรรม.*เจ้าของ|ความปลอดภัย|ตรวจสอบ/u);
+        assert.doesNotMatch(safety,/เลือกระยะเวลา\s*30.*60.*90/u);
+
+        const events=h.postsTo('ops_feedback_events');
+        assert.ok(events.some(e=>e.feedback_type==='complaint' && e.business_unit==='general'),'refund must create owner-review event');
+        assert.ok(events.some(e=>e.feedback_type==='safety_issue' && e.business_unit==='activity'),'ATV safety must create activity safety event');
+
+        // Durable constraints survived all of the domain turns above.
+        const gid=h.guestDbId(lineGuestId(user));
+        assert.ok(gid);
+        const constraints=h.getGuestMemory(gid!,'constraints');
+        assert.ok(Array.isArray(constraints));
+        for(const expected of ['limited_walking','no_spicy','no_chicken','no_shrimp']){
+          assert.ok((constraints as unknown[]).includes(expected),`durable constraint missing after cross-domain turns: ${expected}`);
+        }
+      } finally { capture.restore(); }
+    },{
+      restaurantMenu:[
+        menuRow('m1','คอหมูทอดสมุนไพร',169,['คอหมู','ตะไคร้']),
+        menuRow('m2','ไข่เจียวหมูสับ',99,['ไข่ไก่','หมูสับ']),
+        menuRow('m3','ปลานิลทอดน้ำปลา',189,['ปลานิล','น้ำปลา']),
+        menuRow('m4','ต้มจืดหมูสับ',149,['หมูสับ','ผักกาดขาว']),
+        menuRow('m5','ข้าวผัดหมู',109,['หมู','ข้าว','ไข่ไก่']),
+        menuRow('m6','ไก่ย่าง',159,['ไก่']),
+        menuRow('m7','กุ้งทอด',199,['กุ้ง']),
+        menuRow('m8','ยำพริกสด',139,['หมู','พริก']),
+      ],
+    });
+  } finally {
+    if(oldSecret===undefined) delete process.env.LINE_CHANNEL_SECRET; else process.env.LINE_CHANNEL_SECRET=oldSecret;
+    if(oldWeatherKey===undefined) delete process.env.WEATHER_API_KEY; else process.env.WEATHER_API_KEY=oldWeatherKey;
+    if(oldLat===undefined) delete process.env.TAMMA_WEATHER_LAT; else process.env.TAMMA_WEATHER_LAT=oldLat;
+    if(oldLon===undefined) delete process.env.TAMMA_WEATHER_LON; else process.env.TAMMA_WEATHER_LON=oldLon;
   }
 });
