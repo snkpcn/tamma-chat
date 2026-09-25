@@ -70,6 +70,18 @@ export type SemanticAction =
   | 'cancel' | 'confirm' | 'status' | 'provide_information'
   | 'correct_previous' | 'unknown';
 
+export type SemanticInformationNeed =
+  | 'none'
+  | 'availability'
+  | 'price'
+  | 'schedule'
+  | 'inventory'
+  | 'catalog'
+  | 'recommendation'
+  | 'ingredients'
+  | 'policy'
+  | 'transaction_status';
+
 const VALID_DOMAINS: SemanticDomain[] = [
   'ecosystem', 'restaurant', 'stay', 'activity', 'promotion', 'membership',
   'otop', 'cafe', 'journey', 'payment', 'support', 'unknown',
@@ -78,6 +90,19 @@ const VALID_ACTIONS: SemanticAction[] = [
   'ask', 'discover', 'recommend', 'compare', 'book', 'order', 'modify',
   'cancel', 'confirm', 'status', 'provide_information',
   'correct_previous', 'unknown',
+];
+
+const VALID_INFORMATION_NEEDS: SemanticInformationNeed[] = [
+  'none',
+  'availability',
+  'price',
+  'schedule',
+  'inventory',
+  'catalog',
+  'recommendation',
+  'ingredients',
+  'policy',
+  'transaction_status',
 ];
 
 /** A single entity Thongthai currently knows about from recent conversation --
@@ -154,8 +179,13 @@ export type SemanticReference = {
 
 export type SemanticTurn = {
   domain: SemanticDomain;
+  /** Free-form descriptive label for observability/evaluation only.
+   *  Downstream routing must not depend on an exact model-invented label. */
   intent: string;
   action: SemanticAction;
+  /** Closed machine-facing meaning facet. This is what downstream knowledge
+   *  routing should use for information questions instead of exact intent text. */
+  informationNeed?: SemanticInformationNeed;
   entities: Record<string, unknown>;
   references: SemanticReference[];
   constraints: string[];
@@ -172,6 +202,7 @@ export type SemanticInterpretationMeta = {
   domain: SemanticDomain;
   intent: string;
   action: SemanticAction;
+  informationNeed: SemanticInformationNeed;
   confidenceBucket: 'high' | 'medium' | 'low';
   referencesResolved: number;
   referencesUnresolved: number;
@@ -191,6 +222,7 @@ export function toSemanticInterpretationMeta(turn: SemanticTurn): SemanticInterp
     domain: turn.domain,
     intent: turn.intent,
     action: turn.action,
+    informationNeed: turn.informationNeed ?? 'none',
     confidenceBucket: confidenceBucket(turn.confidence),
     referencesResolved: resolved,
     referencesUnresolved: turn.references.length - resolved,
@@ -281,6 +313,11 @@ SEMANTIC COMPLETENESS RULES:
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
 action: one of ask | discover | recommend | compare | book | order | modify | cancel | confirm | status | provide_information | correct_previous | unknown
+informationNeed: one of none | availability | price | schedule | inventory | catalog | recommendation | ingredients | policy | transaction_status
+- informationNeed is a CLOSED machine-facing meaning facet, independent of the free-form intent label.
+- Use availability when the customer asks whether a table/room/activity/resource is free, full, open, or available.
+- Use transaction_status only when asking the status of an already-existing booking/order/payment/member transaction.
+- Use none when the turn is conversational or the question is not an information lookup.
 entities: an object of whatever concrete values the message actually states (e.g. {"partySize":2}, {"date":"พรุ่งนี้"}, {"time":"บ่ายสาม"}, {"horseName":"ภาราดร"}) -- never invent a value that wasn't stated
 references: an array of {"type":string,"value"?:string,"refersToPriorContext":boolean} for anything in the message that points at something from context rather than being fully self-contained (a pronoun/deictic like "ตัวไหน", "อันนั้น", "อันเมื่อกี้", a bare correction, an implicit continuation). Omit entirely if the message is fully self-contained.
 constraints: array of strings for any stated limitation/preference (e.g. "no_pork", "budget_700", "no_stairs")
@@ -289,7 +326,7 @@ needsClarification: true only if the message is genuinely too ambiguous to act o
 clarificationReason: short string, only present if needsClarification is true
 
 Return ONLY this JSON object, nothing else:
-{"domain":string,"intent":string,"action":string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}`;
+{"domain":string,"intent":string,"action":string,"informationNeed":string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}`;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -364,6 +401,9 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
   const action = VALID_ACTIONS.includes(parsed.action as SemanticAction) ? parsed.action as SemanticAction : 'unknown';
   const intent = typeof parsed.intent === 'string' && /^[a-z][a-z0-9_]{1,79}$/.test(parsed.intent) ? parsed.intent : 'unknown';
+  const informationNeed = VALID_INFORMATION_NEEDS.includes(parsed.informationNeed as SemanticInformationNeed)
+    ? parsed.informationNeed as SemanticInformationNeed
+    : 'none';
   const confidenceRaw = Number(parsed.confidence);
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
@@ -391,6 +431,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     domain,
     intent,
     action,
+    informationNeed,
     entities,
     references,
     constraints: asStringArray(parsed.constraints),
