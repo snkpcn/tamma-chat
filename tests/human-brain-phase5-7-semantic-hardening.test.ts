@@ -7,7 +7,10 @@ import {
   parseSemanticTurnResponse,
   type SemanticContext,
 } from '../netlify/functions/_semantic-interpreter';
-import { runSemanticCertification } from '../netlify/functions/_semantic-live-certification';
+import {
+  computeInterCaseWaitMs,
+  runSemanticCertification,
+} from '../netlify/functions/_semantic-live-certification';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 import { PHASE_L_SEMANTIC_CASES } from './fixtures/phase-l-semantic-cases';
 
@@ -16,6 +19,13 @@ function byId(id:string){
   assert.ok(item,`missing fixture ${id}`);
   return item;
 }
+
+test('Phase 5.7: quota pacing subtracts provider call time instead of doubling it',()=>{
+  assert.equal(computeInterCaseWaitMs(4250,0),4250);
+  assert.equal(computeInterCaseWaitMs(4250,2000),2250);
+  assert.equal(computeInterCaseWaitMs(4250,4250),0);
+  assert.equal(computeInterCaseWaitMs(4250,6000),0);
+});
 
 test('Phase 5.7 RED: malformed model JSON is a semantic/model-output failure, not provider unavailability',async()=>{
   const result=await runSemanticCertification({
