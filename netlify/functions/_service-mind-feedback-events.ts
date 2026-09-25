@@ -139,17 +139,13 @@ export async function createFeedbackEvent(input: {
     try {
       const { overallStatus, targets } = await notifyFeedbackEventTargets(row.id);
       // Reflect the real PRIMARY-team dispatch outcome on the single
-      // notification_status column (its CHECK constraint only allows one
-      // scalar value -- see supabase/migrations/..._ops_feedback_events_v1.sql
-      // -- so it can never itself represent "domain sent, owner failed").
-      // The full per-target breakdown is stored non-destructively in
-      // internal_notes (an existing, otherwise-unused jsonb column) so
-      // nothing here required a schema change.
+      // notification_status column. Per-target delivery outcomes already
+      // live in ops_notification_deliveries; internal_notes is reserved
+      // exclusively for the backoffice staff-note array contract.
       await dbFetch(`ops_feedback_events?id=eq.${row.id}`, {
         method: 'PATCH',
         body: JSON.stringify({
           notification_status: overallStatus === 'ignored' ? 'not_configured' : overallStatus,
-          internal_notes: { notification_targets: targets },
         }),
       }).catch(() => undefined);
       return {

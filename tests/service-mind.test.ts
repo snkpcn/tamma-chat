@@ -322,6 +322,18 @@ test('19. Transaction safety: complaint + bare "ยืนยัน" never trigge
   });
 });
 
+test('20. Feedback notification routing never overwrites the internal staff-notes array contract', async () => {
+  await withHarness(async harness => {
+    harness.programOpsChannel('restaurant');
+    const r = await ask('sm-feedback-notes-contract', 'ร้านอาหารรอนานมาก');
+    assert.equal(r.statusCode, 200);
+    const row = harness.feedbackEventRow('feedback-event-1');
+    assert.ok(row, 'feedback row must exist after the real Service Mind flow');
+    assert.ok(Array.isArray(row.internal_notes), 'internal_notes must remain the staff-note array contract after notification routing');
+    assert.deepEqual(row.internal_notes, [], 'notification routing metadata must not be written into internal staff notes');
+  });
+});
+
 test('21. Notification actually sent: when a team channel IS bound, the customer-facing wording reflects that it was already routed, not "will be"', async () => {
   await withHarness(async harness => {
     harness.programOpsChannel('restaurant');
