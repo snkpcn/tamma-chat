@@ -8796,3 +8796,213 @@ A final human-grade certification still requires real-provider acceptance across
 - current intent beating stale memory
 
 Do not call the system “perfect” solely from network-free CI.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5 / Checkpoint 5.4 — Provider Resilience + Honest Live Certification — 2026-09-26
+
+**STATUS: IMPLEMENTATION GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / ONE-SHOT PRODUCTION LIVE CERT.**
+
+### Why this checkpoint exists
+
+The first production live semantic certification finally produced real evidence, but the headline score was misleading if read as semantic intelligence:
+
+- total corpus: **158**
+- pass: **5**
+- failed: **153**
+- naive passPct: **3.16%**
+
+Inspection of the artifact showed:
+
+- **152 / 153 failures were provider errors**
+- only **1 failure was an actual semantic mismatch**
+- the semantic mismatch was `discover-04` (`มีไรให้เล่น`), classified as activity discovery instead of broad ecosystem discovery
+
+Therefore **3.16% was NOT the model's semantic accuracy**. It primarily measured provider availability collapse under the certification load.
+
+Production certification evidence:
+- deploy commit: `ec76dc2bf77ec102fbe6c709f2096dab7ad2d37d`
+- certification artifact workflow run: `36185536194`
+- artifact ID: `10885733633`
+
+### Root cause in provider architecture
+
+The provider layer had a global Gemini circuit assumption:
+
+> one Gemini model returns 429 => all Gemini models are treated as quota-exhausted
+
+That assumption was too broad.
+
+Current Google Gemini rate-limit documentation states that limits are applied per project while each model variation has its own associated rate limits. A 429 on one model therefore must not automatically suppress every other free Gemini model.
+
+Reference reviewed during this checkpoint:
+`https://ai.google.dev/gemini-api/docs/rate-limits`
+
+### New zero-cost provider chain
+
+Free Gemini order is now:
+
+1. `gemini-3.8-flash`
+2. `gemini-3.7-flash`
+3. `gemini-3.6-flash`
+4. `gemini-3.5-flash`
+
+Google lists 3.8, 3.7, 3.6 and 3.5 Flash as current Gemini 3 model releases.
+
+A 429 now:
+
+- records the structured diagnostic
+- opens a bounded circuit for **that model only**
+- immediately tries the next FREE Gemini model within the existing shared wall-clock budget
+- never enables paid OpenAI by itself
+
+`THONGTHAI_ALLOW_PAID_FALLBACK='1'` is still required before OpenAI may be called.
+
+No paid fallback was enabled in this checkpoint.
+
+### Circuit semantics
+
+Old:
+`geminiCircuitOpenUntil: number`
+
+New:
+per-model circuit map keyed by Gemini model.
+
+Compatibility:
+`isGeminiCircuitOpen()` still reports whether at least one Gemini model is cooling down, for existing diagnostics/tests.
+
+`resetGeminiCircuitForTests()` clears all per-model circuits.
+
+### RED evidence
+
+RED commit:
+`95c2a506ee92b7c2e695f9b4dcbfae24bebb0767`
+
+Run:
+`36186324795`
+
+Expected RED result:
+- tests: 1155
+- pass: 1152
+- fail: 3
+
+RED proved:
+1. one-model 429 incorrectly killed all Gemini fallback
+2. circuit was global instead of model-specific
+3. provider chain did not start with current stable Gemini 3.8 Flash
+
+### Provider implementation
+
+Core provider commit:
+`044ea99f2cd7249ac4d2101e10a559ef9c41ac62`
+
+Legacy global-circuit test was intentionally migrated rather than deleted:
+`336ac0a5c2ed2bf6bf9990a029084d8aa352e272`
+
+The replacement contract proves:
+- next FREE Gemini model is attempted
+- fallback remains fast
+- model URL actually changes
+- paid OpenAI is not called
+- a rate-limited model remains circuit-open while other models stay usable
+
+### Honest certification semantics
+
+`_semantic-live-certification.ts` now distinguishes:
+
+- `semanticFailed`: model returned a semantic turn but it disagreed with golden truth
+- `providerFailed`: no valid semantic result because provider availability failed
+- `semanticEvaluated`: only cases where a semantic result was actually obtained
+- `availabilityComplete`: whether the requested certification slice completed without persistent provider failure
+
+Provider failures now include only privacy-safe structured attempt diagnostics:
+- provider
+- model
+- outcome
+- HTTP status when available
+- elapsedMs
+
+No API keys.
+No prompts.
+No model output.
+No customer transcript.
+
+Certification diagnostics commit:
+`b224ee71da5755c2470ca53bdc5bf75d358e5fa8`
+
+Regression coverage commit:
+`9ac99818cdb00340eb128ea8a8c2ae115aa734de`
+
+### Certification pacing
+
+The production certification runner now:
+
+- runs serially instead of 4 batches in parallel
+- uses chunks of 20
+- on retryable availability failure waits **61 seconds**
+- retries the same case once
+- if provider still fails, stops immediately as `incomplete_provider`
+- never turns hundreds of provider failures into a fake semantic score
+
+Pacing commit:
+`df5e5a249276ea7efcb0d9b498ea3551d14569f1`
+
+### Netlify credit protection
+
+The prior `RUN_SEMANTIC_CERTIFICATION = "1"` value was removed from `netlify.toml`.
+
+Certification is now an explicit one-shot production action:
+
+- production only: `CONTEXT=production`
+- main only: `BRANCH=main`
+- run only when:
+  - explicit runtime env opt-in exists, OR
+  - current commit message contains `[semantic-cert]`
+
+The Phase 5.4 merge will intentionally carry `[semantic-cert]`.
+Future ordinary production deploys will NOT rerun the full corpus.
+
+Commits:
+- `89e71540ff8431acecb1632cd8257909a4639c3f`
+- `0c6caff85006250495a1f562f0c0ef8ec61c48f0`
+- `ff475599f124f3d93ca92ccce2ad7a5f9838000e`
+
+### GREEN evidence before docs checkpoint
+
+One-Mind CI run:
+`36187097185`
+
+Result:
+**1158 / 1158 PASS**
+**fail 0**
+
+Exact Netlify build command:
+run `36187097193`
+**PASS**
+
+### Scope safety
+
+No DB/schema change.
+No customer memory mutation.
+No booking/order/payment executor change.
+No backoffice change.
+No new repo/site/database.
+No paid OpenAI fallback enabled.
+No manual Netlify deploy.
+
+### Next acceptance
+
+After docs-inclusive CI is green:
+
+1. merge exact PR head with merge commit marker `[semantic-cert]`
+2. verify production Netlify deploy READY and commit_ref exact
+3. read `semantic-certification-result.json`
+4. require:
+   - `availabilityComplete=true`
+   - `providerFailed=0`
+5. only then interpret semantic pass/fail
+6. fix recurring semantic failure patterns without weakening golden corpus
+7. repeat until human-grade semantic contract is met
+
+Do NOT quote the old **3.16%** as semantic accuracy. It was primarily an availability artifact.
