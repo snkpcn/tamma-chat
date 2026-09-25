@@ -1,6 +1,8 @@
 -- ============================================================================
--- OWNER APPROVED 2026-09-25 FOR tamma-customer-data
+-- APPLIED 2026-09-25 TO tamma-customer-data
 -- project: upaokrprawzhgzeqsdke
+-- Supabase migration version: 20260925094049
+-- Owner explicitly approved Phase 2.7 in chat before application.
 --
 -- Phase 2.7 — aggregate customer intelligence storage.
 --
