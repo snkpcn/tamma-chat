@@ -8287,3 +8287,183 @@ Only then close Checkpoint 1.3.
 No DB/schema/site change.
 No production transaction.
 No manual Netlify deploy.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 3 — Relevance & Memory Brain — 2026-09-26
+
+**STATUS: CORE + ORCHESTRATOR INTEGRATION GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY / LIVE TRACE.**
+
+### Goal
+
+Durable customer memory must help a response only AFTER the current utterance has been understood.
+
+Human Brain ownership order is now:
+
+`CURRENT UTTERANCE -> SEMANTIC TURN -> MEMORY RELEVANCE -> DIALOG / KNOWLEDGE / RESPONSE`
+
+Never:
+
+`MEMORY / KEYWORD -> CHOOSE INTENT`
+
+This closes the original failure class where remembered food constraints could hijack a later restaurant table-availability question.
+
+### RED evidence
+
+Branch:
+`human-brain/phase3-memory-relevance-20260926`
+
+RED head:
+`5e620fd475f581b80d0ca584cbf3ff967add8b0f`
+
+GitHub Actions:
+run `36174575188`
+
+Expected RED failures proved that the new relevance contract did not yet select:
+- restaurant dietary memory for food recommendation
+- dietary safety memory for ingredient questions
+- trip-style memory for ecosystem recommendations
+- care/mobility memory for activity recommendations
+
+The important negative controls were green from RED:
+- restaurant availability ignored durable dietary/lifestyle memory
+- operational/status-style questions ignored unrelated memory
+- relevance planning did not mutate the SemanticTurn
+
+### Memory relevance policy
+
+New module:
+`netlify/functions/_memory-relevance.ts`
+
+It consumes only:
+- an already-resolved `SemanticTurn`
+- an already-normalized durable-memory snapshot
+
+It cannot change:
+- domain
+- intent
+- action
+- informationNeed
+
+#### Restaurant
+Recommendation/catalog/ingredients may receive food-relevant constraints only:
+- dietary restrictions
+- food allergies
+- spice preference
+- authentic-Isan preference
+
+Restaurant availability/status never receives those durable preferences.
+
+#### Activity
+Recommendation may receive care/mobility context only:
+- limited walking / wheelchair
+- elderly/child suitability
+- beginner
+- low intensity
+- fear of falling / speed
+- rain sensitivity / prior safety concern
+
+Dietary memory is excluded.
+
+#### Stay
+Recommendation may receive bounded mobility/family/rest context.
+
+#### Ecosystem / Journey
+Broad recommendation may softly use:
+- traveler type
+- pace
+- interests
+- favorites
+- visited experiences
+- general mobility/family constraints
+
+Food-specific dietary constraints do not leak into broad trip planning.
+
+#### Operational / live fact questions
+Availability, schedule, transaction status and status actions are memory-neutral by default.
+
+### One-Mind integration
+
+`OneMindTurnInput` now accepts optional normalized `durableMemory`.
+
+Important sequence inside the orchestrator:
+
+1. build bounded conversation/task semantic context
+2. resolve the current SemanticTurn
+3. plan durable-memory relevance
+4. create a dialog-only copy enriched only with relevant constraints
+5. Dialog Manager / Knowledge Resolver operate on that enriched copy
+6. ORIGINAL SemanticTurn remains the canonical understanding stored in result/context/trace
+
+Therefore memory can enrich downstream planning without rewriting what the customer meant.
+
+### Customer gateway wiring
+
+`thongthai-chat.ts` now passes one normalized durable-memory snapshot into every One-Mind entry:
+- activity One-Mind path
+- primary One-Mind cutover
+- shadow path
+- provider-failure One-Mind fallback
+
+No channel gets a different memory policy.
+
+### Safe observability
+
+One-Mind trace now includes only:
+- `memory.appliedKeys`
+- `memory.ignoredKeys`
+- `memory.relevantConstraintCount`
+
+It does NOT persist the actual memory values in the trace envelope.
+
+Backward compatibility:
+old tests/older trace objects with no `trace.memory` safely default to an empty memory trace instead of throwing.
+
+### Integration proof
+
+New tests:
+- `tests/human-brain-phase3-memory-relevance.test.ts`
+- `tests/human-brain-phase3-memory-relevance-integration.test.ts`
+
+They prove:
+- restaurant availability with remembered no-chicken/no-shrimp/no-spicy keeps those values OUT of DialogPlan
+- restaurant recommendation receives the relevant dietary values only after semantic understanding
+- original SemanticTurn constraints remain unchanged
+- safe trace contains keys/count only, never raw memory values
+
+### GREEN evidence
+
+Green head before docs:
+`5e47a8898e5542e96528e5012921d83461edee31`
+
+GitHub Actions:
+run `36175450766`
+**1138 / 1138 PASS**
+
+No DB schema change.
+No new database/repo/site.
+No production transaction.
+No manual Netlify deploy.
+
+### Live verification after deploy
+
+For an owner LINE turn, inspect `one_mind_traces.envelope` and require:
+- current semantic domain/action/informationNeed correctly reflect the utterance
+- availability/status turn shows no relevant durable constraint application
+- recommendation turn may show only semantically appropriate memory keys
+- no raw preference values appear in trace metadata
+
+### Next Human Brain phase
+
+**Phase 4 — Organization Brain + Tool Truth**
+
+Goal:
+the Language Brain may understand broadly, but all mutable TAMMA facts/actions must come from verified organization knowledge/tools:
+- live availability
+- current prices/menu
+- schedules/inventory
+- booking/order/payment state
+- business policy
+
+Unknown facts remain unknown; the model never fills source gaps by guessing.
