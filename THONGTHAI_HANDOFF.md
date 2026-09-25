@@ -7765,3 +7765,121 @@ Phase 1 is not declared fully complete until:
 
 Next Human Brain phase after Phase 1:
 - Phase 2 — Conversation Brain (references, short follow-ups, interruption/topic switch, change-of-mind)
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 1 / Checkpoint 1.1 LIVE ACCEPTED + Checkpoint 1.2 — Availability Contract — 2026-09-26
+
+### Owner live acceptance for Checkpoint 1.1
+
+Production LINE retest was performed by the owner in the SAME conversation that still had restaurant dietary memory.
+
+Owner message:
+`ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ`
+
+Production reply after PR #104 / main `625b88caf53130945215331bc3a44b188a55a537`:
+`ข้อมูลส่วนนี้ยังไม่มีข้อมูลยืนยันครับ ทองไทยไม่ขอเดาให้ผิด`
+
+Acceptance result:
+- PASS: dietary memory did not hijack the turn
+- PASS: no menu recommendation was emitted
+- PASS: no invented table-availability claim
+- PASS: current utterance won over stale restaurant preference context
+- UX GAP FOUND: the final reply was too generic and dropped the already-understood date/time/table predicate
+
+Checkpoint 1.1 semantic-ownership bug is therefore CLOSED by production evidence, while its downstream semantic-preservation UX gap became Checkpoint 1.2.
+
+### Checkpoint 1.2 RED evidence
+
+Branch:
+`human-brain/phase1-2-restaurant-availability-20260926`
+
+RED commit:
+`0b0e01cfe1af309008cd43dec2316706792f8c82`
+
+GitHub Actions:
+run `36168043421` = FAILURE
+
+Two exact RED failures:
+
+1. Dialog/Knowledge contract:
+- expected `needs: ['availability']`
+- actual `needs: ['order_status']`
+
+This proved that although the Semantic Interpreter understood
+`restaurant_table_availability`, the Dialog Manager collapsed all
+restaurant `action='status'` meanings into prior-order status.
+
+2. Deterministic honest-degradation copy:
+- expected reply to preserve `พรุ่งนี้`, `18:00`, and table/seat meaning
+- actual:
+  `ข้อมูลส่วนนี้ยังไม่มีข้อมูลยืนยันครับ ทองไทยไม่ขอเดาให้ผิด`
+
+This proved semantic meaning was still being lost after interpretation.
+
+### Checkpoint 1.2 implementation
+
+No Thai runtime phrase trigger was added.
+
+#### Dialog Manager
+`restaurant_table_availability` now explicitly plans:
+- domain: `restaurant`
+- knowledge need: `availability`
+
+Generic restaurant `status` remains `order_status` for existing-order inquiries.
+
+Therefore the semantic INTENT, not the presence of words such as "โต๊ะ" or a time string, decides the knowledge contract.
+
+#### Knowledge Resolver
+The architecture now declares restaurant availability as a legitimate live source contract:
+- `SOURCE_REGISTRY.availability` includes `restaurant_live`
+- `KnowledgeSourceAdapters.restaurant.availability` is optional
+- `(restaurant, availability)` routes only to that adapter
+- it never calls `orderStatus.lookup`
+
+There is intentionally no fabricated production availability adapter.
+Until a real authoritative table-capacity source exists, the resolver returns
+`no_source_registered` -> `fact_unknown`.
+
+This is deliberate truth preservation, not an incomplete fake integration.
+
+#### Response Composer
+For the machine-classified `restaurant_table_availability` knowledge request,
+`fact_unknown` / `source_unavailable` now preserves semantic entities.
+
+Thai response shape:
+`รับทราบครับ ถามเรื่องโต๊ะสำหรับพรุ่งนี้ เวลา 18:00 นะครับ ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ เลยยังบอกไม่ได้ว่าเต็มหรือว่าง และไม่ขอเดาให้ผิดครับ`
+
+The copy:
+- acknowledges what the customer actually asked
+- preserves date/time supplied by SemanticTurn entities
+- never claims live capacity without a source
+- never converts the question into an order-status or menu reply
+
+### Regression / guard coverage
+
+New tests prove:
+1. table availability plans `availability`, never `order_status`
+2. no-source fallback preserves date/time/table meaning
+3. a future registered `restaurant.availability` source is called exactly once
+4. `orderStatus.lookup` remains zero calls for this intent
+5. existing Phase 1.1 semantic arbitration tests continue to pass
+6. all pre-existing transaction, dietary, OTOP, membership, activity, provider-outage and continuity regression tests remain in the full suite
+
+No DB/schema change.
+No production transaction.
+No new site/repo/project.
+No manual Netlify deploy.
+
+### Human Brain principle locked by this checkpoint
+
+**Meaning must survive every layer.**
+
+It is not enough for the LLM to understand the sentence correctly if the
+Dialog Manager, Knowledge Resolver, or Response Composer later collapses
+that meaning into a broader legacy category.
+
+The required chain is now:
+`whole-sentence meaning -> precise semantic intent -> correct knowledge need -> truthful intent-preserving response`.
+
