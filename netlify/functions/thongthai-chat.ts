@@ -1332,13 +1332,22 @@ async function promotionDiscoveryFallbackResponse(
 }
 
 
+const CAFE_EXPLICIT_MARKER = /(?:คาเฟ่|กาแฟ|ลาเต้|อเมริกาโน่|คาปูชิโน่|เอสเปรสโซ่|อินทนิน|inthanin)/iu;
+const CAFE_READ_ONLY_FOLLOWUP_MARKER = /^(?:ราคาเท่าไหร่|ราคาเท่าไร|กี่บาท|เปิดกี่โมง|ปิดกี่โมง|เปิดถึงกี่โมง|มีอะไรบ้าง|มีเมนูอะไร)(?:ครับ|คะ|ค่ะ)?[\s?？!.]*$/u;
+
+function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
+  const text = message.trim();
+  if (hasExplicitTransactionIntent(text)) return false;
+  if (CAFE_EXPLICIT_MARKER.test(text)) return true;
+  return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
+}
+
 function deterministicCafeResponse(
   request: BrainRequest,
   runtime: BrainRuntimeContext,
 ): BrainResponse | null {
   const message = request.message.trim();
-  const cafeMarker = /(?:คาเฟ่|กาแฟ|ลาเต้|อเมริกาโน่|คาปูชิโน่|เอสเปรสโซ่|อินทนิน|inthanin)/iu;
-  if (!cafeMarker.test(message) || hasExplicitTransactionIntent(message)) return null;
+  if (!isCafeReadOnlyTurn(message, runtime.agentState?.active_topic)) return null;
 
   const cafeFacts = runtime.worldFacts.filter(fact => fact.category === 'cafe');
   const factByKey = new Map(cafeFacts.map(fact => [fact.fact_key, fact.fact_value]));
@@ -1373,6 +1382,10 @@ function deterministicCafeResponse(
     journeyAction: { type:'none', journey:null },
     suggestedActions: [],
     responseStyle: 'direct',
+    agentStateUpdate: {
+      activeTopic: 'cafe',
+      unresolvedNeed: 'cafe_read_only_inquiry',
+    },
     semanticMemoryUpdates: [],
     toolCalls: [],
   };
@@ -4050,8 +4063,29 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // can never disagree about which messages this covers.
   const preserveLocalConciergeFastPath = !hasExplicitTransactionIntent(request.message)
     && Boolean(classifyLocalConciergeQuestion(request.message));
+
+  // Phase 4 Cafe: the production One-Mind cutover runs before the legacy
+  // deterministic responder. Preserve this read-only class exactly like
+  // restaurant/local-concierge so verified cafe facts cannot be swallowed by
+  // a model-composed generic answer. For a transport-history-free follow-up
+  // ("ราคาเท่าไร"), consult only the bounded active_topic snapshot.
+  let preserveCafeFastPath = isCafeReadOnlyTurn(request.message);
+  if (!preserveCafeFastPath
+      && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(request.message.trim())
+      && guestDbId) {
+    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+      console.error(
+        'THONGTHAI_CAFE_PRECUTOVER_STATE_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return { state: null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
+    });
+    preserveCafeFastPath = isObject(snapshot.state)
+      && isCafeReadOnlyTurn(request.message, snapshot.state.active_topic);
+  }
+
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
-      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath) {
+      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath && !preserveCafeFastPath) {
     try {
       const oneMind = await processOneMindCustomerTurn({
         channel,
