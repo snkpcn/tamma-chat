@@ -92,7 +92,12 @@ test('Phase 7 matrix: LINE chatHistory=[] still carries durable restaurant const
 
     const recommendation = replyText(replies, 1);
     assert.match(recommendation, /ข้าวผัดหมู|หมู|อาหาร|เมนู/u);
-    assert.doesNotMatch(recommendation, /ผัดไทย|ต้มยำกุ้ง|ไก่/u, 'later LINE turn must use durable constraints, not transport history');
+    assert.match(recommendation, /เลี่ยงกุ้ง\/ไก่|เลี่ยง.*กุ้ง.*ไก่/u, 'reply should naturally acknowledge the durable constraint');
+    const recommendedItems = recommendation.split('\n').filter(line => line.trim().startsWith('•'));
+    assert.ok(recommendedItems.length >= 1);
+    for (const item of recommendedItems) {
+      assert.doesNotMatch(item, /ผัดไทย|ต้มยำกุ้ง|กุ้ง|ไก่/u, 'recommended item lines must respect durable constraints');
+    }
   });
 });
 
