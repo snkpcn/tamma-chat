@@ -21,6 +21,7 @@ import {
   capturePreferenceSignals,
 } from './_customer-db';
 import { resolveCanonicalGuestId } from './_thongthai-identity';
+import { extractPreferenceSignal } from './_customer-phrase-intelligence';
 import {
   executeBrainTools,
   loadBrainRuntime,
@@ -747,6 +748,8 @@ function restaurantConstraintAvoidLabels(advisor: any): string[] {
   for (const allergen of allergens) if (allergenAvoidLabels[allergen] && !labels.includes(allergenAvoidLabels[allergen])) labels.push(allergenAvoidLabels[allergen]);
   const avoidIngredients = Array.isArray(parsed.avoidIngredients) ? parsed.avoidIngredients.map(String) : [];
   if (avoidIngredients.some(value => value.includes('ปลาร้า')) && !labels.includes('ปลาร้า')) labels.push('ปลาร้า');
+  if (avoidIngredients.some(value => value.includes('กุ้ง')) && !labels.includes('กุ้ง')) labels.push('กุ้ง');
+  if (avoidIngredients.some(value => value.includes('ถั่ว')) && !labels.includes('ถั่ว')) labels.push('ถั่ว');
   const avoidProteins = Array.isArray(parsed.avoidProteins) ? parsed.avoidProteins.map(String) : [];
   const proteinLabels: Record<string, string> = { pork: 'หมู', beef: 'เนื้อวัว', chicken: 'ไก่', fish: 'ปลา', egg: 'ไข่' };
   for (const protein of avoidProteins) if (proteinLabels[protein] && !labels.includes(proteinLabels[protein])) labels.push(proteinLabels[protein]);
@@ -3122,9 +3125,44 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // LLM, never changes which responder answers this turn, and never
   // overrides Phase 1's boundary policy (see
   // _customer-phrase-intelligence.ts's own header comment).
+  const sameTurnPreferenceSignal = extractPreferenceSignal(request.message);
   await capturePreferenceSignals(guestDbId, request.message).catch(error => {
     console.error('THONGTHAI_PREFERENCE_CAPTURE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
   });
+
+  // The write above is durable, but request.guestContext was loaded BEFORE
+  // that write. LINE does not send conversation history back, so without this
+  // in-memory merge the responder for the SAME turn can answer from stale
+  // constraints and only "remember" the new preference on the next message.
+  //
+  // Production example: user said "ไม่กินกุ้ง" and the ack still said only
+  // "เลี่ยงไก่ / ไม่เผ็ด" because those were yesterday's loaded constraints.
+  // Merge the classifier's canonical add/remove delta into this turn's
+  // GuestContext immediately; the exact same normalized signal is already what
+  // capturePreferenceSignals persisted to guest_memory.
+  if (
+    sameTurnPreferenceSignal.addConstraints.length
+    || sameTurnPreferenceSignal.removeConstraints.length
+    || sameTurnPreferenceSignal.pace
+    || sameTurnPreferenceSignal.travelerType
+  ) {
+    const remove = new Set(sameTurnPreferenceSignal.removeConstraints);
+    const constraints = [
+      ...new Set([
+        ...request.guestContext.constraints.filter(item => !remove.has(item)),
+        ...sameTurnPreferenceSignal.addConstraints,
+      ]),
+    ];
+    request = {
+      ...request,
+      guestContext: {
+        ...request.guestContext,
+        constraints,
+        pace: sameTurnPreferenceSignal.pace ?? request.guestContext.pace,
+        travelerType: sameTurnPreferenceSignal.travelerType ?? request.guestContext.travelerType,
+      },
+    };
+  }
 
   // eventId is whatever the transport layer determined (LINE's own message
   // id; the web HTTP handler's rawBody.eventId or x-nf-request-id/x-request-id
