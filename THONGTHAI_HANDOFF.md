@@ -6525,7 +6525,7 @@ No new repo, Supabase project, site, or production DB mutation was created as pa
 
 ## Phase 2.7 — Aggregate Customer Intelligence Storage — 2026-09-25
 
-**STATUS: DATABASE APPLIED; CODE CI GREEN; PENDING PR #93 MERGE + AUTOMATIC PRODUCTION DEPLOY VERIFICATION.**
+**STATUS: DONE — DATABASE APPLIED + CODE MERGED + PRODUCTION DEPLOY VERIFIED.**
 
 Owner explicitly approved proceeding with Phase 2.7 after Phase 2 was closed.
 
@@ -6652,8 +6652,23 @@ New load-bearing coverage includes:
 - phone/email/url are removed from stored examples
 - all prior Phase 2 customer-memory / safety / authority regressions remain green
 
-### Remaining action for Phase 2.7
+### Production closure
 
-Merge PR #93 only after the final docs-inclusive CI is green, then wait for normal automatic Netlify production deploy and verify the deploy commit.
+PR #93:
+- merged to `main`
+- merge commit: `44c783ada37d24886b781a5ae1969590495f3f26`
 
-Do not start Phase 3 inside PR #93.
+Final PR CI:
+- GitHub Actions run: `36119978651`
+- result: **1074 / 1074 PASS**
+
+Automatic Netlify production deploy:
+- deploy id: `6ab642971b58030008356c13`
+- state: **READY**
+- context: `production`
+- `commit_ref`: `44c783ada37d24886b781a5ae1969590495f3f26`
+- `manual_deploy=false`
+
+Phase 2.7 is therefore **DONE**.
+
+Phase 3 — Owner Dashboard / Customer Voice OS remains **NOT STARTED** at this checkpoint.
