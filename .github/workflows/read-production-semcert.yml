@@ -1,4 +1,5 @@
 name: Read Current Production Semantic Certification
+# refresh 2026-09-26
 
 on:
   push:
