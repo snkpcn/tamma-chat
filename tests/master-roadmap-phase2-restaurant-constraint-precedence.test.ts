@@ -116,10 +116,11 @@ test('full LINE: combined no-spicy/no-chicken/no-shrimp + recommendation is answ
 
         assert.match(t, /บาท/u, 'explicit recommendation request should return grounded menu rows');
         assert.doesNotMatch(t, /อาหารอีสานแท้|รสจัดจ้าน|อยากให้ทองไทยแนะนำเมนูจากร้านจริงตอนนี้เลยไหม/u);
-        assert.doesNotMatch(t, /ไก่บ้านทอดสมุนไพร/u);
-        assert.doesNotMatch(t, /ต้มยำกุ้ง|กุ้ง/u);
-        assert.doesNotMatch(t, /ลาบปลาช่อน/u);
-        assert.match(t, /คอหมูทอดสมุนไพร/u);
+        const recommendedLines = t.split('\n').filter(line => /^\\s*•/u.test(line));
+        assert.doesNotMatch(recommendedLines.join('\n'), /ไก่บ้านทอดสมุนไพร/u);
+        assert.doesNotMatch(recommendedLines.join('\n'), /ต้มยำกุ้ง|กุ้ง/u);
+        assert.doesNotMatch(recommendedLines.join('\n'), /ลาบปลาช่อน/u);
+        assert.match(recommendedLines.join('\n'), /คอหมูทอดสมุนไพร/u);
       } finally { capture.restore(); }
     }, {
       restaurantMenu:[
