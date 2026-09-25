@@ -458,7 +458,9 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       ? context.recentEntities.filter(entity => entity.domain === context.activeDomain)
       : context.recentEntities;
     if (inDomain.length === 1) return { ...reference, resolvedEntityId: inDomain[0]!.id };
-    if (inDomain.length > 1) return { ...reference, resolvedEntityIds: inDomain.map(entity => entity.id) };
+    if (inDomain.length > 1) {
+      return { ...reference, ambiguous:true, resolvedEntityIds:inDomain.map(entity => entity.id) };
+    }
     return reference;
   });
 }
@@ -514,6 +516,12 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && !reference.resolvedEntityId
     && !reference.resolvedEntityIds?.length
     && !reference.resolvedTaskSlot);
+  // Multiple plausible antecedents are not a successful singular resolution.
+  // Compare/recommend intentionally operate over candidate sets; selection,
+  // confirmation, status, modification, etc. require one clear antecedent.
+  const canUseReferenceSet = action === 'compare' || action === 'recommend';
+  const hasAmbiguousReference = !canUseReferenceSet
+    && references.some(reference => reference.refersToPriorContext && reference.ambiguous === true);
 
   return {
     domain,
@@ -528,10 +536,12 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: parsed.needsClarification === true || hasUnresolvedReference,
+    needsClarification: parsed.needsClarification === true || hasUnresolvedReference || hasAmbiguousReference,
     clarificationReason: typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
       ? parsed.clarificationReason.trim()
-      : (hasUnresolvedReference ? 'unresolved_reference' : undefined),
+      : (hasUnresolvedReference
+        ? 'unresolved_reference'
+        : (hasAmbiguousReference ? 'ambiguous_reference' : undefined)),
     taskDirective,
   };
 }
