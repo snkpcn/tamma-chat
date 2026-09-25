@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          OLD_GENERATED_AT="2026-09-25T20:48:15.511Z"
+          OLD_GENERATED_AT="2026-09-25T21:10:33.400Z"
           for i in $(seq 1 55); do
             body="$(curl --fail --silent --show-error --location --max-time 20 https://tamma-chat.netlify.app/semantic-certification-result.json || true)"
             if [ -n "$body" ]; then
