@@ -392,3 +392,41 @@ test('full signed LINE regression: explicit horse intent suspends stale unrelate
     else process.env.LINE_CHANNEL_SECRET=old;
   }
 });
+
+
+test('full signed LINE regression: horse-care opener persists beginner experience so horse selection never re-asks it',async()=>{
+  const old=process.env.LINE_CHANNEL_SECRET;
+  process.env.LINE_CHANNEL_SECRET=SECRET;
+  try{
+    await withHarness(async h=>{
+      const capture=installCapture();
+      try{
+        const user='phase2-horse-care-slot-continuity';
+
+        await callLine('อยากขี่ม้า ไม่เคยเลย กลัวตก',user);
+        const care=textOf(capture.replies[0]);
+        assert.match(care,/มากี่คนครับ/u);
+        assert.doesNotMatch(care,/เคยขี่ม้ามาก่อนไหมครับ.*มากี่คนครับ/u);
+
+        const afterCare=stateFor(h,user).taskState as {
+          activeTask?:{domain?:string;type?:string;slots?:Record<string,unknown>}|null;
+        }|undefined;
+        assert.equal(afterCare?.activeTask?.domain,'activity');
+        assert.equal(afterCare?.activeTask?.slots?.riderExperience,'beginner','opening turn must persist the already-understood experience');
+        assert.equal(afterCare?.activeTask?.slots?.fearOrConfidence,'concerned');
+
+        const calls=h.modelCallCount();
+        await callLine('เอาทองไทย',user);
+        const selection=textOf(capture.replies[1]);
+
+        assert.match(selection,/^ได้ครับ เลือกทองไทย/u);
+        assert.doesNotMatch(selection,/เคยขี่ม้ามาก่อนไหม/u,'must not ask an already answered experience question again');
+        assert.match(selection,/มากี่คนครับ/u,'only the genuinely missing party-size question should remain');
+        assert.equal(h.modelCallCount(),calls,'selection continuation stays deterministic');
+      } finally { capture.restore(); }
+    });
+  } finally {
+    if(old===undefined) delete process.env.LINE_CHANNEL_SECRET;
+    else process.env.LINE_CHANNEL_SECRET=old;
+  }
+});
