@@ -102,7 +102,7 @@ function constraintsOf(harness: Harness, userId: string): string[] {
 }
 
 function intelligenceEvents(harness: Harness): Array<Record<string, unknown>> {
-  return harness.postsTo('customer_intelligence_events');
+  return harness.customerIntelligenceRows();
 }
 
 // ---------------------------------------------------------------------
