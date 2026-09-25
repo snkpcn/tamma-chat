@@ -61,7 +61,7 @@ import {
   type RestaurantProposedSetState,
 } from './_restaurant-preorder-dialog';
 import { processThongthaiOneMindTurnResilient } from './_thongthai-one-mind-orchestrator';
-import { loadGuestAgentStateSnapshot } from './_guest-agent-state-store';
+import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import {
@@ -88,6 +88,11 @@ import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, 
 import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
 import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
+import {
+  normalizePendingQuestion,
+  resolvePendingQuestionAnswer,
+  type PendingQuestionState,
+} from './_conversation-continuity';
 import {
   asksIfSafe,
   interpretActivityGoal,
@@ -2556,8 +2561,9 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
         intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
         suggestedActions: [], responseStyle: 'direct',
         agentStateUpdate: {
-          activeTopic: 'ecosystem_focus_choice',
+          activeTopic: 'ecosystem',
           unresolvedNeed: 'choose_food_cafe_or_light_activity',
+          pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
         },
         semanticMemoryUpdates: [], toolCalls: [],
       };
@@ -2580,9 +2586,10 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
       suggestedActions: [], responseStyle: 'direct',
       agentStateUpdate: {
-        activeTopic: 'ecosystem_focus_choice',
-        unresolvedNeed: 'choose_food_cafe_or_light_activity',
-      },
+          activeTopic: 'ecosystem',
+          unresolvedNeed: 'choose_food_cafe_or_light_activity',
+          pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
+        },
       semanticMemoryUpdates: [], toolCalls: [],
     };
   }
@@ -2624,12 +2631,33 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
   return null;
 }
 
-const ECOSYSTEM_FOCUS_CHOICE_TOPIC = 'ecosystem_focus_choice';
-const ECOSYSTEM_FOOD_FOCUS_RE = /(?:กินข้าว|อาหาร|ของกิน|กินก่อน|เน้นกิน|เน้นอาหาร|หิว)/u;
-const ECOSYSTEM_CAFE_FOCUS_RE = /(?:คาเฟ่|กาแฟ|เครื่องดื่ม|นั่งคาเฟ่)/u;
-const ECOSYSTEM_LIGHT_ACTIVITY_FOCUS_RE = /(?:กิจกรรมเบา|กิจกรรม|ทำอะไรเบา|ขยับเบา|ชมวิว)/u;
+const ECOSYSTEM_FOCUS_PENDING_QUESTION: PendingQuestionState = {
+  domain: 'general_recommendation',
+  kind: 'preference_choice',
+  choices: [
+    { value: 'restaurant', aliases: ['กินข้าว', 'อาหาร', 'ของกิน', 'กินก่อน', 'เน้นกิน', 'เน้นอาหาร', 'หิว'] },
+    { value: 'cafe', aliases: ['คาเฟ่', 'กาแฟ', 'เครื่องดื่ม', 'นั่งคาเฟ่'] },
+    { value: 'light_activity', aliases: ['กิจกรรมเบา', 'ทำอะไรเบา', 'ขยับเบา', 'ชมวิว', 'กิจกรรม'] },
+  ],
+};
 
-async function ecosystemFocusChoiceContinuationResponse(
+function isExplicitSwitchAwayFromPendingQuestion(
+  request: BrainRequest,
+  pending: PendingQuestionState,
+): boolean {
+  // A pending general-recommendation refinement must never capture a clear
+  // new domain. The pending answer matcher itself is data-driven from the
+  // choices persisted by the question producer.
+  if (pending.domain !== 'general_recommendation') return false;
+  const intent = classifyTopLevelSemanticIntent(request.message);
+  if (intent === 'LOCATION_REQUEST' || intent === 'WEATHER_REQUEST'
+    || intent === 'BOT_ADDRESS' || intent === 'HORSE_RELATED') return true;
+  return hasExplicitAtvIntent(request.message)
+    || hasExplicitArcheryIntent(request.message)
+    || hasExplicitHomestayIntent(request.message);
+}
+
+async function pendingQuestionContinuationResponse(
   request: BrainRequest,
   guestDbId: string | null,
   channel: BrainChannel,
@@ -2638,24 +2666,35 @@ async function ecosystemFocusChoiceContinuationResponse(
 
   const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
     console.error(
-      'THONGTHAI_ECOSYSTEM_FOCUS_STATE_ERROR',
+      'THONGTHAI_PENDING_QUESTION_STATE_ERROR',
       error instanceof Error ? error.message.slice(0, 220) : 'unknown',
     );
     return { state: null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
   });
-  if (!isObject(snapshot.state)
-      || (snapshot.state.active_topic !== ECOSYSTEM_FOCUS_CHOICE_TOPIC
-        && snapshot.state.activeTopic !== ECOSYSTEM_FOCUS_CHOICE_TOPIC)) return null;
+  if (!isObject(snapshot.state)) return null;
 
-  const text = request.message.trim();
+  const pending = normalizePendingQuestion(snapshot.state.pending_question);
+  if (!pending) return null;
 
-  if (ECOSYSTEM_FOOD_FOCUS_RE.test(text)) {
-    // This is a deterministic continuation of OUR OWN branch question, so it
-    // should not need an LLM and should not jump ahead of the canonical
-    // One-Mind cutover with a legacy runtime load. Query the verified
-    // restaurant SOT directly using the already-loaded durable guest
-    // constraints, then persist enough bounded restaurant context for later
-    // "มีอะไรแนะนำอีก" turns.
+  const resolution = resolvePendingQuestionAnswer(request.message, pending);
+  if (!resolution) {
+    if (isExplicitSwitchAwayFromPendingQuestion(request, pending)) {
+      await patchGuestAgentState(guestDbId, { removeKeys: ['pending_question'] }).catch(error => {
+        console.error(
+          'THONGTHAI_PENDING_QUESTION_CLEAR_ERROR',
+          error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+        );
+        return false;
+      });
+    }
+    return null;
+  }
+
+  if (resolution.domain !== 'general_recommendation'
+      || resolution.kind !== 'preference_choice'
+      || typeof resolution.value !== 'string') return null;
+
+  if (resolution.value === 'restaurant') {
     const advice = await restaurantMenuAdvice({
       query: 'ร้านอาหารมีอะไรแนะนำ',
       partySize: null,
@@ -2691,6 +2730,7 @@ async function ecosystemFocusChoiceContinuationResponse(
         agentStateUpdate: {
           activeTopic: 'restaurant',
           clearUnresolvedNeed: true,
+          clearPendingQuestion: true,
           restaurantAdvisorContext: {
             source: RESTAURANT_ADVISOR_CONTEXT_SOURCE,
             recentMessages: ['ร้านอาหารมีอะไรแนะนำ'],
@@ -2710,13 +2750,17 @@ async function ecosystemFocusChoiceContinuationResponse(
       journeyAction: { type: 'none', journey: null },
       suggestedActions: [],
       responseStyle: 'direct',
-      agentStateUpdate: { activeTopic: 'restaurant', clearUnresolvedNeed: true },
+      agentStateUpdate: {
+        activeTopic: 'restaurant',
+        clearUnresolvedNeed: true,
+        clearPendingQuestion: true,
+      },
       semanticMemoryUpdates: [],
       toolCalls: [],
     };
   }
 
-  if (ECOSYSTEM_CAFE_FOCUS_RE.test(text)) {
+  if (resolution.value === 'cafe') {
     return {
       message: 'ได้ครับ 😊 งั้นเน้นคาเฟ่ก่อน แวะ Inthanin นั่งพัก เดินน้อย แล้วค่อยชมวิวใกล้ ๆ ได้ครับ\nอยากได้กาแฟ ชา หรือเครื่องดื่มไม่กาแฟครับ?',
       intent: 'recommendation',
@@ -2724,13 +2768,17 @@ async function ecosystemFocusChoiceContinuationResponse(
       journeyAction: { type: 'none', journey: null },
       suggestedActions: [],
       responseStyle: 'direct',
-      agentStateUpdate: { activeTopic: 'cafe', clearUnresolvedNeed: true },
+      agentStateUpdate: {
+        activeTopic: 'cafe',
+        clearUnresolvedNeed: true,
+        clearPendingQuestion: true,
+      },
       semanticMemoryUpdates: [],
       toolCalls: [],
     };
   }
 
-  if (ECOSYSTEM_LIGHT_ACTIVITY_FOCUS_RE.test(text)) {
+  if (resolution.value === 'light_activity') {
     return {
       message: 'ได้ครับ 😊 ถ้าอยากทำอะไรเบา ๆ และเดินน้อย ทองไทยช่วยคัดต่อให้ได้ครับ\nอยากลองขี่ม้า ยิงธนู หรือเอาแบบนั่งพักชมวิวก่อนครับ?',
       intent: 'recommendation',
@@ -2738,7 +2786,11 @@ async function ecosystemFocusChoiceContinuationResponse(
       journeyAction: { type: 'none', journey: null },
       suggestedActions: [],
       responseStyle: 'direct',
-      agentStateUpdate: { activeTopic: 'activity_discovery', clearUnresolvedNeed: true },
+      agentStateUpdate: {
+        activeTopic: 'activity_discovery',
+        clearUnresolvedNeed: true,
+        clearPendingQuestion: true,
+      },
       semanticMemoryUpdates: [],
       toolCalls: [],
     };
@@ -3585,16 +3637,16 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  const ecosystemFocusChoice = await ecosystemFocusChoiceContinuationResponse(request, guestDbId, channel).catch(error => {
+  const pendingQuestionContinuation = await pendingQuestionContinuationResponse(request, guestDbId, channel).catch(error => {
     console.error(
-      'THONGTHAI_ECOSYSTEM_FOCUS_CONTINUATION_ERROR',
+      'THONGTHAI_PENDING_QUESTION_CONTINUATION_ERROR',
       error instanceof Error ? error.message.slice(0, 220) : 'unknown',
     );
     return null;
   });
-  if (ecosystemFocusChoice) {
-    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'ecosystemFocusChoiceContinuationResponse' }));
-    const polished = polishedResponse(ecosystemFocusChoice, channel);
+  if (pendingQuestionContinuation) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'pendingQuestionContinuationResponse' }));
+    const polished = polishedResponse(pendingQuestionContinuation, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
