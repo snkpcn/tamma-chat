@@ -89,6 +89,7 @@ import {
 import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask, suspendActiveTask } from './_task-state';
 import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
+import { EXPERIENCES } from '../../src/data/experiences';
 import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
 import {
   normalizePendingQuestion,
@@ -2634,6 +2635,41 @@ const FIRST_VISIT_RECOMMEND_MARKER = /(?:มาครั้งแรก|คร�
 const BARE_RECOMMEND_MARKER = /^(?:มีอะไรแนะนำ|แนะนำอะไรดี|แนะนำอะไรบ้าง)(?:ครับ|คะ|ค่ะ)?[\s?？!.]*$/u;
 const ECOSYSTEM_RAIN_WHERE_MARKER = /ฝนตก.*(?:ไปไหนดี|ที่ไหนดี|ไปที่ไหน)/u;
 
+function experienceNames(ids: string[], limit = 2): string[] {
+  const wanted = new Set(ids);
+  return EXPERIENCES
+    .filter(item => wanted.has(item.id))
+    .map(item => item.name)
+    .slice(0, limit);
+}
+
+function ecosystemPersonalizationHints(request: BrainRequest): string[] {
+  const hints: string[] = [];
+  const constraints = new Set(request.guestContext.constraints ?? []);
+
+  if (constraints.has('child_friendly') || request.guestContext.travelerType === 'family') {
+    hints.push('ถ้ายังมากับครอบครัวหรือมีเด็กด้วย ทองไทยจะเน้นจังหวะไม่เร่ง และให้ทีมช่วยประเมินกิจกรรมให้เหมาะกับแต่ละคนครับ');
+  } else if (request.guestContext.travelerType === 'couple') {
+    hints.push('ถ้ายังมากับแฟนอยู่ แนวคาเฟ่ + อาหาร + ชมพระอาทิตย์ตกก็จัดเป็นทริปคู่แบบสบาย ๆ ได้ครับ');
+  }
+
+  if (request.guestContext.pace === 'relaxed') {
+    hints.push('ถ้ายังอยากชิล ๆ อยู่ ทองไทยจะวางคาเฟ่ / อาหาร / พักเป็นแกนก่อน แล้วค่อยเติมกิจกรรมตามแรงและเวลาครับ');
+  }
+
+  const favoriteNames = experienceNames(request.journeyContext.favorites ?? []);
+  if (favoriteNames.length) {
+    hints.push(`ถ้ายังชอบ ${favoriteNames.join(' / ')} อยู่ ทองไทยเอาไว้เป็นจุดตั้งต้นของรอบนี้ได้ครับ`);
+  }
+
+  const visitedNames = experienceNames(request.journeyContext.visitedExperiences ?? []);
+  if (visitedNames.length) {
+    hints.push(`ถ้าอยากไม่ซ้ำจุดที่เคยแวะอย่าง ${visitedNames.join(' / ')} รอบนี้ทองไทยช่วยข้ามแล้วจัดอย่างอื่นให้ได้ครับ`);
+  }
+
+  return hints;
+}
+
 export function ecosystemFirstVisitResponse(request: BrainRequest): BrainResponse | null {
   const message = request.message;
 
@@ -2658,10 +2694,12 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
         semanticMemoryUpdates: [], toolCalls: [],
       };
     }
+    const personalization = ecosystemPersonalizationHints(request);
     return {
       message: [
         'ถ้ามาครั้งแรก ทองไทยแนะนำให้ดูเป็น 3 แบบครับ 😊',
         ...ECOSYSTEM_PATHS.map((path, index) => `${index + 1}) ${path.labelTh}: ${path.descriptionTh}`),
+        ...(personalization.length ? ['', ...personalization] : []),
         '',
         'ขอถามนิดนึงครับ มากี่คน แล้วอยากได้ชิล ๆ หรือมีกิจกรรมด้วยครับ?',
       ].join('\n'),
@@ -2698,10 +2736,12 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
     if ((request.guestContext.constraints ?? []).some(item => restaurantConstraintKeys.has(item))) {
       return null;
     }
+    const personalization = ecosystemPersonalizationHints(request);
     return {
       message: [
         'ถ้ายังไม่ได้ล็อกว่าอยากทำอะไร ทองไทยแนะนำให้เลือกฟีลก่อนครับ 😊',
         ...ECOSYSTEM_PATHS.map((path, index) => `${index + 1}) ${path.labelTh}: ${path.descriptionTh}`),
+        ...(personalization.length ? ['', ...personalization] : []),
         '',
         'มากี่คน แล้วอยากได้ชิล ๆ หรือมีกิจกรรมด้วยครับ?',
       ].join('\n'),
@@ -3367,8 +3407,17 @@ function deterministicFoodIntentStartResponse(request: BrainRequest): BrainRespo
 
 function deterministicActivityIntentStartResponse(request: BrainRequest): BrainResponse | null {
   if (!isActivityIntentStartMessage(request.message)) return null;
+  const explicitQualifier = classifyActivityIntentQualifier(request.message);
+  const rememberedConstraints = new Set(request.guestContext.constraints ?? []);
+  const rememberedQualifier = rememberedConstraints.has('beginner_friendly')
+    ? 'beginner'
+    : rememberedConstraints.has('fear_of_falling') || rememberedConstraints.has('fear_of_speed')
+      ? 'cautious'
+      : rememberedConstraints.has('child_friendly') || rememberedConstraints.has('elderly_friendly')
+        ? 'family'
+        : null;
   return {
-    message: composeActivityIntentStartResponse(classifyActivityIntentQualifier(request.message)),
+    message: composeActivityIntentStartResponse(explicitQualifier ?? rememberedQualifier),
     intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
