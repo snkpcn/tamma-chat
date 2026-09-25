@@ -366,6 +366,14 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
 
   switch (turn.domain) {
     case 'restaurant':
+      // Human Brain Phase 1.2: "status" is not one universal business fact.
+      // Table/capacity availability is a live venue-availability question,
+      // while a customer's EXISTING food order status is an operational
+      // order-status lookup. Preserve the semantic intent instead of
+      // collapsing both into one action label.
+      if (turn.intent === 'restaurant_table_availability') {
+        return [{ ...base, domain: 'restaurant', needs: ['availability'] }];
+      }
       if (turn.action === 'status') return [{ ...base, domain: 'restaurant', needs: ['order_status'] }];
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'restaurant', needs: ['catalog', 'recommendations_input'] }];
       return [];

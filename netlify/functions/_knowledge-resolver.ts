@@ -63,7 +63,7 @@ export const SOURCE_REGISTRY: Record<KnowledgeNeed, readonly KnowledgeSourceType
   catalog: ['activity_live', 'restaurant_live', 'stay_live', 'otop_live', 'bible'],
   entity_details: ['activity_live', 'restaurant_live', 'stay_live', 'bible'],
   price: ['activity_live', 'restaurant_live', 'stay_live', 'otop_live'],
-  availability: ['activity_live', 'stay_live'],
+  availability: ['restaurant_live', 'activity_live', 'stay_live'],
   schedule: ['activity_live', 'stay_live'],
   inventory: ['activity_live', 'otop_live'],
   ingredients: ['restaurant_live'],
@@ -172,7 +172,7 @@ export type KnowledgeBundle = {
 export type KnowledgeSourceFetch = (request: KnowledgeRequest) => Promise<SourceResult>;
 
 export type KnowledgeSourceAdapters = {
-  restaurant?: { menu?: KnowledgeSourceFetch };
+  restaurant?: { menu?: KnowledgeSourceFetch; availability?: KnowledgeSourceFetch };
   activity?: { catalog?: KnowledgeSourceFetch; availability?: KnowledgeSourceFetch };
   stay?: { catalog?: KnowledgeSourceFetch; availability?: KnowledgeSourceFetch };
   promotion?: { eligibility?: KnowledgeSourceFetch };
@@ -201,6 +201,9 @@ function routeNeed(domain: SemanticDomain, need: KnowledgeNeed, adapters: Knowle
     case 'restaurant':
       if ((need === 'catalog' || need === 'price' || need === 'ingredients' || need === 'entity_details' || need === 'recommendations_input') && adapters.restaurant?.menu) {
         return { sourceType: 'restaurant_live', fetch: adapters.restaurant.menu };
+      }
+      if (need === 'availability' && adapters.restaurant?.availability) {
+        return { sourceType: 'restaurant_live', fetch: adapters.restaurant.availability };
       }
       if ((need === 'booking_status') && adapters.bookingStatus?.lookup) return { sourceType: 'booking_operational', fetch: adapters.bookingStatus.lookup };
       if ((need === 'order_status') && adapters.orderStatus?.lookup) return { sourceType: 'order_operational', fetch: adapters.orderStatus.lookup };
