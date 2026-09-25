@@ -175,6 +175,10 @@ ABSOLUTE RULES:
 - Never say booked/reserved/confirmed/submitted/ordered/paid/redeemed unless VERIFIED OPERATIONAL OUTCOME has executed=true and success=true. "confirmed" specifically requires its real status to be confirmed (or an equivalent verified terminal status).
 - requested is not confirmed. If status=requested, say the request was received/submitted and staff confirmation is still required.
 - Never expose tool names, provider names, confidence scores, internal state, source ids, or chain-of-thought.
+- Answer the substance first. Do not narrate the classification, intent, domain, routing, or say things like "I understand you're asking about..." unless a real clarification is necessary.
+- Do not mechanically restate the customer's whole question before answering.
+- For Thai, write natural spoken Thai that a capable human staff member would actually say. Avoid bureaucratic/system phrases such as "ข้อมูลส่วนนี้ยังไม่มีข้อมูลยืนยัน" when a simpler human sentence works.
+- Keep Thai spacing natural around numbers/times and particles; never glue a time such as "18:00" directly to "นะครับ".
 - Be concise and natural. LINE should be especially short and scannable. Use emoji only when it genuinely improves scanning.
 - Do not force a closing question when none is needed.
 
@@ -264,8 +268,8 @@ function deterministicMessages(language: ResponseLanguage) {
     failed:'The request has not been submitted successfully yet.',
   };
   return {
-    unavailable:'ตอนนี้ทองไทยยังเช็กข้อมูลล่าสุดส่วนนี้ให้ไม่ได้ครับ เลยไม่ขอเดา ถ้าต้องใช้ข้อมูลนี้ทันทีให้ทีมงานช่วยตรวจสอบต่อได้ครับ',
-    unknown:'ข้อมูลส่วนนี้ยังไม่มีข้อมูลยืนยันครับ ทองไทยไม่ขอเดาให้ผิด',
+    unavailable:'ตอนนี้ทองไทยยังเช็กข้อมูลล่าสุดเรื่องนี้ไม่ได้ครับ เลยไม่อยากเดาให้ผิด',
+    unknown:'เรื่องนี้ยังไม่มีข้อมูลยืนยันครับ ทองไทยไม่ขอเดาให้ผิด',
     empty:'ทองไทยเช็กข้อมูลล่าสุดแล้ว ตอนนี้ยังไม่มีตัวเลือกที่ตรงครับ',
     model:'ตอนนี้ทองไทยยังตอบเรื่องนี้ให้แม่นไม่ได้ครับ ลองอีกครั้งสักครู่ หรือให้ทีมงานช่วยต่อได้ครับ',
     clarify:'ขอรายละเอียดเพิ่มอีกนิดครับ จะได้ช่วยต่อให้ตรงเรื่อง',
@@ -651,24 +655,127 @@ export function composeMembershipInformationResponse(input: ResponseComposerInpu
   };
 }
 
-function restaurantTableAvailabilityUnknownCopy(input: ResponseComposerInput): string | null {
-  const request = input.dialogDecision.knowledgeRequests.find(candidate =>
-    candidate.domain === 'restaurant'
-    && candidate.needs.includes('availability')
-  );
+type UnknownKnowledgeCondition = 'source_unavailable' | 'fact_unknown';
+
+function firstCustomerFacingEntity(entities: Record<string, unknown>): string | null {
+  const keys = [
+    'itemName', 'menuItemName', 'menuItem', 'productName', 'activityName',
+    'serviceName', 'roomType', 'horseName', 'resourceName', 'promotionName', 'name',
+  ];
+  for (const key of keys) {
+    const value = entities[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function thaiWhen(entities: Record<string, unknown>): string {
+  const date = typeof entities.date === 'string' ? entities.date.trim() : '';
+  const time = typeof entities.time === 'string' ? entities.time.trim() : '';
+  if (date && time) return `${date} เวลา ${time}`;
+  if (date) return date;
+  if (time) return `เวลา ${time}`;
+  return '';
+}
+
+function unknownSubject(domain: string, named: string | null): string {
+  if (named) return named;
+  const fallback: Record<string, string> = {
+    restaurant:'เมนูนี้',
+    activity:'กิจกรรมนี้',
+    stay:'ที่พักนี้',
+    promotion:'โปรโมชันนี้',
+    otop:'สินค้านี้',
+    cafe:'รายการนี้',
+    membership:'เรื่องสมาชิกนี้',
+    journey:'แผนนี้',
+  };
+  return fallback[domain] ?? 'เรื่องนี้';
+}
+
+/**
+ * Human fallback for a meaning that is already known but whose mutable fact
+ * cannot be verified. This is RENDERING ONLY: it never interprets user text.
+ * Domain + information need + entities were decided upstream by the semantic
+ * brain and deterministic dialog/knowledge layers.
+ */
+function humanKnowledgeUnknownCopy(
+  input: ResponseComposerInput,
+  condition: UnknownKnowledgeCondition,
+): string | null {
+  const request = input.dialogDecision.knowledgeRequests.find(candidate => candidate.needs.length > 0);
   if (!request) return null;
 
-  const date = typeof request.entities.date === 'string' ? request.entities.date.trim() : '';
-  const time = typeof request.entities.time === 'string' ? request.entities.time.trim() : '';
-  const when = [date, time ? `เวลา ${time}` : ''].filter(Boolean).join(' ');
+  const need = request.needs[0];
+  const named = firstCustomerFacingEntity(request.entities);
+  const subject = unknownSubject(request.domain, named);
 
-  if (input.language === 'th') {
-    const target = when ? `สำหรับ${when}` : '';
-    return `รับทราบครับ ถามเรื่องโต๊ะ${target}นะครับ ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ เลยยังบอกไม่ได้ว่าเต็มหรือว่าง และไม่ขอเดาให้ผิดครับ`;
+  if (input.language !== 'th') {
+    const when = thaiWhen(request.entities);
+    const timing = when ? ` (${when})` : '';
+    if (need === 'availability') return `I can't verify live availability${timing} right now, so I don't want to guess.`;
+    if (need === 'price') return `I can't verify the current price for ${subject} right now, so I don't want to guess.`;
+    if (need === 'schedule') return `I can't verify the current schedule${timing} right now, so I don't want to guess.`;
+    return condition === 'source_unavailable'
+      ? `I can't verify the latest information for ${subject} right now, so I don't want to guess.`
+      : `I don't have a verified answer for ${subject} yet, so I don't want to guess.`;
   }
 
-  const target = when ? ` for ${when}` : '';
-  return `I understand you're asking about table availability${target}. I don't have a verified live table-availability source right now, so I can't honestly say whether it is full or available.`;
+  const when = thaiWhen(request.entities);
+  const lead = when ? `${when} ` : '';
+
+  if (need === 'availability') {
+    if (request.domain === 'restaurant') {
+      return `${lead}ตอนนี้ทองไทยยังเช็กโต๊ะว่างแบบเรียลไทม์ไม่ได้ครับ เลยยังบอกไม่ได้ว่าเต็มหรือว่าง ไม่อยากเดาให้ผิดครับ`;
+    }
+    if (request.domain === 'stay') {
+      return `${lead}ตอนนี้ทองไทยยังเช็กห้องว่างแบบเรียลไทม์ไม่ได้ครับ เลยยังบอกไม่ได้ว่ามีห้องเหลือไหม ไม่อยากเดาให้ผิดครับ`;
+    }
+    if (request.domain === 'activity') {
+      return `${lead}ตอนนี้ทองไทยยังเช็กคิวว่างของ${subject}ไม่ได้ครับ เลยยังบอกไม่ได้ว่าว่างหรือเต็ม ไม่อยากเดาให้ผิดครับ`;
+    }
+    return `${lead}ตอนนี้ทองไทยยังเช็กความว่างล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากเดาให้ผิด`;
+  }
+
+  if (need === 'schedule') {
+    const target = request.domain === 'activity' ? 'รอบกิจกรรม' : `ตารางเวลาของ${subject}`;
+    return `${lead}ตอนนี้ทองไทยยังเช็ก${target}ที่อัปเดตไม่ได้ครับ เลยไม่อยากเดาเวลาให้ผิด`;
+  }
+
+  if (need === 'price') {
+    if (condition === 'source_unavailable') {
+      return `ตอนนี้ทองไทยยังเช็กราคาล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากเดาราคาให้ผิด`;
+    }
+    return `ราคาของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากเดาราคาให้ผิด`;
+  }
+
+  if (need === 'inventory') {
+    return `ตอนนี้ทองไทยยังเช็กจำนวน${subject}ที่มีจริงไม่ได้ครับ เลยไม่อยากเดาจำนวนให้ผิด`;
+  }
+
+  if (need === 'catalog') {
+    return `ตอนนี้ทองไทยยังเช็กรายการล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากบอกข้อมูลที่อาจเก่า`;
+  }
+
+  if (need === 'ingredients') {
+    return `ส่วนผสมของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครบครับ เลยไม่อยากเดา โดยเฉพาะถ้าเกี่ยวกับของที่แพ้หรือของที่งด`;
+  }
+
+  if (need === 'policy') {
+    return `เรื่องเงื่อนไขของ${subject}ตอนนี้ทองไทยยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากตอบเดา ๆ`;
+  }
+
+  if (need === 'transaction_status') {
+    return `ตอนนี้ทองไทยยังเช็กสถานะล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากบอกสถานะผิด`;
+  }
+
+  if (need === 'recommendation') {
+    return `ตอนนี้ข้อมูลที่ยืนยันได้ยังไม่พอให้ทองไทยแนะนำ${subject}แบบมั่นใจครับ เลยไม่อยากเดาให้`;
+  }
+
+  return condition === 'source_unavailable'
+    ? `ตอนนี้ทองไทยยังเช็กข้อมูลล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากเดาให้ผิด`
+    : `${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากตอบเดา ๆ`;
 }
 
 const TASK_SUMMARY_FIELDS_TH: Record<string, string> = {
@@ -756,9 +863,9 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
   } else if (input.dialogDecision.responseIntent === 'active_task_summary') {
     message = activeTaskSummaryMessage(input);
   } else if (input.degradation.condition === 'source_unavailable') {
-    message = restaurantTableAvailabilityUnknownCopy(input) ?? copy.unavailable;
+    message = humanKnowledgeUnknownCopy(input, 'source_unavailable') ?? copy.unavailable;
   } else if (input.degradation.condition === 'fact_unknown') {
-    message = restaurantTableAvailabilityUnknownCopy(input) ?? copy.unknown;
+    message = humanKnowledgeUnknownCopy(input, 'fact_unknown') ?? copy.unknown;
   } else if (input.degradation.condition === 'verified_empty') {
     message = input.dialogDecision.responseIntent === 'no_active_promotion' ? copy.noPromo : copy.empty;
   } else if (input.dialogDecision.mode === 'clarify') {

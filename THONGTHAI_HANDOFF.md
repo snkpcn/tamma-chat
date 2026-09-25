@@ -8467,3 +8467,139 @@ the Language Brain may understand broadly, but all mutable TAMMA facts/actions m
 - business policy
 
 Unknown facts remain unknown; the model never fills source gaps by guessing.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5 / Checkpoint 5.1 — Human Response Quality — 2026-09-26
+
+**STATUS: IMPLEMENTATION GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY / LIVE TRACE.**
+
+### Goal
+
+A correctly understood semantic turn must sound like a capable human staff member, not like an intent-classification system.
+
+This checkpoint fixes the production-observed reply shape:
+
+`รับทราบครับ ถามเรื่องโต๊ะสำหรับพรุ่งนี้ เวลา 18:00นะครับ ...`
+
+The semantic trace for that real LINE turn was already correct:
+- domain = restaurant
+- action = status
+- informationNeed = availability
+- needsClarification = false
+- memory relevantConstraintCount = 0
+
+Therefore this checkpoint changes RESPONSE RENDERING, not intent routing.
+
+### Architecture rule
+
+No new Thai intent regex/trigger was added.
+
+The Response Composer now renders degraded/unknown mutable facts from the already-decided machine contract:
+
+`domain + knowledge need + entities + degradation condition -> human fallback copy`
+
+It never decides what the customer meant.
+
+Semantic needs covered by the generic human fallback include:
+- availability
+- schedule
+- price
+- inventory
+- catalog
+- ingredients
+- policy
+- transaction_status
+- recommendation
+
+### Natural-response doctrine
+
+The normal model Response Composer prompt now explicitly requires:
+- answer the substance first
+- do not narrate intent/domain/classification/routing
+- do not mechanically restate the customer's whole question
+- use natural spoken Thai like a capable human staff member
+- avoid bureaucratic/system wording when simpler human wording is truthful
+- keep spacing around times/numbers and Thai particles natural
+- never glue a time such as `18:00` directly to `นะครับ`
+
+Truth rules remain unchanged:
+- no source = do not guess
+- unavailable != empty
+- no false booking/payment/confirmation claims
+- mutable business facts still require authoritative facts/outcomes
+
+### RED-first evidence
+
+RED contract commit:
+`bd86087bd706d31419ffd5bc36cfabd7f995818b`
+
+The human-response tests were committed before implementation.
+
+Branch CI in this repository is PR-triggered, so no workflow run existed for the RED-only branch commit before the draft PR was opened.
+
+Implementation commit:
+`21812587149e4758e92c2493b75a78bf35622316`
+
+First PR CI:
+run `36177083214` = FAILURE
+
+It caught two existing regression contracts:
+1. Response Composer version constant must remain the established explicit value.
+2. The generic FACT_UNKNOWN fallback must still clearly state unverified truth / no guessing.
+
+Those tests were NOT weakened.
+
+Regression-preserving fix:
+`7dd7dd48ab52f672fb7649055d8b0b64d18ce217`
+
+Green CI:
+run `36177261146`
+
+Result:
+**1142 / 1142 PASS**
+**fail 0**
+
+### New coverage
+
+`tests/human-brain-phase5-human-response.test.ts` proves:
+
+1. Restaurant table availability:
+   - preserves tomorrow
+   - preserves 18:00
+   - still says table/seat
+   - never uses `รับทราบครับ ถามเรื่อง...`
+   - never produces `18:00นะครับ`
+
+2. Semantic fallback is not restaurant-phrase-specific:
+   - stay availability preserves date + room meaning
+   - activity schedule preserves date/time + round/schedule meaning
+   - restaurant price preserves the named menu item
+
+3. SOURCE_UNAVAILABLE:
+   - says it cannot check now
+   - never converts unavailable into a false empty/full claim
+
+4. Normal model composition:
+   - answer content first
+   - no intent narration
+   - natural spoken Thai doctrine
+
+### Safety / scope
+
+No DB/schema change.
+No transaction behavior change.
+No booking/order/payment policy change.
+No new repo/site/project.
+No manual Netlify deploy.
+
+### Live closeout requirement after merge
+
+One real production LINE availability turn must show:
+- semantic trace still availability
+- memory irrelevant
+- customer reply preserves date/time/table meaning
+- customer reply no longer sounds like an intent-ack template
+
+Only then close Checkpoint 5.1.
