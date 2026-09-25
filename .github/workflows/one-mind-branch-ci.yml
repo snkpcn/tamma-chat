@@ -23,3 +23,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Netlify build command smoke
+        env:
+          RUN_SEMANTIC_CERTIFICATION: "0"
+        run: node scripts/apply-chat-polish.mjs && node scripts/apply-restaurant-constraint-copy.mjs && node scripts/phase-o-build-gate.mjs && node --import tsx scripts/write-semantic-certification-artifact.ts
