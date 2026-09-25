@@ -22,6 +22,8 @@ import {
 } from './_customer-db';
 import { resolveCanonicalGuestId } from './_thongthai-identity';
 import { extractPreferenceSignal } from './_customer-phrase-intelligence';
+import { evaluateBotQualitySignals } from './_bot-quality-intelligence';
+import { recordIntelligenceEvent } from './_customer-intelligence-events';
 import {
   executeBrainTools,
   loadBrainRuntime,
@@ -3325,8 +3327,27 @@ export type ThongthaiChatCoreResult = { statusCode: number; payload: Record<stri
 // x-nf-request-id/x-request-id header), or null if transport gave us nothing
 // stable for this turn.
 export async function processThongthaiChatCore(request: BrainRequest, eventId: string | null): Promise<ThongthaiChatCoreResult> {
-  function coreResult(statusCode: number, payload: unknown): ThongthaiChatCoreResult {
-    return { statusCode, payload: payload as Record<string, unknown> };
+  async function coreResult(statusCode: number, payload: unknown): Promise<ThongthaiChatCoreResult> {
+    const typed = payload as Record<string, unknown>;
+    if (statusCode === 200 && typeof typed?.message === 'string') {
+      const signals = evaluateBotQualitySignals({
+        customerMessage: request.message,
+        assistantMessage: typed.message,
+        chatHistory: request.chatHistory,
+      });
+      await Promise.all(signals.map(signal => recordIntelligenceEvent({
+        eventType: signal.eventType,
+        category: signal.category,
+        domain: signal.domain,
+        guestDbId,
+        message: request.message,
+        channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
+        sourceEventId: transportEventId,
+      }))).catch(error => {
+        console.error('THONGTHAI_BOT_QUALITY_EVENT_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+      });
+    }
+    return { statusCode, payload: typed };
   }
 
   const channel = getBrainChannel(request.pageContext.section);
