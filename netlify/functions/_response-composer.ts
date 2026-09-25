@@ -672,6 +672,69 @@ function restaurantTableAvailabilityUnknownCopy(input: ResponseComposerInput): s
   return `I understand you're asking about table availability${target}. I don't have a verified live table-availability source right now, so I can't honestly say whether it is full or available.`;
 }
 
+const TASK_SUMMARY_FIELDS_TH: Record<string, string> = {
+  date:'วัน',
+  time:'เวลา',
+  durationMinutes:'ระยะเวลา',
+  partySize:'จำนวนคน',
+  quantity:'จำนวน',
+  checkIn:'วันเช็กอิน',
+  checkOut:'วันเช็กเอาต์',
+  roomType:'ประเภทห้อง',
+  seatPreference:'ที่นั่ง',
+  budget:'งบ',
+  budgetBand:'ช่วงงบ',
+  horseName:'ม้า',
+};
+
+function formatTaskSummaryValue(key: string, value: unknown, language: ResponseLanguage): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return null;
+  if (language === 'th') {
+    if (key === 'durationMinutes') return `${value} นาที`;
+    if (key === 'partySize') return `${value} คน`;
+  }
+  return String(value);
+}
+
+function activeTaskSummaryMessage(input: ResponseComposerInput): string {
+  const task = input.dialogDecision.taskStateContainer.activeTask;
+  if (!task) {
+    return input.language === 'th'
+      ? 'ตอนนี้ยังไม่มีรายการที่กำลังเลือกหรือกรอกค้างอยู่ครับ'
+      : 'There is no active selection or in-progress request right now.';
+  }
+
+  const items: string[] = [];
+  const selectedNames = [...new Set(task.selectedEntities.map(entity => entity.name.trim()).filter(Boolean))];
+  if (selectedNames.length) {
+    items.push(input.language === 'th'
+      ? `รายการที่เลือก: ${selectedNames.join(', ')}`
+      : `Selected: ${selectedNames.join(', ')}`);
+  }
+
+  for (const [key, labelTh] of Object.entries(TASK_SUMMARY_FIELDS_TH)) {
+    // If a canonical selected entity already names the horse, do not repeat
+    // the same selection from the legacy horseName slot.
+    if (key === 'horseName' && selectedNames.length) continue;
+    const raw = task.slots[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const value = formatTaskSummaryValue(key, raw, input.language);
+    if (!value) continue;
+    items.push(input.language === 'th' ? `${labelTh}: ${value}` : `${key}: ${value}`);
+  }
+
+  if (!items.length) {
+    return input.language === 'th'
+      ? 'ตอนนี้มีรายการที่กำลังดำเนินอยู่ครับ แต่ยังไม่มีรายละเอียดที่ลูกค้าเลือกไว้ให้สรุป'
+      : 'There is an active request, but no customer-facing selections have been captured yet.';
+  }
+
+  if (input.language === 'th') {
+    return `ตอนนี้ที่เลือกไว้มี:\n• ${items.join('\n• ')}\n\nข้อมูลนี้ยังเป็นรายการที่กำลังคุยกันอยู่ ยังไม่ได้ยืนยันการจองหรือส่งรายการครับ`;
+  }
+  return `Current selections:\n- ${items.join('\n- ')}\n\nThese are still in-progress details, not a confirmed booking or submitted order.`;
+}
+
 export function composeDeterministicResponse(input: ResponseComposerInput): ComposedResponse {
   const copy = deterministicMessages(input.language);
   const outcome = input.operationalOutcome;
@@ -691,6 +754,8 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     }
   } else if (outcome?.executed && !outcome.success) {
     message = copy.failed;
+  } else if (input.dialogDecision.responseIntent === 'active_task_summary') {
+    message = activeTaskSummaryMessage(input);
   } else if (input.degradation.condition === 'source_unavailable') {
     message = restaurantTableAvailabilityUnknownCopy(input) ?? copy.unavailable;
   } else if (input.degradation.condition === 'fact_unknown') {
@@ -768,6 +833,10 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
 }
 
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
+  if (input.dialogDecision.responseIntent === 'active_task_summary') {
+    return composeDeterministicResponse(input);
+  }
+
   // If the model stack itself is the degraded component, do not immediately
   // call it again just to phrase the failure.
   if (input.degradation.condition === 'model_unavailable'

@@ -104,11 +104,31 @@ export type SemanticContextEntity = {
   parentId?: string;
 };
 
+export type SemanticContextTurn = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+export type SemanticTaskContext = {
+  type: string;
+  domain: SemanticDomain;
+  status: string;
+  knownSlots: Record<string, unknown>;
+  missingFields: string[];
+  selectedEntities: SemanticContextEntity[];
+  constraints: string[];
+};
+
 export type SemanticContext = {
   activeDomain: SemanticDomain | null;
   recentEntities: SemanticContextEntity[];
   lastAction?: SemanticAction;
   openQuestion?: string;
+  activeTopic?: string;
+  rollingSummary?: string;
+  recentTurns?: SemanticContextTurn[];
+  activeTask?: SemanticTaskContext | null;
+  suspendedTask?: SemanticTaskContext | null;
 };
 
 export function emptySemanticContext(): SemanticContext {
@@ -126,6 +146,9 @@ export type SemanticReference = {
   refersToPriorContext: boolean;
   resolvedEntityId?: string | null;
   resolvedEntityIds?: string[];
+  /** Exact privacy-safe task slot key resolved from SemanticContext.activeTask.
+   *  This is a pointer to canonical task state, never a model-invented value. */
+  resolvedTaskSlot?: string;
   ambiguous?: boolean;
 };
 
@@ -175,17 +198,39 @@ export function toSemanticInterpretationMeta(turn: SemanticTurn): SemanticInterp
   };
 }
 
+function describeTaskContext(label: string, task: SemanticTaskContext | null | undefined): string | null {
+  if (!task) return null;
+  const selected = task.selectedEntities.map(entity => entity.name).filter(Boolean);
+  return `${label}: ${JSON.stringify({
+    type: task.type,
+    domain: task.domain,
+    status: task.status,
+    knownSlots: task.knownSlots,
+    missingFields: task.missingFields,
+    selectedEntities: selected,
+    constraints: task.constraints,
+  })}`;
+}
+
 function describeContext(context: SemanticContext): string {
-  if (!context.activeDomain && !context.recentEntities.length && !context.openQuestion) return 'none';
   const entities = context.recentEntities
     .map(entity => `${entity.type}:${entity.name} (id=${entity.id}, domain=${entity.domain})`)
     .join('; ');
-  return [
+  const recentTurns = (context.recentTurns ?? [])
+    .map(turn => `${turn.role}: ${JSON.stringify(turn.content)}`)
+    .join(' ; ');
+  const parts = [
     context.activeDomain ? `active domain: ${context.activeDomain}` : null,
+    context.activeTopic ? `active topic: ${context.activeTopic}` : null,
     entities ? `recent entities (most relevant first): ${entities}` : null,
     context.lastAction ? `last action: ${context.lastAction}` : null,
     context.openQuestion ? `still waiting on: ${context.openQuestion}` : null,
-  ].filter(Boolean).join(' | ');
+    context.rollingSummary ? `bounded factual summary: ${JSON.stringify(context.rollingSummary)}` : null,
+    recentTurns ? `recent conversation evidence (oldest to newest): ${recentTurns}` : null,
+    describeTaskContext('active task evidence', context.activeTask),
+    describeTaskContext('suspended task evidence', context.suspendedTask),
+  ].filter(Boolean);
+  return parts.length ? parts.join(' | ') : 'none';
 }
 
 export function buildSemanticInterpreterPrompt(context: SemanticContext): string {
@@ -207,6 +252,15 @@ CONVERSATION CONTEXT: ${describeContext(context)}
 If the customer's message plainly continues or references that context (a short follow-up, a selection among
 things just mentioned, a correction, an implicit "the same one"), say so via "references" -- do not treat it
 as if it arrived with no history. If there truly is no relevant context, ordinary new requests need none.
+
+CONVERSATION-REFERENCE RULES:
+- active/suspended task evidence is CONTEXT, not permission to execute anything.
+- When the customer refers to an already-known task value without restating it (for example "same time", "same date",
+  "the previous duration"), emit a prior-context reference with type "task_slot" and value equal to the exact slot key
+  shown in active task evidence (for example "time", "date", "durationMinutes"). Do not copy or invent a different value.
+- When the customer asks what they have selected/provided so far, use intent "summarize_active_task" with action "ask".
+  That is a request to summarize existing state, not a request for a fresh catalog/recommendation.
+- Recent turns and rolling summary are evidence for ellipsis/references only. The CURRENT message still outranks them.
 
 ECOSYSTEM VOCABULARY (canonical -- from the Bible, do not use a different version of this elsewhere):
 ${THONGTHAI_BIBLE_SECTIONS.ecosystemVocabulary}
@@ -268,9 +322,19 @@ function normalizeReferences(value: unknown): SemanticReference[] {
  */
 export function resolveReferences(references: SemanticReference[], context: SemanticContext): SemanticReference[] {
   return references.map(reference => {
-    if (!reference.refersToPriorContext || !context.recentEntities.length) return reference;
+    if (!reference.refersToPriorContext) return reference;
 
     const value = (reference.value ?? '').trim();
+
+    // Task-slot references are resolved against the privacy-safe, canonical
+    // task evidence supplied by the orchestrator. The model names ONLY the
+    // slot key; it never supplies/guesses the prior value.
+    if (reference.type === 'task_slot' && value && context.activeTask?.knownSlots
+        && Object.prototype.hasOwnProperty.call(context.activeTask.knownSlots, value)) {
+      return { ...reference, resolvedTaskSlot:value };
+    }
+
+    if (!context.recentEntities.length) return reference;
     const byExactName = value
       ? context.recentEntities.filter(entity => entity.name === value || entity.name.includes(value) || value.includes(entity.name))
       : [];
@@ -304,14 +368,30 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
   const references = resolveReferences(normalizeReferences(parsed.references), context);
+  const entities = asRecord(parsed.entities);
+
+  // Deterministically materialize only task-slot references that were
+  // validated against the real active-task context. This is analogous to
+  // entity-id resolution above: the model identifies WHAT is being referred
+  // to; canonical state supplies the actual value.
+  for (const reference of references) {
+    const slot = reference.resolvedTaskSlot;
+    if (!slot || entities[slot] !== undefined) continue;
+    const value = context.activeTask?.knownSlots?.[slot];
+    if (value !== undefined && value !== null) entities[slot] = value;
+  }
+
   const hasUnresolvedReference = references.some(reference =>
-    reference.refersToPriorContext && !reference.resolvedEntityId && !reference.resolvedEntityIds?.length);
+    reference.refersToPriorContext
+    && !reference.resolvedEntityId
+    && !reference.resolvedEntityIds?.length
+    && !reference.resolvedTaskSlot);
 
   return {
     domain,
     intent,
     action,
-    entities: asRecord(parsed.entities),
+    entities,
     references,
     constraints: asStringArray(parsed.constraints),
     confidence,

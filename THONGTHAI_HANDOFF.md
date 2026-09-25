@@ -7883,3 +7883,154 @@ that meaning into a broader legacy category.
 The required chain is now:
 `whole-sentence meaning -> precise semantic intent -> correct knowledge need -> truthful intent-preserving response`.
 
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 2 / Checkpoint 2.1 — Conversation + Active Task Context — 2026-09-26
+
+**STATUS: GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY.**
+
+### Goal
+
+Make the semantic brain understand short human follow-ups from the real bounded conversation/task state already present in the system, without creating a second memory system and without replacing deterministic business execution.
+
+This checkpoint targets the previously documented 16-turn gaps such as:
+- `เวลาเดิมนะ`
+- `ตอนนี้ที่เลือกไว้มีอะไรบ้าง`
+
+### RED evidence
+
+Branch:
+`human-brain/phase2-conversation-context-20260926`
+
+RED commit:
+`34d8a08a26f96e2edac2021d3c915b4c0356df7a`
+
+GitHub Actions:
+run `36170205619` = FAILURE
+
+Three exact RED failures proved:
+
+1. Semantic brain did not receive bounded recent turns / active topic / rolling summary / active task values.
+2. A model-identified prior task-slot reference could not resolve `time` from canonical task state, so `เวลาเดิมนะ` had no safe way to reuse the already-known value.
+3. `summarize_active_task` was incorrectly treated like a normal activity `ask` and triggered catalog knowledge lookup instead of reading the task state already owned by the system.
+
+### Implementation
+
+#### Semantic context now receives existing bounded evidence
+
+No new table, DB, or transcript store was created.
+
+The existing `ConversationContextState` already stores bounded/redacted:
+- recent turns
+- rolling summary
+- active domain/topic
+- open question
+- recent entities
+
+`buildSemanticContext()` now exposes those same bounded fields to the Semantic Interpreter.
+
+#### Privacy-safe task evidence
+
+The orchestrator now adds a reduced semantic view of:
+- active task
+- suspended task
+- task type/domain/status
+- selected entities
+- missing-field names
+- task constraints
+- customer-facing known slots only
+
+Allowed task values include items such as:
+- date
+- time
+- partySize
+- durationMinutes
+- quantity
+- checkIn/checkOut
+- horseName
+- roomType
+- seatPreference
+- budget/activity/service descriptors
+
+Contact/payment/internal routing values are NOT sent to the semantic prompt.
+
+Direct regression proves:
+- time/duration/entity are present
+- phone is absent
+- email is absent
+- internal resourceCode is not customer-facing summary output
+
+#### Canonical task-slot references
+
+The model may identify a contextual reference with:
+- `type: "task_slot"`
+- `value: <exact safe slot key>`
+
+Example semantic meaning:
+- "same time" -> task_slot/time
+
+The model names only WHAT prior field is referenced.
+The deterministic validator then obtains the actual value from canonical active-task state.
+
+The model does not invent/copy the old value itself.
+
+A resolved task-slot reference is considered a valid resolved prior-context reference and does not force needless clarification.
+
+#### Generic active-task summary
+
+New first-class machine response:
+- semantic intent: `summarize_active_task`
+- response intent: `active_task_summary`
+
+It:
+- reads current task state
+- makes zero catalog fetches
+- never executes a transaction
+- summarizes only customer-facing selections
+- explicitly states that the details are still in progress / not a confirmed booking or submitted order
+
+Example covered state:
+- ภาราดร
+- date
+- 15:00
+- 60 minutes
+- 2 people
+
+Phone/email/internal resource codes are never rendered.
+
+### Human Brain prompt doctrine added
+
+Conversation evidence is context, not execution authority.
+
+Rules now explicitly cover:
+- short follow-ups / ellipsis
+- task-slot references such as same time/date/duration
+- asking what has been selected/provided so far
+- CURRENT utterance still outranks prior context
+
+No runtime Thai phrase trigger was added for these examples.
+
+### GREEN evidence
+
+Implementation head before docs:
+`e1f228e972ac7b08c0d6b29c17fcd3a88b3b28e5`
+
+GitHub Actions:
+run `36170627215`
+**1121 / 1121 PASS**
+
+No DB/schema change.
+No production transaction.
+No new repo/site/project.
+No manual Netlify deploy.
+
+### Next Phase 2 checkpoint
+
+Checkpoint 2.2 will expand human conversational continuity to:
+- pronouns/deictics: อันนั้น / ตัวเดิม / อันเมื่อกี้
+- short elliptical follow-ups: พรุ่งนี้ล่ะ / แล้วอันนี้ล่ะ
+- change-of-mind / interruption: ไม่เอาละ ไปกินข้าวก่อน
+- safe topic resume without stale task hijack
+- preserve current-turn precedence over all prior state
