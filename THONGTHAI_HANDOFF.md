@@ -8034,3 +8034,182 @@ Checkpoint 2.2 will expand human conversational continuity to:
 - change-of-mind / interruption: ไม่เอาละ ไปกินข้าวก่อน
 - safe topic resume without stale task hijack
 - preserve current-turn precedence over all prior state
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 1 / Checkpoint 1.3 — Closed Semantic Information Facets — 2026-09-26
+
+**STATUS: CODE GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY / LIVE TRACE VERIFICATION.**
+
+### Why Checkpoint 1.2 was still not enough
+
+The owner correctly rejected the generic fallback as proof of understanding.
+
+Production has bounded safe One-Mind traces in the existing `one_mind_traces` table, so the real LINE turn was inspected directly instead of inferring understanding from customer-facing prose.
+
+Real production trace for the owner's table-availability turn showed:
+
+- channel: `line`
+- domain: `restaurant`
+- intent: `table_availability_check`
+- action: `status`
+- confidence: `high`
+- needsClarification: `false`
+- dialog: `query_knowledge`
+- degradation: `fact_unknown`
+- knowledge source: `none`
+- composer: `deterministic`
+
+So the language model DID understand the turn as table availability.
+
+The architecture bug was downstream: Checkpoint 1.2 routed availability only when the arbitrary free-form intent string was exactly:
+
+`restaurant_table_availability`
+
+The live model used the equally-correct label:
+
+`table_availability_check`
+
+That caused the same meaning to fall through to legacy `action=status -> order_status` semantics and then generic fact-unknown fallback.
+
+### Architectural fix
+
+Free-form model intent labels are no longer trusted as machine routing keys.
+
+`SemanticTurn` now has an optional closed machine-facing facet:
+
+`informationNeed`
+
+Allowed values:
+- none
+- availability
+- price
+- schedule
+- inventory
+- catalog
+- recommendation
+- ingredients
+- policy
+- transaction_status
+
+`intent` remains useful for:
+- observability
+- evaluation
+- human diagnostics
+
+but machine knowledge routing must use the closed facet when supplied.
+
+### Semantic prompt
+
+The real semantic-model prompt now explicitly separates:
+
+- `intent`: free-form descriptive snake_case label
+- `action`: interaction/action class
+- `informationNeed`: CLOSED machine-facing information class
+
+Important doctrine:
+- asking whether a table/room/activity/resource is free/full/open/available -> `availability`
+- asking status of an already-existing booking/order/payment/member transaction -> `transaction_status`
+- ordinary conversation/non-lookup -> `none`
+
+This removes dependence on exact synonymous intent-label wording.
+
+### Parser safety
+
+The parser validates `informationNeed` against the closed enum.
+
+Unknown model values become:
+- `none`
+
+They never become arbitrary routing strings.
+
+### Dialog routing
+
+For restaurant:
+- informationNeed=availability -> restaurant availability
+- informationNeed=price -> restaurant price
+- informationNeed=ingredients -> restaurant ingredients
+- informationNeed=transaction_status -> order status
+
+Mature deterministic turns that do not yet carry the optional facet keep their old compatibility behavior.
+
+### Response composition
+
+The honest table-availability fallback now keys from the resolved knowledge need:
+- restaurant + availability
+
+It no longer requires one exact free-form intent label.
+
+Thus any valid semantic intent wording that resolves to `informationNeed=availability` receives the contextual date/time/table response.
+
+### Observability
+
+Safe semantic trace metadata now includes:
+- `informationNeed`
+
+No raw customer text.
+No raw model output.
+No chain-of-thought.
+
+This means future owner live tests can be verified from production trace directly:
+- what the model understood
+- what knowledge need it requested
+- why it degraded
+- which composer path answered
+
+### RED evidence
+
+PR #108 initial RED:
+- commit `d285d62ea109cf171dc79f97cb0f039e80b07e24`
+- GitHub Actions run `36171881259`
+- failed 3 new tests as expected:
+  - parser dropped informationNeed
+  - downstream used order_status despite informationNeed=availability
+  - unknown facet was not normalized
+
+### GREEN evidence
+
+Implementation + compatibility-test head:
+- `979a48dd1a3360489f6a633e67b0f453e50e2cdf`
+
+GitHub Actions:
+- run `36172348686`
+- **1124 / 1124 PASS**
+
+The canonical owner regression now deliberately uses the LIVE model's real free-form label:
+- `table_availability_check`
+
+plus:
+- `informationNeed=availability`
+
+and requires the final response to preserve:
+- table/seat meaning
+- tomorrow
+- 18:00
+- no menu hijack
+
+### Safety / migration discipline
+
+No DB/schema change.
+No production transaction.
+No manual Netlify deploy.
+No business-rule rewrite.
+No free-form intent synonym list.
+
+This is a semantic contract upgrade layered onto the existing proven system.
+
+### Next verification
+
+After merge + automatic production deploy:
+1. owner sends the same natural LINE question once
+2. inspect customer reply
+3. query `one_mind_traces`
+4. require:
+   - semantic.domain=restaurant
+   - semantic.informationNeed=availability
+   - high/acceptable semantic confidence
+   - no order_status routing
+   - contextual fallback if live table source is still unconfigured
+
+Only then close Checkpoint 1.3.
