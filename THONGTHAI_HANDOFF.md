@@ -5997,3 +5997,41 @@ Owner retest after production deploy:
 - then `ร้านอาหารมีอะไรแนะนำ`;
 - then `มีอะไรแนะนำอีก`;
 - no chicken dish may appear even if intelligence-profile metadata is missing.
+
+
+## Phase 2 Stabilization — Dietary restaurant intent beats Local Concierge generic food-culture — 2026-09-25
+
+Owner production smoke exposed a routing bug after the durable no-chicken fix:
+- `ไม่กินเผ็ดด้วยนะ` returned generic Isan-food copy instead of a short dietary acknowledgment.
+- `บอกว่าไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง มีอะไรแนะนำบ้าง` repeated the same generic food-culture answer instead of using the grounded restaurant advisor.
+
+Root cause:
+`deterministicLocalConciergeResponse` runs before `deterministicRestaurantResponse`. Its broad `food_culture` classifier could claim high-confidence dietary restaurant turns before the dedicated restaurant intent gate ever ran.
+
+Load-bearing red proof:
+commit `80081d4b4fff3f0d33cc9f682f8058718596af6c` added the exact production phrases as full signed LINE tests and failed both.
+
+Fix:
+- before Local Concierge, compute the existing `classifyRestaurantDietaryIntent`;
+- prefer the grounded restaurant path for:
+  1. `CONSTRAINT_ONLY` declarations/updates;
+  2. `CONSTRAINT_AND_RECOMMENDATION` only when the same message has an explicit grounded menu/recommendation ask (`มีอะไร`, `แนะนำอะไร`, `กินอะไรดี`, `ขอเมนู`, etc.);
+- deliberately do NOT steal broad hospitality/food-culture messages such as `อยากกินอีสาน ไม่กินเผ็ด`, and do not steal recommendation-only visitor-context questions such as `มากับแฟนกินอะไรดี`.
+- weather/location precedence remains unchanged and still wins earlier.
+
+Regression coverage:
+- exact owner phrase `ไม่กินเผ็ดด้วยนะ` -> short constraint ack, no generic Isan-food copy, no menu dump;
+- exact combined phrase -> grounded priced menu, excludes chicken/shrimp/spicy test dishes;
+- existing Local Concierge food-culture and Service Mind tests remain green.
+
+Verified branch head `59a2ff2d945920d76ecfb9cf39aee088f0b4ff9d`: GitHub Actions **1059/1059 passing, 0 failures**.
+
+No DB migration. No production DB mutation. No Phase 3 work.
+
+Owner retest after deploy:
+1. `ไม่กินเผ็ดด้วยนะ`
+2. `บอกว่าไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง มีอะไรแนะนำบ้าง`
+Expected:
+- turn 1 short acknowledgment only;
+- turn 2 grounded menu recommendations respecting all 3 current constraints;
+- never the generic `อาหารอีสานแท้ๆ...รสจัดจ้าน...` paragraph.

@@ -3796,13 +3796,43 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // One-Mind can't claim these messages first either. See
   // deterministicLocalConciergeResponse's own header comment for the full
   // precedence reasoning and the explicit-transaction-intent yield.
-  const localConcierge = await deterministicLocalConciergeResponse(request).catch(error => {
-    // redactWeatherUrl: defense-in-depth -- some fetch implementations
-    // embed the request URL (appid=<key> included) in their own error
-    // message; never let that reach a log line unredacted.
-    console.error('THONGTHAI_LOCAL_CONCIERGE_ERROR', error instanceof Error ? redactWeatherUrl(error.message.slice(0, 220)) : 'unknown');
-    return null;
-  });
+  // High-confidence restaurant dietary/recommendation intent must not be
+  // swallowed by Local Concierge's broader food-culture classifier. A real
+  // production failure showed "ไม่กินเผ็ดด้วยนะ" and
+  // "ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง มีอะไรแนะนำบ้าง" returning generic
+  // Isan-food copy instead of updating/enforcing dietary constraints.
+  //
+  // This is a semantic-precedence gate, not a phrase patch: once the dedicated
+  // restaurant intent classifier says the turn is a dietary declaration or
+  // explicit recommendation and the restaurant domain accepts the turn, the
+  // grounded restaurant responder below owns it. Weather/location still win
+  // earlier through the top-level semantic gate.
+  const restaurantDietaryIntentForPrecedence = classifyRestaurantDietaryIntent(request.message);
+  // Do not steal broad food-culture discovery ("อยากกินอีสาน ไม่กินเผ็ด")
+  // from Local Concierge. The restaurant fast path owns:
+  //   1) a pure dietary declaration/update, and
+  //   2) a dietary message that ALSO explicitly asks for a concrete menu/
+  //      recommendation ("...มีอะไรแนะนำบ้าง", "...กินอะไรดี", etc.).
+  // Bare "อยากกิน..." remains hospitality/food-culture intent.
+  const explicitGroundedMenuAsk = /มีอะไร|แนะนำอะไร|กินอะไรดี|ขอเมนู|มีเมนู|จัดชุด|จัดโต๊ะ|อะไรอร่อย|มีไรกิน|ไรกิน/u.test(request.message);
+  const preferGroundedRestaurant = isRestaurantAdvisorTurn(request, runtime)
+    && (
+      restaurantDietaryIntentForPrecedence === 'CONSTRAINT_ONLY'
+      || (
+        restaurantDietaryIntentForPrecedence === 'CONSTRAINT_AND_RECOMMENDATION'
+        && explicitGroundedMenuAsk
+      )
+    );
+
+  const localConcierge = preferGroundedRestaurant
+    ? null
+    : await deterministicLocalConciergeResponse(request).catch(error => {
+      // redactWeatherUrl: defense-in-depth -- some fetch implementations
+      // embed the request URL (appid=<key> included) in their own error
+      // message; never let that reach a log line unredacted.
+      console.error('THONGTHAI_LOCAL_CONCIERGE_ERROR', error instanceof Error ? redactWeatherUrl(error.message.slice(0, 220)) : 'unknown');
+      return null;
+    });
   if (localConcierge) {
     const polished = polishedResponse(localConcierge, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
