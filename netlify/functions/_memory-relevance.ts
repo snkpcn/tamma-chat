@@ -170,3 +170,18 @@ export function planMemoryRelevance(
   // operational/administrative domains stay memory-neutral by default.
   return none();
 }
+
+
+/** Apply only the selected memory constraints to downstream planning.
+ * The original semantic classification is preserved separately by the
+ * orchestrator for observability/conversation state. */
+export function semanticTurnForDialog(
+  turn: SemanticTurn,
+  plan: MemoryRelevancePlan,
+): SemanticTurn {
+  const constraints = [...new Set([
+    ...turn.constraints,
+    ...plan.relevantConstraints,
+  ])];
+  return { ...turn, constraints };
+}
