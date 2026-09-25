@@ -6672,3 +6672,71 @@ Automatic Netlify production deploy:
 Phase 2.7 is therefore **DONE**.
 
 Phase 3 — Owner Dashboard / Customer Voice OS remains **NOT STARTED** at this checkpoint.
+
+
+---
+
+## Phase 2.7 Production Smoke Fix — Missing no_shrimp aggregate signal — 2026-09-25
+
+**STATUS: CODE FIXED; CI GREEN; PENDING PR #95 MERGE + PRODUCTION RETEST.**
+
+Owner production smoke sent:
+
+`ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง`
+
+The customer-facing reply was correct, but production `customer_intelligence_events` contained only:
+
+- `low_spice`
+- `no_chicken`
+
+and omitted `no_shrimp`.
+
+This exposed an aggregate-classifier completeness gap: durable guest memory already stored `no_shrimp`, but `extractIntelligenceSignals` had no matching aggregate phrase signal.
+
+### Test-first proof
+
+Test-only commit:
+- `7a74b2294ed6b241cefa2c11e5d86b6449c010a1`
+
+GitHub Actions run:
+- `36127769668`
+
+Exact failure:
+- `durable no_shrimp must also be represented in aggregate intelligence`
+
+### Fix
+
+`extractIntelligenceSignals` now emits:
+
+```ts
+{ eventType: 'phrase', category: 'no_shrimp', domain: 'restaurant' }
+```
+
+for plain avoidance:
+- `ไม่กินกุ้ง`
+- `ไม่เอากุ้ง`
+- `งดกุ้ง`
+
+while continuing to keep `แพ้กุ้ง` as the separate risk signal `shrimp_allergy`.
+
+This keeps aggregate customer intelligence aligned with the existing durable preference vocabulary instead of introducing a new parallel concept.
+
+### Verification
+
+Fix commit:
+- `f953a3e35305b8176b6b95c4b3e1cfa522c240e9`
+
+GitHub Actions run:
+- `36127886662`
+
+Result:
+- **1075 / 1075 PASS**
+
+Production retest required after deployment:
+- resend `ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง`
+- verify the new transport turn creates all three aggregate categories:
+  - `low_spice`
+  - `no_chicken`
+  - `no_shrimp`
+
+Do not start Phase 3 until this production retest passes.
