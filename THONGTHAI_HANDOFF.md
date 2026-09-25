@@ -5964,3 +5964,36 @@ Expected:
 - no bare staple presented as a top standalone recommendation when substantive food exists;
 - no repeated names across pages;
 - final page honestly says no more verified options when exhausted.
+
+
+## Phase 2 Stabilization — Durable protein avoidance safety — 2026-09-25
+
+Owner production smoke after the final restaurant paging work exposed a load-bearing dietary safety failure: the customer had previously said `ไม่กินไก่`, but a later recommendation returned `ไก่บ้านทอดสมุนไพร`.
+
+A production-shaped failing test proved the exact mechanism:
+- `ไม่กินไก่` **did persist correctly** as durable `guest_memory.constraints = no_chicken`;
+- the next recommendation naturally said `ถ้ายังเลี่ยงไก่อยู่...`, proving the durable constraint was active;
+- but a chicken dish still passed when curated `profile.proteinTags` was unavailable, because hard exclusion relied on profile tags instead of authoritative raw `ingredient_names`.
+
+Load-bearing red proof: commit `634d901586b0779e2a94ab23e858c67234af5036` failed the new full LINE test with actual output containing `ไก่บ้านทอดสมุนไพร` despite active `no_chicken`.
+
+Fix:
+- protein avoidance now has a raw-ingredient fallback in `_restaurant-intelligence.ts`;
+- `no_chicken` detects real chicken-meat ingredient forms (ไก่บ้าน/เนื้อไก่/อกไก่/สะโพกไก่/น่องไก่/ปีกไก่/ไก่ย่าง/ไก่ทอด/ไก่สับ/chicken) while deliberately NOT treating `ไข่ไก่` as chicken meat;
+- equivalent defensive raw fallbacks were added for pork/beef/fish/egg constraints;
+- curated profile tags remain useful, but are no longer a single point of failure for dietary exclusion.
+
+Regression test: `tests/master-roadmap-phase2-durable-no-chicken.test.ts` uses full signed LINE flow and a menu catalog with **no curated intelligence profiles**. It proves:
+1. `ไม่กินไก่` persists into existing guest_memory as `no_chicken`;
+2. a later restaurant recommendation does not contain the raw chicken-ingredient dish;
+3. non-chicken alternatives remain available.
+
+Verified fixed head `b5f6bba367ddb1924923394c1b6c539769cfb611`: GitHub Actions **1057/1057 passing, 0 failures**.
+
+No DB migration. No production DB mutation. No Phase 3 work.
+
+Owner retest after production deploy:
+- send `ไม่กินไก่` once to ensure this old test conversation has a fresh durable no_chicken constraint;
+- then `ร้านอาหารมีอะไรแนะนำ`;
+- then `มีอะไรแนะนำอีก`;
+- no chicken dish may appear even if intelligence-profile metadata is missing.

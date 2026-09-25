@@ -245,6 +245,30 @@ function isUnverifiedSpicyRiskItem(item: RestaurantAdvisorItem): boolean {
   return SPICY_RISK_CATEGORY_RE.test(item.name) || SPICY_RISK_CATEGORY_RE.test(item.category);
 }
 
+// Dietary protein exclusions must not depend on manually curated
+// profile.proteinTags. The authoritative menu SOT already carries raw
+// ingredient_names, and production can temporarily have a missing/stale
+// intelligence profile. A real owner smoke exposed exactly this: durable
+// no_chicken memory was active, but a chicken dish slipped through when the
+// advisor saw no usable protein tag.
+//
+// Keep chicken matching deliberately away from "ไข่ไก่": avoiding chicken meat
+// does not automatically mean avoiding eggs.
+function rawIngredientHasAvoidedProtein(ingredient: string, avoidProteins: string[]): boolean {
+  const value = norm(ingredient);
+  for (const protein of avoidProteins) {
+    if (protein === 'chicken' && (
+      value === 'ไก่'
+      || /(?:ไก่บ้าน|เนื้อไก่|อกไก่|สะโพกไก่|น่องไก่|ปีกไก่|ไก่ย่าง|ไก่ทอด|ไก่สับ|chicken)/iu.test(value)
+    )) return true;
+    if (protein === 'pork' && /(?:หมู|pork)/iu.test(value)) return true;
+    if (protein === 'beef' && (value === 'เนื้อ' || /(?:เนื้อวัว|เนื้อโค|beef)/iu.test(value))) return true;
+    if (protein === 'fish' && (/^ปลา/u.test(value) || /(?:เนื้อปลา|fish)/iu.test(value))) return true;
+    if (protein === 'egg' && (/^ไข่/u.test(value) || /egg/iu.test(value))) return true;
+  }
+  return false;
+}
+
 // Restaurant recommendation scope.
 //
 // A real production smoke after PR #80 exposed a semantic drift: the guest
@@ -305,6 +329,7 @@ function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): b
   if (item.profile.allergenFlags.some(tag => pref.allergenFlags.includes(tag))) return true;
   const ingredients = item.ingredients.map(norm);
   if (pref.avoidIngredients.some(avoid => ingredients.some(ingredient => ingredient.includes(norm(avoid))))) return true;
+  if (ingredients.some(ingredient => rawIngredientHasAvoidedProtein(ingredient, pref.avoidProteins))) return true;
   if (pref.spice === 'none' && item.profile.spiceLevel >= 3) return true;
   if (pref.spice === 'none' && isUnverifiedSpicyRiskItem(item)) return true;
   // Strict "ไม่เผ็ด" must also respect the authoritative ingredient list.
