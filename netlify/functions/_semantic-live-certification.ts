@@ -4,7 +4,6 @@
 // - No customer DB, memory, trace, booking/order/payment, or runtime state.
 // - Calls ONLY the semantic language interpreter against repository-owned
 //   non-personal golden evaluation cases.
-// - The HTTP wrapper is token-gated and returns 404 when disabled/mismatched.
 
 import {
   emptySemanticContext,
@@ -83,16 +82,21 @@ export type SemanticCertificationResult = {
   failures: SemanticCertificationFailure[];
 };
 
-function allCases(): SemanticEvalCase[] {
-  return [...SEMANTIC_EVAL_CORPUS, ...PHASE_L_SEMANTIC_CASES];
+export function getSemanticCertificationCases(
+  profile: SemanticCertificationProfile = 'full',
+): SemanticEvalCase[] {
+  const corpus: SemanticEvalCase[] = [...SEMANTIC_EVAL_CORPUS, ...PHASE_L_SEMANTIC_CASES];
+  return profile === 'production-smoke'
+    ? corpus.filter(item => PRODUCTION_SMOKE_IDS.has(item.id))
+    : corpus;
 }
 
-function expectedInformationNeed(item: SemanticEvalCase): string | null {
+export function expectedSemanticInformationNeed(item: SemanticEvalCase): string | null {
   const value = item.simulatedModelOutput?.informationNeed;
   return typeof value === 'string' ? value : null;
 }
 
-function matchesExpected(item: SemanticEvalCase, turn: SemanticTurn): boolean {
+export function semanticTurnMatchesExpected(item: SemanticEvalCase, turn: SemanticTurn): boolean {
   if (turn.domain !== item.expected.domain) return false;
   if (item.expected.action !== undefined && turn.action !== item.expected.action) return false;
   if (
@@ -100,10 +104,34 @@ function matchesExpected(item: SemanticEvalCase, turn: SemanticTurn): boolean {
     && turn.needsClarification !== item.expected.needsClarification
   ) return false;
 
-  const informationNeed = expectedInformationNeed(item);
+  const informationNeed = expectedSemanticInformationNeed(item);
   if (informationNeed !== null && (turn.informationNeed ?? 'none') !== informationNeed) return false;
 
   return true;
+}
+
+export function semanticCertificationFailureForTurn(
+  item: SemanticEvalCase,
+  turn: SemanticTurn,
+): SemanticCertificationFailure | null {
+  if (semanticTurnMatchesExpected(item, turn)) return null;
+  return {
+    id:item.id,
+    category:item.category,
+    expected:{
+      domain:item.expected.domain,
+      action:item.expected.action ?? null,
+      needsClarification:item.expected.needsClarification ?? null,
+      informationNeed:expectedSemanticInformationNeed(item),
+    },
+    actual:{
+      domain:turn.domain,
+      action:turn.action,
+      needsClarification:turn.needsClarification,
+      informationNeed:turn.informationNeed ?? 'none',
+      confidence:turn.confidence,
+    },
+  };
 }
 
 export async function runSemanticCertification(options: {
@@ -113,10 +141,7 @@ export async function runSemanticCertification(options: {
   interpret?: typeof interpretSemanticTurn;
 } = {}): Promise<SemanticCertificationResult> {
   const profile = options.profile ?? 'full';
-  const corpus = allCases();
-  const profileCases = profile === 'production-smoke'
-    ? corpus.filter(item => PRODUCTION_SMOKE_IDS.has(item.id))
-    : corpus;
+  const profileCases = getSemanticCertificationCases(profile);
 
   const start = Math.max(0, Math.min(profileCases.length, Math.floor(options.start ?? 0)));
   const requestedLimit = Math.floor(options.limit ?? 10);
@@ -130,27 +155,9 @@ export async function runSemanticCertification(options: {
   for (const item of selected) {
     try {
       const turn = await interpret(item.message, item.context ?? emptySemanticContext());
-      if (matchesExpected(item, turn)) {
-        pass += 1;
-        continue;
-      }
-      failures.push({
-        id:item.id,
-        category:item.category,
-        expected:{
-          domain:item.expected.domain,
-          action:item.expected.action ?? null,
-          needsClarification:item.expected.needsClarification ?? null,
-          informationNeed:expectedInformationNeed(item),
-        },
-        actual:{
-          domain:turn.domain,
-          action:turn.action,
-          needsClarification:turn.needsClarification,
-          informationNeed:turn.informationNeed ?? 'none',
-          confidence:turn.confidence,
-        },
-      });
+      const failure = semanticCertificationFailureForTurn(item, turn);
+      if (!failure) pass += 1;
+      else failures.push(failure);
     } catch {
       failures.push({
         id:item.id,
@@ -159,7 +166,7 @@ export async function runSemanticCertification(options: {
           domain:item.expected.domain,
           action:item.expected.action ?? null,
           needsClarification:item.expected.needsClarification ?? null,
-          informationNeed:expectedInformationNeed(item),
+          informationNeed:expectedSemanticInformationNeed(item),
         },
         actual:{
           domain:'error',
