@@ -84,7 +84,7 @@ import {
   extractTime,
   hasCommitMarker,
 } from './_slot-parsers';
-import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask } from './_task-state';
+import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask, suspendActiveTask } from './_task-state';
 import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
 import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
@@ -1696,7 +1696,17 @@ const ACTIVITY_BOOKING_REQUIRED_FIELDS = ['assetSelection', 'duration', 'date', 
 async function persistHorseSelection(guestDbId: string | null, channel: BrainChannel, horseName: string): Promise<void> {
   if (!guestDbId) return;
   try {
-    const container = await loadTaskState(guestDbId);
+    let container = await loadTaskState(guestDbId);
+
+    // An explicit horse selection is a real domain switch. Preserve an
+    // unrelated unfinished task in the bounded suspended slot instead of
+    // overwriting it or letting it block horse context on the next LINE turn.
+    if (container.activeTask
+        && !isTerminalTaskStatus(container.activeTask.status)
+        && container.activeTask.domain !== 'activity') {
+      container = suspendActiveTask(container);
+    }
+
     const reusable = container.activeTask
       && container.activeTask.type === 'activity_booking'
       && !isTerminalTaskStatus(container.activeTask.status);
@@ -3203,10 +3213,18 @@ function deterministicActivityIntentStartResponse(request: BrainRequest): BrainR
 async function markActivityIntentStarted(guestDbId: string | null, channel: BrainChannel): Promise<void> {
   if (!guestDbId) return;
   try {
-    const container = await loadTaskState(guestDbId);
-    if (container.activeTask && !['completed', 'cancelled', 'failed', 'superseded'].includes(container.activeTask.status)) {
-      return;
+    let container = await loadTaskState(guestDbId);
+
+    if (container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+      // Same-domain activity context is already exactly what we need.
+      if (container.activeTask.domain === 'activity') return;
+
+      // A clear explicit activity/horse intent must be allowed to switch
+      // domains. Preserve the unrelated unfinished task using the existing
+      // bounded task stack instead of silently refusing the switch.
+      container = suspendActiveTask(container);
     }
+
     const next = startNewActiveTask(container, {
       type: 'activity_booking',
       sourceChannel: channel,
