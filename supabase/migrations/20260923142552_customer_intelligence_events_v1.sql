@@ -1,64 +1,92 @@
 -- ============================================================================
--- NOT APPLIED. OWNER APPROVAL REQUIRED BEFORE RUNNING AGAINST tamma-customer-
--- data (project upaokrprawzhgzeqsdke).
+-- OWNER APPROVED 2026-09-25 FOR tamma-customer-data
+-- project: upaokrprawzhgzeqsdke
 --
--- Master Roadmap Phase 2 (Customer Intelligence Memory) -- see
--- THONGTHAI_HANDOFF.md's "Master Roadmap Phase 2" entry for the full
--- design writeup. This file is kept in the repo as the reviewed,
--- ready-to-apply storage for the AGGREGATE (cross-guest) phrase/demand/
--- risk signal log a future owner dashboard needs.
+-- Phase 2.7 — aggregate customer intelligence storage.
 --
--- THE GAP: the existing guest_memory table is guest_id-scoped (one row
--- per memory_key, per guest, upserted) -- correct for "what does THIS
--- guest prefer," but it cannot represent "how many DIFFERENT guests said
--- this exact phrase" or "how often has this risk signal come up this
--- month" without attaching aggregate counters to every guest's own row,
--- which would conflate per-guest state with cross-guest business
--- intelligence. A new, purpose-built, append-only table is the correct
--- fit -- same design philosophy as the existing guest_events table
--- (event log, not a running counter; counting happens at QUERY time).
+-- Purpose:
+--   * guest_memory remains the per-guest personalization source of truth.
+--   * customer_intelligence_events is a separate append-style aggregate log
+--     for cross-guest phrase / demand / risk analysis.
 --
--- THE FIX IS PURELY ADDITIVE: one new table (this migration), no
--- existing table, trigger, function, or constraint is modified. Nothing
--- customer-facing depends on this table existing -- the actual
--- customer-facing personalization this phase ships (returning-guest
--- allergy/mobility awareness) reads ONLY the existing guest_memory
--- table via _customer-db.ts, completely independent of this one.
+-- Privacy:
+--   * never stores a full raw conversation transcript.
+--   * redacted_example is hard-capped at 80 chars and direct identifiers are
+--     removed in _customer-intelligence-events.ts before insert.
+--   * raw LINE/web transport event ids are never stored; source_event_key is
+--     a one-way SHA-256 key.
 --
--- SAFE TO APPLY: a brand-new table with RLS enabled and all grants
--- revoked from anon/authenticated (service-role only, matching every
--- other operational table in this schema) cannot affect any existing
--- read/write path -- nothing references customer_intelligence_events
--- until this migration exists. Until it's applied, netlify/functions/
--- _customer-intelligence-events.ts's write attempt fails gracefully
--- (caught, logged, never thrown) and every customer-facing turn remains
--- fully functional without it, just without the aggregate signal log.
+-- Reliability:
+--   * LINE/core retries must not inflate counts.
+--   * UNIQUE(source_event_key,event_type,category,domain) plus
+--     PostgREST resolution=ignore-duplicates makes the aggregate write
+--     idempotent for one transport turn while still allowing one turn to
+--     produce multiple distinct normalized signals.
 --
--- TO APPLY (owner-authorized only): run via the Supabase MCP server's
--- apply_migration tool (or `supabase db push`) against project
--- upaokrprawzhgzeqsdke, then confirm a real phrase/demand/risk-shaped
--- customer message produces exactly one row here.
+-- Security:
+--   * RLS enabled.
+--   * anon/authenticated/public receive no privileges.
+--   * service_role gets only SELECT + INSERT (no UPDATE/DELETE), matching the
+--     table's aggregate append-log role and future server-side dashboard use.
+--
+-- This migration is additive and does not modify any existing customer-facing
+-- table, trigger, function, or policy.
 -- ============================================================================
 
 create table if not exists public.customer_intelligence_events (
   id uuid primary key default gen_random_uuid(),
-  event_type text not null check (event_type in ('phrase', 'demand', 'risk')),
+
+  event_type text not null check (
+    event_type in ('phrase', 'demand', 'risk')
+  ),
+
   category text not null,
+
   domain text not null check (
     domain in ('restaurant', 'activity', 'stay', 'cafe', 'system', 'general')
   ),
+
   guest_id uuid null references public.guests(id) on delete set null,
-  -- A short, truncated snippet only -- never a full raw chat dump (see
-  -- _customer-intelligence-events.ts's own redactExample, capped well
-  -- below any real message length).
-  redacted_example text not null,
-  created_at timestamptz not null default now()
+
+  channel text not null check (
+    channel in ('web', 'line', 'other')
+  ),
+
+  -- SHA-256(channel + ':' + transport event id). The raw transport id is
+  -- deliberately never stored.
+  source_event_key text not null check (
+    source_event_key ~ '^[a-f0-9]{64}$'
+  ),
+
+  -- Short customer-language example only, never a full transcript.
+  redacted_example text not null check (
+    char_length(redacted_example) between 1 and 80
+  ),
+
+  created_at timestamptz not null default now(),
+
+  constraint customer_intelligence_events_source_signal_key
+    unique (source_event_key, event_type, category, domain)
 );
 
-create index if not exists customer_intelligence_events_category_idx
-  on public.customer_intelligence_events (event_type, category);
+-- Dashboard/trend queries: time window + normalized signal dimensions.
 create index if not exists customer_intelligence_events_created_at_idx
   on public.customer_intelligence_events (created_at desc);
 
+create index if not exists customer_intelligence_events_signal_idx
+  on public.customer_intelligence_events
+  (event_type, category, domain, created_at desc);
+
+-- Supports distinct-guest / returning-pattern analysis without exposing
+-- customer identity to client-side callers.
+create index if not exists customer_intelligence_events_guest_idx
+  on public.customer_intelligence_events (guest_id, created_at desc)
+  where guest_id is not null;
+
 alter table public.customer_intelligence_events enable row level security;
-revoke all on public.customer_intelligence_events from anon, authenticated;
+
+revoke all on table public.customer_intelligence_events
+  from public, anon, authenticated, service_role;
+
+grant select, insert on table public.customer_intelligence_events
+  to service_role;
