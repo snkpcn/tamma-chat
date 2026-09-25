@@ -89,7 +89,7 @@ const FOOD_CONSTRAINT_ALIASES: Record<string, Partial<Pick<ParsedPreferences,'sp
 }> = {
   no_pork:{avoidProteins:['pork']}, no_beef:{avoidProteins:['beef']}, no_chicken:{avoidProteins:['chicken']},
   no_fish:{avoidProteins:['fish']}, no_egg:{avoidProteins:['egg']}, no_plara:{avoidIngredients:['น้ำปลาร้า']},
-  no_peanut:{avoidIngredients:['ถั่วลิสงคั่ว']}, no_shrimp:{avoidIngredients:['กุ้งแห้ง']},
+  no_peanut:{avoidIngredients:['ถั่วลิสงคั่ว']}, no_shrimp:{avoidIngredients:['กุ้งแห้ง','กุ้ง']},
   peanut_allergy:{allergenFlags:['peanut']}, shrimp_allergy:{allergenFlags:['shrimp']},
   fish_allergy:{allergenFlags:['fish']}, egg_allergy:{allergenFlags:['egg']},
   no_spicy:{spice:'none'}, mild_spice:{spice:'mild'}, vegetarian:{vegetarian:true},
