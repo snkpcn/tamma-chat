@@ -25,11 +25,15 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Verify live-provider credentials are available
+      - name: Check live-provider credentials
+        id: creds
         run: |
           if [ -z "$GEMINI_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
             echo "LIVE_SEMANTIC_EVAL_NOT_RUN: no GitHub Actions model secret is configured."
-            exit 2
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Run full live semantic baseline
+        if: steps.creds.outputs.available == 'true'
         run: npm run eval:semantic:live
