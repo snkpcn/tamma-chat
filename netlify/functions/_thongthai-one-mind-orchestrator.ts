@@ -286,22 +286,44 @@ function nextConversationContext(
  *    invalid response) still propagates -- that is a different, real error
  *    class the caller must still see.
  */
-function deterministicOwnsActiveTransaction(
+function hasLiveActiveTask(taskState: TaskStateContainer): boolean {
+  const task = taskState.activeTask;
+  return Boolean(task && !isTerminalTaskStatus(task.status));
+}
+
+/**
+ * Human Brain strangler gate.
+ *
+ * The mature deterministic interpreter remains authoritative whenever it has
+ * already classified a turn precisely enough for the proven business/dialog
+ * path. We ask the language model to refine ONLY a deliberately coarse
+ * classification that would otherwise discard the meaning of the sentence.
+ *
+ * Phase 1 starts with restaurant_topic_switch because that classifier says
+ * only "this is about the restaurant" and intentionally carries no specific
+ * question/action/entities. It is exactly the class that swallowed the owner's
+ * real sentence "ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ" before the
+ * language model could understand availability/date/time.
+ *
+ * Cross-domain switches while an operational task is active remain on the
+ * proven deterministic suspend/resume path in this checkpoint. Later Human
+ * Brain phases can expand this gate only with their own RED/full-CI evidence.
+ */
+function deterministicNeedsLanguageRefinement(
   turn: SemanticTurn | null,
   taskState: TaskStateContainer,
-): turn is SemanticTurn {
-  const activeTask = taskState.activeTask;
-  if (!turn || !activeTask || isTerminalTaskStatus(activeTask.status)) return false;
-  if (activeTask.status !== 'collecting' && activeTask.status !== 'ready') return false;
+): boolean {
+  if (!turn) return true;
+  if (hasLiveActiveTask(taskState)) return false;
+  return turn.intent === 'restaurant_topic_switch';
+}
 
-  // Human Brain doctrine:
-  // deterministic parsing owns ONLY the already-open transaction it can
-  // structurally continue. It does not own ordinary language understanding.
-  //
-  // A different-domain turn is a topic switch and must be understood by the
-  // language model first. Same-domain slot/correction/selection turns retain
-  // the proven zero-LLM path so booking/order flows remain resilient.
-  return turn.domain === activeTask.domain;
+function modelRefinementIsUsable(turn: SemanticTurn): boolean {
+  return turn.domain !== 'unknown'
+    && turn.action !== 'unknown'
+    && turn.needsClarification !== true
+    && Number.isFinite(turn.confidence)
+    && turn.confidence >= 0.7;
 }
 
 async function resolveSemanticTurn(
@@ -313,41 +335,57 @@ async function resolveSemanticTurn(
 ): Promise<SemanticTurn> {
   const deterministic = deriveDeterministicSemanticTurn(message, context, taskState, now);
 
-  if (deterministicOwnsActiveTransaction(deterministic, taskState)) {
+  // Preserve every mature deterministic path unless this checkpoint has
+  // explicitly proven that its classification is too coarse.
+  if (deterministic && !deterministicNeedsLanguageRefinement(deterministic, taskState)) {
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-      semantic_owner: 'active_transaction_deterministic',
+      semantic_owner: 'deterministic_proven_path',
       deterministic_turn: true,
       model_call_used: false,
+      intent: deterministic.intent,
     }));
     return deterministic;
   }
 
-  // Human Brain Phase 1: normal conversation is language-first. The model
-  // reads the complete current utterance + bounded semantic context before a
-  // broad topic matcher can reduce it to one keyword/domain. Business actions
-  // remain deterministic downstream; this changes understanding ownership,
-  // not booking/payment/safety execution authority.
+  // No deterministic interpretation has always required real language
+  // understanding. A coarse restaurant topic classification now does too.
   try {
-    const turn = await deps.interpretSemanticTurn(message, context);
+    const modelTurn = await deps.interpretSemanticTurn(message, context);
+
+    // A weak model interpretation never replaces a useful deterministic
+    // fallback. This gives us the larger language brain without gambling away
+    // the mature system on low-confidence/ambiguous output.
+    if (deterministic && !modelRefinementIsUsable(modelTurn)) {
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'deterministic_low_confidence_fallback',
+        deterministic_turn: true,
+        model_call_used: true,
+        model_confidence: modelTurn.confidence,
+        deterministic_intent: deterministic.intent,
+      }));
+      return deterministic;
+    }
+
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-      semantic_owner: 'language_model',
+      semantic_owner: deterministic ? 'language_model_refinement' : 'language_model',
       deterministic_candidate: Boolean(deterministic),
       deterministic_turn: false,
       model_call_used: true,
+      model_confidence: modelTurn.confidence,
     }));
-    return turn;
+    return modelTurn;
   } catch (error) {
     if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
 
-    // Preserve the mature system as the outage fallback. We are not deleting
-    // its deterministic knowledge: if the model stack is unavailable, reuse
-    // the exact pre-existing deterministic interpretation when one exists.
+    // Provider outage never destroys a path the old system could already
+    // understand. Fall straight back to the exact deterministic candidate.
     if (deterministic) {
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
         semantic_owner: 'deterministic_provider_fallback',
         deterministic_turn: true,
         model_call_used: false,
         provider_unavailable: true,
+        deterministic_intent: deterministic.intent,
       }));
       return deterministic;
     }
