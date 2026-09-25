@@ -122,6 +122,11 @@ export function buildOneMindTraceEnvelope(args:{
 }):OneMindTraceEnvelope {
   const {turn,response,operationalOutcome}=args;
   const timing=turn.trace.timingsMs;
+  const memoryTrace = turn.trace.memory ?? {
+    appliedKeys: [],
+    ignoredKeys: [],
+    relevantConstraintCount: 0,
+  };
   const transaction=operationalOutcome ? {
     executed:operationalOutcome.executed === true,
     success:operationalOutcome.success === true,
@@ -153,9 +158,9 @@ export function buildOneMindTraceEnvelope(args:{
       needsClarification:turn.trace.semantic.needsClarification === true,
     },
     memory:{
-      appliedKeys:safeTokens(turn.trace.memory.appliedKeys,20,60),
-      ignoredKeys:safeTokens(turn.trace.memory.ignoredKeys,20,60),
-      relevantConstraintCount:Math.max(0,turn.trace.memory.relevantConstraintCount),
+      appliedKeys:safeTokens(memoryTrace.appliedKeys,20,60),
+      ignoredKeys:safeTokens(memoryTrace.ignoredKeys,20,60),
+      relevantConstraintCount:Math.max(0,memoryTrace.relevantConstraintCount),
     },
     dialog:{
       mode:safeToken(turn.trace.dialogMode,60) ?? 'unknown',
