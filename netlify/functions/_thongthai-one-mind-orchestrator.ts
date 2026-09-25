@@ -42,6 +42,7 @@ import {
   toSemanticInterpretationMeta,
   type SemanticContext,
   type SemanticContextEntity,
+  type SemanticTaskContext,
   type SemanticTurn,
 } from './_semantic-interpreter';
 import { deriveDeterministicSemanticTurn } from './_deterministic-semantic-turn';
@@ -162,6 +163,40 @@ function normalizeMessage(message: string): string {
   return message.trim().slice(0, 4000);
 }
 
+// Only customer-facing, non-secret working values are exposed to the language
+// understanding layer. Contact/payment/internal routing slots remain in task
+// state but never enter the semantic prompt.
+const SEMANTIC_TASK_SLOT_KEYS = new Set([
+  'date', 'time', 'partySize', 'durationMinutes', 'quantity',
+  'checkIn', 'checkOut', 'horseName', 'roomType', 'seatPreference',
+  'budget', 'budgetBand', 'activityCode', 'serviceType',
+]);
+
+function safeSemanticTaskValue(value: unknown): unknown {
+  if (typeof value === 'string') return value.slice(0, 160);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'boolean') return value;
+  return undefined;
+}
+
+function semanticTaskContext(task: ActiveTask | null): SemanticTaskContext | null {
+  if (!task) return null;
+  const knownSlots: Record<string, unknown> = {};
+  for (const [key, rawValue] of Object.entries(task.slots)) {
+    if (!SEMANTIC_TASK_SLOT_KEYS.has(key)) continue;
+    const value = safeSemanticTaskValue(rawValue);
+    if (value !== undefined) knownSlots[key] = value;
+  }
+  return {
+    type:task.type,
+    domain:task.domain,
+    status:task.status,
+    knownSlots,
+    missingFields:[...task.missingFields],
+    selectedEntities:task.selectedEntities.map(entity => ({ ...entity })),
+    constraints:[...task.constraints],
+  };
+}
 
 export function normalizeTaskStateForConversation(
   taskState: TaskStateContainer,
@@ -421,7 +456,11 @@ async function computeOneMindTurnFromState(
 ): Promise<OneMindTurnResult> {
   const computeStartedAt = Date.now();
   const message = normalizeMessage(input.message);
-  const semanticContext = buildSemanticContext(conversationContextBefore, now);
+  const semanticContext: SemanticContext = {
+    ...buildSemanticContext(conversationContextBefore, now),
+    activeTask:semanticTaskContext(taskStateBefore.activeTask),
+    suspendedTask:semanticTaskContext(taskStateBefore.suspendedTask),
+  };
   const semanticStartedAt = Date.now();
   const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, deps, now);
   const semanticMs = Date.now() - semanticStartedAt;
