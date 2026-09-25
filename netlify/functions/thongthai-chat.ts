@@ -2666,7 +2666,13 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
         'ขอถามนิดนึงครับ มากี่คน แล้วอยากได้ชิล ๆ หรือมีกิจกรรมด้วยครับ?',
       ].join('\n'),
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
-      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+      suggestedActions: [], responseStyle: 'direct',
+      agentStateUpdate: {
+        activeTopic: 'ecosystem',
+        unresolvedNeed: 'choose_ecosystem_path',
+        pendingQuestion: ECOSYSTEM_PATH_PENDING_QUESTION,
+      },
+      semanticMemoryUpdates: [], toolCalls: [],
     };
   }
 
@@ -2704,7 +2710,7 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
       agentStateUpdate: {
         activeTopic: 'ecosystem',
         unresolvedNeed: 'choose_ecosystem_path',
-        pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
+        pendingQuestion: ECOSYSTEM_PATH_PENDING_QUESTION,
       },
       semanticMemoryUpdates: [], toolCalls: [],
     };
@@ -2757,6 +2763,16 @@ const ECOSYSTEM_FOCUS_PENDING_QUESTION: PendingQuestionState = {
   ],
 };
 
+const ECOSYSTEM_PATH_PENDING_QUESTION: PendingQuestionState = {
+  domain: 'general_recommendation',
+  kind: 'preference_choice',
+  choices: [
+    { value: 'ecosystem_chill', aliases: ['สายชิล', 'ชิล', 'ชิล ๆ', 'ชิลๆ', 'คาเฟ่', 'ถ่ายรูป'] },
+    { value: 'ecosystem_activity', aliases: ['สายกิจกรรม', 'กิจกรรม', 'สายลุย', 'ลุย', 'อยากลุย'] },
+    { value: 'ecosystem_stay', aliases: ['สายพัก', 'พัก', 'ค้างคืน', 'เฮือนสเตย์', 'ที่พัก'] },
+  ],
+};
+
 function isExplicitSwitchAwayFromPendingQuestion(
   request: BrainRequest,
   pending: PendingQuestionState,
@@ -2768,6 +2784,12 @@ function isExplicitSwitchAwayFromPendingQuestion(
   const intent = classifyTopLevelSemanticIntent(request.message);
   if (intent === 'LOCATION_REQUEST' || intent === 'WEATHER_REQUEST'
     || intent === 'BOT_ADDRESS' || intent === 'HORSE_RELATED') return true;
+
+  const cafeText = request.message.trim();
+  const specificCafeFactQuestion = CAFE_EXPLICIT_MARKER.test(cafeText)
+    && /(?:มี|เมนู|ราคา|กี่บาท|เท่าไหร่|เท่าไร|เปิด|ปิด|กี่โมง|เวลา)/u.test(cafeText);
+  if (specificCafeFactQuestion) return true;
+
   return hasExplicitAtvIntent(request.message)
     || hasExplicitArcheryIntent(request.message)
     || hasExplicitHomestayIntent(request.message);
@@ -2812,6 +2834,60 @@ async function pendingQuestionContinuationResponse(
   if (resolution.domain !== 'general_recommendation'
       || resolution.kind !== 'preference_choice'
       || typeof resolution.value !== 'string') return null;
+
+  if (resolution.value === 'ecosystem_chill') {
+    return {
+      message: 'สายชิลได้เลยครับ 😊 แนะนำฟีลคาเฟ่ + ถ่ายรูป + อาหารก่อนครับ แล้วค่อยต่ออย่างอื่นตามเวลาได้\nมากี่คน แล้วมีเวลาประมาณเท่าไหร่ครับ?',
+      intent: 'recommendation',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      agentStateUpdate: {
+        activeTopic: 'ecosystem',
+        clearUnresolvedNeed: true,
+        clearPendingQuestion: true,
+      },
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
+
+  if (resolution.value === 'ecosystem_activity') {
+    return {
+      message: 'สายกิจกรรมได้เลยครับ 😊 ที่ทำมา-ชาติมีขี่ม้า / ATV / ยิงธนูครับ\nอยากเริ่มจากอันไหนก่อนครับ เดี๋ยวทองไทยช่วยดูรายละเอียดให้ต่อ',
+      intent: 'recommendation',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      agentStateUpdate: {
+        activeTopic: 'activity_discovery',
+        clearUnresolvedNeed: true,
+        clearPendingQuestion: true,
+      },
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
+
+  if (resolution.value === 'ecosystem_stay') {
+    return {
+      message: 'สายพักได้เลยครับ 😊 มีทำมา-ชาติ เฮือนสเตย์ + บรรยากาศธรรมชาติครับ\nมากี่คน และอยากพักกี่คืนครับ เดี๋ยวทองไทยช่วยต่อให้โดยไม่เดาห้องว่าง',
+      intent: 'recommendation',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      agentStateUpdate: {
+        activeTopic: 'stay',
+        clearUnresolvedNeed: true,
+        clearPendingQuestion: true,
+      },
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
 
   if (resolution.value === 'restaurant') {
     const advice = await restaurantMenuAdvice({
