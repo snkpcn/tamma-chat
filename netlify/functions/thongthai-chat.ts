@@ -1349,31 +1349,11 @@ function deterministicCafeResponse(
   const message = request.message.trim();
   if (!isCafeReadOnlyTurn(message, runtime.agentState?.active_topic)) return null;
 
-  const cafeFacts = runtime.worldFacts.filter(fact => fact.category === 'cafe');
-  const factByKey = new Map(cafeFacts.map(fact => [fact.fact_key, fact.fact_value]));
-  const lattePrice = factByKey.get('cafe_latte_price');
-  const hours = factByKey.get('cafe_hours');
-  const asksLatte = /ลาเต้/u.test(message);
-  const asksPrice = /(?:ราคา|กี่บาท|เท่าไหร่|เท่าไร)/u.test(message);
-  const asksHours = /(?:เปิด|ปิด|กี่โมง|เวลา)/u.test(message);
-
-  let answer: string | null = null;
-  if (asksLatte && lattePrice !== undefined && lattePrice !== null) {
-    answer = asksPrice
-      ? `ลาเต้ในข้อมูลคาเฟ่ที่ยืนยันตอนนี้ราคา ${lattePrice} บาทครับ`
-      : `มีข้อมูลลาเต้ที่ยืนยันในระบบครับ ราคา ${lattePrice} บาท`;
-  } else if (asksHours && typeof hours === 'string' && hours.trim()) {
-    answer = `เวลาคาเฟ่ที่ยืนยันในระบบตอนนี้คือ ${hours.trim()} ครับ`;
-  } else if (cafeFacts.length) {
-    const pieces: string[] = [];
-    if (typeof hours === 'string' && hours.trim()) pieces.push(`เวลา ${hours.trim()}`);
-    if (lattePrice !== undefined && lattePrice !== null) pieces.push(`ลาเต้ ${lattePrice} บาท`);
-    if (pieces.length) answer = `ข้อมูลคาเฟ่ที่ยืนยันตอนนี้: ${pieces.join(' • ')} ครับ`;
-  }
-
-  if (!answer) {
-    answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเมนู/ราคาคาเฟ่ที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิด ถ้าอยากวางทริปสายชิล ทองไทยช่วยต่อคาเฟ่กับร้านอาหารหรือที่พักให้ได้ครับ';
-  }
+  // There is currently no verified live cafe menu / price / hours source in
+  // production. Stay useful without fabricating operational facts: acknowledge
+  // the cafe domain, be explicit about the information boundary, and offer a
+  // real next step within the ecosystem.
+  const answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเมนู ราคา หรือเวลาเปิดปิดของคาเฟ่ที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิด แต่ถ้าอยากวางทริปสายชิล ทองไทยช่วยต่อคาเฟ่กับร้านอาหารหรือที่พักให้ได้ครับ';
 
   return {
     message: answer,
@@ -4066,8 +4046,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
 
   // Phase 4 Cafe: the production One-Mind cutover runs before the legacy
   // deterministic responder. Preserve this read-only class exactly like
-  // restaurant/local-concierge so verified cafe facts cannot be swallowed by
-  // a model-composed generic answer. For a transport-history-free follow-up
+  // restaurant/local-concierge so the honest no-verified-data boundary cannot
+  // be swallowed by a model-composed or stale-domain answer. For a
+  // transport-history-free follow-up
   // ("ราคาเท่าไร"), consult only the bounded active_topic snapshot.
   let preserveCafeFastPath = isCafeReadOnlyTurn(request.message);
   if (!preserveCafeFastPath
