@@ -651,6 +651,27 @@ export function composeMembershipInformationResponse(input: ResponseComposerInpu
   };
 }
 
+function restaurantTableAvailabilityUnknownCopy(input: ResponseComposerInput): string | null {
+  const request = input.dialogDecision.knowledgeRequests.find(candidate =>
+    candidate.domain === 'restaurant'
+    && candidate.intent === 'restaurant_table_availability'
+    && candidate.needs.includes('availability')
+  );
+  if (!request) return null;
+
+  const date = typeof request.entities.date === 'string' ? request.entities.date.trim() : '';
+  const time = typeof request.entities.time === 'string' ? request.entities.time.trim() : '';
+  const when = [date, time ? `เวลา ${time}` : ''].filter(Boolean).join(' ');
+
+  if (input.language === 'th') {
+    const target = when ? `สำหรับ${when}` : '';
+    return `รับทราบครับ ถามเรื่องโต๊ะ${target}นะครับ ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ เลยยังบอกไม่ได้ว่าเต็มหรือว่าง และไม่ขอเดาให้ผิดครับ`;
+  }
+
+  const target = when ? ` for ${when}` : '';
+  return `I understand you're asking about table availability${target}. I don't have a verified live table-availability source right now, so I can't honestly say whether it is full or available.`;
+}
+
 export function composeDeterministicResponse(input: ResponseComposerInput): ComposedResponse {
   const copy = deterministicMessages(input.language);
   const outcome = input.operationalOutcome;
@@ -671,9 +692,9 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
   } else if (outcome?.executed && !outcome.success) {
     message = copy.failed;
   } else if (input.degradation.condition === 'source_unavailable') {
-    message = copy.unavailable;
+    message = restaurantTableAvailabilityUnknownCopy(input) ?? copy.unavailable;
   } else if (input.degradation.condition === 'fact_unknown') {
-    message = copy.unknown;
+    message = restaurantTableAvailabilityUnknownCopy(input) ?? copy.unknown;
   } else if (input.degradation.condition === 'verified_empty') {
     message = input.dialogDecision.responseIntent === 'no_active_promotion' ? copy.noPromo : copy.empty;
   } else if (input.dialogDecision.mode === 'clarify') {
