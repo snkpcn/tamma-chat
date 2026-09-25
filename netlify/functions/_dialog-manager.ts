@@ -442,7 +442,19 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'restaurant', needs: ['catalog', 'recommendations_input'] }];
       return [];
     case 'activity':
-      if (turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
+      // Human Brain 5.5: the CLOSED information facet owns mutable-fact
+      // routing. Free-form action/intent labels are secondary and may vary
+      // without changing what authoritative source we need.
+      if (turn.informationNeed === 'availability') return [{ ...base, domain: 'activity', needs: ['availability'] }];
+      if (turn.informationNeed === 'price') return [{ ...base, domain: 'activity', needs: ['price'] }];
+      if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'activity', needs: ['schedule'] }];
+      if (turn.informationNeed === 'inventory') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
+      if (turn.informationNeed === 'catalog') return [{ ...base, domain: 'activity', needs: ['catalog'] }];
+      if (turn.informationNeed === 'recommendation') return [{ ...base, domain: 'activity', needs: ['catalog', 'recommendations_input'] }];
+      if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
+      if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
+      // Legacy exact deterministic labels remain safe fallbacks when an older
+      // path did not produce a closed facet.
       if (turn.intent === 'activity_inventory_count') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
       if (turn.intent === 'ask_price') return [{ ...base, domain: 'activity', needs: ['price'] }];
       if (turn.action === 'compare' || turn.action === 'ask') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
@@ -459,7 +471,17 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       }
       return [];
     case 'stay':
-      if (turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
+      // Same closed-facet rule as restaurant/activity: "is a room free?" is
+      // availability even if the model chooses action=status; only an
+      // explicitly existing booking uses transaction_status/booking_status.
+      if (turn.informationNeed === 'availability') return [{ ...base, domain: 'stay', needs: ['availability'] }];
+      if (turn.informationNeed === 'price') return [{ ...base, domain: 'stay', needs: ['price'] }];
+      if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'stay', needs: ['schedule'] }];
+      if (turn.informationNeed === 'inventory') return [{ ...base, domain: 'stay', needs: ['inventory'] }];
+      if (turn.informationNeed === 'catalog') return [{ ...base, domain: 'stay', needs: ['catalog'] }];
+      if (turn.informationNeed === 'recommendation') return [{ ...base, domain: 'stay', needs: ['catalog'] }];
+      if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
+      if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'stay', needs: ['catalog', 'availability'] }];
       if (task && task.missingFields.length === 0) return [{ ...base, domain: 'stay', needs: ['availability'] }];
       return [];
