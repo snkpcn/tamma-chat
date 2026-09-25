@@ -1331,6 +1331,53 @@ async function promotionDiscoveryFallbackResponse(
   return resolvePromotionRedemption(decision.pending, request, guestDbId, channel);
 }
 
+
+function deterministicCafeResponse(
+  request: BrainRequest,
+  runtime: BrainRuntimeContext,
+): BrainResponse | null {
+  const message = request.message.trim();
+  const cafeMarker = /(?:คาเฟ่|กาแฟ|ลาเต้|อเมริกาโน่|คาปูชิโน่|เอสเปรสโซ่|อินทนิน|inthanin)/iu;
+  if (!cafeMarker.test(message) || hasExplicitTransactionIntent(message)) return null;
+
+  const cafeFacts = runtime.worldFacts.filter(fact => fact.category === 'cafe');
+  const factByKey = new Map(cafeFacts.map(fact => [fact.fact_key, fact.fact_value]));
+  const lattePrice = factByKey.get('cafe_latte_price');
+  const hours = factByKey.get('cafe_hours');
+  const asksLatte = /ลาเต้/u.test(message);
+  const asksPrice = /(?:ราคา|กี่บาท|เท่าไหร่|เท่าไร)/u.test(message);
+  const asksHours = /(?:เปิด|ปิด|กี่โมง|เวลา)/u.test(message);
+
+  let answer: string | null = null;
+  if (asksLatte && lattePrice !== undefined && lattePrice !== null) {
+    answer = asksPrice
+      ? `ลาเต้ในข้อมูลคาเฟ่ที่ยืนยันตอนนี้ราคา ${lattePrice} บาทครับ`
+      : `มีข้อมูลลาเต้ที่ยืนยันในระบบครับ ราคา ${lattePrice} บาท`;
+  } else if (asksHours && typeof hours === 'string' && hours.trim()) {
+    answer = `เวลาคาเฟ่ที่ยืนยันในระบบตอนนี้คือ ${hours.trim()} ครับ`;
+  } else if (cafeFacts.length) {
+    const pieces: string[] = [];
+    if (typeof hours === 'string' && hours.trim()) pieces.push(`เวลา ${hours.trim()}`);
+    if (lattePrice !== undefined && lattePrice !== null) pieces.push(`ลาเต้ ${lattePrice} บาท`);
+    if (pieces.length) answer = `ข้อมูลคาเฟ่ที่ยืนยันตอนนี้: ${pieces.join(' • ')} ครับ`;
+  }
+
+  if (!answer) {
+    answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเมนู/ราคาคาเฟ่ที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิด ถ้าอยากวางทริปสายชิล ทองไทยช่วยต่อคาเฟ่กับร้านอาหารหรือที่พักให้ได้ครับ';
+  }
+
+  return {
+    message: answer,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type:'none', journey:null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
 function deterministicExperienceDiscoveryResponse(
   request: BrainRequest,
   runtime: BrainRuntimeContext,
@@ -2643,6 +2690,14 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
         },
         semanticMemoryUpdates: [], toolCalls: [],
       };
+    }
+    const restaurantConstraintKeys = new Set([
+      'vegetarian','no_spicy','mild_spice','no_pork','no_beef','no_chicken','no_fish','no_egg',
+      'no_plara','no_peanut','no_shrimp','peanut_allergy','shrimp_allergy','fish_allergy','egg_allergy',
+      'food_allergy','authentic_isan',
+    ]);
+    if ((request.guestContext.constraints ?? []).some(item => restaurantConstraintKeys.has(item))) {
+      return null;
     }
     return {
       message: [
@@ -4120,6 +4175,19 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (promotionDiscovery) {
     const polished = polishedResponse(promotionDiscovery, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const deterministicCafe = deterministicCafeResponse(request, runtime);
+  if (deterministicCafe) {
+    const polished = polishedResponse(deterministicCafe, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
