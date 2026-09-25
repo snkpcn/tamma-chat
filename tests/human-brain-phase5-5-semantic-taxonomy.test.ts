@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSemanticInterpreterPrompt, emptySemanticContext } from '../netlify/functions/_semantic-interpreter';
+import {
+  buildSemanticInterpreterPrompt,
+  emptySemanticContext,
+  parseSemanticTurnResponse,
+} from '../netlify/functions/_semantic-interpreter';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 
 function byId(id:string){
@@ -56,4 +60,59 @@ test('Human Brain 5.5 RED: contextual selection and slot answers retain non-tran
   assert.equal(byId('reference-04').expected.action,'confirm');
   assert.equal(byId('reference-06').expected.action,'provide_information');
   assert.equal(byId('reference-02').expected.action,'ask');
+});
+
+
+test('Human Brain 5.5: closed information facets canonicalize read-only action labels',()=>{
+  const base={
+    domain:'stay',
+    intent:'room_availability_query',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.9,
+    needsClarification:false,
+  };
+
+  const availability=parseSemanticTurnResponse(JSON.stringify({
+    ...base,
+    action:'ask',
+    informationNeed:'availability',
+  }),emptySemanticContext());
+  assert.equal(availability.action,'status');
+
+  const catalog=parseSemanticTurnResponse(JSON.stringify({
+    ...base,
+    domain:'restaurant',
+    intent:'menu_catalog_request',
+    action:'recommend',
+    informationNeed:'catalog',
+  }),emptySemanticContext());
+  assert.equal(catalog.action,'discover');
+
+  const recommendation=parseSemanticTurnResponse(JSON.stringify({
+    ...base,
+    domain:'restaurant',
+    intent:'menu_recommendation_request',
+    action:'discover',
+    informationNeed:'recommendation',
+  }),emptySemanticContext());
+  assert.equal(recommendation.action,'recommend');
+});
+
+test('Human Brain 5.5: closed-facet normalization never rewrites transactional actions',()=>{
+  const result=parseSemanticTurnResponse(JSON.stringify({
+    domain:'stay',
+    intent:'book_if_available',
+    action:'book',
+    informationNeed:'availability',
+    entities:{date:'พรุ่งนี้'},
+    references:[],
+    constraints:[],
+    confidence:0.9,
+    needsClarification:false,
+  }),emptySemanticContext());
+
+  assert.equal(result.action,'book');
+  assert.equal(result.informationNeed,'availability');
 });
