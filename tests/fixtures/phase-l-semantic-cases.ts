@@ -87,6 +87,14 @@ const JOURNEY_CONTEXT:SemanticContext={
   recentEntities:[{id:'journey:current',type:'journey',name:'แผนปัจจุบัน',domain:'journey',source:'conversation',canonical:false}],
   lastAction:'recommend',
 };
+const JOURNEY_PREVIOUS_CONTEXT:SemanticContext={
+  activeDomain:'journey',
+  recentEntities:[
+    {id:'journey:current',type:'journey',name:'แผนปัจจุบัน',domain:'journey',source:'conversation',canonical:false},
+    {id:'journey:previous',type:'journey',name:'แผนเดิม',domain:'journey',source:'conversation',canonical:false},
+  ],
+  lastAction:'recommend',
+};
 
 export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   // Activity — availability/capacity/safety/recommendation/change/cancel.
@@ -119,7 +127,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-stay-03','formal','stay','มีบ้านสองห้องนอนไหม','discover','discover_two_bedroom_stay',{bedrooms:2},undefined,[],false,'catalog'),
   c('l-stay-04','formal','stay','สี่คนคืนเดียว แนะนำหลังไหนดี','recommend','recommend_stay',{partySize:4,nights:1},undefined,[],false,'recommendation'),
   c('l-stay-05','formal','stay','จองบ้านพักวันศุกร์หนึ่งคืน','book','book_stay',{checkIn:'วันศุกร์',nights:1}),
-  c('l-stay-06','correction','stay','เปลี่ยนเป็นสองคืนครับ','correct_previous','change_stay_nights',{nights:2},STAY_CONTEXT),
+  c('l-stay-06','correction','stay','เปลี่ยนเป็นสองคืนครับ','modify','change_stay_nights',{nights:2},STAY_CONTEXT),
   c('l-stay-07','cancel','stay','ขอยกเลิกห้องที่จองไว้','cancel','cancel_stay',{},STAY_CONTEXT),
   c('l-stay-08','follow_up','stay','สถานะจองห้องตอนนี้เป็นยังไง','status','stay_booking_status',{},STAY_CONTEXT,[],false,'transaction_status'),
   c('l-stay-09','follow_up','stay','เอาหลังเดิมที่แนะนำ','confirm','select_recommended_stay',{},STAY_CONTEXT),
@@ -127,8 +135,8 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
 
   // Promotions — discovery, applicability, eligibility, redemption/cancel.
   c('l-promo-01','formal','promotion','วันนี้มีโปรโมชั่นอะไรเปิดอยู่บ้าง','discover','discover_current_promotions'),
-  c('l-promo-02','formal','promotion','มีโปรของร้านอาหารไหม','discover','discover_restaurant_promotions',{businessUnit:'restaurant'}),
-  c('l-promo-03','formal','promotion','กิจกรรมมีโปรอะไรบ้าง','discover','discover_activity_promotions',{businessUnit:'activity'}),
+  c('l-promo-02','formal','promotion','มีโปรของร้านอาหารไหม','discover','discover_restaurant_promotions',{businessUnit:'restaurant'},undefined,[],false,'catalog'),
+  c('l-promo-03','formal','promotion','กิจกรรมมีโปรอะไรบ้าง','discover','discover_activity_promotions',{businessUnit:'activity'},undefined,[],false,'catalog'),
   c('l-promo-04','follow_up','promotion','โปรนี้ยังใช้ได้ไหม','status','promotion_status',{},PROMO_CONTEXT,[],false,'availability'),
   c('l-promo-05','confirmation_gating','promotion','ใช้โปรนี้เลยครับ','confirm','accept_promotion',{},PROMO_CONTEXT),
   c('l-promo-06','cancel','promotion','ไม่ใช้โปรนี้แล้ว ยกเลิกครับ','cancel','cancel_promotion',{},PROMO_CONTEXT),
@@ -139,7 +147,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-member-01','formal','membership','สมัครสมาชิกยังไงครับ','ask','ask_membership_signup'),
   c('l-member-02','confirmation_gating','membership','สมัครสมาชิกเลยครับ','confirm','confirm_membership_signup'),
   c('l-member-03','formal','membership','สถานะสมาชิกของผมเป็นยังไง','status','membership_status',{},undefined,[],false,'transaction_status'),
-  c('l-member-04','formal','membership','ขอเปลี่ยนข้อมูลสมาชิกได้ไหม','modify','modify_membership_profile'),
+  c('l-member-04','formal','membership','ขอเปลี่ยนข้อมูลสมาชิกได้ไหม','ask','ask_membership_profile_change_policy',{},undefined,[],false,'policy'),
   c('l-member-05','cancel','membership','ขอยกเลิกสมาชิก','cancel','cancel_membership'),
   c('l-member-06','formal','membership','สมาชิกได้สิทธิอะไรบ้าง','discover','discover_membership_benefits'),
 
@@ -154,8 +162,8 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   // Café — intentionally informational while no verified live catalog exists.
   c('l-cafe-01','formal','cafe','อินทนินเปิดอยู่ไหม','status','ask_cafe_open',{},undefined,[],false,'availability'),
   c('l-cafe-02','formal','cafe','คาเฟ่มีเมนูอะไรบ้าง','discover','discover_cafe_menu'),
-  c('l-cafe-03','colloquial','cafe','มีลาเต้ปะ','ask','ask_cafe_item',{itemName:'ลาเต้'}),
-  c('l-cafe-04','formal','cafe','อยากถามเรื่องเครื่องดื่มเย็น','ask','ask_cafe_drinks',{category:'cold_drink'}),
+  c('l-cafe-03','colloquial','cafe','มีลาเต้ปะ','discover','discover_cafe_item',{itemName:'ลาเต้'},undefined,[],false,'catalog'),
+  c('l-cafe-04','ambiguous','cafe','อยากถามเรื่องเครื่องดื่มเย็น','ask','ask_cafe_drinks',{category:'cold_drink'},undefined,[],true),
   c('l-cafe-05','follow_up','cafe','แก้วนี้ราคาเท่าไหร่','ask','ask_cafe_price',{},CAFE_CONTEXT),
 
   // Payment — information/status/cancel only; semantic layer never verifies money itself.
@@ -167,22 +175,22 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-payment-06','cancel','payment','ขอยกเลิกรายการชำระนี้','cancel','cancel_payment'),
 
   // Journey / ecosystem / support — planning, modification, resume, vague support.
-  c('l-journey-01','formal','journey','ช่วยจัดทริปครึ่งวันให้หน่อย','recommend','recommend_half_day_journey',{duration:'half_day'}),
-  c('l-journey-02','formal','journey','มากับครอบครัว มีเด็กกับผู้สูงอายุ ช่วยจัดแผนให้หน่อย','recommend','recommend_family_journey',{travelerType:'family'},undefined,['children','elderly']),
-  c('l-journey-03','colloquial','journey','วันนี้อยากชิล ๆ ไม่รีบ จัดให้หน่อย','recommend','recommend_slow_journey',{},undefined,['slow_pace']),
-  c('l-journey-04','multi_intent','journey','ก่อนกินข้าวอยากทำกิจกรรมเบา ๆ สักอย่าง','recommend','recommend_pre_meal_activity',{},undefined,['low_effort','before_meal']),
+  c('l-journey-01','formal','journey','ช่วยจัดทริปครึ่งวันให้หน่อย','recommend','recommend_half_day_journey',{duration:'half_day'},undefined,[],false,'recommendation'),
+  c('l-journey-02','formal','journey','มากับครอบครัว มีเด็กกับผู้สูงอายุ ช่วยจัดแผนให้หน่อย','recommend','recommend_family_journey',{travelerType:'family'},undefined,['children','elderly'],false,'recommendation'),
+  c('l-journey-03','colloquial','journey','วันนี้อยากชิล ๆ ไม่รีบ จัดให้หน่อย','recommend','recommend_slow_journey',{},undefined,['slow_pace'],false,'recommendation'),
+  c('l-journey-04','multi_intent','activity','ก่อนกินข้าวอยากทำกิจกรรมเบา ๆ สักอย่าง','recommend','recommend_pre_meal_activity',{},undefined,['low_effort','before_meal'],false,'recommendation'),
   c('l-journey-05','correction','journey','เปลี่ยนแผน ไม่เอากิจกรรมผจญภัยแล้ว','modify','modify_journey_remove_adventure',{},JOURNEY_CONTEXT,['no_adventure']),
-  c('l-journey-06','follow_up','journey','กลับไปแผนเดิมได้ไหม','correct_previous','restore_previous_journey',{},JOURNEY_CONTEXT),
+  c('l-journey-06','follow_up','journey','กลับไปแผนเดิมได้ไหม','correct_previous','restore_previous_journey',{},JOURNEY_PREVIOUS_CONTEXT),
   c('l-journey-07','follow_up','journey','ช่วยต่อจากเมื่อกี้ให้หน่อย','ask','resume_journey',{},JOURNEY_CONTEXT),
-  c('l-support-01','ambiguous','support','ไม่เข้าใจ ช่วยหน่อย','unknown','vague_support',{},undefined,[],true),
+  c('l-support-01','ambiguous','support','ไม่เข้าใจ ช่วยหน่อย','ask','vague_support',{},undefined,[],true),
   c('l-support-02','formal','support','ขอคุยกับทีมงานได้ไหม','ask','request_human_support'),
 
   // Extra Phase L breadth — cross-domain planning and less common customer goals.
-  c('l-journey-08','formal','journey','พาแม่มาเที่ยว ไม่อยากเดินเยอะ ช่วยจัดแผนให้หน่อย','recommend','recommend_low_walking_journey',{travelerType:'family'},undefined,['low_walking']),
-  c('l-journey-09','multi_intent','journey','มีอะไรทำแล้วไปกินข้าวต่อได้พอดี','recommend','recommend_activity_then_meal',{},undefined,['before_meal']),
-  c('l-journey-10','multi_intent','journey','อยากขี่ม้าแล้วพักค้างคืน ช่วยจัดให้หน่อย','recommend','recommend_horse_and_stay',{activityType:'horse',nights:1}),
-  c('l-topic-activity-01','topic_switch','activity','ไม่เอาห้องแล้ว ขอไปดูกิจกรรมแทน','discover','switch_from_stay_to_activity'),
-  c('l-promo-09','formal','promotion','โปรร้านอาหารกับที่พักใช้ร่วมกันได้ไหม','ask','ask_cross_business_promotion',{businessUnits:['restaurant','stay']}),
+  c('l-journey-08','formal','journey','พาแม่มาเที่ยว ไม่อยากเดินเยอะ ช่วยจัดแผนให้หน่อย','recommend','recommend_low_walking_journey',{travelerType:'family'},undefined,['low_walking'],false,'recommendation'),
+  c('l-journey-09','multi_intent','journey','มีอะไรทำแล้วไปกินข้าวต่อได้พอดี','recommend','recommend_activity_then_meal',{},undefined,['before_meal'],false,'recommendation'),
+  c('l-journey-10','multi_intent','journey','อยากขี่ม้าแล้วพักค้างคืน ช่วยจัดให้หน่อย','recommend','recommend_horse_and_stay',{activityType:'horse',nights:1},undefined,[],false,'recommendation'),
+  c('l-topic-activity-01','topic_switch','activity','ไม่เอาห้องแล้ว ขอไปดูกิจกรรมแทน','discover','switch_from_stay_to_activity',{},STAY_CONTEXT,[],false,'catalog'),
+  c('l-promo-09','formal','promotion','โปรร้านอาหารกับที่พักใช้ร่วมกันได้ไหม','ask','ask_cross_business_promotion',{businessUnits:['restaurant','stay']},undefined,[],false,'policy'),
   c('l-promo-10','formal','promotion','ถ้าเป็นสมาชิก ใช้โปรนี้ได้ไหม','ask','ask_member_promotion_eligibility',{membershipRequired:true},PROMO_CONTEXT),
   c('l-payment-07','formal','payment','สลิปไม่ผ่าน ต้องทำยังไงต่อ','ask','ask_payment_rejection_next_step'),
   c('l-otop-07','formal','otop','ของฝากอันไหนเหมาะซื้อเป็นของขวัญ','recommend','recommend_otop_gift'),
