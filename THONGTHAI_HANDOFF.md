@@ -6800,3 +6800,111 @@ The load-bearing regression requires both stored feedback and the actual capture
 
 No historical production rows were rewritten by this code fix.
 No Phase 3 work started.
+
+
+---
+
+## Phase 3 Customer Voice Runtime Incident — Feedback internal_notes contract — 2026-09-25
+
+**STATUS: ROOT CAUSE PROVEN; BACKOFFICE FIX LIVE; CUSTOMER WRITER FIX GREEN ON PR #97, PENDING MERGE / AUTO DEPLOY.**
+
+This incident was discovered from the owner's real iPhone production behavior on the Backoffice Customer Voice page: feedback cards rendered, but tapping the newest rows did not open detail.
+
+### Production root cause
+
+Read-only inspection of live `public.ops_feedback_events` in `tamma-customer-data` proved:
+
+- 23 live feedback rows total
+- 13 rows had `internal_notes` as a JSON object
+- 10 rows had `internal_notes` as the intended JSON array
+- the 12 newest live rows were all object-shaped
+- every object-shaped row contained the routing-only key `notification_targets`
+
+The Backoffice detail renderer treated `internal_notes` as the documented owner/staff-note array and called `.map(...)`. Object-shaped rows therefore threw before the detail dialog could open.
+
+The writer-side source was this Service Mind path: after `notifyFeedbackEventTargets()`, `_service-mind-feedback-events.ts` PATCHed:
+
+```ts
+internal_notes: { notification_targets: targets }
+```
+
+That reused the staff-notes column for routing metadata and violated the schema contract.
+
+No production feedback row was rewritten or deleted while diagnosing this incident.
+
+### Backoffice side
+
+The Backoffice fix was completed independently in `snkpcn/tamma-backoffice` PR #19 and is already live:
+
+- merged Backoffice commit: `85dfdcff077c4d09c98e0baccb4956498cd819a1`
+- automatic Netlify production deploy: `6ab67850eb9a11000823e071`
+- deploy state: READY
+- `manual_deploy=false`
+
+Backoffice now normalizes legacy `internal_notes` at the read boundary and opens detail from a canonical by-ID read rather than an in-memory subset.
+
+### Customer writer RED proof
+
+Branch:
+- `fix/feedback-internal-notes-contract-20260925`
+
+The canonical test harness was first corrected to model the actual DB default:
+
+```ts
+internal_notes: []
+```
+
+A new Service Mind end-to-end regression then creates a real feedback event, runs notification routing, and requires `internal_notes` to remain the staff-note array.
+
+RED head:
+- `e80aa312360c8edf381d2296264c927bb381092f`
+
+GitHub Actions:
+- run `36141977762`
+- **1076 PASS / 1 FAIL**
+
+Exact failing assertion:
+- `internal_notes must remain the staff-note array contract after notification routing`
+
+### Writer fix
+
+`_service-mind-feedback-events.ts` no longer writes per-target notification results into `internal_notes`.
+
+It now PATCHes only the feedback row's scalar `notification_status`.
+
+Per-target provider delivery evidence remains where it belongs:
+- `ops_notification_deliveries`
+- actual LINE push attempts
+- the immediate `notifyFeedbackEventTargets()` result used to compose the customer-facing response
+
+`internal_notes` is reserved exclusively for owner/staff notes.
+
+### Test-contract repair
+
+Several older routing tests were coupled to the production-breaking implementation by reading:
+
+`ops_feedback_events.internal_notes.notification_targets`
+
+Those tests were migrated to stronger operational evidence instead of restoring the bad write:
+
+- final `ops_notification_deliveries` state
+- actual LINE push targets/counts
+- the feedback row's primary `notification_status`
+- customer-facing wording for partial failure / not-bound states
+
+The harness now exposes final notification delivery ledger state joined back to its bound team for this purpose.
+
+Not-bound and same-physical-target duplicate cases intentionally have no provider delivery row because no provider send was attempted; tests prove those states using absence of a delivery/push plus the canonical response/status.
+
+### GREEN proof
+
+Current code/test head before this docs update:
+- `7204c45179e330813dd16819c00876d8c8831dc2`
+
+GitHub Actions:
+- run `36142683629`
+- **1077 / 1077 PASS**
+
+No database migration is part of this writer fix.
+No production data rewrite is part of this writer fix.
+Do not mark Customer Voice Checkpoint 3 closed until the owner performs the single production detail-open smoke and then one complete normal workflow smoke.
