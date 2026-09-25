@@ -1,4 +1,4 @@
-name: Probe Preview Brain Status
+name: Probe Preview Semantic Provider
 
 on:
   push:
@@ -13,15 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Fetch preview brain status
+      - name: Fetch safe semantic provider probe
         run: |
           set -euo pipefail
           curl --fail --silent --show-error \
-            https://deploy-preview-122--tamma-chat.netlify.app/.netlify/functions/thongthai-brain-status \
-            -o brain-status.json
-          node -e "const x=require('./brain-status.json'); console.log(JSON.stringify(x.environment,null,2))"
+            "https://deploy-preview-122--tamma-chat.netlify.app/.netlify/functions/thongthai-semantic-certification-preview?probe=1" \
+            -o semantic-provider-probe.json
+          cat semantic-provider-probe.json
       - uses: actions/upload-artifact@v4
         with:
-          name: preview-brain-status
-          path: brain-status.json
+          name: semantic-provider-probe
+          path: semantic-provider-probe.json
           if-no-files-found: error
