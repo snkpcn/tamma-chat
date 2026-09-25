@@ -62,6 +62,13 @@ const RESTAURANT_CONTEXT:SemanticContext={
   lastAction:'recommend',
   openQuestion:'pickup details',
 };
+
+const RESTAURANT_DISCOVERY_CONTEXT:SemanticContext={
+  activeDomain:'restaurant',
+  recentEntities:[],
+  lastAction:'discover',
+  activeTopic:'restaurant menu',
+};
 const STAY_CONTEXT:SemanticContext={
   activeDomain:'stay',
   recentEntities:[{id:'stay:house-1',type:'stay_unit',name:'บ้านแนะนำ',domain:'stay',source:'catalog',canonical:true}],
@@ -92,31 +99,31 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   // Activity — availability/capacity/safety/recommendation/change/cancel.
   c('l-activity-01','formal','activity','ราคาขี่ม้าตอนนี้เท่าไหร่ครับ','ask','ask_horse_price',{activityType:'horse'}),
   c('l-activity-02','formal','activity','เด็ก 7 ขวบขี่ม้าได้ไหม','ask','ask_horse_child_policy',{activityType:'horse',childAge:7}),
-  c('l-activity-03','formal','activity','ATV สามคันออกพร้อมกันได้ไหม','ask','ask_atv_capacity',{activityType:'atv',quantity:3}),
+  c('l-activity-03','formal','activity','ATV สามคันออกพร้อมกันได้ไหม','ask','ask_atv_capacity',{activityType:'atv',quantity:3},undefined,[],false,'policy'),
   c('l-activity-04','colloquial','activity','ไม่เคยยิงธนูเลย เล่นได้ปะ','ask','ask_archery_beginner',{activityType:'archery'},undefined,['beginner']),
   c('l-activity-05','correction','activity','เปลี่ยนจาก ATV เป็นขี่ม้าแทน','correct_previous','change_activity',{activityType:'horse'},ACTIVITY_CONTEXT),
   c('l-activity-06','cancel','activity','ไม่เอากิจกรรมแล้ว ยกเลิกก่อน','cancel','cancel_activity',{},ACTIVITY_CONTEXT),
   c('l-activity-07','formal','activity','จอง ATV วันเสาร์ 3 คน','book','book_atv',{activityType:'atv',date:'วันเสาร์',partySize:3}),
   c('l-activity-08','follow_up','activity','บ่ายสามว่างไหม','status','check_activity_time',{time:'15:00'},ACTIVITY_CONTEXT,[],false,'availability'),
-  c('l-activity-09','colloquial','activity','อยากทำอะไรชิล ๆ ไม่เหนื่อย','recommend','recommend_low_effort_activity',{},undefined,['low_effort']),
+  c('l-activity-09','colloquial','ecosystem','อยากทำอะไรชิล ๆ ไม่เหนื่อย','recommend','recommend_low_effort_experience',{},undefined,['low_effort'],false,'recommendation'),
   c('l-activity-10','formal','activity','ช่วยเทียบขี่ม้ากับ ATV ให้หน่อย','compare','compare_activities',{options:['horse','atv']}),
 
   // Restaurant — constraints, recommendation, preorder/status/correction.
-  c('l-restaurant-01','formal','restaurant','มีเมนูปลาที่พร้อมขายไหม','ask','ask_fish_menu',{ingredientCategory:'fish'}),
-  c('l-restaurant-02','formal','restaurant','มากันสองคน งบ 500 แนะนำให้หน่อย','recommend','recommend_for_budget',{partySize:2,budget:500}),
+  c('l-restaurant-01','formal','restaurant','มีเมนูปลาที่พร้อมขายไหม','status','ask_fish_menu_availability',{ingredientCategory:'fish'},undefined,[],false,'availability'),
+  c('l-restaurant-02','formal','restaurant','มากันสองคน งบ 500 แนะนำให้หน่อย','recommend','recommend_for_budget',{partySize:2,budget:500},RESTAURANT_DISCOVERY_CONTEXT,[],false,'recommendation'),
   c('l-restaurant-03','colloquial','restaurant','ไม่กินหมู เอาอะไรดี','recommend','recommend_without_pork',{},undefined,['no_pork']),
-  c('l-restaurant-04','formal','restaurant','แพ้ถั่ว มีเมนูไหนควรเลี่ยงบ้าง','ask','ask_allergen_menu',{allergen:'peanut'},undefined,['peanut_allergy']),
+  c('l-restaurant-04','formal','restaurant','แพ้ถั่ว มีเมนูไหนควรเลี่ยงบ้าง','recommend','recommend_allergen_avoidance',{allergen:'peanut'},undefined,['peanut_allergy'],false,'ingredients'),
   c('l-restaurant-05','follow_up','restaurant','เอาชุดเดิมครับ','confirm','confirm_previous_set',{},RESTAURANT_CONTEXT),
-  c('l-restaurant-06','correction','restaurant','เปลี่ยนเวลารับเป็นบ่ายสอง','correct_previous','change_pickup_time',{time:'14:00'},RESTAURANT_CONTEXT),
+  c('l-restaurant-06','correction','restaurant','เปลี่ยนเวลารับเป็นบ่ายสอง','modify','change_pickup_time',{time:'14:00'},RESTAURANT_CONTEXT),
   c('l-restaurant-07','cancel','restaurant','ยกเลิกออเดอร์เมื่อกี้','cancel','cancel_preorder',{},RESTAURANT_CONTEXT),
   c('l-restaurant-08','follow_up','restaurant','ออเดอร์เมื่อกี้ถึงไหนแล้ว','status','preorder_status',{},RESTAURANT_CONTEXT,[],false,'transaction_status'),
   c('l-restaurant-09','confirmation_gating','restaurant','สั่งชุดนี้เลยครับ','order','submit_preorder',{},RESTAURANT_CONTEXT),
-  c('l-restaurant-10','formal','restaurant','มีเมนูสำหรับเด็กไหม','ask','ask_child_friendly_menu',{travelerType:'family'}),
+  c('l-restaurant-10','formal','restaurant','มีเมนูสำหรับเด็กไหม','discover','discover_child_friendly_menu',{travelerType:'family'},undefined,[],false,'catalog'),
 
   // Stay — policy, capacity, recommend, modify, cancel, status.
   c('l-stay-01','formal','stay','เช็กอินได้ตั้งแต่กี่โมง','ask','ask_checkin_time'),
   c('l-stay-02','typo','stay','เช็คเอ้าท์กี่โมงคับ','ask','ask_checkout_time'),
-  c('l-stay-03','formal','stay','มีบ้านสองห้องนอนไหม','ask','ask_two_bedroom_stay',{bedrooms:2}),
+  c('l-stay-03','formal','stay','มีบ้านสองห้องนอนไหม','discover','discover_two_bedroom_stay',{bedrooms:2},undefined,[],false,'catalog'),
   c('l-stay-04','formal','stay','สี่คนคืนเดียว แนะนำหลังไหนดี','recommend','recommend_stay',{partySize:4,nights:1}),
   c('l-stay-05','formal','stay','จองบ้านพักวันศุกร์หนึ่งคืน','book','book_stay',{checkIn:'วันศุกร์',nights:1}),
   c('l-stay-06','correction','stay','เปลี่ยนเป็นสองคืนครับ','correct_previous','change_stay_nights',{nights:2},STAY_CONTEXT),
