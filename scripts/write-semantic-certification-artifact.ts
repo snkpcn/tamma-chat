@@ -1,11 +1,38 @@
-import { writeFile } from 'node:fs/promises';
+import { readdir, unlink, writeFile } from 'node:fs/promises';
 import {
   runSemanticCertification,
   type SemanticCertificationFailure,
 } from '../netlify/functions/_semantic-live-certification';
 import { SEMANTIC_INTERPRETER_VERSION } from '../netlify/functions/_semantic-interpreter';
+import { semanticCertificationMarkerNames } from './_semantic-certification-markers';
 
 const OUTPUT='semantic-certification-result.json';
+const FUNCTION_DIR='netlify/functions';
+const MARKER_PREFIX='semcert-';
+
+async function clearMarkerFunctions(){
+  const entries=await readdir(FUNCTION_DIR).catch(()=>[]);
+  await Promise.all(
+    entries
+      .filter(name=>name.startsWith(MARKER_PREFIX) && name.endsWith('.ts'))
+      .map(name=>unlink(`${FUNCTION_DIR}/${name}`).catch(()=>undefined)),
+  );
+}
+
+async function writeMarkerFunctions(result:{
+  evaluated:number;
+  pass:number;
+  failed:number;
+  passPct:number;
+  failures:SemanticCertificationFailure[];
+}){
+  await clearMarkerFunctions();
+  const body="export const handler=async()=>({statusCode:404,headers:{'Cache-Control':'no-store'},body:'Not found'});\n";
+  await Promise.all(
+    semanticCertificationMarkerNames(result)
+      .map(name=>writeFile(`${FUNCTION_DIR}/${name}.ts`,body,'utf8')),
+  );
+}
 
 async function main() {
   if (process.env.RUN_SEMANTIC_CERTIFICATION !== '1') {
@@ -49,6 +76,7 @@ async function main() {
     };
 
     await writeFile(OUTPUT,JSON.stringify(artifact,null,2),'utf8');
+    await writeMarkerFunctions({ evaluated,pass,failed,passPct:artifact.passPct,failures });
     console.log('LIVE_SEMANTIC_CERTIFICATION_WRITTEN',JSON.stringify({
       evaluated,pass,failed,passPct:artifact.passPct,
     }));
@@ -61,6 +89,12 @@ async function main() {
       error:error instanceof Error ? error.name : 'unknown',
     };
     await writeFile(OUTPUT,JSON.stringify(artifact,null,2),'utf8');
+    await clearMarkerFunctions();
+    await writeFile(
+      `${FUNCTION_DIR}/semcert-error.ts`,
+      "export const handler=async()=>({statusCode:404,headers:{'Cache-Control':'no-store'},body:'Not found'});\n",
+      'utf8',
+    );
     console.error('LIVE_SEMANTIC_CERTIFICATION_ERROR',artifact.error);
     // Baseline collection must never take production down. A later checkpoint
     // may promote a proven threshold into a build gate.
