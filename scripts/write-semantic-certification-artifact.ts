@@ -39,6 +39,14 @@ async function main() {
 
   const chunkSize=20;
   const availabilityRetryDelayMs=61_000;
+  // Gemini rate limits are project-scoped and actual capacity can vary by
+  // model/tier. Production evidence hit 429 after 16 burst calls, so keep the
+  // one-shot certification below that observed burst rate. This setting is
+  // certification-only and never changes customer request latency.
+  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '4250');
+  const interCaseDelayMs=Number.isFinite(configuredInterCaseDelayMs)
+    ? Math.max(0,Math.min(15_000,Math.floor(configuredInterCaseDelayMs)))
+    : 4_250;
 
   try {
     const batches=[];
@@ -53,6 +61,7 @@ async function main() {
         availabilityRetries:1,
         availabilityRetryDelayMs,
         stopOnProviderFailure:true,
+        interCaseDelayMs,
       });
       batches.push(batch);
       totalCorpusCases=batch.totalCorpusCases;
