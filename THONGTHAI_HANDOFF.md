@@ -6908,3 +6908,134 @@ GitHub Actions:
 No database migration is part of this writer fix.
 No production data rewrite is part of this writer fix.
 Do not mark Customer Voice Checkpoint 3 closed until the owner performs the single production detail-open smoke and then one complete normal workflow smoke.
+
+
+---
+
+## Phase 3 — Owner Intelligence Capture Closeout — 2026-09-25
+
+**STATUS: SOURCE CAPTURE + ACTUAL BOT QUALITY IMPLEMENTED; CI GREEN; PR #98 PENDING FINAL DOCS CI / MERGE / AUTO DEPLOY.**
+
+### Checkpoint 3 production workflow is CLOSED
+
+Owner completed the single production iPhone workflow smoke on feedback event:
+
+`f38293ea-21e0-4dba-9817-ab8a42692774`
+
+Production DB verification immediately after the smoke:
+- final status: `closed`
+- assigned_to: `owner test`
+- acknowledged_at present
+- assigned_at present
+- resolved_at present
+- closed_at present
+- audit sequence in `backoffice_activity`:
+  1. `acknowledged`
+  2. `assigned`
+  3. `started`
+  4. `resolved`
+  5. `closed`
+- no false workflow 400 observed
+- owner screenshot showed canonical closed state and correct assignee on iPhone
+
+The tested historical row still physically contains the old object-shaped `internal_notes.notification_targets`, by design: historical production data was not rewritten. Backoffice read-boundary normalization hides that legacy routing metadata from the staff-note contract, and the writer fix in PR #97 prevents new rows from creating that shape.
+
+Checkpoint 3 is therefore **CLOSED**.
+
+### Remaining Phase 3 capture taxonomy
+
+The existing append-only `customer_intelligence_events` table is reused. No new DB, repo, site, or parallel memory system was created.
+
+Normalized common intents now include:
+- `intent_restaurant_recommendation`
+- `intent_cafe`
+- `intent_horse`
+- `intent_atv`
+- `intent_archery`
+- `intent_homestay`
+- `intent_location`
+- `intent_weather`
+- `intent_refund`
+- `intent_complaint`
+- `intent_safety`
+- `intent_booking`
+- `intent_pricing`
+- `intent_availability`
+
+Food/activity interest signals include:
+- cafe / horse / ATV / archery / homestay
+- dish interest (larb / somtam / namtok / grilled pork neck)
+- protein interest (pork / chicken / beef / fish)
+- Isan-food interest
+
+Negative dietary constraints never inflate positive protein demand.
+
+Group patterns include:
+- solo
+- couple
+- family
+- family with children
+- elderly companion
+- friends
+- corporate/group
+
+Where the same concept belongs in durable customer memory, the existing GuestContext / guest_memory vocabulary is reused:
+- solo / friends / group traveler type
+- child_friendly
+- beginner_friendly
+- rain_sensitive
+- existing family/couple and other constraint keys
+
+Additional aggregate constraint signals:
+- children_present
+- beginner
+- weather_sensitive
+- existing low-spice/protein avoidance/allergy/mobility/fear/low-intensity/chill signals remain intact
+
+### Actual post-response Bot Quality
+
+New module:
+- `netlify/functions/_bot-quality-intelligence.ts`
+
+The evaluator runs from the canonical `processThongthaiChatCore` response boundary, so signals describe the actual customer message + actual assistant response, not only keywords in the customer's complaint.
+
+Signals:
+- `bot_quality_clarification_failure`
+- `bot_quality_wrong_domain`
+- `bot_quality_repeated_answer`
+- `bot_quality_stale_context_hijack`
+- `bot_quality_unsupported_claim`
+- `bot_quality_authority_boundary_failure`
+- `bot_quality_safety_handling`
+- `bot_quality_successful_recovery`
+
+All are written best-effort into the existing aggregate event pipeline using the same one-way source-event key/idempotency contract.
+
+A canonical runtime regression proves a real safety turn persists `bot_quality_safety_handling` after the response is composed.
+
+### RED / GREEN proof
+
+RED head:
+- `1c8076a9ed5650cf81dc81424ddd02be41b9137e`
+- GitHub Actions run `36143993154`
+- failures covered all four missing groups: common intents, interests/groups, constraints, Bot Quality
+
+Implementation had one vocabulary-only follow-up:
+- natural phrase `ขอแบบไม่โหด` was not in the existing low-intensity marker
+- fixed without broadening unrelated routing
+
+Current implementation head before this docs update:
+- `e35fc64d94cccef7e47b91027f42a7dc45ab42ca`
+- GitHub Actions run `36144475655`
+- **1082 / 1082 PASS**
+
+### Still required before Phase 3 is complete
+
+Backoffice must aggregate and visibly surface:
+- Common Intents
+- Food / Activity Interests
+- Group Patterns
+- expanded Constraints
+- actual Bot Quality signals above
+
+Then production deploy/status must be verified. No extra owner click test is required for aggregate sections unless production behavior contradicts CI/runtime evidence.
