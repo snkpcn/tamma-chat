@@ -1,6 +1,8 @@
-// Phase L expansion: 70 additional meaningful semantic scenarios.
-// Combined with the existing 89-case corpus this gives 159 stored semantic
+// Phase L expansion: 80 additional meaningful semantic scenarios.
+// Combined with the current 78-case base corpus this gives 158 stored semantic
 // ground-truth cases before multi-turn/task/source/composer regression suites.
+// Keep this comment aligned with the exported arrays; the older 70 + 89 = 159
+// note was stale and did not match the actual executable fixtures.
 //
 // These are intentionally different customer goals/state shapes rather than
 // spelling-only duplicates. They remain network-free contract fixtures; the
@@ -17,8 +19,13 @@ function out(
   constraints: string[] = [],
   confidence = 0.86,
   needsClarification = false,
+  informationNeed?: string,
 ): Record<string,unknown> {
-  return { domain,intent,action,entities,references:[],constraints,confidence,needsClarification };
+  return {
+    domain,intent,action,
+    ...(informationNeed ? { informationNeed } : {}),
+    entities,references:[],constraints,confidence,needsClarification,
+  };
 }
 
 function c(
@@ -32,11 +39,12 @@ function c(
   context?:SemanticContext,
   constraints:string[]=[],
   needsClarification=false,
+  informationNeed?:string,
 ): SemanticEvalCase {
   return {
     id,category,domainArea:domain,message,context,
     expected:{domain,action,needsClarification},
-    simulatedModelOutput:out(domain,intent,action,entities,constraints,0.86,needsClarification),
+    simulatedModelOutput:out(domain,intent,action,entities,constraints,0.86,needsClarification,informationNeed),
   };
 }
 
@@ -89,7 +97,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-activity-05','correction','activity','เปลี่ยนจาก ATV เป็นขี่ม้าแทน','correct_previous','change_activity',{activityType:'horse'},ACTIVITY_CONTEXT),
   c('l-activity-06','cancel','activity','ไม่เอากิจกรรมแล้ว ยกเลิกก่อน','cancel','cancel_activity',{},ACTIVITY_CONTEXT),
   c('l-activity-07','formal','activity','จอง ATV วันเสาร์ 3 คน','book','book_atv',{activityType:'atv',date:'วันเสาร์',partySize:3}),
-  c('l-activity-08','follow_up','activity','บ่ายสามว่างไหม','ask','check_activity_time',{time:'15:00'},ACTIVITY_CONTEXT),
+  c('l-activity-08','follow_up','activity','บ่ายสามว่างไหม','status','check_activity_time',{time:'15:00'},ACTIVITY_CONTEXT,[],false,'availability'),
   c('l-activity-09','colloquial','activity','อยากทำอะไรชิล ๆ ไม่เหนื่อย','recommend','recommend_low_effort_activity',{},undefined,['low_effort']),
   c('l-activity-10','formal','activity','ช่วยเทียบขี่ม้ากับ ATV ให้หน่อย','compare','compare_activities',{options:['horse','atv']}),
 
@@ -101,7 +109,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-restaurant-05','follow_up','restaurant','เอาชุดเดิมครับ','confirm','confirm_previous_set',{},RESTAURANT_CONTEXT),
   c('l-restaurant-06','correction','restaurant','เปลี่ยนเวลารับเป็นบ่ายสอง','correct_previous','change_pickup_time',{time:'14:00'},RESTAURANT_CONTEXT),
   c('l-restaurant-07','cancel','restaurant','ยกเลิกออเดอร์เมื่อกี้','cancel','cancel_preorder',{},RESTAURANT_CONTEXT),
-  c('l-restaurant-08','follow_up','restaurant','ออเดอร์เมื่อกี้ถึงไหนแล้ว','status','preorder_status',{},RESTAURANT_CONTEXT),
+  c('l-restaurant-08','follow_up','restaurant','ออเดอร์เมื่อกี้ถึงไหนแล้ว','status','preorder_status',{},RESTAURANT_CONTEXT,[],false,'transaction_status'),
   c('l-restaurant-09','confirmation_gating','restaurant','สั่งชุดนี้เลยครับ','order','submit_preorder',{},RESTAURANT_CONTEXT),
   c('l-restaurant-10','formal','restaurant','มีเมนูสำหรับเด็กไหม','ask','ask_child_friendly_menu',{travelerType:'family'}),
 
@@ -113,7 +121,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-stay-05','formal','stay','จองบ้านพักวันศุกร์หนึ่งคืน','book','book_stay',{checkIn:'วันศุกร์',nights:1}),
   c('l-stay-06','correction','stay','เปลี่ยนเป็นสองคืนครับ','correct_previous','change_stay_nights',{nights:2},STAY_CONTEXT),
   c('l-stay-07','cancel','stay','ขอยกเลิกห้องที่จองไว้','cancel','cancel_stay',{},STAY_CONTEXT),
-  c('l-stay-08','follow_up','stay','สถานะจองห้องตอนนี้เป็นยังไง','status','stay_booking_status',{},STAY_CONTEXT),
+  c('l-stay-08','follow_up','stay','สถานะจองห้องตอนนี้เป็นยังไง','status','stay_booking_status',{},STAY_CONTEXT,[],false,'transaction_status'),
   c('l-stay-09','follow_up','stay','เอาหลังเดิมที่แนะนำ','confirm','select_recommended_stay',{},STAY_CONTEXT),
   c('l-stay-10','formal','stay','อยากได้หลังเงียบ ๆ แนะนำหน่อย','recommend','recommend_quiet_stay',{},undefined,['quiet']),
 
@@ -121,7 +129,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-promo-01','formal','promotion','วันนี้มีโปรโมชั่นอะไรเปิดอยู่บ้าง','discover','discover_current_promotions'),
   c('l-promo-02','formal','promotion','มีโปรของร้านอาหารไหม','discover','discover_restaurant_promotions',{businessUnit:'restaurant'}),
   c('l-promo-03','formal','promotion','กิจกรรมมีโปรอะไรบ้าง','discover','discover_activity_promotions',{businessUnit:'activity'}),
-  c('l-promo-04','follow_up','promotion','โปรนี้ยังใช้ได้ไหม','status','promotion_status',{},PROMO_CONTEXT),
+  c('l-promo-04','follow_up','promotion','โปรนี้ยังใช้ได้ไหม','status','promotion_status',{},PROMO_CONTEXT,[],false,'availability'),
   c('l-promo-05','confirmation_gating','promotion','ใช้โปรนี้เลยครับ','confirm','accept_promotion',{},PROMO_CONTEXT),
   c('l-promo-06','cancel','promotion','ไม่ใช้โปรนี้แล้ว ยกเลิกครับ','cancel','cancel_promotion',{},PROMO_CONTEXT),
   c('l-promo-07','formal','promotion','โปรนี้หมดเขตวันไหน','ask','ask_promotion_end',{},PROMO_CONTEXT),
@@ -130,7 +138,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   // Membership — informational/status/update/cancel.
   c('l-member-01','formal','membership','สมัครสมาชิกยังไงครับ','ask','ask_membership_signup'),
   c('l-member-02','confirmation_gating','membership','สมัครสมาชิกเลยครับ','confirm','confirm_membership_signup'),
-  c('l-member-03','formal','membership','สถานะสมาชิกของผมเป็นยังไง','status','membership_status'),
+  c('l-member-03','formal','membership','สถานะสมาชิกของผมเป็นยังไง','status','membership_status',{},undefined,[],false,'transaction_status'),
   c('l-member-04','formal','membership','ขอเปลี่ยนข้อมูลสมาชิกได้ไหม','modify','modify_membership_profile'),
   c('l-member-05','cancel','membership','ขอยกเลิกสมาชิก','cancel','cancel_membership'),
   c('l-member-06','formal','membership','สมาชิกได้สิทธิอะไรบ้าง','discover','discover_membership_benefits'),
@@ -138,13 +146,13 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   // OTOP — catalog, price, stock, order/modify/cancel.
   c('l-otop-01','formal','otop','มีของฝากอะไรบ้าง','discover','discover_otop_products'),
   c('l-otop-02','formal','otop','น้ำผึ้งป่าราคาเท่าไหร่','ask','ask_otop_price',{productName:'น้ำผึ้งป่า'}),
-  c('l-otop-03','follow_up','otop','อันนี้ยังมีของไหม','ask','ask_otop_stock',{},OTOP_CONTEXT),
+  c('l-otop-03','follow_up','otop','อันนี้ยังมีของไหม','status','ask_otop_stock',{},OTOP_CONTEXT,[],false,'inventory'),
   c('l-otop-04','confirmation_gating','otop','เอาน้ำผึ้งสองขวด สั่งเลย','order','order_otop',{productName:'น้ำผึ้งป่า',quantity:2},OTOP_CONTEXT),
   c('l-otop-05','correction','otop','เปลี่ยนเป็นสามขวด','modify','modify_otop_quantity',{quantity:3},OTOP_CONTEXT),
   c('l-otop-06','cancel','otop','ยกเลิกออเดอร์ของฝากเมื่อกี้','cancel','cancel_otop_order',{},OTOP_CONTEXT),
 
   // Café — intentionally informational while no verified live catalog exists.
-  c('l-cafe-01','formal','cafe','อินทนินเปิดอยู่ไหม','ask','ask_cafe_open'),
+  c('l-cafe-01','formal','cafe','อินทนินเปิดอยู่ไหม','status','ask_cafe_open',{},undefined,[],false,'availability'),
   c('l-cafe-02','formal','cafe','คาเฟ่มีเมนูอะไรบ้าง','discover','discover_cafe_menu'),
   c('l-cafe-03','colloquial','cafe','มีลาเต้ปะ','ask','ask_cafe_item',{itemName:'ลาเต้'}),
   c('l-cafe-04','formal','cafe','อยากถามเรื่องเครื่องดื่มเย็น','ask','ask_cafe_drinks',{category:'cold_drink'}),
@@ -153,9 +161,9 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   // Payment — information/status/cancel only; semantic layer never verifies money itself.
   c('l-payment-01','formal','payment','ชำระเงินยังไงครับ','ask','ask_payment_method'),
   c('l-payment-02','follow_up','payment','ส่งสลิปแล้วครับ','provide_information','payment_proof_submitted',{proofSubmitted:true}),
-  c('l-payment-03','formal','payment','สถานะการชำระเงินถึงไหนแล้ว','status','payment_status'),
+  c('l-payment-03','formal','payment','สถานะการชำระเงินถึงไหนแล้ว','status','payment_status',{},undefined,[],false,'transaction_status'),
   c('l-payment-04','formal','payment','ยอดที่ต้องจ่ายเท่าไหร่','ask','ask_payment_amount'),
-  c('l-payment-05','colloquial','payment','จ่ายแล้วทำไมยังขึ้นว่ารออยู่','status','payment_pending_after_payment'),
+  c('l-payment-05','colloquial','payment','จ่ายแล้วทำไมยังขึ้นว่ารออยู่','status','payment_pending_after_payment',{},undefined,[],false,'transaction_status'),
   c('l-payment-06','cancel','payment','ขอยกเลิกรายการชำระนี้','cancel','cancel_payment'),
 
   // Journey / ecosystem / support — planning, modification, resume, vague support.

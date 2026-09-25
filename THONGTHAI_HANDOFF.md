@@ -9006,3 +9006,178 @@ After docs-inclusive CI is green:
 7. repeat until human-grade semantic contract is met
 
 Do NOT quote the old **3.16%** as semantic accuracy. It was primarily an availability artifact.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5 / Checkpoint 5.5 — Semantic Taxonomy v2 — 2026-09-26
+
+**STATUS: IMPLEMENTATION GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / ONE-SHOT LIVE CERTIFICATION.**
+
+### Live evidence that triggered this checkpoint
+
+Phase 5.4 production live certification after provider-resilience hardening:
+
+- total executable corpus: **158**
+- evaluated before persistent provider interruption: **33**
+- semantic results actually returned: **32**
+- semantic pass: **17**
+- semantic failures: **15**
+- provider failures: **1**
+- semantic pass rate over returned semantic results: **53.13%**
+- status: `incomplete_provider`
+
+This is materially different from the earlier misleading 3.16% run: Phase 5.4 separated real semantic mismatches from provider availability.
+
+The remaining 15 semantic failures clustered into taxonomy classes rather than isolated phrases.
+
+### Taxonomy defects identified from live model output
+
+1. Generic property-wide discovery (`มีไรทำ/เล่น`) sometimes narrowed to `activity` with no specific activity/entity.
+2. Restaurant catalog browsing (`ร้านมีไรกิน`, `มีเมนูไรมั่ง`) was inconsistently scored as recommendation.
+3. Availability used `status` in restaurant but `ask` in stay/activity fixtures.
+4. Contextual selection (`เอาภาราดร`, `อันเมื่อกี้`) could be escalated to `book`.
+5. Slot answers (`พรุ่งนี้สองคน`) could be confused with confirmation.
+6. One golden case (`พรุ่งนี้ว่างไหม`) demanded `stay` despite supplying no stay context -- a human cannot infer the missing subject honestly.
+
+### Semantic-v2 human taxonomy
+
+The interpreter prompt now defines domain/action meaning explicitly, without runtime phrase routing.
+
+#### Domain scope
+- `ecosystem`: whole-property discovery when no specific business domain/activity/entity is stated.
+- Generic “do/play/visit” meaning alone does not narrow to `activity`.
+- `activity`: requires a specific activity/entity or unambiguous relevant context.
+- Elliptical availability with neither an entity/domain nor relevant context must not hallucinate a domain; use clarification.
+
+#### Actions
+- `discover`: browse catalog/options/categories that exist.
+- `recommend`: ask Thongthai to help choose/personalize/suggest.
+- `status`: ask current state/availability/open/full/still-available or existing transaction state.
+- `ask`: factual information not better represented by status/compare/recommend/discover.
+- `confirm`: accept/select a previously presented/referenced option.
+- `book/order`: explicit transaction intent to create/submit now; selection alone is not enough.
+- `provide_information`: supply requested task slot values, not transaction confirmation.
+- `correct_previous`: explicit correction/replacement.
+
+### Closed-facet canonicalizer
+
+Prompt quality is not the only guard.
+
+After structured model output is parsed, read-only actions are canonicalized from the CLOSED machine-facing facet:
+
+- availability -> status
+- transaction_status -> status
+- catalog -> discover
+- recommendation -> recommend
+
+Only read-only labels (`ask/discover/recommend/status`) are normalized.
+
+Transactional actions are NEVER rewritten:
+- book
+- order
+- confirm
+- modify
+- cancel
+- etc.
+
+This keeps deterministic safety while removing harmless model-label drift.
+
+### Golden corpus corrections
+
+The corpus was corrected where old ground truth was internally inconsistent.
+
+Examples:
+- restaurant menu/catalog browsing -> discover + catalog
+- explicit “แนะนำอะไรกินหน่อย” remains recommend
+- stay/activity/resource availability -> status + availability
+- context-free `พรุ่งนี้ว่างไหม` now has relevant stay context because otherwise the domain is unknowable
+- topic-switch stay availability -> status
+- Phase-L status/informationNeed cases were aligned as well
+
+This is NOT weakening gold to match model output. It makes the semantic contract internally consistent and human-grounded.
+
+### Corpus count correction
+
+Executable arrays are:
+
+- base corpus: **78**
+- Phase-L expansion: **80**
+- total: **158**
+
+Older comments stating 89 + 70 = 159 were stale and did not match the actual executable fixtures.
+
+### RED evidence
+
+RED commit:
+`4e79b17757ad8f6f8c014d5894c67ea6548f338a`
+
+RED run:
+`36188209869`
+
+Result:
+- tests: 1165
+- pass: 1159
+- fail: 6
+
+Expected failures proved:
+- broad ecosystem/activity domain rule missing
+- discover/recommend taxonomy missing
+- confirm vs transaction rule missing
+- cross-domain availability status inconsistency
+- context-free stay hallucination in gold
+- restaurant catalog/recommendation inconsistency
+
+### Implementation
+
+Prompt taxonomy:
+`3e9d2ca14c62fa3a94c85e90014bd0642ac97a1e`
+
+Base gold normalization:
+`d48aa4e3ab4ee9b77ff50b91c3315cd00d44dba7`
+
+Phase-L normalization:
+`a6e4833a9547ddb9e3efd8b4fefc68863d1ad067`
+
+Closed-facet canonicalizer:
+`d73e0c6be43b2fad439b7d27107943f935a4128e`
+
+Canonicalizer safety tests:
+`2a13615e9ee630c49a3b4db955d21abe0e5963a3`
+
+Semantic interpreter version:
+`semantic-v2`
+
+Live-eval status now honestly reports:
+`partial_live_certification_in_progress`
+
+Corpus equivalence tests were migrated, not deleted:
+`70392050f5f45752128fe072627f8b2111bc8f63`
+
+### GREEN evidence before docs checkpoint
+
+One Mind CI:
+run `36188961192`
+
+Result:
+**1167 / 1167 PASS**
+**fail 0**
+
+Exact Netlify build-command guard:
+run `36188961187`
+**PASS**
+
+### Scope safety
+
+No DB/schema change.
+No booking/order/payment executor change.
+No backoffice change.
+No runtime keyword router added.
+No paid OpenAI fallback enabled.
+No manual deploy.
+
+### Next acceptance
+
+Merge with explicit `[semantic-cert]` marker and run one-shot semantic-v2 production certification.
+
+Do not call Phase 5.5 human-grade until the live model evidence confirms the taxonomy changes.
