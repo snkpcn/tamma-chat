@@ -107,8 +107,15 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
 
   if (/(?:เอา|ขอ)?แบบชิล\s*ๆ?|ขอชิล\s*ๆ?/u.test(text)) pace = 'relaxed';
 
-  if (/มาเป็นครอบครัว|มากันทั้งครอบครัว/u.test(text)) travelerType = 'family';
+  if (/มาเป็นครอบครัว|มากันทั้งครอบครัว|มากับครอบครัว/u.test(text)) travelerType = 'family';
   if (/มาเดท|มากับแฟน/u.test(text)) travelerType = 'couple';
+  if (/มาคนเดียว|มาเที่ยวคนเดียว|ไปคนเดียว/u.test(text)) travelerType = 'solo';
+  if (/มากับเพื่อน|มากันกับเพื่อน|แก๊งเพื่อน/u.test(text)) travelerType = 'friends';
+  if (/มากับบริษัท|บริษัท.*มา|กรุ๊ปบริษัท|ทีมงาน.*มา|สัมมนา|กรุ๊ปใหญ่/u.test(text)) travelerType = 'group';
+
+  if (/มีเด็กมาด้วย|พาเด็กมา|เด็กมาด้วย/u.test(text)) addConstraints.push('child_friendly');
+  if (/มือใหม่|ไม่เคยขี่ม้า|ไม่เคยขับ\s*(?:ATV|เอทีวี)/iu.test(text)) addConstraints.push('beginner_friendly');
+  if (/ถ้าฝนตกไม่สะดวก|ไม่สะดวกถ้าฝนตก|ไม่อยากทำกิจกรรมตอนฝนตก|แพ้ฝน/u.test(text)) addConstraints.push('rain_sensitive');
 
   return { addConstraints, removeConstraints, pace, travelerType };
 }
@@ -141,5 +148,88 @@ export function extractIntelligenceSignals(message: string): IntelligenceSignal[
   if (/ตอบยาวไป|ยาวเกินไป/u.test(text)) signals.push({ eventType: 'risk', category: 'bot_quality_length', domain: 'system' });
   if (/อธิบายไม่รู้เรื่อง/u.test(text)) signals.push({ eventType: 'risk', category: 'bot_quality_clarity', domain: 'system' });
 
-  return signals;
+  // Phase 3 owner-dashboard taxonomy. These are normalized aggregate
+  // categories only; no raw identity is exposed by the dashboard.
+  if (/(?:ร้านอาหาร|ตำมา-ชาติ|เมนู|กินอะไร|มีอะไรแนะนำ|อะไรอร่อย)/u.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_restaurant_recommendation', domain: 'restaurant' });
+  }
+  if (/(?:คาเฟ่|กาแฟ|อินทนิน|inthanin)/iu.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_cafe', domain: 'cafe' });
+    signals.push({ eventType: 'demand', category: 'interest_cafe', domain: 'cafe' });
+  }
+  if (/(?:ขี่ม้า|ม้าตัวไหน|ภาราดร|(?:ทองไทย.*ม้า|ม้า.*ทองไทย))/u.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_horse', domain: 'activity' });
+    signals.push({ eventType: 'demand', category: 'interest_horse', domain: 'activity' });
+  }
+  if (/\bATV\b|เอทีวี/iu.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_atv', domain: 'activity' });
+    signals.push({ eventType: 'demand', category: 'interest_atv', domain: 'activity' });
+  }
+  if (/ยิงธนู|ธนู/u.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_archery', domain: 'activity' });
+    signals.push({ eventType: 'demand', category: 'interest_archery', domain: 'activity' });
+  }
+  if (/เฮือนสเตย์|โฮมสเตย์|homestay|ที่พัก|ห้องพัก/iu.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_homestay', domain: 'stay' });
+    signals.push({ eventType: 'demand', category: 'interest_homestay', domain: 'stay' });
+  }
+  if (/อยู่ที่ไหน|พิกัด|โลเคชั่น|location|ทางไป|ไปยังไง/iu.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_location', domain: 'general' });
+  }
+  if (/อากาศ|ฝนตก|ฝนจะตก|ร้อนไหม|หนาวไหม|weather/iu.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_weather', domain: 'general' });
+  }
+  if (/คืนเงิน|รีฟันด์|refund/iu.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_refund', domain: 'general' });
+  }
+  if (/ร้องเรียน|บริการแย่|บริการไม่ดี|ไม่พอใจ|แย่มาก/u.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_complaint', domain: 'general' });
+  }
+  if (/ไม่ปลอดภัย|บาดเจ็บ|พื้นลื่น|อันตราย|น่ากลัว/u.test(text)) {
+    signals.push({ eventType: 'risk', category: 'intent_safety', domain: 'general' });
+  }
+  if (/จอง|ยกเลิก.*จอง|เลื่อน.*จอง|จอง.*พรุ่งนี้|จอง.*วันนี้/u.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_booking', domain: 'general' });
+  }
+  if (/ราคา|กี่บาท|เท่าไหร่|เท่าไร/u.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_pricing', domain: 'general' });
+  }
+  if (/ว่างไหม|ว่างมั้ย|มีคิว|คิวว่าง|มีห้อง|ห้องว่าง|เหลือไหม|เหลือมั้ย/u.test(text)) {
+    signals.push({ eventType: 'demand', category: 'intent_availability', domain: 'general' });
+  }
+
+  // Group type patterns.
+  if (/มาคนเดียว|มาเที่ยวคนเดียว|ไปคนเดียว/u.test(text)) signals.push({ eventType:'phrase', category:'group_solo', domain:'general' });
+  if (/มาเดท|มากับแฟน/u.test(text)) signals.push({ eventType:'phrase', category:'group_couple', domain:'general' });
+  if (/ครอบครัว/u.test(text)) signals.push({ eventType:'phrase', category:'group_family', domain:'general' });
+  if (/พาลูกมา|มากับลูก|มีเด็กมาด้วย|พาเด็กมา|เด็กมาด้วย/u.test(text)) signals.push({ eventType:'phrase', category:'group_family_children', domain:'general' });
+  if (/พาแม่มา|มากับแม่|คุณแม่|พ่อแม่|ผู้สูงอายุ/u.test(text)) signals.push({ eventType:'phrase', category:'group_elderly_companion', domain:'general' });
+  if (/มากับเพื่อน|มากันกับเพื่อน|แก๊งเพื่อน/u.test(text)) signals.push({ eventType:'phrase', category:'group_friends', domain:'general' });
+  if (/มากับบริษัท|กรุ๊ปบริษัท|ทีมงาน.*มา|สัมมนา|กรุ๊ปใหญ่/u.test(text)) signals.push({ eventType:'phrase', category:'group_corporate', domain:'general' });
+
+  // Additional owner-facing constraint patterns.
+  if (/พาลูกมา|มากับลูก|มีเด็กมาด้วย|พาเด็กมา|เด็กมาด้วย/u.test(text)) signals.push({ eventType:'phrase', category:'children_present', domain:'general' });
+  if (/มือใหม่|ไม่เคยขี่ม้า|ไม่เคยขับ\s*(?:ATV|เอทีวี)/iu.test(text)) signals.push({ eventType:'phrase', category:'beginner', domain:'activity' });
+  if (/ถ้าฝนตกไม่สะดวก|ไม่สะดวกถ้าฝนตก|ไม่อยากทำกิจกรรมตอนฝนตก|แพ้ฝน/u.test(text)) signals.push({ eventType:'phrase', category:'weather_sensitive', domain:'general' });
+
+  // Food / dish interest: positive wording only, so a negative constraint
+  // like "ไม่กินหมู" never inflates pork demand.
+  if (/(?:ชอบ|อยากกิน|ขอ|เอา).{0,10}(?:ลาบ)/u.test(text)) signals.push({ eventType:'demand', category:'dish_interest_larb', domain:'restaurant' });
+  if (/(?:ชอบ|อยากกิน|ขอ|เอา).{0,10}(?:ส้มตำ|ตำลาว|ตำไทย)/u.test(text)) signals.push({ eventType:'demand', category:'dish_interest_somtam', domain:'restaurant' });
+  if (/(?:ชอบ|อยากกิน|ขอ|เอา).{0,10}(?:น้ำตก)/u.test(text)) signals.push({ eventType:'demand', category:'dish_interest_namtok', domain:'restaurant' });
+  if (/(?:ชอบ|อยากกิน|ขอ|เอา).{0,10}(?:คอหมู)/u.test(text)) signals.push({ eventType:'demand', category:'dish_interest_grilled_pork_neck', domain:'restaurant' });
+  if (!/ไม่กินหมู|ไม่เอาหมู|งดหมู/u.test(text) && /(?:ชอบ|อยากกิน|ขอ|เอา).{0,14}(?:หมู|ลาบหมู|คอหมู)/u.test(text)) signals.push({ eventType:'demand', category:'food_interest_pork', domain:'restaurant' });
+  if (!/ไม่กินไก่|ไม่เอาไก่|งดไก่/u.test(text) && /(?:ชอบ|อยากกิน|ขอ|เอา).{0,14}(?:ไก่)/u.test(text)) signals.push({ eventType:'demand', category:'food_interest_chicken', domain:'restaurant' });
+  if (!/ไม่กินเนื้อ|ไม่เอาเนื้อ|งดเนื้อ/u.test(text) && /(?:ชอบ|อยากกิน|ขอ|เอา).{0,14}(?:เนื้อ|วัว)/u.test(text)) signals.push({ eventType:'demand', category:'food_interest_beef', domain:'restaurant' });
+  if (!/ไม่กินปลา|ไม่เอาปลา|งดปลา/u.test(text) && /(?:ชอบ|อยากกิน|ขอ|เอา).{0,14}(?:ปลา|ปลาช่อน|ปลานิล)/u.test(text)) signals.push({ eventType:'demand', category:'food_interest_fish', domain:'restaurant' });
+  if (/อาหารอีสาน|กินอีสาน|แนวอีสาน/u.test(text)) signals.push({ eventType:'demand', category:'food_interest_isan', domain:'restaurant' });
+
+  // Avoid double-counting the same normalized signal within one customer turn.
+  return signals.filter((signal, index, all) =>
+    all.findIndex(candidate =>
+      candidate.eventType === signal.eventType
+      && candidate.category === signal.category
+      && candidate.domain === signal.domain
+    ) === index
+  );
 }
