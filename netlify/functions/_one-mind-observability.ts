@@ -52,6 +52,7 @@ export type OneMindTraceEnvelope = {
     domain: string;
     intent: string;
     action: string;
+    informationNeed: string;
     confidenceBucket: 'high' | 'medium' | 'low';
     referencesResolved: number;
     referencesUnresolved: number;
@@ -140,6 +141,7 @@ export function buildOneMindTraceEnvelope(args:{
       domain:safeToken(turn.trace.semantic.domain,60) ?? 'unknown',
       intent:safeToken(turn.trace.semantic.intent,100) ?? 'unknown',
       action:safeToken(turn.trace.semantic.action,60) ?? 'unknown',
+      informationNeed:safeToken(turn.trace.semantic.informationNeed,60) ?? 'none',
       confidenceBucket:turn.trace.semantic.confidenceBucket,
       referencesResolved:Math.max(0,turn.trace.semantic.referencesResolved),
       referencesUnresolved:Math.max(0,turn.trace.semantic.referencesUnresolved),
