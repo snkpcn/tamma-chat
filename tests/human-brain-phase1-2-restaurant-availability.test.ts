@@ -83,3 +83,47 @@ test('Human Brain Phase 1.2 RED: if no live table source exists, the determinist
   assert.doesNotMatch(response.message, /ออเดอร์|คำสั่งซื้อ|สถานะรายการ/u);
   assert.doesNotMatch(response.message, /เมนู|คอหมู|ไข่เจียว/u);
 });
+
+
+test('Human Brain Phase 1.2 guard: registered restaurant availability source is used exclusively, never order-status lookup', async () => {
+  const plan = planDialogTurn({
+    semanticTurn: availabilityTurn(),
+    conversationContext: emptyConversationContextState(NOW),
+    taskState: emptyTaskStateContainer(),
+    channel: 'line',
+    eventId: 'phase1-2-source-routing',
+  }, NOW);
+
+  let availabilityCalls = 0;
+  let orderStatusCalls = 0;
+
+  const bundle = await resolveKnowledge(plan.knowledgeRequests[0]!, {
+    restaurant: {
+      availability: async () => {
+        availabilityCalls += 1;
+        return {
+          status: 'empty',
+          sourceId: 'restaurant_table_availability_live',
+          sourceType: 'restaurant_live',
+          fetchedAt: NOW.toISOString(),
+        };
+      },
+    },
+    orderStatus: {
+      lookup: async () => {
+        orderStatusCalls += 1;
+        return {
+          status: 'empty',
+          sourceId: 'restaurant_orders',
+          sourceType: 'order_operational',
+          fetchedAt: NOW.toISOString(),
+        };
+      },
+    },
+  }, NOW);
+
+  assert.equal(availabilityCalls, 1);
+  assert.equal(orderStatusCalls, 0);
+  assert.equal(bundle.sources[0]?.need, 'availability');
+  assert.equal(bundle.sources[0]?.sourceType, 'restaurant_live');
+});
