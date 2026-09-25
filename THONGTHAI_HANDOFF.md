@@ -6035,3 +6035,19 @@ Expected:
 - turn 1 short acknowledgment only;
 - turn 2 grounded menu recommendations respecting all 3 current constraints;
 - never the generic `อาหารอีสานแท้ๆ...รสจัดจ้าน...` paragraph.
+
+
+## Phase 2 Stabilization — Durable no_shrimp covers fresh + dried shrimp — 2026-09-25
+
+Owner smoke for the combined dietary phrase passed visually, but review of the underlying constraint mapping found a latent durable-memory bug:
+- same-turn `ไม่กินกุ้ง` was safe because parsePreferences added both fresh `กุ้ง` and `กุ้งแห้ง`;
+- durable `guest_memory.constraints = no_shrimp` mapped only to `กุ้งแห้ง`, so a later turn relying only on memory could allow a fresh-shrimp dish.
+
+Fix:
+- `FOOD_CONSTRAINT_ALIASES.no_shrimp` now excludes both `กุ้ง` and `กุ้งแห้ง`;
+- customer-facing acknowledgement now says `ไม่มีกุ้ง` instead of the misleading narrower `ไม่มีกุ้งแห้ง`;
+- full signed LINE regression proves `ไม่กินกุ้ง` persists as `no_shrimp` and a later restaurant recommendation excludes both a fresh-shrimp dish and a dried-shrimp dish.
+
+Verified head `028bb6ce18bb631b94acd0c69b5dc0835409b302`: GitHub Actions **1060/1060 passing, 0 failures**.
+
+No DB migration. No production DB mutation. No Phase 3 work.
