@@ -6404,3 +6404,118 @@ Expected turn 2:
 - direct `เลือกทองไทย`;
 - asks only `มากี่คนครับ?`;
 - must NOT ask `เคยขี่ม้ามาก่อนไหม` again.
+
+
+---
+
+## PHASE 2 CLOSED — Production LINE smoke complete — 2026-09-25
+
+**STATUS: CLOSED.**
+
+Phase 2 — Customer memory + semantic conversational continuity is now closed based on **real owner production LINE smoke**, not unit tests alone.
+
+### Production baseline at closure
+
+- Production `main` commit: `6e120275237df9e303e194a46d3f79ac1c32e3e4`
+- Netlify production deploy: `6ab63133b93e640008e6a41d`
+- Netlify state: **READY**
+- Deploy `commit_ref`: `6e120275237df9e303e194a46d3f79ac1c32e3e4`
+- Deploy was automatic (`manual_deploy=false`)
+- Latest full GitHub Actions result before closure: **1072 / 1072 PASS**
+
+### Owner production smoke that passed
+
+The owner tested the real LINE account, one same conversation, including:
+
+1. `แม่เดินไกลไม่ได้`
+   - limited-walking context captured.
+
+2. `มีอะไรแนะนำ`
+   - remembered the mother / low-walking context and asked the specific refinement:
+     `อยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?`
+
+3. `อยากเน้นกินข้าว`
+   - correctly resolved as the answer to Thongthai's own previous question.
+   - no generic `ขอรายละเอียดเพิ่มอีกนิด`.
+   - entered grounded restaurant recommendations.
+
+4. `ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง`
+   - acknowledged constraints without dumping a menu.
+
+5. `แนะนำอะไร`
+   - returned grounded menu choices respecting no-spicy / no-chicken / no-shrimp.
+
+6. `มีอะไรแนะนำอีก`
+   - did not repeat the same menu page.
+   - honestly reported that no further verified options were available under the constraints.
+
+7. `ขอโลเคชั่นหน่อยทองไทย`
+   - correctly treated `ทองไทย` as the assistant, not the horse.
+   - returned the location / Google Maps link.
+
+8. `ตอนนี้ฝนตกไหม`
+   - correctly switched to weather intent instead of letting stale restaurant context hijack the turn.
+
+9. `อยากขี่ม้า ไม่เคยเลย กลัวตก`
+   - switched cleanly into horse-care context.
+   - care-first response, no booking/payment rush, no 100% safety guarantee.
+   - persisted `riderExperience=beginner` and fear context.
+
+10. `เอาทองไทย`
+    - correctly selected horse `ทองไทย`.
+    - did not ask assistant-vs-horse clarification.
+    - did not re-ask `เคยขี่ม้ามาก่อนไหม`.
+    - asked only the still-missing party-size question.
+
+11. `ขอคืนเงินได้ไหม`
+    - authority boundary overrode active horse context.
+    - Thongthai did not approve a refund itself.
+    - owner LINE notification was received.
+    - Customer Voice event/backoffice link was generated.
+
+12. `พื้นลื่นมาก ตอนเล่น ATV น่ากลัว`
+    - safety escalation overrode all active context.
+    - Thongthai told the customer the real surface conditions require team checking.
+    - owner LINE safety notification was received.
+    - activity LINE safety notification was received.
+    - Customer Voice event/backoffice link was generated.
+
+### Phase 2 Definition of Done — final status
+
+A. Memory survives multiple turns — **PASS**
+
+B. Thongthai understands answers to its own previous questions — **PASS**
+
+C. Explicit new intent switches domain cleanly — **PASS**
+
+D. Stale context does not hijack new intent — **PASS**
+
+E. Dietary / mobility / fear preferences persist correctly — **PASS**
+
+F. Safety + authority override active tasks — **PASS**
+
+G. No generic clarification for an obvious contextual answer — **PASS**
+
+H. No regression in location / weather / horse / ATV / restaurant / mobility / refund / safety / owner notification — **PASS**
+
+### Important smoke fixes included before closure
+
+- PR #89 — persisted generic `pending_question` semantic follow-up resolver.
+- PR #90 — explicit horse/activity domain switch suspends unrelated stale task instead of being blocked by it.
+- PR #91 — horse-care facts already understood in the opening turn are persisted, and subsequent prompts ask only genuinely missing slots.
+
+### Guardrails after closure
+
+Phase 2.7 `customer_intelligence_events` aggregate migration remains:
+
+**NOT APPROVED / NOT APPLIED**
+
+Do not apply that migration without explicit owner approval.
+
+Phase 3 — Owner Dashboard / Customer Voice OS remains:
+
+**NOT STARTED**
+
+Do not start Phase 3 until the owner explicitly approves proceeding after this closed checkpoint.
+
+No new repo, Supabase project, site, or production DB mutation was created as part of Phase 2 closeout.
