@@ -7257,3 +7257,116 @@ Once PR #100 is merged and its automatic production deploy is verified:
 - cafe remains grounded to the actual production source boundary
 
 At that point **Phase 4 is CLOSED** and the roadmap proceeds to **Phase 5 — Learning Loop / Bot Lessons**.
+
+
+---
+
+## Phase 6 — Customer Personalization — 2026-09-25
+
+**STATUS: DURABLE PERSONALIZATION GREEN; PR #101 PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY.**
+
+Phase 6 reuses the existing `guest_memory` / `journeyContext` foundation. No parallel profile store was added.
+
+### RED findings
+
+Stateful regression:
+- `tests/phase6-customer-personalization.test.ts`
+
+RED commit:
+- `acb1172060d840f56489470b3739247560601768`
+
+GitHub Actions run:
+- `36159604057`
+
+Existing memory already persisted many useful signals, but several were merely loaded and then ignored by deterministic host responses.
+
+RED reproduced five real gaps:
+
+1. child/family memory persisted but did not shape a later broad recommendation
+2. relaxed pace persisted but did not shape a later broad recommendation
+3. beginner/fear memory persisted but a later horse turn still re-asked whether the guest had ever ridden
+4. couple/group context persisted but broad host wording ignored it
+5. favorites / visited experiences rehydrated into `journeyContext` but were never read by the canonical core
+
+The same RED suite also proved two safety properties already worked:
+- `preferred_language` is durable through the existing customer-memory endpoint
+- a current explicit new intent (e.g. location) wins over stale personalization state
+
+### Implementation
+
+Broad ecosystem recommendations now add **soft, conditional hints** from durable memory:
+
+- child/family
+  - emphasizes unhurried pacing and team assessment for activities
+  - never makes a safety guarantee
+
+- relaxed pace
+  - prioritizes cafe / food / stay as the initial planning spine
+  - activities remain optional instead of being silently removed
+
+- couple
+  - may suggest cafe / dining / sunset framing
+
+- favorites
+  - canonical experience IDs are mapped through the existing `EXPERIENCES` catalog
+  - wording is conditional: “ถ้ายังชอบ ... อยู่”
+  - no claim that an old preference is permanently true
+
+- visited experiences
+  - can be used as an optional avoid-repeat hint
+  - wording is conditional: “ถ้าอยากไม่ซ้ำ...”
+  - previously visited places are not permanently excluded
+
+No raw chat text is stored for this personalization.
+
+### Activity care memory
+
+`deterministicActivityIntentStartResponse()` now uses durable constraints when the current message does not already supply a stronger qualifier:
+
+precedence:
+1. explicit current-turn qualifier
+2. remembered `beginner_friendly`
+3. remembered fear-of-falling / fear-of-speed → cautious branch
+4. remembered child / elderly companion context
+5. generic horse-start branch
+
+This prevents the assistant from asking “เคยขี่ม้ามาก่อนไหม” again when durable memory already says the guest is a beginner.
+
+The new cautious branch says the guest can start slowly and be assisted during mounting/dismounting; it never guarantees safety.
+
+### Stale-context rule
+
+Durable memory only shapes **how** a compatible response is composed.
+
+It does not select a different domain over an explicit current request.
+
+The Phase 6 regression explicitly proves a stored chill/couple preference cannot hijack a later location request.
+
+### Favorites / visited / language
+
+Existing durable storage remains authoritative:
+- `favorites`
+- `visited_experiences`
+- `preferred_language`
+
+Phase 6 adds actual canonical-host use for favorites/visited.
+
+Language behavior keeps the safer rule:
+- stored preferred language remains durable
+- the current request language wins when explicit, so stale language cannot override a new-language turn
+
+### GREEN evidence
+
+Implementation head before this docs update:
+- `37fd15afc9c378ab28cc590f61770413fa842e1a`
+
+GitHub Actions:
+- run `36159835028`
+- **1097 / 1097 PASS**
+
+No DB/schema/site change.
+No production customer transaction.
+No manual Netlify deploy.
+
+After merge + exact automatic production deploy verification:
+**Phase 6 is CLOSED** and the roadmap proceeds to **Phase 7 — Production E2E Smoke Matrix**.

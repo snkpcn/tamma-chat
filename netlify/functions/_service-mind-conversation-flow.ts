@@ -70,7 +70,7 @@ export function isActivityIntentStartMessage(message: string): boolean {
   return ACTIVITY_INTENT_START_MARKER.test(message.trim());
 }
 
-export type ActivityIntentQualifier = 'beginner' | 'family' | null;
+export type ActivityIntentQualifier = 'beginner' | 'family' | 'cautious' | null;
 
 /** Which of the two care-question branches (if any) the appended
  *  qualifier calls for. Never used to claim a horse is "safer" for either
@@ -94,7 +94,10 @@ export function composeActivityIntentStartResponse(qualifier: ActivityIntentQual
     return `${intro}\n\nเป็นมือใหม่ไม่ต้องกังวลครับ ทีมงานจะช่วยดูแลและแนะนำจังหวะที่เหมาะสมให้ครับ แล้วมากันกี่คนครับ?`;
   }
   if (qualifier === 'family') {
-    return `${intro}\n\nพาเด็ก/ผู้สูงอายุไปด้วยก็ขี่ได้ครับ ขอถามอายุคร่าว ๆ และเคยขี่ม้ามาก่อนไหมครับ ทีมงานจะช่วยดูแลความปลอดภัยให้เหมาะกับแต่ละท่านครับ`;
+    return `${intro}\n\nถ้ามีเด็ก/ผู้สูงอายุไปด้วย ขออายุคร่าว ๆ และประสบการณ์ขี่ม้าของแต่ละท่านก่อนนะครับ ทีมงานจะช่วยประเมินและดูแลให้เหมาะ โดยทองไทยไม่ขอการันตีความปลอดภัย 100% ครับ`;
+  }
+  if (qualifier === 'cautious') {
+    return `${intro}\n\nถ้ายังกังวลเรื่องการทรงตัวหรือความเร็วอยู่ เริ่มช้า ๆ แบบสบาย ๆ ก่อนได้ครับ ทีมงานจะช่วยดูใกล้ ๆ ตอนขึ้น-ลงม้า แล้วมากันกี่คนครับ?`;
   }
   return `${intro}\n\nขอถามนิดนึงนะครับ เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ จะได้แนะนำตัวม้าและระยะเวลาให้เหมาะครับ`;
 }
