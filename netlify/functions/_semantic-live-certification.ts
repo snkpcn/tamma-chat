@@ -77,6 +77,11 @@ export type SemanticCertificationFailure = {
     name: string;
     attempts: ProviderAttemptDiagnostic[];
   };
+  /** Model returned but semantic output could not be parsed/validated.
+   *  Safe diagnostic only: error class name, never raw model output. */
+  semanticError?: {
+    name: string;
+  };
 };
 
 export type SemanticCertificationResult = {
@@ -247,7 +252,8 @@ export async function runSemanticCertification(options: {
         break;
       } catch (error) {
         const attempts = safeProviderAttempts(error);
-        const retryable = retryableAvailabilityFailure(attempts);
+        const isProviderFailure = attempts.length > 0;
+        const retryable = isProviderFailure && retryableAvailabilityFailure(attempts);
 
         if (
           retryable
@@ -260,8 +266,7 @@ export async function runSemanticCertification(options: {
         }
 
         evaluated += 1;
-        providerFailed += 1;
-        failures.push({
+        const baseFailure = {
           id:item.id,
           category:item.category,
           expected:{
@@ -277,11 +282,28 @@ export async function runSemanticCertification(options: {
             informationNeed:'none',
             confidence:0,
           },
-          providerError:{
-            name:providerErrorName(error),
-            attempts,
-          },
-        });
+        };
+
+        if (isProviderFailure) {
+          providerFailed += 1;
+          failures.push({
+            ...baseFailure,
+            providerError:{
+              name:providerErrorName(error),
+              attempts,
+            },
+          });
+        } else {
+          // A provider did return, but its semantic payload could not be
+          // parsed/validated (e.g. malformed JSON). That is model-output
+          // correctness, not provider availability, and must not stop the
+          // remaining corpus when stopOnProviderFailure is enabled.
+          semanticFailed += 1;
+          failures.push({
+            ...baseFailure,
+            semanticError:{ name:providerErrorName(error) },
+          });
+        }
         break;
       }
     }
