@@ -8,8 +8,16 @@ import { SEMANTIC_INTERPRETER_VERSION } from '../netlify/functions/_semantic-int
 const OUTPUT='semantic-certification-result.json';
 
 async function main() {
-  if (process.env.RUN_SEMANTIC_CERTIFICATION !== '1') {
-    console.log('LIVE_SEMANTIC_CERTIFICATION_SKIPPED');
+  const isProductionMain =
+    process.env.CONTEXT === 'production'
+    && process.env.BRANCH === 'main';
+
+  if (process.env.RUN_SEMANTIC_CERTIFICATION !== '1' || !isProductionMain) {
+    console.log('LIVE_SEMANTIC_CERTIFICATION_SKIPPED', JSON.stringify({
+      enabled: process.env.RUN_SEMANTIC_CERTIFICATION === '1',
+      context: process.env.CONTEXT ?? null,
+      branch: process.env.BRANCH ?? null,
+    }));
     return;
   }
 
