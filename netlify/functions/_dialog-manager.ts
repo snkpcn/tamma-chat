@@ -229,7 +229,13 @@ export const TOOL_NAME_FOR_TASK_TYPE: Partial<Record<ActiveTaskType, string>> = 
 };
 
 function isAmbiguous(turn: SemanticTurn): boolean {
-  return turn.needsClarification || turn.references.some(reference => reference.ambiguous === true);
+  if (turn.needsClarification) return true;
+  // Compare/recommend intentionally reason over a candidate set. Multiple
+  // resolved antecedents are expected there, not a reason to force a
+  // singular clarification. Selection/status/mutation actions still require
+  // one unambiguous antecedent and are guarded by the Semantic Interpreter.
+  if (turn.action === 'compare' || turn.action === 'recommend') return false;
+  return turn.references.some(reference => reference.ambiguous === true);
 }
 
 type TopicTransition = 'none' | 'suspend' | 'resume';
