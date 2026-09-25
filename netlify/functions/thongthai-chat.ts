@@ -445,10 +445,17 @@ function currentRestaurantAdvisorContext(runtime: { agentState: Record<string, u
     .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     .map(item => item.trim().replace(/\s+/g, ' ').slice(0, 180))
     .slice(-8);
+  const recentRecommendationNames = Array.isArray(raw.recentRecommendationNames)
+    ? raw.recentRecommendationNames
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .map(item => item.trim().replace(/\s+/g, ' ').slice(0, 160))
+      .slice(-20)
+    : [];
   if (!recentMessages.length) return null;
   return {
     source: RESTAURANT_ADVISOR_CONTEXT_SOURCE,
     recentMessages,
+    recentRecommendationNames,
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
   };
 }
@@ -462,19 +469,31 @@ function restaurantAdvisorRecentMessages(
   return [...stored, ...transported].slice(-8);
 }
 
+function isRestaurantAlternativeRequest(message: string): boolean {
+  return /(?:แนะนำ.*อีก|มีอะไร.*อีก|เมนู.*อื่น|อย่างอื่น|อันอื่น|อย่างอื่นอีก)/u.test(message);
+}
+
 function restaurantAdvisorContextUpdate(
   request: BrainRequest,
   runtime: { agentState: Record<string, unknown> },
+  shownRecommendationNames?: string[],
 ): AgentStateUpdate {
   const recentMessages = [...restaurantAdvisorRecentMessages(request, runtime), request.message]
     .map(item => item.trim().replace(/\s+/g, ' ').slice(0, 180))
     .filter(Boolean)
     .slice(-8);
+  const previousRecommendationNames = currentRestaurantAdvisorContext(runtime)?.recentRecommendationNames ?? [];
+  const recentRecommendationNames = shownRecommendationNames === undefined
+    ? previousRecommendationNames
+    : isRestaurantAlternativeRequest(request.message)
+      ? [...new Set([...previousRecommendationNames, ...shownRecommendationNames])].slice(-20)
+      : [...new Set(shownRecommendationNames)].slice(-20);
   return {
     activeTopic: 'restaurant',
     restaurantAdvisorContext: {
       source: RESTAURANT_ADVISOR_CONTEXT_SOURCE,
       recentMessages,
+      recentRecommendationNames,
       updatedAt: new Date().toISOString(),
     },
   };
@@ -801,11 +820,51 @@ function naturalRestaurantConstraintPhrase(advisor: any): string {
   return parts.join('และ');
 }
 
+function isBareStapleRecommendationRow(row: any): boolean {
+  const mealRoles = Array.isArray(row?.mealRoles) ? row.mealRoles.filter((value: unknown): value is string => typeof value === 'string') : [];
+  const proteinTags = Array.isArray(row?.proteinTags) ? row.proteinTags.filter((value: unknown): value is string => typeof value === 'string') : [];
+  return mealRoles.length > 0 && mealRoles.every((role: string) => role === 'side') && proteinTags.length === 0;
+}
+
+function advisorRecommendationSelection(
+  advisor: any,
+  fullList: boolean,
+  currentMessage: string,
+  alreadyShownNames: string[] = [],
+): { shown: any[]; moreAvailable: boolean; wantsAlternative: boolean } {
+  const rawRows = Array.isArray(advisor?.recommendations) ? advisor.recommendations : [];
+  const wantsAlternative = !fullList && isRestaurantAlternativeRequest(currentMessage);
+
+  // A generic recommendation should not promote bare staples (plain rice,
+  // plain noodles, etc.) as standalone "best picks". Keep them available in
+  // full-list/compose/pairing experiences, where side dishes are useful.
+  const scopedRows = !fullList && advisor?.mode === 'recommend'
+    ? rawRows.filter((row: any) => !isBareStapleRecommendationRow(row))
+    : rawRows;
+
+  const alreadyShown = new Set(alreadyShownNames.map(name => name.trim()).filter(Boolean));
+  const candidateRows = wantsAlternative
+    ? scopedRows.filter((row: any) => !alreadyShown.has(String(row?.name ?? '').trim()))
+    : scopedRows;
+
+  const shown = fullList
+    ? candidateRows
+    : wantsAlternative
+      ? candidateRows.slice(0, 3)
+      : limitAdvisoryList(candidateRows, 3);
+  return {
+    shown,
+    moreAvailable: candidateRows.length > shown.length,
+    wantsAlternative,
+  };
+}
+
 function formatAdvisorMessage(
   advisor: any,
   fullList = false,
   constraintMentionedNow = true,
   currentMessage = '',
+  alreadyShownNames: string[] = [],
 ): string {
   const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
   if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
@@ -851,21 +910,12 @@ function formatAdvisorMessage(
   // dump instead of care first.
   const allRows = Array.isArray(advisor?.recommendations) ? advisor.recommendations : [];
   if (allRows.length) {
-    // "มีอะไรแนะนำอีก" means ANOTHER recommendation, not "repeat the same
-    // top 3". restaurantMenuAdvice intentionally returns a ranked shortlist
-    // (up to 5 grounded items). The first recommendation shows rank 1–3; an
-    // explicit "อีก/อย่างอื่น/เมนูอื่น" follow-up rotates to the remaining
-    // ranked items instead of replaying the same answer. If fewer than four
-    // verified candidates exist, say so rather than hallucinating or repeating.
-    const wantsAlternative = !fullList && /(?:แนะนำ.*อีก|มีอะไร.*อีก|เมนู.*อื่น|อย่างอื่น|อันอื่น|อย่างอื่นอีก)/u.test(currentMessage);
-    const shown = fullList
-      ? allRows
-      : wantsAlternative
-        ? allRows.slice(3, 6)
-        : limitAdvisoryList(allRows, 3);
-    const moreAvailable = wantsAlternative
-      ? allRows.length > 6
-      : allRows.length > shown.length;
+    const { shown, moreAvailable, wantsAlternative } = advisorRecommendationSelection(
+      advisor,
+      fullList,
+      currentMessage,
+      alreadyShownNames,
+    );
     // Master Roadmap Phase 2 fix -- the full caution block (constraintAck
     // + allergyNotice) only leads when THIS message is the one restating
     // the constraint; on a later turn using a REMEMBERED constraint
@@ -1344,7 +1394,7 @@ async function deterministicRestaurantResponse(
     constraints: request.guestContext.constraints,
     recentMessages: restaurantAdvisorRecentMessages(request, runtime),
   });
-  const advisorContext = restaurantAdvisorContextUpdate(request, runtime);
+  const priorRecommendationNames = currentRestaurantAdvisorContext(runtime)?.recentRecommendationNames ?? [];
   // Master Roadmap Phase 2 fix -- the ONE hard gate: a dietary constraint
   // message is NEVER a menu request. CONSTRAINT_ONLY always gets a short
   // acknowledgment only, never the full recommendation dump -- see
@@ -1365,17 +1415,24 @@ async function deterministicRestaurantResponse(
       journeyAction: { type: 'none', journey: null },
       suggestedActions: [],
       responseStyle: 'direct',
-      agentStateUpdate: advisorContext,
+      agentStateUpdate: restaurantAdvisorContextUpdate(request, runtime),
       semanticMemoryUpdates: [],
       toolCalls: [],
     };
   }
+  const fullList = wantsFullRestaurantList(request.message);
+  const selection = advisorRecommendationSelection(advice, fullList, request.message, priorRecommendationNames);
+  const shownRecommendationNames = selection.shown
+    .map((row: any) => typeof row?.name === 'string' ? row.name.trim() : '')
+    .filter(Boolean);
+  const advisorContext = restaurantAdvisorContextUpdate(request, runtime, shownRecommendationNames);
   return {
     message: formatAdvisorMessage(
       advice,
-      wantsFullRestaurantList(request.message),
+      fullList,
       mentionsRestaurantConstraintNow(dietaryIntent),
       request.message,
+      priorRecommendationNames,
     ),
     intent: advice.mode === 'compare' ? 'information' : 'recommendation',
     contextUpdates:{},
