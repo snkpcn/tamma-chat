@@ -6079,3 +6079,31 @@ Full LINE regressions:
 Verified head `a7fab775000628af33cb0788bcdb88cfc14cbb0d`: **1062/1062 tests passing, 0 failures**.
 
 No DB migration. No production DB mutation. No Phase 3 work.
+
+
+## Phase 2 Production Smoke Closure — Restaurant memory / dietary safety — 2026-09-25
+
+Owner production LINE retest after PR #85 passed the final restaurant-memory slice:
+
+- customer turn: `ไม่กินกุ้ง`
+- assistant acknowledged active durable constraints as `เลี่ยงกุ้ง/ไก่ + ไม่เผ็ด`, correctly preserving prior no_chicken + no_spicy memory while adding no_shrimp;
+- customer follow-up: `มีอะไรแนะนำอีก`
+- assistant did **not** repeat old dishes, did **not** drift to beverages, did **not** hallucinate a new dish, and honestly replied that no further menu options could be verified under the active constraints.
+
+This closes the restaurant Phase 2 stabilization checkpoint covering:
+- constraint-only vs recommendation intent split;
+- durable no_spicy / no_chicken / no_shrimp;
+- raw ingredient fallback for dietary exclusions;
+- strict spicy-risk filtering;
+- food vs beverage scope continuity;
+- unseen recommendation pagination;
+- honest exhausted-catalog behavior;
+- Local Concierge precedence fix;
+- LINE empty-history continuity.
+
+Current production baseline after smoke:
+- main includes PR #85;
+- production deploy for merge commit `cf5a3ee155570e24049b636679220d94cb46daa8` is READY;
+- branch CI for PR #85: 1060/1060 passing.
+
+No DB migration was applied in Phase 2. The prepared customer_intelligence_events migration remains pending explicit owner approval before Phase 3.
