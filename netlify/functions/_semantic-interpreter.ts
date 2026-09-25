@@ -313,6 +313,15 @@ Classify the CURRENT message only (use context to interpret it, not to answer a 
 SEMANTIC COMPLETENESS RULES:
 - A domain noun tells you WHERE the customer is talking about; the rest of the sentence tells you WHAT they want.
   Never collapse a richer question into generic discovery merely because it mentions a restaurant, room, horse, cafe, or product.
+- Broad discovery scope is cross-business: when the customer asks generally what there is to do or experience here without
+  anchoring the CURRENT utterance or relevant context to one specific business/resource, use domain "ecosystem". Do not narrow
+  a broad "what can I do here?" meaning to domain "activity" merely because doing/playing could include activities. Use
+  domain "activity" only when the meaning is specifically anchored to Adventure/activities or a concrete activity/resource.
+- Catalog/listing and recommendation are different meanings. A request to list what exists (for example the available menu,
+  room types, activities, products, or promotions) is discovery/catalog meaning. Use recommend only when the customer is asking
+  what they should choose, what fits them, or for suggestions/judgment.
+- A bare availability question with an omitted object must inherit a domain only from genuinely relevant current context.
+  Without such context, do not invent "stay", "restaurant", or "activity" merely because availability is a business concept.
 - Preserve the customer's actual predicate/question: availability/status, price, recommendation, booking, cancellation,
   comparison, how-it-works, complaint, or ordinary conversation are different meanings even inside the same domain.
 - Extract concrete date/time/party-size/preferences the customer actually said. Do not drop them just because the domain is obvious.
