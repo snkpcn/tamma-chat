@@ -90,7 +90,7 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   if (/(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินกุ้งได้|ทานกุ้งได้)/u.test(text)) removeConstraints.push('no_shrimp');
   else if (/ไม่กินกุ้ง|ไม่เอากุ้ง|งดกุ้ง/u.test(text) && !/แพ้กุ้ง/u.test(text)) addConstraints.push('no_shrimp');
 
-  if (/เอาแบบไม่โหด|ไม่เอาโหด|ไม่เอาหนัก/u.test(text)) addConstraints.push('low_intensity');
+  if (/(?:เอา|ขอ)แบบไม่โหด|ไม่เอาโหด|ไม่เอาหนัก/u.test(text)) addConstraints.push('low_intensity');
   if (/กลัวตก/u.test(text)) addConstraints.push('fear_of_falling');
   if (/กลัวเร็ว/u.test(text)) addConstraints.push('fear_of_speed');
   if (/เดินไม่ไหว|เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้/u.test(text)) addConstraints.push('limited_walking');
@@ -129,7 +129,7 @@ export function extractIntelligenceSignals(message: string): IntelligenceSignal[
   // phrase is exactly what a future "top repeated phrases" owner
   // insight needs, independent of whether it also became a durable
   // per-guest preference.
-  if (/เอาแบบไม่โหด|ไม่เอาโหด|ไม่เอาหนัก/u.test(text)) signals.push({ eventType: 'phrase', category: 'low_intensity', domain: 'activity' });
+  if (/(?:เอา|ขอ)แบบไม่โหด|ไม่เอาโหด|ไม่เอาหนัก/u.test(text)) signals.push({ eventType: 'phrase', category: 'low_intensity', domain: 'activity' });
   if (/กลัวตก/u.test(text)) signals.push({ eventType: 'risk', category: 'fear_of_falling', domain: 'activity' });
   if (/กลัวเร็ว/u.test(text)) signals.push({ eventType: 'risk', category: 'fear_of_speed', domain: 'activity' });
   if (/เดินไม่ไหว|เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้/u.test(text)) signals.push({ eventType: 'risk', category: 'mobility_need', domain: 'general' });
