@@ -49,3 +49,23 @@ test('Phase 5.3 diagnostic endpoint is hidden when token is absent or wrong', as
     else process.env.THONGTHAI_SEMANTIC_CERT_TOKEN=previous;
   }
 });
+
+test('Phase 5.3 full certification corpus is large enough to be meaningful', async () => {
+  const result = await runSemanticCertification({
+    profile:'full',
+    start:0,
+    limit:1,
+    interpret:async () => ({
+      domain:'ecosystem',
+      intent:'broad_experience_discovery',
+      action:'discover',
+      informationNeed:'none',
+      entities:{},
+      references:[],
+      constraints:[],
+      confidence:0.95,
+      needsClarification:false,
+    }),
+  });
+  assert.ok(result.totalCorpusCases >= 140);
+});
