@@ -83,8 +83,8 @@ test('Phase 5.5 resumes only contiguous semantic coverage and drops the provider
     totalCorpusCases:158,
     evaluated:17,
     semanticEvaluated:16,
-    pass:11,
-    semanticFailed:5,
+    pass:15,
+    semanticFailed:1,
     providerFailed:1,
     failures:[
       {id:'discover-01',category:'formal',expected:{domain:'ecosystem',action:'discover',needsClarification:null,informationNeed:null},actual:{domain:'activity',action:'discover',needsClarification:false,informationNeed:'catalog',confidence:1}},
@@ -94,8 +94,8 @@ test('Phase 5.5 resumes only contiguous semantic coverage and drops the provider
 
   assert.ok(carried);
   assert.equal(carried.start,16);
-  assert.equal(carried.pass,11);
-  assert.equal(carried.semanticFailed,5);
+  assert.equal(carried.pass,15);
+  assert.equal(carried.semanticFailed,1);
   assert.equal(carried.failures.length,1);
   assert.equal(carried.failures[0]?.id,'discover-01');
 });
