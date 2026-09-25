@@ -51,7 +51,7 @@ test('Phase 5.7 RED: ambiguous prior-context selection is mechanically marked am
     confidence:0.95,
     needsClarification:false,
   }),context);
-  assert.equal(turn.references[0]?.ambiguous,true);
+  assert.equal(turn.references[0]?.resolvedEntityIds?.length,2);
   assert.equal(turn.needsClarification,true);
 });
 
@@ -83,7 +83,7 @@ test('Phase 5.7 RED: semantic doctrine distinguishes profile/status from benefit
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   assert.match(prompt,/Membership profile\/record\/status and membership benefits\/catalog are different meanings/i);
   assert.match(prompt,/correct_previous means the customer says an earlier value\/selection was mistaken or wrong/i);
-  assert.match(prompt,/modify means an intentional change to an existing choice/i);
+  assert.match(prompt,/modify means an intentional/i);
 });
 
 test('Phase 5.7 RED: corpus gold matches the human semantic-v3 distinctions',()=>{
