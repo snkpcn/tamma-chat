@@ -534,10 +534,10 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     expected: { domain: 'restaurant', action: 'ask' },
     simulatedModelOutput: { domain: 'restaurant', intent: 'ask_opening_hours', action: 'ask',
       entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
-  { id: 'informational-02', category: 'informational', domainArea: 'ecosystem',
+  { id: 'informational-02', category: 'informational', domainArea: 'activity',
     message: 'ที่นี่มีกิจกรรมอะไรบ้าง',
-    expected: { domain: 'ecosystem', action: 'discover' },
-    simulatedModelOutput: { domain: 'ecosystem', intent: 'discover_ecosystem_activities', action: 'discover',
+    expected: { domain: 'activity', action: 'discover' },
+    simulatedModelOutput: { domain: 'activity', intent: 'discover_activity_catalog', action: 'discover', informationNeed: 'catalog',
       entities: {}, references: [], constraints: [], confidence: 0.84, needsClarification: false } },
 
   // --- explicit-confirmation gating (READY != EXECUTE) ---
