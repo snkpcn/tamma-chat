@@ -92,3 +92,55 @@ test('Human Brain Phase 1 guard: an in-progress transactional slot update stays 
   assert.equal(result.semanticTurn.entities.partySize, 2);
   assert.ok(result.semanticTurn.entities.date);
 });
+
+
+test('Human Brain Phase 1 guard: precise proven deterministic intents still bypass the model', async () => {
+  let semanticCalls = 0;
+  const result = await processThongthaiOneMindTurn({
+    channel: 'line',
+    message: 'มีม้ากี่ตัว',
+    eventId: 'human-brain-phase1-inventory',
+    providerUserKey: 'line-key',
+  }, {
+    ...baseDeps(),
+    interpretSemanticTurn: async () => {
+      semanticCalls += 1;
+      throw new Error('precise_inventory_semantics_should_stay_deterministic');
+    },
+  }, NOW);
+
+  assert.equal(semanticCalls, 0);
+  assert.equal(result.semanticTurn.intent, 'activity_inventory_count');
+  assert.equal(result.semanticTurn.domain, 'activity');
+});
+
+test('Human Brain Phase 1 guard: weak model refinement cannot overwrite the mature deterministic fallback', async () => {
+  let semanticCalls = 0;
+  const result = await processThongthaiOneMindTurn({
+    channel: 'line',
+    message: 'ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ',
+    eventId: 'human-brain-phase1-weak-model',
+    providerUserKey: 'line-key',
+  }, {
+    ...baseDeps(),
+    interpretSemanticTurn: async () => {
+      semanticCalls += 1;
+      return {
+        domain: 'unknown',
+        intent: 'unknown',
+        action: 'unknown',
+        entities: {},
+        references: [],
+        constraints: [],
+        confidence: 0.2,
+        needsClarification: true,
+        clarificationReason: 'uncertain',
+      };
+    },
+  }, NOW);
+
+  assert.equal(semanticCalls, 1);
+  assert.equal(result.semanticTurn.intent, 'restaurant_topic_switch',
+    'a weak/ambiguous model result must not erase the old system\'s known restaurant topic');
+  assert.equal(result.semanticTurn.domain, 'restaurant');
+});
