@@ -6334,3 +6334,73 @@ No DB migration. No production DB mutation. No Phase 2.7 or Phase 3 work.
 Owner production retest after automatic deployment:
 - send exactly `เอาทองไทย` in the CURRENT horse conversation.
 - expected: direct horse selection, never assistant-vs-horse clarification.
+
+
+---
+
+## Phase 2 Production Smoke Fix — Horse-care slot continuity — 2026-09-25
+
+**STATUS: FIXED IN PR #91; PHASE 2 STILL AWAITS OWNER PRODUCTION LINE SMOKE.**
+
+Owner production LINE smoke confirmed PR #90 fixed horse-name disambiguation:
+- `อยากขี่ม้า ไม่เคยเลย กลัวตก`
+- `เอาทองไทย`
+- Thongthai correctly selected horse ทองไทย without asking assistant-vs-horse clarification.
+
+The same screenshot exposed a second continuity defect:
+- the opening turn already contained `ไม่เคยเลย`;
+- Thongthai's first reply correctly understood this and asked only `แล้วมากี่คนครับ?`;
+- after selecting `ทองไทย`, it incorrectly asked again `เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?`.
+
+### Root cause
+
+`horseCompoundCareIntentResponse` semantically interpreted rider experience/fear for its current reply, but persisted only care flags such as fear/customer type/health. It did not persist the already-understood `riderExperience` / `partySize` care slots into the activity task.
+
+Separately, `horseSelectionWithContextResponse` hard-coded the same two care questions regardless of which slots were already known.
+
+With LINE `chatHistory=[]`, this meant a fact understood on one turn disappeared from the next turn's continuation state.
+
+### Test-first proof
+
+Test-only RED commit: `5a37953bbdd881de678e4be8803a51a9b6669aae`
+
+GitHub Actions run: `36112952637`
+
+Exact failure:
+- expected `activeTask.slots.riderExperience = beginner`
+- actual `undefined`
+
+The signed LINE regression sends:
+1. `อยากขี่ม้า ไม่เคยเลย กลัวตก`
+2. `เอาทองไทย`
+
+and requires the selection turn NOT to repeat `เคยขี่ม้ามาก่อนไหม`.
+
+### Architectural fix
+
+- Compound horse-care opener now persists every care fact already parsed from the current turn:
+  - `riderExperience`
+  - `partySize`
+  - existing fear / health / customer-type signals
+- Selection continuation reloads the persisted activity task AFTER horse selection.
+- The next question is derived from genuinely missing slots:
+  - neither known -> ask experience + party size
+  - experience known -> ask only party size
+  - party size known -> ask only experience
+  - both known -> proceed to the health/balance clarification
+- No phrase-specific patch for `ไม่เคยเลย` or `เอาทองไทย`; the existing semantic interpreters and task slots remain the source of truth.
+
+Fixed code head: `62e6dbe23609205be3042567d3c48773048266c6`
+
+GitHub Actions run `36113088787`: **1072 / 1072 PASS**.
+
+No DB migration. No production DB mutation. No Phase 2.7 or Phase 3 work.
+
+Owner production retest after automatic deployment:
+1. `อยากขี่ม้า ไม่เคยเลย กลัวตก`
+2. `เอาทองไทย`
+
+Expected turn 2:
+- direct `เลือกทองไทย`;
+- asks only `มากี่คนครับ?`;
+- must NOT ask `เคยขี่ม้ามาก่อนไหม` again.
