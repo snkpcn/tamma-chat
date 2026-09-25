@@ -10,12 +10,13 @@ import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts,
 import { loadActivePromotionsWorldFact, redeemPromotion } from './_promotions-runtime';
 import { loadActivityWorldFacts } from './_activity-sot';
 import { patchGuestAgentState } from './_guest-agent-state-store';
+import { loadVerifiedWorldFacts, type VerifiedWorldFactRow } from './_world-facts';
 
 export const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
 ]);
 const EXPERIENCE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,119}$/i;
-type WorldFactRow = { fact_key: string; category: string; fact_value: unknown; source: string | null; updated_at: string };
+type WorldFactRow = VerifiedWorldFactRow;
 type SemanticMemoryRow = { memory_key: string; memory_value: unknown; confidence: number; source_channel: string; evidence_count: number; last_observed_at: string };
 
 function configuration(): { url: string; key: string } | null {
@@ -66,7 +67,7 @@ export async function loadBrainRuntime(guestDbId: string | null, channel: BrainC
   if (!configuration()) return fallback;
   try {
     const worldPromise = Promise.all([
-    dbFetch('world_facts?active=eq.true&verified=eq.true&select=fact_key,category,fact_value,source,updated_at&order=fact_key.asc&limit=300').then(r => r.json() as Promise<WorldFactRow[]>),
+    loadVerifiedWorldFacts(),
     loadActivityWorldFacts(),
     loadRestaurantWorldFacts(),
     loadActivePromotionsWorldFact(channel),
