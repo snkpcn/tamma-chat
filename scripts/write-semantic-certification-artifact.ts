@@ -39,6 +39,14 @@ async function main() {
 
   const chunkSize=20;
   const availabilityRetryDelayMs=61_000;
+  // The first hardened production run completed 16 semantic calls before the
+  // project hit 429s. Gemini documents rate limits as project-scoped and
+  // model/tier dependent, so certification deliberately stays below the
+  // observed burst rate instead of assuming fallback models provide fresh RPM.
+  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '4250');
+  const interCaseDelayMs=Number.isFinite(configuredInterCaseDelayMs)
+    ? Math.max(0,Math.min(15_000,Math.floor(configuredInterCaseDelayMs)))
+    : 4_250;
 
   try {
     const batches=[];
@@ -53,6 +61,7 @@ async function main() {
         availabilityRetries:1,
         availabilityRetryDelayMs,
         stopOnProviderFailure:true,
+        interCaseDelayMs,
       });
       batches.push(batch);
       totalCorpusCases=batch.totalCorpusCases;
