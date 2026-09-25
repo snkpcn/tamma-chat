@@ -6051,3 +6051,31 @@ Fix:
 Verified head `028bb6ce18bb631b94acd0c69b5dc0835409b302`: GitHub Actions **1060/1060 passing, 0 failures**.
 
 No DB migration. No production DB mutation. No Phase 3 work.
+
+
+## Phase 2 Stabilization — Same-turn preference application — 2026-09-25
+
+Owner production smoke exposed a subtle state-timing bug:
+- customer sent `ไม่กินกุ้ง`;
+- durable capture wrote the new preference, but the same reply still said only `เลี่ยงไก่ / ไม่เผ็ด`;
+- the newly stated shrimp avoidance was only visible on a later turn.
+
+Root cause:
+`processThongthaiChatCore` loads `request.guestContext` BEFORE `capturePreferenceSignals` writes durable guest_memory. The write was correct, but the responder cascade for that SAME turn still held the stale in-memory GuestContext.
+
+Fix:
+- compute the same canonical `extractPreferenceSignal` used by durable capture;
+- keep the existing durable DB write unchanged;
+- immediately merge the canonical add/remove constraint delta (plus pace/travelerType when present) into the current in-memory `request.guestContext`;
+- corrections remove stale constraints on the same turn;
+- no extra DB read is added.
+
+A first load-bearing test run correctly failed because the short-ack helper itself omitted non-allergy shrimp/peanut ingredient labels. That copy gap was fixed too: `restaurantConstraintAvoidLabels` now includes shrimp and peanut avoidance from parsed avoidIngredients.
+
+Full LINE regressions:
+1. fresh `ไม่กินกุ้ง` -> same reply explicitly acknowledges shrimp avoidance; no menu dump;
+2. fresh `ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง มีอะไรแนะนำบ้าง` -> same-turn grounded recommendation excludes chicken/shrimp/spicy test dishes.
+
+Verified head `a7fab775000628af33cb0788bcdb88cfc14cbb0d`: **1062/1062 tests passing, 0 failures**.
+
+No DB migration. No production DB mutation. No Phase 3 work.
