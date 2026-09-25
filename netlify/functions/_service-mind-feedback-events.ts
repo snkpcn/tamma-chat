@@ -97,6 +97,9 @@ export async function createFeedbackEvent(input: {
   message: string;
   channel: BrainChannel;
   guestDbId: string | null;
+  /** Stable transport event id (LINE message.id / web event id). Retries
+   *  with the same key must reuse the original Customer Voice case. */
+  sourceEventKey?: string | null;
 }): Promise<FeedbackEventResult> {
   try {
     // Customer Voice needs the operational meaning of the report, not
@@ -127,13 +130,44 @@ export async function createFeedbackEvent(input: {
       issue_keywords: input.match.issueKeywords,
       named_assets: input.match.namedAssets,
       keyword_summary: input.match.keywordSummary,
+      source_event_key: typeof input.sourceEventKey === 'string' && input.sourceEventKey.trim()
+        ? input.sourceEventKey.trim().slice(0, 240)
+        : null,
     };
-    const response = await dbFetch('ops_feedback_events', {
+    const hasSourceKey = Boolean(body.source_event_key);
+    const insertPath = hasSourceKey
+      ? 'ops_feedback_events?on_conflict=source_event_key'
+      : 'ops_feedback_events';
+    const response = await dbFetch(insertPath, {
       method: 'POST',
-      headers: { Prefer: 'return=representation' },
+      headers: {
+        Prefer: hasSourceKey
+          ? 'resolution=ignore-duplicates,return=representation'
+          : 'return=representation',
+      },
       body: JSON.stringify(body),
     });
-    const row = (await response.json() as Array<{ id: string }>)[0];
+    let row = (await response.json() as Array<{ id: string; notification_status?: string }>)[0];
+
+    // PostgREST returns [] when resolution=ignore-duplicates hits the same
+    // source_event_key. Reuse that existing case and run the notification
+    // dispatcher again: its own delivery ledger is idempotent by event/target,
+    // so this yields "duplicate" outcomes without a second LINE push.
+    if (!row?.id && hasSourceKey) {
+      const existingResponse = await dbFetch(
+        'ops_feedback_events?source_event_key=eq.' + encodeURIComponent(String(body.source_event_key))
+        + '&select=id,notification_status&limit=1',
+      );
+      row = (await existingResponse.json() as Array<{ id: string; notification_status?: string }>)[0];
+      if (row?.id) {
+        const { overallStatus, targets } = await notifyFeedbackEventTargets(row.id);
+        return {
+          eventId: row.id,
+          notificationQueued: overallStatus === 'sent' || overallStatus === 'duplicate',
+          targets,
+        };
+      }
+    }
     if (!row?.id) return { eventId: null, notificationQueued: false, targets: [] };
 
     try {

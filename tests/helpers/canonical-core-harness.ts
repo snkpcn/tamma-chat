@@ -122,8 +122,6 @@ export function defaultCatalog(): Required<HarnessCatalog> {
       { fact_key: 'stay_checkin_time', category: 'stay', fact_value: '14:00', source: 'world_facts', updated_at: new Date().toISOString() },
       { fact_key: 'stay_checkout_time', category: 'stay', fact_value: '12:00', source: 'world_facts', updated_at: new Date().toISOString() },
       { fact_key: 'stay_room_service_hours', category: 'stay', fact_value: '10:00-22:00', source: 'world_facts', updated_at: new Date().toISOString() },
-      { fact_key: 'cafe_hours', category: 'cafe', fact_value: '07:00-18:00', source: 'world_facts', updated_at: new Date().toISOString() },
-      { fact_key: 'cafe_latte_price', category: 'cafe', fact_value: 65, source: 'world_facts', updated_at: new Date().toISOString() },
     ],
     serviceResources: [
       { id: 'res-room-a', code: 'stay-hueun', name: 'เฮือนสเตย์', metadata: {} },
@@ -264,6 +262,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   let geminiCalls = 0;
   let weatherFetchResponse: { ok: boolean; body: unknown } | null = null;
   const feedbackEvents = new Map<string, Record<string, unknown>>(); // id -> row (ops_feedback_events)
+  const feedbackEventSourceKeys = new Map<string, string>(); // source_event_key -> id
   const opsChannels = new Map<string, { id: string; team_code: string; target_id_enc: string; target_id_hash: string; enabled: boolean }>(); // team_code -> channel
   const failingPushTeamCodes = new Set<string>(); // team_code -> LINE push should fail for this team's bound target
   const opsDeliveries = new Map<string, { id: string; status: string }>(); // idempotency_key -> delivery
@@ -494,13 +493,25 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     if (path.startsWith('ops_feedback_events')) {
       if (method === 'POST') {
         const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+        recordPost('ops_feedback_events', body);
+        const sourceEventKey = typeof body.source_event_key === 'string' ? body.source_event_key : '';
+        const existingId = sourceEventKey ? feedbackEventSourceKeys.get(sourceEventKey) : undefined;
+        if (existingId && query.get('on_conflict') === 'source_event_key') {
+          return jsonResponse([]);
+        }
         feedbackEventSeq += 1;
         const row = { id: `feedback-event-${feedbackEventSeq}`, environment: 'test', internal_notes: [], ...body };
         feedbackEvents.set(row.id, row);
-        recordPost('ops_feedback_events', body);
+        if (sourceEventKey) feedbackEventSourceKeys.set(sourceEventKey, row.id);
         return jsonResponse([row]);
       }
       if (method === 'GET') {
+        const sourceEventKey = query.get('source_event_key')?.replace('eq.', '') ?? '';
+        if (sourceEventKey) {
+          const id = feedbackEventSourceKeys.get(sourceEventKey);
+          const row = id ? feedbackEvents.get(id) : undefined;
+          return jsonResponse(row ? [row] : []);
+        }
         const idParam = query.get('id')?.replace('eq.', '') ?? '';
         const row = feedbackEvents.get(idParam);
         return jsonResponse(row ? [row] : []);

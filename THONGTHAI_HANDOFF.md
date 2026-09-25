@@ -7500,3 +7500,95 @@ After PR #102 docs-inclusive CI is green, merged, and the automatic Netlify prod
 
 The remaining roadmap phase is:
 - **Phase 8 — Operational Polish**
+
+
+---
+
+## Phase 8 — Operational Polish — Customer Runtime — 2026-09-25
+
+**STATUS: CUSTOMER-SIDE OPERATIONAL POLISH GREEN; PRODUCTION IDEMPOTENCY MIGRATION APPLIED; PR #103 PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY.**
+
+This checkpoint closes two concrete operational risks found after Phase 7.
+
+### 1. Production-false cafe fixtures removed
+
+The canonical harness still contained synthetic cafe rows:
+- `cafe_hours = 07:00-18:00`
+- `cafe_latte_price = 65`
+
+Production read-only verification in Phase 4 proved `public.world_facts` currently has **zero cafe rows**.
+
+Those fixtures are now removed from the default canonical harness so a future test cannot accidentally mistake synthetic data for a production source of truth.
+
+Existing tests can still inject explicit catalog overrides when a test truly needs synthetic source data.
+
+### 2. Customer Voice feedback creation is transport-idempotent
+
+A RED operational test replayed the exact same signed LINE safety event twice with the same `message.id`.
+
+Before the fix:
+- first delivery created `feedback-event-1`
+- redelivery created `feedback-event-2`
+- this violated LINE retry-safety expectations and could duplicate owner work
+
+The canonical core already has one stable `transportEventId` per turn:
+- LINE: `message.id`
+- web: supplied event/request id when available
+- fallback: one generated id per core invocation
+
+Phase 8 now threads that exact key into Customer Voice creation as `source_event_key`.
+
+### Database contract
+
+Additive migration:
+- repo file: `supabase/migrations/20260925163800_ops_feedback_source_event_key_v1.sql`
+- production migration name: `ops_feedback_source_event_key_v1`
+
+Production schema now has:
+- `ops_feedback_events.source_event_key text NULL`
+- unique index `ops_feedback_events_source_event_key_uq`
+
+Historical rows remain NULL and were not rewritten.
+
+RLS / grants were not broadened.
+
+The migration was applied **before** the customer code is merged/deployed, preventing a schema/code mismatch window.
+
+### Runtime behavior
+
+For a source event key:
+1. insert uses PostgREST `on_conflict=source_event_key` + `resolution=ignore-duplicates`
+2. first delivery creates the Customer Voice case normally
+3. retry/redelivery receives an empty insert result
+4. code re-reads the original feedback case by `source_event_key`
+5. notification dispatch runs against the original case id
+6. the existing `ops_notification_deliveries` ledger returns duplicate rather than sending another LINE push
+
+Therefore a redelivered safety report:
+- creates one feedback case
+- creates one activity push
+- creates one owner push
+- can safely reuse the original operational case
+
+Customer-intelligence events keep their existing separate unique source-event contract and are also regression-tested for retry dedupe.
+
+### RED / GREEN evidence
+
+RED head:
+- `81beaf7369c0788b1ebe405ca5f23a25c67ea170`
+- GitHub Actions run `36161627067`
+
+RED reproduced:
+- synthetic cafe fixtures present
+- duplicate LINE safety message creates a second feedback case
+
+GREEN implementation head:
+- `4e0a3ab59e4f4104ebe1ec8a89e6ea343dd5edd6`
+- GitHub Actions run `36161871691`
+- **1106 / 1106 PASS**
+
+No production feedback row was modified or deleted.
+No production test booking/order was created.
+
+After PR #103 merge + exact automatic Netlify deploy verification, customer-side Phase 8 polish is closed.
+The remaining Phase 8 checkpoint is Backoffice mobile mutation locking / final documentation.
