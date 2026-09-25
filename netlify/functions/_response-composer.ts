@@ -24,7 +24,7 @@ import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
 import { extractTime } from './_slot-parsers';
 
-export const RESPONSE_COMPOSER_VERSION = 'response-composer-v2-human';
+export const RESPONSE_COMPOSER_VERSION = 'response-composer-v1';
 const MAX_FACTS_IN_PROMPT = 100;
 const PRICE_QUESTION_RE = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/iu;
 const HOW_IT_WORKS_RE = /(?:ยังไง|อย่างไร|ไง|วิธี|ทำยังไง|เล่นยังไง|ขี่.*ไง)/iu;
@@ -269,7 +269,7 @@ function deterministicMessages(language: ResponseLanguage) {
   };
   return {
     unavailable:'ตอนนี้ทองไทยยังเช็กข้อมูลล่าสุดเรื่องนี้ไม่ได้ครับ เลยไม่อยากเดาให้ผิด',
-    unknown:'เรื่องนี้ทองไทยยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากตอบเดา ๆ',
+    unknown:'เรื่องนี้ยังไม่มีข้อมูลยืนยันครับ ทองไทยไม่ขอเดาให้ผิด',
     empty:'ทองไทยเช็กข้อมูลล่าสุดแล้ว ตอนนี้ยังไม่มีตัวเลือกที่ตรงครับ',
     model:'ตอนนี้ทองไทยยังตอบเรื่องนี้ให้แม่นไม่ได้ครับ ลองอีกครั้งสักครู่ หรือให้ทีมงานช่วยต่อได้ครับ',
     clarify:'ขอรายละเอียดเพิ่มอีกนิดครับ จะได้ช่วยต่อให้ตรงเรื่อง',
