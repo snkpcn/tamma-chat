@@ -60,12 +60,13 @@ export type DialogReasonCode =
   | 'ready_for_availability_check' | 'awaiting_explicit_commit' | 'explicit_commit_received'
   | 'task_suspended_for_topic_switch' | 'task_resumed' | 'cannot_verify_comparison'
   | 'known_unconfigured_price' | 'duplicate_event_ignored' | 'no_active_task'
-  | 'task_side_question_preserved' | 'task_unrelated_turn_preserved' | 'task_cancelled';
+  | 'task_side_question_preserved' | 'task_unrelated_turn_preserved' | 'task_cancelled'
+  | 'task_summary_requested';
 
 export type ResponseIntent =
   | 'discovery_response' | 'grounded_answer' | 'clarify_ambiguous_entity' | 'ask_missing_field'
   | 'cannot_verify_comparison' | 'no_active_promotion' | 'source_unavailable_apology'
-  | 'propose_action' | 'no_op';
+  | 'propose_action' | 'active_task_summary' | 'no_op';
 
 export type DialogInput = {
   semanticTurn: SemanticTurn;
@@ -364,6 +365,11 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
   const task = container.activeTask;
   const base = { intent: turn.intent, action: turn.action, entities: turn.entities, constraints: turn.constraints, task: task ?? null };
 
+  // This question is about the canonical working state we already own, not
+  // about fresh catalog/availability data. Never refetch a catalog just to
+  // tell the customer what they themselves have already selected.
+  if (turn.intent === 'summarize_active_task') return [];
+
   switch (turn.domain) {
     case 'restaurant':
       // Human Brain Phase 1.2: "status" is not one universal business fact.
@@ -459,6 +465,7 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   // must not trigger catalog/availability work merely because the preserved
   // task still needs data (e.g. a greeting must not fetch horse durations).
   const knowledgeRequests = isTaskUnrelatedTurn ? [] : planKnowledgeNeeds(turn, container);
+  if (turn.intent === 'summarize_active_task') reasons.push('task_summary_requested');
 
   // Missing fields still live on the preserved task, but they are NOT
   // response-facing on a turn that did not actually continue that task.
@@ -508,7 +515,8 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
   const unavailable = bundles.some(bundle => bundle.sources.some(source => source.status === 'unavailable'));
   const emptyPromotion = bundles.some(bundle => bundle.domain === 'promotion' && bundle.sources.some(source => source.need === 'promotion_eligibility' && source.status === 'empty'));
 
-  if (unavailable) { reasons.push('knowledge_unavailable'); responseIntent = 'source_unavailable_apology'; }
+  if (reasons.includes('task_summary_requested')) responseIntent = 'active_task_summary';
+  else if (unavailable) { reasons.push('knowledge_unavailable'); responseIntent = 'source_unavailable_apology'; }
   else if (emptyPromotion) { reasons.push('knowledge_empty'); responseIntent = 'no_active_promotion'; }
 
   // Anti-hallucination: a comparison must be backed by a real verified fact
