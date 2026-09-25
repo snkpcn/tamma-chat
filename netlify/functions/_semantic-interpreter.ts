@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v3';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v4';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -322,11 +322,17 @@ SEMANTIC COMPLETENESS RULES:
   instead of forcing the message into the nearest business trigger.
 
 DOMAIN-SCOPE TAXONOMY:
-- ecosystem = generic whole-property discovery when the customer asks what there is to do, play, visit, or experience and does NOT
-  name a specific business domain/activity/entity and context does not unambiguously narrow it.
+- ecosystem = generic whole-property discovery/recommendation when the customer asks broadly what there is to do, play, visit, or
+  experience and does NOT ask to compose a trip/plan/sequence and does not name a narrower primary business subject.
 - Generic verbs such as do/play/visit are NOT enough by themselves to narrow the domain to activity. They can describe the whole
   TAMMA ecosystem. Use activity only when a specific activity/activity entity is stated (horse, ATV, archery, etc.) or the relevant
   conversation context unambiguously establishes activity.
+- promotion is cross-cutting. When the PRIMARY subject is a promotion/discount/offer, keep domain "promotion" even when the promotion
+  is for restaurant, activity, stay, cafe, OTOP, or multiple business units. Put the named business unit in entities; do not replace
+  the primary promotion domain with that sub-business domain.
+- journey = itinerary/plan/trip composition: the customer asks Thongthai to arrange, continue, restore, or structure a trip/plan, or
+  to sequence multiple experiences/businesses over time. Use ecosystem for broad browse/discovery/recommendation without plan
+  composition; use journey when composition/sequence itself is the customer goal.
 - Never hallucinate a business domain for an elliptical question such as a bare date + "available?". If neither the message nor
   relevant context identifies what should be available, use unknown and needsClarification=true.
 
@@ -363,6 +369,10 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   for an explicit reservation/order transaction.
 - Membership profile/record/status and membership benefits/catalog are different meanings. A personal/current membership record is
   status; benefits, perks, or what membership includes are discover + catalog.
+- Membership signup uses confirm for an explicit "sign me up / register me" commitment in this closed action vocabulary. Never map
+  membership signup to book/order; those actions are reserved for booking/order transaction families.
+- Permission/capability questions are ask + policy, not mutations. "Can I change/update X?" asks whether change is allowed/how it works;
+  only an actual instruction to change X is modify.
 - correct_previous means the customer says an earlier value/selection was mistaken or wrong and replaces it. modify means an intentional
   change to an existing choice, preference, schedule, or plan without claiming the earlier value was a mistake.
 
@@ -371,7 +381,10 @@ intent: a short snake_case label naming the specific thing being asked (e.g. "br
 action: one of ask | discover | recommend | compare | book | order | modify | cancel | confirm | status | provide_information | correct_previous | unknown
 informationNeed: one of none | availability | price | schedule | inventory | catalog | recommendation | ingredients | policy | transaction_status
 - informationNeed is a CLOSED machine-facing meaning facet, independent of the free-form intent label.
-- Use availability when the customer asks whether a table/room/activity/resource is free, full, open, or available.
+- Use availability when the customer asks whether a table/room/activity/time/resource is free, full, open, or available.
+- Use inventory for current physical-product stock/quantity existence (for example an OTOP product or packaged retail item). Do not
+  collapse physical stock into generic availability.
+- Use catalog when asking whether a menu/item/type/category exists in the offering, without asking current live stock/time state.
 - Use transaction_status only when asking the status of an already-existing booking/order/payment/member transaction.
 - Use none when the turn is conversational or the question is not an information lookup.
 taskDirective: OPTIONAL one of cancel_active | suspend_active | resume_suspended, only for the bounded conversational working task as described above
