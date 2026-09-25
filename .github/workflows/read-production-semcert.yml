@@ -9,6 +9,8 @@ on:
 permissions:
   contents: read
 
+# target: 5784bea
+
 jobs:
   read-production-cert:
     runs-on: ubuntu-latest
