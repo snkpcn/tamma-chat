@@ -43,14 +43,10 @@ test('Phase 5.5 RED: live certification supports inter-case pacing instead of bu
 
 test('Phase 5.5 RED: semantic prompt defines broad ecosystem discovery as cross-business meaning, not activity-by-default', () => {
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.match(
-    prompt,
-    /broad(?:ly)?[^\n]{0,180}(?:what|things)[^\n]{0,180}do[^\n]{0,180}ecosystem/is,
-  );
-  assert.match(
-    prompt,
-    /activity[^\n]{0,220}(?:specific|explicit|anchor)/is,
-  );
+  assert.match(prompt,/Broad discovery scope is cross-business:/);
+  assert.match(prompt,/use domain "ecosystem"/);
+  assert.match(prompt,/Do not narrow[\s\S]{0,240}domain "activity"/);
+  assert.match(prompt,/Use[\s\S]{0,80}domain "activity" only when[\s\S]{0,180}specific/i);
 });
 
 test('Phase 5.5 RED: ambiguous or catalog-shaped gold cases are adjudicated semantically, not kept as stale labels', () => {
