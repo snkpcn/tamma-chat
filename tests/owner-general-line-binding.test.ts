@@ -9,7 +9,7 @@
 // stays 'not_bound', nothing is silently claimed as sent.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withHarness, guestId, brainRequest } from './helpers/canonical-core-harness';
+import { withHarness, guestId, brainRequest, type Harness } from './helpers/canonical-core-harness';
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
 import { handleLineOpsGroupMessage } from '../netlify/functions/_ops-notifications';
 
@@ -26,6 +26,11 @@ async function ask(seed: string, message: string) {
 // creates exactly one feedback event can always find it under this
 // deterministic first id.
 const FIRST_EVENT_ID = 'feedback-event-1';
+
+function deliveryStatus(harness: Harness, teamCode: string, eventId = FIRST_EVENT_ID): string | undefined {
+  return harness.notificationDeliveries()
+    .find(delivery => delivery.entityId === eventId && delivery.teamCode === teamCode)?.status;
+}
 
 const OWNER_GENERAL_ALIASES = ['owner', 'general', 'admin', 'เจ้าของ', 'ทั่วไป', 'แอดมิน', 'ผู้ดูแล'];
 
@@ -128,9 +133,13 @@ test('6. Urgent safety with activity bound but owner_general NOT bound: primary 
     assert.equal(events[0].business_unit, 'activity');
     const row = harness.feedbackEventRow(FIRST_EVENT_ID);
     assert.equal(row?.notification_status, 'sent', 'the primary activity send succeeded and must be reported as such');
-    const targets = (row?.internal_notes as { notification_targets?: Array<{ team: string; status: string }> } | undefined)?.notification_targets ?? [];
-    assert.deepEqual(targets.find(t => t.team === 'activity')?.status, 'sent');
-    assert.deepEqual(targets.find(t => t.team === 'owner_general')?.status, 'not_bound', 'the SEPARATE owner_general escalation attempt must be honestly recorded as not_bound, never silently dropped or claimed as sent');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent', 'the activity provider delivery is durably recorded as sent');
+    assert.equal(deliveryStatus(harness, 'owner_general'), undefined, 'an unbound owner target has no provider delivery row because no send was attempted');
+    assert.equal(
+      harness.postsTo('line_push').filter(push => push.to === 'line-group-owner_general').length,
+      0,
+      'the unbound owner target must never receive a LINE push',
+    );
   });
 });
 
@@ -156,7 +165,7 @@ test('7. After owner_general is bound in the mock: system feedback sends there, 
     );
     const row = harness.feedbackEventRow(FIRST_EVENT_ID);
     assert.equal(row?.notification_status, 'sent', 'primary send still succeeds');
-    const targets = (row?.internal_notes as { notification_targets?: Array<{ team: string; status: string }> } | undefined)?.notification_targets ?? [];
-    assert.deepEqual(targets.find(t => t.team === 'owner_general')?.status, 'sent', 'once owner_general is ALSO bound, the escalation succeeds too');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent', 'the primary activity delivery is durably recorded');
+    assert.equal(deliveryStatus(harness, 'owner_general'), 'sent', 'once owner_general is also bound, its escalation has its own sent delivery row');
   });
 });
