@@ -6079,3 +6079,40 @@ Full LINE regressions:
 Verified head `a7fab775000628af33cb0788bcdb88cfc14cbb0d`: **1062/1062 tests passing, 0 failures**.
 
 No DB migration. No production DB mutation. No Phase 3 work.
+
+
+## Phase 2 Stabilization — Resolve Thongthai's Own Ecosystem Focus Question — 2026-09-25
+
+Owner production smoke exposed a conversation-state gap:
+- Thongthai correctly remembered `limited_walking` and asked: `อยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?`
+- customer answered the offered branch directly: `อยากเน้นกินข้าว`
+- production fell to the generic clarification: `ขอรายละเอียดเพิ่มอีกนิดครับ จะได้ช่วยต่อให้ตรงเรื่อง`.
+
+Root cause:
+LINE intentionally transports no chat history. The deterministic ecosystem responder asked a multi-choice follow-up but persisted no pending-choice state, so the customer's answer was context-free on the next webhook. A first implementation also read `activeTopic`, but the persisted guest-agent-state schema stores the key as `active_topic`; the load-bearing tests caught this before merge.
+
+Fix:
+- mobility-personalized ecosystem recommendation now persists `activeTopic=ecosystem_focus_choice` plus an unresolved-choice marker;
+- an early deterministic continuation reads the bounded server-side guest-agent-state snapshot before One-Mind cutover;
+- food choice (`อยากเน้นกินข้าว`, `เน้นอาหาร`, etc.) goes directly to verified restaurant SOT and returns grounded menu recommendations while preserving durable guest constraints;
+- cafe choice gets a specific Inthanin next question;
+- light-activity choice gets a specific activity-selection next question;
+- direct `อยากเน้นกินข้าว` without prior choice context is also recognized as a food-start intent and asks the concrete dietary question instead of generic clarification;
+- continuation uses the persisted snake_case `active_topic` key (with compatibility support for camelCase);
+- no legacy `loadBrainRuntime` call was inserted ahead of the canonical cutover, preserving Phase N architecture ordering.
+
+Load-bearing tests:
+- full signed LINE: `แม่เดินไกลไม่ได้` -> `มีอะไรแนะนำ` -> `อยากเน้นกินข้าว` => grounded priced restaurant recommendations, never vague clarification;
+- the same own-question flow resolves cafe and light-activity branches specifically;
+- direct `อยากเน้นกินข้าว` without prior state gets a specific food question;
+- Phase N canonical-order regression remains green.
+
+Verified code head `957789cb82045e2f0629f586c7e8dca10f53adf6`: GitHub Actions **1066/1066 passing, 0 failures**.
+
+No DB migration. No production DB mutation. No Phase 3 work.
+
+Owner retest after production deploy:
+1. `แม่เดินไกลไม่ได้`
+2. `มีอะไรแนะนำ`
+3. `อยากเน้นกินข้าว`
+Expected turn 3: grounded restaurant recommendation with real prices/constraints, never `ขอรายละเอียดเพิ่มอีกนิด`.

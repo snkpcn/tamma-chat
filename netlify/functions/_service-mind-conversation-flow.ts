@@ -38,7 +38,7 @@ export function composeVagueVisitIntentResponse(): string {
 // this, a bare "อยากกิน" risks the generic LLM-unavailable apology rather
 // than a real question -- there was no deterministic scaffolding for this
 // exact bare shape before.
-const FOOD_INTENT_START_MARKER = /^(?:อยากกิน|หิว(?:มาก|จัง)?|อยากทานข้าว|อยากทานอาหาร)[\s.ๆ!]*$/u;
+const FOOD_INTENT_START_MARKER = /^(?:อยากกิน|หิว(?:มาก|จัง)?|อยากทานข้าว|อยากทานอาหาร|อยากเน้นกินข้าว|เน้นกินข้าว|อยากเน้นอาหาร|เน้นอาหาร)[\s.ๆ!]*$/u;
 
 export function isFoodIntentStartMessage(message: string): boolean {
   return FOOD_INTENT_START_MARKER.test(message.trim());
