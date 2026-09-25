@@ -307,6 +307,8 @@ export async function persistBrainRuntime(guestDbId: string | null, channel: Bra
     if (summary !== null) set.travel_context_summary=summary;
     if (unresolved !== null) set.unresolved_need=unresolved;
     if (update.clearUnresolvedNeed === true) removeKeys.push('unresolved_need');
+    if (update.pendingQuestion) set.pending_question = update.pendingQuestion;
+    if (update.clearPendingQuestion === true) removeKeys.push('pending_question');
     if (update.restaurantProposedSet) set.restaurantProposedSet = update.restaurantProposedSet;
     if (update.restaurantAdvisorContext) set.restaurantAdvisorContext = update.restaurantAdvisorContext;
     if (update.pendingPromotionRedemption) set.pendingPromotionRedemption = update.pendingPromotionRedemption;
