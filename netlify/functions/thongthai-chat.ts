@@ -3306,6 +3306,7 @@ async function deterministicEscalationResponse(
   request: BrainRequest,
   channel: BrainChannel,
   guestDbId: string | null,
+  sourceEventKey: string,
 ): Promise<BrainResponse | null> {
   const match = classifyEscalationBoundary(request.message);
   if (!match) return null;
@@ -3340,7 +3341,7 @@ async function deterministicEscalationResponse(
     keywordSummary: { topPositive: [], topNegative: [] },
   };
   const eventResult = await createFeedbackEvent({
-    match: serviceFeedbackMatch, message: request.message, channel, guestDbId,
+    match: serviceFeedbackMatch, message: request.message, channel, guestDbId, sourceEventKey,
   });
   return respond(composeEscalationResponse(match, eventResult.eventId != null, eventResult.targets));
 }
@@ -3349,11 +3350,12 @@ async function deterministicServiceFeedbackResponse(
   request: BrainRequest,
   channel: BrainChannel,
   guestDbId: string | null,
+  sourceEventKey: string,
 ): Promise<BrainResponse | null> {
   const match = classifyServiceFeedback(request.message);
   if (!match) return null;
   const eventResult = await createFeedbackEvent({
-    match, message: request.message, channel, guestDbId,
+    match, message: request.message, channel, guestDbId, sourceEventKey,
   });
   return {
     message: composeServiceFeedbackResponse(match, eventResult.notificationQueued, eventResult),
@@ -3685,7 +3687,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // otherwise be misclassified by classifyServiceFeedback's own
   // URGENT_SAFETY_MARKER first). Same "active context must never swallow
   // this" ordering discipline as the block immediately below.
-  const escalation = await deterministicEscalationResponse(request, channel, guestDbId).catch(error => {
+  const escalation = await deterministicEscalationResponse(request, channel, guestDbId, transportEventId).catch(error => {
     console.error('THONGTHAI_ESCALATION_BOUNDARY_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
   });
@@ -3718,7 +3720,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // system-quality comment -- this is now enforced by ORDER, not by each
   // downstream responder having to individually remember to yield to
   // feedback (which is exactly what silently broke before).
-  const serviceFeedback = await deterministicServiceFeedbackResponse(request, channel, guestDbId).catch(error => {
+  const serviceFeedback = await deterministicServiceFeedbackResponse(request, channel, guestDbId, transportEventId).catch(error => {
     console.error('THONGTHAI_SERVICE_FEEDBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
   });
