@@ -3796,13 +3796,30 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // One-Mind can't claim these messages first either. See
   // deterministicLocalConciergeResponse's own header comment for the full
   // precedence reasoning and the explicit-transaction-intent yield.
-  const localConcierge = await deterministicLocalConciergeResponse(request).catch(error => {
-    // redactWeatherUrl: defense-in-depth -- some fetch implementations
-    // embed the request URL (appid=<key> included) in their own error
-    // message; never let that reach a log line unredacted.
-    console.error('THONGTHAI_LOCAL_CONCIERGE_ERROR', error instanceof Error ? redactWeatherUrl(error.message.slice(0, 220)) : 'unknown');
-    return null;
-  });
+  // High-confidence restaurant dietary/recommendation intent must not be
+  // swallowed by Local Concierge's broader food-culture classifier. A real
+  // production failure showed "ไม่กินเผ็ดด้วยนะ" and
+  // "ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง มีอะไรแนะนำบ้าง" returning generic
+  // Isan-food copy instead of updating/enforcing dietary constraints.
+  //
+  // This is a semantic-precedence gate, not a phrase patch: once the dedicated
+  // restaurant intent classifier says the turn is a dietary declaration or
+  // explicit recommendation and the restaurant domain accepts the turn, the
+  // grounded restaurant responder below owns it. Weather/location still win
+  // earlier through the top-level semantic gate.
+  const restaurantDietaryIntentForPrecedence = classifyRestaurantDietaryIntent(request.message);
+  const preferGroundedRestaurant = restaurantDietaryIntentForPrecedence !== 'OTHER'
+    && isRestaurantAdvisorTurn(request, runtime);
+
+  const localConcierge = preferGroundedRestaurant
+    ? null
+    : await deterministicLocalConciergeResponse(request).catch(error => {
+      // redactWeatherUrl: defense-in-depth -- some fetch implementations
+      // embed the request URL (appid=<key> included) in their own error
+      // message; never let that reach a log line unredacted.
+      console.error('THONGTHAI_LOCAL_CONCIERGE_ERROR', error instanceof Error ? redactWeatherUrl(error.message.slice(0, 220)) : 'unknown');
+      return null;
+    });
   if (localConcierge) {
     const polished = polishedResponse(localConcierge, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
