@@ -83,6 +83,10 @@ export interface AgentStateUpdate {
   restaurantAdvisorContext?: {
     source: 'restaurant_menu_advisor_v1';
     recentMessages: string[];
+    /** Grounded menu names already shown in the current recommendation thread.
+     *  LINE does not transport chat history, so "มีอะไรแนะนำอีก" needs a small
+     *  server-side cursor to avoid repeating the same rows forever. */
+    recentRecommendationNames?: string[];
     updatedAt: string;
   };
   /** Deterministic promo-redemption-in-progress state -- set only by the
