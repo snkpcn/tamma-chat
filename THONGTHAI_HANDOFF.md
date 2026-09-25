@@ -5894,3 +5894,36 @@ Owner retest after merge/deploy:
 - expected: different grounded items from the previous list, OR an honest no-more-verified-options message;
 - must not repeat the exact same top 3;
 - with remembered `ไม่เผ็ด`, must not recommend conventional spicy-risk items/sauces such as `จิ้มแจ่ว`, `เสือร้องไห้`, `ตำ`, `ยำ`, `ลาบ`, `น้ำตก`, `ต้มแซ่บ`, `พล่า` unless future SOT explicitly verifies a safe non-spicy preparation.
+
+
+## Phase 2 Stabilization — Restaurant food/drink scope continuity — 2026-09-25
+
+Owner production smoke after PR #80 showed the "อีก" routing fix worked, but revealed semantic category drift: in a FOOD conversation with remembered `ไม่เผ็ด + แพ้กุ้ง + ไม่กินไก่`, `มีอะไรแนะนำอีก` returned `Singha Draft (แก้ว)` and `น้ำกระเจี๊ยบ`. Those rows were grounded and constraint-safe, but they were beverages, not a continuation of food recommendations.
+
+Read-only production DB verification confirmed the live categories involved: `เบียร์สด` for Singha Draft and `น้ำสมุนไพร` for น้ำกระเจี๊ยบ.
+
+Fix:
+- generic restaurant recommendations now default to **food scope**;
+- beverage categories are eligible only when the customer explicitly asks for drinks/beer/spirits/herbal drinks, or when a vague follow-up inherits a recent drink scope;
+- dessert categories are eligible only when explicitly requested, or inherited from recent dessert context;
+- explicit full-menu intent can still span all categories;
+- a food follow-up no longer falls into beverages merely because safe food candidates were exhausted.
+
+This preserves topic meaning instead of patching product names.
+
+Tests:
+- direct advisor test: generic restaurant recommendation returns food only;
+- direct advisor test: explicit drink request returns beverage rows;
+- direct advisor test: explicit dessert request returns dessert rows;
+- direct continuity test: vague follow-up after an explicit drink request stays in drink scope;
+- full signed LINE test: food recommendation -> `มีอะไรแนะนำอีก` never returns Singha/beer/herbal drink rows.
+
+Verified code head `5592f4368d83e1620ad74ccd2bb18e5095bbd14e`: GitHub Actions **1053/1053 passing, 0 failures**.
+
+No DB migration. No production DB mutation. No Phase 3 work.
+
+Owner retest after production deploy:
+- same existing LINE conversation;
+- send `มีอะไรแนะนำอีก`;
+- expected: another FOOD option that respects remembered constraints, or an honest "no more verified food options" response;
+- must not drift to beer/herbal drinks unless the customer asks for drinks.
