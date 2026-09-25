@@ -69,7 +69,7 @@ function horseCatalogFacts(durationsMinutes: number[]): GroundedFact[] {
   ];
 }
 
-test('canonical activity flow retains context/selection/slots with ZERO LLM calls, auto-filling a single verified duration', async () => {
+test('canonical activity flow retains context/selection/slots through provider outage; only the read-only availability side-question attempts Language Brain', async () => {
   const state = memoryState();
   let modelCallCount = 0;
   const forcedUnavailable: Partial<OneMindDependencies> = {
@@ -163,9 +163,13 @@ test('canonical activity flow retains context/selection/slots with ZERO LLM call
     assert.doesNotMatch(t4Composed.response.message, GENERIC_APOLOGY);
   }
 
-  // The deterministic deriver covered every turn in this script -- the real
-  // (forced-throwing) model was never actually reached.
-  assert.equal(modelCallCount, 0, 'the canonical flow must cost zero LLM calls end-to-end');
+  // Human Brain 5.2 intentionally gives the read-only "บ่ายสามได้ปะ" side
+  // question to Language Brain first. The forced outage must fall back without
+  // losing any slot or proposing a transaction. All actual slot-filling turns
+  // stay deterministic; therefore this canonical flow has exactly one bounded
+  // semantic attempt.
+  assert.equal(modelCallCount, 1,
+    'only the read-only availability side-question may attempt Language Brain; slot filling must remain deterministic');
 });
 
 test('a horse activity with MULTIPLE verified durations asks ONE question showing the real choices, never auto-picks one', async () => {

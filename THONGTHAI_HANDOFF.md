@@ -8603,3 +8603,196 @@ One real production LINE availability turn must show:
 - customer reply no longer sounds like an intent-ack template
 
 Only then close Checkpoint 5.1.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5 / Checkpoint 5.2 — Language Brain Ownership — 2026-09-26
+
+**STATUS: IMPLEMENTATION GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY / LIVE ACCEPTANCE.**
+
+### Why this checkpoint exists
+
+The system already had a capable semantic interpreter, but the One-Mind arbiter still allowed deterministic phrase/topic routers to become the FINAL owner of most natural read-only turns.
+
+That was safe, but not human enough.
+
+A sentence could therefore be reduced to:
+- stay topic
+- cafe topic
+- activity topic
+- generic price
+- generic availability
+
+before the Language Brain had a chance to read the whole predicate, qualifiers, constraints, references, or information need.
+
+### New ownership rule
+
+For **coarse read-only meaning**, the deterministic result is now a FALLBACK, not the final language owner.
+
+Language Brain ownership covers coarse:
+- ask
+- discover
+- recommend
+- compare
+- status
+
+across coarse deterministic buckets including:
+- stay
+- cafe
+- OTOP
+- membership
+- activity topic
+- broad ecosystem discovery
+- price
+- availability
+- how-it-works
+- follow-ups
+
+The model reads the whole current utterance with the existing semantic prompt.
+
+### What remains deterministic
+
+Business-state safety is unchanged.
+
+The mature deterministic path remains authoritative for state-mutating / transactional meaning such as:
+- task slot filling
+- correction
+- selection / confirmation
+- booking
+- ordering
+- modification
+- cancellation
+- explicit transaction continuation
+
+Exact deterministic machine facts that do not need language interpretation also remain zero-model.
+
+Current explicit example:
+- `activity_inventory_count` (e.g. exact catalog-backed count)
+
+### Write-escalation guard
+
+A semantic refinement that starts from a read-only deterministic candidate may NEVER upgrade the action into:
+- book
+- order
+- confirm
+- modify
+- cancel
+- or another write-capable action
+
+A high-confidence model cannot turn “is it available?” into “book it”.
+
+Write-capable meaning must still enter through the existing transactional contracts.
+
+### Human clarification rule
+
+A high-confidence semantic result that says clarification is genuinely required may now beat a coarse deterministic guess.
+
+This lets Thongthai behave like a person:
+- unresolved “that room / that one” => ask what the customer means
+- do not confidently follow a broad keyword guess just because one exists
+
+Weak/low-confidence semantic output still falls back to the deterministic candidate.
+
+### Provider outage behavior
+
+The new architecture may ATTEMPT Language Brain on coarse read-only turns.
+
+If the model provider is unavailable:
+- exact deterministic candidate is reused
+- task state is preserved
+- slots are preserved
+- no transaction is proposed merely because the model failed
+- exact deterministic write/state flows remain model-free
+
+Two older tests that asserted **zero LLM calls for the entire conversation** were intentionally superseded because that performance contract conflicts with the owner’s new requirement that important natural read-only sentences be understood by the Language Brain.
+
+Their safety coverage was not removed. It was replaced with stronger explicit contracts:
+- only bounded coarse read-only turns may attempt the model
+- transactional state turns remain deterministic
+- provider outage must preserve the entire task state and response truth
+
+### RED evidence
+
+RED test commit:
+`15f9c62bd65300a20647505da2344443aecbb419`
+
+GitHub Actions:
+run `36178933035` = FAILURE
+
+Expected RED failures:
+- task-free stay inquiry did not reach Language Brain
+- cafe fact inquiry did not reach Language Brain
+- richer ATV capacity question collapsed to activity topic
+- read-only price side-question during active booking stayed phrase-owned
+- write-escalation guard was absent
+- semantic clarification could not beat a coarse deterministic guess
+
+Transactional slot-fill and exact inventory guard tests were GREEN already in RED.
+
+### Implementation
+
+Core commit:
+`30e68cb725b0311b7ece39859f54976f36930163`
+
+The arbiter now uses semantic candidate TYPE / action ownership, not an expanded Thai intent keyword list.
+
+No new Thai runtime phrase trigger was added.
+
+### Regression migration
+
+Old zero-call-only assertions were replaced with the new bounded ownership contract.
+
+Regression commits:
+- `e961c76c05645ea9985121d0eb135c45cb5a6acc`
+- `a89fa4aead110d249878ce612830054db8dbd78c`
+
+### GREEN evidence
+
+GitHub Actions:
+run `36179343184`
+
+Result:
+**1150 / 1150 PASS**
+**fail 0**
+
+New coverage proves:
+1. stay availability reaches Language Brain
+2. cafe item + preference reaches Language Brain
+3. richer ATV capacity meaning is preserved
+4. read-only side-question during an active booking reaches Language Brain without mutating the booking
+5. transactional slot filling remains deterministic
+6. exact inventory remains deterministic / zero-model
+7. write-escalating model output is rejected
+8. genuine high-confidence clarification can beat a coarse read-only guess
+9. forced provider outage preserves task state and deterministic fallback truth
+
+### Scope
+
+No DB/schema change.
+No booking/order/payment executor change.
+No backoffice change.
+No new repo/site/project.
+No manual Netlify deploy.
+
+### Remaining acceptance before calling this “human-grade”
+
+Static / mocked CI is necessary but not sufficient.
+
+The repository already carries the large semantic ground-truth corpus and live-eval runner.
+
+A final human-grade certification still requires real-provider acceptance across the important semantic matrix, especially:
+- colloquial Thai
+- typo
+- omitted subjects
+- short follow-ups
+- reference resolution
+- corrections
+- topic changes
+- multi-intent
+- availability vs transaction status
+- price / schedule / inventory / policy
+- active-task side questions
+- current intent beating stale memory
+
+Do not call the system “perfect” solely from network-free CI.

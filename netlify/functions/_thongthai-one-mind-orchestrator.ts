@@ -376,6 +376,42 @@ function mayContainMultipleClauses(message: string): boolean {
     || /[;,]\s*\S/u.test(normalized);
 }
 
+const LANGUAGE_BRAIN_READ_ONLY_ACTIONS: ReadonlySet<SemanticTurn['action']> = new Set([
+  'ask', 'discover', 'recommend', 'compare', 'status',
+]);
+
+// These deterministic intents are intentionally broad language buckets. They
+// are useful as a provider-outage fallback, but they are NOT rich enough to be
+// the final owner of a natural sentence because they can discard predicates,
+// qualifiers, constraints, references, or informationNeed.
+const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
+  'restaurant_topic_switch',
+  'stay_topic_switch',
+  'otop_topic_switch',
+  'cafe_topic_switch',
+  'membership_topic_switch',
+  'activity_topic_narrow',
+  'broad_experience_discovery',
+  'ask_price',
+  'ask_availability_status',
+  'ask_how_it_works',
+  'stay_follow_up',
+  'otop_follow_up',
+  'cafe_follow_up',
+  'membership_follow_up',
+  'stay_read_only_inquiry',
+  'otop_product_discovery',
+  'cafe_read_only_inquiry',
+]);
+
+// A tiny set of read-only deterministic results are already exact machine
+// facts rather than language guesses. Keeping them zero-model protects both
+// cost and reliability without making phrase routing the owner of broader
+// customer meaning.
+const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
+  'activity_inventory_count',
+]);
+
 function deterministicNeedsLanguageRefinement(
   turn: SemanticTurn | null,
   taskState: TaskStateContainer,
@@ -383,30 +419,60 @@ function deterministicNeedsLanguageRefinement(
 ): boolean {
   if (!turn) return true;
 
-  if (turn.intent === 'restaurant_topic_switch') {
-    // Phase 1: with no live working task, this coarse class is always refined
-    // because it previously swallowed richer restaurant questions.
-    if (!hasLiveActiveTask(taskState)) return true;
+  if (EXACT_READ_ONLY_DETERMINISTIC_INTENTS.has(turn.intent)) return false;
 
-    // Phase 2: preserve the mature zero-model pure topic switch ("ร้านมีไรกิน")
-    // while allowing a compound utterance ("...ละ ร้าน...") to be read as a
-    // whole. The cue decides only whether to ask the semantic brain, never
-    // what the sentence means.
+  // Preserve Phase 2's proven active-task restaurant switch behavior: a pure
+  // switch can remain zero-model, while a compound sentence is read as a
+  // whole by the Language Brain.
+  if (turn.intent === 'restaurant_topic_switch' && hasLiveActiveTask(taskState)) {
     return mayContainMultipleClauses(message);
   }
 
-  // Every other mature active-task parser remains authoritative in this
-  // checkpoint: slot fills, corrections, side-questions, inventory, etc.
-  if (hasLiveActiveTask(taskState)) return false;
+  // Transactional / state-mutating meaning remains deterministic whenever the
+  // mature parser already has it. The Language Brain is not allowed to become
+  // a write-policy engine.
+  if (!LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)) return false;
+
+  // Coarse read-only candidates are FALLBACKS, not final language ownership.
+  // This includes read-only side questions asked while a booking/order task is
+  // alive: asking a price must not be silently treated as filling a slot.
+  if (COARSE_READ_ONLY_INTENTS.has(turn.intent)) return true;
+
   return false;
 }
 
-function modelRefinementIsUsable(turn: SemanticTurn): boolean {
-  return turn.domain !== 'unknown'
-    && turn.action !== 'unknown'
-    && turn.needsClarification !== true
-    && Number.isFinite(turn.confidence)
-    && turn.confidence >= 0.7;
+function modelRefinementIsUsable(
+  turn: SemanticTurn,
+  deterministic: SemanticTurn | null,
+): boolean {
+  if (!Number.isFinite(turn.confidence)) return false;
+
+  // A real clarification is a valid semantic result. Humans ask when a
+  // reference is genuinely unresolved instead of confidently following a
+  // coarse keyword guess.
+  if (turn.needsClarification === true) {
+    return LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)
+      && turn.action !== 'unknown'
+      && turn.confidence >= 0.6;
+  }
+
+  if (turn.domain === 'unknown' || turn.action === 'unknown' || turn.confidence < 0.7) {
+    return false;
+  }
+
+  // Critical safety boundary: refining a read-only deterministic candidate
+  // can NEVER escalate the turn into book/order/confirm/modify/cancel/etc.
+  // Write-capable meaning must enter through the existing transactional
+  // contracts, not through semantic refinement.
+  if (
+    deterministic
+    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+    && !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 async function resolveSemanticTurn(
@@ -438,7 +504,7 @@ async function resolveSemanticTurn(
     // A weak model interpretation never replaces a useful deterministic
     // fallback. This gives us the larger language brain without gambling away
     // the mature system on low-confidence/ambiguous output.
-    if (deterministic && !modelRefinementIsUsable(modelTurn)) {
+    if (deterministic && !modelRefinementIsUsable(modelTurn, deterministic)) {
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
         semantic_owner: 'deterministic_low_confidence_fallback',
         deterministic_turn: true,
