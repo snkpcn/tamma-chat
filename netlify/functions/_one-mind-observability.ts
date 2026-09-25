@@ -58,6 +58,11 @@ export type OneMindTraceEnvelope = {
     referencesUnresolved: number;
     needsClarification: boolean;
   };
+  memory: {
+    appliedKeys: string[];
+    ignoredKeys: string[];
+    relevantConstraintCount: number;
+  };
   dialog: {
     mode: string;
     responseIntent: string;
@@ -146,6 +151,11 @@ export function buildOneMindTraceEnvelope(args:{
       referencesResolved:Math.max(0,turn.trace.semantic.referencesResolved),
       referencesUnresolved:Math.max(0,turn.trace.semantic.referencesUnresolved),
       needsClarification:turn.trace.semantic.needsClarification === true,
+    },
+    memory:{
+      appliedKeys:safeTokens(turn.trace.memory.appliedKeys,20,60),
+      ignoredKeys:safeTokens(turn.trace.memory.ignoredKeys,20,60),
+      relevantConstraintCount:Math.max(0,turn.trace.memory.relevantConstraintCount),
     },
     dialog:{
       mode:safeToken(turn.trace.dialogMode,60) ?? 'unknown',
