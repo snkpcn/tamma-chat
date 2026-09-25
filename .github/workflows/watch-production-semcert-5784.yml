@@ -1,0 +1,35 @@
+name: Watch Production Semantic Certification 5784
+
+on:
+  push:
+    branches:
+      - ops/watch-semcert-5784
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Wait for a new production semantic certification artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          OLD_GENERATED_AT="2026-09-25T20:48:15.511Z"
+          for i in $(seq 1 55); do
+            body="$(curl --fail --silent --show-error --location --max-time 20 https://tamma-chat.netlify.app/semantic-certification-result.json || true)"
+            if [ -n "$body" ]; then
+              generated="$(printf '%s' "$body" | jq -r '.generatedAt // empty' 2>/dev/null || true)"
+              if [ -n "$generated" ] && [ "$generated" != "$OLD_GENERATED_AT" ]; then
+                echo "NEW_PRODUCTION_CERT_BEGIN"
+                printf '%s\n' "$body"
+                echo "NEW_PRODUCTION_CERT_END"
+                exit 0
+              fi
+            fi
+            sleep 30
+          done
+          echo "No new production certification artifact appeared in the watch window." >&2
+          exit 1
