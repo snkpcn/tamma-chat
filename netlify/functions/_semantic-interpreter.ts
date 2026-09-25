@@ -510,8 +510,15 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && !reference.resolvedEntityId
     && !reference.resolvedEntityIds?.length
     && !reference.resolvedTaskSlot);
+  const SINGLE_ENTITY_REFERENCE_TYPES = new Set([
+    'entity_selection','previous_selection','selected_entity',
+  ]);
   const hasAmbiguousReference = references.some(reference =>
-    reference.ambiguous === true || (reference.resolvedEntityIds?.length ?? 0) > 1);
+    reference.ambiguous === true
+    || (
+      SINGLE_ENTITY_REFERENCE_TYPES.has(reference.type)
+      && (reference.resolvedEntityIds?.length ?? 0) > 1
+    ));
   const ambiguousReferenceRequiresClarification =
     hasAmbiguousReference
     && !(['ask','discover','recommend','compare'] as SemanticAction[]).includes(action);
