@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractIntelligenceSignals } from '../netlify/functions/_customer-phrase-intelligence';
 import { evaluateBotQualitySignals } from '../netlify/functions/_bot-quality-intelligence';
+import { withHarness, guestId, brainRequest } from './helpers/canonical-core-harness';
+import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
 
 function categories(message: string): string[] {
   return extractIntelligenceSignals(message).map(signal => signal.category);
@@ -75,4 +77,24 @@ test('Phase 3 closeout: bot quality records actual post-response failures and su
     const found = evaluateBotQualitySignals(input).map(signal => signal.category);
     assert.ok(found.includes(expected), `${expected}: ${JSON.stringify(found)}`);
   }
+});
+
+
+test('Phase 3 closeout: canonical core persists post-response safety handling as aggregate Bot Quality', async () => {
+  await withHarness(async harness => {
+    const request = brainRequest(
+      'พื้นลื่นมาก ตอนเล่น ATV น่ากลัว',
+      guestId('phase3-bot-quality-runtime'),
+      'web',
+    );
+    const result = await processThongthaiChatCore(request, 'phase3-bot-quality-runtime-event');
+    assert.equal(result.statusCode, 200);
+    assert.ok(
+      harness.customerIntelligenceRows().some(row =>
+        row.category === 'bot_quality_safety_handling'
+        && row.domain === 'system'
+      ),
+      'post-response evaluator must persist the actual safety-handling outcome, not only customer keywords',
+    );
+  });
 });
