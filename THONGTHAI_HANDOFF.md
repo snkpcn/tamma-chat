@@ -8160,3 +8160,130 @@ Phase 3 next:
 - memory may inform a current answer only when semantically relevant
 - current utterance always outranks durable/stale memory
 - build a relevance contract rather than domain-keyword hijacking
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 1 / Checkpoint 1.3 — Closed Semantic Information Facets — 2026-09-26
+
+**STATUS: REBASED ON CURRENT MAIN + FULL CI GREEN; PENDING MERGE / AUTO DEPLOY / LIVE TRACE.**
+
+### Production evidence that drove this checkpoint
+
+The owner's real LINE table-availability turn was inspected from the existing bounded `one_mind_traces` store.
+
+The live semantic model returned:
+- domain: `restaurant`
+- intent: `table_availability_check`
+- action: `status`
+- confidenceBucket: `high`
+- needsClarification: `false`
+
+But downstream still degraded to `fact_unknown`.
+
+Root cause:
+Checkpoint 1.2 had machine routing coupled to one exact free-form intent label:
+`restaurant_table_availability`
+
+The real model used the equally-correct:
+`table_availability_check`
+
+Therefore the language brain understood the meaning, but the downstream machine contract was unstable.
+
+### Architecture change
+
+`SemanticTurn` now carries optional closed:
+`informationNeed`
+
+Allowed:
+- none
+- availability
+- price
+- schedule
+- inventory
+- catalog
+- recommendation
+- ingredients
+- policy
+- transaction_status
+
+The model's free-form `intent` remains diagnostics/evaluation metadata only.
+
+Restaurant knowledge routing now uses `informationNeed`:
+- availability -> availability
+- price -> price
+- ingredients -> ingredients
+- transaction_status -> order_status
+
+Legacy deterministic turns without the new facet retain their previous compatibility behavior.
+
+### Prompt + parser
+
+The semantic prompt now requires the closed facet separately from intent.
+
+The parser:
+- accepts only the closed enum
+- normalizes any invented/unknown value to `none`
+- never turns arbitrary model text into a routing key
+
+### Response composition
+
+Restaurant availability fallback keys from the resolved:
+- restaurant + availability knowledge need
+
+It no longer requires an exact free-form intent label.
+
+### Safe observability
+
+`informationNeed` is included in the privacy-safe One-Mind trace envelope.
+
+No raw customer transcript, raw model output, or chain-of-thought is added.
+
+### Test evidence
+
+Initial RED on PR #108:
+- parser dropped informationNeed
+- downstream still chose order_status
+- unknown facet was not normalized
+
+PR #108 then became non-mergeable only because Human Brain Phase 2.2 advanced `main` concurrently.
+
+No force merge was used.
+
+The same atomic changes were reapplied onto exact current main after Phase 2.2:
+- rebased branch: `human-brain/phase1-3-semantic-facets-rebase-20260926`
+- green head before docs: `9a5fd1bd21084d39c997de780d9c67c49905964d`
+- GitHub Actions run `36172955163`
+- **1128 / 1128 PASS**
+
+This proves Phase 1.3 coexists with the completed Phase 2.2 conversation/reference work.
+
+### Owner regression
+
+The canonical owner test now deliberately uses:
+- free-form intent: `table_availability_check`
+- informationNeed: `availability`
+
+and requires:
+- no dietary/menu hijack
+- reply still refers to table/seat
+- reply preserves tomorrow
+- reply preserves 18:00
+
+### Next live verification
+
+After merge + exact automatic production deploy:
+1. owner sends one natural table-availability question
+2. query the newest LINE One-Mind trace
+3. require:
+   - domain=restaurant
+   - informationNeed=availability
+   - confidence high/acceptable
+   - knowledge need availability, never order_status
+4. customer response must preserve the understood date/time/table meaning even when live table inventory is unconfigured
+
+Only then close Checkpoint 1.3.
+
+No DB/schema/site change.
+No production transaction.
+No manual Netlify deploy.
