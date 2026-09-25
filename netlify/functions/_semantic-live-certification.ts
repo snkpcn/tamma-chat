@@ -11,6 +11,10 @@ import {
   interpretSemanticTurn,
   type SemanticTurn,
 } from './_semantic-interpreter';
+import type {
+  ProviderAttemptDiagnostic,
+  ProviderAttemptOutcome,
+} from './_thongthai-model-provider';
 import {
   SEMANTIC_EVAL_CORPUS,
   type SemanticEvalCase,
@@ -69,6 +73,10 @@ export type SemanticCertificationFailure = {
     informationNeed: string;
     confidence: number;
   };
+  providerError?: {
+    name: string;
+    attempts: ProviderAttemptDiagnostic[];
+  };
 };
 
 export type SemanticCertificationResult = {
@@ -77,9 +85,13 @@ export type SemanticCertificationResult = {
   totalCorpusCases: number;
   start: number;
   evaluated: number;
+  semanticEvaluated: number;
   pass: number;
   failed: number;
+  semanticFailed: number;
+  providerFailed: number;
   passPct: number;
+  availabilityComplete: boolean;
   failures: SemanticCertificationFailure[];
 };
 
@@ -106,11 +118,72 @@ function matchesExpected(item: SemanticEvalCase, turn: SemanticTurn): boolean {
   return true;
 }
 
+function safeProviderAttempts(error: unknown): ProviderAttemptDiagnostic[] {
+  if (!error || typeof error !== 'object') return [];
+  const raw = (error as { attempts?: unknown }).attempts;
+  if (!Array.isArray(raw)) return [];
+
+  const validOutcomes = new Set<ProviderAttemptOutcome>([
+    'success',
+    'timeout',
+    'rate_limited',
+    'server_error',
+    'network_error',
+    'request_error',
+    'not_configured',
+    'circuit_open',
+  ]);
+
+  return raw.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const attempt = item as Partial<ProviderAttemptDiagnostic>;
+    if (
+      (attempt.provider !== 'gemini' && attempt.provider !== 'openai')
+      || typeof attempt.model !== 'string'
+      || !validOutcomes.has(attempt.outcome as ProviderAttemptOutcome)
+      || typeof attempt.elapsedMs !== 'number'
+    ) {
+      return [];
+    }
+    return [{
+      provider:attempt.provider,
+      model:attempt.model,
+      outcome:attempt.outcome as ProviderAttemptOutcome,
+      ...(typeof attempt.httpStatus === 'number' ? { httpStatus:attempt.httpStatus } : {}),
+      elapsedMs:attempt.elapsedMs,
+    }];
+  });
+}
+
+function providerErrorName(error: unknown): string {
+  return error instanceof Error && error.name ? error.name : 'unknown';
+}
+
+function retryableAvailabilityFailure(attempts: ProviderAttemptDiagnostic[]): boolean {
+  if (!attempts.length) return false;
+  const retryable = new Set<ProviderAttemptOutcome>([
+    'timeout',
+    'rate_limited',
+    'server_error',
+    'network_error',
+    'circuit_open',
+  ]);
+  return attempts.some(attempt => retryable.has(attempt.outcome))
+    && !attempts.some(attempt => attempt.outcome === 'request_error' || attempt.outcome === 'not_configured');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export async function runSemanticCertification(options: {
   profile?: SemanticCertificationProfile;
   start?: number;
   limit?: number;
   interpret?: typeof interpretSemanticTurn;
+  availabilityRetries?: number;
+  availabilityRetryDelayMs?: number;
+  stopOnProviderFailure?: boolean;
 } = {}): Promise<SemanticCertificationResult> {
   const profile = options.profile ?? 'full';
   const corpus = allCases();
@@ -123,66 +196,105 @@ export async function runSemanticCertification(options: {
   const limit = Math.max(1, Math.min(20, Number.isFinite(requestedLimit) ? requestedLimit : 10));
   const selected = profileCases.slice(start, start + limit);
   const interpret = options.interpret ?? interpretSemanticTurn;
+  const availabilityRetries = Math.max(0, Math.min(3, Math.floor(options.availabilityRetries ?? 0)));
+  const availabilityRetryDelayMs = Math.max(0, Math.min(90_000, Math.floor(options.availabilityRetryDelayMs ?? 0)));
+  const stopOnProviderFailure = options.stopOnProviderFailure === true;
 
   let pass = 0;
+  let evaluated = 0;
+  let providerFailed = 0;
+  let semanticFailed = 0;
   const failures: SemanticCertificationFailure[] = [];
 
   for (const item of selected) {
-    try {
-      const turn = await interpret(item.message, item.context ?? emptySemanticContext());
-      if (matchesExpected(item, turn)) {
-        pass += 1;
-        continue;
+    let availabilityAttempt = 0;
+
+    while (true) {
+      try {
+        const turn = await interpret(item.message, item.context ?? emptySemanticContext());
+        evaluated += 1;
+        if (matchesExpected(item, turn)) {
+          pass += 1;
+        } else {
+          semanticFailed += 1;
+          failures.push({
+            id:item.id,
+            category:item.category,
+            expected:{
+              domain:item.expected.domain,
+              action:item.expected.action ?? null,
+              needsClarification:item.expected.needsClarification ?? null,
+              informationNeed:expectedInformationNeed(item),
+            },
+            actual:{
+              domain:turn.domain,
+              action:turn.action,
+              needsClarification:turn.needsClarification,
+              informationNeed:turn.informationNeed ?? 'none',
+              confidence:turn.confidence,
+            },
+          });
+        }
+        break;
+      } catch (error) {
+        const attempts = safeProviderAttempts(error);
+        const retryable = retryableAvailabilityFailure(attempts);
+
+        if (
+          retryable
+          && availabilityAttempt < availabilityRetries
+          && availabilityRetryDelayMs > 0
+        ) {
+          availabilityAttempt += 1;
+          await sleep(availabilityRetryDelayMs);
+          continue;
+        }
+
+        evaluated += 1;
+        providerFailed += 1;
+        failures.push({
+          id:item.id,
+          category:item.category,
+          expected:{
+            domain:item.expected.domain,
+            action:item.expected.action ?? null,
+            needsClarification:item.expected.needsClarification ?? null,
+            informationNeed:expectedInformationNeed(item),
+          },
+          actual:{
+            domain:'error',
+            action:'error',
+            needsClarification:true,
+            informationNeed:'none',
+            confidence:0,
+          },
+          providerError:{
+            name:providerErrorName(error),
+            attempts,
+          },
+        });
+        break;
       }
-      failures.push({
-        id:item.id,
-        category:item.category,
-        expected:{
-          domain:item.expected.domain,
-          action:item.expected.action ?? null,
-          needsClarification:item.expected.needsClarification ?? null,
-          informationNeed:expectedInformationNeed(item),
-        },
-        actual:{
-          domain:turn.domain,
-          action:turn.action,
-          needsClarification:turn.needsClarification,
-          informationNeed:turn.informationNeed ?? 'none',
-          confidence:turn.confidence,
-        },
-      });
-    } catch {
-      failures.push({
-        id:item.id,
-        category:item.category,
-        expected:{
-          domain:item.expected.domain,
-          action:item.expected.action ?? null,
-          needsClarification:item.expected.needsClarification ?? null,
-          informationNeed:expectedInformationNeed(item),
-        },
-        actual:{
-          domain:'error',
-          action:'error',
-          needsClarification:true,
-          informationNeed:'none',
-          confidence:0,
-        },
-      });
     }
+
+    if (stopOnProviderFailure && providerFailed > 0) break;
   }
 
   const failed = failures.length;
-  const evaluated = selected.length;
+  const semanticEvaluated = pass + semanticFailed;
   return {
     kind:'LIVE_MODEL_SEMANTIC_CERTIFICATION',
     profile,
     totalCorpusCases:profileCases.length,
     start,
     evaluated,
+    semanticEvaluated,
     pass,
     failed,
-    passPct:evaluated ? Number((pass / evaluated * 100).toFixed(2)) : 0,
+    semanticFailed,
+    providerFailed,
+    passPct:semanticEvaluated ? Number((pass / semanticEvaluated * 100).toFixed(2)) : 0,
+    availabilityComplete:providerFailed === 0,
     failures,
   };
 }
