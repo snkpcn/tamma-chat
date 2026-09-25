@@ -801,7 +801,12 @@ function naturalRestaurantConstraintPhrase(advisor: any): string {
   return parts.join('และ');
 }
 
-function formatAdvisorMessage(advisor: any, fullList = false, constraintMentionedNow = true): string {
+function formatAdvisorMessage(
+  advisor: any,
+  fullList = false,
+  constraintMentionedNow = true,
+  currentMessage = '',
+): string {
   const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
   if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
     const [first, second] = advisor.comparison;
@@ -846,8 +851,21 @@ function formatAdvisorMessage(advisor: any, fullList = false, constraintMentione
   // dump instead of care first.
   const allRows = Array.isArray(advisor?.recommendations) ? advisor.recommendations : [];
   if (allRows.length) {
-    const shown = limitAdvisoryList(allRows, fullList ? allRows.length : 3);
-    const moreAvailable = allRows.length > shown.length;
+    // "มีอะไรแนะนำอีก" means ANOTHER recommendation, not "repeat the same
+    // top 3". restaurantMenuAdvice intentionally returns a ranked shortlist
+    // (up to 5 grounded items). The first recommendation shows rank 1–3; an
+    // explicit "อีก/อย่างอื่น/เมนูอื่น" follow-up rotates to the remaining
+    // ranked items instead of replaying the same answer. If fewer than four
+    // verified candidates exist, say so rather than hallucinating or repeating.
+    const wantsAlternative = !fullList && /(?:แนะนำ.*อีก|มีอะไร.*อีก|เมนู.*อื่น|อย่างอื่น|อันอื่น|อย่างอื่นอีก)/u.test(currentMessage);
+    const shown = fullList
+      ? allRows
+      : wantsAlternative
+        ? allRows.slice(3, 6)
+        : limitAdvisoryList(allRows, 3);
+    const moreAvailable = wantsAlternative
+      ? allRows.length > 6
+      : allRows.length > shown.length;
     // Master Roadmap Phase 2 fix -- the full caution block (constraintAck
     // + allergyNotice) only leads when THIS message is the one restating
     // the constraint; on a later turn using a REMEMBERED constraint
@@ -862,11 +880,22 @@ function formatAdvisorMessage(advisor: any, fullList = false, constraintMentione
     const rememberedConstraintPhrase = constraintMentionedNow ? '' : naturalRestaurantConstraintPhrase(advisor);
     const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
     const partySizeKnown = parsed?.partySize != null;
+    if (wantsAlternative && shown.length === 0) {
+      const prefix = rememberedConstraintPhrase ? `ถ้ายัง${rememberedConstraintPhrase}อยู่ ` : '';
+      return composeLineShortReply([
+        `${prefix}ตอนนี้เมนูที่ผ่านเงื่อนไขและยืนยันได้มีเท่านี้ก่อนครับ`,
+        'ทองไทยไม่อยากวนเมนูเดิมหรือเดาเมนูเพิ่มให้ครับ',
+      ]);
+    }
     const intro = advisor?.mode === 'pairing'
       ? 'มีเมนูนี้แล้ว เพิ่มนี้จะบาลานซ์โต๊ะกำลังดีครับ'
-      : rememberedConstraintPhrase
-        ? `ถ้ายัง${rememberedConstraintPhrase}อยู่ ทองไทยแนะนำเริ่มจาก 2–3 อย่างนี้ครับ 😊`
-        : (constraintAck || allergyNotice) ? 'จากเมนูที่มี ทองไทยแนะนำ' : '🍽️ เมนูที่น่าลองตอนนี้';
+      : wantsAlternative
+        ? rememberedConstraintPhrase
+          ? `ถ้ายัง${rememberedConstraintPhrase}อยู่ มีอีกครับ ลองชุดนี้ได้เลย 😊`
+          : 'มีอีกครับ ลอง 1–2 อย่างนี้ได้เลย 😊'
+        : rememberedConstraintPhrase
+          ? `ถ้ายัง${rememberedConstraintPhrase}อยู่ ทองไทยแนะนำเริ่มจาก 2–3 อย่างนี้ครับ 😊`
+          : (constraintAck || allergyNotice) ? 'จากเมนูที่มี ทองไทยแนะนำ' : '🍽️ เมนูที่น่าลองตอนนี้';
     const closing = advisor?.mode === 'pairing'
       ? ''
       : !partySizeKnown ? 'มากี่คนครับ เดี๋ยวทองไทยช่วยจัดให้พอดีโต๊ะครับ'
@@ -1342,7 +1371,12 @@ async function deterministicRestaurantResponse(
     };
   }
   return {
-    message: formatAdvisorMessage(advice, wantsFullRestaurantList(request.message), mentionsRestaurantConstraintNow(dietaryIntent)),
+    message: formatAdvisorMessage(
+      advice,
+      wantsFullRestaurantList(request.message),
+      mentionsRestaurantConstraintNow(dietaryIntent),
+      request.message,
+    ),
     intent: advice.mode === 'compare' ? 'information' : 'recommendation',
     contextUpdates:{},
     journeyAction:{type:'none',journey:null},
