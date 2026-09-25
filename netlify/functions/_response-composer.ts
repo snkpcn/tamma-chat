@@ -654,7 +654,6 @@ export function composeMembershipInformationResponse(input: ResponseComposerInpu
 function restaurantTableAvailabilityUnknownCopy(input: ResponseComposerInput): string | null {
   const request = input.dialogDecision.knowledgeRequests.find(candidate =>
     candidate.domain === 'restaurant'
-    && candidate.intent === 'restaurant_table_availability'
     && candidate.needs.includes('availability')
   );
   if (!request) return null;
