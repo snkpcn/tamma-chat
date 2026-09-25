@@ -77,6 +77,9 @@ export type SemanticCertificationFailure = {
     name: string;
     attempts: ProviderAttemptDiagnostic[];
   };
+  modelOutputError?: {
+    name: string;
+  };
 };
 
 export type SemanticCertificationResult = {
@@ -260,6 +263,40 @@ export async function runSemanticCertification(options: {
         }
 
         evaluated += 1;
+
+        // A malformed structured model response is a semantic/model-contract
+        // failure, NOT provider unavailability. The production semantic-v2
+        // run exposed this when JSON parsing threw SyntaxError with zero
+        // provider attempts attached. Count it in semanticEvaluated and keep
+        // going so one bad model response cannot truncate the corpus.
+        if (error instanceof SyntaxError && attempts.length === 0) {
+          semanticFailed += 1;
+          failures.push({
+            id:item.id,
+            category:item.category,
+            expected:{
+              domain:item.expected.domain,
+              action:item.expected.action ?? null,
+              needsClarification:item.expected.needsClarification ?? null,
+              informationNeed:expectedInformationNeed(item),
+            },
+            actual:{
+              domain:'error',
+              action:'error',
+              needsClarification:true,
+              informationNeed:'none',
+              confidence:0,
+            },
+            modelOutputError:{ name:error.name || 'SyntaxError' },
+          });
+          break;
+        }
+
+        // Provider/config/network failures carry a safe attempt trail. If an
+        // unexpected internal exception has no provider evidence, surface it
+        // to the outer artifact writer instead of mislabeling it as outage.
+        if (!attempts.length) throw error;
+
         providerFailed += 1;
         failures.push({
           id:item.id,
