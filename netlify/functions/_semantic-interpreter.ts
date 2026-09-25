@@ -513,6 +513,9 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && !reference.resolvedTaskSlot);
   const hasAmbiguousReference = references.some(reference =>
     reference.ambiguous === true || (reference.resolvedEntityIds?.length ?? 0) > 1);
+  const ambiguousReferenceRequiresClarification =
+    hasAmbiguousReference
+    && !(['ask','discover','recommend','compare'] as SemanticAction[]).includes(action);
 
   return {
     domain,
@@ -527,10 +530,10 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: parsed.needsClarification === true || hasUnresolvedReference || hasAmbiguousReference,
+    needsClarification: parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification,
     clarificationReason: typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
       ? parsed.clarificationReason.trim()
-      : (hasAmbiguousReference ? 'ambiguous_reference'
+      : (ambiguousReferenceRequiresClarification ? 'ambiguous_reference'
         : (hasUnresolvedReference ? 'unresolved_reference' : undefined)),
     taskDirective,
   };
