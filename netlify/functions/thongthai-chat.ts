@@ -2630,14 +2630,32 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
     };
   }
 
-  if (BARE_RECOMMEND_MARKER.test(message.trim()) && request.guestContext.constraints?.includes('limited_walking')) {
+  if (BARE_RECOMMEND_MARKER.test(message.trim())) {
+    if (request.guestContext.constraints?.includes('limited_walking')) {
+      return {
+        message: 'ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ 😊\nอยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?',
+        intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
+        suggestedActions: [], responseStyle: 'direct',
+        agentStateUpdate: {
+          activeTopic: 'ecosystem',
+          unresolvedNeed: 'choose_food_cafe_or_light_activity',
+          pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
+        },
+        semanticMemoryUpdates: [], toolCalls: [],
+      };
+    }
     return {
-      message: 'ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ 😊\nอยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?',
+      message: [
+        'ถ้ายังไม่ได้ล็อกว่าอยากทำอะไร ทองไทยแนะนำให้เลือกฟีลก่อนครับ 😊',
+        ...ECOSYSTEM_PATHS.map((path, index) => `${index + 1}) ${path.labelTh}: ${path.descriptionTh}`),
+        '',
+        'มากี่คน แล้วอยากได้ชิล ๆ หรือมีกิจกรรมด้วยครับ?',
+      ].join('\n'),
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
       suggestedActions: [], responseStyle: 'direct',
       agentStateUpdate: {
         activeTopic: 'ecosystem',
-        unresolvedNeed: 'choose_food_cafe_or_light_activity',
+        unresolvedNeed: 'choose_ecosystem_path',
         pendingQuestion: ECOSYSTEM_FOCUS_PENDING_QUESTION,
       },
       semanticMemoryUpdates: [], toolCalls: [],
