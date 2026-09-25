@@ -239,6 +239,7 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
 // broad exclusion is far safer than recommending a spicy dish to someone
 // who explicitly said "ไม่เผ็ด."
 const SPICY_RISK_CATEGORY_RE = /ตำ|ส้มตำ|ยำ|ลาบ|น้ำตก|ต้มแซ่บ|พล่า|แจ่ว|เสือร้องไห้/u;
+const SPICY_RISK_INGREDIENT_RE = /(?:พริกสด|พริกแห้ง|พริกป่น|พริกขี้หนู|พริกจินดา|พริกชี้ฟ้า|chili|chilli)/iu;
 
 function isUnverifiedSpicyRiskItem(item: RestaurantAdvisorItem): boolean {
   return SPICY_RISK_CATEGORY_RE.test(item.name) || SPICY_RISK_CATEGORY_RE.test(item.category);
@@ -306,6 +307,11 @@ function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): b
   if (pref.avoidIngredients.some(avoid => ingredients.some(ingredient => ingredient.includes(norm(avoid))))) return true;
   if (pref.spice === 'none' && item.profile.spiceLevel >= 3) return true;
   if (pref.spice === 'none' && isUnverifiedSpicyRiskItem(item)) return true;
+  // Strict "ไม่เผ็ด" must also respect the authoritative ingredient list.
+  // Real production data has several dishes whose curated spiceLevel is 0–1
+  // even though ingredient_names contains fresh/dried chilli. Name/category
+  // heuristics alone cannot catch those.
+  if (pref.spice === 'none' && ingredients.some(ingredient => SPICY_RISK_INGREDIENT_RE.test(ingredient))) return true;
   return false;
 }
 
@@ -327,6 +333,16 @@ function scoreItem(item: RestaurantAdvisorItem, pref: ParsedPreferences, selecte
   if (pref.spice === 'mild') score += Math.max(0, 3 - Math.abs(p.spiceLevel - 1)) * .8;
   if (pref.spice === 'medium') score += Math.max(0, 3 - Math.abs(p.spiceLevel - 2)) * .7;
   if (pref.spice === 'hot') score += p.spiceLevel * .8;
+
+  // For ordinary FOOD recommendations, useful dishes should rank ahead of
+  // bare staples/side-only rows. This still leaves side dishes available for
+  // compose/pairing flows, but prevents answers like "ขนมจีน" being treated as
+  // a stronger standalone recommendation than a real main/protein dish.
+  const hasSubstantiveRole = p.mealRoles.some(role => ['main','protein','grill_or_fry','soup_or_steam','single_plate'].includes(role));
+  const isBareSide = p.mealRoles.length > 0 && p.mealRoles.every(role => role === 'side') && p.proteinTags.length === 0;
+  if (hasSubstantiveRole) score += 1.8;
+  if (isBareSide) score -= 1.1;
+
   if (!pref.goals.length && !pref.preferProteins.length && !pref.spice) {
     score += (item.signature ? 2 : 0) + p.shareability * .25 + (p.beginnerFriendly ? .4 : 0);
   }
