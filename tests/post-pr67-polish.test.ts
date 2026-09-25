@@ -8,10 +8,10 @@
 // 'urgent' (the real production gap: SAFETY_CONCERN_MARKER-classified
 // messages like "พื้นลื่นมาก ตอนเล่น ATV น่ากลัว" score 'high', which never
 // triggered the old urgent-only escalation). Every combination of
-// bound/unbound/failed target is asserted against BOTH the stored
-// per-target result (ops_feedback_events.internal_notes.notification_targets)
-// and the customer-facing wording, which must never overclaim a target
-// that didn't actually send.
+// bound/unbound/failed target is asserted against provider effects,
+// ops_notification_deliveries, the row's primary notification_status,
+// and customer-facing wording. ops_feedback_events.internal_notes is
+// reserved for owner/staff notes and must never carry routing metadata.
 //
 // Section B (Task 3): the restaurant advisor is host-style, not a menu
 // dump -- allergy caution leads, top 3 items by default, one next
@@ -36,9 +36,13 @@ async function ask(seed: string, message: string) {
   return processThongthaiChatCore(brainRequest(message, gid, 'web'), 'evt-1');
 }
 
-function notificationTargets(harness: Harness, eventId = 'feedback-event-1'): Array<{ team: string; status: string }> {
-  const row = harness.feedbackEventRow(eventId) as { internal_notes?: { notification_targets?: Array<{ team: string; status: string }> } } | undefined;
-  return row?.internal_notes?.notification_targets ?? [];
+function deliveryStatus(harness: Harness, teamCode: string, eventId = 'feedback-event-1'): string | undefined {
+  return harness.notificationDeliveries()
+    .find(delivery => delivery.entityId === eventId && delivery.teamCode === teamCode)?.status;
+}
+
+function feedbackDeliveries(harness: Harness, eventId = 'feedback-event-1') {
+  return harness.notificationDeliveries().filter(delivery => delivery.entityId === eventId);
 }
 
 const DURATION_PROMPT_RE = /เลือกระยะเวลา\s*30,?\s*60\s*หรือ\s*90\s*นาที/u;
@@ -66,9 +70,8 @@ test('A1. safety issue with BOTH activity and owner_general bound: both targets 
 
     const row = harness.feedbackEventRow('feedback-event-1');
     assert.equal(row?.notification_status, 'sent', 'backoffice-visible: primary team send succeeded');
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(x => x.team === 'activity')?.status, 'sent');
-    assert.equal(targets.find(x => x.team === 'owner_general')?.status, 'sent');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent');
+    assert.equal(deliveryStatus(harness, 'owner_general'), 'sent');
   });
 });
 
@@ -84,9 +87,10 @@ test('A2. owner_general bound, activity NOT bound: owner sent, activity not_boun
 
     const events = harness.postsTo('ops_feedback_events');
     assert.equal(events.length, 1, 'event is stored regardless of partial notification failure');
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(x => x.team === 'activity')?.status, 'not_bound');
-    assert.equal(targets.find(x => x.team === 'owner_general')?.status, 'sent');
+    assert.equal(harness.feedbackEventRow('feedback-event-1')?.notification_status, 'not_bound', 'the primary activity target is honestly not bound');
+    assert.equal(deliveryStatus(harness, 'activity'), undefined, 'an unbound target has no provider delivery row');
+    assert.equal(deliveryStatus(harness, 'owner_general'), 'sent');
+    assert.equal(harness.postsTo('line_push').filter(push => push.to === 'line-group-activity').length, 0);
   });
 });
 
@@ -101,9 +105,9 @@ test('A3. activity bound, owner_general NOT bound: activity sent, owner not_boun
 
     const events = harness.postsTo('ops_feedback_events');
     assert.equal(events.length, 1);
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(x => x.team === 'activity')?.status, 'sent');
-    assert.equal(targets.find(x => x.team === 'owner_general')?.status, 'not_bound');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent');
+    assert.equal(deliveryStatus(harness, 'owner_general'), undefined, 'an unbound owner target has no provider delivery row');
+    assert.equal(harness.postsTo('line_push').filter(push => push.to === 'line-group-owner_general').length, 0);
   });
 });
 
@@ -118,9 +122,10 @@ test('A4. neither activity nor owner_general bound: event still stored, reply is
 
     const events = harness.postsTo('ops_feedback_events');
     assert.equal(events.length, 1, 'the report is still stored even with zero teams bound');
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(x => x.team === 'activity')?.status, 'not_bound');
-    assert.equal(targets.find(x => x.team === 'owner_general')?.status, 'not_bound');
+    assert.equal(harness.feedbackEventRow('feedback-event-1')?.notification_status, 'not_bound');
+    assert.equal(deliveryStatus(harness, 'activity'), undefined);
+    assert.equal(deliveryStatus(harness, 'owner_general'), undefined);
+    assert.equal(harness.postsTo('line_push').length, 0, 'no provider push is attempted when neither target is bound');
   });
 });
 
@@ -132,11 +137,14 @@ test('A5. owner_general bound to the SAME physical LINE group as activity: only 
     const r = await ask('polish-a5', ATV_SAFETY_MESSAGE);
     assert.equal(r.statusCode, 200);
 
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(x => x.team === 'activity')?.status, 'sent', 'the first target to the shared group actually sends');
-    assert.equal(targets.find(x => x.team === 'owner_general')?.status, 'duplicate', 'the second target to the SAME physical group is never sent twice');
-
-    assert.equal(targets.length, 2, 'both targets are still recorded (one sent, one duplicate) -- the event is never silently missing a target');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent', 'the first target to the shared group actually sends');
+    assert.equal(deliveryStatus(harness, 'owner_general'), undefined, 'the same-group duplicate is skipped before creating a second provider delivery');
+    assert.equal(feedbackDeliveries(harness).length, 1, 'only one provider delivery row exists for one physical LINE group');
+    assert.equal(
+      harness.postsTo('line_push').filter(push => push.to === sharedTarget).length,
+      1,
+      'the shared physical LINE group receives exactly one push',
+    );
   });
 });
 
@@ -151,9 +159,8 @@ test('Task 4a. mock owner_general push failure: activity sends, owner_general fa
     const r = await ask('polish-4a', ATV_SAFETY_MESSAGE);
     const t = msg(r.payload);
     assert.match(t, /ส่งให้ทีมกิจกรรมแล้วครับ ส่วนแจ้งเจ้าของยังไม่สำเร็จ/u);
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(x => x.team === 'activity')?.status, 'sent');
-    assert.equal(targets.find(x => x.team === 'owner_general')?.status, 'failed');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent');
+    assert.equal(deliveryStatus(harness, 'owner_general'), 'failed');
   });
 });
 
@@ -165,9 +172,8 @@ test('Task 4b. mock domain (activity) push failure: owner_general sends, activit
     const r = await ask('polish-4b', ATV_SAFETY_MESSAGE);
     const t = msg(r.payload);
     assert.doesNotMatch(t, /ส่งให้ทีมกิจกรรมแล้วครับ|ส่งให้ทีมกิจกรรมและเจ้าของ/u, 'must never claim the activity team was notified when its push actually failed');
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(x => x.team === 'activity')?.status, 'failed');
-    assert.equal(targets.find(x => x.team === 'owner_general')?.status, 'sent');
+    assert.equal(deliveryStatus(harness, 'activity'), 'failed');
+    assert.equal(deliveryStatus(harness, 'owner_general'), 'sent');
   });
 });
 
