@@ -8796,3 +8796,95 @@ A final human-grade certification still requires real-provider acceptance across
 - current intent beating stale memory
 
 Do not call the system “perfect” solely from network-free CI.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5 / Checkpoint 5.3 — Live Semantic Certification Harness — 2026-09-26
+
+**STATUS: HARNESS GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY / LIVE CORPUS EXECUTION.**
+
+### Goal
+
+Network-free CI is necessary but not enough to call Thongthai human-grade.
+
+Checkpoint 5.3 adds a stateless live semantic-certification surface so the real production model can be measured against the repository's golden semantic corpus without contaminating:
+- guest identity
+- customer memory
+- guest events
+- One-Mind trace storage
+- booking/order/payment state
+- backoffice
+- production transactions
+
+### GitHub Actions discovery
+
+A first attempt added a live-eval GitHub Actions workflow.
+
+Run:
+`36180310988`
+
+Result:
+the repository has **no GEMINI_API_KEY or OPENAI_API_KEY configured in GitHub Actions secrets**.
+
+The workflow now treats this as a documented non-run rather than a CI failure.
+
+No model key was copied out of Netlify or exposed in repository files/logs.
+
+### Stateless certification helper
+
+Added:
+`netlify/functions/_semantic-live-certification.ts`
+
+It:
+- imports the existing semantic interpreter directly
+- consumes only repository-owned non-personal golden cases
+- never loads customer DB/runtime state
+- never writes traces/events/memory
+- never calls booking/order/payment execution
+- supports bounded batches (max 20 cases per call)
+- compares domain/action/clarification and informationNeed when present
+
+### Secured HTTP surface
+
+Added:
+`netlify/functions/thongthai-semantic-certification.ts`
+
+Security:
+- disabled unless `THONGTHAI_SEMANTIC_CERT_TOKEN` is configured
+- missing/wrong token returns 404
+- no-store
+- noindex/nofollow
+- token is stored as a Netlify secret runtime variable, not in the repository
+
+The endpoint is an acceptance/diagnostic surface only, not part of customer routing.
+
+### Test evidence
+
+Implementation head before docs:
+`59f38c4f1f029d420f2f11553df40bb3e64a668b`
+
+GitHub Actions:
+- normal One-Mind CI run `36180649733`
+- **1152 / 1152 PASS**
+- fail 0
+
+New tests prove:
+1. certification helper can run with injected semantic interpretation and no runtime/customer state
+2. endpoint is hidden when token is missing or wrong
+
+### Next acceptance
+
+After merge and exact Netlify automatic production deploy:
+1. call the secured semantic-certification endpoint in bounded batches
+2. run the full golden corpus against the real configured semantic provider
+3. collect failures by category
+4. repair architecture/prompt/closed facets for recurring failure patterns
+5. rerun until the agreed human-grade threshold is met
+6. do not weaken the corpus merely to improve the score
+
+Do not call the system “perfect” before this live-provider certification is complete.
+
+No manual Netlify deploy.
+No production transaction.
+No DB/schema change.
