@@ -1,0 +1,39 @@
+name: Human Brain Live Semantic Certification
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  live-semantic-baseline:
+    if: github.head_ref == 'human-brain/phase5-3-live-semantic-certification-20260926'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LIVE_EVAL_PROFILE: full
+      LIVE_EVAL_MIN_PASS_PCT: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Check live-provider credentials
+        id: creds
+        run: |
+          if [ -z "$GEMINI_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
+            echo "LIVE_SEMANTIC_EVAL_NOT_RUN: no GitHub Actions model secret is configured."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Run full live semantic baseline
+        if: steps.creds.outputs.available == 'true'
+        run: npm run eval:semantic:live
