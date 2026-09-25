@@ -230,6 +230,18 @@ export type Harness = {
    *  row id -- lets a test assert on notification_status/notification_error
    *  after dispatch, not just the initial insert body. */
   feedbackEventRow: (id: string) => Record<string, unknown> | undefined;
+  /** Final notification-delivery ledger state joined back to the bound team.
+   *  Use this for routing assertions instead of abusing ops_feedback_events.internal_notes,
+   *  which is reserved for owner/staff notes. A not-bound or same-target duplicate
+   *  intentionally has no delivery row because no provider delivery was attempted. */
+  notificationDeliveries: () => Array<{
+    id: string;
+    idempotencyKey: string;
+    entityId: string | null;
+    deliveryType: string;
+    teamCode: string | null;
+    status: string;
+  }>;
   restaurantId: string;
 };
 
@@ -771,6 +783,23 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     customerIntelligenceRows: () => [...customerIntelligence.values()],
     guestDbId: anonymousId => guests.get(anonymousId)?.id,
     feedbackEventRow: id => feedbackEvents.get(id),
+    notificationDeliveries: () => {
+      const deliveryPosts = posts.get('ops_notification_deliveries') ?? [];
+      return deliveryPosts.map(post => {
+        const id = String(post.id ?? '');
+        const finalRow = [...opsDeliveries.values()].find(row => row.id === id);
+        const channelId = String(post.channel_id ?? '');
+        const channel = [...opsChannels.values()].find(candidate => candidate.id === channelId);
+        return {
+          id,
+          idempotencyKey: String(post.idempotency_key ?? ''),
+          entityId: typeof post.entity_id === 'string' ? post.entity_id : null,
+          deliveryType: String(post.delivery_type ?? ''),
+          teamCode: channel?.team_code ?? null,
+          status: finalRow?.status ?? String(post.status ?? ''),
+        };
+      });
+    },
     restaurantId: RESTAURANT_ID,
   };
 }
