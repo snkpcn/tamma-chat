@@ -286,6 +286,46 @@ function nextConversationContext(
  *    invalid response) still propagates -- that is a different, real error
  *    class the caller must still see.
  */
+function hasLiveActiveTask(taskState: TaskStateContainer): boolean {
+  const task = taskState.activeTask;
+  return Boolean(task && !isTerminalTaskStatus(task.status));
+}
+
+/**
+ * Human Brain strangler gate.
+ *
+ * The mature deterministic interpreter remains authoritative whenever it has
+ * already classified a turn precisely enough for the proven business/dialog
+ * path. We ask the language model to refine ONLY a deliberately coarse
+ * classification that would otherwise discard the meaning of the sentence.
+ *
+ * Phase 1 starts with restaurant_topic_switch because that classifier says
+ * only "this is about the restaurant" and intentionally carries no specific
+ * question/action/entities. It is exactly the class that swallowed the owner's
+ * real sentence "ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ" before the
+ * language model could understand availability/date/time.
+ *
+ * Cross-domain switches while an operational task is active remain on the
+ * proven deterministic suspend/resume path in this checkpoint. Later Human
+ * Brain phases can expand this gate only with their own RED/full-CI evidence.
+ */
+function deterministicNeedsLanguageRefinement(
+  turn: SemanticTurn | null,
+  taskState: TaskStateContainer,
+): boolean {
+  if (!turn) return true;
+  if (hasLiveActiveTask(taskState)) return false;
+  return turn.intent === 'restaurant_topic_switch';
+}
+
+function modelRefinementIsUsable(turn: SemanticTurn): boolean {
+  return turn.domain !== 'unknown'
+    && turn.action !== 'unknown'
+    && turn.needsClarification !== true
+    && Number.isFinite(turn.confidence)
+    && turn.confidence >= 0.7;
+}
+
 async function resolveSemanticTurn(
   message: string,
   context: SemanticContext,
@@ -294,17 +334,68 @@ async function resolveSemanticTurn(
   now: Date = new Date(),
 ): Promise<SemanticTurn> {
   const deterministic = deriveDeterministicSemanticTurn(message, context, taskState, now);
-  if (deterministic) {
-    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: true, model_call_used: false }));
+
+  // Preserve every mature deterministic path unless this checkpoint has
+  // explicitly proven that its classification is too coarse.
+  if (deterministic && !deterministicNeedsLanguageRefinement(deterministic, taskState)) {
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+      semantic_owner: 'deterministic_proven_path',
+      deterministic_turn: true,
+      model_call_used: false,
+      intent: deterministic.intent,
+    }));
     return deterministic;
   }
+
+  // No deterministic interpretation has always required real language
+  // understanding. A coarse restaurant topic classification now does too.
   try {
-    const turn = await deps.interpretSemanticTurn(message, context);
-    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: false, model_call_used: true }));
-    return turn;
+    const modelTurn = await deps.interpretSemanticTurn(message, context);
+
+    // A weak model interpretation never replaces a useful deterministic
+    // fallback. This gives us the larger language brain without gambling away
+    // the mature system on low-confidence/ambiguous output.
+    if (deterministic && !modelRefinementIsUsable(modelTurn)) {
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'deterministic_low_confidence_fallback',
+        deterministic_turn: true,
+        model_call_used: true,
+        model_confidence: modelTurn.confidence,
+        deterministic_intent: deterministic.intent,
+      }));
+      return deterministic;
+    }
+
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+      semantic_owner: deterministic ? 'language_model_refinement' : 'language_model',
+      deterministic_candidate: Boolean(deterministic),
+      deterministic_turn: false,
+      model_call_used: true,
+      model_confidence: modelTurn.confidence,
+    }));
+    return modelTurn;
   } catch (error) {
     if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
-    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: false, model_call_used: false, clarification_without_model: true }));
+
+    // Provider outage never destroys a path the old system could already
+    // understand. Fall straight back to the exact deterministic candidate.
+    if (deterministic) {
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'deterministic_provider_fallback',
+        deterministic_turn: true,
+        model_call_used: false,
+        provider_unavailable: true,
+        deterministic_intent: deterministic.intent,
+      }));
+      return deterministic;
+    }
+
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+      semantic_owner: 'clarification_provider_fallback',
+      deterministic_turn: false,
+      model_call_used: false,
+      clarification_without_model: true,
+    }));
     const domain = taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown';
     return {
       domain,
