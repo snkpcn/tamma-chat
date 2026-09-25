@@ -9181,3 +9181,91 @@ No manual deploy.
 Merge with explicit `[semantic-cert]` marker and run one-shot semantic-v2 production certification.
 
 Do not call Phase 5.5 human-grade until the live model evidence confirms the taxonomy changes.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5.6 — Quota-safe semantic certification — 2026-09-26
+
+**STATUS: IMPLEMENTATION + BRANCH VERIFICATION GREEN; PENDING PR CI / EXACT MERGE / AUTO PRODUCTION CERT.**
+
+### Why this checkpoint exists
+
+The hardened live certification still burst provider calls fast enough to manufacture its own availability failure.
+
+Production evidence from deploy `6ab6dd0bc092750008f39e8f`:
+- total corpus = 158
+- evaluated = 17
+- semanticEvaluated = 16
+- semanticFailed = 5
+- providerFailed = 1
+- availabilityComplete = false
+- passPct = 68.75% of semantic-evaluated cases only
+
+The provider-blocked turn showed multiple current Gemini model IDs rate-limited in the same burst before the shared 7s provider budget was exhausted.
+
+Therefore the incomplete run is NOT a valid whole-corpus semantic score.
+
+### Architecture
+
+Runtime provider behavior remains unchanged:
+- FREE Gemini first
+- per-model circuit remains
+- shared 7s runtime budget remains
+- paid OpenAI remains opt-in only via THONGTHAI_ALLOW_PAID_FALLBACK=1
+
+Certification only now supports bounded `interCaseDelayMs`.
+
+The production one-shot runner defaults to:
+`SEMANTIC_CERT_INTER_CASE_DELAY_MS=4250`
+when no explicit override is supplied.
+
+Pacing applies across:
+- cases inside each batch
+- batch boundaries
+
+It does NOT slow customer chat.
+
+Existing cert safeguards remain:
+- provider failure != semantic failure
+- stop on provider failure
+- 61s availability retry/cooldown
+- provider failures excluded from semantic pass percentage
+- build never fails merely because baseline provider availability is incomplete
+
+### Provider documentation correction
+
+Gemini quotas are project-scoped and may vary by model/tier.
+A 429 from one model does not prove every model is unavailable, so per-model runtime fallback remains useful.
+But certification must pace project-wide because project quota can affect several model IDs during one burst.
+
+### RED-first evidence
+
+RED commit:
+`c2f09075712d24d6ab3997424e11441442bf4fa4`
+
+### Branch verification
+
+GitHub Actions:
+run `36189657525`
+
+Result:
+- **1169 / 1169 PASS**
+- fail 0
+- exact Netlify build command = SUCCESS
+- live semantic certification correctly skipped outside production/main
+
+No DB/schema change.
+No transaction executor change.
+No booking/order/payment behavior change.
+No backoffice change.
+No manual Netlify deploy.
+No fake production transaction.
+No paid OpenAI fallback.
+Temporary verification workflow removed before PR.
+
+### Merge discipline
+
+PR must skip Deploy Preview to preserve Netlify credits.
+Merge only exact verified head SHA.
+Production merge commit must contain `[semantic-cert]` and must NOT contain `[skip netlify]`, so the single real production auto deploy runs the quota-safe live corpus.
