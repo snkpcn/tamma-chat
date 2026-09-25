@@ -150,7 +150,7 @@ test('Human Brain 5.7: semantic-v3 prompt encodes general failure patterns, not 
   assert.match(prompt,/question meaning outranks slot-shaped wording/i);
   assert.match(prompt,/problem ABOUT an order[\s\S]*not automatically transaction_status/i);
   assert.match(prompt,/Use catalog[\s\S]{0,180}stable category\/type\/item exists/i);
-  assert.match(prompt,/operating rules\/capacity constraints[\s\S]*policy/i);
+  assert.match(prompt,/Use policy[\s\S]{0,180}operating rules\/capacity constraints/i);
   assert.match(prompt,/journey = planning-state work[\s\S]*saving[\s\S]*viewing/i);
   assert.match(prompt,/resume_suspended/i);
 });
