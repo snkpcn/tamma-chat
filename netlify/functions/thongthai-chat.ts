@@ -3462,6 +3462,32 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Phase 2 closeout — resolve the answer to Thongthai's own persisted
+  // question before ordinary domain routing. Safety/authority + service
+  // feedback remain above this block. If the customer states a clear new
+  // domain instead, the resolver clears only that stale pending question and
+  // yields, so location/weather/horse/ATV/etc. continue through their normal
+  // authoritative responders below.
+  const pendingQuestionContinuation = await pendingQuestionContinuationResponse(request, guestDbId, channel).catch(error => {
+    console.error(
+      'THONGTHAI_PENDING_QUESTION_CONTINUATION_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+    return null;
+  });
+  if (pendingQuestionContinuation) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'pendingQuestionContinuationResponse' }));
+    const polished = polishedResponse(pendingQuestionContinuation, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   // Phase 2 stabilization — meaning-first semantic gate. Explicit location
   // and weather questions are answered BEFORE any horse/activity continuation
   // can inspect entity tokens or stale task state. Safety/escalation and
@@ -3627,26 +3653,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const ecosystemFirstVisit = ecosystemFirstVisitResponse(request);
   if (ecosystemFirstVisit) {
     const polished = polishedResponse(ecosystemFirstVisit, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return coreResult(200, {
-      message: polished.message,
-      intent: polished.intent,
-      contextUpdates: polished.contextUpdates,
-      journeyAction: polished.journeyAction,
-      suggestedActions: polished.suggestedActions,
-    });
-  }
-
-  const pendingQuestionContinuation = await pendingQuestionContinuationResponse(request, guestDbId, channel).catch(error => {
-    console.error(
-      'THONGTHAI_PENDING_QUESTION_CONTINUATION_ERROR',
-      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
-    );
-    return null;
-  });
-  if (pendingQuestionContinuation) {
-    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'pendingQuestionContinuationResponse' }));
-    const polished = polishedResponse(pendingQuestionContinuation, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
