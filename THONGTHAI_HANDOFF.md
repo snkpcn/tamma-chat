@@ -5927,3 +5927,40 @@ Owner retest after production deploy:
 - send `มีอะไรแนะนำอีก`;
 - expected: another FOOD option that respects remembered constraints, or an honest "no more verified food options" response;
 - must not drift to beer/herbal drinks unless the customer asks for drinks.
+
+
+## Phase 2 Final Restaurant Quality Checkpoint — 2026-09-25
+
+Owner production smoke after PR #81 finally kept `มีอะไรแนะนำอีก` inside FOOD scope and returned `ไข่เจียวหมูสับ` + `ขนมจีน`. This proved category continuity, but exposed three last quality gaps before closing the restaurant-memory slice:
+
+1. strict `ไม่เผ็ด` still trusted curated `spiceLevel` too much; production SOT contains dishes with `พริกสด/พริกแห้ง` in authoritative ingredient_names while profile spiceLevel is only 0–1;
+2. generic recommendation ranking could promote bare staple/side rows (e.g. plain `ขนมจีน`) as standalone recommendations ahead of substantive dishes;
+3. repeated `มีอะไรแนะนำอีก` had no persistent cursor on LINE, so after the second page it could loop the same alternatives forever because LINE transports no chat history.
+
+Fix:
+- strict no_spicy now hard-excludes authoritative raw chilli ingredients (`พริกสด`, `พริกแห้ง`, `พริกป่น`, `พริกขี้หนู`, `พริกจินดา`, `พริกชี้ฟ้า`, chili/chilli) in addition to existing name/category risk rules;
+- scoring gives substantive main/protein/grill/soup/single-plate roles priority and penalizes bare side-only rows;
+- generic recommendation display suppresses bare staple-only rows as standalone picks while full-list/compose/pairing flows keep them available;
+- `restaurantAdvisorContext` now stores a bounded `recentRecommendationNames` cursor;
+- first recommendation stores shown grounded names; each `อีก` follow-up serves only unseen grounded rows; when exhausted, Thongthai says there are no more verified options instead of looping or hallucinating;
+- a fresh non-`อีก` recommendation request resets the shown-name cursor; constraint-only updates preserve it.
+
+Tests added:
+- raw chilli ingredient safety with low/zero profile spiceLevel;
+- substantive main ranks ahead of bare side;
+- full signed LINE sequence proves first page -> unseen second page -> honest exhausted third page.
+
+Verified code head `a6b995932935dcdeec3581fa73917816922f73fb`: GitHub Actions **1056/1056 passing, 0 failures**.
+
+No DB migration. No production DB mutation. No Phase 3 work.
+
+Owner smoke after deploy:
+1. same restaurant conversation: `ร้านอาหารมีอะไรแนะนำ`
+2. `มีอะไรแนะนำอีก`
+3. `มีอะไรแนะนำอีก`
+Expected:
+- no shrimp/chicken/spicy-risk item under remembered constraints;
+- no beer/herbal drink drift unless explicitly requested;
+- no bare staple presented as a top standalone recommendation when substantive food exists;
+- no repeated names across pages;
+- final page honestly says no more verified options when exhausted.
