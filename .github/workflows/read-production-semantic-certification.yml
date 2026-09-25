@@ -27,4 +27,5 @@ jobs:
           path: semantic-certification-result.json
           if-no-files-found: error
 
-# poll phase5.4
+# poll phase5.4 provider-resilience result
+# trigger 1659132c readback
