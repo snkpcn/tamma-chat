@@ -6116,3 +6116,143 @@ Owner retest after production deploy:
 2. `มีอะไรแนะนำ`
 3. `อยากเน้นกินข้าว`
 Expected turn 3: grounded restaurant recommendation with real prices/constraints, never `ขอรายละเอียดเพิ่มอีกนิด`.
+
+
+---
+
+## Phase 2 Closeout — Persisted Pending-Question / Semantic Follow-up — 2026-09-25
+
+**STATUS: CODE READY; PHASE 2 IS NOT CLOSED UNTIL OWNER PRODUCTION LINE SMOKE PASSES.**
+
+### Why this checkpoint exists
+
+LINE intentionally calls the canonical core with `chatHistory: []`. The production failure was not missing restaurant wording; it was missing server-side knowledge of the question Thongthai itself had just asked:
+
+1. `แม่เดินไกลไม่ได้`
+2. `มีอะไรแนะนำ`
+3. Thongthai: `อยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?`
+4. Customer: `อยากเน้นกินข้าว`
+5. Old behavior: generic `ขอรายละเอียดเพิ่มอีกนิดครับ...`
+
+PR #88 fixed that exact ecosystem branch with `active_topic + unresolved_need`, but the continuation was still a branch-specific regex responder. Phase 2 closeout replaces that patchy continuation contract with a bounded, persisted semantic pending-question state.
+
+### Test-first proof
+
+- Test-only RED commit: `cc3ddf90772addc16f015bc163bd994beeaa2644`
+- GitHub Actions run: `36108132718`
+- Result: **1066 pass / 1 fail**
+- Exact failure: `own clarification/choice question must persist pending_question`
+- This proves current production architecture did not yet have the required structured continuation state even though PR #88 could answer the exact food phrase.
+
+### Architecture added
+
+New domain-agnostic module:
+
+- `netlify/functions/_conversation-continuity.ts`
+
+Persisted state contract:
+
+```ts
+pending_question: {
+  domain: string,
+  kind: "preference_choice" | "entity_choice" | "party_size",
+  choices?: Array<{ value: string, aliases: string[] }>,
+  slot?: string
+}
+```
+
+Canonical response contract now supports:
+
+- `agentStateUpdate.pendingQuestion`
+- `agentStateUpdate.clearPendingQuestion`
+
+Persistence remains inside the existing `guest_agent_state` CAS store through `persistBrainRuntime -> patchGuestAgentState`.
+No new table, database, site, repo, or production migration was added.
+
+### Resolution policy
+
+The resolver combines:
+
+- current customer message
+- persisted `pending_question`
+- existing durable customer memory loaded by the canonical core
+
+It resolves canonical values from the choices stored by the **question producer**, rather than hard-coding the current customer sentence inside a branch responder.
+
+Current integrated ecosystem producer persists:
+
+- domain: `general_recommendation`
+- choices: `restaurant | cafe | light_activity`
+
+The old `ecosystem_focus_choice` phrase-regex continuation has been removed.
+
+Precedence is preserved:
+
+1. urgent safety / authority escalation
+2. service feedback
+3. persisted pending-question continuation
+4. explicit location / weather / assistant-address intent
+5. explicit domain responders / active-task continuation
+6. normal One-Mind fallback
+
+A clear explicit domain switch discards an incompatible stale general-recommendation pending question before normal domain routing. This prevents stale choice state from stealing location/weather/horse/ATV/homestay turns.
+
+### Load-bearing coverage
+
+The generic resolver is independently proven for:
+
+- preference choices
+- entity choices (e.g. canonical horse choice)
+- party size, including Thai digits
+- ambiguous multi-choice answers return no guess
+
+The signed LINE regression uses the real webhook path and therefore `chatHistory: []`.
+
+The final same-user Phase 2 closeout matrix covers:
+
+1. `แม่เดินไกลไม่ได้`
+2. `มีอะไรแนะนำ`
+3. `อยากเน้นกินข้าว`
+4. `ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง`
+5. `มีอะไรแนะนำบ้าง`
+6. `มีอะไรแนะนำอีก`
+7. `ขอโลเคชั่นหน่อยทองไทย`
+8. `ตอนนี้ฝนตกไหม`
+9. `อยากขี่ม้า ไม่เคยเลย กลัวตก`
+10. `เอาทองไทย`
+11. `ขอคืนเงินได้ไหม`
+12. `พื้นลื่นมาก ตอนเล่น ATV น่ากลัว`
+
+The matrix verifies:
+
+- mobility memory survives
+- obvious answer to Thongthai's own question never falls to generic clarification
+- intended pending resolution uses zero model calls
+- no-spicy / no-chicken / no-shrimp remain durable across topic turns
+- restaurant `มีอะไรแนะนำอีก` returns unseen grounded options or an honest no-more result
+- location/weather are not hijacked by horse or stale restaurant state
+- explicit horse intent switches domain correctly
+- `เอาทองไทย` is interpreted as the horse inside horse context
+- refund authority boundary overrides active horse state
+- ATV safety escalation overrides every active task
+- owner/activity feedback events still route through the existing notification/event path
+
+### Final branch CI before this handoff update
+
+Head: `85040264ddeacd59dea8b243573fa344f41879a1`
+
+GitHub Actions run: `36109122400`
+
+Result: **1070 / 1070 PASS**
+
+### What remains before Phase 2 can be marked CLOSED
+
+Owner must production-smoke the real LINE flow after PR merge and automatic Netlify production deployment.
+
+Start with **one message at a time**:
+
+`แม่เดินไกลไม่ได้`
+
+Do not start Phase 2.7 or Phase 3 until the owner confirms the production smoke passes the Phase 2 Definition of Done.
+
+Phase 2.7 `customer_intelligence_events` migration remains **NOT APPROVED / NOT APPLIED** and still requires explicit owner approval.
