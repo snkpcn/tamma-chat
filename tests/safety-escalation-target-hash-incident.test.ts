@@ -118,9 +118,13 @@ function text(replies: CapturedReply[], index: number): string {
   return replies[index]?.messages.map(m => m.text ?? '').join(' ') ?? '';
 }
 
-function notificationTargets(harness: Harness, eventId = 'feedback-event-1'): Array<{ team: string; status: string }> {
-  const row = harness.feedbackEventRow(eventId) as { internal_notes?: { notification_targets?: Array<{ team: string; status: string }> } } | undefined;
-  return row?.internal_notes?.notification_targets ?? [];
+function deliveryStatus(harness: Harness, teamCode: string, eventId = 'feedback-event-1'): string | undefined {
+  return harness.notificationDeliveries()
+    .find(delivery => delivery.entityId === eventId && delivery.teamCode === teamCode)?.status;
+}
+
+function feedbackDeliveries(harness: Harness, eventId = 'feedback-event-1') {
+  return harness.notificationDeliveries().filter(delivery => delivery.entityId === eventId);
 }
 
 function pushTargetsCalled(harness: Harness): string[] {
@@ -140,9 +144,8 @@ test('1. BOTH activity and owner_general bound: each group\'s LINE push is calle
     const deliveries = harness.postsTo('ops_notification_deliveries');
     assert.equal(deliveries.length, 2, 'a real delivery row must exist for BOTH targets, not just the domain team');
 
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(t => t.team === 'activity')?.status, 'sent');
-    assert.equal(targets.find(t => t.team === 'owner_general')?.status, 'sent');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent');
+    assert.equal(deliveryStatus(harness, 'owner_general'), 'sent');
 
     assert.match(text(replies, 0), /ส่งให้ทีมกิจกรรมและเจ้าของตรวจสอบแล้วครับ/u, 'reply may only claim both were notified because both really were');
   });
@@ -159,9 +162,8 @@ test('2. owner_general push genuinely fails: activity sent, owner_general failed
     assert.equal(pushedTo.filter(t => t === 'line-group-activity').length, 1);
     assert.equal(pushedTo.filter(t => t === 'line-group-owner_general').length, 1, 'a real push attempt to owner_general must still happen even though it will fail');
 
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(t => t.team === 'activity')?.status, 'sent');
-    assert.equal(targets.find(t => t.team === 'owner_general')?.status, 'failed');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent');
+    assert.equal(deliveryStatus(harness, 'owner_general'), 'failed');
     assert.match(text(replies, 0), /ส่งให้ทีมกิจกรรมแล้วครับ ส่วนแจ้งเจ้าของยังไม่สำเร็จ/u);
   });
 });
@@ -172,9 +174,9 @@ test('3. owner_general not bound: activity sent, owner not_bound, reply never cl
     await callLineWebhook([privateEvent(ATV_SAFETY_MESSAGE, 'incident-3')]);
 
     assert.equal(pushTargetsCalled(harness).filter(t => t === 'line-group-owner_general').length, 0, 'no push should even be attempted when owner_general has no bound channel');
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(t => t.team === 'activity')?.status, 'sent');
-    assert.equal(targets.find(t => t.team === 'owner_general')?.status, 'not_bound');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent');
+    assert.equal(deliveryStatus(harness, 'owner_general'), undefined, 'unbound owner has no provider delivery row');
+    assert.equal(pushTargetsCalled(harness).filter(t => t === 'line-group-owner_general').length, 0);
     assert.match(text(replies, 0), /ส่งให้ทีมกิจกรรมแล้วครับ ส่วนแจ้งเจ้าของยังไม่สำเร็จ/u);
   });
 });
@@ -185,9 +187,9 @@ test('4. activity missing but owner_general bound: owner sent, activity not_boun
     await callLineWebhook([privateEvent(ATV_SAFETY_MESSAGE, 'incident-4')]);
 
     assert.equal(pushTargetsCalled(harness).filter(t => t === 'line-group-owner_general').length, 1);
-    const targets = notificationTargets(harness);
-    assert.equal(targets.find(t => t.team === 'activity')?.status, 'not_bound');
-    assert.equal(targets.find(t => t.team === 'owner_general')?.status, 'sent');
+    assert.equal(harness.feedbackEventRow('feedback-event-1')?.notification_status, 'not_bound', 'primary activity target remains honestly not bound');
+    assert.equal(deliveryStatus(harness, 'activity'), undefined, 'unbound activity has no provider delivery row');
+    assert.equal(deliveryStatus(harness, 'owner_general'), 'sent');
     assert.match(text(replies, 0), /ส่งให้เจ้าของตรวจสอบแล้วครับ/u);
   });
 });
@@ -202,9 +204,9 @@ test('5. Regression: a plain (non-safety, non-urgent) activity complaint still r
     assert.equal(pushedTo.filter(t => t === 'line-group-activity').length, 1);
     assert.equal(pushedTo.filter(t => t === 'line-group-owner_general').length, 0, 'a plain complaint must never also escalate to owner_general');
 
-    const targets = notificationTargets(harness);
-    assert.equal(targets.length, 1, 'only the domain team is a route target for a non-safety, non-urgent complaint');
-    assert.equal(targets[0]?.team, 'activity');
+    assert.equal(deliveryStatus(harness, 'activity'), 'sent');
+    assert.equal(deliveryStatus(harness, 'owner_general'), undefined, 'plain complaint never creates an owner escalation delivery');
+    assert.equal(feedbackDeliveries(harness).length, 1, 'only the domain-team provider delivery exists');
   });
 });
 
