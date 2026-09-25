@@ -355,9 +355,9 @@ function hasLiveActiveTask(taskState: TaskStateContainer): boolean {
  */
 function mayContainMultipleClauses(message: string): boolean {
   const normalized = message.trim();
-  return /(?:แล้ว(?:ก็)?|แต่|ทีนี้|จากนั้น|อีกอย่าง)s*/u.test(normalized)
-    || /ละs+S/u.test(normalized)
-    || /[;,]s*S/u.test(normalized);
+  return /(?:แล้ว(?:ก็)?|แต่|ทีนี้|จากนั้น|อีกอย่าง)\s*/u.test(normalized)
+    || /ละ\s+\S/u.test(normalized)
+    || /[;,]\s*\S/u.test(normalized);
 }
 
 function deterministicNeedsLanguageRefinement(
