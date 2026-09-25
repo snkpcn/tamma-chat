@@ -6051,3 +6051,29 @@ Fix:
 Verified head `028bb6ce18bb631b94acd0c69b5dc0835409b302`: GitHub Actions **1060/1060 passing, 0 failures**.
 
 No DB migration. No production DB mutation. No Phase 3 work.
+
+
+## Phase 2 Stabilization — Durable no-shrimp covers fresh + dried shrimp — 2026-09-25
+
+Owner production smoke passed the combined same-turn dietary recommendation after PR #84, but review found a latent durability gap: the existing durable memory value `no_shrimp` only mapped to `กุ้งแห้ง` inside the restaurant advisor. A later turn could therefore forget the original text form and allow fresh shrimp even though the customer's durable constraint was still `no_shrimp`.
+
+Fix:
+- `no_shrimp` now maps to both `กุ้งแห้ง` and generic `กุ้ง`, so fresh and dried shrimp are excluded from authoritative raw `ingredient_names`;
+- acknowledgement wording is corrected from the overly narrow `ไม่มีกุ้งแห้ง` to `ไม่มีกุ้ง`;
+- no DB schema or data mutation was required.
+
+Load-bearing regression:
+`tests/master-roadmap-phase2-durable-no-shrimp.test.ts` uses full signed LINE flow:
+1. customer says `ไม่กินกุ้ง`;
+2. test proves durable `guest_memory.constraints` contains `no_shrimp`;
+3. later `ร้านอาหารมีอะไรแนะนำ` runs with menu rows containing fresh shrimp and dried shrimp;
+4. neither shrimp dish may be recommended, while a safe alternative remains.
+
+Verified branch head `028bb6ce18bb631b94acd0c69b5dc0835409b302`: GitHub Actions **1060/1060 passing, 0 failures**.
+
+No DB migration. No production DB mutation. No Phase 3 work.
+
+Owner smoke after deploy:
+- `ไม่กินกุ้ง`
+- `ร้านอาหารมีอะไรแนะนำ`
+Expected: no fresh-shrimp or dried-shrimp dishes.
