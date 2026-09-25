@@ -286,6 +286,24 @@ function nextConversationContext(
  *    invalid response) still propagates -- that is a different, real error
  *    class the caller must still see.
  */
+function deterministicOwnsActiveTransaction(
+  turn: SemanticTurn | null,
+  taskState: TaskStateContainer,
+): turn is SemanticTurn {
+  const activeTask = taskState.activeTask;
+  if (!turn || !activeTask || isTerminalTaskStatus(activeTask.status)) return false;
+  if (activeTask.status !== 'collecting' && activeTask.status !== 'ready') return false;
+
+  // Human Brain doctrine:
+  // deterministic parsing owns ONLY the already-open transaction it can
+  // structurally continue. It does not own ordinary language understanding.
+  //
+  // A different-domain turn is a topic switch and must be understood by the
+  // language model first. Same-domain slot/correction/selection turns retain
+  // the proven zero-LLM path so booking/order flows remain resilient.
+  return turn.domain === activeTask.domain;
+}
+
 async function resolveSemanticTurn(
   message: string,
   context: SemanticContext,
@@ -294,17 +312,52 @@ async function resolveSemanticTurn(
   now: Date = new Date(),
 ): Promise<SemanticTurn> {
   const deterministic = deriveDeterministicSemanticTurn(message, context, taskState, now);
-  if (deterministic) {
-    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: true, model_call_used: false }));
+
+  if (deterministicOwnsActiveTransaction(deterministic, taskState)) {
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+      semantic_owner: 'active_transaction_deterministic',
+      deterministic_turn: true,
+      model_call_used: false,
+    }));
     return deterministic;
   }
+
+  // Human Brain Phase 1: normal conversation is language-first. The model
+  // reads the complete current utterance + bounded semantic context before a
+  // broad topic matcher can reduce it to one keyword/domain. Business actions
+  // remain deterministic downstream; this changes understanding ownership,
+  // not booking/payment/safety execution authority.
   try {
     const turn = await deps.interpretSemanticTurn(message, context);
-    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: false, model_call_used: true }));
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+      semantic_owner: 'language_model',
+      deterministic_candidate: Boolean(deterministic),
+      deterministic_turn: false,
+      model_call_used: true,
+    }));
     return turn;
   } catch (error) {
     if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
-    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ deterministic_turn: false, model_call_used: false, clarification_without_model: true }));
+
+    // Preserve the mature system as the outage fallback. We are not deleting
+    // its deterministic knowledge: if the model stack is unavailable, reuse
+    // the exact pre-existing deterministic interpretation when one exists.
+    if (deterministic) {
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'deterministic_provider_fallback',
+        deterministic_turn: true,
+        model_call_used: false,
+        provider_unavailable: true,
+      }));
+      return deterministic;
+    }
+
+    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+      semantic_owner: 'clarification_provider_fallback',
+      deterministic_turn: false,
+      model_call_used: false,
+      clarification_without_model: true,
+    }));
     const domain = taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown';
     return {
       domain,
