@@ -14,6 +14,7 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { listRestaurantMenu } from './_restaurant-sot';
 import { loadActivityWorldFacts } from './_activity-sot';
 import { ACTIVITY_ASSET_ATTRIBUTE_KEYS } from './_activity-catalog-policy';
+import { loadVerifiedWorldFacts } from './_world-facts';
 import { loadActivePromotionsWorldFact } from './_promotions-runtime';
 import {
   listBookingOptions,
@@ -103,6 +104,30 @@ async function activityCatalogAdapter(request: KnowledgeRequest, now: Date = new
     }
     return ok('activity_catalog_live', 'activity_live', facts, now);
   } catch (error) { return unavailable('activity_catalog_live', 'activity_live', error, now); }
+}
+
+
+/** Cafe facts reuse the canonical verified world_facts reader. This is
+ * deliberately read-only and category-scoped: the cafe adapter never loads
+ * activity/restaurant/promotion data just to answer a cafe question. */
+async function cafeFactsAdapter(_request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> {
+  const sourceId = 'cafe_world_facts_verified';
+  try {
+    const rows = await loadVerifiedWorldFacts('cafe');
+    const facts: GroundedFact[] = rows.map(row => ({
+      key: row.fact_key,
+      value: row.fact_value,
+      domain: 'cafe' as const,
+      sourceId,
+      sourceType: 'cafe_live' as const,
+      authoritative: true,
+      fetchedAt: now.toISOString(),
+      updatedAt: row.updated_at,
+    }));
+    return ok(sourceId, 'cafe_live', facts, now);
+  } catch (error) {
+    return unavailable(sourceId, 'cafe_live', error, now);
+  }
 }
 
 /** Reuses loadActivePromotionsWorldFact(channel) exactly -- the real
@@ -262,6 +287,7 @@ export function buildRealKnowledgeSourceAdapters(
       catalog: request => stayCatalogAdapter(request),
       availability: request => availabilityAdapter(environment)(request),
     },
+    cafe: { facts: request => cafeFactsAdapter(request) },
     promotion: { eligibility: request => promotionEligibilityAdapter(channel)() },
     bookingStatus: { lookup: request => bookingStatusAdapter(options.guestDbId)(request) },
     membership: { status: request => membershipStatusAdapter(options.guestDbId)(request) },
