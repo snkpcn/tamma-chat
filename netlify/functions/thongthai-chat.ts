@@ -2554,7 +2554,12 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
       return {
         message: 'ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ 😊\nอยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?',
         intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
-        suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+        suggestedActions: [], responseStyle: 'direct',
+        agentStateUpdate: {
+          activeTopic: 'ecosystem_focus_choice',
+          unresolvedNeed: 'choose_food_cafe_or_light_activity',
+        },
+        semanticMemoryUpdates: [], toolCalls: [],
       };
     }
     return {
@@ -2573,7 +2578,12 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
     return {
       message: 'ถ้ามากับคุณแม่เหมือนเดิม ทองไทยแนะนำแบบเดินน้อยก่อนนะครับ 😊\nอยากเน้นกินข้าว คาเฟ่ หรือกิจกรรมเบา ๆ ครับ?',
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
-      suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+      suggestedActions: [], responseStyle: 'direct',
+      agentStateUpdate: {
+        activeTopic: 'ecosystem_focus_choice',
+        unresolvedNeed: 'choose_food_cafe_or_light_activity',
+      },
+      semanticMemoryUpdates: [], toolCalls: [],
     };
   }
 
@@ -2608,6 +2618,95 @@ export function ecosystemFirstVisitResponse(request: BrainRequest): BrainRespons
       message: `เข้าใจครับ พา${who}มาด้วยและอยากเดินน้อย ๆ ใช่ไหมครับ 😊 ทองไทยแนะนำแนวคาเฟ่ + ร้านอาหาร + ชมวิวใกล้ ๆ ก่อน ไม่ต้องเดินไกลครับ\nมากี่คน แล้วมีเวลาประมาณเท่าไหร่ครับ?`,
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },
       suggestedActions: [], responseStyle: 'direct', semanticMemoryUpdates: [], toolCalls: [],
+    };
+  }
+
+  return null;
+}
+
+const ECOSYSTEM_FOCUS_CHOICE_TOPIC = 'ecosystem_focus_choice';
+const ECOSYSTEM_FOOD_FOCUS_RE = /(?:กินข้าว|อาหาร|ของกิน|กินก่อน|เน้นกิน|เน้นอาหาร|หิว)/u;
+const ECOSYSTEM_CAFE_FOCUS_RE = /(?:คาเฟ่|กาแฟ|เครื่องดื่ม|นั่งคาเฟ่)/u;
+const ECOSYSTEM_LIGHT_ACTIVITY_FOCUS_RE = /(?:กิจกรรมเบา|กิจกรรม|ทำอะไรเบา|ขยับเบา|ชมวิว)/u;
+
+async function ecosystemFocusChoiceContinuationResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  if (!guestDbId) return null;
+
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+    console.error(
+      'THONGTHAI_ECOSYSTEM_FOCUS_STATE_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+    return { state: null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
+  });
+  if (!isObject(snapshot.state) || snapshot.state.activeTopic !== ECOSYSTEM_FOCUS_CHOICE_TOPIC) return null;
+
+  const text = request.message.trim();
+
+  if (ECOSYSTEM_FOOD_FOCUS_RE.test(text)) {
+    const runtime = await loadBrainRuntime(guestDbId, channel);
+    const normalizedFoodRequest: BrainRequest = {
+      ...request,
+      message: 'ร้านอาหารมีอะไรแนะนำ',
+    };
+    const restaurant = await deterministicRestaurantResponse(
+      normalizedFoodRequest,
+      runtime,
+      guestDbId,
+      channel,
+    );
+    if (restaurant) {
+      return {
+        ...restaurant,
+        agentStateUpdate: mergeAgentState(
+          restaurant.agentStateUpdate,
+          { clearUnresolvedNeed: true },
+        ),
+      };
+    }
+
+    return {
+      message: composeFoodIntentStartResponse(),
+      intent: 'recommendation',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      agentStateUpdate: { activeTopic: 'restaurant', clearUnresolvedNeed: true },
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
+
+  if (ECOSYSTEM_CAFE_FOCUS_RE.test(text)) {
+    return {
+      message: 'ได้ครับ 😊 งั้นเน้นคาเฟ่ก่อน แวะ Inthanin นั่งพัก เดินน้อย แล้วค่อยชมวิวใกล้ ๆ ได้ครับ\nอยากได้กาแฟ ชา หรือเครื่องดื่มไม่กาแฟครับ?',
+      intent: 'recommendation',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      agentStateUpdate: { activeTopic: 'cafe', clearUnresolvedNeed: true },
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
+
+  if (ECOSYSTEM_LIGHT_ACTIVITY_FOCUS_RE.test(text)) {
+    return {
+      message: 'ได้ครับ 😊 ถ้าอยากทำอะไรเบา ๆ และเดินน้อย ทองไทยช่วยคัดต่อให้ได้ครับ\nอยากลองขี่ม้า ยิงธนู หรือเอาแบบนั่งพักชมวิวก่อนครับ?',
+      intent: 'recommendation',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      agentStateUpdate: { activeTopic: 'activity_discovery', clearUnresolvedNeed: true },
+      semanticMemoryUpdates: [],
+      toolCalls: [],
     };
   }
 
@@ -3442,6 +3541,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const ecosystemFirstVisit = ecosystemFirstVisitResponse(request);
   if (ecosystemFirstVisit) {
     const polished = polishedResponse(ecosystemFirstVisit, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const ecosystemFocusChoice = await ecosystemFocusChoiceContinuationResponse(request, guestDbId, channel).catch(error => {
+    console.error(
+      'THONGTHAI_ECOSYSTEM_FOCUS_CONTINUATION_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+    return null;
+  });
+  if (ecosystemFocusChoice) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'ecosystemFocusChoiceContinuationResponse' }));
+    const polished = polishedResponse(ecosystemFocusChoice, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
