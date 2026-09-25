@@ -7883,3 +7883,73 @@ that meaning into a broader legacy category.
 The required chain is now:
 `whole-sentence meaning -> precise semantic intent -> correct knowledge need -> truthful intent-preserving response`.
 
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 1 / Checkpoint 1.2 — Restaurant Availability Meaning Preservation — 2026-09-26
+
+**STATUS: GREEN; PENDING MERGE + AUTO PRODUCTION DEPLOY.**
+
+Owner live smoke after Checkpoint 1.1 proved the semantic brain no longer let dietary memory hijack:
+`ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ`
+
+However, the customer reply was still too generic:
+`ข้อมูลส่วนนี้ยังไม่มีข้อมูลยืนยันครับ ทองไทยไม่ขอเดาให้ผิด`
+
+### Root cause proven
+
+RED test commit:
+- `0b0e01cfe1af309008cd43dec2316706792f8c82`
+
+GitHub Actions:
+- run `36168043421`
+- **2 expected failures**
+
+The failures proved:
+1. semantic `restaurant_table_availability + action=status` was collapsed by Dialog Manager to `order_status`
+2. fact-unknown fallback discarded the understood date/time/table meaning
+
+### Fix
+
+This checkpoint preserves meaning across:
+`Semantic Interpreter -> Dialog Manager -> Knowledge Resolver -> Response Composer`
+
+Changes:
+- `restaurant_table_availability` now requests `availability`, never `order_status`
+- Knowledge Resolver now has an explicit optional `restaurant.availability` source contract
+- restaurant availability is classified as `restaurant_live`
+- there is intentionally NO invented production availability adapter yet
+- when no verified table-availability source exists, the deterministic response explicitly acknowledges:
+  - table availability
+  - requested date
+  - requested time
+  - inability to verify live capacity
+  - no guessing
+
+Example safe fallback:
+`รับทราบครับ ถามเรื่องโต๊ะสำหรับพรุ่งนี้ เวลา 18:00 นะครับ ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ เลยยังบอกไม่ได้ว่าเต็มหรือว่าง และไม่ขอเดาให้ผิดครับ`
+
+No language trigger/regex was added for "โต๊ะ", "เต็ม", "18.00", etc.
+The runtime decision uses the semantic intent returned by the Human Brain.
+
+### Source-routing guard
+
+If a real restaurant availability adapter is connected later:
+- availability query must call `restaurant.availability`
+- it must NOT call operational `orderStatus.lookup`
+
+This is locked by a direct resolver test.
+
+### GREEN evidence
+
+Final code/test head before docs:
+- `f601695b4b6b19f65d70f4c24d21f5674d78d5ad`
+
+GitHub Actions:
+- run `36168460262`
+- full suite GREEN
+
+No DB/schema/site creation.
+No production transaction.
+No manual Netlify deploy.
