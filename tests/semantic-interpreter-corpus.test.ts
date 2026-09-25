@@ -103,24 +103,39 @@ test('semantic equivalence group "broad_discovery": 7 differently-worded variant
   }
 });
 
-test('semantic equivalence group "restaurant_recommendation": 3 variants all classify as restaurant/recommend', () => {
-  const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'restaurant_recommendation');
-  assert.equal(group.length, 3);
-  for (const evalCase of group) {
-    const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), emptySemanticContext());
-    assert.equal(turn.domain, 'restaurant');
-    assert.equal(turn.action, 'recommend');
-  }
-});
-
-test('semantic equivalence group "stay_availability": 2 variants both classify as stay/ask', () => {
-  const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'stay_availability');
+test('semantic equivalence group "restaurant_catalog": listing questions classify as restaurant/discover/catalog', () => {
+  const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'restaurant_catalog');
   assert.equal(group.length, 2);
   for (const evalCase of group) {
     const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), emptySemanticContext());
-    assert.equal(turn.domain, 'stay');
-    assert.equal(turn.action, 'ask');
+    assert.equal(turn.domain, 'restaurant');
+    assert.equal(turn.action, 'discover');
+    assert.equal(turn.informationNeed, 'catalog');
   }
+});
+
+test('semantic equivalence group "restaurant_recommendation": explicit advice remains restaurant/recommend', () => {
+  const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'restaurant_recommendation');
+  assert.equal(group.length, 1);
+  const turn = parseSemanticTurnResponse(JSON.stringify(group[0]!.simulatedModelOutput), emptySemanticContext());
+  assert.equal(turn.domain, 'restaurant');
+  assert.equal(turn.action, 'recommend');
+});
+
+test('explicit room availability remains stay/ask while contextless availability stays unknown and asks clarification', () => {
+  const stayGroup = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'stay_availability');
+  assert.equal(stayGroup.length, 1);
+  const stayTurn = parseSemanticTurnResponse(JSON.stringify(stayGroup[0]!.simulatedModelOutput), emptySemanticContext());
+  assert.equal(stayTurn.domain, 'stay');
+  assert.equal(stayTurn.action, 'ask');
+
+  const ambiguousGroup = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'contextless_availability');
+  assert.equal(ambiguousGroup.length, 1);
+  const ambiguousTurn = parseSemanticTurnResponse(JSON.stringify(ambiguousGroup[0]!.simulatedModelOutput), emptySemanticContext());
+  assert.equal(ambiguousTurn.domain, 'unknown');
+  assert.equal(ambiguousTurn.action, 'status');
+  assert.equal(ambiguousTurn.informationNeed, 'availability');
+  assert.equal(ambiguousTurn.needsClarification, true);
 });
 
 // --- reference resolution: the specific worked example from the Phase B brief ---
