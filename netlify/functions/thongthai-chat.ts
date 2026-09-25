@@ -3359,6 +3359,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
 
   await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
 
+  // One stable identity per transport turn. LINE supplies message.id; web
+  // supplies eventId/request-id when available. Generate the fallback ONCE
+  // per core invocation so every side effect in this turn shares it.
+  const transportEventId = eventId
+    ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
+
   // Master Roadmap Phase 2 -- Customer Intelligence Memory. Run ONCE,
   // unconditionally, for every turn -- BEFORE the deterministic
   // responder cascade (including Phase 1's escalation boundary check
@@ -3370,7 +3376,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // overrides Phase 1's boundary policy (see
   // _customer-phrase-intelligence.ts's own header comment).
   const sameTurnPreferenceSignal = extractPreferenceSignal(request.message);
-  await capturePreferenceSignals(guestDbId, request.message).catch(error => {
+  await capturePreferenceSignals(guestDbId, request.message, {
+    channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
+    eventId: transportEventId,
+  }).catch(error => {
     console.error('THONGTHAI_PREFERENCE_CAPTURE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
   });
 
@@ -3407,14 +3416,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       },
     };
   }
-
-  // eventId is whatever the transport layer determined (LINE's own message
-  // id; the web HTTP handler's rawBody.eventId or x-nf-request-id/x-request-id
-  // header -- see the handler below). A generated per-invocation fallback
-  // still separates two intentional identical messages when transport gave
-  // us nothing stable (unlike hashing message text).
-  const transportEventId = eventId
-    ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
 
   const topLevelSemanticIntent = classifyTopLevelSemanticIntent(request.message);
   console.log('TOP_LEVEL_SEMANTIC_INTENT', JSON.stringify({ intent: topLevelSemanticIntent }));

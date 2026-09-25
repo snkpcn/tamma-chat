@@ -6519,3 +6519,141 @@ Phase 3 — Owner Dashboard / Customer Voice OS remains:
 Do not start Phase 3 until the owner explicitly approves proceeding after this closed checkpoint.
 
 No new repo, Supabase project, site, or production DB mutation was created as part of Phase 2 closeout.
+
+
+---
+
+## Phase 2.7 — Aggregate Customer Intelligence Storage — 2026-09-25
+
+**STATUS: DATABASE APPLIED; CODE CI GREEN; PENDING PR #93 MERGE + AUTOMATIC PRODUCTION DEPLOY VERIFICATION.**
+
+Owner explicitly approved proceeding with Phase 2.7 after Phase 2 was closed.
+
+### Canonical database
+
+Project:
+- `tamma-customer-data`
+- project ref: `upaokrprawzhgzeqsdke`
+
+Migration:
+- repo file: `supabase/migrations/20260923142552_customer_intelligence_events_v1.sql`
+- Supabase applied migration version: `20260925094049`
+- name: `customer_intelligence_events_v1`
+- application result: success
+
+### Why Phase 2.7 exists
+
+`guest_memory` remains the per-guest personalization source of truth.
+
+`customer_intelligence_events` is a separate aggregate event log for future owner intelligence such as:
+- repeated customer phrases
+- normalized demand signals
+- risks / constraints seen across customers
+- category/domain trends over time
+- distinct-guest counts
+
+It is not a second customer memory system and is never required for a customer-facing response.
+
+### Storage / privacy design
+
+Table:
+- `public.customer_intelligence_events`
+
+Stored fields:
+- normalized `event_type`
+- normalized `category`
+- normalized `domain`
+- nullable canonical `guest_id`
+- normalized `channel`
+- one-way `source_event_key`
+- short `redacted_example` (1–80 chars)
+- `created_at`
+
+The raw LINE/web transport event id is never stored.
+
+Before storage, common direct identifiers are deterministically redacted from examples:
+- URL -> `[url]`
+- email -> `[email]`
+- phone -> `[phone]`
+- @handle -> `[handle]`
+
+The dashboard phase should prefer normalized category/domain fields and only show snippets where genuinely useful.
+
+### Retry/idempotency hardening
+
+A production-relevant gap was found before enabling the table:
+
+`askThongthaiReliably` can re-enter the canonical core with the SAME LINE `message.id` after a transient failure. Without event-level idempotency, one real customer turn could inflate aggregate counts.
+
+Test-first RED proof:
+- commit: `50032b37486b4338fdcad4f99a029841b0fec108`
+- GitHub Actions run: `36119340783`
+- failure: same signed LINE message produced **2** aggregate rows instead of 1
+
+Fix:
+- canonical core establishes one stable transport event id before intelligence capture
+- writer stores SHA-256(`channel:eventId`) as `source_event_key`
+- table unique constraint:
+  `(source_event_key, event_type, category, domain)`
+- PostgREST uses:
+  `Prefer: resolution=ignore-duplicates,return=minimal`
+
+This still allows one customer turn to produce multiple DIFFERENT normalized signals, while duplicate transport retries cannot inflate the same signal.
+
+### Database security verification
+
+RLS: **enabled**
+
+Privileges verified after migration:
+- anon SELECT: false
+- anon INSERT: false
+- authenticated SELECT: false
+- authenticated INSERT: false
+- service_role SELECT: true
+- service_role INSERT: true
+- service_role UPDATE: false
+- service_role DELETE: false
+
+This matches the append-log design: customer-facing clients cannot query the table; server-side writer/future dashboard may insert/read but not rewrite history.
+
+Security advisor:
+- only the expected INFO `RLS enabled no policy` finding for this server-only table
+- no new security warning/error caused by Phase 2.7
+
+Performance advisor:
+- new indexes are reported as unused while the table has zero rows, expected immediately after creation
+
+### Database structural verification
+
+Verified in production:
+- FK `guest_id -> guests(id) ON DELETE SET NULL`
+- event type CHECK
+- domain CHECK
+- channel CHECK
+- 64-char lowercase hex source-event-key CHECK
+- redacted example length CHECK
+- unique source-signal constraint
+- created-at trend index
+- normalized signal trend index
+- guest/time partial index
+
+A duplicate-insert verification was executed transactionally and rolled back. No synthetic verification row remains in production.
+
+### Application tests
+
+Final branch CI before this checkpoint:
+- code head before docs update: `31c9d4d306fc531bd560087394cf465271ecd2b7`
+- GitHub Actions run: `36119651600`
+- result: **1074 / 1074 PASS**
+
+New load-bearing coverage includes:
+- same signed LINE message id cannot create two accepted aggregate rows
+- stored source key is a SHA-256 hex value, never raw LINE message id
+- phone/email/url are removed from stored examples
+- all prior Phase 2 customer-memory / safety / authority regressions remain green
+
+### Remaining action for Phase 2.7
+
+Merge PR #93 only after the final docs-inclusive CI is green, then wait for normal automatic Netlify production deploy and verify the deploy commit.
+
+Do not start Phase 3 inside PR #93.

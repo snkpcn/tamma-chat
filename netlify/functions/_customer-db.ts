@@ -498,7 +498,11 @@ export async function persistCustomerResult(
 // the SAME on_conflict=guest_id,memory_key upsert every other
 // preference already uses) -- no parallel memory system, per the
 // owner's explicit Phase 2 instruction.
-export async function capturePreferenceSignals(guestDbId: string | null, message: string): Promise<void> {
+export async function capturePreferenceSignals(
+  guestDbId: string | null,
+  message: string,
+  source: { channel: 'web' | 'line' | 'other'; eventId: string },
+): Promise<void> {
   if (!guestDbId || !configuration()) return;
   const text = message.trim();
   if (!text) return;
@@ -550,5 +554,7 @@ export async function capturePreferenceSignals(guestDbId: string | null, message
     domain: signalItem.domain,
     guestDbId,
     message: text,
+    channel: source.channel,
+    sourceEventId: source.eventId,
   })));
 }
