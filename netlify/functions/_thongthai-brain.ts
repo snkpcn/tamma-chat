@@ -1,5 +1,6 @@
 import { EXPERIENCES, annotateForGroup } from '../../src/data/experiences';
 import type { VerifiedCommunityOffering } from './_customer-db';
+import { normalizePendingQuestion, type PendingQuestionState } from './_conversation-continuity';
 
 export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-core-v2';
 
@@ -71,6 +72,8 @@ export interface AgentStateUpdate {
   travelContextSummary?: string;
   unresolvedNeed?: string;
   clearUnresolvedNeed?: boolean;
+  pendingQuestion?: PendingQuestionState;
+  clearPendingQuestion?: boolean;
 }
 
 export interface SemanticMemoryUpdate {
@@ -417,7 +420,7 @@ Return ONLY one JSON object:
   "journeyAction": { "type": "none" | "create" | "modify" | "replace", "journey": object | null },
   "suggestedActions": [ { "label": string, "action": string } ],
   "responseStyle": "direct" | "story" | "contrast" | "curious" | "reflective" | "planner",
-  "agentStateUpdate": { "activeTopic"?: string, "travelContextSummary"?: string, "unresolvedNeed"?: string, "clearUnresolvedNeed"?: boolean },
+  "agentStateUpdate": { "activeTopic"?: string, "travelContextSummary"?: string, "unresolvedNeed"?: string, "clearUnresolvedNeed"?: boolean, "pendingQuestion"?: { "domain": string, "kind": "preference_choice" | "entity_choice" | "party_size", "choices"?: [{ "value": string, "aliases": string[] }], "slot"?: string }, "clearPendingQuestion"?: boolean },
   "semanticMemoryUpdates": [ { "key": string, "value": string | string[], "confidence": number } ],
   "toolCalls": [ { "name": string, "args": object } ]
 }`;
@@ -447,6 +450,9 @@ function normalizeAgentState(value: unknown): AgentStateUpdate | undefined {
   if (isNonEmptyString(raw.travelContextSummary)) out.travelContextSummary = raw.travelContextSummary.slice(0, 600);
   if (isNonEmptyString(raw.unresolvedNeed)) out.unresolvedNeed = raw.unresolvedNeed.slice(0, 220);
   if (raw.clearUnresolvedNeed === true) out.clearUnresolvedNeed = true;
+  const pendingQuestion = normalizePendingQuestion(raw.pendingQuestion);
+  if (pendingQuestion) out.pendingQuestion = pendingQuestion;
+  if (raw.clearPendingQuestion === true) out.clearPendingQuestion = true;
   return Object.keys(out).length ? out : undefined;
 }
 
