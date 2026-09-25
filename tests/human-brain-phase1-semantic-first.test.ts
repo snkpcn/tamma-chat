@@ -12,6 +12,8 @@ import {
   startNewActiveTask,
 } from '../netlify/functions/_task-state';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
+import { withHarness, guestId, brainRequest } from './helpers/canonical-core-harness';
+import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
 
 const NOW = new Date('2026-09-26T00:00:00.000Z');
 const CANONICAL = '11111111-1111-4111-8111-111111111111';
@@ -143,4 +145,47 @@ test('Human Brain Phase 1 guard: weak model refinement cannot overwrite the matu
   assert.equal(result.semanticTurn.intent, 'restaurant_topic_switch',
     'a weak/ambiguous model result must not erase the old system\'s known restaurant topic');
   assert.equal(result.semanticTurn.domain, 'restaurant');
+});
+
+
+test('Human Brain Phase 1 canonical gate: dietary memory cannot hijack a later restaurant table-availability question', async () => {
+  await withHarness(async harness => {
+    const gid = guestId('human-brain-owner-availability');
+
+    // Reproduce the real production setup: the guest previously supplied food
+    // constraints, so durable restaurant memory is active.
+    const remembered = await processThongthaiChatCore(
+      brainRequest('ไม่กินไก่ ไม่กินกุ้ง ไม่เผ็ด', gid, 'line'),
+      'human-brain-owner-memory',
+    );
+    assert.equal(remembered.statusCode, 200);
+
+    // The NEXT Gemini call must be the semantic interpreter for the current
+    // whole sentence. This object is intentionally the raw semantic JSON that
+    // the real model is instructed to return.
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'restaurant',
+      intent: 'restaurant_table_availability',
+      action: 'status',
+      entities: { date: 'พรุ่งนี้', time: '18:00' },
+      references: [],
+      constraints: [],
+      confidence: 0.98,
+      needsClarification: false,
+    });
+
+    const before = harness.modelCallCount();
+    const result = await processThongthaiChatCore(
+      brainRequest('ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ', gid, 'line'),
+      'human-brain-owner-availability',
+    );
+    const used = harness.modelCallCount() - before;
+    const reply = String(result.payload.message ?? '');
+
+    assert.equal(result.statusCode, 200);
+    assert.ok(used >= 1,
+      'the real customer entrypoint must let the semantic brain read this whole sentence');
+    assert.doesNotMatch(reply, /ผัดไทย|ต้มยำกุ้ง|ข้าวผัดหมู/u,
+      'a table-availability question must never be turned into a dietary menu recommendation');
+  });
 });
