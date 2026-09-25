@@ -211,6 +211,11 @@ export type Harness = {
    *  "exactly once" write counts (bookings, restaurant_preorders,
    *  promotion_redemptions, otop_orders, ops_notification-shaped writes). */
   postsTo: (table: string) => Array<Record<string, unknown>>;
+  /** Stateful accepted rows for customer_intelligence_events after the
+   *  production unique source-event constraint / ignore-duplicates behavior
+   *  has been modeled. Use this for aggregate row-count assertions; postsTo
+   *  intentionally remains "HTTP attempts", which can be >1 on retries. */
+  customerIntelligenceRows: () => Array<Record<string, unknown>>;
   /** The INTERNAL guest_agent_state row id (e.g. "guest-1-2d3094a5") for a
    *  guest identified by their external request.guestId (the UUID from
    *  guestId(seed)) -- these are NOT the same string (see loadCustomerMemory's
@@ -242,6 +247,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const guestMemory = new Map<string, { guest_id: string; memory_key: string; memory_value: unknown }>();
   const customerAccounts = new Map<string, { id: string; guest_id: string }>();
   const posts = new Map<string, Array<Record<string, unknown>>>();
+  const customerIntelligence = new Map<string, Record<string, unknown>>();
   const geminiQueue: HarnessGeminiReply[] = [];
   let geminiCalls = 0;
   let weatherFetchResponse: { ok: boolean; body: unknown } | null = null;
@@ -558,7 +564,20 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     // before the migration is applied" precedent as ops_feedback_events
     // had before its own migration was applied). ---
     if (path.startsWith('customer_intelligence_events') && method === 'POST') {
-      recordPost('customer_intelligence_events', JSON.parse(String(init.body ?? '{}')));
+      const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      recordPost('customer_intelligence_events', body);
+
+      const sourceKey = String(body.source_event_key ?? '');
+      const eventType = String(body.event_type ?? '');
+      const category = String(body.category ?? '');
+      const domain = String(body.domain ?? '');
+      const uniqueKey = `${sourceKey}:${eventType}:${category}:${domain}`;
+
+      // Model the migration's UNIQUE(source_event_key,event_type,category,domain)
+      // plus PostgREST Prefer: resolution=ignore-duplicates.
+      if (!sourceKey || !customerIntelligence.has(uniqueKey)) {
+        customerIntelligence.set(uniqueKey, body);
+      }
       return jsonResponse([]);
     }
     if (path.startsWith('journeys') && method === 'GET') return jsonResponse([]);
@@ -749,6 +768,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     getGuestMemory: (guestDbId, memoryKey) => guestMemory.get(`${guestDbId}:${memoryKey}`)?.memory_value,
     setBookingSession: (guestDbId, row) => { bookingSessions.set(guestDbId, { guest_id: guestDbId, ...row }); },
     postsTo: table => posts.get(table) ?? [],
+    customerIntelligenceRows: () => [...customerIntelligence.values()],
     guestDbId: anonymousId => guests.get(anonymousId)?.id,
     feedbackEventRow: id => feedbackEvents.get(id),
     restaurantId: RESTAURANT_ID,
