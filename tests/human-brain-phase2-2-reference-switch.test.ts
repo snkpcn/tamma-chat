@@ -181,3 +181,48 @@ test('Human Brain Phase 2.2 RED: taskDirective cancels only working state while 
   assert.ok(plan.knowledgeRequests.some(request => request.domain === 'restaurant'));
   assert.equal(decision.actionProposal, undefined);
 });
+
+
+test('Human Brain Phase 2.2 guard: a coarse deterministic cross-domain switch is refined when the sentence also abandons the old task', async () => {
+  let semanticCalls = 0;
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANON,
+    guestDbIdFromAnonymousId: async () => GUEST,
+    loadConversationContext: async () => ({
+      ...emptyConversationContextState(NOW),
+      activeDomain:'activity',
+      activeTopic:'activity_booking',
+    }),
+    loadTaskState: async () => activeHorseTask(),
+    buildKnowledgeAdapters: ():KnowledgeSourceAdapters => ({
+      restaurant:{ menu:async()=>ok('restaurant_menu','restaurant_live',[]) },
+    }),
+    interpretSemanticTurn: async () => {
+      semanticCalls += 1;
+      return {
+        domain:'restaurant',
+        intent:'restaurant_food_discovery_after_abandoning_prior_task',
+        action:'discover',
+        entities:{},
+        references:[],
+        constraints:[],
+        confidence:0.97,
+        needsClarification:false,
+        taskDirective:'cancel_active',
+      } as SemanticTurn;
+    },
+  };
+
+  const result = await processThongthaiOneMindTurn({
+    channel:'web',
+    message:'ไม่เอาละ ร้านมีอะไรกินก่อน',
+    eventId:'phase2-2-coarse-switch-refine',
+    canonicalAnonymousId:CANON,
+    guestDbId:GUEST,
+  }, deps, NOW);
+
+  assert.equal(semanticCalls, 1,
+    'restaurant_topic_switch is only a coarse domain label; with task context available the Human Brain must get a chance to preserve compound meaning');
+  assert.equal(result.taskStateAfter.activeTask?.status, 'cancelled');
+  assert.equal(result.taskStateAfter.suspendedTask, null);
+});
