@@ -169,7 +169,8 @@ test('full signed LINE: stale ecosystem pending question yields to a clear horse
       const capture=installCapture();
       try{
         const user='phase2-pending-switch-horse';
-        await establishMobilityChoice(user);
+        await callLine('แม่เดินไกลไม่ได้',user);
+        await callLine('มีอะไรแนะนำ',user);
         const before=stateFor(h,user);
         assert.ok(before.pending_question,'precondition: ecosystem question is pending');
 
