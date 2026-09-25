@@ -64,3 +64,27 @@ test('Phase 5.8 RED: explicit journey planning fixtures keep journey domain whil
   }
   assert.equal(byId('l-activity-09').expected.domain,'ecosystem');
 });
+
+
+test('Phase 5.8 RED2: a topic declaration without a real question asks for clarification instead of inventing catalog intent',()=>{
+  const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
+  assert.ok(prompt.includes('topic declaration without an actual question'));
+  const item=byId('l-cafe-04');
+  assert.equal(item.expected.action,'ask');
+  assert.equal(item.expected.needsClarification,true);
+});
+
+test('Phase 5.8 RED2: conversational continue/resume request is not confirmation',()=>{
+  const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
+  assert.ok(prompt.includes('continue/resume a conversation or plan'));
+  assert.ok(prompt.includes('not confirmation'));
+  assert.equal(byId('l-journey-07').expected.action,'ask');
+});
+
+test('Phase 5.8 RED2: membership profile status fixture contains profile context rather than relying on an ambiguous bare phrase',()=>{
+  const item=byId('membership-02');
+  assert.equal(item.expected.domain,'membership');
+  assert.equal(item.expected.action,'status');
+  assert.equal(item.context?.activeDomain,'membership');
+  assert.ok(item.context?.recentEntities.some(entity=>entity.type==='membership_profile'));
+});
