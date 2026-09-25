@@ -383,3 +383,21 @@ test('2.7 privacy: aggregate snippet redacts direct phone/email/url identifiers 
     assert.ok(example.length <= 80);
   });
 });
+
+
+test('2.7 production-smoke regression: no-spicy + no-chicken + no-shrimp produces all three aggregate signals', async () => {
+  await withHarnessAndLine(async (harness, _replies) => {
+    await callLineWebhook([privateEvent(
+      'ไม่กินเผ็ด ไม่กินไก่ ไม่กินกุ้ง',
+      'phase2-7-food-aggregate-completeness',
+    )]);
+
+    const categories = intelligenceEvents(harness)
+      .filter(row => row.domain === 'restaurant' && row.event_type === 'phrase')
+      .map(row => String(row.category));
+
+    assert.ok(categories.includes('low_spice'));
+    assert.ok(categories.includes('no_chicken'));
+    assert.ok(categories.includes('no_shrimp'), 'durable no_shrimp must also be represented in aggregate intelligence');
+  });
+});
