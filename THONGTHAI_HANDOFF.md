@@ -7953,3 +7953,112 @@ GitHub Actions:
 No DB/schema/site creation.
 No production transaction.
 No manual Netlify deploy.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 1 / Checkpoint 1.2 — Restaurant Availability Meaning Preservation — 2026-09-26
+
+**STATUS: GREEN; PENDING MERGE / AUTO DEPLOY / OWNER LIVE SMOKE.**
+
+### Why this checkpoint exists
+
+Checkpoint 1.1 proved the language brain could correctly understand the owner's real sentence:
+
+`ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ`
+
+But production still answered too generically because downstream layers collapsed the semantic intent:
+- `restaurant_table_availability`
+into:
+- `order_status`
+
+and then degraded to:
+- "ข้อมูลส่วนนี้ยังไม่มีข้อมูลยืนยันครับ..."
+
+This checkpoint preserves meaning through the full pipeline.
+
+### RED proof
+
+PR #105 RED commit:
+- `0b0e01cfe1af309008cd43dec2316706792f8c82`
+
+GitHub Actions:
+- run `36168043421`
+- failed exactly two new tests
+
+RED 1:
+- expected knowledge need: `availability`
+- actual: `order_status`
+
+RED 2:
+- honest fallback lost the understood entities/question
+- expected mention of `พรุ่งนี้`, `18:00`, and table/seat availability
+- actual generic unknown-data copy
+
+### Implementation
+
+#### Dialog Manager
+`restaurant_table_availability` now maps to:
+- domain: restaurant
+- need: `availability`
+
+Existing restaurant `action=status` semantics for true prior-order status remain mapped to:
+- `order_status`
+
+This prevents availability and prior-order status from sharing one ambiguous action bucket.
+
+#### Knowledge Resolver
+Restaurant source contract now permits:
+- `restaurant.availability`
+
+and registers:
+- restaurant + availability -> `restaurant_live`
+
+There is currently **no live production restaurant-table availability adapter** wired, intentionally.
+
+Therefore current truth is:
+- semantic meaning: understood
+- live table fact: unknown
+- response: honest, contextual, non-hallucinated
+
+#### Response Composer
+When restaurant table availability has no registered verified source, deterministic degradation now preserves:
+- the table-availability question
+- date
+- time
+
+Example shape:
+
+"รับทราบครับ ถามเรื่องโต๊ะสำหรับพรุ่งนี้ เวลา 18:00 นะครับ ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ เลยยังบอกไม่ได้ว่าเต็มหรือว่าง และไม่ขอเดาให้ผิดครับ"
+
+No menu recommendation.
+No order-status wording.
+No fabricated availability.
+
+### Source-routing guard
+
+If a live restaurant availability adapter is added later, the new test proves:
+- restaurant availability adapter is called
+- order-status adapter is NOT called
+
+So this semantic separation is locked for future work.
+
+### GREEN evidence
+
+Implementation + guard head:
+- `f601695b4b6b19f65d70f4c24d21f5674d78d5ad`
+
+GitHub Actions:
+- run `36168460262`
+- SUCCESS
+
+No DB/schema mutation.
+No production transaction.
+No manual Netlify deploy.
+
+### Next
+
+After merge + automatic production deploy:
+- one owner live LINE smoke using the same real sentence
+- if reply preserves table/date/time meaning, Checkpoint 1.2 closes
+- continue Phase 1 expansion only for semantic classes proven too coarse by evaluation/production evidence
