@@ -239,7 +239,18 @@ function detectTopicTransition(taskState: TaskStateContainer, domain: SemanticDo
   // General/support/payment/unknown/ecosystem turns must never evict a live
   // business task merely because their semantic domain differs.
   if (!DEFAULT_TASK_TYPE_FOR_DOMAIN[domain]) return 'none';
-  const { activeTask, suspendedTask } = taskState;
+
+  // Terminal working tasks are history, not conversation owners. In
+  // particular, a Phase 2 compound turn may explicitly cancel the old task
+  // and ask about a new domain in the SAME utterance; the cancelled task must
+  // never be immediately suspended/resumed again by generic topic logic.
+  const activeTask = taskState.activeTask && !isTerminalTaskStatus(taskState.activeTask.status)
+    ? taskState.activeTask
+    : null;
+  const suspendedTask = taskState.suspendedTask && !isTerminalTaskStatus(taskState.suspendedTask.status)
+    ? taskState.suspendedTask
+    : null;
+
   if (suspendedTask && suspendedTask.domain === domain && (!activeTask || activeTask.domain !== domain)) return 'resume';
   if (activeTask && activeTask.domain !== domain) return 'suspend';
   return 'none';
@@ -268,11 +279,48 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   // `now` is threaded explicitly throughout (never left to
   // applyTaskStateEvent's wall-clock default) -- the same class of flaky
   // timestamp bug already found and fixed once in Phase C's golden test.
-  const transition = detectTopicTransition(taskState, turn.domain);
-  if (transition === 'suspend') {
+
+  // Human Brain Phase 2.2: one human sentence can BOTH say what to do with
+  // the old conversational working task and express a new CURRENT intent.
+  // taskDirective is deliberately limited to this bounded ActiveTask state:
+  // no booking/order/payment executor is called here, ever.
+  if (turn.taskDirective === 'cancel_active') {
+    if (container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+      container = applyTaskStateEvent(container, {
+        kind:'transition', eventId:`${eventId}:task_directive`, nextStatus:'cancelled',
+      }, now);
+      reasons.push('task_cancelled');
+    } else {
+      reasons.push('no_active_task');
+    }
+  } else if (turn.taskDirective === 'suspend_active') {
+    if (container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+      container = applyTaskStateEvent(container, {
+        kind:'suspend', eventId:`${eventId}:task_directive`,
+      }, now);
+      reasons.push('task_suspended_for_topic_switch');
+    } else {
+      reasons.push('no_active_task');
+    }
+  } else if (turn.taskDirective === 'resume_suspended') {
+    if (container.suspendedTask && !isTerminalTaskStatus(container.suspendedTask.status)) {
+      container = applyTaskStateEvent(container, {
+        kind:'resume', eventId:`${eventId}:task_directive`,
+      }, now);
+      reasons.push('task_resumed');
+    } else {
+      reasons.push('no_active_task');
+    }
+  }
+
+  // Evaluate ordinary domain switching AFTER any explicit directive, against
+  // the state that directive actually produced. This prevents a cancelled
+  // task from being silently converted into a resumable suspended task.
+  const transition = detectTopicTransition(container, turn.domain);
+  if (transition === 'suspend' && turn.taskDirective !== 'suspend_active') {
     container = applyTaskStateEvent(container, { kind: 'suspend', eventId: `${eventId}:topic_transition` }, now);
     reasons.push('task_suspended_for_topic_switch');
-  } else if (transition === 'resume') {
+  } else if (transition === 'resume' && turn.taskDirective !== 'resume_suspended') {
     container = applyTaskStateEvent(container, { kind: 'resume', eventId: `${eventId}:topic_transition` }, now);
     reasons.push('task_resumed');
   }
@@ -362,8 +410,10 @@ function needsActivityCatalogResolution(task: ActiveTask): boolean {
  *  every source every turn. Returns at most one KnowledgeRequest per domain
  *  actually implicated by this turn. */
 function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): KnowledgeRequest[] {
-  const task = container.activeTask;
-  const base = { intent: turn.intent, action: turn.action, entities: turn.entities, constraints: turn.constraints, task: task ?? null };
+  const task = container.activeTask && !isTerminalTaskStatus(container.activeTask.status)
+    ? container.activeTask
+    : null;
+  const base = { intent: turn.intent, action: turn.action, entities: turn.entities, constraints: turn.constraints, task };
 
   // This question is about the canonical working state we already own, not
   // about fresh catalog/availability data. Never refetch a catalog just to

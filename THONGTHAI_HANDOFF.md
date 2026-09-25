@@ -8034,3 +8034,129 @@ Checkpoint 2.2 will expand human conversational continuity to:
 - change-of-mind / interruption: ไม่เอาละ ไปกินข้าวก่อน
 - safe topic resume without stale task hijack
 - preserve current-turn precedence over all prior state
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 2 / Checkpoint 2.2 — References + Compound Topic Changes — 2026-09-26
+
+**STATUS: GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY.**
+
+### Goal
+
+Close the remaining Conversation Brain gaps without teaching Thai through business phrase triggers.
+
+This checkpoint proves:
+- singular prior-selection references use the item actually selected
+- one utterance may both manage the old working conversation and express a new current intent
+- working-task control remains completely separate from real transaction execution
+- pure deterministic topic switches keep their mature zero-model path
+
+### RED evidence
+
+Branch:
+`human-brain/phase2-2-reference-switch-20260926`
+
+RED commit:
+`4ade2bc8be1c4cf7906021e310a34c92ce31503b`
+
+GitHub Actions:
+run `36171337057` = FAILURE
+
+Three RED failures proved:
+1. `selected_entity` could widen to all recently seen catalog entities instead of resolving the one canonical item already selected.
+2. A model-understood compound turn could identify a current restaurant intent but there was no policy for separately abandoning the old working task.
+3. Dialog Manager ignored the proposed working-task directive.
+
+### Semantic task directives
+
+`SemanticTurn` now has optional:
+- `cancel_active`
+- `suspend_active`
+- `resume_suspended`
+
+These are **conversation working-state directives only**.
+
+They:
+- may transition/suspend/resume bounded `ActiveTask`
+- do NOT call booking/order/payment executors
+- do NOT cancel an operational booking/order
+- do NOT grant transaction permission
+- are ignored unless the semantic output validates against the closed directive union
+
+The current turn's domain/action still proceeds independently.
+
+Example semantics:
+`ไม่เอาละ ไปกินข้าวก่อน`
+can mean:
+- close the old conversational activity task
+- CURRENT intent = restaurant discovery
+
+instead of forcing the utterance into only one of those meanings.
+
+### Selected-entity reference resolution
+
+When the semantic brain emits a prior-context reference:
+- `type = selected_entity`
+
+and canonical active task state has exactly one selected entity, the deterministic validator resolves the reference to that selected entity.
+
+Thus a singular `ตัวเดิม / อันที่เลือกไว้` style reference cannot accidentally widen back to every catalog entity merely seen earlier.
+
+### Dialog Manager working-state policy
+
+Task directives are applied before ordinary domain transition logic.
+
+Terminal tasks are no longer eligible as topic-transition owners.
+
+After a `cancel_active` directive:
+- working task remains terminal/cancelled as factual history
+- it is NOT converted into a resumable suspended task
+- the current turn still plans/answers its own domain
+- terminal task state is not attached as a live task to the new knowledge request
+
+### Coarse topic-switch arbitration without losing zero-cost paths
+
+A broad global model-first change was already rejected in Phase 1.
+
+Phase 2.2 therefore keeps pure deterministic switches zero-cost.
+
+A cheap **clause-shape arbitration cue** may ask the semantic model to refine a coarse `restaurant_topic_switch` only when the utterance structurally looks multi-clause.
+
+Important:
+- this cue does NOT classify intent/action/domain
+- it only decides whether the Language Brain should read the whole utterance
+- the model still determines meaning
+- low-confidence/provider outage falls back to the exact mature deterministic candidate
+
+Regression:
+- pure `ร้านมีไรกิน` keeps zero LLM calls
+- compound `ไม่เอาละ ร้านมีอะไรกินก่อน` may be semantically refined
+
+A remote-edit escaping defect briefly changed `\s` to literal `s`; full CI caught the guard failure and it was corrected before merge.
+
+### GREEN evidence
+
+Final implementation head before docs:
+`153a9c63a35e6e2e0250794c9524d02f2ddcd3f3`
+
+GitHub Actions:
+run `36172318753`
+**1125 / 1125 PASS**
+
+No DB/schema change.
+No operational transaction.
+No new repo/site/project.
+No manual Netlify deploy.
+
+### Phase 2 status
+
+After this PR merges and its exact auto production deploy is READY:
+
+**Human Brain Phase 2 — Conversation Brain = CLOSED.**
+
+Phase 3 next:
+**Relevance & Memory Brain**
+- memory may inform a current answer only when semantically relevant
+- current utterance always outranks durable/stale memory
+- build a relevance contract rather than domain-keyword hijacking
