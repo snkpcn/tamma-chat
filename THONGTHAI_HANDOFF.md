@@ -7592,3 +7592,176 @@ No production test booking/order was created.
 
 After PR #103 merge + exact automatic Netlify deploy verification, customer-side Phase 8 polish is closed.
 The remaining Phase 8 checkpoint is Backoffice mobile mutation locking / final documentation.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 1 / Checkpoint 1 — Semantic Arbitration — 2026-09-26
+
+**STATUS: CODE + CANONICAL ENTRYPOINT GREEN; PENDING DOCS-INCLUSIVE CI / MERGE / AUTO DEPLOY / OWNER LIVE LANGUAGE SMOKE.**
+
+### Goal
+
+Upgrade the existing mature Thongthai system instead of replacing it.
+
+Human Brain doctrine:
+- LLM semantic understanding reads whole-sentence meaning where legacy routing is too coarse
+- proven deterministic business/dialog behavior remains in place
+- booking/order/payment/safety execution authority is NOT handed to the model
+- weak model output and provider outage fall back to the mature deterministic system
+- no phrase-by-phrase language patching
+
+### Real owner failure used as the RED case
+
+Production LINE utterance:
+
+`ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ`
+
+The guest already had durable restaurant dietary memory:
+- no chicken
+- no shrimp
+- no spicy
+
+Production incorrectly returned food recommendations.
+
+Root cause was proven at TWO layers.
+
+#### RED 1 — One-Mind semantic ownership
+
+RED commit:
+- `0b43219e3f533c3c7f7c78ae9e8403b8e1484901`
+
+GitHub Actions:
+- run `36165713206`
+
+Exact finding:
+- semantic model calls = **0**
+- `deriveDeterministicSemanticTurn()` reduced the sentence to coarse `restaurant_topic_switch`
+- the LLM semantic interpreter never saw the sentence
+- active transactional slot-fill guard test remained green
+
+#### Unsafe global LLM-first experiment rejected
+
+A first implementation made all normal turns model-first:
+- commit `dc884a8217be2860de8bf66167b41853a953a0e1`
+- run `36165904378` = FAILURE
+
+Full CI correctly exposed broad regressions in mature behavior:
+- OTOP catalog
+- membership
+- cafe/stay switching
+- activity inventory count
+- provider-outage zero-cost paths
+- multi-hop suspend/resume
+- hospitality matrix
+
+That approach was **not merged** and was replaced by semantic arbitration.
+
+### Final architecture of Checkpoint 1
+
+`resolveSemanticTurn()` is now an arbiter.
+
+1. derive the mature deterministic candidate
+2. if it is a proven precise path, keep it with zero LLM cost
+3. if it is a deliberately coarse semantic class approved for refinement, ask the LLM semantic interpreter
+4. accept model refinement only when:
+   - domain != unknown
+   - action != unknown
+   - no clarification required
+   - confidence >= 0.70
+5. if model result is weak, reuse the deterministic candidate
+6. if provider is unavailable, reuse the deterministic candidate
+7. execution/tool policy remains downstream and deterministic
+
+Checkpoint 1 intentionally refines only:
+- task-free `restaurant_topic_switch`
+
+It does NOT globally switch all domains to LLM-first.
+
+This is a strangler upgrade: later Human Brain checkpoints may expand refinement ownership only after their own RED + full-CI proof.
+
+### Customer-entrypoint ownership fix
+
+A second RED test drove the real:
+- `processThongthaiChatCore`
+- durable dietary memory
+- LINE channel
+- exact owner sentence
+
+RED commit:
+- `a0337fb5b09b11b4f671a28f7438de55c1c849c7`
+- run `36166713843`
+
+It proved the semantic brain was still called **0 times** because the legacy pre-cutover guard used the broad:
+- `isRestaurantAdvisorTurn(...)`
+
+That function correctly detects restaurant scope for the legacy advisor, but was too broad to decide semantic ownership.
+
+Final fix:
+- legacy restaurant fast-path is reserved for its proven intent classes:
+  - dietary declarations/corrections
+  - explicit menu/recommendation requests
+  - existing proven restaurant continuity
+- merely mentioning the restaurant no longer blocks semantic interpretation of a richer question
+
+No table/availability/date phrase was added as a runtime trigger for this fix.
+
+### Whole-sentence semantic prompt
+
+The existing LLM semantic interpreter doctrine was strengthened generically:
+
+- domain nouns tell WHERE
+- the predicate/question tells WHAT
+- do not collapse availability/status/price/booking/etc. to generic discovery
+- preserve explicit date/time/party-size/preferences
+- current utterance outranks stale context/memory
+- ordinary conversation should not be forced into a business trigger
+
+### Thai semantic evaluation corpus
+
+Added a four-paraphrase evaluation family:
+- `restaurant_table_availability`
+
+Includes:
+- `ที่ร้านอาหารพรุ่งนี้ตอน 18.00 โต๊ะเต็มรึยังคะ`
+- `พรุ่งนี้หกโมงเย็นยังมีโต๊ะมั้ย`
+- `เย็นพรุ่งนี้คนแน่นปะ ยังพอมีที่นั่งไหม`
+- `พรุ่งนี้ 18:00 ไปกินข้าวได้ไหม โต๊ะว่างหรือเปล่า`
+
+These are evaluation examples, **not runtime regex triggers**.
+
+### Guard tests
+
+Human Brain Phase 1 proves:
+- exact owner sentence reaches semantic interpreter
+- high-confidence specific meaning can refine coarse restaurant topic classification
+- active transactional slot updates remain deterministic
+- precise activity inventory semantics remain deterministic / zero-model
+- low-confidence model output cannot overwrite the mature deterministic fallback
+- canonical customer entrypoint with dietary memory cannot turn table availability into a menu recommendation
+
+### GREEN evidence
+
+Final implementation head before this docs update:
+- `caf8ed7902ffde342ced09fee83808a30e2c1100`
+
+GitHub Actions:
+- run `36166944741`
+- **1115 / 1115 PASS**
+
+No DB/schema/site change.
+No production customer transaction.
+No manual Netlify deploy.
+
+### Phase 1 remaining work
+
+This checkpoint establishes safe semantic arbitration and fixes the first proven coarse-language class.
+
+Phase 1 is not declared fully complete until:
+- this PR is merged
+- exact auto production deploy is READY
+- owner live language smoke confirms the real production model handles the availability family
+- additional coarse semantic classes are expanded only where Human Brain evaluation demonstrates a real need
+
+Next Human Brain phase after Phase 1:
+- Phase 2 — Conversation Brain (references, short follow-ups, interruption/topic switch, change-of-mind)
