@@ -184,6 +184,7 @@ export async function runSemanticCertification(options: {
   availabilityRetries?: number;
   availabilityRetryDelayMs?: number;
   stopOnProviderFailure?: boolean;
+  interCaseDelayMs?: number;
 } = {}): Promise<SemanticCertificationResult> {
   const profile = options.profile ?? 'full';
   const corpus = allCases();
@@ -199,6 +200,7 @@ export async function runSemanticCertification(options: {
   const availabilityRetries = Math.max(0, Math.min(3, Math.floor(options.availabilityRetries ?? 0)));
   const availabilityRetryDelayMs = Math.max(0, Math.min(90_000, Math.floor(options.availabilityRetryDelayMs ?? 0)));
   const stopOnProviderFailure = options.stopOnProviderFailure === true;
+  const interCaseDelayMs = Math.max(0, Math.min(10_000, Math.floor(options.interCaseDelayMs ?? 0)));
 
   let pass = 0;
   let evaluated = 0;
@@ -206,7 +208,7 @@ export async function runSemanticCertification(options: {
   let semanticFailed = 0;
   const failures: SemanticCertificationFailure[] = [];
 
-  for (const item of selected) {
+  for (const [selectedIndex, item] of selected.entries()) {
     let availabilityAttempt = 0;
 
     while (true) {
@@ -278,6 +280,9 @@ export async function runSemanticCertification(options: {
     }
 
     if (stopOnProviderFailure && providerFailed > 0) break;
+    if (interCaseDelayMs > 0 && selectedIndex < selected.length - 1) {
+      await sleep(interCaseDelayMs);
+    }
   }
 
   const failed = failures.length;
