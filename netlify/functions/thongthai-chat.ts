@@ -3808,8 +3808,21 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // grounded restaurant responder below owns it. Weather/location still win
   // earlier through the top-level semantic gate.
   const restaurantDietaryIntentForPrecedence = classifyRestaurantDietaryIntent(request.message);
-  const preferGroundedRestaurant = restaurantDietaryIntentForPrecedence !== 'OTHER'
-    && isRestaurantAdvisorTurn(request, runtime);
+  // Do not steal broad food-culture discovery ("อยากกินอีสาน ไม่กินเผ็ด")
+  // from Local Concierge. The restaurant fast path owns:
+  //   1) a pure dietary declaration/update, and
+  //   2) a dietary message that ALSO explicitly asks for a concrete menu/
+  //      recommendation ("...มีอะไรแนะนำบ้าง", "...กินอะไรดี", etc.).
+  // Bare "อยากกิน..." remains hospitality/food-culture intent.
+  const explicitGroundedMenuAsk = /มีอะไร|แนะนำอะไร|กินอะไรดี|ขอเมนู|มีเมนู|จัดชุด|จัดโต๊ะ|อะไรอร่อย|มีไรกิน|ไรกิน/u.test(request.message);
+  const preferGroundedRestaurant = isRestaurantAdvisorTurn(request, runtime)
+    && (
+      restaurantDietaryIntentForPrecedence === 'CONSTRAINT_ONLY'
+      || (
+        restaurantDietaryIntentForPrecedence === 'CONSTRAINT_AND_RECOMMENDATION'
+        && explicitGroundedMenuAsk
+      )
+    );
 
   const localConcierge = preferGroundedRestaurant
     ? null
