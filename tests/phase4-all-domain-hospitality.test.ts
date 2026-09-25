@@ -2,8 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withHarness, guestId, brainRequest } from './helpers/canonical-core-harness';
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
-import { buildRealKnowledgeSourceAdapters } from '../netlify/functions/_dialog-source-adapters';
-import { resolveKnowledge } from '../netlify/functions/_knowledge-resolver';
 
 function messageOf(result: { payload: Record<string, unknown> }): string {
   return String(result.payload.message ?? '');
@@ -28,34 +26,15 @@ test('Phase 4: bare recommendation is a deterministic 3-path host opener, not an
   });
 });
 
-test('Phase 4: real cafe adapter reads verified cafe world facts and resolves cafe price', async () => {
-  await withHarness(async () => {
-    const adapters = buildRealKnowledgeSourceAdapters('web', { environment:'test' });
-    assert.ok(adapters.cafe?.facts, 'production adapter set must expose a cafe facts source');
-
-    const bundle = await resolveKnowledge({
-      domain:'cafe',
-      intent:'price',
-      action:'read',
-      entities:{},
-      constraints:[],
-      task:null,
-      needs:['price'],
-    }, adapters);
-
-    assert.equal(bundle.sources[0]?.sourceType, 'cafe_live');
-    assert.equal(bundle.sources[0]?.status, 'ok');
-    assert.ok(bundle.facts.some(f => f.key === 'cafe_latte_price' && f.value === 65));
-  });
-});
-
-test('Phase 4: canonical cafe question answers verified fact instead of the old cannot-confirm gap', async () => {
-  await withHarness(async () => {
+test('Phase 4: cafe stays helpful but never invents menu, price or hours without a verified production source', async () => {
+  await withHarness(async harness => {
     const result = await ask('cafe-price', 'ลาเต้ราคาเท่าไหร่');
     assert.equal(result.statusCode, 200);
     const text = messageOf(result);
-    assert.match(text, /65\s*บาท/u);
-    assert.doesNotMatch(text, /ไม่มีข้อมูลยืนยัน|ไม่ขอเดา/u);
+    assert.match(text, /ไม่มีข้อมูล.*ยืนยัน|ไม่ขอเดา/u);
+    assert.match(text, /คาเฟ่|ร้านอาหาร|ที่พัก/u, 'must still offer a useful next step inside the ecosystem');
+    assert.doesNotMatch(text, /65\s*บาท|07:00|18:00/u);
+    assert.equal(harness.modelCallCount(), 0, 'known information boundary must not require the model');
   });
 });
 
@@ -77,7 +56,7 @@ test('Phase 4: all-domain hospitality gate stays helpful and non-generic', async
       ['atv','อยากเล่น ATV',/ATV|เอทีวี/u],
       ['archery','อยากยิงธนู ไม่เคยยิง',/ธนู|สอน|จับธนู/u],
       ['homestay','อยากพัก พาแม่มา',/พัก|เฮือนสเตย์|กี่คน|กี่คืน/u],
-      ['location','ทำมา-ชาติอยู่ที่ไหน',/ชัยภูมิ|พิกัด|แผนที่|ทำมา-ชาติ/u],
+      ['location','ทำมา-ชาติอยู่ที่ไหน',/ปักหมุด|maps\.app\.goo\.gl/u],
       ['weather','วันนี้ฝนตกไหม',/อากาศ|ฝน|เมฆ|30/u],
       ['safety','พื้นลื่นมาก ตอนเล่น ATV น่ากลัว',/กิจกรรม|ตรวจสอบ|บันทึก|ปลอดภัย/u],
       ['complaint','บริการแย่มาก',/ขอโทษ|รับเรื่อง|รายละเอียด/u],
