@@ -9269,3 +9269,98 @@ Temporary verification workflow removed before PR.
 PR must skip Deploy Preview to preserve Netlify credits.
 Merge only exact verified head SHA.
 Production merge commit must contain `[semantic-cert]` and must NOT contain `[skip netlify]`, so the single real production auto deploy runs the quota-safe live corpus.
+
+
+## 2026-09-26 Human Brain Phase 5.7 — semantic-v3 hardening
+
+This checkpoint follows the first semantic-v2 production certification and fixes correctness problems found from real provider output. It is a strangler improvement only: no DB/schema change, no booking/order/payment executor change, no backoffice change, no runtime keyword router, no paid OpenAI enablement.
+
+### Live semantic-v2 evidence used
+
+Production artifact from the semantic-v2 run:
+- total corpus: **158**
+- evaluated before stop: **102**
+- semantic evaluated: **101**
+- pass: **73**
+- semantic failures: **28**
+- provider failures reported: **1**
+- reported passPct: **72.28%**
+- availabilityComplete: **false**
+
+Important correction: the final reported provider failure was a **SyntaxError with zero provider attempts**. That means the provider returned something, but the semantic payload could not be parsed as valid JSON. Phase 5.7 now classifies such malformed model output as a semantic/model-output failure, not provider unavailability. Provider availability is reserved for failures with safe provider-attempt diagnostics.
+
+### Root semantic patterns fixed
+
+From the live failures, the following human semantic distinctions were made explicit without phrase-by-phrase routing:
+
+- capacity/policy vs live availability
+- catalog existence vs current availability
+- vague support/help vs ecosystem discovery
+- journey save/view vs booking
+- membership profile/status vs membership benefits/catalog
+- explicit correction vs intentional modify
+- short category follow-up after broad discovery
+- ambiguous multi-candidate selection vs legitimate multi-entity question/comparison
+- closed read-only informationNeed overriding harmless read-only action-label drift
+- suspended-task resume fixtures must contain real suspended task evidence instead of expecting the model to hallucinate missing context
+
+### Deterministic safety added
+
+- Multiple plausible target entities force clarification only for target-changing actions such as confirm/book/order/modify/cancel.
+- Multi-entity ask/recommend/compare turns may retain the candidate set without being falsely treated as ambiguous execution.
+- availability / transaction_status / catalog / recommendation closed facets may normalize read-only action labels, including a stray provide_information label on a read-only question.
+- No transactional action is normalized into another action.
+- Malformed semantic JSON is counted as semantic correctness failure with safe error-class diagnostics only; no raw model output is stored.
+
+Semantic interpreter version:
+`semantic-v3`
+
+### RED evidence
+
+Initial Phase 5.7 RED run:
+`36190615279`
+
+Result:
+- **1176 tests**
+- **1169 pass**
+- **7 fail**
+
+The failures proved the intended missing behavior:
+- malformed model JSON incorrectly counted as provider outage
+- ambiguous target selection not mechanically guarded
+- read-only informationNeed could lose to action-label drift
+- missing semantic doctrine for capacity/catalog/support/journey/membership/correction
+- stale/inconsistent gold cases from live evidence
+- resume-horse fixture lacked actual suspended task evidence
+
+### GREEN evidence
+
+Final branch verification:
+run `36191447184`
+
+Result:
+- **1176 / 1176 PASS**
+- **0 fail**
+- exact Netlify build command: PASS
+- `PHASE_O_LIVE_EVAL_GATE_SKIPPED` as expected outside production/main
+- `LIVE_SEMANTIC_CERTIFICATION_SKIPPED` as expected outside production/main
+
+### Scope safety
+
+Still true after Phase 5.7:
+- no production DB mutation
+- no fake transaction
+- no transaction-core rewrite
+- no paid OpenAI fallback enablement
+- no Netlify manual deploy
+- no new repo/DB
+- no keyword-expansion architecture
+
+### Next acceptance
+
+1. Merge the exact reviewed Phase 5.7 head only after normal PR CI + Netlify build guard are green.
+2. Let Netlify auto-deploy production.
+3. Run one semantic-v3 production certification using the existing one-shot marker.
+4. Treat providerFailed and semanticFailed separately.
+5. Only if availabilityComplete=true is the full semantic score meaningful.
+6. Fix/adjudicate any remaining semantic-v3 failures by semantic pattern, never exact runtime sentence matching.
