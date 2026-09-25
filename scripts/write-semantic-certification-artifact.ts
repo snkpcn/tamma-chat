@@ -39,6 +39,14 @@ async function main() {
 
   const chunkSize=20;
   const availabilityRetryDelayMs=61_000;
+  // Live evidence reached project quota after a short burst. Gemini rate
+  // limits are project-scoped and vary by model/tier, so the cert runner keeps
+  // deliberate headroom instead of assuming fallback model IDs provide fresh
+  // project RPM. Override only for controlled certification runs.
+  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '4250');
+  const interCaseDelayMs=Number.isFinite(configuredInterCaseDelayMs)
+    ? Math.max(0,Math.min(15_000,Math.floor(configuredInterCaseDelayMs)))
+    : 4_250;
 
   try {
     const batches=[];
@@ -53,6 +61,7 @@ async function main() {
         availabilityRetries:1,
         availabilityRetryDelayMs,
         stopOnProviderFailure:true,
+        interCaseDelayMs,
       });
       batches.push(batch);
       totalCorpusCases=batch.totalCorpusCases;
