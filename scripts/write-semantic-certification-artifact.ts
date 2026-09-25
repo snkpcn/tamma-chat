@@ -67,4 +67,10 @@ async function main() {
   }
 }
 
-await main();
+main().catch(error => {
+  console.error(
+    'LIVE_SEMANTIC_CERTIFICATION_FATAL',
+    error instanceof Error ? error.name : 'unknown',
+  );
+  process.exitCode=1;
+});

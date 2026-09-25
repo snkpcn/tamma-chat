@@ -1,0 +1,23 @@
+name: Netlify Build Command Guard
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  exact-netlify-build-command:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run exact Netlify build command
+        run: node scripts/apply-chat-polish.mjs && node scripts/apply-restaurant-constraint-copy.mjs && node scripts/phase-o-build-gate.mjs && node --import tsx scripts/write-semantic-certification-artifact.ts
