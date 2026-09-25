@@ -9264,6 +9264,13 @@ No fake production transaction.
 No paid OpenAI fallback.
 Temporary verification workflow removed before PR.
 
+### PR CI evidence
+
+PR #129:
+- Netlify Build Command Guard run `36189853647` = SUCCESS
+- One Mind Branch CI run `36189853689` = SUCCESS
+- Human Brain Live Semantic Certification workflow = SKIPPED as expected because GitHub Actions has no provider secret on this branch
+
 ### Merge discipline
 
 PR must skip Deploy Preview to preserve Netlify credits.
