@@ -28,6 +28,7 @@ function availabilityTurn(): SemanticTurn {
     domain: 'restaurant',
     intent: 'restaurant_table_availability',
     action: 'status',
+    informationNeed: 'availability',
     entities: { date: 'พรุ่งนี้', time: '18:00' },
     references: [],
     constraints: [],
