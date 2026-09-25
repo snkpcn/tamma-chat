@@ -653,7 +653,7 @@ function formatRestaurantConstraintAck(advisor: any): string {
 
   const avoidIngredients = Array.isArray(parsed.avoidIngredients) ? parsed.avoidIngredients.map(String) : [];
   if (avoidIngredients.some(value => value.includes('ปลาร้า'))) labels.push('ไม่มีปลาร้า');
-  if (avoidIngredients.some(value => value.includes('กุ้ง'))) labels.push('ไม่มีกุ้งแห้ง');
+  if (avoidIngredients.some(value => value.includes('กุ้ง'))) labels.push('ไม่มีกุ้ง');
   if (avoidIngredients.some(value => value.includes('ถั่ว'))) labels.push('ไม่มีถั่วลิสง');
 
   const allergens = Array.isArray(parsed.allergenFlags) ? parsed.allergenFlags.map(String) : [];
