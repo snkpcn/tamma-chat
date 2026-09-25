@@ -450,10 +450,19 @@ export function resolveReferences(references: SemanticReference[], context: Sema
     if (byExactName.length > 1) {
       return { ...reference, ambiguous: true, resolvedEntityIds: byExactName.map(entity => entity.id) };
     }
+    // Only entity-selection references should be resolved against an entity
+    // candidate set. Context-only references such as implicit_continuation
+    // and previous_turn point to the conversation/task flow itself; treating
+    // them as an entity choice would make ordinary slot answers ambiguous
+    // whenever more than one entity happened to be in recent context.
+    const entityReference = reference.type === 'entity_selection'
+      || reference.type === 'previous_selection'
+      || reference.type === 'selected_entity';
+    if (!entityReference) return reference;
+
     // No named match (e.g. "ตัวไหน" names nothing specific) -- if context has
     // exactly one recent entity in the active domain, that's the plausible
-    // antecedent; if there are several, it's a genuine multi-way reference
-    // (e.g. "ตัวไหนนิสัยดีกว่า" comparing several) rather than an error.
+    // antecedent. Several candidates remain explicitly ambiguous.
     const inDomain = context.activeDomain
       ? context.recentEntities.filter(entity => entity.domain === context.activeDomain)
       : context.recentEntities;
@@ -511,11 +520,16 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     if (value !== undefined && value !== null) entities[slot] = value;
   }
 
+  const contextOnlyReferenceSatisfied = (reference: SemanticReference): boolean =>
+    (reference.type === 'implicit_continuation' || reference.type === 'previous_turn')
+    && Boolean(context.activeDomain || context.openQuestion || context.lastAction);
+
   const hasUnresolvedReference = references.some(reference =>
     reference.refersToPriorContext
     && !reference.resolvedEntityId
     && !reference.resolvedEntityIds?.length
-    && !reference.resolvedTaskSlot);
+    && !reference.resolvedTaskSlot
+    && !contextOnlyReferenceSatisfied(reference));
   // Multiple plausible antecedents are not a successful singular resolution.
   // Compare/recommend intentionally operate over candidate sets; selection,
   // confirmation, status, modification, etc. require one clear antecedent.
