@@ -9181,3 +9181,98 @@ No manual deploy.
 Merge with explicit `[semantic-cert]` marker and run one-shot semantic-v2 production certification.
 
 Do not call Phase 5.5 human-grade until the live model evidence confirms the taxonomy changes.
+
+
+---
+
+## THONGTHAI HUMAN BRAIN — Phase 5 / Checkpoint 5.6 — Quota-Safe Live Certification — 2026-09-26
+
+**STATUS: IMPLEMENTATION ON TOP OF SEMANTIC-V2; BRANCH VERIFICATION IN PROGRESS.**
+
+### Production evidence
+
+The first provider-resilience production certification artifact (production main `ee8d3712bad9a841b5f0324ad7ecfb9b9e098a39`) proved that provider failure and semantic failure are distinct:
+
+- total corpus: 158
+- evaluated before provider block: 17
+- semantic evaluated: 16
+- semantic pass: 11
+- semantic failed: 5
+- provider failed: 1
+- availabilityComplete: false
+
+The provider failure showed the certification harness itself was bursting quota:
+- gemini-3.8-flash -> 429
+- gemini-3.7-flash -> 429
+- gemini-3.6-flash -> 429
+- gemini-3.5-flash -> timeout after the shared budget was mostly consumed
+- gemini-3.5-flash-lite -> no usable remaining budget
+
+This is NOT a 68.75% full-corpus semantic score. The run stopped on provider availability.
+
+### Rate-limit doctrine
+
+Official Gemini API documentation states:
+- rate limits are evaluated per project
+- RPM/TPM/RPD apply
+- model/tier limits vary
+- actual active limits are visible in AI Studio
+- published/default capacity is not guaranteed
+
+Therefore certification must behave as an observational test, not a burst load test.
+
+### Implementation
+
+`runSemanticCertification` now accepts bounded `interCaseDelayMs`.
+
+The delay is applied:
+- between cases inside a batch
+- at the first case of every nonzero/resumed batch
+
+This means chunk boundaries can no longer accidentally reintroduce burst traffic.
+
+The production one-shot runner defaults to:
+
+`SEMANTIC_CERT_INTER_CASE_DELAY_MS = 4250`
+
+unless explicitly overridden.
+
+That pace is certification-only. It does not add latency to normal customer chat.
+
+Existing provider behavior remains:
+- provider failures are separate from semantic failures
+- stop on provider failure
+- one availability retry with 61-second cooldown
+- paid OpenAI remains opt-in only
+- no transaction/database mutation
+
+### Scope
+
+Changed only:
+- semantic certification helper
+- production certification artifact runner
+- certification pacing tests
+- this handoff
+
+No DB/schema change.
+No booking/order/payment executor change.
+No backoffice change.
+No runtime keyword router.
+No paid fallback.
+No manual Netlify deploy.
+
+### Acceptance after merge
+
+Run one production/main auto deploy with `[semantic-cert]`.
+
+Require:
+- deploy READY
+- manual_deploy=false
+- exact merge SHA
+- totalCorpusCases=158
+- semanticEvaluated=158
+- providerFailed=0
+- availabilityComplete=true
+
+Only then is the semantic percentage a valid full-corpus score.
+
