@@ -97,12 +97,12 @@ function parseRetryAfterMs(response: Response): number | null {
 
 // Zero-cost architecture (owner constraint: no paid LLM spend).
 //
-// IMPORTANT: Gemini rate limits are model-specific within a project. A 429
-// from one model must therefore NOT suppress every other free Gemini model.
-// Keep one bounded in-process circuit per model: the rate-limited model fails
-// fast during its cooldown, while the same turn can still fall through to the
-// next free Gemini model. This preserves zero-cost behavior without turning a
-// single-model quota event into a whole-brain outage.
+// IMPORTANT: Gemini rate limits are project-scoped and may differ by model.
+// A 429 from one model is not proof that every other free Gemini model is
+// unavailable, so runtime keeps one bounded circuit per model and may still
+// try another free model inside the same shared latency budget. Certification,
+// however, must pace project-wide because one project quota can affect several
+// model IDs in the same burst.
 const CIRCUIT_MIN_COOLDOWN_MS = 5_000;
 const CIRCUIT_MAX_COOLDOWN_MS = 60_000;
 const CIRCUIT_DEFAULT_COOLDOWN_MS = 15_000;
