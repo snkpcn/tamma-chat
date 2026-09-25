@@ -59,7 +59,8 @@ export class LLMAvailabilityError extends LLMRequestError {
   }
 }
 
-const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'] as const;
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'] as const;
+type GeminiModel = (typeof GEMINI_MODELS)[number];
 const OPENAI_MODEL = 'gpt-5.6-luna';
 
 // Phase P root cause: the old per-attempt timeouts (10s per Gemini model,
@@ -94,40 +95,43 @@ function parseRetryAfterMs(response: Response): number | null {
   return seconds * 1000;
 }
 
-// Zero-cost architecture (owner constraint: no paid LLM spend). A bounded,
-// in-process circuit breaker for Gemini's free tier: once it 429s, every
-// customer turn for the next COOLDOWN window would otherwise re-hit the
-// same still-exhausted quota and burn the retry/backoff budget for nothing.
-// This is intentionally simple module-level state (persists across warm
-// Netlify Function invocations, resets on cold start) -- no database, no new
-// SaaS dependency, "bounded" per the owner's own brief. When the circuit is
-// open, callGemini fails IMMEDIATELY with zero network calls, so callers can
-// degrade deterministically right away instead of waiting out a doomed
-// attempt. After cooldown, exactly one real attempt is allowed through; if
-// it also 429s, the circuit reopens for another cooldown.
+// Zero-cost architecture (owner constraint: no paid LLM spend).
+//
+// IMPORTANT: Gemini rate limits are model-specific within a project. A 429
+// from one model must therefore NOT suppress every other free Gemini model.
+// Keep one bounded in-process circuit per model: the rate-limited model fails
+// fast during its cooldown, while the same turn can still fall through to the
+// next free Gemini model. This preserves zero-cost behavior without turning a
+// single-model quota event into a whole-brain outage.
 const CIRCUIT_MIN_COOLDOWN_MS = 5_000;
 const CIRCUIT_MAX_COOLDOWN_MS = 60_000;
 const CIRCUIT_DEFAULT_COOLDOWN_MS = 15_000;
 
-let geminiCircuitOpenUntil = 0;
+const geminiCircuitOpenUntilByModel = new Map<GeminiModel, number>();
 
+function isGeminiModelCircuitOpen(model: GeminiModel, now: number = Date.now()): boolean {
+  return now < (geminiCircuitOpenUntilByModel.get(model) ?? 0);
+}
+
+/** Backward-compatible aggregate health helper used by existing diagnostics.
+ *  True means at least one Gemini model is currently cooling down; it does
+ *  NOT mean the whole Gemini provider family is unavailable. */
 export function isGeminiCircuitOpen(now: number = Date.now()): boolean {
-  return now < geminiCircuitOpenUntil;
+  return GEMINI_MODELS.some(model => isGeminiModelCircuitOpen(model, now));
 }
 
-/** Test-only escape hatch: production code never needs to reset this by
- *  hand (the circuit closes itself once `now` passes geminiCircuitOpenUntil). */
+/** Test-only escape hatch: production circuits close themselves on expiry. */
 export function resetGeminiCircuitForTests(): void {
-  geminiCircuitOpenUntil = 0;
+  geminiCircuitOpenUntilByModel.clear();
 }
 
-function openGeminiCircuit(retryAfterMs: number | null): void {
+function openGeminiCircuit(model: GeminiModel, retryAfterMs: number | null): void {
   const cooldownMs = Math.min(
     Math.max(retryAfterMs ?? CIRCUIT_DEFAULT_COOLDOWN_MS, CIRCUIT_MIN_COOLDOWN_MS),
     CIRCUIT_MAX_COOLDOWN_MS,
   );
-  geminiCircuitOpenUntil = Date.now() + cooldownMs;
-  console.log('THONGTHAI_MODEL_PROVIDER_CIRCUIT_OPEN', cooldownMs);
+  geminiCircuitOpenUntilByModel.set(model, Date.now() + cooldownMs);
+  console.log('THONGTHAI_MODEL_PROVIDER_CIRCUIT_OPEN', model, cooldownMs);
 }
 
 export function isAvailabilityHttpStatus(status: number): boolean {
@@ -153,8 +157,8 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
   let lastAvailabilityError = '';
   const attempts: ProviderAttemptDiagnostic[] = [];
   for (const model of GEMINI_MODELS) {
-    if (isGeminiCircuitOpen()) {
-      lastAvailabilityError = 'Gemini circuit open (recent rate limit)';
+    if (isGeminiModelCircuitOpen(model)) {
+      lastAvailabilityError = `Gemini ${model} circuit open (recent rate limit)`;
       attempts.push({ provider: 'gemini', model, outcome: 'circuit_open', elapsedMs: 0 });
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ circuit_open: true, callerLabel, model }));
       continue;
@@ -186,14 +190,11 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
           attempts.push({ provider: 'gemini', model, outcome: classifyHttpOutcome(response.status), httpStatus: response.status, elapsedMs });
           if (response.status === 429) {
             console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({ provider_429: true, callerLabel, model }));
-            // Opening the circuit here (rather than sleeping and retrying the
-            // next model in this same turn) is the zero-cost-quota behavior:
-            // a 429 on one model means the shared project quota is exhausted,
-            // so an immediate retry against another model is very likely to
-            // fail the same way. Fail this turn fast and let the caller
-            // degrade deterministically instead of spending wall-clock time
-            // on a doomed retry.
-            openGeminiCircuit(parseRetryAfterMs(response));
+            // Rate limits are tracked per model. Cool down ONLY the model that
+            // returned 429, then continue to the next free Gemini model within
+            // the same shared latency budget. Paid OpenAI remains separately
+            // opt-in and is never reached merely because one free model is busy.
+            openGeminiCircuit(model, parseRetryAfterMs(response));
           }
           continue;
         }
@@ -294,8 +295,8 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[], deadlineAt
  * no behavioral meaning -- this keeps the provider module ignorant of which
  * caller is using it.
  *
- * Phase P: accumulates a ProviderAttemptDiagnostic per attempt (Gemini's two
- * models, then OpenAI if reached) and attaches the FULL combined trail to
+ * Phase 5.4: accumulates a ProviderAttemptDiagnostic per attempt across the
+ * ordered free Gemini model chain, then OpenAI only if explicitly enabled and attaches the FULL combined trail to
  * whichever error ultimately propagates, so a caller that fails can report
  * exactly what happened at each step. It also bounds the ENTIRE operation
  * (every attempt, across both providers) to one shared TOTAL_PROVIDER_BUDGET_MS
