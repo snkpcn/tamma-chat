@@ -5866,3 +5866,31 @@ plus direct classifier coverage.
 **No DB migration. No production DB mutation. No Phase 3 work.**
 
 **Owner retest after production deploy:** use the same existing LINE conversation and send `มีอะไรแนะนำอีก`. Expected: another short restaurant recommendation that respects remembered constraints; never the generic `ขอรายละเอียดเพิ่มอีกนิด` reply.
+
+
+## Phase 2 Stabilization — Restaurant "อีก" semantics + strict no-spicy — 2026-09-25
+
+Owner production smoke after PR #79 confirmed restaurant routing/context continuity was fixed, but exposed two content-quality gaps:
+1. `มีอะไรแนะนำอีก` repeated the same top recommendations instead of giving other grounded options.
+2. strict `ไม่เผ็ด` could still recommend conventional spicy-risk dishes/sauces when curated `spiceLevel` metadata was absent, e.g. `คอหมูย่างจิ้มแจ่ว` / `เสือร้องไห้`.
+
+Changes:
+- Explicit restaurant follow-ups containing `อีก` / `อย่างอื่น` / `เมนูอื่น` rotate from ranked positions 1–3 to the remaining grounded shortlist (positions 4–5).
+- If no additional verified candidates remain, Thongthai says so instead of repeating or hallucinating.
+- Strict `no_spicy` hard-exclusion now conservatively covers name/category risk markers `น้ำตก`, `ต้มแซ่บ`, `พล่า`, `แจ่ว`, and `เสือร้องไห้` in addition to existing `ตำ/ส้มตำ/ยำ/ลาบ`.
+- No menu facts/prices are invented; ranking still comes from existing restaurant SOT.
+
+Tests:
+- direct intelligence test proves risky names are excluded even when profile spice metadata defaults to 0;
+- full signed LINE test proves `มีอะไรแนะนำอีก` returns only remaining grounded items and does not repeat the first top-3;
+- previous PR #79 follow-up regression now accepts the honest no-more-verified-options response when the constrained catalog genuinely has no additional safe items.
+
+Verified code head before docs-only checkpoint: `3fa6f13592e20c5b121e666c75d2b51897d21561` — GitHub Actions success.
+
+No DB migration. No production DB mutation. No Phase 3 work.
+
+Owner retest after merge/deploy:
+- in the same existing restaurant conversation, send `มีอะไรแนะนำอีก`;
+- expected: different grounded items from the previous list, OR an honest no-more-verified-options message;
+- must not repeat the exact same top 3;
+- with remembered `ไม่เผ็ด`, must not recommend conventional spicy-risk items/sauces such as `จิ้มแจ่ว`, `เสือร้องไห้`, `ตำ`, `ยำ`, `ลาบ`, `น้ำตก`, `ต้มแซ่บ`, `พล่า` unless future SOT explicitly verifies a safe non-spicy preparation.

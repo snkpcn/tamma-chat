@@ -111,7 +111,14 @@ test('production cutover: restaurant follow-up survives empty LINE history and p
         );
         assert.doesNotMatch(followup, /ขอรายละเอียดเพิ่มอีกนิด|ช่วยต่อให้ตรงเรื่อง/u);
         const followupItems = menuLines(followup);
-        assert.ok(followupItems.length >= 1, 'follow-up should return another grounded restaurant recommendation');
+        // If the grounded shortlist has additional safe items, show them.
+        // If it does not (the default harness catalog leaves only one safe
+        // item after shrimp allergy), explicitly say there are no more
+        // verified options instead of repeating the same recommendation.
+        assert.ok(
+          followupItems.length >= 1 || /เมนูที่ผ่านเงื่อนไขและยืนยันได้มีเท่านี้ก่อน/u.test(followup),
+          'follow-up should return another grounded recommendation or honestly say no more verified options',
+        );
         for (const line of followupItems) {
           assert.doesNotMatch(line, /กุ้ง/u, 'remembered shrimp allergy must filter recommended item lines');
         }
