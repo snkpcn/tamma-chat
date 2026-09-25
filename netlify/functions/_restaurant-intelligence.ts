@@ -238,7 +238,7 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
 // mirrors the allergy safety net's own reasoning: an occasional over-
 // broad exclusion is far safer than recommending a spicy dish to someone
 // who explicitly said "ไม่เผ็ด."
-const SPICY_RISK_CATEGORY_RE = /ตำ|ส้มตำ|ยำ|ลาบ/u;
+const SPICY_RISK_CATEGORY_RE = /ตำ|ส้มตำ|ยำ|ลาบ|น้ำตก|ต้มแซ่บ|พล่า|แจ่ว|เสือร้องไห้/u;
 
 function isUnverifiedSpicyRiskItem(item: RestaurantAdvisorItem): boolean {
   return SPICY_RISK_CATEGORY_RE.test(item.name) || SPICY_RISK_CATEGORY_RE.test(item.category);
