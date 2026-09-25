@@ -329,3 +329,35 @@ test('14c. "ทองไทยกับภาราดรต่างกัน�
     assert.doesNotMatch(t, /เลือกระยะเวลา\s*30,?\s*60\s*หรือ\s*90\s*นาที/u);
   });
 });
+
+
+test('2.7 idempotency: replaying the same signed LINE message id records one aggregate intelligence row', async () => {
+  await withHarnessAndLine(async (harness, _replies) => {
+    const userId = 'phase2-7-idempotency';
+    const event = {
+      type: 'message',
+      replyToken: 'reply-phase2-7-idempotency',
+      timestamp: Date.now(),
+      source: { type: 'user', userId },
+      message: {
+        id: 'same-line-message-id-001',
+        type: 'text',
+        text: 'พื้นลื่นมาก ตอนเล่น ATV น่ากลัว',
+      },
+    };
+
+    await callLineWebhook([event]);
+    await callLineWebhook([event]);
+
+    const rows = intelligenceEvents(harness).filter(row =>
+      row.category === 'ground_condition_risk'
+      && row.event_type === 'risk'
+      && row.domain === 'activity'
+    );
+
+    assert.equal(rows.length, 1, 'transport retry of the same LINE message id must not inflate aggregate counts');
+    assert.equal(typeof rows[0]?.source_event_key, 'string');
+    assert.match(String(rows[0]?.source_event_key ?? ''), /^[a-f0-9]{64}$/u, 'store only a one-way event key, never the raw LINE message id');
+    assert.equal(rows[0]?.source_event_id, undefined, 'raw transport message ids must not be persisted');
+  });
+});
