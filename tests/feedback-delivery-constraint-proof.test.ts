@@ -217,3 +217,38 @@ test('7. mixed complaint sent mid-horse-flow interrupts immediately, never conti
     assert.ok(mentions.some(m => m.label.includes('เจิด')));
   });
 });
+
+
+test('8. privacy smoke: direct phone/email/url identifiers are redacted in stored feedback and owner LINE notification', async () => {
+  await withHarnessAndLine(async (harness, _replies) => {
+    harness.programOpsChannel('owner_general');
+
+    const message = 'พื้นลื่นมาก ติดต่อ 081-234-5678 อีเมล test@example.com ดู https://example.com';
+    await callLineWebhook([privateEvent(message, 'proof-user-privacy')]);
+
+    const rows = harness.postsTo('ops_feedback_events');
+    assert.ok(rows.length >= 1);
+    const row = rows[rows.length - 1];
+
+    const stored = JSON.stringify({
+      customer_message: row.customer_message,
+      summary: row.summary,
+    });
+    assert.doesNotMatch(stored, /081-234-5678/u);
+    assert.doesNotMatch(stored, /test@example\.com/u);
+    assert.doesNotMatch(stored, /https:\/\/example\.com/u);
+    assert.match(stored, /\[phone\]/u);
+    assert.match(stored, /\[email\]/u);
+    assert.match(stored, /\[url\]/u);
+
+    const pushes = harness.postsTo('line_push');
+    assert.ok(pushes.length >= 1, 'owner notification must actually be pushed');
+    const pushed = JSON.stringify(pushes[pushes.length - 1]);
+    assert.doesNotMatch(pushed, /081-234-5678/u);
+    assert.doesNotMatch(pushed, /test@example\.com/u);
+    assert.doesNotMatch(pushed, /https:\/\/example\.com/u);
+    assert.match(pushed, /\[phone\]/u);
+    assert.match(pushed, /\[email\]/u);
+    assert.match(pushed, /\[url\]/u);
+  });
+});
