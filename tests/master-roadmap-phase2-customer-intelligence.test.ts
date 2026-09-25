@@ -361,3 +361,25 @@ test('2.7 idempotency: replaying the same signed LINE message id records one agg
     assert.equal(rows[0]?.source_event_id, undefined, 'raw transport message ids must not be persisted');
   });
 });
+
+
+test('2.7 privacy: aggregate snippet redacts direct phone/email/url identifiers before storage', async () => {
+  await withHarnessAndLine(async (harness, _replies) => {
+    await callLineWebhook([privateEvent(
+      'พื้นลื่นมาก โทร 081-234-5678 อีเมล nook@example.com ดู https://example.com/path',
+      'phase2-7-redaction',
+    )]);
+
+    const event = intelligenceEvents(harness).find(row => row.category === 'ground_condition_risk');
+    assert.ok(event);
+    const example = String(event?.redacted_example ?? '');
+
+    assert.doesNotMatch(example, /081-234-5678/u);
+    assert.doesNotMatch(example, /nook@example\.com/u);
+    assert.doesNotMatch(example, /https:\/\/example\.com/u);
+    assert.match(example, /\[phone\]/u);
+    assert.match(example, /\[email\]/u);
+    assert.match(example, /\[url\]/u);
+    assert.ok(example.length <= 80);
+  });
+});
