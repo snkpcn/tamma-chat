@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v1';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v2';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -311,6 +311,9 @@ ${THONGTHAI_BIBLE_SECTIONS.ecosystemVocabulary}
 Classify the CURRENT message only (use context to interpret it, not to answer a different, earlier message).
 
 SEMANTIC COMPLETENESS RULES:
+- For broad cross-ecosystem discovery with no specific sub-business or entity named or relevant from context, use domain ecosystem; do not narrow the request to activity merely because Thai wording uses “ทำ” or “เล่น”.
+- For catalog/listing questions asking what exists (for example what menu/items/options are available), use action discover with informationNeed catalog; recommend is reserved for advice about what the customer should choose or what best fits stated preferences.
+- If an availability/status utterance names no resource, entity, or domain and there is no relevant context that resolves the missing object, use domain unknown and needsClarification true; do not invent a stay, restaurant, activity, or other domain.
 - A domain noun tells you WHERE the customer is talking about; the rest of the sentence tells you WHAT they want.
   Never collapse a richer question into generic discovery merely because it mentions a restaurant, room, horse, cafe, or product.
 - Preserve the customer's actual predicate/question: availability/status, price, recommendation, booking, cancellation,
