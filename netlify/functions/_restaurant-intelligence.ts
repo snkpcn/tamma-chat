@@ -244,6 +244,59 @@ function isUnverifiedSpicyRiskItem(item: RestaurantAdvisorItem): boolean {
   return SPICY_RISK_CATEGORY_RE.test(item.name) || SPICY_RISK_CATEGORY_RE.test(item.category);
 }
 
+// Restaurant recommendation scope.
+//
+// A real production smoke after PR #80 exposed a semantic drift: the guest
+// had asked for FOOD recommendations under dietary constraints, then asked
+// "มีอะไรแนะนำอีก". After the first safe food shortlist was exhausted the
+// ranker surfaced "Singha Draft" and "น้ำกระเจี๊ยบ" simply because beverages
+// were still valid/orderable rows. That technically respected the allergen
+// filter but violated the conversational topic.
+//
+// Default restaurant recommendation intent therefore means FOOD. Beverage and
+// dessert categories are only eligible when the customer explicitly asks for
+// them, or when a vague follow-up inherits that category from recent restaurant
+// context. This is semantic category continuity, not a product-name patch.
+type RecommendationScope = 'food' | 'drink' | 'dessert' | 'all';
+
+const DRINK_CATEGORY_RE = /(?:เครื่องดื่ม|น้ำสมุนไพร|เบียร์|สุรา|spirit|drink|beverage)/iu;
+const DESSERT_CATEGORY_RE = /(?:ของหวาน|ขนม|dessert)/iu;
+const DRINK_REQUEST_RE = /(?:เครื่องดื่ม|ดื่มอะไร|น้ำอะไร|เบียร์|เหล้า|สุรา|วิสกี้|ไวน์|ค็อกเทล|น้ำสมุนไพร|drink|beverage|beer|spirit)/iu;
+const DESSERT_REQUEST_RE = /(?:ของหวาน|ขนม|dessert|ปิดท้าย)/iu;
+const ALL_MENU_REQUEST_RE = /(?:เมนูทั้งหมด|ทั้งหมดทุกหมวด|ทั้งอาหารและเครื่องดื่ม|all menu|full menu)/iu;
+const FOOD_CONTEXT_RE = /(?:ร้านอาหาร|อาหาร|กินอะไร|เมนูอาหาร|กับข้าว|ของกิน|มื้อ|ข้าว)/iu;
+
+function recommendationScope(input: RestaurantAdvisorInput): RecommendationScope {
+  const current = norm(input.query);
+  if (ALL_MENU_REQUEST_RE.test(current)) return 'all';
+  if (DRINK_REQUEST_RE.test(current)) return 'drink';
+  if (DESSERT_REQUEST_RE.test(current)) return 'dessert';
+
+  // A vague "อีก/มีอะไรแนะนำอีก" should continue the most recent explicit
+  // category instead of resetting. Walk newest-to-oldest and stop at the first
+  // useful category signal.
+  const recent = [...(input.recentMessages ?? [])].reverse();
+  for (const raw of recent) {
+    const text = norm(raw);
+    if (DRINK_REQUEST_RE.test(text)) return 'drink';
+    if (DESSERT_REQUEST_RE.test(text)) return 'dessert';
+    if (FOOD_CONTEXT_RE.test(text)) return 'food';
+  }
+
+  // "ร้านอาหารมีอะไรแนะนำ", "กินอะไรดี", and constraint-led recommendations
+  // all default to food. Drinks/desserts require explicit intent.
+  return 'food';
+}
+
+function itemMatchesRecommendationScope(item: RestaurantAdvisorItem, scope: RecommendationScope): boolean {
+  if (scope === 'all') return true;
+  const isDrink = DRINK_CATEGORY_RE.test(item.category);
+  const isDessert = DESSERT_CATEGORY_RE.test(item.category);
+  if (scope === 'drink') return isDrink;
+  if (scope === 'dessert') return isDessert;
+  return !isDrink && !isDessert;
+}
+
 function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): boolean {
   if (!item.orderable || item.availableServings <= 0 || item.unavailableIngredients.length) return true;
   if (pref.vegetarian && item.profile.proteinTags.some(tag => ['pork','beef','chicken','fish','shrimp'].includes(tag))) return true;
@@ -360,7 +413,8 @@ function composeSet(candidates: Scored[], pref: ParsedPreferences) {
 
 export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: RestaurantAdvisorInput) {
   const pref = parsePreferences(input, items);
-  const available = items.filter(item => !isHardExcluded(item,pref));
+  const scope = recommendationScope(input);
+  const available = items.filter(item => !isHardExcluded(item,pref) && itemMatchesRecommendationScope(item, scope));
   const selectedRoles = selectedRoleHints(items,pref.selectedNames);
   const scored = available.map(item => scoreItem(item,pref,selectedRoles)).sort((a,b)=>b.score-a.score || a.item.price-b.item.price);
   const query = norm(input.query);
