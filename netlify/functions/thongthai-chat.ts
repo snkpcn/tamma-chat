@@ -2643,29 +2643,63 @@ async function ecosystemFocusChoiceContinuationResponse(
     );
     return { state: null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
   });
-  if (!isObject(snapshot.state) || snapshot.state.activeTopic !== ECOSYSTEM_FOCUS_CHOICE_TOPIC) return null;
+  if (!isObject(snapshot.state)
+      || (snapshot.state.active_topic !== ECOSYSTEM_FOCUS_CHOICE_TOPIC
+        && snapshot.state.activeTopic !== ECOSYSTEM_FOCUS_CHOICE_TOPIC)) return null;
 
   const text = request.message.trim();
 
   if (ECOSYSTEM_FOOD_FOCUS_RE.test(text)) {
-    const runtime = await loadBrainRuntime(guestDbId, channel);
-    const normalizedFoodRequest: BrainRequest = {
-      ...request,
-      message: 'ร้านอาหารมีอะไรแนะนำ',
-    };
-    const restaurant = await deterministicRestaurantResponse(
-      normalizedFoodRequest,
-      runtime,
-      guestDbId,
-      channel,
+    // This is a deterministic continuation of OUR OWN branch question, so it
+    // should not need an LLM and should not jump ahead of the canonical
+    // One-Mind cutover with a legacy runtime load. Query the verified
+    // restaurant SOT directly using the already-loaded durable guest
+    // constraints, then persist enough bounded restaurant context for later
+    // "มีอะไรแนะนำอีก" turns.
+    const advice = await restaurantMenuAdvice({
+      query: 'ร้านอาหารมีอะไรแนะนำ',
+      partySize: null,
+      budget: typeof request.guestContext.budget === 'number' ? request.guestContext.budget : null,
+      constraints: request.guestContext.constraints,
+      recentMessages: [],
+    });
+
+    const selection = advisorRecommendationSelection(
+      advice,
+      false,
+      'ร้านอาหารมีอะไรแนะนำ',
+      [],
     );
-    if (restaurant) {
+    const shownRecommendationNames = selection.shown
+      .map((row: any) => typeof row?.name === 'string' ? row.name.trim() : '')
+      .filter(Boolean);
+
+    if (Array.isArray(advice?.recommendations) && advice.recommendations.length) {
       return {
-        ...restaurant,
-        agentStateUpdate: mergeAgentState(
-          restaurant.agentStateUpdate,
-          { clearUnresolvedNeed: true },
+        message: formatAdvisorMessage(
+          advice,
+          false,
+          false,
+          'ร้านอาหารมีอะไรแนะนำ',
+          [],
         ),
+        intent: 'recommendation',
+        contextUpdates: {},
+        journeyAction: { type: 'none', journey: null },
+        suggestedActions: [],
+        responseStyle: 'direct',
+        agentStateUpdate: {
+          activeTopic: 'restaurant',
+          clearUnresolvedNeed: true,
+          restaurantAdvisorContext: {
+            source: RESTAURANT_ADVISOR_CONTEXT_SOURCE,
+            recentMessages: ['ร้านอาหารมีอะไรแนะนำ'],
+            recentRecommendationNames: shownRecommendationNames,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+        semanticMemoryUpdates: [],
+        toolCalls: [],
       };
     }
 
