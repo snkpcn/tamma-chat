@@ -1,0 +1,24 @@
+name: Read Current Production Semantic Certification
+
+on:
+  push:
+    branches:
+      - ops/read-prod-semcert-20260926
+
+permissions:
+  contents: read
+
+jobs:
+  read-production-cert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read production semantic certification artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CURRENT_PRODUCTION_CERT_BEGIN"
+          curl --fail --silent --show-error --location --max-time 30 \
+            https://tamma-chat.netlify.app/semantic-certification-result.json
+          echo
+          echo "CURRENT_PRODUCTION_CERT_END"
