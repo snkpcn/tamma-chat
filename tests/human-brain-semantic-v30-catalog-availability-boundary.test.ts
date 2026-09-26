@@ -12,7 +12,7 @@ test('semantic-v30 keeps the remaining stay gold meaning unchanged', () => {
   assert.ok(item);
   assert.equal(item.expected.domain, 'stay');
   assert.equal(item.expected.action, 'discover');
-  assert.equal(item.expected.informationNeed, 'catalog');
+  assert.equal(item.simulatedModelOutput.informationNeed, 'catalog');
 });
 
 test('semantic-v30 terminal audit distinguishes configuration existence from live resource state', () => {
