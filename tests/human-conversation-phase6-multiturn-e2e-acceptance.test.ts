@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { ProviderNotConfiguredError } from '../netlify/functions/_thongthai-model-provider';
 import {
   processThongthaiOneMindTurnAuthoritative,
   type OneMindDependencies,
@@ -179,4 +180,82 @@ test('Phase 6 E2E open-world incident/local/general turns never create business 
       assert.equal(result.dialogDecision.actionProposal,undefined,`${channel}: ${message}`);
     }
   }
+});
+
+
+test('Phase 6 metamorphic E2E: explicit restaurant-order paraphrases keep transaction intent after grounded browsing',async()=>{
+  const browse='ขอดูเมนูหน่อย';
+  const variants=[
+    'เอาตำไทยหนึ่งจาน ส่งพรุ่งนี้หกโมง ชื่อสมชาย 0812345678',
+    'สั่งตำไทย 1 ที่ พรุ่งนี้เวลา 18:00 สมชาย 0812345678',
+    'รับตำไทยหนึ่งที่นะ พรุ่งนี้หกโมง ลูกค้าชื่อสมชาย เบอร์ 0812345678',
+  ];
+  const adapters:KnowledgeSourceAdapters={
+    restaurant:{menu:async()=>ok('menu','restaurant_live',[
+      fact('menu:tamthai:name','ตำไทย','restaurant','menu','restaurant_live'),
+    ])},
+  };
+  for(const [index,message] of variants.entries()) {
+    const meanings:Record<string,SemanticTurn>={
+      [browse]:semantic({domain:'restaurant',intent:'browse_menu',action:'discover',informationNeed:'catalog',speechAct:'question'}),
+      [message]:semantic({
+        domain:'restaurant',intent:`order_paraphrase_${index}`,action:'order',speechAct:'transaction_request',
+        entities:{items:[{name:'ตำไทย',quantity:1}],date:'2026-09-28',time:'18:00',customerName:'สมชาย',phone:'0812345678'},
+      }),
+    };
+    const run=conversation(index%2===0?'web':'line',adapters,meanings);
+    const browsed=await run(browse);
+    const ordered=await run(message);
+    assert.equal(browsed.dialogDecision.actionProposal,undefined);
+    assert.equal(ordered.semanticTurn.action,'order',message);
+    assert.equal(ordered.dialogDecision.actionProposal?.toolName,'create_restaurant_preorder',message);
+    assert.equal(ordered.dialogDecision.actionProposal?.requiresExplicitConfirmation,true,message);
+  }
+});
+
+test('Phase 6 E2E provider outage cannot mutate or advance an existing committed task',async()=>{
+  let snapshot:GuestAgentStateSnapshot={exists:false,state:{},updatedAt:null};
+  let offset=0;
+  let outage=false;
+  const first='จองขี่ม้าภาราดร วันที่ 6 ตุลาคม 60 นาที สองคน';
+  const deps:Partial<OneMindDependencies>={
+    resolveCanonicalGuestId:async()=>CANON,
+    guestDbIdFromAnonymousId:async()=>GUEST,
+    interpretSemanticTurn:async message=>{
+      if(outage) throw new ProviderNotConfiguredError();
+      assert.equal(message,first);
+      return semantic({
+        domain:'activity',intent:'book_horse',action:'book',speechAct:'transaction_request',
+        entities:{resourceCode:'activity-horse',horseName:'ภาราดร',date:'2026-10-06',durationMinutes:60,partySize:2},
+      });
+    },
+    buildKnowledgeAdapters:()=>({
+      activity:{catalog:async()=>ok('activity_catalog','activity_live',[
+        fact('activity:horse:resourceCode','activity-horse','activity','activity_catalog','activity_live'),
+      ])},
+    }),
+    mirrorActivityTaskToLegacySession:async()=>{},
+  };
+  const run=async(message:string)=>{
+    offset+=1;
+    return processThongthaiOneMindTurnAuthoritative({
+      channel:'web',message,eventId:`phase6-outage-${offset}`,providerUserKey:'outage-key',persistState:true,
+    },deps,{
+      loadSnapshot:async()=>snapshot,
+      compareAndSwap:async(_id,current,patch)=>{
+        const next={...current.state,...(patch.set??{})};
+        for(const key of patch.removeKeys??[]) delete next[key];
+        snapshot={exists:true,state:next,updatedAt:new Date(NOW.getTime()+offset*1000).toISOString()};
+        return {status:'applied',snapshot};
+      },
+    },new Date(NOW.getTime()+offset*1000));
+  };
+  const started=await run(first);
+  const before=structuredClone(started.taskStateAfter);
+  assert.equal(before.activeTask?.commitmentIntent,true);
+  outage=true;
+  const failed=await run('เอ่อ เรื่องเมื่อกี้นั่นแหละ');
+  assert.deepEqual(failed.taskStateAfter,before);
+  assert.equal(failed.dialogDecision.actionProposal,undefined);
+  assert.equal(failed.semanticTurn.semanticSource,'provider_unavailable');
 });
