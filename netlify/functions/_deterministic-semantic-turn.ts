@@ -69,6 +69,17 @@ function findActivityTopic(message: string): { nodeId: string; activityCode: str
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
 }
 
+function hasStandaloneTransactionRequest(message:string):boolean {
+  if (hasCommitMarker(message)) return true;
+  if (!/(?:จอง|สั่ง)/u.test(message)) return false;
+  // Conversational task control ("กลับมาจอง...ต่อ") resumes state; it is not
+  // a new commitment. Questions and explicit negation remain read-only.
+  if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
+  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้)?\s*(?:จอง|สั่ง)|ยกเลิก/u.test(message)) return false;
+  if (/[?？]|ไหม|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร/u.test(message)) return false;
+  return true;
+}
+
 // A small, closed set of negation markers, not a growing phrase table --
 // this is the same "correction marker" grammatical category
 // hasCorrectionMarker (_slot-parsers.ts) already recognizes, applied here
@@ -466,20 +477,33 @@ export function deriveDeterministicSemanticTurn(
   // Explicit transaction commitment outranks every read-only topic shortcut.
   // The resource comes from the closed ecosystem activity graph; missing
   // booking slots remain follow-up fields and do not erase the commitment.
-  const committedActivityTopic=!activeTask && hasCommitMarker(trimmed)
+  const committedActivityTopic=!activeTask && hasStandaloneTransactionRequest(trimmed)
     ? findActivityTopic(trimmed)
     : null;
   if (committedActivityTopic) {
+    const asset=findKnownActivityAssetSelection(trimmed);
+    const entities:Record<string,unknown>={
+      activityCode:committedActivityTopic.activityCode,
+      resourceCode:committedActivityTopic.nodeId,
+    };
+    if (asset) entities.horseName=asset.name;
+    const date=extractDate(trimmed,now);
+    const time=extractTime(trimmed);
+    const partySize=extractPartySize(trimmed);
+    const durationMinutes=extractDurationMinutes(trimmed);
+    if (date) entities.date=date;
+    if (time) entities.time=time;
+    if (partySize) entities.partySize=partySize;
+    if (durationMinutes) entities.durationMinutes=durationMinutes;
     return {
       domain:'activity',
       intent:'activity_booking_request',
       action:'book',
       speechAct:'transaction_request',
-      entities:{
-        activityCode:committedActivityTopic.activityCode,
-        resourceCode:committedActivityTopic.nodeId,
-      },
-      references:[],
+      entities,
+      references:asset
+        ? [{type:'entity_selection',value:asset.name,refersToPriorContext:false,resolvedEntityId:asset.entityId}]
+        : [],
       constraints:[],
       confidence:0.92,
       needsClarification:false,

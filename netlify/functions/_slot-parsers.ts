@@ -144,17 +144,7 @@ export function hasCorrectionMarker(message: string): boolean {
  *  more than I can safely interpret" and defer (return null) instead of
  *  silently dropping the commit intent by only extracting the slot value. */
 export function hasCommitMarker(message: string): boolean {
-  if (/จองเลย|ยืนยันจอง|สั่งเลย|ยืนยันการจอง|ยืนยันการสั่ง/u.test(message)) return true;
-
-  // Imperative/elliptical transaction requests do not always include "เลย"
-  // ("ขอจองขี่ม้า", "จอง ATV"). Recognize the shared transaction verb
-  // structurally, while questions and explicit negation stay read-only.
-  // This is language grammar, not a catalog of product phrases.
-  const hasTransactionVerb=/(?:จอง|สั่ง)/u.test(message);
-  if (!hasTransactionVerb) return false;
-  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้)?\s*(?:จอง|สั่ง)|ยกเลิก/u.test(message)) return false;
-  if (/[?？]|ไหม|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร/u.test(message)) return false;
-  return true;
+  return /จองเลย|ยืนยันจอง|สั่งเลย|ยืนยันการจอง|ยืนยันการสั่ง/u.test(message);
 }
 
 /** A customer explicitly asking to cancel/abandon whatever is in progress
