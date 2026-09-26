@@ -380,9 +380,9 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   selection as confirm and preserve every supplied slot in entities. Do not demote the explicit selection to provide_information.
 - Explicit transaction commitment outranks generic confirmation: "book it / reserve now" is book and "order it / submit this order now"
   is order. confirm is only selection/acceptance that does NOT itself submit a booking/order.
-- Returning to or continuing a suspended conversation/task is conversational resumption, not confirmation. Use taskDirective=resume_suspended
-  when the supplied context contains the matching suspended task; the action remains ask unless the CURRENT utterance separately performs
-  another explicit action.
+- Returning to or continuing a suspended conversation/task is conversational resumption, not confirmation. A request to
+  continue/resume a conversation or plan is not confirmation. Use taskDirective=resume_suspended when the supplied context contains
+  the matching suspended task; the action remains ask unless the CURRENT utterance separately performs another explicit action.
 - A topic declaration without an actual question/request (for example "I want to ask about cold drinks") establishes topic/domain but
   still needs clarification about what the customer wants to know. Do not invent catalog/availability intent.
 - A preference-shaped open request ("want something suitable/chill/not tiring", "what would fit us?") asks for recommendation when the
