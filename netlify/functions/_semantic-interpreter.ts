@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v21';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v22';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -480,6 +480,8 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- A vague topic introduction or request to ask about a subject is ask and needs clarification when no concrete information need is stated. Do not turn a topic introduction into discover + catalog merely because the topic names a product or menu category.
+- When the customer wants one primary activity and mentions a later meal only as a timing or sequencing anchor, keep the domain activity rather than journey. Journey requires the multi-step sequence itself to be the requested deliverable.
 - Do not default to discover + catalog merely because a request is short, asks what is available, or asks to view information. FIRST classify evaluative choice requests as recommend when the customer asks what is good, worth doing, suitable, recommended, or asks the assistant to choose. SECOND classify bare existence of a reservable resource as status + availability when the customer is asking whether a room, table, slot, or other reservable resource is available, even without a date. THIRD classify readback of one existing personal profile, saved artifact, or existing record as ask + none. ONLY AFTER those checks may a true browse-what-exists request become discover + catalog.
 - For broad ecosystem requests, asking what exists or what there is to do remains discover even when traveler or companion context is present. Move to recommend when the CURRENT utterance asks what is good, worth doing, suitable, recommended, or asks the assistant to choose.
 - First decide whether the customer is asking you to choose exactly ONE primary offering or to design a MULTI-PART plan. Exactly one requested activity remains activity even when it must happen before or after a meal, stay, or other event. The second event is only a timing boundary unless the customer asks you to choose, arrange, or coordinate it too.
