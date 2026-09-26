@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v11';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v12';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -325,8 +325,9 @@ DOMAIN-SCOPE TAXONOMY:
 - ecosystem = generic whole-property discovery/recommendation when the customer asks broadly what there is to do, play, visit, or
   experience and does NOT ask to compose a trip/plan/sequence and does not name a narrower primary business subject.
 - Generic verbs such as do/play/visit are NOT enough by themselves to narrow the domain to activity. They can describe the whole
-  TAMMA ecosystem. Use activity only when a specific activity/activity entity is stated (horse, ATV, archery, etc.) or the relevant
-  conversation context unambiguously establishes activity.
+  TAMMA ecosystem. But when the customer explicitly names a canonical business category, the category noun itself is enough to establish that domain:
+  asking what activities are offered belongs to activity, asking what rooms/stays are offered belongs to stay, and similarly for restaurant, cafe,
+  OTOP, promotion, and membership. A specific individual activity/entity (horse, ATV, archery, etc.) is NOT required when the category itself is explicit.
 - promotion is cross-cutting. When the PRIMARY subject is a promotion/discount/offer, keep domain "promotion" even when the promotion
   is for restaurant, activity, stay, cafe, OTOP, or multiple business units. Put the named business unit in entities; do not replace
   the primary promotion domain with that sub-business domain.
