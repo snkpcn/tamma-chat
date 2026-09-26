@@ -26,3 +26,4 @@ jobs:
           echo "CURRENT_PRODUCTION_CERT_END"
 
 # refresh phase5.13 fallback result
+# refresh semantic-v7 production readback
