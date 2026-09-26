@@ -503,15 +503,39 @@ async function resolveSemanticTurn(
   try {
     const modelTurn = await deps.interpretSemanticTurn(message, context);
 
-    if (deterministic && !modelRefinementIsUsable(modelTurn, deterministic)) {
+    if (!modelRefinementIsUsable(modelTurn, deterministic)) {
+      if (deterministic) {
+        console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+          semantic_owner: 'deterministic_unusable_model_fallback',
+          deterministic_turn: true,
+          model_call_used: true,
+          model_confidence: modelTurn.confidence,
+          deterministic_intent: deterministic.intent,
+        }));
+        return { ...deterministic, semanticSource:'deterministic_fallback' };
+      }
+
+      // No deterministic interpretation exists and the model result is not
+      // strong enough to own state. Convert it to a read-only clarification:
+      // low confidence can never start/update/cancel a working task.
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-        semantic_owner: 'deterministic_unusable_model_fallback',
-        deterministic_turn: true,
+        semantic_owner: 'clarification_untrusted_model',
+        deterministic_turn: false,
         model_call_used: true,
         model_confidence: modelTurn.confidence,
-        deterministic_intent: deterministic.intent,
       }));
-      return deterministic;
+      return {
+        semanticSource:'openai_supervisor',
+        domain:taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown',
+        intent:'clarification_needed_untrusted_semantics',
+        action:'ask',
+        entities:{},
+        references:[],
+        constraints:[],
+        confidence:Number.isFinite(modelTurn.confidence) ? modelTurn.confidence : 0,
+        needsClarification:true,
+        clarificationReason:'untrusted_semantics',
+      };
     }
 
     // A model must never silently reinterpret an already-proven mutating
@@ -581,6 +605,16 @@ async function resolveSemanticTurn(
   }
 }
 
+/** Only semantics that passed the structural/confidence gate may mutate
+ * conversation/task state. Provider outage and weak model results remain
+ * response-only clarification events. */
+export function semanticTurnTrustedForState(turn:SemanticTurn):boolean {
+  if (turn.semanticSource === 'provider_unavailable') return false;
+  if (!Number.isFinite(turn.confidence) || turn.confidence < 0.7) return false;
+  if (turn.domain === 'unknown' || turn.action === 'unknown') return false;
+  return true;
+}
+
 async function computeOneMindTurnFromState(
   input: OneMindTurnInput,
   identity: OneMindIdentity,
@@ -621,15 +655,18 @@ async function computeOneMindTurnFromState(
   }, adapters, now);
   const dialogAndKnowledgeMs = Date.now() - dialogStartedAt;
 
-  const taskStateAfter = dialog.decision.taskStateContainer;
-  const conversationContextAfter = nextConversationContext(
-    conversationContextBefore,
-    input,
-    semanticTurn,
-    dialog.decision,
-    dialog.bundles,
-    now,
-  );
+  const stateTrusted = semanticTurnTrustedForState(semanticTurn);
+  const taskStateAfter = stateTrusted ? dialog.decision.taskStateContainer : taskStateBefore;
+  const conversationContextAfter = stateTrusted
+    ? nextConversationContext(
+        conversationContextBefore,
+        input,
+        semanticTurn,
+        dialog.decision,
+        dialog.bundles,
+        now,
+      )
+    : conversationContextBefore;
 
   return {
     identity,
@@ -695,12 +732,13 @@ export async function processThongthaiOneMindTurn(
     deps.loadConversationContext(identity.guestDbId, now),
     deps.loadTaskState(identity.guestDbId),
   ]);
-  const { taskState:taskStateBefore } = normalizeTaskStateForConversation(loadedTaskState, now);
+  const { taskState:taskStateBefore, staleTaskSuspended } = normalizeTaskStateForConversation(loadedTaskState, now);
   const result = await computeOneMindTurnFromState(
     input, identity, conversationContextBefore, taskStateBefore, deps, now,
   );
 
-  const persistState = input.persistState === true;
+  const persistState = input.persistState === true
+    && (staleTaskSuspended || semanticTurnTrustedForState(result.semanticTurn));
   if (persistState) {
     await deps.persistConversationContext(identity.guestDbId, result.conversationContextAfter);
     await deps.persistTaskState(identity.guestDbId, result.taskStateAfter);
@@ -816,7 +854,9 @@ export async function processThongthaiOneMindTurnAuthoritative(
     // Staleness normalization is a state-safety operation, not a response
     // cutover decision. Persist it even when this turn itself falls through
     // to legacy (e.g. a greeting/support turn outside initial cutover).
-    const shouldPersist = input.persistState === true && (staleTaskSuspended || persistPredicate(result));
+    const shouldPersist = input.persistState === true
+      && (staleTaskSuspended
+        || (semanticTurnTrustedForState(result.semanticTurn) && persistPredicate(result)));
     if (!shouldPersist || !identity.guestDbId) {
       return {
         ...result,
