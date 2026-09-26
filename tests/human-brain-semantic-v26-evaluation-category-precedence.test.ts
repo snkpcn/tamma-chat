@@ -35,5 +35,5 @@ test('semantic-v28 resolves an explicit category noun before venue framing or ge
 });
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v28');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
 });
