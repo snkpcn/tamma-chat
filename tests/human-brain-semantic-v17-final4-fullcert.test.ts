@@ -15,7 +15,7 @@ function byId(id:string){
 }
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v28');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
 });
 
 test('semantic-v28 keeps all four final full-corpus gold labels unchanged',()=>{

@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v28';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v29';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -528,12 +528,13 @@ needsClarification: true only if the message is genuinely too ambiguous to act o
 clarificationReason: short string, only present if needsClarification is true
 
 MANDATORY TERMINAL DECISION CHECKLIST — apply this after all doctrine above and immediately before emitting JSON:
-1. DOMAIN: identify the explicit semantic business subject first. A missing record id or missing slot does not erase a known domain.
+1. DOMAIN OWNERSHIP: identify the explicit semantic business subject first. A missing record id or missing slot does not erase a known domain, and an explicit canonical category noun owns its category domain even inside a general location frame. For a multi-clause turn, choose the domain of the primary requested deliverable. A secondary coordinated request does not widen a specific primary domain to ecosystem; retain the primary domain and represent the secondary interest in intent/entities.
 2. CURRENT SPEECH ACT: classify what the customer is doing in this turn, not what a later business layer may do next.
-3. BROAD BROWSE VERSUS JUDGMENT: neutral existence/listing is discover + catalog. A request for what is desirable, worthwhile, suitable, advisable, appealing, or otherwise good is recommend + recommendation. In Thai and other languages, a qualitative predicate attached directly to a broad action question still asks for judgment even without a separate verb meaning recommend. Companion or traveler metadata is only context; remove that metadata without removing any qualitative judgment expressed by the remaining request.
-4. TRANSACTION COMMITMENT: an explicit commitment to place an order or booking now remains order/book even when product, resource, quantity, date, or time is missing. An indefinite object or missing item name after an explicit order-placement commitment is a missing slot, not catalog intent. Merely selecting a prior option without submission language remains confirm.
-5. CONSTRAINT PAYLOAD: a declarative turn that only supplies requested facts or constraints is provide_information.
-6. FIELD COHERENCE: informationNeed must mirror the action already chosen and must never reverse it. recommend pairs with recommendation; true browse/list pairs with catalog; transaction commitment stays order/book and is never changed to discover merely because details are missing.
+3. REPAIR VERSUS CHANGE: when the customer contrastively rejects an earlier value as wrong and supplies its replacement, the speech act is correct_previous, not modify. Use modify for an intentional new change that does not claim the earlier value was mistaken.
+4. BROAD BROWSE VERSUS JUDGMENT: neutral existence/listing is discover + catalog. When the unknown answer itself is qualified as desirable, worthwhile, appealing, or good, the customer is requesting evaluative selection: recommend + recommendation. In Thai and other languages, sentence-final evaluative wording modifies the requested choice rather than acting as mere politeness; a qualitative predicate attached directly to a broad action question still asks for judgment even without a separate verb meaning recommend. Companion or traveler metadata is only context; remove that metadata without removing any qualitative judgment expressed by the remaining request.
+5. TRANSACTION COMMITMENT: an explicit commitment to place an order or booking now remains order/book even when product, resource, quantity, date, or time is missing. An indefinite object or missing item name after an explicit order-placement commitment is a missing slot, not catalog intent. Merely selecting a prior option without submission language remains confirm.
+6. CONSTRAINT PAYLOAD: a declarative turn that only supplies requested facts or constraints is provide_information.
+7. FIELD COHERENCE: informationNeed must mirror the action already chosen and must never reverse it. recommend pairs with recommendation; true browse/list pairs with catalog; transaction commitment stays order/book and is never changed to discover merely because details are missing.
 
 Return ONLY this JSON object, nothing else:
 {"domain":string,"intent":string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}`;

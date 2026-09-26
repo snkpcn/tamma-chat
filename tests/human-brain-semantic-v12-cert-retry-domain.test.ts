@@ -13,7 +13,7 @@ import {
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 
 test('semantic-v28 version is explicit so v11 partial evidence cannot be resumed',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v28');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
 });
 
 test('semantic-v28 makes an explicitly requested single business catalog own the domain',()=>{
