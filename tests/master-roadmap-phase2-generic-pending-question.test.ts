@@ -125,7 +125,7 @@ test('full signed LINE: Thongthai persists a semantic pending question and resol
 
         assert.doesNotMatch(answer,/ขอรายละเอียดเพิ่มอีกนิด|ช่วยต่อให้ตรงเรื่อง/u);
         assert.match(answer,/คอหมูทอดสมุนไพร|ไข่เจียวหมูสับ|ร้านอาหาร|เมนู/u);
-        assert.equal(h.modelCallCount(),modelCallsBefore,'pending-choice resolution must be deterministic');
+        assert.equal(h.modelCallCount(),modelCallsBefore+1,'pending-choice resolution must be language-supervised once, then resolved deterministically');
 
         const stateAfter=stateFor(h,user);
         assert.equal(stateAfter.pending_question,undefined,'resolved question must be cleared');
@@ -181,7 +181,7 @@ test('full signed LINE: stale ecosystem pending question yields to a clear horse
 
         assert.match(horse,/ขี่ม้า|ทีมงาน|ช้า/u);
         assert.doesNotMatch(horse,/คาเฟ่|เน้นกินข้าว|ขอรายละเอียดเพิ่มอีกนิด/u);
-        assert.equal(h.modelCallCount(),modelCallsBefore,'explicit horse care must remain deterministic');
+        assert.equal(h.modelCallCount(),modelCallsBefore+1,'explicit horse care must be language-supervised once before the deterministic care path');
         assert.equal(stateFor(h,user).pending_question,undefined,'explicit new domain must retire stale pending question');
       } finally { capture.restore(); }
     });
@@ -226,7 +226,7 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         const foodStart=textOf(capture.replies[2]);
         assert.doesNotMatch(foodStart,/ขอรายละเอียดเพิ่มอีกนิด|ช่วยต่อให้ตรงเรื่อง/u);
         assert.match(foodStart,/บาท|เมนู|คอหมูทอดสมุนไพร|ไข่เจียวหมูสับ/u);
-        assert.equal(h.modelCallCount(),callsBeforeFood);
+        assert.equal(h.modelCallCount(),callsBeforeFood+1,'own-question answer must still pass through the language supervisor once');
         assert.equal(stateFor(h,user).pending_question,undefined);
 
         // 4 — constraint declaration is acknowledgement only, never a menu dump.
@@ -272,7 +272,7 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         const horseCare=textOf(capture.replies[8]);
         assert.match(horseCare,/ขี่ม้า|ทีมงาน|ช้า|กลัว/u);
         assert.doesNotMatch(horseCare,/ชำระเงิน|เลือกระยะเวลา\s*30/u);
-        assert.equal(h.modelCallCount(),callsBeforeHorse);
+        assert.equal(h.modelCallCount(),callsBeforeHorse+1,'horse intent must pass through the language supervisor once');
 
         // 10 — horse-name collision is now correctly interpreted inside horse context.
         await callLine('เอาทองไทย',user);
@@ -378,7 +378,7 @@ test('full signed LINE regression: explicit horse intent suspends stale unrelate
 
         assert.match(selection,/^ได้ครับ เลือกทองไทย/u);
         assert.doesNotMatch(selection,/หมายถึงอยากเลือก|เรียกทองไทยผู้ช่วยแชท/u);
-        assert.equal(h.modelCallCount(),callsBeforeHorse,'contextual horse selection must be deterministic');
+        assert.equal(h.modelCallCount(),callsBeforeHorse+2,'horse care and contextual selection must each be language-supervised once');
 
         const afterSelection=stateFor(h,user).taskState as {
           activeTask?:{domain?:string;slots?:Record<string,unknown>}|null;
@@ -422,7 +422,7 @@ test('full signed LINE regression: horse-care opener persists beginner experienc
         assert.match(selection,/^ได้ครับ เลือกทองไทย/u);
         assert.doesNotMatch(selection,/เคยขี่ม้ามาก่อนไหม/u,'must not ask an already answered experience question again');
         assert.match(selection,/มากี่คนครับ/u,'only the genuinely missing party-size question should remain');
-        assert.equal(h.modelCallCount(),calls,'selection continuation stays deterministic');
+        assert.equal(h.modelCallCount(),calls+1,'selection continuation must be language-supervised once, then keep the deterministic business flow');
       } finally { capture.restore(); }
     });
   } finally {
