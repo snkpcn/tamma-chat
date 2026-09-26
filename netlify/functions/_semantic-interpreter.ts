@@ -344,19 +344,25 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
   pair an existing booking/order/payment status with informationNeed=transaction_status.
 - ask = an informational/factual question that is not better represented by status, compare, recommend, or discover.
-- compare = the customer asks to compare two or more known options/attributes.
-- confirm = the customer explicitly selects/accepts a previously presented or referenced option. Selection alone does NOT create a
+- compare = the customer asks to compare two or more known options/attributes. Comparative attribute questions ("which is gentler/better/faster?",
+  "how do these differ?") stay compare even if the answer may help the customer choose. recommend is for asking the assistant to choose/suggest
+  what suits the customer, not for a direct comparison between known options.
+- confirm = the customer explicitly selects/accepts a previously presented or referenced option. If the customer names one known option
+  and that name matches exactly one contextual entity, confirm that selection; do not ask for clarification merely because other candidates exist.
+  Selection alone does NOT create a
   booking/order. "Take that one / the previous one / this horse" in selection context is confirm, not book/order.
 - book/order = explicit TRANSACTION intent to create/submit a booking or order now. Do not infer book/order merely because a customer
   selected an entity or because an active task exists.
-- provide_information = the customer supplies values requested by the current open question/task (date, time, party size, name, etc.)
-  without asking a new question. It is slot information, not confirmation or transaction execution.
+- provide_information = the customer declaratively supplies values requested by the current open question/task (date, time, party size,
+  name, etc.) without asking a new question. If they OFFER a candidate value while asking whether it works/is okay/available, that is a
+  status question with informationNeed=availability, not mere slot information.
 - correct_previous = the customer explicitly corrects/replaces something they said or selected before.
 - A short contextual interrogative that asks identity/choice ("which one?", "which option?") is a QUESTION, not confirmation.
   confirm requires an affirmative selection/acceptance of one identifiable option. If several candidates remain plausible, do not guess.
 - A short topic-narrow follow-up that names a canonical business/category/resource after broad discovery may narrow the domain without
-  inventing a prior-entity reference. If the customer is simply asking what that category offers, use discover + catalog and do not
-  demand clarification merely because no individual recent entity exists. A bare topic/resource follow-up does NOT imply current
+  inventing a prior-entity reference. If it merely raises that topic/resource with NO date/time/current-state/stock predicate, use
+  discover + catalog. Do not invent availability/status merely from the existence of a resource noun, and do not demand clarification
+  merely because no individual recent entity exists. A bare topic/resource follow-up does NOT imply current
   availability: without a time/current-state predicate, do not invent status + availability merely because the resource could be booked.
 - When the customer explicitly NAMES one exact recent entity while selecting/accepting it, that is confirm. Preserve the exact named
   entity in entities and in the prior-context reference value so deterministic reference resolution can distinguish it from other
@@ -556,8 +562,31 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const confidenceRaw = Number(parsed.confidence);
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
-  const references = resolveReferences(normalizeReferences(parsed.references), context);
+  let references = resolveReferences(normalizeReferences(parsed.references), context);
   const entities = asRecord(parsed.entities);
+
+  const structuredEntityNames = new Set(
+    Object.values(entities)
+      .filter((value): value is string => typeof value === 'string')
+      .map(value => value.trim())
+      .filter(Boolean),
+  );
+  if (structuredEntityNames.size && context.recentEntities.length) {
+    references = references.map(reference => {
+      if (
+        !reference.refersToPriorContext
+        || !['entity_selection','previous_selection','selected_entity'].includes(reference.type)
+      ) return reference;
+      const matches = context.recentEntities.filter(entity => structuredEntityNames.has(entity.name));
+      if (matches.length !== 1) return reference;
+      return {
+        ...reference,
+        resolvedEntityId:matches[0]!.id,
+        resolvedEntityIds:undefined,
+        ambiguous:false,
+      };
+    });
+  }
 
   // Deterministically materialize only task-slot references that were
   // validated against the real active-task context. This is analogous to
