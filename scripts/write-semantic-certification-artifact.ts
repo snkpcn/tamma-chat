@@ -43,7 +43,7 @@ async function loadResumeBase(): Promise<ResumeBase|null> {
     if(
       artifact.kind!=='LIVE_MODEL_SEMANTIC_CERTIFICATION'
       || artifact.semanticVersion!==SEMANTIC_INTERPRETER_VERSION
-      || artifact.status!=='incomplete_provider'
+      || !['incomplete_provider','incomplete_chunk'].includes(artifact.status ?? '')
       || artifact.availabilityComplete===true
       || typeof artifact.resumeStart!=='number'
       || artifact.resumeStart<=0
@@ -110,14 +110,21 @@ async function main() {
 
   const chunkSize=20;
   const availabilityRetryDelayMs=61_000;
+  // Final free-tier certification runs in bounded production-build chunks.
+  // This avoids both self-inflicted RPM bursts and Netlify's ~15 minute
+  // build ceiling. The same-version artifact is resumed on the next build.
+  const configuredMaxSemanticCases=Number(process.env.SEMANTIC_CERT_MAX_CASES_PER_RUN ?? '75');
+  const maxSemanticCasesPerRun=Number.isFinite(configuredMaxSemanticCases)
+    ? Math.max(1,Math.min(75,Math.floor(configuredMaxSemanticCases)))
+    : 75;
   // Live evidence reached project quota after a short burst. Gemini rate
   // limits are project-scoped and vary by model/tier, so the cert runner keeps
   // deliberate headroom instead of assuming fallback model IDs provide fresh
   // project RPM. Override only for controlled certification runs.
-  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '6500');
+  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '9000');
   const interCaseDelayMs=Number.isFinite(configuredInterCaseDelayMs)
     ? Math.max(0,Math.min(15_000,Math.floor(configuredInterCaseDelayMs)))
-    : 6_500;
+    : 9_000;
 
   try {
     const resumeBase=await loadResumeBase();
@@ -126,11 +133,16 @@ async function main() {
     let start=initialStart;
     let totalCorpusCases:number|null=resumeBase?.totalCorpusCases ?? null;
 
-    while(totalCorpusCases===null || start<totalCorpusCases){
+    let semanticCasesThisRun=0;
+    while(
+      (totalCorpusCases===null || start<totalCorpusCases)
+      && semanticCasesThisRun<maxSemanticCasesPerRun
+    ){
+      const remainingChunkBudget=maxSemanticCasesPerRun-semanticCasesThisRun;
       const batch=await runSemanticCertification({
         profile:'full',
         start,
-        limit:chunkSize,
+        limit:Math.min(chunkSize,remainingChunkBudget),
         availabilityRetries:1,
         availabilityRetryDelayMs,
         stopOnProviderFailure:true,
@@ -138,6 +150,7 @@ async function main() {
       });
       batches.push(batch);
       totalCorpusCases=batch.totalCorpusCases;
+      semanticCasesThisRun += batch.semanticEvaluated;
 
       if(batch.evaluated<=0) break;
       start += batch.evaluated;
@@ -175,7 +188,9 @@ async function main() {
       providerFailed===0
       && totalCorpusCases!==null
       && semanticEvaluated===totalCorpusCases;
-    const status=availabilityComplete?'completed':'incomplete_provider';
+    const status=availabilityComplete
+      ? 'completed'
+      : (providerFailed>0 ? 'incomplete_provider' : 'incomplete_chunk');
 
     const artifact={
       kind:'LIVE_MODEL_SEMANTIC_CERTIFICATION',
@@ -190,6 +205,9 @@ async function main() {
       semanticFailed,
       providerFailed,
       resumeStart:availabilityComplete ? (totalCorpusCases ?? semanticEvaluated) : resumeStart,
+      semanticCasesThisRun,
+      maxSemanticCasesPerRun,
+      interCaseDelayMs,
       passPct:semanticEvaluated?Number((pass/semanticEvaluated*100).toFixed(2)):0,
       availabilityComplete,
       failures,
@@ -204,6 +222,9 @@ async function main() {
       semanticFailed,
       providerFailed,
       resumeStart:artifact.resumeStart,
+      semanticCasesThisRun,
+      maxSemanticCasesPerRun,
+      interCaseDelayMs,
       passPct:artifact.passPct,
       availabilityComplete,
     }));
