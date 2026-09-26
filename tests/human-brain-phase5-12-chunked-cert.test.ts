@@ -7,12 +7,12 @@ test('Phase 5.12+: certification accepts same-version incomplete chunks as resum
   assert.match(script,/\['incomplete_provider','incomplete_chunk'\]\.includes/);
 });
 
-test('Grouped final cert can cover the full 158-case corpus in one bounded production build',()=>{
+test('Grouped final cert covers the 158-case corpus across two bounded resumable production builds',()=>{
   const script=readFileSync(new URL('../scripts/write-semantic-certification-artifact.ts',import.meta.url),'utf8');
-  assert.match(script,/SEMANTIC_CERT_MAX_CASES_PER_RUN \?\? '158'/);
+  assert.match(script,/SEMANTIC_CERT_MAX_CASES_PER_RUN \?\? '80'/);
   assert.match(script,/Math\.min\(158/);
   assert.match(script,/runGroupedSemanticCertification/);
-  assert.match(script,/chunkSize=20/);
+  assert.match(script,/chunkSize=10/);
 });
 
 test('Grouped final cert spaces live provider GROUP requests instead of every individual case',()=>{
