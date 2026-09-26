@@ -9646,3 +9646,40 @@ No DB/schema/backoffice/transaction-core change.
 No paid OpenAI fallback.
 No manual Netlify deploy.
 No keyword/regex runtime language router.
+
+
+---
+
+## 2026-09-26 Human Brain Phase 5.11 — quota-safe semantic-v6 resume
+
+Semantic-v6 production deploy `6ab7157cd5b991000896a553` (commit `3c6ca7cbbe649766ad3244684b71c3006f0c7041`, auto deploy, manual_deploy=false) proved the resume machinery works but exposed the real free-project quota cadence.
+
+Partial semantic-v6 artifact:
+- total: 158
+- semanticEvaluated: 10
+- pass: 10
+- semanticFailed: 0
+- providerFailed: 1
+- passPct: 100%
+- resumeStart: 10
+- availabilityComplete: false
+
+Provider failure at case 11 showed HTTP 429 on Gemini 3.8/3.7/3.6 after 10 successful cases with the old 4.25s cadence. This is direct evidence that the previous pace still exceeded the current shared free-project quota.
+
+Phase 5.11 changes certification pacing ONLY:
+- default inter-case delay: 4.25s -> 6.5s
+- effective request rate: below ~10 RPM with headroom
+- semantic version remains `semantic-v6`
+- runtime customer request latency is unchanged
+- same-version resume will continue from `resumeStart=10`; the first ten certified semantic passes are not repeated
+
+Branch verification:
+- run `36206245317`
+- **1198 / 1198 PASS**
+- fail 0
+- exact Netlify build command PASS
+- live cert correctly skipped outside production/main
+
+No DB/schema/transaction/backoffice changes.
+No paid OpenAI fallback.
+No manual Netlify deploy.
