@@ -61,7 +61,7 @@ test('semantic-v8 doctrine keeps eligibility/can-I-use-this questions informatio
 
 test('semantic-v8 doctrine treats failed/rejected payment next-step questions as remediation guidance, not transaction status',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.ok(prompt.includes('payment/slip was failed/rejected and asks what to do next'));
+  assert.ok(prompt.includes('a payment/slip was failed/rejected and asks what to do next'));
   assert.ok(prompt.includes('ask, not status'));
 });
 
