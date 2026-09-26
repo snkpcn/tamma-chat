@@ -95,6 +95,15 @@ const PER_ATTEMPT_CAP_MS = 6_000;
 const SEMANTIC_CERT_TOTAL_PROVIDER_BUDGET_MS = 30_000;
 const SEMANTIC_CERT_PER_ATTEMPT_CAP_MS = 25_000;
 const MIN_ATTEMPT_BUDGET_MS = 1_200;
+const RUNTIME_MAX_OUTPUT_TOKENS = 4096;
+const SEMANTIC_CERT_MAX_OUTPUT_TOKENS = 8192;
+
+export function maxOutputTokensForCaller(callerLabel: string): number {
+  return callerLabel === 'semantic-certification-group'
+    ? SEMANTIC_CERT_MAX_OUTPUT_TOKENS
+    : RUNTIME_MAX_OUTPUT_TOKENS;
+}
+
 
 export function providerTimingPolicyForCaller(callerLabel: string): {
   totalBudgetMs: number;
@@ -218,7 +227,7 @@ async function callGemini(
         signal: controller.signal,
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemPrompt }] }, contents,
-          generationConfig: { responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 4096 },
+          generationConfig: { responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: maxOutputTokensForCaller(callerLabel) },
         }),
       });
       if (!response.ok) {
