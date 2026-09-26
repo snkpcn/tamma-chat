@@ -13,11 +13,11 @@ function byId(id:string){
   return item;
 }
 
-test('semantic-v24 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v24');
+test('semantic-v25 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v25');
 });
 
-test('semantic-v24 preserves the three v22 live-failure gold meanings',()=>{
+test('semantic-v25 preserves the three v22 live-failure gold meanings',()=>{
   assert.deepEqual(byId('discover-04').expected,{domain:'ecosystem',action:'discover'});
   for(const id of ['discover-05','discover-06']){
     assert.equal(byId(id).expected.domain,'ecosystem');
@@ -26,14 +26,14 @@ test('semantic-v24 preserves the three v22 live-failure gold meanings',()=>{
   }
 });
 
-test('semantic-v24 decides broad scope before answer type without lexical category guessing',()=>{
+test('semantic-v25 decides broad scope before answer type without lexical category guessing',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('Decide DOMAIN SCOPE before ACTION for broad experience requests'));
   assert.ok(p.includes('Generic do, play, visit, or experience wording is not an explicit activity-category request'));
   assert.ok(p.includes('Only an explicit canonical category noun, named offering, or clearly bounded business subject narrows broad ecosystem scope'));
 });
 
-test('semantic-v24 makes evaluative guidance outrank catalog browsing after scope is chosen',()=>{
+test('semantic-v25 makes evaluative guidance outrank catalog browsing after scope is chosen',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('After domain scope is chosen, decide the requested ANSWER TYPE'));
   assert.ok(p.includes('Neutral listing of what exists is discover'));
