@@ -7,6 +7,77 @@ import {
 import { SEMANTIC_INTERPRETER_VERSION } from '../netlify/functions/_semantic-interpreter';
 
 const OUTPUT='semantic-certification-result.json';
+const PRODUCTION_CERT_URL='https://tamma-chat.netlify.app/semantic-certification-result.json';
+
+type ResumeArtifact = {
+  kind?: string;
+  status?: string;
+  semanticVersion?: string;
+  totalCorpusCases?: number;
+  semanticEvaluated?: number;
+  pass?: number;
+  semanticFailed?: number;
+  providerFailed?: number;
+  failures?: SemanticCertificationFailure[];
+  resumeStart?: number;
+  availabilityComplete?: boolean;
+};
+
+type ResumeBase = {
+  start: number;
+  totalCorpusCases: number;
+  semanticEvaluated: number;
+  pass: number;
+  semanticFailed: number;
+  failures: SemanticCertificationFailure[];
+};
+
+async function loadResumeBase(): Promise<ResumeBase|null> {
+  if (process.env.SEMANTIC_CERT_DISABLE_RESUME === '1') return null;
+  try {
+    const response=await fetch(PRODUCTION_CERT_URL,{
+      headers:{'cache-control':'no-cache'},
+    });
+    if(!response.ok) return null;
+    const artifact=await response.json() as ResumeArtifact;
+    if(
+      artifact.kind!=='LIVE_MODEL_SEMANTIC_CERTIFICATION'
+      || artifact.semanticVersion!==SEMANTIC_INTERPRETER_VERSION
+      || artifact.status!=='incomplete_provider'
+      || artifact.availabilityComplete===true
+      || typeof artifact.resumeStart!=='number'
+      || artifact.resumeStart<=0
+      || typeof artifact.totalCorpusCases!=='number'
+      || artifact.resumeStart>=artifact.totalCorpusCases
+      || typeof artifact.semanticEvaluated!=='number'
+      || typeof artifact.pass!=='number'
+      || typeof artifact.semanticFailed!=='number'
+      || !Array.isArray(artifact.failures)
+    ){
+      return null;
+    }
+
+    const semanticFailures=artifact.failures.filter(failure=>!failure.providerError);
+    console.log('LIVE_SEMANTIC_CERTIFICATION_RESUME',JSON.stringify({
+      semanticVersion:artifact.semanticVersion,
+      resumeStart:artifact.resumeStart,
+      semanticEvaluated:artifact.semanticEvaluated,
+      pass:artifact.pass,
+      semanticFailed:artifact.semanticFailed,
+    }));
+
+    return {
+      start:artifact.resumeStart,
+      totalCorpusCases:artifact.totalCorpusCases,
+      semanticEvaluated:artifact.semanticEvaluated,
+      pass:artifact.pass,
+      semanticFailed:artifact.semanticFailed,
+      failures:semanticFailures,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function currentCommitMessage(): string {
   try {
@@ -49,9 +120,11 @@ async function main() {
     : 4_250;
 
   try {
+    const resumeBase=await loadResumeBase();
     const batches=[];
-    let start=0;
-    let totalCorpusCases:number|null=null;
+    const initialStart=resumeBase?.start ?? 0;
+    let start=initialStart;
+    let totalCorpusCases:number|null=resumeBase?.totalCorpusCases ?? null;
 
     while(totalCorpusCases===null || start<totalCorpusCases){
       const batch=await runSemanticCertification({
@@ -79,17 +152,29 @@ async function main() {
       }
     }
 
-    const evaluated=batches.reduce((sum,batch)=>sum+batch.evaluated,0);
-    const semanticEvaluated=batches.reduce((sum,batch)=>sum+batch.semanticEvaluated,0);
-    const pass=batches.reduce((sum,batch)=>sum+batch.pass,0);
-    const semanticFailed=batches.reduce((sum,batch)=>sum+batch.semanticFailed,0);
+    const newSemanticEvaluated=batches.reduce((sum,batch)=>sum+batch.semanticEvaluated,0);
+    const newPass=batches.reduce((sum,batch)=>sum+batch.pass,0);
+    const newSemanticFailed=batches.reduce((sum,batch)=>sum+batch.semanticFailed,0);
     const providerFailed=batches.reduce((sum,batch)=>sum+batch.providerFailed,0);
-    const failures:SemanticCertificationFailure[]=batches.flatMap(batch=>batch.failures);
+
+    const semanticEvaluated=(resumeBase?.semanticEvaluated ?? 0)+newSemanticEvaluated;
+    const pass=(resumeBase?.pass ?? 0)+newPass;
+    const semanticFailed=(resumeBase?.semanticFailed ?? 0)+newSemanticFailed;
+    const failures:SemanticCertificationFailure[]=[
+      ...(resumeBase?.failures ?? []),
+      ...batches.flatMap(batch=>batch.failures),
+    ];
+
+    // A provider-failed case is intentionally NOT part of the durable prefix.
+    // Resume from the next not-yet-semantically-evaluated corpus index, not
+    // from raw evaluated count (which includes the provider failure itself).
+    const resumeStart=initialStart+newSemanticEvaluated;
+    const evaluated=semanticEvaluated+providerFailed;
     const failed=failures.length;
     const availabilityComplete=
       providerFailed===0
       && totalCorpusCases!==null
-      && evaluated===totalCorpusCases;
+      && semanticEvaluated===totalCorpusCases;
     const status=availabilityComplete?'completed':'incomplete_provider';
 
     const artifact={
@@ -104,6 +189,7 @@ async function main() {
       failed,
       semanticFailed,
       providerFailed,
+      resumeStart:availabilityComplete ? (totalCorpusCases ?? semanticEvaluated) : resumeStart,
       passPct:semanticEvaluated?Number((pass/semanticEvaluated*100).toFixed(2)):0,
       availabilityComplete,
       failures,
@@ -117,6 +203,7 @@ async function main() {
       pass,
       semanticFailed,
       providerFailed,
+      resumeStart:artifact.resumeStart,
       passPct:artifact.passPct,
       availabilityComplete,
     }));

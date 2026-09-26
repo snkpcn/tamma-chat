@@ -9555,3 +9555,94 @@ No manual Netlify deploy.
 Merge PR #131 only at the exact re-verified head SHA.
 Merge commit must include `[semantic-cert]` and must not include `[skip netlify]`.
 Then let Netlify auto-deploy once and read the semantic-v5 production artifact.
+
+
+---
+
+## 2026-09-26 Human Brain Phase 5.10 — semantic-v6 + resumable production certification
+
+### Why this checkpoint exists
+
+Semantic-v5 production was deployed successfully but its one-shot live certification was interrupted by a transient Gemini provider outage after 39 evaluated cases.
+
+Production deploy:
+- deploy id: `6ab7113f83925f00083cbe5d`
+- commit_ref: `9b3d636cabb933090bf3b8e7d86de4f8225efb19`
+- branch: main
+- context: production
+- manual_deploy: false
+- state: READY
+
+Semantic-v5 partial artifact:
+- total corpus: 158
+- evaluated: 39
+- semanticEvaluated: 38
+- pass: 37
+- semanticFailed: 1
+- providerFailed: 1
+- passPct: 97.37%
+- availabilityComplete: false
+
+The single semantic mismatch before the provider outage was:
+- `reference-02`: “ตัวไหน”
+- expected: activity / ask
+- model: activity / confirm, needsClarification=true
+
+Provider interruption:
+- Gemini 3.8: HTTP 503
+- Gemini 3.7: HTTP 503
+- remaining free Gemini models exhausted the shared provider budget
+- paid OpenAI remained OFF
+
+### semantic-v6 change
+
+The interpreter now keeps the model as language owner but adds one structure-only safety normalization:
+
+If a reference resolves to multiple canonical candidate entities and the model calls it `confirm`, the action is downgraded to `ask`. A multi-candidate reference cannot be an executable selection.
+
+Clarification safety still keys off the model's original target-changing action, so ambiguous selection remains clarification-required.
+
+A separate corpus fixture that says “เอาม้าตัวนี้” was corrected to include a real one-horse selected context. This is not score chasing: without a single selected entity, that deictic confirmation was under-specified in the fixture itself.
+
+Semantic interpreter version:
+`semantic-v6`
+
+### Resumable certification
+
+The production cert runner now reads the CURRENT production artifact before a one-shot certification.
+
+Resume is allowed only when ALL are true:
+- artifact kind is semantic certification
+- semanticVersion exactly matches current semanticVersion
+- prior status is `incomplete_provider`
+- prior availabilityComplete is false
+- a valid `resumeStart` exists inside the corpus range
+
+The durable prefix contains only semantically evaluated cases. The provider-failed case is NOT counted as durable progress and is retried on resume.
+
+The output artifact now includes:
+- `resumeStart`
+
+On a provider interruption:
+- semantic pass/fail evidence already completed is preserved
+- provider failure is reported separately
+- next same-version one-shot run resumes from the failed case instead of starting again at case 0
+
+A semantic version change deliberately invalidates resume so a changed interpreter must still recertify the full corpus.
+
+### Branch verification
+
+Phase 5.10 branch verification:
+run `36205780101`
+
+Result:
+- **1196 / 1196 PASS**
+- fail 0
+- exact Netlify build command PASS
+- Phase O live eval gate skipped outside production/main
+- live cert skipped outside production/main
+
+No DB/schema/backoffice/transaction-core change.
+No paid OpenAI fallback.
+No manual Netlify deploy.
+No keyword/regex runtime language router.

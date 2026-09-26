@@ -44,6 +44,15 @@ const HORSE_CONTEXT: SemanticContext = {
   openQuestion: undefined,
 };
 
+const HORSE_SELECTED_CONTEXT: SemanticContext = {
+  activeDomain: 'activity',
+  recentEntities: [
+    { id: 'horse:paradon', type: 'horse', name: 'ภาราดร', domain: 'activity' },
+  ],
+  lastAction: 'recommend',
+  openQuestion: undefined,
+};
+
 const RESTAURANT_SET_CONTEXT: SemanticContext = {
   activeDomain: 'restaurant',
   recentEntities: [
@@ -563,7 +572,7 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
       entities: {}, references: [], constraints: [], confidence: 0.92, needsClarification: false } },
   { id: 'confirm-gating-02', category: 'confirmation_gating', domainArea: 'activity',
     message: 'เอาม้าตัวนี้',
-    context: HORSE_CONTEXT,
+    context: HORSE_SELECTED_CONTEXT,
     expected: { domain: 'activity', action: 'confirm' },
     simulatedModelOutput: { domain: 'activity', intent: 'select_horse', action: 'confirm',
       entities: { horseName: 'ภาราดร' }, references: [{ type: 'previous_selection', refersToPriorContext: true, resolvedEntityId: 'horse:paradon' }], constraints: [], confidence: 0.88, needsClarification: false } },
