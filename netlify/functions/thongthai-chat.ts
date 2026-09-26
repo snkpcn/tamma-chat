@@ -4621,7 +4621,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // semantic supervisor already produced a safe, non-transactional One-Mind
   // response, use that deterministic/grounded response instead of invoking
   // the legacy generative brain. This keeps OpenAI in the teacher role.
-  if (earlyOneMind?.status === 'composed') {
+  const earlyFallbackSafe = earlyOneMind?.status === 'composed'
+    && !earlyOneMind.turn.taskStateBefore.activeTask
+    && !earlyOneMind.turn.taskStateAfter.activeTask
+    && !earlyOneMind.turn.semanticTurn.taskDirective
+    && ['ask','discover','recommend','compare','status'].includes(earlyOneMind.turn.semanticTurn.action);
+  if (earlyFallbackSafe && earlyOneMind?.status === 'composed') {
     const supervisedFallback = polishedResponse({
       message: earlyOneMind.response.message,
       intent: earlyOneMind.turn.semanticTurn.action === 'recommend'
