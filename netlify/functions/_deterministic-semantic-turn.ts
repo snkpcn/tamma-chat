@@ -576,10 +576,18 @@ export function deriveDeterministicSemanticTurn(
   const entityMatch = findEntityByName(trimmed, context.recentEntities);
   if (entityMatch) {
     const resourceCode = directResourceCode(entityMatch);
+    const domain = entityMatch.domain === 'unknown' ? (context.activeDomain ?? 'unknown') : entityMatch.domain;
+    const committing = hasStandaloneTransactionRequest(trimmed);
+    const action: SemanticTurn['action'] = committing
+      ? domain === 'restaurant' ? 'order'
+        : domain === 'activity' || domain === 'stay' ? 'book'
+          : 'confirm'
+      : 'confirm';
     return {
-      domain: entityMatch.domain === 'unknown' ? (context.activeDomain ?? 'unknown') : entityMatch.domain,
-      intent: 'select_prior_entity',
-      action: 'confirm',
+      domain,
+      intent: committing ? 'transaction_request_for_prior_entity' : 'select_prior_entity',
+      action,
+      speechAct: committing ? 'transaction_request' : 'selection',
       // Lands directly as resourceCode where that's valid (stay/restaurant/
       // otop); for an activity asset, resourceCode resolves authoritatively
       // downstream from selectedEntities instead (see directResourceCode).
