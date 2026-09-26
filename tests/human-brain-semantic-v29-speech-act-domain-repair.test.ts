@@ -40,5 +40,5 @@ test('semantic-v29 terminal audit separates repair from intentional change', () 
 });
 
 test('semantic-v29 version is explicit', () => {
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
 });

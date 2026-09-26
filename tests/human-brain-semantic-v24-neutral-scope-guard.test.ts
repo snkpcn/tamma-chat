@@ -31,5 +31,5 @@ test('semantic-v28 does not turn companion context into evaluation by itself',()
 });
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
 });

@@ -8,7 +8,7 @@ import {
 
 test('semantic-v28 locks short topic follow-up vs invented availability',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
   assert.ok(prompt.includes('bare topic/resource follow-up does NOT imply current'));
   assert.ok(prompt.includes('do not invent status + availability'));
 });

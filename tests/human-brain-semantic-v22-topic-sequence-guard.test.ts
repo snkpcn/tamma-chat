@@ -34,5 +34,5 @@ test('semantic-v28 keeps generic cross-business flow as journey composition',()=
 });
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
 });
