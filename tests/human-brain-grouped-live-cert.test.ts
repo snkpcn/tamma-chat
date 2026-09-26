@@ -68,23 +68,47 @@ test('grouped provider outage is availability failure and does not advance seman
 });
 
 
-test('grouped malformed envelope marks every selected case failed instead of skipping resume coverage',async()=>{
-  const classifyGroup:GroupedSemanticClassifier=async()=>{
-    throw new SyntaxError('bad grouped json');
+test('grouped malformed envelope retries as two smaller independent groups without converting parser noise into semantic failure',async()=>{
+  let calls=0;
+  const classifyGroup:GroupedSemanticClassifier=async(items)=>{
+    calls+=1;
+    if(items.length>5) throw new SyntaxError('batch too large');
+    return new Map(items.map(item=>[item.id,item.simulatedModelOutput]));
   };
   const result=await runGroupedSemanticCertification({
     profile:'full',
     start:12,
-    limit:20,
+    limit:10,
     classifyGroup,
+    groupRecoveryDelayMs:0,
+  });
+  assert.equal(calls,3);
+  assert.equal(result.providerFailed,0);
+  assert.equal(result.semanticEvaluated,10);
+  assert.equal(result.semanticFailed,0);
+  assert.equal(result.failed,0);
+  assert.equal(result.pass,10);
+  assert.equal(result.availabilityComplete,true);
+});
+
+test('unrecoverable grouped formatting failure does not advance semantic prefix or invent semantic failures',async()=>{
+  const classifyGroup:GroupedSemanticClassifier=async()=>{
+    throw new SyntaxError('still malformed');
+  };
+  const result=await runGroupedSemanticCertification({
+    profile:'full',
+    start:12,
+    limit:10,
+    classifyGroup,
+    groupRecoveryDelayMs:0,
   });
   assert.equal(result.providerFailed,0);
-  assert.equal(result.semanticEvaluated,20);
-  assert.equal(result.semanticFailed,20);
-  assert.equal(result.failed,20);
-  assert.equal(result.failures.length,20);
+  assert.equal(result.evaluated,0);
+  assert.equal(result.semanticEvaluated,0);
+  assert.equal(result.semanticFailed,0);
+  assert.equal(result.failed,0);
   assert.equal(result.pass,0);
-  assert.equal(result.availabilityComplete,true);
+  assert.equal(result.availabilityComplete,false);
 });
 
 test('grouped live request payload never includes expected labels or simulated gold output',()=>{
