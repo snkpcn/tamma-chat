@@ -355,6 +355,19 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   // SAME hasOpenTask pattern already established elsewhere in this file.
   const hasOpenActiveTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
   if (!hasOpenActiveTask) {
+    // A correction only has meaning against existing working state unless it
+    // carries a concrete slot/reference to establish what is being corrected.
+    // "just asking, I did not ask you to book" must suppress progression,
+    // never manufacture a new preorder/booking task from an empty correction.
+    if (
+      turn.action === 'correct_previous'
+      && Object.keys(taskSlotPatch(turn.entities)).length === 0
+      && !hasResolvedTaskReference(turn)
+    ) {
+      reasons.push('no_active_task');
+      return {container,reasons};
+    }
+
     // Human Conversation Recovery: a preference/constraint declaration is
     // conversational state, not evidence that the customer wants to start an
     // order/booking task. Example: "หมูก็ไม่เอาด้วย" must update meaning and

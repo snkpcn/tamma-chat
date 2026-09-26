@@ -84,6 +84,7 @@ test('Phase 6 E2E restaurant: browse, preferences, availability and just-asking 
   for(const turn of turns.slice(0,-1)) assert.equal(turn.dialogDecision.actionProposal,undefined);
   assert.equal(turns[1]!.taskStateAfter.activeTask,null,'preference memory is not an order task');
   assert.equal(turns[2]!.taskStateAfter.activeTask,null,'availability question is not a booking');
+  assert.equal(turns[3]!.taskStateAfter.activeTask,null,'just-asking correction cannot manufacture an order task');
   assert.equal(turns.at(-1)!.dialogDecision.actionProposal?.toolName,'create_restaurant_preorder');
   assert.equal(turns.at(-1)!.dialogDecision.actionProposal?.requiresExplicitConfirmation,true);
 });
