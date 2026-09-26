@@ -444,6 +444,23 @@ function deterministicNeedsLanguageRefinement(
   return false;
 }
 
+function isTrustedConversationalCorrection(
+  turn: SemanticTurn,
+  deterministic: SemanticTurn | null,
+): boolean {
+  return Boolean(
+    deterministic
+    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+    && COARSE_READ_ONLY_INTENTS.has(deterministic.intent)
+    && turn.action === 'correct_previous'
+    && turn.speechAct === 'correction'
+    && turn.domain === deterministic.domain
+    && turn.confidence >= 0.9
+    && turn.needsClarification === false
+    && Object.keys(turn.entities).length > 0
+  );
+}
+
 function modelRefinementIsUsable(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
@@ -471,6 +488,7 @@ function modelRefinementIsUsable(
     deterministic
     && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
     && !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)
+    && !isTrustedConversationalCorrection(turn, deterministic)
   ) {
     return false;
   }
@@ -546,8 +564,10 @@ async function resolveSemanticTurn(
     const mutatingActions = new Set<SemanticTurn['action']>([
       'book', 'order', 'confirm', 'modify', 'cancel', 'correct_previous',
     ]);
+    const trustedConversationalCorrection = isTrustedConversationalCorrection(modelTurn, deterministic);
     if (
       deterministic
+      && !trustedConversationalCorrection
       && (mutatingActions.has(modelTurn.action) || mutatingActions.has(deterministic.action))
       && (modelTurn.domain !== deterministic.domain || modelTurn.action !== deterministic.action)
     ) {
