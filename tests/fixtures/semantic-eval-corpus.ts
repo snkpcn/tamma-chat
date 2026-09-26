@@ -129,7 +129,7 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     message: 'ที่นี่มีอะไรน่าทำ',
     expected: { domain: 'ecosystem', action: 'discover' },
     simulatedModelOutput: { domain: 'ecosystem', intent: 'broad_experience_discovery', action: 'discover', entities: {}, references: [], constraints: [], confidence: 0.88, needsClarification: false } },
-  { id: 'discover-07', group: 'broad_discovery', category: 'colloquial', domainArea: 'ecosystem',
+  { id: 'discover-07', group: 'personalized_recommendation', category: 'colloquial', domainArea: 'ecosystem',
     message: 'พาแฟนมา มีไรทำ',
     expected: { domain: 'ecosystem', action: 'recommend' },
     simulatedModelOutput: { domain: 'ecosystem', intent: 'couple_experience_recommendation', action: 'recommend', informationNeed: 'recommendation', entities: { travelerType: 'couple' }, references: [], constraints: [], confidence: 0.82, needsClarification: false } },
