@@ -13,11 +13,11 @@ function byId(id:string){
   return item;
 }
 
-test('semantic-v24 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v24');
+test('semantic-v25 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v25');
 });
 
-test('semantic-v24 preserves broad evaluative golds',()=>{
+test('semantic-v25 preserves broad evaluative golds',()=>{
   for(const id of ['discover-05','discover-06']){
     const item=byId(id);
     assert.equal(item.expected.domain,'ecosystem');
@@ -26,7 +26,7 @@ test('semantic-v24 preserves broad evaluative golds',()=>{
   }
 });
 
-test('semantic-v24 defines neutral browsing versus evaluative guidance by requested answer',()=>{
+test('semantic-v25 defines neutral browsing versus evaluative guidance by requested answer',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('discover means neutral browsing or listing of what exists, without asking the assistant to judge which options are good, worthwhile, advisable, or preferable'));
   assert.ok(p.includes('recommend means the customer asks for evaluative guidance or curation: which options are good, worthwhile, advisable, suitable, preferable, or worth choosing'));

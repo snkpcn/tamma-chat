@@ -13,24 +13,24 @@ function byId(id:string){
   return item;
 }
 
-test('semantic-v24 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v24');
+test('semantic-v25 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v25');
 });
 
-test('semantic-v24 keeps both remaining v17 full-cert golds unchanged',()=>{
+test('semantic-v25 keeps both remaining v17 full-cert golds unchanged',()=>{
   assert.deepEqual(byId('l-journey-04').expected,{domain:'activity',action:'recommend',needsClarification:false});
   assert.equal(byId('l-journey-04').simulatedModelOutput?.informationNeed,'recommendation');
   assert.deepEqual(byId('l-journey-10').expected,{domain:'journey',action:'recommend',needsClarification:false});
 });
 
-test('semantic-v24 decides single requested target before incidental sequence language',()=>{
+test('semantic-v25 decides single requested target before incidental sequence language',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('First decide whether the customer is asking you to choose exactly ONE primary offering or to design a MULTI-PART plan'));
   assert.ok(p.includes('Exactly one requested activity remains activity even when it must happen before or after a meal, stay, or other event'));
   assert.ok(p.includes('The second event is only a timing boundary unless the customer asks you to choose, arrange, or coordinate it too'));
 });
 
-test('semantic-v24 makes journey composition recommend and reserves discover for existing journey catalogs',()=>{
+test('semantic-v25 makes journey composition recommend and reserves discover for existing journey catalogs',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('When the requested deliverable is a NEW multi-part plan, itinerary, or coordination of two or more customer goals, use journey + recommend'));
   assert.ok(p.includes('journey + discover is only for browsing already-existing itinerary/package/plan options'));
