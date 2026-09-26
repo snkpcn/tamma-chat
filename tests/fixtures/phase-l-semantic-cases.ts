@@ -203,7 +203,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
 
   // Extra Phase L breadth — cross-domain planning and less common customer goals.
   c('l-journey-08','formal','journey','พาแม่มาเที่ยว ไม่อยากเดินเยอะ ช่วยจัดแผนให้หน่อย','recommend','recommend_low_walking_journey',{travelerType:'family'},undefined,['low_walking']),
-  c('l-journey-09','multi_intent','journey','มีอะไรทำแล้วไปกินข้าวต่อได้พอดี','recommend','recommend_activity_then_meal',{},undefined,['before_meal']),
+  c('l-journey-09','multi_intent','activity','มีอะไรทำแล้วไปกินข้าวต่อได้พอดี','recommend','recommend_activity_then_meal',{},undefined,['before_meal']),
   c('l-journey-10','multi_intent','journey','อยากขี่ม้าแล้วพักค้างคืน ช่วยจัดให้หน่อย','recommend','recommend_horse_and_stay',{activityType:'horse',nights:1}),
   c('l-topic-activity-01','topic_switch','activity','ไม่เอาห้องแล้ว ขอไปดูกิจกรรมแทน','discover','switch_from_stay_to_activity',{},STAY_CONTEXT),
   c('l-promo-09','formal','promotion','โปรร้านอาหารกับที่พักใช้ร่วมกันได้ไหม','ask','ask_cross_business_promotion',{businessUnits:['restaurant','stay']},undefined,[],false,'policy'),
