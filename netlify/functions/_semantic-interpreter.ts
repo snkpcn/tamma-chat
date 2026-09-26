@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v13';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v14';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -324,9 +324,10 @@ SEMANTIC COMPLETENESS RULES:
 DOMAIN-SCOPE TAXONOMY:
 - ecosystem = generic whole-property discovery/recommendation when the customer asks broadly what there is to do, play, visit, or
   experience and does NOT ask to compose a trip/plan/sequence and does not name a narrower primary business subject.
-- Generic verbs such as do/play/visit are NOT enough by themselves to narrow the domain to activity. They can describe the whole
-  TAMMA ecosystem. Use activity only when a specific activity/activity entity is stated (horse, ATV, archery, etc.) or the relevant
-  conversation context unambiguously establishes activity.
+- Generic do/play/visit wording alone may remain ecosystem when the requested experience is genuinely broad. But an explicit canonical
+  category noun such as activities establishes that category domain even when no individual item has been named. No specific activity
+  entity is required when the customer explicitly asks for the activity category itself; the same category-ownership principle applies
+  to stay, restaurant/menu, cafe, OTOP, promotion, and membership.
 - promotion is cross-cutting. When the PRIMARY subject is a promotion/discount/offer, keep domain "promotion" even when the promotion
   is for restaurant, activity, stay, cafe, OTOP, or multiple business units. Put the named business unit in entities; do not replace
   the primary promotion domain with that sub-business domain.
@@ -346,6 +347,10 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
   pair an existing booking/order/payment status with informationNeed=transaction_status.
 - ask = an informational/factual question that is not better represented by status, compare, recommend, or discover.
+- Retrieving, viewing, reopening, or showing one existing saved artifact is ask, not discover. This includes a saved journey/plan,
+  booking detail, order detail, or other already-existing record when the customer wants to see that specific artifact. discover + catalog
+  is for browsing multiple options or categories, not reading back a specific saved artifact. A saved journey/plan that already exists is
+  an artifact, not a journey catalog.
 - Bare existence questions about reservable resources ask current availability. "Are there any rooms/tables/slots?" is status + availability;
   asking what room/table/resource TYPES or options exist is discover + catalog.
 - A bare identity question like "which one?" asks to identify or disambiguate among the candidates already in context. Do not turn it into
