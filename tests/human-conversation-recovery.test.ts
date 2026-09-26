@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -120,4 +121,20 @@ test('Human Conversation Recovery: deterministic parser remains outage fallback,
   assert.equal(modelCalls, 1);
   assert.equal(result.semanticTurn.domain, 'activity');
   assert.equal(result.semanticTurn.informationNeed, 'inventory');
+});
+
+
+test('Human Conversation Recovery: production chat routing attempts One Mind before legacy domain responders', () => {
+  const source = fs.readFileSync(new URL('../netlify/functions/thongthai-chat.ts', import.meta.url), 'utf8');
+  const first = source.indexOf('THONGTHAI_HUMAN_CONVERSATION_FIRST');
+  const pending = source.indexOf('pendingQuestionContinuationResponse(request');
+  const homestay = source.indexOf('const homestayFacts = homestayFactsResponse(request)');
+  const activityFallback = source.indexOf('const earlyActivityFallback = await activityBookingFallbackResponse(request');
+  const oldCutover = source.indexOf('const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message)');
+
+  assert.ok(first > 0);
+  assert.ok(pending > first, 'language understanding must run before pending-question phrase matching');
+  assert.ok(homestay > first, 'language understanding must run before homestay regex routing');
+  assert.ok(activityFallback > first, 'language understanding must run before activity fallback parsing');
+  assert.ok(oldCutover > first, 'legacy-position cutover must no longer be the first semantic attempt');
 });
