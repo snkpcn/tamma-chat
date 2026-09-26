@@ -9,7 +9,7 @@ import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 import { PHASE_L_SEMANTIC_CASES } from './fixtures/phase-l-semantic-cases';
 
 test('semantic-v28 version is explicit so live certification cannot inherit semantic-v7 results',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v28');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
 });
 
 test('semantic-v28 doctrine locks the eight human-meaning boundaries from completed live v7 certification',()=>{
