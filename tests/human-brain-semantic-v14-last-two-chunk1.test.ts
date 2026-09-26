@@ -25,15 +25,17 @@ test('semantic-v14 keeps journey-02 and informational-02 gold unchanged',()=>{
 
 test('semantic-v14 removes the activity-domain contradiction and gives explicit category nouns priority',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.ok(prompt.includes('Generic do/play/visit wording alone may remain ecosystem'));
-  assert.ok(prompt.includes('an explicit canonical category noun such as activities establishes that category domain'));
-  assert.ok(prompt.includes('No specific activity entity is required when the customer explicitly asks for the activity category itself'));
-  assert.equal(prompt.includes('Use activity only when a specific activity/activity entity is stated'),false);
+  const normalized=prompt.replace(/\\s+/g,' ');
+  assert.ok(normalized.includes('Generic do/play/visit wording alone may remain ecosystem'));
+  assert.ok(normalized.includes('an explicit canonical category noun such as activities establishes that category domain'));
+  assert.ok(normalized.includes('No specific activity entity is required when the customer explicitly asks for the activity category itself'));
+  assert.equal(normalized.includes('Use activity only when a specific activity/activity entity is stated'),false);
 });
 
 test('semantic-v14 distinguishes retrieving an existing saved artifact from catalog discovery',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
-  assert.ok(prompt.includes('Retrieving, viewing, reopening, or showing one existing saved artifact is ask'));
-  assert.ok(prompt.includes('discover + catalog is for browsing multiple options or categories, not reading back a specific saved artifact'));
-  assert.ok(prompt.includes('A saved journey/plan that already exists is an artifact, not a journey catalog'));
+  const normalized=prompt.replace(/\\s+/g,' ');
+  assert.ok(normalized.includes('Retrieving, viewing, reopening, or showing one existing saved artifact is ask'));
+  assert.ok(normalized.includes('discover + catalog is for browsing multiple options or categories, not reading back a specific saved artifact'));
+  assert.ok(normalized.includes('A saved journey/plan that already exists is an artifact, not a journey catalog'));
 });
