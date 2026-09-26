@@ -85,8 +85,14 @@ test('Phase 6 E2E restaurant: browse, preferences, availability and just-asking 
   assert.equal(turns[1]!.taskStateAfter.activeTask,null,'preference memory is not an order task');
   assert.equal(turns[2]!.taskStateAfter.activeTask,null,'availability question is not a booking');
   assert.equal(turns[3]!.taskStateAfter.activeTask,null,'just-asking correction cannot manufacture an order task');
-  assert.equal(turns.at(-1)!.dialogDecision.actionProposal?.toolName,'create_restaurant_preorder');
-  assert.equal(turns.at(-1)!.dialogDecision.actionProposal?.requiresExplicitConfirmation,true);
+  const final=turns.at(-1)!;
+  assert.equal(final.semanticTurn.action,'order');
+  assert.deepEqual(final.taskStateAfter.activeTask?.missingFields,[],
+    JSON.stringify({slots:final.taskStateAfter.activeTask?.slots,decision:final.dialogDecision}));
+  assert.equal(final.taskStateAfter.activeTask?.commitmentIntent,true);
+  assert.equal(final.dialogDecision.actionProposal?.toolName,'create_restaurant_preorder',
+    JSON.stringify({semantic:final.semanticTurn,task:final.taskStateAfter.activeTask,decision:final.dialogDecision}));
+  assert.equal(final.dialogDecision.actionProposal?.requiresExplicitConfirmation,true);
 });
 
 test('Phase 6 E2E horse: selection, side B, side C and resume preserve the exact task; booking appears only at the end',async()=>{
