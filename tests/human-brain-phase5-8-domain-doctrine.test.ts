@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   buildSemanticInterpreterPrompt,
   emptySemanticContext,
+  parseSemanticTurnResponse,
+  type SemanticContext,
 } from '../netlify/functions/_semantic-interpreter';
 import { PHASE_L_SEMANTIC_CASES } from './fixtures/phase-l-semantic-cases';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
@@ -87,4 +89,111 @@ test('Phase 5.8 RED2: membership profile status fixture contains profile context
   assert.equal(item.expected.action,'status');
   assert.equal(item.context?.activeDomain,'membership');
   assert.ok(item.context?.recentEntities.some(entity=>entity.type==='membership_profile'));
+});
+
+
+test('Phase 5.8: bounded JSON syntax recovery accepts one wrapped object and harmless trailing comma',()=>{
+  const wrapped='result follows: {"domain":"activity","intent":"ask_policy","action":"ask","informationNeed":"policy","entities":{},"references":[],"constraints":[],"confidence":0.9,"needsClarification":false,} end';
+  const turn=parseSemanticTurnResponse(wrapped,emptySemanticContext());
+  assert.equal(turn.domain,'activity');
+  assert.equal(turn.action,'ask');
+  assert.equal(turn.informationNeed,'policy');
+});
+
+test('Phase 5.8: unresolved selection with zero usable context cannot retain a hallucinated business domain',()=>{
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    domain:'ecosystem',
+    intent:'select_that',
+    action:'confirm',
+    informationNeed:'none',
+    entities:{},
+    references:[{type:'previous_selection',value:'that',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.9,
+    needsClarification:false,
+  }),emptySemanticContext());
+  assert.equal(turn.domain,'unknown');
+  assert.equal(turn.needsClarification,true);
+});
+
+test('Phase 5.8: multi-candidate identity lookup is ask, not catalog discovery',()=>{
+  const context:SemanticContext={
+    activeDomain:'activity',
+    recentEntities:[
+      {id:'horse:a',type:'horse',name:'A',domain:'activity'},
+      {id:'horse:b',type:'horse',name:'B',domain:'activity'},
+    ],
+  };
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    domain:'activity',
+    intent:'which_horse',
+    action:'discover',
+    informationNeed:'catalog',
+    entities:{},
+    references:[{type:'entity_selection',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.9,
+    needsClarification:false,
+  }),context);
+  assert.equal(turn.action,'ask');
+  assert.equal(turn.needsClarification,false);
+});
+
+test('Phase 5.8: explicit prior selection plus supplied slots remains confirm while preserving slots',()=>{
+  const context:SemanticContext={
+    activeDomain:'restaurant',
+    recentEntities:[{id:'set:1',type:'proposed_set',name:'ชุดหนึ่ง',domain:'restaurant'}],
+  };
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    domain:'restaurant',
+    intent:'select_set_with_time',
+    action:'provide_information',
+    informationNeed:'none',
+    entities:{date:'พรุ่งนี้',time:'12:00'},
+    references:[{type:'previous_selection',value:'ชุดหนึ่ง',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.9,
+    needsClarification:false,
+  }),context);
+  assert.equal(turn.action,'confirm');
+  assert.equal(turn.entities.date,'พรุ่งนี้');
+  assert.equal(turn.entities.time,'12:00');
+});
+
+test('Phase 5.8: resume_suspended directive cannot be interpreted as confirmation',()=>{
+  const context:SemanticContext={
+    activeDomain:'restaurant',
+    recentEntities:[],
+    suspendedTask:{
+      type:'activity_booking',
+      domain:'activity',
+      status:'collecting',
+      knownSlots:{},
+      missingFields:['date'],
+      selectedEntities:[],
+      constraints:[],
+    },
+  };
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    domain:'activity',
+    intent:'resume_activity',
+    action:'confirm',
+    taskDirective:'resume_suspended',
+    informationNeed:'none',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.9,
+    needsClarification:false,
+  }),context);
+  assert.equal(turn.action,'ask');
+  assert.equal(turn.taskDirective,'resume_suspended');
+});
+
+test('Phase 5.8: live-v3 adjudications keep intentional changes as modify and vague support as ask+clarify',()=>{
+  assert.equal(byId('correction-05').expected.action,'modify');
+  assert.equal(byId('l-activity-05').expected.action,'modify');
+  assert.equal(byId('l-stay-06').expected.action,'modify');
+  assert.equal(byId('l-support-01').expected.action,'ask');
+  assert.equal(byId('l-support-01').expected.needsClarification,true);
 });
