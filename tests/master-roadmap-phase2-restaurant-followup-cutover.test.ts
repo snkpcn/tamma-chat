@@ -106,8 +106,8 @@ test('production cutover: restaurant follow-up survives empty LINE history and p
 
         assert.equal(
           harness.modelCallCount(),
-          modelCallsBeforeFollowup,
-          'restaurant follow-up with persisted context must bypass One-Mind/model cutover',
+          modelCallsBeforeFollowup + 1,
+          'restaurant follow-up must be language-supervised once, then continue through grounded restaurant context',
         );
         assert.doesNotMatch(followup, /ขอรายละเอียดเพิ่มอีกนิด|ช่วยต่อให้ตรงเรื่อง/u);
         const followupItems = menuLines(followup);
