@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v16';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v17';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -481,6 +481,8 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- A promotion, discount, offer, or benefit remains domain=promotion when that is the PRIMARY thing being requested. Scoping that promotion to activity, restaurant, stay, cafe, or OTOP does not transfer domain ownership to the scoped business.
+- A failed, rejected, or invalid payment artifact remains domain=payment when the customer asks what to do next. Use support only when the primary request is generic assistance rather than payment remediation.
 - Creating, arranging, or composing a NEW itinerary or multi-step journey for the customer is recommend, not ask. This includes a duration-bounded plan or a plan that combines multiple requested experiences or business units. Use ask for retrieving, resuming, explaining, or discussing an existing plan when the customer is not asking you to design a new one.
 - How-it-works, instructions, rules, or explanation about one named activity are ask, not discover. discover is for browsing what activities/options exist.
 - Selecting an already-presented option and adding only schedule, quantity, or party-size slots remains confirm. Do not escalate that turn to book/order unless the CURRENT utterance explicitly asks to submit the transaction.
@@ -641,10 +643,14 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     ? parsed.taskDirective as SemanticTaskDirective
     : undefined;
   const intent = typeof parsed.intent === 'string' && /^[a-z][a-z0-9_]{1,79}$/.test(parsed.intent) ? parsed.intent : 'unknown';
-  const informationNeed = VALID_INFORMATION_NEEDS.includes(parsed.informationNeed as SemanticInformationNeed)
+  let informationNeed = VALID_INFORMATION_NEEDS.includes(parsed.informationNeed as SemanticInformationNeed)
     ? parsed.informationNeed as SemanticInformationNeed
     : 'none';
   let action = canonicalizeReadOnlyAction(parsedAction, informationNeed);
+  // Closed-field consistency only: once the model has semantically chosen
+  // recommend, an omitted generic facet is normalized to recommendation.
+  // This does not infer intent from user text or change domains/actions.
+  if (action === 'recommend' && informationNeed === 'none') informationNeed = 'recommendation';
   const confidenceRaw = Number(parsed.confidence);
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
