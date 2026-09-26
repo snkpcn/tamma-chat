@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v20';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v21';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -340,9 +340,8 @@ DOMAIN-SCOPE TAXONOMY:
   the restaurant unless CURRENT context explicitly establishes another storefront such as Inthanin/cafe or OTOP. Therefore an unqualified ร้าน operating-hours question belongs to restaurant, not ecosystem.
 
 ACTION TAXONOMY (apply by meaning, not keywords):
-- discover = the customer asks what options/catalog/items/categories EXIST or are available to browse. Asking what menu/items/options
-  are there is discover, even inside restaurant/cafe/OTOP. discovery does not mean the assistant should choose one for them.
-- recommend = the customer asks the assistant to HELP CHOOSE, suggest, personalize, or say what is suitable/better for them.
+- discover means neutral browsing or listing of what exists, without asking the assistant to judge which options are good, worthwhile, advisable, or preferable. Asking what menu/items/options are there is discover, even inside restaurant/cafe/OTOP. Discovery does not mean the assistant should choose or evaluate one for them.
+- recommend means the customer asks for evaluative guidance or curation: which options are good, worthwhile, advisable, suitable, preferable, or worth choosing. Recommendation does not require personal preferences, traveler details, or the literal word recommend. If a useful answer must make an evaluative judgment or curate a subset rather than merely list the catalog, use recommend + recommendation.
 - status = the customer asks the CURRENT STATE of something: whether a table/room/activity/resource is available, free, full, open,
   still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
   pair an existing booking/order/payment status with informationNeed=transaction_status.
