@@ -19,7 +19,10 @@ jobs:
           set -uo pipefail
           url='https://tamma-chat.netlify.app/semantic-certification-result.json'
           for attempt in $(seq 1 20); do
-            curl --fail --silent --show-error --retry 2 --retry-delay 2               -H 'Cache-Control: no-cache'               "$url?readback_attempt=$attempt&ts=$(date +%s)"               -o /tmp/semantic-certification-result.json
+            curl --fail --silent --show-error --retry 2 --retry-delay 2 \
+              -H 'Cache-Control: no-cache' \
+              "$url?readback_attempt=$attempt&ts=$(date +%s)" \
+              -o /tmp/semantic-certification-result.json
             if node <<'NODE'
           const fs=require('fs');
           const a=JSON.parse(fs.readFileSync('/tmp/semantic-certification-result.json','utf8'));
@@ -29,17 +32,28 @@ jobs:
             providerFailed:a.providerFailed,resumeStart:a.resumeStart,passPct:a.passPct,
             availabilityComplete:a.availabilityComplete,generatedAt:a.generatedAt
           }));
-          if(a.semanticVersion==='semantic-v30' && a.totalCorpusCases===158 &&
-             a.semanticEvaluated===158 && a.pass===158 && a.semanticFailed===0 &&
-             a.providerFailed===0 && Array.isArray(a.failures) && a.failures.length===0 &&
-             a.availabilityComplete===true && a.status==='completed'){
+          const done=
+            a.semanticVersion==='semantic-v30' &&
+            a.totalCorpusCases===158 &&
+            a.semanticEvaluated===158 &&
+            a.pass===158 &&
+            a.semanticFailed===0 &&
+            a.providerFailed===0 &&
+            Array.isArray(a.failures) &&
+            a.failures.length===0 &&
+            a.availabilityComplete===true &&
+            a.status==='completed';
+          if(done){
             console.log('SEMANTIC_V30_FINAL_ARTIFACT='+JSON.stringify(a));
             process.exit(0);
           }
           process.exit(42);
           NODE
-            code=$?
-            if [ "$code" -eq 0 ]; then exit 0; fi
+            then
+              exit 0
+            else
+              code=$?
+            fi
             if [ "$code" -ne 42 ]; then exit "$code"; fi
             echo "Final artifact not ready yet (attempt $attempt/20)"
             sleep 45
