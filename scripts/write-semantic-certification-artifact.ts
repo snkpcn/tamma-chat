@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import {
-  runSemanticCertification,
+  runGroupedSemanticCertification,
   type SemanticCertificationFailure,
 } from '../netlify/functions/_semantic-live-certification';
 import { SEMANTIC_INTERPRETER_VERSION } from '../netlify/functions/_semantic-interpreter';
@@ -109,22 +109,22 @@ async function main() {
   }
 
   const chunkSize=20;
-  const availabilityRetryDelayMs=61_000;
-  // Final free-tier certification runs in bounded production-build chunks.
-  // This avoids both self-inflicted RPM bursts and Netlify's ~15 minute
-  // build ceiling. The same-version artifact is resumed on the next build.
-  const configuredMaxSemanticCases=Number(process.env.SEMANTIC_CERT_MAX_CASES_PER_RUN ?? '75');
+  const availabilityRetryDelayMs=62_000;
+  // Certification-only prompt grouping keeps the LIVE provider in the loop
+  // while reducing free-tier request pressure: up to 20 independent corpus
+  // cases share one provider request, but each keeps its own context/message
+  // and is parsed/scored independently afterward.
+  const configuredMaxSemanticCases=Number(process.env.SEMANTIC_CERT_MAX_CASES_PER_RUN ?? '158');
   const maxSemanticCasesPerRun=Number.isFinite(configuredMaxSemanticCases)
-    ? Math.max(1,Math.min(75,Math.floor(configuredMaxSemanticCases)))
-    : 75;
-  // Live evidence reached project quota after a short burst. Gemini rate
-  // limits are project-scoped and vary by model/tier, so the cert runner keeps
-  // deliberate headroom instead of assuming fallback model IDs provide fresh
-  // project RPM. Override only for controlled certification runs.
-  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '9000');
-  const interCaseDelayMs=Number.isFinite(configuredInterCaseDelayMs)
-    ? Math.max(0,Math.min(15_000,Math.floor(configuredInterCaseDelayMs)))
-    : 9_000;
+    ? Math.max(1,Math.min(158,Math.floor(configuredMaxSemanticCases)))
+    : 158;
+  // Current project evidence behaves like a one-request quota window after
+  // sustained certification traffic. Space GROUP starts, not individual
+  // cases. A resumed build waits one clean interval before its first group.
+  const configuredInterGroupDelayMs=Number(process.env.SEMANTIC_CERT_INTER_GROUP_DELAY_MS ?? '62000');
+  const interGroupDelayMs=Number.isFinite(configuredInterGroupDelayMs)
+    ? Math.max(0,Math.min(90_000,Math.floor(configuredInterGroupDelayMs)))
+    : 62_000;
 
   try {
     const resumeBase=await loadResumeBase();
@@ -134,20 +134,23 @@ async function main() {
     let totalCorpusCases:number|null=resumeBase?.totalCorpusCases ?? null;
 
     let semanticCasesThisRun=0;
+    let groupedRequestCount=0;
     while(
       (totalCorpusCases===null || start<totalCorpusCases)
       && semanticCasesThisRun<maxSemanticCasesPerRun
     ){
+      if(interGroupDelayMs>0 && (start>0 || groupedRequestCount>0)){
+        await new Promise(resolve=>setTimeout(resolve,interGroupDelayMs));
+      }
       const remainingChunkBudget=maxSemanticCasesPerRun-semanticCasesThisRun;
-      const batch=await runSemanticCertification({
+      const batch=await runGroupedSemanticCertification({
         profile:'full',
         start,
         limit:Math.min(chunkSize,remainingChunkBudget),
         availabilityRetries:1,
         availabilityRetryDelayMs,
-        stopOnProviderFailure:true,
-        interCaseDelayMs,
       });
+      groupedRequestCount += 1;
       batches.push(batch);
       totalCorpusCases=batch.totalCorpusCases;
       semanticCasesThisRun += batch.semanticEvaluated;
@@ -206,8 +209,9 @@ async function main() {
       providerFailed,
       resumeStart:availabilityComplete ? (totalCorpusCases ?? semanticEvaluated) : resumeStart,
       semanticCasesThisRun,
+      groupedRequestCount,
       maxSemanticCasesPerRun,
-      interCaseDelayMs,
+      interGroupDelayMs,
       passPct:semanticEvaluated?Number((pass/semanticEvaluated*100).toFixed(2)):0,
       availabilityComplete,
       failures,
@@ -223,8 +227,9 @@ async function main() {
       providerFailed,
       resumeStart:artifact.resumeStart,
       semanticCasesThisRun,
+      groupedRequestCount,
       maxSemanticCasesPerRun,
-      interCaseDelayMs,
+      interGroupDelayMs,
       passPct:artifact.passPct,
       availabilityComplete,
     }));
