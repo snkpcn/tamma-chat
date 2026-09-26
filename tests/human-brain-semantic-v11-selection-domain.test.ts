@@ -8,7 +8,7 @@ import {
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
 });
 
 test('semantic-v28 doctrine locks selection-with-slots and explicit category domain ownership',()=>{
