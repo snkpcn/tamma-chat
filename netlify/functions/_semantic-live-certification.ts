@@ -177,6 +177,18 @@ function retryableAvailabilityFailure(attempts: ProviderAttemptDiagnostic[]): bo
     && !attempts.some(attempt => attempt.outcome === 'request_error' || attempt.outcome === 'not_configured');
 }
 
+export function computeAvailabilityRetryDelayMs(
+  attempts: ProviderAttemptDiagnostic[],
+  rateLimitDelayMs: number,
+  transientDelayMs: number,
+): number {
+  const hasRateLimit = attempts.some(attempt =>
+    attempt.outcome === 'rate_limited' || attempt.outcome === 'circuit_open');
+  return hasRateLimit
+    ? Math.max(0, Math.floor(rateLimitDelayMs))
+    : Math.max(0, Math.floor(transientDelayMs));
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -200,6 +212,7 @@ export async function runSemanticCertification(options: {
   interpret?: typeof interpretSemanticTurn;
   availabilityRetries?: number;
   availabilityRetryDelayMs?: number;
+  transientAvailabilityRetryDelayMs?: number;
   stopOnProviderFailure?: boolean;
   interCaseDelayMs?: number;
 } = {}): Promise<SemanticCertificationResult> {
@@ -216,6 +229,10 @@ export async function runSemanticCertification(options: {
   const interpret = options.interpret ?? interpretSemanticTurn;
   const availabilityRetries = Math.max(0, Math.min(3, Math.floor(options.availabilityRetries ?? 0)));
   const availabilityRetryDelayMs = Math.max(0, Math.min(90_000, Math.floor(options.availabilityRetryDelayMs ?? 0)));
+  const transientAvailabilityRetryDelayMs = Math.max(
+    0,
+    Math.min(30_000, Math.floor(options.transientAvailabilityRetryDelayMs ?? availabilityRetryDelayMs)),
+  );
   const stopOnProviderFailure = options.stopOnProviderFailure === true;
   const interCaseDelayMs = Math.max(0, Math.min(60_000, Math.floor(options.interCaseDelayMs ?? 0)));
 
@@ -278,13 +295,18 @@ export async function runSemanticCertification(options: {
         const isProviderFailure = attempts.length > 0;
         const retryable = isProviderFailure && retryableAvailabilityFailure(attempts);
 
+        const retryDelayMs = computeAvailabilityRetryDelayMs(
+          attempts,
+          availabilityRetryDelayMs,
+          transientAvailabilityRetryDelayMs,
+        );
         if (
           retryable
           && availabilityAttempt < availabilityRetries
-          && availabilityRetryDelayMs > 0
+          && retryDelayMs > 0
         ) {
           availabilityAttempt += 1;
-          await sleep(availabilityRetryDelayMs);
+          await sleep(retryDelayMs);
           continue;
         }
 
