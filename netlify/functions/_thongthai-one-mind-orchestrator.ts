@@ -534,7 +534,7 @@ async function resolveSemanticTurn(
         model_action: modelTurn.action,
         deterministic_action: deterministic.action,
       }));
-      return deterministic;
+      return { ...deterministic, semanticSource:'deterministic_fallback' };
     }
 
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
@@ -544,7 +544,7 @@ async function resolveSemanticTurn(
       model_call_used: true,
       model_confidence: modelTurn.confidence,
     }));
-    return modelTurn;
+    return { ...modelTurn, semanticSource:'openai_supervisor' };
   } catch (error) {
     if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
 
@@ -556,7 +556,7 @@ async function resolveSemanticTurn(
         provider_unavailable: true,
         deterministic_intent: deterministic.intent,
       }));
-      return deterministic;
+      return { ...deterministic, semanticSource:'deterministic_fallback' };
     }
 
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
@@ -567,6 +567,7 @@ async function resolveSemanticTurn(
     }));
     const domain = taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown';
     return {
+      semanticSource:'provider_unavailable',
       domain,
       intent: 'clarification_needed_provider_unavailable',
       action: 'ask',
