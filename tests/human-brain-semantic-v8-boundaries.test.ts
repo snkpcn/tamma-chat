@@ -8,11 +8,11 @@ import {
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 import { PHASE_L_SEMANTIC_CASES } from './fixtures/phase-l-semantic-cases';
 
-test('semantic-v25 version is explicit so live certification cannot inherit semantic-v7 results',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v25');
+test('semantic-v26 version is explicit so live certification cannot inherit semantic-v7 results',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v26');
 });
 
-test('semantic-v25 doctrine locks the eight human-meaning boundaries from completed live v7 certification',()=>{
+test('semantic-v26 doctrine locks the eight human-meaning boundaries from completed live v7 certification',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   const required=[
     'CURRENT request for help choosing outranks a prior status or availability turn',
@@ -27,7 +27,7 @@ test('semantic-v25 doctrine locks the eight human-meaning boundaries from comple
   for(const rule of required) assert.ok(prompt.includes(rule),rule);
 });
 
-test('semantic-v25 keeps the adjudicated live-v7 gold labels unchanged',()=>{
+test('semantic-v26 keeps the adjudicated live-v7 gold labels unchanged',()=>{
   const cases=[...SEMANTIC_EVAL_CORPUS,...PHASE_L_SEMANTIC_CASES];
   const expected:Record<string,{domain:string;action:string;needsClarification?:boolean;informationNeed?:string}>={
     'stay-availability-02':{domain:'stay',action:'recommend',informationNeed:'recommendation'},

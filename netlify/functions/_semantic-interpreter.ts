@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v25';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v26';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -480,6 +480,8 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- Resolve explicit category nouns before interpreting place framing or generic action predicates. An explicit canonical category noun anchors its own business domain even when the same utterance also refers to this place, the surrounding area, or a generic action. A place reference such as here or nearby does not widen that explicit category back to ecosystem.
+- Remove only contextual metadata, then classify the semantic remainder. An evaluative property of the requested possibilities remains recommend even when the utterance is short or uses broad question grammar; bare existence or neutral listing remains discover. Metadata neutrality must never erase evaluation already expressed by the request itself.
 - Explicit transaction commitment outranks catalog browsing. When the CURRENT utterance commits to ordering or booking, keep order/book ownership even if the exact product, resource, date, quantity, or other slot is not chosen yet. Missing product or slot details are follow-up fields; they do not downgrade order or book intent to discover.
 - A CURRENT turn that only supplies constraints, preferences, quantities, party details, budget, or other requested facts without asking for a new action is provide_information. Do not turn constraint-only continuation into recommend merely because those facts could personalize a recommendation; a later layer may continue the prior task after receiving the information.
 - Ignore companion or traveler metadata when deciding whether a broad request is discover or recommend. Treat those facts as constraints first. If the remaining request is neutral browsing, keep discover; use recommend only when the CURRENT utterance itself requests evaluation, suitability, curation, or a choice.

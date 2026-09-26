@@ -13,17 +13,17 @@ function byId(id:string){
   return item;
 }
 
-test('semantic-v25 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v25');
+test('semantic-v26 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v26');
 });
 
-test('semantic-v25 keeps journey-02 and informational-02 gold unchanged',()=>{
+test('semantic-v26 keeps journey-02 and informational-02 gold unchanged',()=>{
   assert.deepEqual(byId('journey-02').expected,{domain:'journey',action:'ask'});
   assert.deepEqual(byId('informational-02').expected,{domain:'activity',action:'discover'});
   assert.equal(byId('informational-02').simulatedModelOutput?.informationNeed,'catalog');
 });
 
-test('semantic-v25 removes the activity-domain contradiction and gives explicit category nouns priority',()=>{
+test('semantic-v26 removes the activity-domain contradiction and gives explicit category nouns priority',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   const normalized=prompt.replace(/\s+/g,' ');
   assert.ok(normalized.includes('Generic do/play/visit wording alone may remain ecosystem'));
@@ -32,7 +32,7 @@ test('semantic-v25 removes the activity-domain contradiction and gives explicit 
   assert.equal(normalized.includes('Use activity only when a specific activity/activity entity is stated'),false);
 });
 
-test('semantic-v25 distinguishes retrieving an existing saved artifact from catalog discovery',()=>{
+test('semantic-v26 distinguishes retrieving an existing saved artifact from catalog discovery',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   const normalized=prompt.replace(/\s+/g,' ');
   assert.ok(normalized.includes('Retrieving, viewing, reopening, or showing one existing saved artifact is ask'));
