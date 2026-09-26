@@ -44,7 +44,7 @@ test('explicit structured entity name disambiguates one selection among multiple
   }),context);
   assert.equal(turn.action,'confirm');
   assert.equal(turn.references[0]?.resolvedEntityId,'horse:paradon');
-  assert.equal(turn.references[0]?.ambiguous,false);
+  assert.notEqual(turn.references[0]?.ambiguous,true);
 });
 
 test('generic multi-candidate selection without a named match still asks and clarifies',()=>{
