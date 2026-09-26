@@ -176,6 +176,10 @@ export function readOnlyCutoverEligibility(
   return { eligible:false, reason:'transactional_or_task_turn' };
 }
 
+function taskStateChanged(turn: OneMindTurnResult): boolean {
+  return JSON.stringify(turn.taskStateBefore) !== JSON.stringify(turn.taskStateAfter);
+}
+
 export async function processOneMindCustomerTurn(
   input: OneMindCustomerTurnInput,
   dependencies: Partial<OneMindDependencies> = {},
@@ -193,6 +197,29 @@ export async function processOneMindCustomerTurn(
     candidate => readOnlyCutoverEligibility(candidate, eligibilityOptions).eligible,
   );
   const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptions);
+
+  // Never acknowledge a state-mutating conversational decision unless the
+  // authoritative state write actually succeeded. This matters for cancel /
+  // suspend / resume / correction turns: a pretty reply with statePersisted
+  // false would tell the customer the working state changed when it did not.
+  // Fall through to the existing deterministic executor instead.
+  if (
+    input.persistState !== false
+    && taskStateChanged(turn)
+    && !turn.trace.statePersisted
+  ) {
+    return {
+      status:'legacy_required',
+      turn,
+      reason:'transactional_or_task_turn',
+      observability:buildOneMindTraceEnvelope({
+        turn,
+        response:null,
+        totalMs:Date.now() - totalStartedAt,
+      }),
+    };
+  }
+
   if (!eligibility.eligible) {
     return {
       status:'legacy_required',
