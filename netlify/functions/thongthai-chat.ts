@@ -3778,7 +3778,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         persistState:true,
       });
       await recordOneMindTrace(oneMind.observability);
-      if (oneMind.status === 'composed') {
+      if (oneMind.status === 'composed'
+          && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor') {
         console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
           domain:oneMind.turn.semanticTurn.domain,
           action:oneMind.turn.semanticTurn.action,
@@ -3799,9 +3800,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         });
       }
       console.log('THONGTHAI_HUMAN_CONVERSATION_LEGACY_REQUIRED', JSON.stringify({
-        reason:oneMind.reason,
+        reason:oneMind.status === 'legacy_required'
+          ? oneMind.reason
+          : 'semantic_supervisor_unavailable',
         domain:oneMind.turn.semanticTurn.domain,
         action:oneMind.turn.semanticTurn.action,
+        semanticSource:oneMind.turn.semanticTurn.semanticSource ?? 'unknown',
       }));
     } catch (error) {
       // Strangler safety during recovery: language-first failure must not take
