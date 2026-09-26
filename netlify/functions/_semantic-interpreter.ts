@@ -194,6 +194,8 @@ export type SemanticReference = {
 };
 
 export type SemanticTurn = {
+  /** Runtime provenance; never customer-facing and never business truth. */
+  semanticSource?: 'openai_supervisor' | 'deterministic_fallback' | 'provider_unavailable';
   /** Short paraphrase of what the customer means, for machine state and
    * observability only. It is never sent to the customer as the answer. */
   normalizedMeaning?: string;
