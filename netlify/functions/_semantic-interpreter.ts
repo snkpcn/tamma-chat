@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v19';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v20';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -481,6 +481,7 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- Do not default to discover + catalog merely because a request is short, asks what is available, or asks to view information. FIRST classify evaluative choice requests as recommend when the customer asks what is good, worth doing, suitable, recommended, or asks the assistant to choose. SECOND classify bare existence of a reservable resource as status + availability when the customer is asking whether a room, table, slot, or other reservable resource is available, even without a date. THIRD classify readback of one existing personal profile, saved artifact, or existing record as ask + none. ONLY AFTER those checks may a true browse-what-exists request become discover + catalog.
 - For broad ecosystem requests, asking what exists or what there is to do remains discover even when traveler or companion context is present. Move to recommend when the CURRENT utterance asks what is good, worth doing, suitable, recommended, or asks the assistant to choose.
 - First decide whether the customer is asking you to choose exactly ONE primary offering or to design a MULTI-PART plan. Exactly one requested activity remains activity even when it must happen before or after a meal, stay, or other event. The second event is only a timing boundary unless the customer asks you to choose, arrange, or coordinate it too.
 - When the requested deliverable is a NEW multi-part plan, itinerary, or coordination of two or more customer goals, use journey + recommend. journey + discover is only for browsing already-existing itinerary/package/plan options. Named components do not make a new-plan request catalog discovery.
