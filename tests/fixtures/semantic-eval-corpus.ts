@@ -325,8 +325,11 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
       recentEntities: [{ id: 'membership:self', type: 'membership_profile', name: 'ข้อมูลสมาชิกของฉัน', domain: 'membership' }],
       lastAction: 'ask',
     },
-    expected: { domain: 'membership', action: 'status' },
-    simulatedModelOutput: { domain: 'membership', intent: 'view_membership_profile', action: 'status', informationNeed: 'transaction_status',
+    // Honest adjudication: this asks to read the existing member profile, not the processing/state
+    // of a membership transaction. Existing-record readback is ask; transaction_status is reserved
+    // for questions such as whether signup/renewal/verification is pending, approved, failed, etc.
+    expected: { domain: 'membership', action: 'ask' },
+    simulatedModelOutput: { domain: 'membership', intent: 'view_membership_profile', action: 'ask',
       entities: {}, references: [{ type: 'selected_entity', refersToPriorContext: true }], constraints: [], confidence: 0.85, needsClarification: false } },
 
   // --- OTOP ---
