@@ -389,6 +389,15 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     }
   }
 
+  // Remember an explicit book/order request across the remaining slot-
+  // collection turns. This flag is conversational intent only: it cannot
+  // execute a tool and it does not replace the separate confirmation gate.
+  if (COMMIT_ACTIONS.has(turn.action) && container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+    container = applyTaskStateEvent(container, {
+      kind:'mark_commitment', eventId:`${eventId}:commitment_intent`,
+    }, now);
+  }
+
   const selectedEntities = resolveSelectedEntities(turn, conversationContext);
   if (selectedEntities.length && container.activeTask) {
     container = applyTaskStateEvent(container, { kind: 'set_entities', eventId: `${eventId}:entities`, entities: selectedEntities }, now);
@@ -514,8 +523,9 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   // resurface a collect_field prompt for something that no longer exists.
   const hasOpenTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
   const missingFields = hasOpenTask ? container.activeTask!.missingFields : [];
-  const customerCommitPresent = COMMIT_ACTIONS.has(turn.action);
-  if (customerCommitPresent) reasons.push('explicit_commit_received');
+  const currentTurnCommit = COMMIT_ACTIONS.has(turn.action);
+  const customerCommitPresent = currentTurnCommit || Boolean(container.activeTask?.commitmentIntent);
+  if (currentTurnCommit) reasons.push('explicit_commit_received');
 
   // CORE PRECEDENCE: the CURRENT turn must contain positive structural
   // evidence that it continues the active task before missingFields may drive
@@ -635,7 +645,7 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
         mode = 'propose_action';
         responseIntent = 'propose_action';
         actionProposal = {
-          toolName, validatedArgs: task.slots, requiresExplicitConfirmation: false,
+          toolName, validatedArgs: task.slots, requiresExplicitConfirmation: true,
           customerCommitPresent: true, idempotencyKey: task.taskId,
         };
       }
