@@ -359,7 +359,7 @@ test('full signed LINE regression: explicit horse intent suspends stale unrelate
         const care=textOf(capture.replies[1]);
         assert.match(care,/ขี่ม้า|ทีมงาน|ช้า|กลัว/u);
         assert.doesNotMatch(care,/ขอรายละเอียดเพิ่มอีกนิด/u);
-        assert.equal(h.modelCallCount(),callsBeforeHorse,'explicit horse care must be deterministic');
+        assert.equal(h.modelCallCount(),callsBeforeHorse+1,'explicit horse care must be language-supervised once before deterministic handling');
 
         const afterCare=stateFor(h,user).taskState as {
           activeTask?:{domain?:string;type?:string;slots?:Record<string,unknown>}|null;
