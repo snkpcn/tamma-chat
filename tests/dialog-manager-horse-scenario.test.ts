@@ -29,7 +29,7 @@ function activityCatalogFacts(): SourceResult {
 function availabilityFacts(available: boolean): SourceResult {
   return {
     status: 'ok', sourceId: 'schedule_rows', sourceType: 'activity_live', fetchedAt: NOW.toISOString(),
-    data: [{ key: 'activity:activity-horse:2026-09-19:15:00:available', value: available, domain: 'activity', sourceId: 'schedule_rows', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
+    data: [{ key: 'availability:activity-horse:2026-09-19T15:00:00+07:00:available', value: available, domain: 'activity', sourceId: 'schedule_rows', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
   };
 }
 

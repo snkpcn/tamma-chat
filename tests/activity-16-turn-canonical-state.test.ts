@@ -44,7 +44,7 @@ function activityCatalogAdapter(): () => Promise<SourceResult> {
 function activityAvailabilityAdapter(): () => Promise<SourceResult> {
   return async () => ({
     status: 'ok', sourceId: 'schedule_rows', sourceType: 'activity_live', fetchedAt: NOW.toISOString(),
-    data: [{ key: 'activity:horse:thongthai:2026-10-03:13:00:available', value: true, domain: 'activity', sourceId: 'schedule_rows', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
+    data: [{ key: 'availability:activity-horse:2026-10-03T13:00:00+07:00:available', value: true, domain: 'activity', sourceId: 'schedule_rows', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
   });
 }
 

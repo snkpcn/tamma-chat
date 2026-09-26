@@ -36,7 +36,7 @@ function knowledgeAdapters(): OneMindDependencies['buildKnowledgeAdapters'] {
       }),
       availability: async (): Promise<SourceResult> => ({
         status: 'ok', sourceId: 'schedule_rows', sourceType: 'activity_live', fetchedAt: NOW.toISOString(),
-        data: [{ key: 'activity:horse:pharadon:2026-10-03:13:00:available', value: true, domain: 'activity', sourceId: 'schedule_rows', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
+        data: [{ key: 'availability:activity-horse:2026-10-03T13:00:00+07:00:available', value: true, domain: 'activity', sourceId: 'schedule_rows', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
       }),
     },
   });

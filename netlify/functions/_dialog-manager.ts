@@ -610,7 +610,7 @@ function hasMatchingVerifiedAvailability(
 
   return bundles.some(bundle=>bundle.facts.some(fact=>{
     if (fact.value !== true || fact.authoritative !== true || fact.stale === true) return false;
-    const match=fact.key.match(/^availability:([^:]+):(.+):available$/u);
+    const match=fact.key.match(/^availability:(.+):(\d{4}-\d{2}-\d{2}T.+):available$/u);
     if (!match) return false;
     const [,factResource,startAt]=match;
     if (resourceCode && factResource !== resourceCode) return false;
