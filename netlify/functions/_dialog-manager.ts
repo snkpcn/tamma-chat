@@ -355,6 +355,20 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   // SAME hasOpenTask pattern already established elsewhere in this file.
   const hasOpenActiveTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
   if (!hasOpenActiveTask) {
+    // Human Conversation Recovery: a preference/constraint declaration is
+    // conversational state, not evidence that the customer wants to start an
+    // order/booking task. Example: "หมูก็ไม่เอาด้วย" must update meaning and
+    // continuity without silently opening a restaurant preorder.
+    const constraintOnlyInformation =
+      turn.action === 'provide_information'
+      && turn.constraints.length > 0
+      && Object.keys(taskSlotPatch(turn.entities)).length === 0
+      && !hasResolvedTaskReference(turn);
+    if (constraintOnlyInformation) {
+      reasons.push('discovery_only');
+      return { container, reasons };
+    }
+
     const defaultType = DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
     if (TASK_WORTHY_ACTIONS.has(turn.action) && defaultType) {
       container = applyTaskStateEvent(container, {
