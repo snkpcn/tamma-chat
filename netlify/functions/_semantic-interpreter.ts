@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v22';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v23';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -480,6 +480,8 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- Decide DOMAIN SCOPE before ACTION for broad experience requests. Generic do, play, visit, or experience wording is not an explicit activity-category request. Only an explicit canonical category noun, named offering, or clearly bounded business subject narrows broad ecosystem scope.
+- After domain scope is chosen, decide the requested ANSWER TYPE. Neutral listing of what exists is discover; asking which possibilities are good, worthwhile, advisable, suitable, or worth doing is recommend + recommendation. Do not downgrade evaluative guidance to discover + catalog merely because the utterance also asks what exists.
 - A topic-only inquiry that merely names a subject without asking to browse, choose, check status, price, policy, or another concrete fact must stay ask + none with needsClarification=true. This topic-only clarification check happens before browse/catalog classification.
 - Do not infer catalog discovery merely because the named subject is a product, menu class, activity class, room class, promotion class, or other business category. A subject is not yet a browse request until the customer asks what exists, what options there are, or otherwise requests a catalog/list.
 - When the customer asks for an unspecified thing to do so that it flows directly into another business experience, the requested deliverable is the sequence. Use journey + recommend for that sequence even when the first leg could individually be an activity. Keep domain=activity only when the CURRENT utterance requests one explicit activity target and the other event is merely a timing boundary rather than a second coordinated experience.
