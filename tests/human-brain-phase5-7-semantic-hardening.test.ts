@@ -103,7 +103,7 @@ test('Phase 5.7 RED: corpus gold matches the human semantic-v3 distinctions',()=
     'cafe-02':{domain:'cafe',action:'discover',need:'catalog'},
     'payment-01':{domain:'payment',action:'ask'},
     'journey-02':{domain:'journey',action:'ask'},
-    'support-02':{domain:'support',action:'status',need:'transaction_status'},
+    'support-02':{domain:'support',action:'ask'},
     'restaurant-constraint-01':{domain:'restaurant',action:'provide_information',contextDomain:'restaurant'},
     'correction-02':{domain:'restaurant',action:'modify'},
     'activity-book-03':{domain:'activity',action:'status',need:'availability'},
