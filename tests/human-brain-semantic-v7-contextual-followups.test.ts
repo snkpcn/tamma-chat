@@ -9,7 +9,7 @@ import {
 } from '../netlify/functions/_semantic-interpreter';
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v28');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
 });
 
 test('semantic-v28 doctrine keeps bare topic narrowing as catalog, candidate-time questions as availability, and direct comparisons as compare',()=>{
