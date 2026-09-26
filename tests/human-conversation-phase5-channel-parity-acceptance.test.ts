@@ -6,6 +6,7 @@ import { emptyConversationContextState } from '../netlify/functions/_conversatio
 import { createActiveTask, emptyTaskStateContainer, type TaskStateContainer } from '../netlify/functions/_task-state';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
 import type { BrainChannel } from '../netlify/functions/_thongthai-brain-v3';
+import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
 
 const NOW=new Date('2026-09-27T01:00:00+07:00');
 
@@ -79,4 +80,18 @@ test('Phase 5 acceptance: incident, local, and general meaning produce channel-i
     assert.deepEqual(results[0].knowledgeRequests,results[1].knowledgeRequests,domain);
     assert.deepEqual(results[0].reasons,results[1].reasons,domain);
   }
+});
+
+
+test('Phase 5 acceptance: explicit activity commitment cannot be downgraded to channel catalog browsing',()=>{
+  const interpreted=deriveDeterministicSemanticTurn(
+    'ขอจองกิจกรรม ATV',
+    {activeDomain:null,activeTopic:null,recentEntities:[],recentConstraints:[],recentTurns:[]},
+    emptyTaskStateContainer(),
+    NOW,
+  );
+  assert.equal(interpreted?.domain,'activity');
+  assert.equal(interpreted?.action,'book');
+  assert.equal(interpreted?.speechAct,'transaction_request');
+  assert.equal(interpreted?.entities.resourceCode,'activity-atv');
 });

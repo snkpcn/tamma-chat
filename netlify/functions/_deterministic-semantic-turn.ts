@@ -592,16 +592,26 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
-  // Narrowing to a specific known activity ("ม้าล่ะ" / "ATV ล่ะ").
+  // A generic transaction commitment applies to the canonical activity
+  // topic even before a named asset is selected. Missing asset/date/duration
+  // are follow-up slots; they must never downgrade "book <activity>" into a
+  // catalog browse. This is structural (shared commit marker + ecosystem
+  // activity node), not a phrase table.
   if (activityTopic) {
+    const committing=hasCommitMarker(trimmed);
     return {
       domain: 'activity',
-      intent: 'activity_topic_narrow',
-      action: 'discover',
-      entities: { activityCode: activityTopic.activityCode },
+      intent: committing ? 'activity_booking_request' : 'activity_topic_narrow',
+      action: committing ? 'book' : 'discover',
+      speechAct: committing ? 'transaction_request' : undefined,
+      informationNeed: committing ? undefined : 'catalog',
+      entities: {
+        activityCode: activityTopic.activityCode,
+        ...(committing ? {resourceCode:activityTopic.nodeId} : {}),
+      },
       references: [],
       constraints: [],
-      confidence: 0.85,
+      confidence: 0.9,
       needsClarification: false,
     };
   }

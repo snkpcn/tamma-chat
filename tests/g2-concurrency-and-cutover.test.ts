@@ -74,10 +74,10 @@ test('G.2 cutover is an explicit OFF-by-default env gate and legacy fallthrough 
   assert.match(source,/runThongthaiBrain/,'legacy brain must remain until equivalence cleanup');
 });
 
-test('LINE channel adapter remains transport-only for One-Mind and keeps its legacy transaction safety net', () => {
+test('LINE channel adapter remains transport-only and sends every customer text turn through the shared core', () => {
   const source=readFileSync('netlify/functions/_line-webhook-core.ts','utf8');
   assert.doesNotMatch(source,/processOneMindCustomerTurn|composeThongthaiResponse/);
-  assert.match(source,/handleLineMembershipMessage/);
-  assert.match(source,/handleLineBookingMessage/);
+  assert.match(source,/processThongthaiChatCore/);
+  assert.doesNotMatch(source,/handleLineMembershipMessage|handleLineBookingMessage/);
   assert.match(source,/event\.message\.id/);
 });

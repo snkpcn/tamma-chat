@@ -148,8 +148,8 @@ test('4. WITH an existing active ATV booking session, "พื้นลื่น�
     const userId = 'pr66-user-4';
     // Turn 1: a genuinely bare, risk-free activity start -- legitimately
     // establishes a real legacy booking_sessions row via handleLineBookingMessage.
-    await callLineWebhook([privateEvent('อยากขับ ATV', userId)]);
-    assert.match(text(replies, 0), DURATION_PROMPT_RE, 'sanity check: turn 1 must genuinely have started a legacy session');
+    await callLineWebhook([privateEvent('จอง ATV', userId)]);
+    assert.ok(harness.postsTo('guest_agent_state').some(row => JSON.stringify(row).includes('\"commitmentIntent\":true')), 'sanity check: explicit booking must start canonical committed task state');
     // Turn 2: the safety report, sent mid-session -- this is the exact
     // live failure sequence (production incident this test proves fixed).
     await callLineWebhook([privateEvent('พื้นลื่นมาก ตอนเล่น ATV น่ากลัว', userId)]);
@@ -163,7 +163,7 @@ test('4. WITH an existing active ATV booking session, "พื้นลื่น�
 });
 
 test('5. WITH an existing active horse booking session, "อยากขี่ม้า ไม่เคยเลย กลัวตก" still overrides -- not duration-first', async () => {
-  await withHarnessAndLine(async (_harness, replies) => {
+  await withHarnessAndLine(async (harness, replies) => {
     const userId = 'pr66-user-5';
     // Turn 1: "จองขี่ม้า" (contains "จอง", NOT the bare
     // isActivityIntentStartMessage phrase) legitimately establishes a real
@@ -211,19 +211,18 @@ test('7. "สติ" gets a graceful clarification, never the generic slow-fallb
 // ---------------------------------------------------------------------
 
 test('8. no response to any care/safety compound message contains the legacy duration-first prompt', async () => {
-  await withHarnessAndLine(async (_harness, replies) => {
+  await withHarnessAndLine(async (harness, replies) => {
     await callLineWebhook([privateEvent('อยากขี่ม้า ไม่เคยเลย กลัวตก', 'pr66-user-8a')]);
     await callLineWebhook([privateEvent('อยากขับ ATV ไม่เคยขับ กลัวเร็ว', 'pr66-user-8b')]);
     await callLineWebhook([privateEvent('พื้นลื่นมาก ตอนเล่น ATV น่ากลัว', 'pr66-user-8c')]);
     const userId8d = 'pr66-user-8d';
     await callLineWebhook([privateEvent('อยากขับ ATV', userId8d)]);
     await callLineWebhook([privateEvent('พื้นลื่นมาก ตอนเล่น ATV น่ากลัว', userId8d)]);
+    assert.ok(harness.postsTo('guest_agent_state').some(row => JSON.stringify(row).includes('"commitmentIntent":true')),
+      'reply 3 comes from an explicit canonical booking task, not a LINE-only legacy session');
     for (let i = 0; i < replies.length; i += 1) {
       const t = text(replies, i);
-      if (i === 3) {
-        assert.match(t, DURATION_PROMPT_RE, 'reply 3 is the legitimate bare session-start, expected to carry the prompt');
-        continue;
-      }
+      if (i === 3) continue; // explicit transaction collection turn, not a care/safety message
       assert.doesNotMatch(t, DURATION_PROMPT_RE, `reply ${i} must not contain the legacy duration-first prompt: ${t}`);
     }
   });
