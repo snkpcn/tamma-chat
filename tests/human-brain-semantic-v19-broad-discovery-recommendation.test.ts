@@ -13,11 +13,11 @@ function byId(id:string){
   return item;
 }
 
-test('semantic-v27 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v27');
+test('semantic-v28 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v28');
 });
 
-test('semantic-v27 honestly adjudicates evaluative broad requests as recommendation',()=>{
+test('semantic-v28 honestly adjudicates evaluative broad requests as recommendation',()=>{
   const local=byId('discover-05');
   assert.equal(local.message,'แถวนี้ทำไรดี');
   assert.equal(local.expected.domain,'ecosystem');
@@ -31,13 +31,13 @@ test('semantic-v27 honestly adjudicates evaluative broad requests as recommendat
   assert.equal(onsite.simulatedModelOutput?.informationNeed,'recommendation');
 });
 
-test('semantic-v27 keeps bare discovery with companion context as discovery',()=>{
+test('semantic-v28 keeps bare discovery with companion context as discovery',()=>{
   const partner=byId('discover-07');
   assert.equal(partner.message,'พาแฟนมา มีไรทำ');
   assert.deepEqual(partner.expected,{domain:'ecosystem',action:'discover'});
 });
 
-test('semantic-v27 final precedence separates broad browsing from evaluative choosing',()=>{
+test('semantic-v28 final precedence separates broad browsing from evaluative choosing',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('For broad ecosystem requests, asking what exists or what there is to do remains discover even when traveler or companion context is present'));
   assert.ok(p.includes('Move to recommend when the CURRENT utterance asks what is good, worth doing, suitable, recommended, or asks the assistant to choose'));
