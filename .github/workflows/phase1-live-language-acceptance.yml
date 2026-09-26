@@ -1,0 +1,39 @@
+name: Phase 1 Live Language Acceptance
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  live-openai-language:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Detect OpenAI acceptance credential
+        id: openai
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "PHASE1_LIVE_NOT_RUN: repository OPENAI_API_KEY secret is not configured."
+          fi
+      - name: Run real OpenAI open-world acceptance
+        if: steps.openai.outputs.available == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
+          THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
+        run: npm run eval:phase1:live
