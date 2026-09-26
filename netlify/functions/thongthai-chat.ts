@@ -3639,6 +3639,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // pipeline once, early. If it cannot safely own the turn, legacy execution
   // remains available below; never call One-Mind twice for the same turn.
   let oneMindAttemptedEarly = false;
+  let earlyOneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>> | null = null;
 
   // Master Roadmap Phase 2 -- Customer Intelligence Memory. Run ONCE,
   // unconditionally, for every turn -- BEFORE the deterministic
@@ -4345,8 +4346,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         canonicalAnonymousId:request.guestId,
         guestDbId,
         durableMemory:durableMemoryFromRequest(request),
-        persistState:true,
+        // Phase 1 is UNDERSTANDING ONLY. The supervisor must not mutate
+        // booking/order/topic task state before the proven executor path has
+        // decided what to do. Context/state ownership is Phase 2+.
+        persistState:false,
       });
+      earlyOneMind = oneMind;
       if (oneMind.status === 'composed') {
         await recordOneMindTrace(oneMind.observability);
         console.log('THONGTHAI_ONE_MIND_CUTOVER', JSON.stringify({
@@ -4416,6 +4421,34 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
       );
     }
+  }
+
+  // If every proven deterministic/business responder above yielded but the
+  // semantic supervisor already produced a safe, non-transactional One-Mind
+  // response, use that deterministic/grounded response instead of invoking
+  // the legacy generative brain. This keeps OpenAI in the teacher role.
+  if (earlyOneMind?.status === 'composed') {
+    const supervisedFallback = polishedResponse({
+      message: earlyOneMind.response.message,
+      intent: earlyOneMind.turn.semanticTurn.action === 'recommend'
+        || earlyOneMind.turn.semanticTurn.action === 'discover'
+        ? 'recommendation'
+        : 'information',
+      contextUpdates:{},
+      journeyAction:{type:'none', journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    }, channel);
+    await persistBrainRuntime(guestDbId, channel, supervisedFallback);
+    return coreResult(200, {
+      message:supervisedFallback.message,
+      intent:supervisedFallback.intent,
+      contextUpdates:supervisedFallback.contextUpdates,
+      journeyAction:supervisedFallback.journeyAction,
+      suggestedActions:supervisedFallback.suggestedActions,
+    });
   }
 
   const history = request.chatHistory.slice(-16);
