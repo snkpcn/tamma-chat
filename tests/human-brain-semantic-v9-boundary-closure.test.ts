@@ -8,11 +8,11 @@ import {
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 import { PHASE_L_SEMANTIC_CASES } from './fixtures/phase-l-semantic-cases';
 
-test('semantic-v11 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v11');
+test('semantic-v12 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v12');
 });
 
-test('semantic-v11 doctrine separates the boundary pairs exposed by full semantic-v8 live certification',()=>{
+test('semantic-v12 doctrine separates the boundary pairs exposed by full semantic-v8 live certification',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   const required=[
     'A bare request to see what exists remains discover even when it includes traveler context',
@@ -28,7 +28,7 @@ test('semantic-v11 doctrine separates the boundary pairs exposed by full semanti
   for(const rule of required) assert.ok(prompt.includes(rule),rule);
 });
 
-test('semantic-v11 honestly adjudicates one contradictory modify gold and preserves the other live-v8 golds',()=>{
+test('semantic-v12 honestly adjudicates one contradictory modify gold and preserves the other live-v8 golds',()=>{
   const cases=[...SEMANTIC_EVAL_CORPUS,...PHASE_L_SEMANTIC_CASES];
   const byId=(id:string)=>{
     const item=cases.find(candidate=>candidate.id===id);
