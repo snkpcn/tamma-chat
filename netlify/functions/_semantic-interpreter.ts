@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v23';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v24';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -480,6 +480,8 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- Generic experience verbs alone do not narrow ecosystem scope to activity. Require an explicit activity category, named activity offering, or clearly activity-bounded subject before using domain=activity; otherwise keep category-unspecified experience discovery in ecosystem.
+- Companion or group context by itself is a constraint, not recommendation intent. A neutral what-is-there-to-do request remains ecosystem + discover when companion context is merely supplied. Move to recommend only when the CURRENT utterance asks what is good, suitable, advisable, preferable, recommended, or asks the assistant to choose.
 - Decide DOMAIN SCOPE before ACTION for broad experience requests. Generic do, play, visit, or experience wording is not an explicit activity-category request. Only an explicit canonical category noun, named offering, or clearly bounded business subject narrows broad ecosystem scope.
 - After domain scope is chosen, decide the requested ANSWER TYPE. Neutral listing of what exists is discover; asking which possibilities are good, worthwhile, advisable, suitable, or worth doing is recommend + recommendation. Do not downgrade evaluative guidance to discover + catalog merely because the utterance also asks what exists.
 - A topic-only inquiry that merely names a subject without asking to browse, choose, check status, price, policy, or another concrete fact must stay ask + none with needsClarification=true. This topic-only clarification check happens before browse/catalog classification.
