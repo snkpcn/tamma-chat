@@ -39,7 +39,7 @@ test('Phase 5.10: certification runner resumes only same-version incomplete prov
   const script=readFileSync(new URL('../scripts/write-semantic-certification-artifact.ts',import.meta.url),'utf8');
   assert.match(script,/PRODUCTION_CERT_URL='https:\/\/tamma-chat\.netlify\.app\/semantic-certification-result\.json'/);
   assert.match(script,/artifact\.semanticVersion!==SEMANTIC_INTERPRETER_VERSION/);
-  assert.match(script,/artifact\.status!=='incomplete_provider'/);
+  assert.match(script,/\['incomplete_provider','incomplete_chunk'\]\.includes/);
   assert.match(script,/artifact\.availabilityComplete===true/);
   assert.match(script,/resumeStart/);
   assert.match(script,/failure=>!failure\.providerError/);
