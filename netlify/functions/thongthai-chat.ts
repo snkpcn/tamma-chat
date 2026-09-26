@@ -3778,8 +3778,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         persistState:true,
       }, {}, {}, undefined, { requireSemanticSupervisor:true });
       await recordOneMindTrace(oneMind.observability);
-      if (oneMind.status === 'composed'
-          && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor') {
+      const supervisedOpenWorld = oneMind.status === 'composed'
+        && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor'
+        && ['general','local','incident'].includes(oneMind.turn.semanticTurn.domain);
+      if (supervisedOpenWorld) {
         console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
           domain:oneMind.turn.semanticTurn.domain,
           action:oneMind.turn.semanticTurn.action,
