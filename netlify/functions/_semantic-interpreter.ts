@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v8';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v9';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -367,6 +367,28 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 - A customer asking what to do next after a failure, rejection, or error is requesting remediation guidance, so use ask (normally with
   informationNeed=policy when a procedure/rule is needed). Use status + transaction_status only when the CURRENT question asks what state
   the transaction is in, whether it is still pending/failed, or whether processing succeeded.
+- A bare request to see what exists remains discover even when it includes traveler context such as coming with a partner,
+  family, children, or a group. Traveler facts are constraints/context, not by themselves a request for personalization. Move to
+  recommend only when the CURRENT utterance asks what suits them, what they should choose, or otherwise asks the assistant to choose.
+- Explicit transaction commitment keeps book/order ownership even when required item or slot details are still missing. Missing product,
+  date, time, quantity, or other required slots may require follow-up, but it does not turn "book/order now" intent into discover/ask.
+- A request phrased as asking whether a change is allowed is ask + policy, even when it names the field the customer may want to change.
+  Use modify only when the CURRENT utterance actually instructs the system to change an existing choice/value/plan.
+- Dissatisfaction with a current choice followed by a requested replacement is modify when the customer wants a new preference/value
+  intentionally. Use correct_previous only when they say the earlier value/statement/selection itself was mistaken, wrong, or not what
+  they meant.
+- Simultaneous capacity is a policy question, not live availability. Questions about how many units/people can operate/use a resource
+  at once are ask + policy unless the customer separately asks whether those units are actually free at a stated/current time.
+- Generic low-effort or relaxed experience requests stay ecosystem unless a specific business category is named. Generic "something to
+  do", "experience", or vibe-only requests are ecosystem recommendations; if the CURRENT request explicitly asks for an activity as
+  the target category, use activity even when the exact activity has not been chosen yet.
+- A selected promotion asking whether it is still active or usable is status + availability. This is different from eligibility:
+  conditional questions about whether a member/customer/channel qualifies for the promotion are ask + policy.
+- Bare catalog existence wording does not mean current stock. A simple "do you have X?" / catalog-item existence question with no
+  current-time, stock, sold-out, ready-now, or on-hand predicate is discover + catalog; inventory/status requires an actual current
+  stock question.
+- Domain follows the requested output: one requested experience plus a timing anchor does not become a journey. If the customer asks
+  for one activity before/after another event, return activity; journey is for arranging a multi-step plan/sequence as the goal.
 - compare = the customer asks to compare two or more known options/attributes. Comparative attribute questions ("which is gentler/better/faster?",
   "how do these differ?") stay compare even if the answer may help the customer choose. recommend is for asking the assistant to choose/suggest
   what suits the customer, not for a direct comparison between known options.
