@@ -3593,6 +3593,11 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const transportEventId = eventId
     ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
 
+  // Recovery architecture: attempt the canonical language-understanding
+  // pipeline once, early. If it cannot safely own the turn, legacy execution
+  // remains available below; never call One-Mind twice for the same turn.
+  let oneMindAttemptedEarly = false;
+
   // Master Roadmap Phase 2 -- Customer Intelligence Memory. Run ONCE,
   // unconditionally, for every turn -- BEFORE the deterministic
   // responder cascade (including Phase 1's escalation boundary check
@@ -3748,6 +3753,65 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
     });
+  }
+
+  // Human Conversation Recovery: UNDERSTAND FIRST.
+  //
+  // Safety/escalation/service-feedback responders above may remain
+  // deterministic because they are guardrails. Ordinary customer language
+  // reaches One-Mind BEFORE pending-question matchers, horse/stay/activity
+  // regex responders, or other legacy domain routers. If One-Mind says the
+  // turn needs a real transaction executor, it returns legacy_required and
+  // the unchanged executor path below still owns the write.
+  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1') {
+    oneMindAttemptedEarly = true;
+    try {
+      const oneMind = await processOneMindCustomerTurn({
+        channel,
+        language:request.language,
+        message:request.message,
+        eventId:transportEventId,
+        providerUserKey:providerUserKey ?? request.guestId,
+        canonicalAnonymousId:request.guestId,
+        guestDbId,
+        durableMemory:durableMemoryFromRequest(request),
+        persistState:true,
+      });
+      await recordOneMindTrace(oneMind.observability);
+      if (oneMind.status === 'composed') {
+        console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
+          domain:oneMind.turn.semanticTurn.domain,
+          action:oneMind.turn.semanticTurn.action,
+          responseIntent:oneMind.turn.dialogDecision.responseIntent,
+          composerMode:oneMind.response.mode,
+          stateConflictRetries:oneMind.turn.trace.stateConflictRetries ?? 0,
+        }));
+        const mappedIntent = oneMind.turn.semanticTurn.action === 'recommend'
+          || oneMind.turn.semanticTurn.action === 'discover'
+          ? 'recommendation'
+          : 'information';
+        return coreResult(200, {
+          message:oneMind.response.message,
+          intent:mappedIntent,
+          contextUpdates:{},
+          journeyAction:{type:'none',journey:null},
+          suggestedActions:[],
+        });
+      }
+      console.log('THONGTHAI_HUMAN_CONVERSATION_LEGACY_REQUIRED', JSON.stringify({
+        reason:oneMind.reason,
+        domain:oneMind.turn.semanticTurn.domain,
+        action:oneMind.turn.semanticTurn.action,
+      }));
+    } catch (error) {
+      // Strangler safety during recovery: language-first failure must not take
+      // down the existing product. Legacy remains a fallback until the full
+      // conversation acceptance suite is green.
+      console.error(
+        'THONGTHAI_HUMAN_CONVERSATION_FIRST_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+    }
   }
 
   // Phase 2 closeout — resolve the answer to Thongthai's own persisted
@@ -4217,7 +4281,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       && isCafeReadOnlyTurn(request.message, snapshot.state.active_topic);
   }
 
-  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
+  if (!oneMindAttemptedEarly && process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
       && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath && !preserveCafeFastPath) {
     try {
       const oneMind = await processOneMindCustomerTurn({
