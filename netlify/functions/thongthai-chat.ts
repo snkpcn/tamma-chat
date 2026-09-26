@@ -4423,33 +4423,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     }
   }
 
-  // If every proven deterministic/business responder above yielded but the
-  // semantic supervisor already produced a safe, non-transactional One-Mind
-  // response, use that deterministic/grounded response instead of invoking
-  // the legacy generative brain. This keeps OpenAI in the teacher role.
-  if (earlyOneMind?.status === 'composed') {
-    const supervisedFallback = polishedResponse({
-      message: earlyOneMind.response.message,
-      intent: earlyOneMind.turn.semanticTurn.action === 'recommend'
-        || earlyOneMind.turn.semanticTurn.action === 'discover'
-        ? 'recommendation'
-        : 'information',
-      contextUpdates:{},
-      journeyAction:{type:'none', journey:null},
-      suggestedActions:[],
-      responseStyle:'direct',
-      semanticMemoryUpdates:[],
-      toolCalls:[],
-    }, channel);
-    await persistBrainRuntime(guestDbId, channel, supervisedFallback);
-    return coreResult(200, {
-      message:supervisedFallback.message,
-      intent:supervisedFallback.intent,
-      contextUpdates:supervisedFallback.contextUpdates,
-      journeyAction:supervisedFallback.journeyAction,
-      suggestedActions:supervisedFallback.suggestedActions,
-    });
-  }
 
   const history = request.chatHistory.slice(-16);
   const lastTurn = history[history.length - 1];
@@ -4643,6 +4616,35 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       suggestedActions: polished.suggestedActions,
     });
   }
+
+  // If every proven deterministic/business responder above yielded but the
+  // semantic supervisor already produced a safe, non-transactional One-Mind
+  // response, use that deterministic/grounded response instead of invoking
+  // the legacy generative brain. This keeps OpenAI in the teacher role.
+  if (earlyOneMind?.status === 'composed') {
+    const supervisedFallback = polishedResponse({
+      message: earlyOneMind.response.message,
+      intent: earlyOneMind.turn.semanticTurn.action === 'recommend'
+        || earlyOneMind.turn.semanticTurn.action === 'discover'
+        ? 'recommendation'
+        : 'information',
+      contextUpdates:{},
+      journeyAction:{type:'none', journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    }, channel);
+    await persistBrainRuntime(guestDbId, channel, supervisedFallback);
+    return coreResult(200, {
+      message:supervisedFallback.message,
+      intent:supervisedFallback.intent,
+      contextUpdates:supervisedFallback.contextUpdates,
+      journeyAction:supervisedFallback.journeyAction,
+      suggestedActions:supervisedFallback.suggestedActions,
+    });
+  }
+
 
   let firstResponse: BrainResponse;
   try {
