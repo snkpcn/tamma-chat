@@ -67,6 +67,7 @@ import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agen
 import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import type { DurableMemorySnapshot } from './_memory-relevance';
+import type { SemanticTurn } from './_semantic-interpreter';
 import {
   buildPendingPromotionRedemption,
   decidePromotionFallback,
@@ -3508,6 +3509,47 @@ function deterministicCareContextResponse(request: BrainRequest): BrainResponse 
 // light feedback invitation -- never a survey, never spammed onto an
 // unrelated turn (this responder only ever fires on the narrow
 // THANK_YOU_MARKER shape, nothing else).
+function supervisedOpenWorldResponse(
+  turn: SemanticTurn,
+  request: BrainRequest,
+): BrainResponse {
+  const isThai = request.language === 'th' || /[\u0E00-\u0E7F]/u.test(request.message);
+  let message:string;
+
+  if (turn.domain === 'incident') {
+    message = isThai
+      ? 'รับเรื่องครับ ช่วยบอกจุดที่เกิดเหตุหรือจุดที่เห็นครั้งสุดท้าย เวลาประมาณ และรายละเอียดสิ่งที่เกิดขึ้นอีกนิดครับ ทองไทยจะช่วยรวบรวมให้ทีมตรวจสอบต่อ'
+      : 'I understand this is an incident report. Please share the approximate time, location, and a few details so I can help route it for follow-up.';
+  } else if (turn.domain === 'local') {
+    message = isThai
+      ? 'ถ้าเป็นสิ่งที่เกิดขึ้นรอบพื้นที่ตอนนี้ ทองไทยยังไม่มีข้อมูลสดยืนยันจากหน้างานครับ เลยไม่อยากเดา ถ้าบอกจุดหรือช่วงเวลาที่หมายถึงได้ จะช่วยต่อให้ตรงขึ้นครับ'
+      : 'I understand you are asking about something around the area. I do not have a live on-site view, so I will not guess. Share the spot or time you mean and I can help narrow it down.';
+  } else if (turn.needsClarification) {
+    message = isThai
+      ? 'เข้าใจเรื่องที่ถามอยู่ครับ แต่ยังขาดรายละเอียดสำคัญอีกนิด บอกเพิ่มได้เลยว่าหมายถึงอะไรหรืออยากให้ทองไทยช่วยแบบไหน'
+      : 'I understand the topic, but I need one more detail to know exactly what you want help with.';
+  } else if (turn.speechAct === 'social' || turn.action === 'unknown') {
+    message = isThai
+      ? 'ได้ครับ คุยกับทองไทยได้เลย ถ้ามีอะไรอยากให้ช่วยต่อ บอกมาได้ตรง ๆ ครับ'
+      : 'Sure. You can talk to me normally—tell me what you want help with next.';
+  } else {
+    message = isThai
+      ? 'เข้าใจครับ เรื่องนี้ไม่ได้เป็นคำสั่งจองหรือสั่งซื้อ ทองไทยจะไม่ทำรายการอะไรเอง ถ้าต้องใช้ข้อมูลเฉพาะเพิ่มเติมจะเช็กจากแหล่งที่ยืนยันได้ก่อนครับ'
+      : 'Understood. This is not a booking or purchase instruction, so I will not submit anything. If specific facts are needed, I will rely on a verified source first.';
+  }
+
+  return {
+    message,
+    intent:'conversation',
+    contextUpdates:{},
+    journeyAction:{ type:'none', journey:null },
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 function deterministicThankYouCloseResponse(request: BrainRequest): BrainResponse | null {
   if (!isThankYouMessage(request.message)) return null;
   return {
@@ -3789,16 +3831,17 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           composerMode:oneMind.response.mode,
           stateConflictRetries:oneMind.turn.trace.stateConflictRetries ?? 0,
         }));
-        const mappedIntent = oneMind.turn.semanticTurn.action === 'recommend'
-          || oneMind.turn.semanticTurn.action === 'discover'
-          ? 'recommendation'
-          : 'information';
+        const openWorld = polishedResponse(
+          supervisedOpenWorldResponse(oneMind.turn.semanticTurn, request),
+          channel,
+        );
+        await persistBrainRuntime(guestDbId, channel, openWorld);
         return coreResult(200, {
-          message:oneMind.response.message,
-          intent:mappedIntent,
-          contextUpdates:{},
-          journeyAction:{type:'none',journey:null},
-          suggestedActions:[],
+          message:openWorld.message,
+          intent:openWorld.intent,
+          contextUpdates:openWorld.contextUpdates,
+          journeyAction:openWorld.journeyAction,
+          suggestedActions:openWorld.suggestedActions,
         });
       }
       console.log('THONGTHAI_HUMAN_CONVERSATION_LEGACY_REQUIRED', JSON.stringify({
