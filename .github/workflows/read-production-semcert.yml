@@ -25,4 +25,4 @@ jobs:
           echo
           echo "CURRENT_PRODUCTION_CERT_END"
 
-# refresh after chunked cert deploy 1
+# refresh final cert chunk 2 result
