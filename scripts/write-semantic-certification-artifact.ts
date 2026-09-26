@@ -114,10 +114,14 @@ async function main() {
   // limits are project-scoped and vary by model/tier, so the cert runner keeps
   // deliberate headroom instead of assuming fallback model IDs provide fresh
   // project RPM. Override only for controlled certification runs.
-  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '4250');
+  // Semantic-v6 production evidence hit the shared free-project quota at
+  // exactly 10 successful cases with the old 4.25s cadence. Keep deliberate
+  // headroom below ~10 RPM so certification observes semantics instead of
+  // manufacturing 429s. Runtime customer traffic is unaffected.
+  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '6500');
   const interCaseDelayMs=Number.isFinite(configuredInterCaseDelayMs)
     ? Math.max(0,Math.min(15_000,Math.floor(configuredInterCaseDelayMs)))
-    : 4_250;
+    : 6_500;
 
   try {
     const resumeBase=await loadResumeBase();
