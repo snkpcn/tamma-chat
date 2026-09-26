@@ -245,6 +245,7 @@ export function toSemanticInterpretationMeta(turn: SemanticTurn): SemanticInterp
   return {
     semanticVersion: SEMANTIC_INTERPRETER_VERSION,
     domain: turn.domain,
+    speechAct: turn.speechAct,
     intent: turn.intent,
     action: turn.action,
     informationNeed: turn.informationNeed ?? 'none',
