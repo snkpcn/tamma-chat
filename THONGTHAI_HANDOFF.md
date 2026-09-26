@@ -9763,3 +9763,10 @@ RED/GREEN:
 - final wiring Build Guard run `36209917277` — PASS.
 
 This patch exists only to let semantic-v7 production certification complete honestly on the free provider chain. It does not claim semantic acceptance by itself.
+
+## Human Brain semantic-v8 live-failure remediation checkpoint — 2026-09-26
+
+- Production semantic-v7 certification on deploy `6ab72967cea89200082ccbee` completed the full corpus: 158/158 semantically evaluated, providerFailed=0, availabilityComplete=true, pass=150, semanticFailed=8 (94.94%).
+- The eight failures were human-adjudicated as valid gold: `stay-availability-02`, `l-restaurant-01`, `l-restaurant-04`, `l-journey-04`, `l-journey-07`, `l-support-01`, `l-promo-10`, `l-payment-07`.
+- semantic-v8 hardens generalized meaning boundaries only: recommendation vs current availability, current menu readiness vs catalog existence, allergen avoidance recommendation, activity-vs-journey primary goal, conversational continuation/resume, vague support clarification, promotion eligibility policy, and payment remediation guidance.
+- No sentence-specific runtime matching, no corpus-gold weakening, no transaction-core/DB/backoffice changes, and paid OpenAI remains off.
