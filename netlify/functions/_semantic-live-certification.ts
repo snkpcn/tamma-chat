@@ -443,6 +443,8 @@ export async function runGroupedSemanticCertification(options:{
   classifyGroup?:GroupedSemanticClassifier;
   availabilityRetries?:number;
   availabilityRetryDelayMs?:number;
+  formatRetries?:number;
+  formatRetryDelayMs?:number;
 }={}):Promise<SemanticCertificationResult>{
   const profile=options.profile ?? 'full';
   const corpus=allCases();
@@ -456,8 +458,11 @@ export async function runGroupedSemanticCertification(options:{
   const classifyGroup=options.classifyGroup ?? classifySemanticCasesGrouped;
   const availabilityRetries=Math.max(0,Math.min(3,Math.floor(options.availabilityRetries ?? 0)));
   const availabilityRetryDelayMs=Math.max(0,Math.min(90_000,Math.floor(options.availabilityRetryDelayMs ?? 0)));
+  const formatRetries=Math.max(0,Math.min(2,Math.floor(options.formatRetries ?? 0)));
+  const formatRetryDelayMs=Math.max(0,Math.min(90_000,Math.floor(options.formatRetryDelayMs ?? 0)));
 
   let availabilityAttempt=0;
+  let formatAttempt=0;
   let rawResults:Map<string,Record<string,unknown>>;
   while(true){
     try{
@@ -470,6 +475,19 @@ export async function runGroupedSemanticCertification(options:{
       if(retryable && availabilityAttempt<availabilityRetries && availabilityRetryDelayMs>0){
         availabilityAttempt+=1;
         await sleep(availabilityRetryDelayMs);
+        continue;
+      }
+
+      // A provider response with a malformed GROUP envelope is different from
+      // a semantic mismatch inside a valid case result. Retry the exact same
+      // selected group a bounded number of times, without advancing coverage.
+      // Persistent malformed output still falls through to the explicit
+      // all-selected-cases failure below, so resume can never skip unscored
+      // corpus cases or manufacture passes.
+      const isFormatFailure=!isProviderFailure && providerErrorName(error)==='SyntaxError';
+      if(isFormatFailure && formatAttempt<formatRetries){
+        formatAttempt+=1;
+        if(formatRetryDelayMs>0) await sleep(formatRetryDelayMs);
         continue;
       }
 
