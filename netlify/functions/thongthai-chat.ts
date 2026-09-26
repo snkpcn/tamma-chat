@@ -3834,17 +3834,29 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           composerMode:oneMind.response.mode,
           stateConflictRetries:oneMind.turn.trace.stateConflictRetries ?? 0,
         }));
-        const openWorld = polishedResponse(
-          supervisedOpenWorldResponse(oneMind.turn.semanticTurn, request),
-          channel,
-        );
-        await persistBrainRuntime(guestDbId, channel, openWorld);
+        const responseFromSystem = ['general','local','incident'].includes(oneMind.turn.semanticTurn.domain)
+          ? supervisedOpenWorldResponse(oneMind.turn.semanticTurn, request)
+          : {
+              message:oneMind.response.message,
+              intent:oneMind.turn.semanticTurn.action === 'recommend'
+                || oneMind.turn.semanticTurn.action === 'discover'
+                ? 'recommendation'
+                : 'information',
+              contextUpdates:{},
+              journeyAction:{type:'none' as const, journey:null},
+              suggestedActions:[],
+              responseStyle:'direct' as const,
+              semanticMemoryUpdates:[],
+              toolCalls:[],
+            };
+        const supervisedResponse = polishedResponse(responseFromSystem, channel);
+        await persistBrainRuntime(guestDbId, channel, supervisedResponse);
         return coreResult(200, {
-          message:openWorld.message,
-          intent:openWorld.intent,
-          contextUpdates:openWorld.contextUpdates,
-          journeyAction:openWorld.journeyAction,
-          suggestedActions:openWorld.suggestedActions,
+          message:supervisedResponse.message,
+          intent:supervisedResponse.intent,
+          contextUpdates:supervisedResponse.contextUpdates,
+          journeyAction:supervisedResponse.journeyAction,
+          suggestedActions:supervisedResponse.suggestedActions,
         });
       }
       console.log('THONGTHAI_HUMAN_CONVERSATION_LEGACY_REQUIRED', JSON.stringify({
