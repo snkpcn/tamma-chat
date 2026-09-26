@@ -3806,7 +3806,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // turn needs a real transaction executor, it returns legacy_required and
   // the unchanged executor path below still owns the write.
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1') {
-    oneMindAttemptedEarly = true;
     try {
       const oneMind = await processOneMindCustomerTurn({
         channel,
@@ -3820,6 +3819,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         persistState:true,
       }, {}, {}, undefined, { requireSemanticSupervisor:true });
       await recordOneMindTrace(oneMind.observability);
+      // Only a real OpenAI-owned interpretation consumes the early semantic
+      // slot. If the supervisor is unavailable, leave the later proven
+      // deterministic One-Mind compatibility cutover available.
+      oneMindAttemptedEarly = oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor';
       const supervisedOpenWorld = oneMind.status === 'composed'
         && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor'
         && ['general','local','incident'].includes(oneMind.turn.semanticTurn.domain);
