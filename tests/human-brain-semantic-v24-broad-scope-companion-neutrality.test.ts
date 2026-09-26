@@ -28,7 +28,7 @@ test('semantic-v24 treats companion context as constraints, not recommendation i
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('Companion or group context by itself is a constraint, not recommendation intent'));
   assert.ok(p.includes('A neutral what-is-there-to-do request remains ecosystem + discover when companion context is merely supplied'));
-  assert.ok(p.includes('Move to recommend only when the CURRENT utterance asks what is good, suitable, advisable, preferable, recommended, or otherwise asks the assistant to choose'));
+  assert.ok(p.includes('Move to recommend only when the CURRENT utterance asks what is good, suitable, advisable, preferable, recommended, or asks the assistant to choose'));
 });
 
 test('semantic-v24 version is explicit',()=>{
