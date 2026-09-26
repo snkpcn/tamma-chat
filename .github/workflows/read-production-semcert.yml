@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 
-# target: 6ab72d90 semantic-v8
+# target: 6ab72d90
 
 jobs:
   read-production-cert:
