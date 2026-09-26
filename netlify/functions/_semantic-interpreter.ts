@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v24';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v25';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -480,6 +480,9 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- Separate the user speech act from payload details. Companion, traveler, party size, budget, dietary, preference, or other payload details may populate entities or constraints without changing the requested action. A neutral browse request remains discover even when it also carries companion or traveler metadata.
+- When an active recommendation or selection flow is awaiting preferences or constraints and the CURRENT utterance supplies only those parameters, use provide_information. Do not turn a constraint-supply turn into recommend merely because the supplied data will later be used to make a recommendation.
+- An explicit transaction directive remains order or book even when the exact product or offering has not yet been selected. Missing target selection is a slot or clarification problem for deterministic downstream handling, not a reason to reinterpret the turn as discover + catalog. Semantic transaction intent never executes the transaction itself.
 - A generic action predicate describes what the customer wants to do; it is not a canonical business-category noun. Without an explicit category, named offering, or already-grounded category context, keep broad something-to-do requests in ecosystem.
 - Traveler, companion, family, couple, age, or group context alone does not make a neutral browse request evaluative. Use recommend only when the CURRENT utterance asks for judgment, suitability, preference-sensitive choice, what is good, or another evaluative decision.
 - Decide DOMAIN SCOPE before ACTION for broad experience requests. Generic do, play, visit, or experience wording is not an explicit activity-category request. Only an explicit canonical category noun, named offering, or clearly bounded business subject narrows broad ecosystem scope.
