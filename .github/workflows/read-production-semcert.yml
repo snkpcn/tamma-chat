@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 
-# target: 3e86f7cd
+# target: 80872150
 
 jobs:
   read-production-cert:
