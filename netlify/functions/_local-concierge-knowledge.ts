@@ -98,6 +98,13 @@ export const SAFETY_GENERAL_GUIDANCE: LocalTopicGuidance = {
  *  See THONGTHAI_HANDOFF.md's Local Concierge Intelligence Framework
  *  section for the owner's exact disallowed-claims list this guards
  *  against. */
+export const HORSE_FACT_PROVENANCE = Object.freeze({
+  sourceId:'owner_verified_horse_profile_v1',
+  sourceType:'verified_static_catalog',
+  authoritative:true,
+  allowedClaimKeys:['rideFeelTh','personalityTh'] as const,
+});
+
 export type HorseFact = {
   name: string;
   rideFeelTh: string;
