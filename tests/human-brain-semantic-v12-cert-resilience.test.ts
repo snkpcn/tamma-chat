@@ -14,7 +14,7 @@ test('semantic-v12 version is explicit',()=>{
 test('semantic-v12 makes single-business catalog ownership explicit even with venue-wide wording',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   assert.ok(prompt.includes('A catalog question about one named business category belongs to that category'));
-  assert.ok(prompt.includes('venue-wide wording such as here, this place, or what do you have here does not broaden it to ecosystem'));
+  assert.ok(prompt.includes('Venue-wide wording such as here, this place, or what do you have here does not broaden it to ecosystem'));
   assert.ok(prompt.includes('Use ecosystem only when the requested set genuinely spans multiple business units'));
 });
 
