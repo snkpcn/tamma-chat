@@ -87,7 +87,30 @@ const OPENAI_MODEL = 'gpt-5.6-luna';
 // how many attempts are made.
 const TOTAL_PROVIDER_BUDGET_MS = 7_000;
 const PER_ATTEMPT_CAP_MS = 6_000;
+// Grouped semantic certification runs during the Netlify build, not inside a
+// customer request. A 20-case structured response can legitimately take
+// longer than the customer-facing 6s attempt cap. Keep runtime latency policy
+// unchanged while giving this one build-time caller enough room to complete
+// on the FREE Gemini chain.
+const SEMANTIC_CERT_TOTAL_PROVIDER_BUDGET_MS = 30_000;
+const SEMANTIC_CERT_PER_ATTEMPT_CAP_MS = 25_000;
 const MIN_ATTEMPT_BUDGET_MS = 1_200;
+
+export function providerTimingPolicyForCaller(callerLabel: string): {
+  totalBudgetMs: number;
+  perAttemptCapMs: number;
+} {
+  if (callerLabel === 'semantic-certification-group') {
+    return {
+      totalBudgetMs: SEMANTIC_CERT_TOTAL_PROVIDER_BUDGET_MS,
+      perAttemptCapMs: SEMANTIC_CERT_PER_ATTEMPT_CAP_MS,
+    };
+  }
+  return {
+    totalBudgetMs: TOTAL_PROVIDER_BUDGET_MS,
+    perAttemptCapMs: PER_ATTEMPT_CAP_MS,
+  };
+}
 
 // Phase P confirmed root cause: production 429s on EVERY attempt, Gemini and
 // OpenAI alike, each rejected in a few hundred ms -- a real rate-limit
@@ -158,7 +181,13 @@ export function shouldFallbackToSecondaryProvider(error: unknown): boolean {
   return error instanceof LLMAvailabilityError || error instanceof ProviderNotConfiguredError;
 }
 
-async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabel: string, deadlineAt: number): Promise<string> {
+async function callGemini(
+  systemPrompt: string,
+  messages: ChatTurn[],
+  callerLabel: string,
+  deadlineAt: number,
+  perAttemptCapMs: number,
+): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new ProviderNotConfiguredError([{ provider: 'gemini', model: 'n/a', outcome: 'not_configured', elapsedMs: 0 }]);
   const contents = messages.map(message => ({
@@ -180,7 +209,7 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
       continue;
     }
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.min(PER_ATTEMPT_CAP_MS, remainingMs));
+    const timeout = setTimeout(() => controller.abort(), Math.min(perAttemptCapMs, remainingMs));
     const startedAt = Date.now();
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
@@ -241,7 +270,12 @@ async function callGemini(systemPrompt: string, messages: ChatTurn[], callerLabe
   throw new LLMAvailabilityError(lastAvailabilityError || 'Gemini unavailable', attempts);
 }
 
-async function callOpenAI(systemPrompt: string, messages: ChatTurn[], deadlineAt: number): Promise<string> {
+async function callOpenAI(
+  systemPrompt: string,
+  messages: ChatTurn[],
+  deadlineAt: number,
+  perAttemptCapMs: number,
+): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new LLMAvailabilityError('OpenAI fallback not configured', [{ provider: 'openai', model: OPENAI_MODEL, outcome: 'not_configured', elapsedMs: 0 }]);
   const remainingMs = deadlineAt - Date.now();
@@ -249,7 +283,7 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[], deadlineAt
     throw new LLMAvailabilityError('OpenAI shared timeout budget exhausted', [{ provider: 'openai', model: OPENAI_MODEL, outcome: 'timeout', elapsedMs: 0 }]);
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(PER_ATTEMPT_CAP_MS, remainingMs));
+  const timeout = setTimeout(() => controller.abort(), Math.min(perAttemptCapMs, remainingMs));
   const startedAt = Date.now();
   try {
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -325,8 +359,9 @@ async function callOpenAI(systemPrompt: string, messages: ChatTurn[], deadlineAt
  * deterministic degradation path for that (see _graceful-degradation.ts).
  */
 export async function callPreferredModel(systemPrompt: string, messages: ChatTurn[], callerLabel = 'unknown'): Promise<string> {
-  const deadlineAt = Date.now() + TOTAL_PROVIDER_BUDGET_MS;
-  try { return await callGemini(systemPrompt, messages, callerLabel, deadlineAt); }
+  const timing = providerTimingPolicyForCaller(callerLabel);
+  const deadlineAt = Date.now() + timing.totalBudgetMs;
+  try { return await callGemini(systemPrompt, messages, callerLabel, deadlineAt, timing.perAttemptCapMs); }
   catch (geminiError) {
     if (!shouldFallbackToSecondaryProvider(geminiError)) throw geminiError;
     if (process.env.THONGTHAI_ALLOW_PAID_FALLBACK !== '1') throw geminiError;
@@ -334,7 +369,7 @@ export async function callPreferredModel(systemPrompt: string, messages: ChatTur
     const geminiAttempts = geminiError instanceof LLMRequestError || geminiError instanceof ProviderNotConfiguredError
       ? geminiError.attempts : [];
     try {
-      return await callOpenAI(systemPrompt, messages, deadlineAt);
+      return await callOpenAI(systemPrompt, messages, deadlineAt, timing.perAttemptCapMs);
     } catch (openaiError) {
       if (openaiError instanceof LLMRequestError) {
         openaiError.attempts = [...geminiAttempts, ...openaiError.attempts];
