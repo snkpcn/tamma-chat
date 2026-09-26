@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v7';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v8';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -344,6 +344,29 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
   pair an existing booking/order/payment status with informationNeed=transaction_status.
 - ask = an informational/factual question that is not better represented by status, compare, recommend, or discover.
+- CURRENT request for help choosing outranks a prior status or availability turn. When the customer now asks what you recommend,
+  what suits them, or what they should choose, use recommend + recommendation even if earlier context was checking availability and even
+  if the current turn also supplies party size, duration, budget, or other constraints. Context may fill meaning; it must not replace
+  the CURRENT requested action.
+- For sellable/servable resources, distinguish browse from current readiness. Asking whether something is ready to sell, serve, use, or provide now
+  is status + availability when the point is whether the offering can actually be provided now or at the stated time. Use discover +
+  catalog for what exists to browse; use inventory only when the customer is specifically asking about stock/count/on-hand inventory.
+- When an allergy or dietary safety constraint is used to ask which menu/items the customer should choose or avoid, that is personalized
+  recommend + ingredients. Use ask + policy only for a general rule or policy question that is not asking which concrete offerings are
+  suitable or unsafe for this customer.
+- Choose domain by the PRIMARY requested deliverable, not by incidental sequencing words. If the customer wants one activity suggested
+  before/after a meal or another event, the domain is activity. A time-order constraint by itself does not make the request a journey;
+  use journey when arranging or sequencing a multi-stop plan is itself the requested deliverable.
+- Pure continue/resume language does not repeat the previous action. When the customer merely asks to continue where the conversation
+  or plan left off, preserve the relevant domain but use ask; only classify a new recommend/modify/confirm action when the CURRENT turn
+  actually asks for that action. If a matching suspended task exists, also use taskDirective=resume_suspended.
+- Even when support is the clear domain, a help request with no object or requested outcome still needs clarification. Use support + ask
+  with needsClarification=true rather than treating confident domain recognition as enough to answer.
+- Eligibility or applicability of a promotion, benefit, or permission is an ask + policy question: the customer is asking whether a rule
+  permits/applies to them or this situation. Use status only for an actual current redemption, transaction, resource, or record state.
+- A customer asking what to do next after a failure, rejection, or error is requesting remediation guidance, so use ask (normally with
+  informationNeed=policy when a procedure/rule is needed). Use status + transaction_status only when the CURRENT question asks what state
+  the transaction is in, whether it is still pending/failed, or whether processing succeeded.
 - compare = the customer asks to compare two or more known options/attributes. Comparative attribute questions ("which is gentler/better/faster?",
   "how do these differ?") stay compare even if the answer may help the customer choose. recommend is for asking the assistant to choose/suggest
   what suits the customer, not for a direct comparison between known options.
