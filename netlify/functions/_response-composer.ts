@@ -256,6 +256,22 @@ function activeTaskSubjectTh(input: ResponseComposerInput): string {
   return '';
 }
 
+function verifiedEmptyTaskMessageTh(input: ResponseComposerInput): string | null {
+  const task=input.dialogDecision.taskStateContainer.activeTask;
+  if (!task || task.commitmentIntent !== true) return null;
+  const context=activeTaskSubjectTh(input).replace(/กำลังช่วย|ให้อยู่นะครับ\s*$/gu,'').trim();
+  if (task.type==='activity_booking') {
+    return `ตอนนี้ยังไม่พบคิว${context || 'กิจกรรม'}ที่ตรงกับรายละเอียดที่ขอครับ ยังไม่ได้ยืนยันการจอง`;
+  }
+  if (task.type==='stay_booking') {
+    return 'ตอนนี้ยังไม่พบที่พักว่างที่ตรงกับรายละเอียดที่ขอครับ ยังไม่ได้ยืนยันการจอง';
+  }
+  if (task.type==='restaurant_preorder') {
+    return 'ตอนนี้ยังไม่พบรายการอาหารที่ตรงกับคำขอนี้ครับ ยังไม่ได้ส่งออเดอร์';
+  }
+  return null;
+}
+
 function deterministicMessages(language: ResponseLanguage) {
   if (language === 'en') return {
     unavailable:'I can’t verify the latest information right now, so I won’t guess. I can have the team check it for you.',
@@ -885,7 +901,11 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     // A verified-empty supporting catalog must not erase an explicit task
     // that is still collecting fields (notably activity duration). Let the
     // task-aware collection branch below say what cannot be verified.
-    message = input.dialogDecision.responseIntent === 'no_active_promotion' ? copy.noPromo : copy.empty;
+    message = input.dialogDecision.responseIntent === 'no_active_promotion'
+      ? copy.noPromo
+      : input.language === 'th'
+        ? (verifiedEmptyTaskMessageTh(input) ?? copy.empty)
+        : copy.empty;
   } else if (input.dialogDecision.mode === 'clarify') {
     // Zero-cost architecture: a clarify/collect_field decision is a real,
     // already-computed machine decision from the Dialog Manager -- it does
