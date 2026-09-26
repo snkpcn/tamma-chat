@@ -5,10 +5,10 @@ import {
   emptySemanticContext,
   SEMANTIC_INTERPRETER_VERSION,
 } from '../netlify/functions/_semantic-interpreter';
-import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
+import { PHASE_L_SEMANTIC_CASES } from './fixtures/phase-l-semantic-cases';
 
 function byId(id:string){
-  const item=SEMANTIC_EVAL_CORPUS.find(row=>row.id===id);
+  const item=PHASE_L_SEMANTIC_CASES.find(row=>row.id===id);
   assert.ok(item,`missing fixture ${id}`);
   return item;
 }
