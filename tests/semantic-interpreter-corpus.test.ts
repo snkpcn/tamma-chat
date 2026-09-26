@@ -87,15 +87,26 @@ for (const evalCase of SEMANTIC_EVAL_CORPUS) {
   });
 }
 
-// --- semantic equivalence: the broad-discovery group must all classify the same way ---
+// --- semantic equivalence: broad browsing and evaluative choosing are distinct meanings ---
 
-test('semantic equivalence group "broad_discovery": 7 differently-worded variants all classify as ecosystem/discover', () => {
+test('semantic equivalence group "broad_discovery": 5 bare-browsing variants all classify as ecosystem/discover', () => {
   const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'broad_discovery');
-  assert.equal(group.length, 7);
+  assert.equal(group.length, 5);
   for (const evalCase of group) {
     const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), emptySemanticContext());
     assert.equal(turn.domain, 'ecosystem');
     assert.equal(turn.action, 'discover');
+  }
+});
+
+test('semantic equivalence group "broad_recommendation": 2 evaluative variants classify as ecosystem/recommend', () => {
+  const group = SEMANTIC_EVAL_CORPUS.filter(c => c.group === 'broad_recommendation');
+  assert.equal(group.length, 2);
+  for (const evalCase of group) {
+    const turn = parseSemanticTurnResponse(JSON.stringify(evalCase.simulatedModelOutput), emptySemanticContext());
+    assert.equal(turn.domain, 'ecosystem');
+    assert.equal(turn.action, 'recommend');
+    assert.equal(turn.informationNeed, 'recommendation');
   }
 });
 
