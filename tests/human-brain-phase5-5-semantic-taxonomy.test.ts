@@ -13,11 +13,13 @@ function byId(id:string){
   return item;
 }
 
-test('Human Brain 5.5 RED: semantic prompt defines broad ecosystem vs specific activity domain without phrase routing',()=>{
+test('Human Brain 5.5 RED: semantic prompt defines broad ecosystem vs explicit activity category without phrase routing',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   assert.match(prompt,/generic.*whole-property.*ecosystem/is);
-  assert.match(prompt,/activity.*specific activity.*entity|specific activity.*entity.*activity/is);
-  assert.match(prompt,/generic.*do|play|visit.*must not.*activity/is);
+  assert.match(prompt,/category noun itself is enough to establish that domain/is);
+  assert.match(prompt,/asking what activities are offered belongs to activity/is);
+  assert.match(prompt,/specific individual activity.*NOT required/is);
+  assert.match(prompt,/generic.*do|play|visit.*NOT enough.*activity/is);
 });
 
 test('Human Brain 5.5 RED: semantic prompt gives mutually useful discover vs recommend definitions',()=>{
