@@ -141,12 +141,10 @@ export type HarnessGeminiReply = {
 
 export type Harness = {
   fetchMock: typeof fetch;
-  /** Queue one scripted LLM completion for the NEXT call to the model
-   *  provider. If the queue is empty, a safe generic "conversation" reply
-   *  is returned (never a hallucinated business fact). */
+  /** Queue one scripted semantic-supervisor completion for the NEXT model call.
+   * Historical name kept as a compatibility alias for existing tests. */
   programGeminiReply: (reply: HarnessGeminiReply) => void;
-  /** Number of raw Gemini HTTP completions consumed so far. Useful for
-   * proving a deterministic fast path did not accidentally call the model. */
+  /** Number of OpenAI semantic-supervisor/reviewer HTTP completions consumed. */
   modelCallCount: () => number;
   /** Script the NEXT call to the OpenWeatherMap endpoint
    *  (_weather-provider.ts's getWeatherForTammaLocation) -- ok:true + body
@@ -258,8 +256,8 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const customerAccounts = new Map<string, { id: string; guest_id: string }>();
   const posts = new Map<string, Array<Record<string, unknown>>>();
   const customerIntelligence = new Map<string, Record<string, unknown>>();
-  const geminiQueue: HarnessGeminiReply[] = [];
-  let geminiCalls = 0;
+  const modelQueue: HarnessGeminiReply[] = [];
+  let modelCalls = 0;
   let weatherFetchResponse: { ok: boolean; body: unknown } | null = null;
   const feedbackEvents = new Map<string, Record<string, unknown>>(); // id -> row (ops_feedback_events)
   const feedbackEventSourceKeys = new Map<string, string>(); // source_event_key -> id
@@ -361,11 +359,25 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     const path = u.replace(/^https?:\/\/[^/]+\/rest\/v1\//, '').replace(/^https?:\/\/[^/]+\//, '');
     const query = decodeQuery(u);
 
-    // --- LLM provider (Gemini) ---
-    if (u.includes('generativelanguage.googleapis.com')) {
-      geminiCalls += 1;
-      const reply = geminiQueue.shift() ?? { message: 'ขอโทษนะครับ ตอนนี้ทองไทยยังไม่มีข้อมูลที่ยืนยันได้สำหรับเรื่องนี้ครับ', intent: 'conversation' };
-      return jsonResponse({ candidates: [{ content: { parts: [{ text: JSON.stringify(reply) }] } }] });
+    // --- LLM semantic supervisor (OpenAI Responses API) ---
+    // The public test helper keeps the historical programGeminiReply name as
+    // a compatibility alias, but the runtime provider under test is OpenAI-only.
+    if (u.includes('api.openai.com/v1/responses')) {
+      modelCalls += 1;
+      const reply = modelQueue.shift() ?? {
+        normalizedMeaning:'generic test conversation',
+        speechAct:'question',
+        domain:'general',
+        intent:'general_question',
+        action:'ask',
+        informationNeed:'none',
+        entities:{},
+        references:[],
+        constraints:[],
+        confidence:0.9,
+        needsClarification:false,
+      };
+      return jsonResponse({ output_text: JSON.stringify(reply) });
     }
 
     // --- weather provider (OpenWeatherMap, _weather-provider.ts) ---
@@ -774,8 +786,8 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
 
   return {
     fetchMock,
-    programGeminiReply: reply => { geminiQueue.push(reply); },
-    modelCallCount: () => geminiCalls,
+    programGeminiReply: reply => { modelQueue.push(reply); },
+    modelCallCount: () => modelCalls,
     programWeatherFetch: response => { weatherFetchResponse = { ok: response.ok, body: response.body ?? {} }; },
     programLinePushFailure: teamCode => { failingPushTeamCodes.add(teamCode); },
     programOpsChannel: (teamCode, sharedTargetId) => {
@@ -829,13 +841,15 @@ export async function withHarness<T>(
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
     CUSTOMER_PII_ENCRYPTION_KEY: process.env.CUSTOMER_PII_ENCRYPTION_KEY,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     THONGTHAI_ONE_MIND_CUTOVER: process.env.THONGTHAI_ONE_MIND_CUTOVER,
     LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN,
   };
   process.env.SUPABASE_URL = 'https://example.supabase.co';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
   process.env.CUSTOMER_PII_ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
-  process.env.GEMINI_API_KEY = 'test-gemini-key';
+  delete process.env.GEMINI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-openai-key';
   // Only actually exercised when a test programs a bound ops channel (see
   // programOpsChannel) -- linePush (_ops-notifications.ts) throws if this
   // is unset, so it must be present even though most tests never bind a
