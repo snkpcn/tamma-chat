@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v15';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v16';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -481,6 +481,7 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- Creating, arranging, or composing a NEW itinerary or multi-step journey for the customer is recommend, not ask. This includes a duration-bounded plan or a plan that combines multiple requested experiences or business units. Use ask for retrieving, resuming, explaining, or discussing an existing plan when the customer is not asking you to design a new one.
 - How-it-works, instructions, rules, or explanation about one named activity are ask, not discover. discover is for browsing what activities/options exist.
 - Selecting an already-presented option and adding only schedule, quantity, or party-size slots remains confirm. Do not escalate that turn to book/order unless the CURRENT utterance explicitly asks to submit the transaction.
 - An explicitly named canonical business category owns the domain even when phrased as what is available here. The activity category means domain=activity; ecosystem is only for genuinely cross-business or category-unspecified discovery.
