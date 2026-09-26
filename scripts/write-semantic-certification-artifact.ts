@@ -39,6 +39,7 @@ async function main() {
 
   const chunkSize=20;
   const availabilityRetryDelayMs=61_000;
+  const transientAvailabilityRetryDelayMs=10_000;
   // Live evidence reached project quota after a short burst. Gemini rate
   // limits are project-scoped and vary by model/tier, so the cert runner keeps
   // deliberate headroom instead of assuming fallback model IDs provide fresh
@@ -58,8 +59,9 @@ async function main() {
         profile:'full',
         start,
         limit:chunkSize,
-        availabilityRetries:1,
+        availabilityRetries:2,
         availabilityRetryDelayMs,
+        transientAvailabilityRetryDelayMs,
         stopOnProviderFailure:true,
         interCaseDelayMs,
       });
