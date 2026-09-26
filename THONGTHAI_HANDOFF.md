@@ -9763,3 +9763,37 @@ RED/GREEN:
 - final wiring Build Guard run `36209917277` — PASS.
 
 This patch exists only to let semantic-v7 production certification complete honestly on the free provider chain. It does not claim semantic acceptance by itself.
+
+
+---
+
+## 2026-09-26 Human Brain semantic-v10 smaller-batch prefix checkpoint
+
+Production semantic-v10 auto deploy:
+- deploy: `6ab736d07263630008ebd6c8`
+- commit_ref: `e3ea69c6af112b183220c1a8f39c19ca57fd1c84`
+- branch/context: main / production
+- manual_deploy: false
+- state: READY
+
+Certification methodology:
+- grouped prompt size = 10 independent cases
+- max semantic cases per build = 80
+- inter-group spacing = 62 seconds
+- same-version incomplete_chunk resume remains authoritative
+- no runtime semantic/provider/transaction/DB change from the batching adjustment
+
+Semantic-v10 durable prefix:
+- totalCorpusCases = 158
+- semanticEvaluated = 80
+- pass = 78
+- semanticFailed = 2
+- providerFailed = 0
+- resumeStart = 80
+- availabilityComplete = false
+
+Prefix mismatches retained for final whole-corpus adjudication:
+- restaurant-preorder-followup-01: expected restaurant/confirm; live restaurant/book
+- informational-02: expected activity/discover/catalog; live ecosystem/discover/catalog
+
+This checkpoint is docs-only and exists to trigger exactly one same-version production certification resume for cases 81-158. Do not restart from case 0 and do not change semantic gold before the resumed corpus is complete.
