@@ -38,10 +38,10 @@ test('Human Brain 5.6 RED: live certification spaces provider calls instead of b
   assert.ok(calledAt[2]! - calledAt[1]! >= 20);
 });
 
-test('Human Brain 5.6 RED: production one-shot runner explicitly enables bounded inter-case pacing',()=>{
+test('Human Brain 5.6+: production one-shot runner explicitly enables bounded live-provider pacing',()=>{
   const source=readFileSync(new URL('../scripts/write-semantic-certification-artifact.ts',import.meta.url),'utf8');
-  assert.match(source,/SEMANTIC_CERT_INTER_CASE_DELAY_MS/);
-  assert.match(source,/interCaseDelayMs/);
-  assert.match(source,/stopOnProviderFailure:true/);
+  assert.match(source,/runGroupedSemanticCertification/);
+  assert.match(source,/SEMANTIC_CERT_INTER_GROUP_DELAY_MS/);
+  assert.match(source,/interGroupDelayMs/);
   assert.match(source,/availabilityRetryDelayMs/);
 });
