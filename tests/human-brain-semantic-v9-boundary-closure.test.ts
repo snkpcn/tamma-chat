@@ -9,7 +9,7 @@ import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 import { PHASE_L_SEMANTIC_CASES } from './fixtures/phase-l-semantic-cases';
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
 });
 
 test('semantic-v28 doctrine separates the boundary pairs exposed by full semantic-v8 live certification',()=>{
