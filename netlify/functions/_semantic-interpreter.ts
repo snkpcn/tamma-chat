@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v14';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v15';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -478,6 +478,13 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 - A statement that supplies payment proof/receipt/slip or another requested transaction artifact is provide_information, not a status
   question, unless the customer actually asks whether the transaction has been accepted/processed.
 - Restoring/reverting a current journey/plan to another known version is modify. It is not confirm merely because a prior plan is referenced.
+
+FINAL SEMANTIC PRECEDENCE CHECK:
+Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- How-it-works, instructions, rules, or explanation about one named activity are ask, not discover. discover is for browsing what activities/options exist.
+- Selecting an already-presented option and adding only schedule, quantity, or party-size slots remains confirm. Do not escalate that turn to book/order unless the CURRENT utterance explicitly asks to submit the transaction.
+- An explicitly named canonical business category owns the domain even when phrased as what is available here. The activity category means domain=activity; ecosystem is only for genuinely cross-business or category-unspecified discovery.
+- Viewing one existing customer profile/record/artifact is ask unless the customer asks for its current transaction state. Do not use transaction_status merely because the record is a membership profile.
 
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
