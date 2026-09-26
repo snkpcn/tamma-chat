@@ -51,51 +51,61 @@ const cases:Case[]=[
   {id:'open-plain-general',message:'แฟนผมเหนื่อยมาก ขอพักก่อนแป๊บนึง',expect:{domain:'general',speechAct:'statement'}},
 ];
 
-let pass=0;
-const failures:Array<Record<string,unknown>>=[];
-for(const item of cases){
-  try{
-    const turn=await interpretSemanticTurn(item.message,item.context??emptySemanticContext());
-    const checks=[
-      item.expect.domain===undefined||turn.domain===item.expect.domain,
-      item.expect.speechAct===undefined||turn.speechAct===item.expect.speechAct,
-      item.expect.action===undefined||turn.action===item.expect.action,
-      item.expect.constraint===undefined||turn.constraints.includes(item.expect.constraint),
-      item.expect.needsClarification===undefined||turn.needsClarification===item.expect.needsClarification,
-    ];
-    if(checks.every(Boolean)){
-      pass+=1;
-    }else{
-      failures.push({
-        id:item.id,
-        message:item.message,
-        expected:item.expect,
-        actual:{
-          normalizedMeaning:turn.normalizedMeaning,
-          domain:turn.domain,
-          speechAct:turn.speechAct,
-          action:turn.action,
-          constraints:turn.constraints,
-          confidence:turn.confidence,
-          needsClarification:turn.needsClarification,
-        },
-      });
+async function main():Promise<void>{
+  let pass=0;
+  const failures:Array<Record<string,unknown>>=[];
+
+  for(const item of cases){
+    try{
+      const turn=await interpretSemanticTurn(item.message,item.context??emptySemanticContext());
+      const checks=[
+        item.expect.domain===undefined||turn.domain===item.expect.domain,
+        item.expect.speechAct===undefined||turn.speechAct===item.expect.speechAct,
+        item.expect.action===undefined||turn.action===item.expect.action,
+        item.expect.constraint===undefined||turn.constraints.includes(item.expect.constraint),
+        item.expect.needsClarification===undefined||turn.needsClarification===item.expect.needsClarification,
+      ];
+
+      if(checks.every(Boolean)){
+        pass+=1;
+      }else{
+        failures.push({
+          id:item.id,
+          message:item.message,
+          expected:item.expect,
+          actual:{
+            normalizedMeaning:turn.normalizedMeaning,
+            domain:turn.domain,
+            speechAct:turn.speechAct,
+            action:turn.action,
+            constraints:turn.constraints,
+            confidence:turn.confidence,
+            needsClarification:turn.needsClarification,
+          },
+        });
+      }
+    }catch(error){
+      failures.push({id:item.id,message:item.message,error:error instanceof Error?error.message:String(error)});
     }
-  }catch(error){
-    failures.push({id:item.id,message:item.message,error:error instanceof Error?error.message:String(error)});
   }
+
+  const total=cases.length;
+  const passPct=total?Math.round(pass/total*10000)/100:0;
+  console.log(JSON.stringify({
+    kind:'PHASE1_OPEN_WORLD_LIVE_LANGUAGE_ACCEPTANCE',
+    total,
+    pass,
+    failed:failures.length,
+    passPct,
+    primaryModel:process.env.THONGTHAI_SEMANTIC_MODEL||'gpt-5.6-terra',
+    reviewModel:process.env.THONGTHAI_SEMANTIC_REVIEW_MODEL||'gpt-5.6-sol',
+    failures,
+  },null,2));
+
+  if(failures.length) process.exitCode=1;
 }
 
-const total=cases.length;
-const passPct=total?Math.round(pass/total*10000)/100:0;
-console.log(JSON.stringify({
-  kind:'PHASE1_OPEN_WORLD_LIVE_LANGUAGE_ACCEPTANCE',
-  total,
-  pass,
-  failed:failures.length,
-  passPct,
-  primaryModel:process.env.THONGTHAI_SEMANTIC_MODEL||'gpt-5.6-terra',
-  reviewModel:process.env.THONGTHAI_SEMANTIC_REVIEW_MODEL||'gpt-5.6-sol',
-  failures,
-},null,2));
-if(failures.length) process.exitCode=1;
+main().catch(error=>{
+  console.error('PHASE1_OPEN_WORLD_LIVE_LANGUAGE_ACCEPTANCE_CRASH',error instanceof Error?error.message:String(error));
+  process.exitCode=1;
+});
