@@ -81,6 +81,6 @@ test('semantic-v8 gold adjudication preserves the eight human-grounded boundarie
     assert.equal(item.expected.domain,e.domain,`${id} domain`);
     assert.equal(item.expected.action,e.action,`${id} action`);
     if(e.need) assert.equal(item.simulatedModelOutput.informationNeed,e.need,`${id} informationNeed`);
-    if(e.clarify!==undefined) assert.equal(item.expected.needsClarification,e.clarify,`${id} needsClarification`);
+    if(e.clarify!==undefined) assert.equal(item.simulatedModelOutput.needsClarification,e.clarify,`${id} needsClarification`);
   }
 });
