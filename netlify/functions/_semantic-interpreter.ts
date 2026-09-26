@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v9';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v10';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -344,6 +344,15 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
   pair an existing booking/order/payment status with informationNeed=transaction_status.
 - ask = an informational/factual question that is not better represented by status, compare, recommend, or discover.
+- Permission meaning outranks mutation wording: asking whether a change is allowed is ask + policy even when phrased with a polite change verb. A real modify action requires the customer to instruct that the value/choice actually be changed now.
+- A support request like "help me investigate/check this problem" is ask unless the CURRENT utterance actually asks what state an existing transaction is in. Do not manufacture transaction_status merely because an order/payment is mentioned.
+- For preference adjustments, dissatisfaction plus a requested new preference is modify, not correct_previous. Reserve correct_previous for explicit claims that the earlier value/statement itself was mistaken or wrong.
+- When the customer asks what activities the venue offers as a category, use activity + discover + catalog. Use ecosystem for broad cross-business experiences when no concrete business category is the requested catalog.
+- For menu/service readiness, ready to sell now is availability unless the customer asks about stock/on-hand inventory. Inventory is for stock quantity/on-hand existence; availability is whether the offered item can actually be served/provided now.
+- When a customer asks which concrete menu/items to avoid because of an allergy, that is recommend + ingredients: they want help choosing safely, not merely a general fact.
+- Domain follows the requested deliverable: one requested activity with a meal only as a timing anchor stays activity. Journey is for composing or sequencing a multi-step itinerary as the actual goal.
+- A customer who asks what to do next after a failed payment artifact is asking for remediation guidance, so use ask. Use status only when they ask whether payment processing succeeded, failed, or is still pending.
+- A question asking which product is suitable as a gift is recommend, not catalog discovery. Suitability requires the assistant to help choose among offerings.
 - CURRENT request for help choosing outranks a prior status or availability turn. When the customer now asks what you recommend,
   what suits them, or what they should choose, use recommend + recommendation even if earlier context was checking availability and even
   if the current turn also supplies party size, duration, budget, or other constraints. Context may fill meaning; it must not replace
