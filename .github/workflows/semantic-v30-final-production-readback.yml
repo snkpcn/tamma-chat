@@ -20,7 +20,7 @@ jobs:
           url='https://tamma-chat.netlify.app/semantic-certification-result.json'
           for attempt in $(seq 1 20); do
             curl --fail --silent --show-error --retry 2 --retry-delay 2               -H 'Cache-Control: no-cache'               "$url?readback_attempt=$attempt&ts=$(date +%s)"               -o /tmp/semantic-certification-result.json
-            node <<'NODE'
+            if node <<'NODE'
           const fs=require('fs');
           const a=JSON.parse(fs.readFileSync('/tmp/semantic-certification-result.json','utf8'));
           console.log('SEMANTIC_V30_POLL='+JSON.stringify({
