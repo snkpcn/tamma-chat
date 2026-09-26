@@ -373,7 +373,70 @@ export type GroupedSemanticClassifier = (
   items: SemanticEvalCase[],
 ) => Promise<Map<string, Record<string, unknown>>>;
 
-function parseGroupedSemanticEnvelope(rawText:string): Map<string,Record<string,unknown>> {
+function collectGroupedSemanticItems(items: unknown[]): Map<string,Record<string,unknown>> {
+  const out=new Map<string,Record<string,unknown>>();
+  for(const item of items as GroupedSemanticRawResult[]){
+    if(!item || typeof item!=='object') continue;
+    if(typeof item.id!=='string') continue;
+    if(!item.semantic || typeof item.semantic!=='object' || Array.isArray(item.semantic)) continue;
+    out.set(item.id,item.semantic as Record<string,unknown>);
+  }
+  return out;
+}
+
+function salvageCompleteGroupedResultObjects(cleaned:string): Map<string,Record<string,unknown>> {
+  const resultsKey=cleaned.indexOf('"results"');
+  const arrayStart=resultsKey>=0 ? cleaned.indexOf('[',resultsKey) : -1;
+  if(arrayStart<0) return new Map();
+
+  const items:unknown[]=[];
+  let inString=false;
+  let escaped=false;
+  let depth=0;
+  let objectStart=-1;
+
+  for(let i=arrayStart+1;i<cleaned.length;i+=1){
+    const ch=cleaned[i]!;
+    if(inString){
+      if(escaped){
+        escaped=false;
+      }else if(ch==='\\'){
+        escaped=true;
+      }else if(ch==='"'){
+        inString=false;
+      }
+      continue;
+    }
+
+    if(ch==='"'){
+      inString=true;
+      continue;
+    }
+
+    if(ch==='{'){
+      if(depth===0) objectStart=i;
+      depth+=1;
+      continue;
+    }
+
+    if(ch==='}' && depth>0){
+      depth-=1;
+      if(depth===0 && objectStart>=0){
+        const candidate=cleaned.slice(objectStart,i+1);
+        try{
+          items.push(JSON.parse(candidate));
+        }catch{
+          // Keep salvage bounded: only complete standalone JSON objects count.
+        }
+        objectStart=-1;
+      }
+    }
+  }
+
+  return collectGroupedSemanticItems(items);
+}
+
+export function parseGroupedSemanticEnvelope(rawText:string): Map<string,Record<string,unknown>> {
   const cleaned=stripCodeFences(rawText).replace(/^\uFEFF/,'').trim();
   let parsed:GroupedSemanticEnvelope;
   try{
@@ -381,24 +444,28 @@ function parseGroupedSemanticEnvelope(rawText:string): Map<string,Record<string,
   }catch(firstError){
     const firstBrace=cleaned.indexOf('{');
     const lastBrace=cleaned.lastIndexOf('}');
-    if(firstBrace<0 || lastBrace<=firstBrace) throw firstError;
-    const slice=cleaned.slice(firstBrace,lastBrace+1);
-    try{
-      parsed=JSON.parse(slice) as GroupedSemanticEnvelope;
-    }catch{
-      parsed=JSON.parse(slice.replace(/,\s*([}\]])/g,'$1')) as GroupedSemanticEnvelope;
+    if(firstBrace>=0 && lastBrace>firstBrace){
+      const slice=cleaned.slice(firstBrace,lastBrace+1);
+      try{
+        parsed=JSON.parse(slice) as GroupedSemanticEnvelope;
+      }catch{
+        try{
+          parsed=JSON.parse(slice.replace(/,\s*([}\]])/g,'$1')) as GroupedSemanticEnvelope;
+        }catch{
+          const salvaged=salvageCompleteGroupedResultObjects(cleaned);
+          if(salvaged.size>0) return salvaged;
+          throw firstError;
+        }
+      }
+    }else{
+      const salvaged=salvageCompleteGroupedResultObjects(cleaned);
+      if(salvaged.size>0) return salvaged;
+      throw firstError;
     }
   }
 
   if(!Array.isArray(parsed.results)) throw new SyntaxError('Grouped semantic response missing results array');
-  const out=new Map<string,Record<string,unknown>>();
-  for(const item of parsed.results as GroupedSemanticRawResult[]){
-    if(!item || typeof item!=='object') continue;
-    if(typeof item.id!=='string') continue;
-    if(!item.semantic || typeof item.semantic!=='object' || Array.isArray(item.semantic)) continue;
-    out.set(item.id,item.semantic as Record<string,unknown>);
-  }
-  return out;
+  return collectGroupedSemanticItems(parsed.results);
 }
 
 function groupedSemanticSystemPrompt():string {
