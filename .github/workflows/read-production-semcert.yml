@@ -25,4 +25,4 @@ jobs:
           echo
           echo "CURRENT_PRODUCTION_CERT_END"
 
-# refresh after final pacing deploy
+# refresh after semantic-v6 resume deploy
