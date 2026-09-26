@@ -29,7 +29,7 @@ function activeActivityTask(): TaskStateContainer {
       sourceChannel:'web',
       now:NOW,
       initialSlots:{ resourceCode:'activity-horse', horseName:'ภาราดร', date:'2026-09-27' },
-      requiredFields:['resourceCode', 'date', 'time', 'partySize', 'durationMinutes'],
+      requiredFields:['durationMinutes'],
     }),
   };
 }
@@ -77,7 +77,7 @@ test('Phase 2 acceptance: provider outage cannot mutate canonical conversation o
   const beforeTask = activeActivityTask();
   const result = await processThongthaiOneMindTurn({
     channel:'web',
-    message:'แล้วตัวนั้นว่างพรุ่งนี้ไหม',
+    message:'เพลงนี้เพราะดีนะ',
     eventId:'phase2-outage-no-state-write',
     canonicalAnonymousId:CANON,
     guestDbId:GUEST,
