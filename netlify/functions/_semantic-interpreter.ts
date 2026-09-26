@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v12';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v13';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -335,6 +335,8 @@ DOMAIN-SCOPE TAXONOMY:
   composition; use journey when composition/sequence itself is the customer goal.
 - Never hallucinate a business domain for an elliptical question such as a bare date + "available?". If neither the message nor
   relevant context identifies what should be available, use unknown and needsClarification=true.
+- TAMMA venue vocabulary is semantic, not a generic web-shop taxonomy. In an operating-hours question, an unqualified ร้าน refers to
+  the restaurant unless CURRENT context explicitly establishes another storefront such as Inthanin/cafe or OTOP. Therefore an unqualified ร้าน operating-hours question belongs to restaurant, not ecosystem.
 
 ACTION TAXONOMY (apply by meaning, not keywords):
 - discover = the customer asks what options/catalog/items/categories EXIST or are available to browse. Asking what menu/items/options
@@ -344,6 +346,14 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
   pair an existing booking/order/payment status with informationNeed=transaction_status.
 - ask = an informational/factual question that is not better represented by status, compare, recommend, or discover.
+- Bare existence questions about reservable resources ask current availability. "Are there any rooms/tables/slots?" is status + availability;
+  asking what room/table/resource TYPES or options exist is discover + catalog.
+- A bare identity question like "which one?" asks to identify or disambiguate among the candidates already in context. Do not turn it into
+  recommend unless the CURRENT utterance actually asks which is better, suitable, preferred, or recommended.
+- Saving or bookmarking a journey plan is not a booking transaction. Treat a request to preserve the current plan as journey + confirm;
+  reserve book/order for explicit customer-facing transaction submission.
+- Do not create a prior-context reference merely because the customer mentions a generic booking noun while asking a policy/permission
+  question. A named business/resource in the CURRENT utterance can establish domain without requiring an earlier transaction to exist.
 - The requested catalog noun owns domain classification. If the customer asks what activities are offered, domain=activity even when the venue framing is broad (for example "what activities are here?"). The same rule applies to an explicitly requested restaurant/menu, stay, cafe, OTOP, promotion, or membership catalog. Use ecosystem only when the requested discovery itself spans businesses or stays genuinely broad rather than naming one canonical business category.
 - Selecting a previously presented option while supplying extra scheduling or quantity slots remains confirm. Added date, time, party size, quantity, or similar slot values refine the selected option; this does not become book/order unless the CURRENT utterance explicitly commits to submit the transaction now.
 - When the CURRENT utterance explicitly names a canonical business category such as activities, stay, restaurant, cafe, OTOP, promotion, or membership as the catalog being requested, that category owns the domain rather than ecosystem. Ecosystem is for broad cross-business discovery when no specific business category is itself the requested catalog.
@@ -569,6 +579,12 @@ function canonicalizeReadOnlyAction(
   action: SemanticAction,
   informationNeed: SemanticInformationNeed,
 ): SemanticAction {
+  // Policy is intrinsically read-only. If the model labels a permission/capability
+  // question as modify merely because it contains a change verb, preserve the
+  // policy facet and normalize the action back to ask. An actual mutation should
+  // not carry informationNeed=policy.
+  if (informationNeed === 'policy' && action === 'modify') return 'ask';
+
   if (!READ_ONLY_ACTIONS_FOR_FACET_NORMALIZATION.has(action)) return action;
 
   if (informationNeed === 'availability' || informationNeed === 'transaction_status') return 'status';

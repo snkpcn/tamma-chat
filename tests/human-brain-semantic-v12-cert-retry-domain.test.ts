@@ -12,18 +12,18 @@ import {
 } from '../netlify/functions/_semantic-live-certification';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 
-test('semantic-v12 version is explicit so v11 partial evidence cannot be resumed',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v12');
+test('semantic-v13 version is explicit so v11 partial evidence cannot be resumed',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v13');
 });
 
-test('semantic-v12 makes an explicitly requested single business catalog own the domain',()=>{
+test('semantic-v13 makes an explicitly requested single business catalog own the domain',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   assert.ok(prompt.includes('The requested catalog noun owns domain classification'));
   assert.ok(prompt.includes('If the customer asks what activities are offered, domain=activity'));
   assert.ok(prompt.includes('ecosystem only when the requested discovery itself spans businesses or stays genuinely broad'));
 });
 
-test('semantic-v12 keeps informational-02 gold unchanged',()=>{
+test('semantic-v13 keeps informational-02 gold unchanged',()=>{
   const item=SEMANTIC_EVAL_CORPUS.find(candidate=>candidate.id==='informational-02');
   assert.ok(item);
   assert.equal(item.expected.domain,'activity');
