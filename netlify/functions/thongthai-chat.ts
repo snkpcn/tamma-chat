@@ -4297,6 +4297,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const restaurantIntentClass = classifyRestaurantDietaryIntent(request.message);
   let preserveRestaurantFastPath = restaurantIntentClass !== 'OTHER'
     && isRestaurantAdvisorTurn(request, { agentState: {} });
+  const supervisedRestaurantStatus = earlyOneMind?.turn.semanticTurn.semanticSource === 'openai_supervisor'
+    && earlyOneMind.turn.semanticTurn.domain === 'restaurant'
+    && (
+      earlyOneMind.turn.semanticTurn.action === 'status'
+      || earlyOneMind.turn.semanticTurn.informationNeed === 'availability'
+      || earlyOneMind.turn.semanticTurn.informationNeed === 'transaction_status'
+    );
+  if (supervisedRestaurantStatus) preserveRestaurantFastPath = false;
   if (!preserveRestaurantFastPath
       && restaurantIntentClass === 'RECOMMENDATION_ONLY'
       && guestDbId) {
@@ -4345,9 +4353,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       && isCafeReadOnlyTurn(request.message, snapshot.state.active_topic);
   }
 
-  if (!oneMindAttemptedEarly && process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
+  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
       && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath && !preserveCafeFastPath) {
     try {
+      const cachedSemantic = earlyOneMind?.turn.semanticTurn;
       const oneMind = await processOneMindCustomerTurn({
         channel,
         language:request.language,
@@ -4357,11 +4366,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         canonicalAnonymousId:request.guestId,
         guestDbId,
         durableMemory:durableMemoryFromRequest(request),
-        // Phase 1 is UNDERSTANDING ONLY. The supervisor must not mutate
-        // booking/order/topic task state before the proven executor path has
-        // decided what to do. Context/state ownership is Phase 2+.
-        persistState:false,
-      });
+        // Reuse the already-understood meaning, then let the existing
+        // Dialog Manager persist its bounded conversational task state.
+        persistState:true,
+      }, cachedSemantic ? {
+        interpretSemanticTurn: async () => cachedSemantic,
+      } : undefined);
       earlyOneMind = oneMind;
       if (oneMind.status === 'composed') {
         await recordOneMindTrace(oneMind.observability);
