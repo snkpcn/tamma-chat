@@ -13,30 +13,30 @@ function byId(id:string){
   return item;
 }
 
-test('semantic-v25 preserves the three semantic-v24 live-failure gold meanings',()=>{
+test('semantic-v26 preserves the three semantic-v24 live-failure gold meanings',()=>{
   assert.deepEqual(byId('discover-07').expected,{domain:'ecosystem',action:'discover'});
   assert.deepEqual(byId('otop-02').expected,{domain:'otop',action:'order'});
   assert.deepEqual(byId('restaurant-constraint-01').expected,{domain:'restaurant',action:'provide_information'});
 });
 
-test('semantic-v25 makes explicit transaction commitment outrank catalog browsing',()=>{
+test('semantic-v26 makes explicit transaction commitment outrank catalog browsing',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('Explicit transaction commitment outranks catalog browsing'));
   assert.ok(p.includes('Missing product or slot details are follow-up fields; they do not downgrade order or book intent to discover'));
 });
 
-test('semantic-v25 makes constraint-only continuation provide information',()=>{
+test('semantic-v26 makes constraint-only continuation provide information',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('A CURRENT turn that only supplies constraints, preferences, quantities, party details, budget, or other requested facts without asking for a new action is provide_information'));
   assert.ok(p.includes('Do not turn constraint-only continuation into recommend merely because those facts could personalize a recommendation'));
 });
 
-test('semantic-v25 requires an evaluative request beyond companion metadata',()=>{
+test('semantic-v26 requires an evaluative request beyond companion metadata',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('Ignore companion or traveler metadata when deciding whether a broad request is discover or recommend'));
   assert.ok(p.includes('If the remaining request is neutral browsing, keep discover'));
 });
 
-test('semantic-v25 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v25');
+test('semantic-v26 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v26');
 });
