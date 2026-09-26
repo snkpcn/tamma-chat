@@ -3824,10 +3824,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       // slot. If the supervisor is unavailable, leave the later proven
       // deterministic One-Mind compatibility cutover available.
       oneMindAttemptedEarly = oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor';
-      const supervisedOpenWorld = oneMind.status === 'composed'
-        && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor'
-        && ['general','local','incident'].includes(oneMind.turn.semanticTurn.domain);
-      if (supervisedOpenWorld) {
+      const supervisedMeaningReady = oneMind.status === 'composed'
+        && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor';
+      if (supervisedMeaningReady) {
         console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
           domain:oneMind.turn.semanticTurn.domain,
           action:oneMind.turn.semanticTurn.action,
