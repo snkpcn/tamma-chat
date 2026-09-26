@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v14';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v15';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -320,6 +320,19 @@ SEMANTIC COMPLETENESS RULES:
   a new availability/status question into an old recommendation or transaction topic.
 - If the customer is simply talking conversationally rather than requesting a business action, classify that meaning honestly
   instead of forcing the message into the nearest business trigger.
+
+HARD SEMANTIC PRIORITIES (apply these before broad/default taxonomy):
+- An explicit canonical business/category noun OWNS the domain even when the same utterance says "ที่นี่", "ของที่นี่", "here", or otherwise
+  frames the whole venue. Canonical category examples are กิจกรรม/activity/activities -> activity, ห้องพัก/ที่พัก -> stay,
+  ร้านอาหาร/เมนู -> restaurant, คาเฟ่/กาแฟ/Inthanin -> cafe, OTOP/ของฝาก -> otop, โปรโมชั่น/โปร -> promotion, สมาชิก -> membership.
+  Venue framing never widens an explicitly named canonical category back to ecosystem.
+- A HOW-TO / process / explanation question about one known offering is ask. Asking how an activity works, how to use it, what the process is,
+  or what happens during it is not catalog discovery. discover + catalog is only for asking what offerings/options/categories exist.
+- Selecting or accepting a previously presented option while adding date/time/party-size/quantity or other slot refinements remains confirm.
+  Slot values alone NEVER imply book/order and NEVER imply an availability check. Use book/order only when the CURRENT utterance explicitly
+  commits to submitting the transaction now; use status + availability only when it explicitly asks whether the resource is available.
+- Reading back an existing profile/account/record is ask. Use status + transaction_status only when the customer asks the processing/current
+  state of a signup, renewal, booking, order, payment, verification, or other transaction—not when they simply ask to see stored details.
 
 DOMAIN-SCOPE TAXONOMY:
 - ecosystem = generic whole-property discovery/recommendation when the customer asks broadly what there is to do, play, visit, or
