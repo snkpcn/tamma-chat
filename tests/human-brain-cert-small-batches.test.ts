@@ -20,3 +20,8 @@ test('smaller-batch certification still keeps full corpus and quota-safe group s
   assert.match(script,/SEMANTIC_CERT_INTER_GROUP_DELAY_MS \?\? '62000'/);
   assert.doesNotMatch(script,/SEMANTIC_CERT_INTER_CASE_DELAY_MS/);
 });
+
+test('malformed grouped-output recovery is quota-paced and wired into production certification',()=>{
+  const script=readFileSync(new URL('../scripts/write-semantic-certification-artifact.ts',import.meta.url),'utf8');
+  assert.match(script,/groupRecoveryDelayMs:interGroupDelayMs/);
+});
