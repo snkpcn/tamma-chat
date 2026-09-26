@@ -443,6 +443,7 @@ export async function runGroupedSemanticCertification(options:{
   classifyGroup?:GroupedSemanticClassifier;
   availabilityRetries?:number;
   availabilityRetryDelayMs?:number;
+  groupRecoveryDelayMs?:number;
 }={}):Promise<SemanticCertificationResult>{
   const profile=options.profile ?? 'full';
   const corpus=allCases();
@@ -456,12 +457,35 @@ export async function runGroupedSemanticCertification(options:{
   const classifyGroup=options.classifyGroup ?? classifySemanticCasesGrouped;
   const availabilityRetries=Math.max(0,Math.min(3,Math.floor(options.availabilityRetries ?? 0)));
   const availabilityRetryDelayMs=Math.max(0,Math.min(90_000,Math.floor(options.availabilityRetryDelayMs ?? 0)));
+  const groupRecoveryDelayMs=Math.max(0,Math.min(90_000,Math.floor(options.groupRecoveryDelayMs ?? 0)));
+
+  const classifyWithSplitRecovery=async(
+    items:SemanticEvalCase[],
+  ):Promise<Map<string,Record<string,unknown>>>=>{
+    try{
+      return await classifyGroup(items);
+    }catch(error){
+      // Provider availability failures keep their existing semantics and are
+      // handled by the outer retry path. Split recovery is ONLY for a
+      // provider-returned grouped payload that cannot be parsed structurally.
+      if(safeProviderAttempts(error).length>0 || items.length<=1) throw error;
+
+      const midpoint=Math.ceil(items.length/2);
+      const leftItems=items.slice(0,midpoint);
+      const rightItems=items.slice(midpoint);
+      if(groupRecoveryDelayMs>0) await sleep(groupRecoveryDelayMs);
+      const left=await classifyGroup(leftItems);
+      if(groupRecoveryDelayMs>0) await sleep(groupRecoveryDelayMs);
+      const right=await classifyGroup(rightItems);
+      return new Map([...left,...right]);
+    }
+  };
 
   let availabilityAttempt=0;
   let rawResults:Map<string,Record<string,unknown>>;
   while(true){
     try{
-      rawResults=await classifyGroup(selected);
+      rawResults=await classifyWithSplitRecovery(selected);
       break;
     }catch(error){
       const attempts=safeProviderAttempts(error);
@@ -529,42 +553,31 @@ export async function runGroupedSemanticCertification(options:{
         };
       }
 
-      // Provider returned, but the GROUP envelope itself was not parseable.
-      // None of the selected cases has a trustworthy semantic classification,
-      // so every selected case is an explicit semantic/model-output failure.
-      // This prevents resume logic from silently advancing past unscored cases.
-      const failures:SemanticCertificationFailure[]=selected.map(item=>({
-        id:item.id,
-        category:item.category,
-        expected:{
-          domain:item.expected.domain,
-          action:item.expected.action ?? null,
-          needsClarification:item.expected.needsClarification ?? null,
-          informationNeed:expectedInformationNeed(item),
-        },
-        actual:{
-          domain:'error',
-          action:'error',
-          needsClarification:true,
-          informationNeed:'none',
-          confidence:0,
-        },
-        semanticError:{name:providerErrorName(error)},
+      // Provider returned, but the grouped certification envelope remained
+      // structurally unusable even after one smaller 50/50 recovery split.
+      // This is certification transport/format noise, NOT evidence that every
+      // customer utterance in the group has wrong semantics. Do not advance
+      // the durable semantic prefix and do not invent semantic failures.
+      // A later same-version build will resume from this exact corpus index.
+      console.error('LIVE_SEMANTIC_CERTIFICATION_GROUP_FORMAT_BLOCK',JSON.stringify({
+        start,
+        selected:selected.length,
+        error:providerErrorName(error),
       }));
       return {
         kind:'LIVE_MODEL_SEMANTIC_CERTIFICATION',
         profile,
         totalCorpusCases:profileCases.length,
         start,
-        evaluated:selected.length,
-        semanticEvaluated:selected.length,
+        evaluated:0,
+        semanticEvaluated:0,
         pass:0,
-        failed:selected.length,
-        semanticFailed:selected.length,
+        failed:0,
+        semanticFailed:0,
         providerFailed:0,
         passPct:0,
-        availabilityComplete:true,
-        failures,
+        availabilityComplete:false,
+        failures:[],
       };
     }
   }
