@@ -23,16 +23,12 @@
 // the Semantic Interpreter's output, an import from brain-v3 here would
 // create Brain -> Semantic Interpreter -> Brain. See THONGTHAI_HANDOFF.md
 // (Phase B.1) and tests/model-provider-no-cycle.test.ts for the static proof.
-import { callPreferredModel as callPreferredModelFromProvider, stripCodeFences, type ChatTurn } from './_thongthai-model-provider';
+import { callSemanticSupervisor, callSemanticReviewer, stripCodeFences, type ChatTurn } from './_thongthai-model-provider';
 // Ecosystem vocabulary/relationships come from the ONE canonical Bible source
 // (Phase A), not a second hand-typed paraphrase -- _thongthai-bible-generated.ts
 // is a plain generated data module with zero imports of its own, so importing
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
-
-function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
-  return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
-}
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v30';
 
@@ -63,7 +59,8 @@ export const SEMANTIC_EVAL_STATUS = {
 
 export type SemanticDomain =
   | 'ecosystem' | 'restaurant' | 'stay' | 'activity' | 'promotion' | 'membership'
-  | 'otop' | 'cafe' | 'journey' | 'payment' | 'support' | 'unknown';
+  | 'otop' | 'cafe' | 'journey' | 'payment' | 'support'
+  | 'general' | 'local' | 'incident' | 'unknown';
 
 export type SemanticAction =
   | 'ask' | 'discover' | 'recommend' | 'compare' | 'book' | 'order' | 'modify'
@@ -74,6 +71,20 @@ export type SemanticTaskDirective =
   | 'cancel_active'
   | 'suspend_active'
   | 'resume_suspended';
+
+export type SemanticSpeechAct =
+  | 'question'
+  | 'statement'
+  | 'preference_update'
+  | 'correction'
+  | 'selection'
+  | 'request'
+  | 'transaction_request'
+  | 'incident_report'
+  | 'complaint'
+  | 'request_help'
+  | 'social'
+  | 'unknown';
 
 export type SemanticInformationNeed =
   | 'none'
@@ -89,7 +100,8 @@ export type SemanticInformationNeed =
 
 const VALID_DOMAINS: SemanticDomain[] = [
   'ecosystem', 'restaurant', 'stay', 'activity', 'promotion', 'membership',
-  'otop', 'cafe', 'journey', 'payment', 'support', 'unknown',
+  'otop', 'cafe', 'journey', 'payment', 'support',
+  'general', 'local', 'incident', 'unknown',
 ];
 const VALID_ACTIONS: SemanticAction[] = [
   'ask', 'discover', 'recommend', 'compare', 'book', 'order', 'modify',
@@ -98,6 +110,11 @@ const VALID_ACTIONS: SemanticAction[] = [
 ];
 const VALID_TASK_DIRECTIVES: SemanticTaskDirective[] = [
   'cancel_active', 'suspend_active', 'resume_suspended',
+];
+const VALID_SPEECH_ACTS: SemanticSpeechAct[] = [
+  'question', 'statement', 'preference_update', 'correction', 'selection',
+  'request', 'transaction_request', 'incident_report', 'complaint',
+  'request_help', 'social', 'unknown',
 ];
 const VALID_INFORMATION_NEEDS: SemanticInformationNeed[] = [
   'none', 'availability', 'price', 'schedule', 'inventory', 'catalog',
@@ -177,6 +194,10 @@ export type SemanticReference = {
 };
 
 export type SemanticTurn = {
+  /** Short paraphrase of what the customer means, for machine state and
+   * observability only. It is never sent to the customer as the answer. */
+  normalizedMeaning?: string;
+  speechAct?: SemanticSpeechAct;
   domain: SemanticDomain;
   /** Free-form descriptive label for observability/evaluation only.
    *  Downstream routing must not depend on an exact model-invented label. */
@@ -202,6 +223,7 @@ export type SemanticTurn = {
 export type SemanticInterpretationMeta = {
   semanticVersion: string;
   domain: SemanticDomain;
+  speechAct?: SemanticSpeechAct;
   intent: string;
   action: SemanticAction;
   informationNeed: SemanticInformationNeed;
@@ -222,6 +244,7 @@ export function toSemanticInterpretationMeta(turn: SemanticTurn): SemanticInterp
   return {
     semanticVersion: SEMANTIC_INTERPRETER_VERSION,
     domain: turn.domain,
+    speechAct: turn.speechAct,
     intent: turn.intent,
     action: turn.action,
     informationNeed: turn.informationNeed ?? 'none',
@@ -320,6 +343,17 @@ SEMANTIC COMPLETENESS RULES:
   a new availability/status question into an old recommendation or transaction topic.
 - If the customer is simply talking conversationally rather than requesting a business action, classify that meaning honestly
   instead of forcing the message into the nearest business trigger.
+
+OPEN-WORLD LANGUAGE RULES:
+- You are not a business-keyword classifier. Understand the sentence even when it has nothing to do with a known Tamma business flow.
+- Use general for ordinary conversation, personal context, or questions whose subject is not owned by a narrower business domain.
+- Use local for questions about the surrounding place/area or what may be around there when the customer is not asking for a known business offering.
+- Use incident when the customer reports a real-world incident such as a lost item, lost pet, damage, injury report, or something that may require staff follow-up.
+- Use support for generic requests for help with a service/problem when incident/payment/another owned domain is not more precise.
+- Do NOT force open-world language into restaurant/activity/stay just because one nearby word overlaps a business vocabulary item.
+- A strange, colloquial, misspelled, or previously unseen sentence is still language. Interpret its meaning before considering clarification.
+- normalizedMeaning must be a short neutral paraphrase of the CURRENT customer's meaning. It is internal semantic state, NEVER customer-facing prose.
+- speechAct describes what the person is doing conversationally, independent of domain.
 
 DOMAIN-SCOPE TAXONOMY:
 - ecosystem = generic whole-property discovery/recommendation when the customer asks broadly what there is to do, play, visit, or
@@ -507,7 +541,9 @@ Before emitting JSON, re-check the CURRENT utterance against these high-priority
 - An explicitly named canonical business category owns the domain even when phrased as what is available here. The activity category means domain=activity; ecosystem is only for genuinely cross-business or category-unspecified discovery.
 - Viewing one existing customer profile/record/artifact is ask unless the customer asks for its current transaction state. Do not use transaction_status merely because the record is a membership profile.
 
-domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | unknown
+normalizedMeaning: a short neutral paraphrase of the customer's CURRENT meaning, never an answer
+speechAct: one of question | statement | preference_update | correction | selection | request | transaction_request | incident_report | complaint | request_help | social | unknown
+domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | general | local | incident | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
 action: one of ask | discover | recommend | compare | book | order | modify | cancel | confirm | status | provide_information | correct_previous | unknown
 informationNeed: one of none | availability | price | schedule | inventory | catalog | recommendation | ingredients | policy | transaction_status
@@ -538,7 +574,7 @@ MANDATORY TERMINAL DECISION CHECKLIST — apply this after all doctrine above an
 8. FIELD COHERENCE: informationNeed must mirror the action already chosen and must never reverse it. recommend pairs with recommendation; true browse/list pairs with catalog; transaction commitment stays order/book and is never changed to discover merely because details are missing.
 
 Return ONLY this JSON object, nothing else:
-{"domain":string,"intent":string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}`;
+{"normalizedMeaning":string,"speechAct":string,"domain":string,"intent":string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}`;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -665,6 +701,12 @@ function parseSemanticJsonObject(rawText: string): Record<string, unknown> {
 export function parseSemanticTurnResponse(rawText: string, context: SemanticContext): SemanticTurn {
   const parsed = parseSemanticJsonObject(rawText);
 
+  const normalizedMeaning = typeof parsed.normalizedMeaning === 'string'
+    ? parsed.normalizedMeaning.trim().slice(0, 360)
+    : '';
+  const speechAct = VALID_SPEECH_ACTS.includes(parsed.speechAct as SemanticSpeechAct)
+    ? parsed.speechAct as SemanticSpeechAct
+    : 'unknown';
   const domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
   const parsedAction = VALID_ACTIONS.includes(parsed.action as SemanticAction) ? parsed.action as SemanticAction : 'unknown';
   const taskDirective = VALID_TASK_DIRECTIVES.includes(parsed.taskDirective as SemanticTaskDirective)
@@ -771,6 +813,8 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const validatedDomain: SemanticDomain = hasUnresolvedReference && noUsableContext ? 'unknown' : domain;
 
   return {
+    normalizedMeaning: normalizedMeaning || undefined,
+    speechAct,
     domain:validatedDomain,
     intent,
     action,
@@ -806,11 +850,85 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
  * is verified by a live acceptance pass, the same way every previous phase's
  * conversational behavior in this program was verified against production.
  */
+export function semanticTurnNeedsReview(
+  turn: SemanticTurn,
+  message: string,
+  context: SemanticContext,
+): boolean {
+  const meaningfulText = message.trim().length >= 4;
+  const unresolvedReference = turn.references.some(reference =>
+    reference.refersToPriorContext
+    && !reference.resolvedEntityId
+    && !reference.resolvedEntityIds?.length
+    && !reference.resolvedTaskSlot
+  );
+  const contextCouldResolve = Boolean(
+    context.recentEntities.length
+    || context.activeTask
+    || context.suspendedTask
+    || context.activeDomain
+  );
+
+  return turn.confidence < 0.72
+    || turn.action === 'unknown'
+    || (turn.domain === 'unknown' && meaningfulText && !turn.needsClarification)
+    || (unresolvedReference && contextCouldResolve);
+}
+
+/**
+ * OpenAI-only semantic supervisor.
+ *
+ * Terra reads every ordinary language turn. Sol is a bounded second opinion
+ * only when the primary result is structurally weak/uncertain. Neither model
+ * is allowed to answer the customer or execute a business action here.
+ */
 export async function interpretSemanticTurn(
   message: string,
   context: SemanticContext = emptySemanticContext(),
 ): Promise<SemanticTurn> {
   const prompt = buildSemanticInterpreterPrompt(context);
-  const raw = await callPreferredModel(prompt, [{ role: 'user', content: message } as ChatTurn]);
-  return parseSemanticTurnResponse(raw, context);
+  const messages:ChatTurn[] = [{ role:'user', content:message }];
+  const primaryRaw = await callSemanticSupervisor(prompt, messages, 'semantic-interpreter');
+  const primary = parseSemanticTurnResponse(primaryRaw, context);
+  if (!semanticTurnNeedsReview(primary, message, context)) return primary;
+
+  const reviewPrompt = `${prompt}
+
+SEMANTIC REVIEW MODE:
+A cheaper first-pass supervisor already attempted this turn. Re-read the ORIGINAL customer message and context independently.
+Use the candidate only as an error signal, not as truth. Fix missed open-world meaning, references, speech act, or constraints.
+Do not become more eager to transact. Return the same JSON schema only.`;
+  try {
+    const reviewedRaw = await callSemanticReviewer(
+      reviewPrompt,
+      [
+        { role:'user', content:message },
+        { role:'assistant', content:primaryRaw },
+        { role:'user', content:'Review the original message and return the corrected semantic JSON only.' },
+      ],
+      'semantic-reviewer',
+    );
+    const reviewed = parseSemanticTurnResponse(reviewedRaw, context);
+
+    // Review is allowed to replace the first pass only when it is actually
+    // usable. Never replace a valid primary interpretation with a weaker
+    // unknown/low-confidence candidate merely because the expensive model ran.
+    if (
+      reviewed.confidence >= 0.72
+      && reviewed.action !== 'unknown'
+      && (
+        reviewed.domain !== 'unknown'
+        || reviewed.needsClarification
+        || primary.domain === 'unknown'
+      )
+    ) {
+      return reviewed;
+    }
+  } catch (error) {
+    console.error(
+      'THONGTHAI_SEMANTIC_REVIEW_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+  }
+  return primary;
 }
