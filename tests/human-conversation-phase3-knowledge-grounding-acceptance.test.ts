@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { HORSE_FACTS, HORSE_FACT_PROVENANCE } from '../netlify/functions/_local-concierge-knowledge';
 import { composeHorseComparisonResponse } from '../netlify/functions/_local-concierge-response';
+import { HOMESTAY_FACT_PROVENANCE } from '../netlify/functions/_tamma-domain-knowledge';
 import {
   getGroundedFactValue,
   pickByPrecedence,
@@ -145,4 +146,12 @@ test('Phase 3 acceptance: static horse claims have explicit owner provenance and
   }
   const response=composeHorseComparisonResponse();
   assert.doesNotMatch(response,/ปลอดภัยแน่นอน|เหมาะกับมือใหม่|เชื่องกว่า|ดีกว่า/u);
+});
+
+
+test('Phase 3 acceptance: static homestay policy/config has explicit canonical provenance', () => {
+  assert.equal(HOMESTAY_FACT_PROVENANCE.authoritative,true);
+  assert.equal(HOMESTAY_FACT_PROVENANCE.sourceType,'canonical_organization_config');
+  assert.ok(HOMESTAY_FACT_PROVENANCE.allowedClaimKeys.includes('totalHouses'));
+  assert.ok(!HOMESTAY_FACT_PROVENANCE.allowedClaimKeys.includes('availability' as never));
 });
