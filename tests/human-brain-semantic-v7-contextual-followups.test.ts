@@ -8,11 +8,11 @@ import {
   type SemanticContext,
 } from '../netlify/functions/_semantic-interpreter';
 
-test('semantic-v14 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v14');
+test('semantic-v15 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v15');
 });
 
-test('semantic-v14 doctrine keeps bare topic narrowing as catalog, candidate-time questions as availability, and direct comparisons as compare',()=>{
+test('semantic-v15 doctrine keeps bare topic narrowing as catalog, candidate-time questions as availability, and direct comparisons as compare',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   assert.ok(prompt.includes('NO date/time/current-state/stock predicate'));
   assert.ok(prompt.includes('discover + catalog'));
