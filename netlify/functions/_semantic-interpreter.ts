@@ -605,7 +605,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
 
   const ambiguousReferenceRequiresClarification =
     hasAmbiguousReference
-    && !(['ask','discover','recommend','compare'] as SemanticAction[]).includes(action);
+    && !(['ask','discover','recommend','compare'] as SemanticAction[]).includes(parsedAction);
 
   const noUsableContext = !context.activeDomain
     && context.recentEntities.length === 0
