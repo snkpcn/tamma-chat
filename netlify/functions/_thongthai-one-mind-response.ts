@@ -105,6 +105,11 @@ function isGenuinelyUnclassifiedFallback(turn: OneMindTurnResult): boolean {
 }
 
 export type ReadOnlyCutoverEligibilityOptions = {
+  /** Recovery-mode gate: require the real OpenAI semantic supervisor to own
+   * the meaning before this candidate may persist state or answer early.
+   * Deterministic/provider-outage candidates then remain pure fallbacks and
+   * cannot pre-mutate legacy state. */
+  requireSemanticSupervisor?: boolean;
   /** Set only by a caller that is ITSELF the last resort (e.g. the legacy
    *  handler's own LLMAvailabilityError catch, invoked only after legacy's
    *  own deterministic pre-checks and its own real model attempt have
@@ -120,6 +125,10 @@ export function readOnlyCutoverEligibility(
 ):
   | { eligible:true }
   | { eligible:false; reason:'transactional_or_task_turn' | 'domain_not_cut_over' } {
+  if (options.requireSemanticSupervisor
+      && turn.semanticTurn.semanticSource !== 'openai_supervisor') {
+    return { eligible:false, reason:'transactional_or_task_turn' };
+  }
   if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
     return { eligible:false, reason:'domain_not_cut_over' };
   }
