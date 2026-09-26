@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v24';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v25';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -480,6 +480,9 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- Explicit transaction commitment outranks catalog browsing. When the CURRENT utterance commits to ordering or booking, keep order/book ownership even if the exact product, resource, date, quantity, or other slot is not chosen yet. Missing product or slot details are follow-up fields; they do not downgrade order or book intent to discover.
+- A CURRENT turn that only supplies constraints, preferences, quantities, party details, budget, or other requested facts without asking for a new action is provide_information. Do not turn constraint-only continuation into recommend merely because those facts could personalize a recommendation; a later layer may continue the prior task after receiving the information.
+- Ignore companion or traveler metadata when deciding whether a broad request is discover or recommend. Treat those facts as constraints first. If the remaining request is neutral browsing, keep discover; use recommend only when the CURRENT utterance itself requests evaluation, suitability, curation, or a choice.
 - A generic action predicate describes what the customer wants to do; it is not a canonical business-category noun. Without an explicit category, named offering, or already-grounded category context, keep broad something-to-do requests in ecosystem.
 - Traveler, companion, family, couple, age, or group context alone does not make a neutral browse request evaluative. Use recommend only when the CURRENT utterance asks for judgment, suitability, preference-sensitive choice, what is good, or another evaluative decision.
 - Decide DOMAIN SCOPE before ACTION for broad experience requests. Generic do, play, visit, or experience wording is not an explicit activity-category request. Only an explicit canonical category noun, named offering, or clearly bounded business subject narrows broad ecosystem scope.
