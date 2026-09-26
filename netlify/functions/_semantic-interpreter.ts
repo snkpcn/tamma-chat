@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v6';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v7';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -356,7 +356,17 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   confirm requires an affirmative selection/acceptance of one identifiable option. If several candidates remain plausible, do not guess.
 - A short topic-narrow follow-up that names a canonical business/category/resource after broad discovery may narrow the domain without
   inventing a prior-entity reference. If the customer is simply asking what that category offers, use discover + catalog and do not
-  demand clarification merely because no individual recent entity exists.
+  demand clarification merely because no individual recent entity exists. A bare topic/resource follow-up does NOT imply current
+  availability: without a time/current-state predicate, do not invent status + availability merely because the resource could be booked.
+- When the customer explicitly NAMES one exact recent entity while selecting/accepting it, that is confirm. Preserve the exact named
+  entity in entities and in the prior-context reference value so deterministic reference resolution can distinguish it from other
+  candidates. The presence of other recent candidates is not ambiguity when the current utterance names exactly one of them.
+- A candidate slot value phrased as a QUESTION about whether it works/is available (for example a proposed time/date followed by
+  "ได้ไหม/โอเคไหม/ว่างไหม" meaning "does that work?") is status + availability. It is NOT provide_information. Use
+  provide_information only when the customer simply supplies the requested slot value without asking whether that candidate works.
+- Explicit attribute comparison outranks recommendation. When the customer asks which of known options is more/less/better on a
+  stated attribute (temperament, size, speed, price, distance, etc.), use compare even if the comparison will help them choose.
+  Use recommend when they ask what they SHOULD choose or what is suitable overall without an explicit comparative attribute.
 - Capacity/policy and live availability are different meanings. A question about how many units/people may operate/use something
   simultaneously as a rule is ask + policy. availability/status is for whether a resource/time is free, open, ready, or available
   in the current/date-specific state.
