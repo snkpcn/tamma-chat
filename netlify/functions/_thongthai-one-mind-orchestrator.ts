@@ -484,29 +484,25 @@ async function resolveSemanticTurn(
 ): Promise<SemanticTurn> {
   const deterministic = deriveDeterministicSemanticTurn(message, context, taskState, now);
 
-  // Preserve every mature deterministic path unless this checkpoint has
-  // explicitly proven that its classification is too coarse.
-  if (deterministic && !deterministicNeedsLanguageRefinement(deterministic, taskState, message)) {
-    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-      semantic_owner: 'deterministic_proven_path',
-      deterministic_turn: true,
-      model_call_used: false,
-      intent: deterministic.intent,
-    }));
-    return deterministic;
-  }
-
-  // No deterministic interpretation has always required real language
-  // understanding. A coarse restaurant topic classification now does too.
+  // Human Conversation Recovery: LANGUAGE FIRST.
+  //
+  // Every ordinary customer utterance is read by the semantic model first.
+  // Deterministic parsing is no longer allowed to become the primary owner of
+  // language merely because a phrase happens to match one of its patterns.
+  // It remains valuable in exactly two roles:
+  //   1) provider-outage / unusable-model fallback; and
+  //   2) a transaction-safety guard when model output conflicts with an
+  //      already-proven mutating deterministic interpretation.
+  //
+  // Business execution is still NOT delegated to the model here. This layer
+  // only decides what the customer meant; the Dialog Manager / legacy
+  // transaction boundary still decides whether anything may be executed.
   try {
     const modelTurn = await deps.interpretSemanticTurn(message, context);
 
-    // A weak model interpretation never replaces a useful deterministic
-    // fallback. This gives us the larger language brain without gambling away
-    // the mature system on low-confidence/ambiguous output.
     if (deterministic && !modelRefinementIsUsable(modelTurn, deterministic)) {
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-        semantic_owner: 'deterministic_low_confidence_fallback',
+        semantic_owner: 'deterministic_unusable_model_fallback',
         deterministic_turn: true,
         model_call_used: true,
         model_confidence: modelTurn.confidence,
@@ -515,8 +511,31 @@ async function resolveSemanticTurn(
       return deterministic;
     }
 
+    // A model must never silently reinterpret an already-proven mutating
+    // command into a DIFFERENT mutation (or vice versa). Natural-language
+    // understanding still happens first, but execution-sensitive conflicts
+    // fall back to the deterministic interpretation until the downstream
+    // transaction layer explicitly proves equivalence.
+    const mutatingActions = new Set<SemanticTurn['action']>([
+      'book', 'order', 'confirm', 'modify', 'cancel', 'correct_previous',
+    ]);
+    if (
+      deterministic
+      && (mutatingActions.has(modelTurn.action) || mutatingActions.has(deterministic.action))
+      && (modelTurn.domain !== deterministic.domain || modelTurn.action !== deterministic.action)
+    ) {
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'deterministic_transaction_conflict_guard',
+        deterministic_turn: true,
+        model_call_used: true,
+        model_action: modelTurn.action,
+        deterministic_action: deterministic.action,
+      }));
+      return deterministic;
+    }
+
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-      semantic_owner: deterministic ? 'language_model_refinement' : 'language_model',
+      semantic_owner: deterministic ? 'language_model_over_deterministic_candidate' : 'language_model',
       deterministic_candidate: Boolean(deterministic),
       deterministic_turn: false,
       model_call_used: true,
@@ -526,13 +545,11 @@ async function resolveSemanticTurn(
   } catch (error) {
     if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
 
-    // Provider outage never destroys a path the old system could already
-    // understand. Fall straight back to the exact deterministic candidate.
     if (deterministic) {
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
         semantic_owner: 'deterministic_provider_fallback',
         deterministic_turn: true,
-        model_call_used: false,
+        model_call_used: true,
         provider_unavailable: true,
         deterministic_intent: deterministic.intent,
       }));
@@ -542,7 +559,7 @@ async function resolveSemanticTurn(
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
       semantic_owner: 'clarification_provider_fallback',
       deterministic_turn: false,
-      model_call_used: false,
+      model_call_used: true,
       clarification_without_model: true,
     }));
     const domain = taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown';
