@@ -136,6 +136,18 @@ export function readOnlyCutoverEligibility(
       && !turn.taskStateAfter.activeTask) {
     return { eligible:true };
   }
+  // A pure preference/constraint declaration is also safe conversation.
+  // It changes no booking/order/payment state and must not be forced back into
+  // a keyword parser merely because the semantic action is
+  // provide_information. Dialog Manager guarantees that a constraint-only
+  // declaration with no active task creates no transactional task.
+  if (turn.semanticTurn.action === 'provide_information'
+      && turn.semanticTurn.constraints.length > 0
+      && !turn.taskStateBefore.activeTask
+      && !turn.taskStateAfter.activeTask
+      && !turn.dialogDecision.actionProposal) {
+    return { eligible:true };
+  }
   // A newly-created restaurant preorder from an ambiguous party/budget
   // follow-up is not a safe task continuation yet. Let the stateful
   // deterministic restaurant advisor answer first; only an already-active
