@@ -1,0 +1,42 @@
+name: Phase 1 Live Language Acceptance
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-openai-language:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Require OpenAI acceptance credential
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "PHASE1_LIVE_NOT_RUN: repository OPENAI_API_KEY secret is not configured."
+            exit 2
+          fi
+      - name: Run real OpenAI regression acceptance
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
+          THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
+        run: npm run eval:phase1:live
+      - name: Run frozen hidden open-world holdout
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
+          THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
+        run: npx tsx scripts/run-phase1-hidden-holdout.ts

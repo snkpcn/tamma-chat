@@ -156,7 +156,7 @@ test('Human Brain Phase 5.2 RED: read-only side question during an active bookin
   assert.notEqual(result.taskStateAfter.activeTask?.status, 'completed');
 });
 
-test('Human Brain Phase 5.2 guard: transactional slot filling still stays on proven deterministic path', async () => {
+test('Human Conversation Recovery: transactional slot filling is understood by Language Brain before safe task merge', async () => {
   let calls = 0;
   const active = startNewActiveTask(emptyTaskStateContainer(), {
     type: 'activity_booking',
@@ -175,15 +175,22 @@ test('Human Brain Phase 5.2 guard: transactional slot filling still stays on pro
     loadTaskState: async () => active,
     interpretSemanticTurn: async () => {
       calls += 1;
-      throw new Error('model_must_not_own_transactional_slot_fill');
+      return modelTurn({
+        domain: 'activity',
+        intent: 'provide_booking_details',
+        action: 'provide_information',
+        informationNeed: 'none',
+        entities: { date: 'พรุ่งนี้', partySize: 2 },
+      });
     },
   }, NOW);
 
-  assert.equal(calls, 0);
+  assert.equal(calls, 1);
+  assert.equal(result.semanticTurn.action, 'provide_information');
   assert.equal(result.semanticTurn.entities.partySize, 2);
 });
 
-test('Human Brain Phase 5.2 guard: exact inventory count remains deterministic and zero-model', async () => {
+test('Human Conversation Recovery: exact inventory question is still read by Language Brain first', async () => {
   let calls = 0;
   const result = await processThongthaiOneMindTurn({
     channel: 'line',
@@ -194,11 +201,17 @@ test('Human Brain Phase 5.2 guard: exact inventory count remains deterministic a
     ...baseDeps(),
     interpretSemanticTurn: async () => {
       calls += 1;
-      throw new Error('exact_inventory_does_not_need_language_refinement');
+      return modelTurn({
+        domain: 'activity',
+        intent: 'activity_inventory_count',
+        action: 'ask',
+        informationNeed: 'inventory',
+        entities: { activityType: 'horse' },
+      });
     },
   }, NOW);
 
-  assert.equal(calls, 0);
+  assert.equal(calls, 1);
   assert.equal(result.semanticTurn.intent, 'activity_inventory_count');
 });
 

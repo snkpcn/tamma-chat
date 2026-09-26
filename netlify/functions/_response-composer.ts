@@ -15,10 +15,7 @@ import {
   planModelDegradation,
   type DegradationPlan,
 } from './_graceful-degradation';
-import {
-  callPreferredModel,
-  stripCodeFences,
-} from './_thongthai-model-provider';
+import { stripCodeFences } from './_thongthai-model-provider';
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
@@ -939,55 +936,11 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
 }
 
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
-  if (input.dialogDecision.responseIntent === 'active_task_summary') {
-    return composeDeterministicResponse(input);
-  }
-
-  // If the model stack itself is the degraded component, do not immediately
-  // call it again just to phrase the failure.
-  if (input.degradation.condition === 'model_unavailable'
-      || input.degradation.condition === 'model_invalid'
-      || input.degradation.condition === 'internal_error') {
-    return composeDeterministicResponse(input);
-  }
-
-  // EMPTY/UNAVAILABLE/UNKNOWN have short canonical deterministic copy; this
-  // makes failure truth independent of another model call.
-  if (input.degradation.condition === 'source_unavailable'
-      || input.degradation.condition === 'verified_empty'
-      || input.degradation.condition === 'fact_unknown') {
-    return composeDeterministicResponse(input);
-  }
-
-  // Comparison safety is a machine decision, not a wording preference.
-  // If the Dialog Manager could not verify the precise comparison attribute
-  // for the candidate entities (for example horse temperament), do NOT hand
-  // the turn to a model that might fill the missing trait with plausible
-  // prose. Speak the canonical "cannot verify" copy deterministically.
-  if (input.dialogDecision.responseIntent === 'cannot_verify_comparison') {
-    return composeDeterministicResponse(input);
-  }
-
-  try {
-    const prompt = buildResponseComposerPrompt(input);
-    const raw = await callPreferredModel(
-      prompt,
-      [{ role:'user', content:'Compose the final customer response from the supplied decision and verified facts.' }],
-      'response-composer',
-    );
-    const parsed = parseComposedResponse(raw, input);
-    return {
-      message:polishCustomerMessage(parsed.message, input.channel),
-      mode:'model',
-      usedFactKeys:parsed.usedFactKeys,
-      composerVersion:RESPONSE_COMPOSER_VERSION,
-      bibleVersion:THONGTHAI_BIBLE_VERSION,
-      channel:input.channel,
-      language:input.language,
-    };
-  } catch (error) {
-    const groundedAvailable = allFacts(input.knowledgeBundles).length > 0;
-    const degraded = planModelDegradation(error, { deterministicFallbackAvailable:groundedAvailable });
-    return composeDeterministicResponse({ ...input, degradation:degraded });
-  }
+  // Human Conversation Recovery contract:
+  // OpenAI is a semantic supervisor, not the customer-facing voice.
+  // Customer wording is therefore rendered only from already-decided,
+  // already-grounded state. No model call is permitted in this layer.
+  const grounded = composeGroundedDeterministicResponse(input);
+  if (grounded) return grounded;
+  return composeDeterministicResponse(input);
 }

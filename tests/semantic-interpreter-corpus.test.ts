@@ -233,7 +233,7 @@ test('toSemanticInterpretationMeta exposes only safe structured fields, never ra
   const meta = toSemanticInterpretationMeta(turn);
   assert.deepEqual(Object.keys(meta).sort(), [
     'action', 'confidenceBucket', 'domain', 'informationNeed', 'intent', 'needsClarification',
-    'referencesResolved', 'referencesUnresolved', 'semanticVersion',
+    'referencesResolved', 'referencesUnresolved', 'semanticVersion', 'speechAct',
   ]);
   assert.equal(meta.confidenceBucket, 'high');
   assert.equal(meta.referencesResolved, 1);

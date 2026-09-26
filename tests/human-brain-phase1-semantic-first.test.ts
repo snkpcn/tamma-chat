@@ -65,7 +65,7 @@ test('Human Brain Phase 1 RED: ordinary Thai meaning is owned by the LLM semanti
   assert.equal(result.semanticTurn.entities.time, '18:00');
 });
 
-test('Human Brain Phase 1 guard: an in-progress transactional slot update stays deterministic and does not require the model', async () => {
+test('Human Brain Phase 1: an in-progress transactional slot update is understood by the supervisor before deterministic execution', async () => {
   let semanticCalls = 0;
   const active = startNewActiveTask(emptyTaskStateContainer(), {
     type: 'activity_booking',
@@ -84,19 +84,29 @@ test('Human Brain Phase 1 guard: an in-progress transactional slot update stays 
     loadTaskState: async () => active,
     interpretSemanticTurn: async () => {
       semanticCalls += 1;
-      throw new Error('model_should_not_be_needed_for_structured_active_task_slot');
+      return {
+        domain:'activity',
+        intent:'provide_booking_details',
+        action:'provide_information',
+        informationNeed:'none',
+        entities:{ date:'พรุ่งนี้', partySize:2 },
+        references:[],
+        constraints:[],
+        confidence:0.98,
+        needsClarification:false,
+      };
     },
   }, NOW);
 
-  assert.equal(semanticCalls, 0,
-    'business-critical active task slot filling should keep the proven deterministic path');
+  assert.equal(semanticCalls, 1,
+    'every ordinary customer utterance must be read by the language supervisor before business execution');
   assert.equal(result.semanticTurn.domain, 'activity');
   assert.equal(result.semanticTurn.entities.partySize, 2);
   assert.ok(result.semanticTurn.entities.date);
 });
 
 
-test('Human Brain Phase 1 guard: precise proven deterministic intents still bypass the model', async () => {
+test('Human Brain Phase 1: precise inventory language is still read by the supervisor before grounded lookup', async () => {
   let semanticCalls = 0;
   const result = await processThongthaiOneMindTurn({
     channel: 'line',
@@ -107,11 +117,21 @@ test('Human Brain Phase 1 guard: precise proven deterministic intents still bypa
     ...baseDeps(),
     interpretSemanticTurn: async () => {
       semanticCalls += 1;
-      throw new Error('precise_inventory_semantics_should_stay_deterministic');
+      return {
+        domain:'activity',
+        intent:'activity_inventory_count',
+        action:'ask',
+        informationNeed:'inventory',
+        entities:{ activityType:'horse' },
+        references:[],
+        constraints:[],
+        confidence:0.98,
+        needsClarification:false,
+      };
     },
   }, NOW);
 
-  assert.equal(semanticCalls, 0);
+  assert.equal(semanticCalls, 1);
   assert.equal(result.semanticTurn.intent, 'activity_inventory_count');
   assert.equal(result.semanticTurn.domain, 'activity');
 });

@@ -15,6 +15,7 @@ import {
   hasCancelMarker, hasCommitMarker, hasCorrectionMarker,
 } from './_slot-parsers';
 import { isExperienceDiscoveryIntent } from './_experience-discovery';
+import { isPromotionDiscoveryIntent } from './_promotion-dialog';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 
 export const DETERMINISTIC_SEMANTIC_TURN_VERSION = 'deterministic-semantic-turn-v1';
@@ -152,6 +153,17 @@ function findMembershipTopic(message: string): boolean {
  *  differs from the active task's. Reuses the SAME topic-narrow markers
  *  already used for the no-task case, never a new phrase table. */
 function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
+  // Promotion questions are cross-cutting by design. A current membership,
+  // restaurant, stay, or activity context must never absorb a clear request
+  // to browse promotions. Reuse the existing promotion dialog classifier so
+  // this remains one shared intent class rather than a new phrase patch.
+  if (isPromotionDiscoveryIntent(message)) {
+    return {
+      domain: 'promotion', intent: 'promotion_discovery', action: 'discover',
+      informationNeed: 'catalog',
+      entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false,
+    };
+  }
   if (findRestaurantTopicNarrow(message)) {
     return {
       domain: 'restaurant', intent: 'restaurant_topic_switch', action: 'discover',
@@ -652,6 +664,20 @@ export function deriveDeterministicSemanticTurn(
       references: [],
       constraints: [],
       confidence: 0.82,
+      needsClarification: false,
+    };
+  }
+
+  if (isPromotionDiscoveryIntent(trimmed)) {
+    return {
+      domain: 'promotion',
+      intent: 'promotion_discovery',
+      action: 'discover',
+      informationNeed: 'catalog',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.9,
       needsClarification: false,
     };
   }

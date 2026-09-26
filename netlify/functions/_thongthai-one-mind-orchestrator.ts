@@ -317,6 +317,9 @@ function nextConversationContext(
     lastAction: semanticTurn.action,
     currentTaskReference: activeTask?.taskId ?? null,
     lastToolResultSummary: decision.actionProposal ? 'action_proposed_not_executed' : undefined,
+    summaryFact: semanticTurn.constraints.length
+      ? `customer constraints in ${semanticTurn.domain}: ${semanticTurn.constraints.join(', ')}.`
+      : undefined,
   }, now);
 }
 
@@ -484,69 +487,111 @@ async function resolveSemanticTurn(
 ): Promise<SemanticTurn> {
   const deterministic = deriveDeterministicSemanticTurn(message, context, taskState, now);
 
-  // Preserve every mature deterministic path unless this checkpoint has
-  // explicitly proven that its classification is too coarse.
-  if (deterministic && !deterministicNeedsLanguageRefinement(deterministic, taskState, message)) {
-    console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-      semantic_owner: 'deterministic_proven_path',
-      deterministic_turn: true,
-      model_call_used: false,
-      intent: deterministic.intent,
-    }));
-    return deterministic;
-  }
-
-  // No deterministic interpretation has always required real language
-  // understanding. A coarse restaurant topic classification now does too.
+  // Human Conversation Recovery: LANGUAGE FIRST.
+  //
+  // Every ordinary customer utterance is read by the semantic model first.
+  // Deterministic parsing is no longer allowed to become the primary owner of
+  // language merely because a phrase happens to match one of its patterns.
+  // It remains valuable in exactly two roles:
+  //   1) provider-outage / unusable-model fallback; and
+  //   2) a transaction-safety guard when model output conflicts with an
+  //      already-proven mutating deterministic interpretation.
+  //
+  // Business execution is still NOT delegated to the model here. This layer
+  // only decides what the customer meant; the Dialog Manager / legacy
+  // transaction boundary still decides whether anything may be executed.
   try {
     const modelTurn = await deps.interpretSemanticTurn(message, context);
 
-    // A weak model interpretation never replaces a useful deterministic
-    // fallback. This gives us the larger language brain without gambling away
-    // the mature system on low-confidence/ambiguous output.
-    if (deterministic && !modelRefinementIsUsable(modelTurn, deterministic)) {
+    if (!modelRefinementIsUsable(modelTurn, deterministic)) {
+      if (deterministic) {
+        console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+          semantic_owner: 'deterministic_unusable_model_fallback',
+          deterministic_turn: true,
+          model_call_used: true,
+          model_confidence: modelTurn.confidence,
+          deterministic_intent: deterministic.intent,
+        }));
+        return { ...deterministic, semanticSource:'deterministic_fallback' };
+      }
+
+      // No deterministic interpretation exists and the model result is not
+      // strong enough to own state. Convert it to a read-only clarification:
+      // low confidence can never start/update/cancel a working task.
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-        semantic_owner: 'deterministic_low_confidence_fallback',
-        deterministic_turn: true,
+        semantic_owner: 'clarification_untrusted_model',
+        deterministic_turn: false,
         model_call_used: true,
         model_confidence: modelTurn.confidence,
-        deterministic_intent: deterministic.intent,
       }));
-      return deterministic;
+      return {
+        semanticSource:'openai_supervisor',
+        domain:taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown',
+        intent:'clarification_needed_untrusted_semantics',
+        action:'ask',
+        entities:{},
+        references:[],
+        constraints:[],
+        confidence:Number.isFinite(modelTurn.confidence) ? modelTurn.confidence : 0,
+        needsClarification:true,
+        clarificationReason:'untrusted_semantics',
+      };
+    }
+
+    // A model must never silently reinterpret an already-proven mutating
+    // command into a DIFFERENT mutation (or vice versa). Natural-language
+    // understanding still happens first, but execution-sensitive conflicts
+    // fall back to the deterministic interpretation until the downstream
+    // transaction layer explicitly proves equivalence.
+    const mutatingActions = new Set<SemanticTurn['action']>([
+      'book', 'order', 'confirm', 'modify', 'cancel', 'correct_previous',
+    ]);
+    if (
+      deterministic
+      && (mutatingActions.has(modelTurn.action) || mutatingActions.has(deterministic.action))
+      && (modelTurn.domain !== deterministic.domain || modelTurn.action !== deterministic.action)
+    ) {
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'deterministic_transaction_conflict_guard',
+        deterministic_turn: true,
+        model_call_used: true,
+        model_action: modelTurn.action,
+        deterministic_action: deterministic.action,
+      }));
+      return { ...deterministic, semanticSource:'deterministic_fallback' };
     }
 
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-      semantic_owner: deterministic ? 'language_model_refinement' : 'language_model',
+      semantic_owner: deterministic ? 'language_model_over_deterministic_candidate' : 'language_model',
       deterministic_candidate: Boolean(deterministic),
       deterministic_turn: false,
       model_call_used: true,
       model_confidence: modelTurn.confidence,
     }));
-    return modelTurn;
+    return { ...modelTurn, semanticSource:'openai_supervisor' };
   } catch (error) {
     if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
 
-    // Provider outage never destroys a path the old system could already
-    // understand. Fall straight back to the exact deterministic candidate.
     if (deterministic) {
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
         semantic_owner: 'deterministic_provider_fallback',
         deterministic_turn: true,
-        model_call_used: false,
+        model_call_used: true,
         provider_unavailable: true,
         deterministic_intent: deterministic.intent,
       }));
-      return deterministic;
+      return { ...deterministic, semanticSource:'deterministic_fallback' };
     }
 
     console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
       semantic_owner: 'clarification_provider_fallback',
       deterministic_turn: false,
-      model_call_used: false,
+      model_call_used: true,
       clarification_without_model: true,
     }));
     const domain = taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown';
     return {
+      semanticSource:'provider_unavailable',
       domain,
       intent: 'clarification_needed_provider_unavailable',
       action: 'ask',
@@ -558,6 +603,16 @@ async function resolveSemanticTurn(
       clarificationReason: 'provider_unavailable',
     };
   }
+}
+
+/** Only semantics that passed the structural/confidence gate may mutate
+ * conversation/task state. Provider outage and weak model results remain
+ * response-only clarification events. */
+export function semanticTurnTrustedForState(turn:SemanticTurn):boolean {
+  if (turn.semanticSource === 'provider_unavailable') return false;
+  if (!Number.isFinite(turn.confidence) || turn.confidence < 0.7) return false;
+  if (turn.domain === 'unknown' || turn.action === 'unknown') return false;
+  return true;
 }
 
 async function computeOneMindTurnFromState(
@@ -600,15 +655,18 @@ async function computeOneMindTurnFromState(
   }, adapters, now);
   const dialogAndKnowledgeMs = Date.now() - dialogStartedAt;
 
-  const taskStateAfter = dialog.decision.taskStateContainer;
-  const conversationContextAfter = nextConversationContext(
-    conversationContextBefore,
-    input,
-    semanticTurn,
-    dialog.decision,
-    dialog.bundles,
-    now,
-  );
+  const stateTrusted = semanticTurnTrustedForState(semanticTurn);
+  const taskStateAfter = stateTrusted ? dialog.decision.taskStateContainer : taskStateBefore;
+  const conversationContextAfter = stateTrusted
+    ? nextConversationContext(
+        conversationContextBefore,
+        input,
+        semanticTurn,
+        dialog.decision,
+        dialog.bundles,
+        now,
+      )
+    : conversationContextBefore;
 
   return {
     identity,
@@ -674,12 +732,13 @@ export async function processThongthaiOneMindTurn(
     deps.loadConversationContext(identity.guestDbId, now),
     deps.loadTaskState(identity.guestDbId),
   ]);
-  const { taskState:taskStateBefore } = normalizeTaskStateForConversation(loadedTaskState, now);
+  const { taskState:taskStateBefore, staleTaskSuspended } = normalizeTaskStateForConversation(loadedTaskState, now);
   const result = await computeOneMindTurnFromState(
     input, identity, conversationContextBefore, taskStateBefore, deps, now,
   );
 
-  const persistState = input.persistState === true;
+  const persistState = input.persistState === true
+    && (staleTaskSuspended || semanticTurnTrustedForState(result.semanticTurn));
   if (persistState) {
     await deps.persistConversationContext(identity.guestDbId, result.conversationContextAfter);
     await deps.persistTaskState(identity.guestDbId, result.taskStateAfter);
@@ -795,7 +854,9 @@ export async function processThongthaiOneMindTurnAuthoritative(
     // Staleness normalization is a state-safety operation, not a response
     // cutover decision. Persist it even when this turn itself falls through
     // to legacy (e.g. a greeting/support turn outside initial cutover).
-    const shouldPersist = input.persistState === true && (staleTaskSuspended || persistPredicate(result));
+    const shouldPersist = input.persistState === true
+      && (staleTaskSuspended
+        || (semanticTurnTrustedForState(result.semanticTurn) && persistPredicate(result)));
     if (!shouldPersist || !identity.guestDbId) {
       return {
         ...result,

@@ -22,7 +22,7 @@ test('Phase 4: bare recommendation is a deterministic 3-path host opener, not an
     assert.match(text, /สายกิจกรรม/u);
     assert.match(text, /สายพัก/u);
     assert.match(text, /มากี่คน/u);
-    assert.equal(harness.modelCallCount(), 0, 'host opener must be deterministic and never require the model');
+    assert.equal(harness.modelCallCount(), 1, 'host opener must be language-supervised once, then answered by the deterministic host path');
   });
 });
 
@@ -34,7 +34,7 @@ test('Phase 4: cafe stays helpful but never invents menu, price or hours without
     assert.match(text, /ไม่มีข้อมูล.*ยืนยัน|ไม่ขอเดา/u);
     assert.match(text, /คาเฟ่|ร้านอาหาร|ที่พัก/u, 'must still offer a useful next step inside the ecosystem');
     assert.doesNotMatch(text, /65\s*บาท|07:00|18:00/u);
-    assert.equal(harness.modelCallCount(), 0, 'known information boundary must not require the model');
+    assert.equal(harness.modelCallCount(), 1, 'known information boundary must still be language-supervised once before grounded handling');
   });
 });
 

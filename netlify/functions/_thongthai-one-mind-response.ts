@@ -44,7 +44,7 @@ const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','statu
 // exclusions (membership/cafe/journey/payment/support) still do, so those
 // stay on legacy until their own equivalence is proven -- "do not force
 // unfinished transactional cutover".
-const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe']);
+const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe','general','local','incident']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
 // Task-worthy modes that only ever COLLECT/CLARIFY information -- they never
 // execute or even propose a transaction (see DialogMode/COMMIT_ACTIONS in
@@ -105,6 +105,11 @@ function isGenuinelyUnclassifiedFallback(turn: OneMindTurnResult): boolean {
 }
 
 export type ReadOnlyCutoverEligibilityOptions = {
+  /** Recovery-mode gate: require the real OpenAI semantic supervisor to own
+   * the meaning before this candidate may persist state or answer early.
+   * Deterministic/provider-outage candidates then remain pure fallbacks and
+   * cannot pre-mutate legacy state. */
+  requireSemanticSupervisor?: boolean;
   /** Set only by a caller that is ITSELF the last resort (e.g. the legacy
    *  handler's own LLMAvailabilityError catch, invoked only after legacy's
    *  own deterministic pre-checks and its own real model attempt have
@@ -120,6 +125,10 @@ export function readOnlyCutoverEligibility(
 ):
   | { eligible:true }
   | { eligible:false; reason:'transactional_or_task_turn' | 'domain_not_cut_over' } {
+  if (options.requireSemanticSupervisor
+      && turn.semanticTurn.semanticSource !== 'openai_supervisor') {
+    return { eligible:false, reason:'transactional_or_task_turn' };
+  }
   if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
     return { eligible:false, reason:'domain_not_cut_over' };
   }
@@ -134,6 +143,18 @@ export function readOnlyCutoverEligibility(
   if (READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
       && !turn.taskStateBefore.activeTask
       && !turn.taskStateAfter.activeTask) {
+    return { eligible:true };
+  }
+  // A pure preference/constraint declaration is also safe conversation.
+  // It changes no booking/order/payment state and must not be forced back into
+  // a keyword parser merely because the semantic action is
+  // provide_information. Dialog Manager guarantees that a constraint-only
+  // declaration with no active task creates no transactional task.
+  if (turn.semanticTurn.action === 'provide_information'
+      && turn.semanticTurn.constraints.length > 0
+      && !turn.taskStateBefore.activeTask
+      && !turn.taskStateAfter.activeTask
+      && !turn.dialogDecision.actionProposal) {
     return { eligible:true };
   }
   // A newly-created restaurant preorder from an ambiguous party/budget
@@ -155,6 +176,10 @@ export function readOnlyCutoverEligibility(
   return { eligible:false, reason:'transactional_or_task_turn' };
 }
 
+function taskStateChanged(turn: OneMindTurnResult): boolean {
+  return JSON.stringify(turn.taskStateBefore) !== JSON.stringify(turn.taskStateAfter);
+}
+
 export async function processOneMindCustomerTurn(
   input: OneMindCustomerTurnInput,
   dependencies: Partial<OneMindDependencies> = {},
@@ -172,6 +197,29 @@ export async function processOneMindCustomerTurn(
     candidate => readOnlyCutoverEligibility(candidate, eligibilityOptions).eligible,
   );
   const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptions);
+
+  // Never acknowledge a state-mutating conversational decision unless the
+  // authoritative state write actually succeeded. This matters for cancel /
+  // suspend / resume / correction turns: a pretty reply with statePersisted
+  // false would tell the customer the working state changed when it did not.
+  // Fall through to the existing deterministic executor instead.
+  if (
+    input.persistState !== false
+    && taskStateChanged(turn)
+    && !turn.trace.statePersisted
+  ) {
+    return {
+      status:'legacy_required',
+      turn,
+      reason:'transactional_or_task_turn',
+      observability:buildOneMindTraceEnvelope({
+        turn,
+        response:null,
+        totalMs:Date.now() - totalStartedAt,
+      }),
+    };
+  }
+
   if (!eligibility.eligible) {
     return {
       status:'legacy_required',

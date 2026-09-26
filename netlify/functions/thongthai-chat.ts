@@ -67,6 +67,7 @@ import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agen
 import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import type { DurableMemorySnapshot } from './_memory-relevance';
+import type { SemanticTurn } from './_semantic-interpreter';
 import {
   buildPendingPromotionRedemption,
   decidePromotionFallback,
@@ -3508,6 +3509,47 @@ function deterministicCareContextResponse(request: BrainRequest): BrainResponse 
 // light feedback invitation -- never a survey, never spammed onto an
 // unrelated turn (this responder only ever fires on the narrow
 // THANK_YOU_MARKER shape, nothing else).
+function supervisedOpenWorldResponse(
+  turn: SemanticTurn,
+  request: BrainRequest,
+): BrainResponse {
+  const isThai = request.language === 'th' || /[\u0E00-\u0E7F]/u.test(request.message);
+  let message:string;
+
+  if (turn.domain === 'incident') {
+    message = isThai
+      ? 'รับเรื่องครับ ช่วยบอกจุดที่เกิดเหตุหรือจุดที่เห็นครั้งสุดท้าย เวลาประมาณ และรายละเอียดสิ่งที่เกิดขึ้นอีกนิดครับ ทองไทยจะช่วยรวบรวมให้ทีมตรวจสอบต่อ'
+      : 'I understand this is an incident report. Please share the approximate time, location, and a few details so I can help route it for follow-up.';
+  } else if (turn.domain === 'local') {
+    message = isThai
+      ? 'ถ้าเป็นสิ่งที่เกิดขึ้นรอบพื้นที่ตอนนี้ ทองไทยยังไม่มีข้อมูลสดยืนยันจากหน้างานครับ เลยไม่อยากเดา ถ้าบอกจุดหรือช่วงเวลาที่หมายถึงได้ จะช่วยต่อให้ตรงขึ้นครับ'
+      : 'I understand you are asking about something around the area. I do not have a live on-site view, so I will not guess. Share the spot or time you mean and I can help narrow it down.';
+  } else if (turn.needsClarification) {
+    message = isThai
+      ? 'เข้าใจเรื่องที่ถามอยู่ครับ แต่ยังขาดรายละเอียดสำคัญอีกนิด บอกเพิ่มได้เลยว่าหมายถึงอะไรหรืออยากให้ทองไทยช่วยแบบไหน'
+      : 'I understand the topic, but I need one more detail to know exactly what you want help with.';
+  } else if (turn.speechAct === 'social' || turn.action === 'unknown') {
+    message = isThai
+      ? 'ได้ครับ คุยกับทองไทยได้เลย ถ้ามีอะไรอยากให้ช่วยต่อ บอกมาได้ตรง ๆ ครับ'
+      : 'Sure. You can talk to me normally—tell me what you want help with next.';
+  } else {
+    message = isThai
+      ? 'เข้าใจครับ เรื่องนี้ไม่ได้เป็นคำสั่งจองหรือสั่งซื้อ ทองไทยจะไม่ทำรายการอะไรเอง ถ้าต้องใช้ข้อมูลเฉพาะเพิ่มเติมจะเช็กจากแหล่งที่ยืนยันได้ก่อนครับ'
+      : 'Understood. This is not a booking or purchase instruction, so I will not submit anything. If specific facts are needed, I will rely on a verified source first.';
+  }
+
+  return {
+    message,
+    intent:'conversation',
+    contextUpdates:{},
+    journeyAction:{ type:'none', journey:null },
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 function deterministicThankYouCloseResponse(request: BrainRequest): BrainResponse | null {
   if (!isThankYouMessage(request.message)) return null;
   return {
@@ -3592,6 +3634,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // per core invocation so every side effect in this turn shares it.
   const transportEventId = eventId
     ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
+
+  // Recovery architecture: attempt the canonical language-understanding
+  // pipeline once, early. If it cannot safely own the turn, legacy execution
+  // remains available below; never call One-Mind twice for the same turn.
+  let oneMindAttemptedEarly = false;
+  let earlyOneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>> | null = null;
 
   // Master Roadmap Phase 2 -- Customer Intelligence Memory. Run ONCE,
   // unconditionally, for every turn -- BEFORE the deterministic
@@ -3748,6 +3796,86 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
     });
+  }
+
+  // Human Conversation Recovery: UNDERSTAND FIRST.
+  //
+  // Safety/escalation/service-feedback responders above may remain
+  // deterministic because they are guardrails. Ordinary customer language
+  // reaches One-Mind BEFORE pending-question matchers, horse/stay/activity
+  // regex responders, or other legacy domain routers. If One-Mind says the
+  // turn needs a real transaction executor, it returns legacy_required and
+  // the unchanged executor path below still owns the write.
+  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1') {
+    try {
+      const oneMind = await processOneMindCustomerTurn({
+        channel,
+        language:request.language,
+        message:request.message,
+        eventId:transportEventId,
+        providerUserKey:providerUserKey ?? request.guestId,
+        canonicalAnonymousId:request.guestId,
+        guestDbId,
+        durableMemory:durableMemoryFromRequest(request),
+        persistState:true,
+      }, {}, {}, undefined, { requireSemanticSupervisor:true });
+      await recordOneMindTrace(oneMind.observability);
+      // Only a real OpenAI-owned interpretation consumes the early semantic
+      // slot. If the supervisor is unavailable, leave the later proven
+      // deterministic One-Mind compatibility cutover available.
+      oneMindAttemptedEarly = oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor';
+      const supervisedMeaningReady = oneMind.status === 'composed'
+        && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor';
+      if (supervisedMeaningReady) {
+        console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
+          domain:oneMind.turn.semanticTurn.domain,
+          action:oneMind.turn.semanticTurn.action,
+          responseIntent:oneMind.turn.dialogDecision.responseIntent,
+          composerMode:oneMind.response.mode,
+          stateConflictRetries:oneMind.turn.trace.stateConflictRetries ?? 0,
+        }));
+        const responseFromSystem = ['general','local','incident'].includes(oneMind.turn.semanticTurn.domain)
+          ? supervisedOpenWorldResponse(oneMind.turn.semanticTurn, request)
+          : {
+              message:oneMind.response.message,
+              intent:oneMind.turn.semanticTurn.action === 'recommend'
+                || oneMind.turn.semanticTurn.action === 'discover'
+                ? 'recommendation'
+                : 'information',
+              contextUpdates:{},
+              journeyAction:{type:'none' as const, journey:null},
+              suggestedActions:[],
+              responseStyle:'direct' as const,
+              semanticMemoryUpdates:[],
+              toolCalls:[],
+            };
+        const supervisedResponse = polishedResponse(responseFromSystem, channel);
+        await persistBrainRuntime(guestDbId, channel, supervisedResponse);
+        return coreResult(200, {
+          message:supervisedResponse.message,
+          intent:supervisedResponse.intent,
+          contextUpdates:supervisedResponse.contextUpdates,
+          journeyAction:supervisedResponse.journeyAction,
+          suggestedActions:supervisedResponse.suggestedActions,
+        });
+      }
+      console.log('THONGTHAI_HUMAN_CONVERSATION_LEGACY_REQUIRED', JSON.stringify({
+        reason:oneMind.status === 'legacy_required'
+          ? oneMind.reason
+          : 'semantic_supervisor_unavailable',
+        domain:oneMind.turn.semanticTurn.domain,
+        action:oneMind.turn.semanticTurn.action,
+        semanticSource:oneMind.turn.semanticTurn.semanticSource ?? 'unknown',
+      }));
+    } catch (error) {
+      // Strangler safety during recovery: language-first failure must not take
+      // down the existing product. Legacy remains a fallback until the full
+      // conversation acceptance suite is green.
+      console.error(
+        'THONGTHAI_HUMAN_CONVERSATION_FIRST_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+    }
   }
 
   // Phase 2 closeout — resolve the answer to Thongthai's own persisted
@@ -4169,6 +4297,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const restaurantIntentClass = classifyRestaurantDietaryIntent(request.message);
   let preserveRestaurantFastPath = restaurantIntentClass !== 'OTHER'
     && isRestaurantAdvisorTurn(request, { agentState: {} });
+  const supervisedRestaurantStatus = earlyOneMind?.turn.semanticTurn.semanticSource === 'openai_supervisor'
+    && earlyOneMind.turn.semanticTurn.domain === 'restaurant'
+    && (
+      earlyOneMind.turn.semanticTurn.action === 'status'
+      || earlyOneMind.turn.semanticTurn.informationNeed === 'availability'
+      || earlyOneMind.turn.semanticTurn.informationNeed === 'transaction_status'
+    );
+  if (supervisedRestaurantStatus) preserveRestaurantFastPath = false;
   if (!preserveRestaurantFastPath
       && restaurantIntentClass === 'RECOMMENDATION_ONLY'
       && guestDbId) {
@@ -4202,6 +4338,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // be swallowed by a model-composed or stale-domain answer. For a
   // transport-history-free follow-up
   // ("ราคาเท่าไร"), consult only the bounded active_topic snapshot.
+  const preservePromotionFastPath = isPromotionDiscoveryIntent(request.message);
+
   let preserveCafeFastPath = isCafeReadOnlyTurn(request.message);
   if (!preserveCafeFastPath
       && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(request.message.trim())
@@ -4218,8 +4356,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   }
 
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
-      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath && !preserveCafeFastPath) {
+      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath
+      && !preservePromotionFastPath && !preserveCafeFastPath) {
     try {
+      const cachedSemantic = earlyOneMind?.turn.semanticTurn;
       const oneMind = await processOneMindCustomerTurn({
         channel,
         language:request.language,
@@ -4229,8 +4369,13 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         canonicalAnonymousId:request.guestId,
         guestDbId,
         durableMemory:durableMemoryFromRequest(request),
+        // Reuse the already-understood meaning, then let the existing
+        // Dialog Manager persist its bounded conversational task state.
         persistState:true,
-      });
+      }, cachedSemantic ? {
+        interpretSemanticTurn: async () => cachedSemantic,
+      } : undefined);
+      earlyOneMind = oneMind;
       if (oneMind.status === 'composed') {
         await recordOneMindTrace(oneMind.observability);
         console.log('THONGTHAI_ONE_MIND_CUTOVER', JSON.stringify({
@@ -4301,6 +4446,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       );
     }
   }
+
 
   const history = request.chatHistory.slice(-16);
   const lastTurn = history[history.length - 1];
@@ -4494,6 +4640,40 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       suggestedActions: polished.suggestedActions,
     });
   }
+
+  // If every proven deterministic/business responder above yielded but the
+  // semantic supervisor already produced a safe, non-transactional One-Mind
+  // response, use that deterministic/grounded response instead of invoking
+  // the legacy generative brain. This keeps OpenAI in the teacher role.
+  const earlyFallbackSafe = earlyOneMind?.status === 'composed'
+    && !earlyOneMind.turn.taskStateBefore.activeTask
+    && !earlyOneMind.turn.taskStateAfter.activeTask
+    && !earlyOneMind.turn.semanticTurn.taskDirective
+    && ['ask','discover','recommend','compare','status'].includes(earlyOneMind.turn.semanticTurn.action);
+  if (earlyFallbackSafe && earlyOneMind?.status === 'composed') {
+    const supervisedFallback = polishedResponse({
+      message: earlyOneMind.response.message,
+      intent: earlyOneMind.turn.semanticTurn.action === 'recommend'
+        || earlyOneMind.turn.semanticTurn.action === 'discover'
+        ? 'recommendation'
+        : 'information',
+      contextUpdates:{},
+      journeyAction:{type:'none', journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    }, channel);
+    await persistBrainRuntime(guestDbId, channel, supervisedFallback);
+    return coreResult(200, {
+      message:supervisedFallback.message,
+      intent:supervisedFallback.intent,
+      contextUpdates:supervisedFallback.contextUpdates,
+      journeyAction:supervisedFallback.journeyAction,
+      suggestedActions:supervisedFallback.suggestedActions,
+    });
+  }
+
 
   let firstResponse: BrainResponse;
   try {
