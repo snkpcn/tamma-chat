@@ -364,19 +364,14 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     // a compatibility alias, but the runtime provider under test is OpenAI-only.
     if (u.includes('api.openai.com/v1/responses')) {
       modelCalls += 1;
-      const reply = modelQueue.shift() ?? {
-        normalizedMeaning:'generic test conversation',
-        speechAct:'question',
-        domain:'general',
-        intent:'general_question',
-        action:'ask',
-        informationNeed:'none',
-        entities:{},
-        references:[],
-        constraints:[],
-        confidence:0.9,
-        needsClarification:false,
-      };
+      const reply = modelQueue.shift();
+      // Do not fabricate a generic semantic interpretation for tests that
+      // never programmed the model. In production OpenAI supplies the real
+      // interpretation; in a network-free test, an empty queue means the
+      // supervisor is unavailable and the proven deterministic fallback must
+      // remain testable. Tests that exercise language ownership explicitly
+      // program a semantic reply through programModelReply/programGeminiReply.
+      if (!reply) return jsonResponse({ error:{ message:'mock semantic supervisor unavailable' } }, 503);
       return jsonResponse({ output_text: JSON.stringify(reply) });
     }
 
