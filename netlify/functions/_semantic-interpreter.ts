@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v11';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v12';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -344,6 +344,7 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
   pair an existing booking/order/payment status with informationNeed=transaction_status.
 - ask = an informational/factual question that is not better represented by status, compare, recommend, or discover.
+- A catalog question about one named business category belongs to that category. Venue-wide wording such as here, this place, or what do you have here does not broaden it to ecosystem when the requested catalog itself is clearly activities, rooms/stay, restaurant/menu, cafe, OTOP, promotions, or membership. Use ecosystem only when the requested set genuinely spans multiple business units or asks broadly for experiences/things to do without naming a single business category.
 - Selecting a previously presented option while supplying extra scheduling or quantity slots remains confirm. Added date, time, party size, quantity, or similar slot values refine the selected option; this does not become book/order unless the CURRENT utterance explicitly commits to submit the transaction now.
 - When the CURRENT utterance explicitly names a canonical business category such as activities, stay, restaurant, cafe, OTOP, promotion, or membership as the catalog being requested, that category owns the domain rather than ecosystem. Ecosystem is for broad cross-business discovery when no specific business category is itself the requested catalog.
 - Permission meaning outranks mutation wording: asking whether a change is allowed is ask + policy even when phrased with a polite change verb. A real modify action requires the customer to instruct that the value/choice actually be changed now.
