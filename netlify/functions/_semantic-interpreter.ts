@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v16';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v17';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -481,7 +481,10 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- When the customer is asking for promotions, discounts, offers, or promotion applicability, promotion owns the domain even if a restaurant, stay, activity, cafe, or OTOP unit is named. The named business unit is context for the promotion, not the primary domain. Do not let canonical business-category ownership steal a promotion request.
 - Creating, arranging, or composing a NEW itinerary or multi-step journey for the customer is recommend, not ask. This includes a duration-bounded plan or a plan that combines multiple requested experiences or business units. Use ask for retrieving, resuming, explaining, or discussing an existing plan when the customer is not asking you to design a new one.
+- If the customer explicitly asks for one activity as the target and another event is only a timing anchor, stay in activity. If the customer instead asks generically for something to do that should flow into another business experience, the requested deliverable is the sequence, so use journey.
+- A concrete payment artifact or payment failure keeps domain=payment when the customer asks what to do next, how to retry, or how to remediate it. support is for generic help problems without a more specific owned business domain.
 - How-it-works, instructions, rules, or explanation about one named activity are ask, not discover. discover is for browsing what activities/options exist.
 - Selecting an already-presented option and adding only schedule, quantity, or party-size slots remains confirm. Do not escalate that turn to book/order unless the CURRENT utterance explicitly asks to submit the transaction.
 - An explicitly named canonical business category owns the domain even when phrased as what is available here. The activity category means domain=activity; ecosystem is only for genuinely cross-business or category-unspecified discovery.
@@ -641,10 +644,13 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     ? parsed.taskDirective as SemanticTaskDirective
     : undefined;
   const intent = typeof parsed.intent === 'string' && /^[a-z][a-z0-9_]{1,79}$/.test(parsed.intent) ? parsed.intent : 'unknown';
-  const informationNeed = VALID_INFORMATION_NEEDS.includes(parsed.informationNeed as SemanticInformationNeed)
+  let informationNeed:SemanticInformationNeed = VALID_INFORMATION_NEEDS.includes(parsed.informationNeed as SemanticInformationNeed)
     ? parsed.informationNeed as SemanticInformationNeed
     : 'none';
   let action = canonicalizeReadOnlyAction(parsedAction, informationNeed);
+  // A recommendation action is itself a recommendation information request.
+  // Keep this facet coherent even if the model leaves the optional facet as none.
+  if (action === 'recommend' && informationNeed === 'none') informationNeed = 'recommendation';
   const confidenceRaw = Number(parsed.confidence);
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
