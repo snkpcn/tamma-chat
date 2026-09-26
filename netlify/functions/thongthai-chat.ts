@@ -3776,7 +3776,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         guestDbId,
         durableMemory:durableMemoryFromRequest(request),
         persistState:true,
-      });
+      }, {}, {}, undefined, { requireSemanticSupervisor:true });
       await recordOneMindTrace(oneMind.observability);
       if (oneMind.status === 'composed'
           && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor') {
