@@ -129,3 +129,28 @@ test('Phase 4 acceptance: duplicate final event remains one idempotent proposal 
   assert.equal(d1.actionProposal?.requiresExplicitConfirmation,true);
   assert.equal(d2.actionProposal?.requiresExplicitConfirmation,true);
 });
+
+
+test('Phase 4 acceptance: availability must match the selected resource and requested time', () => {
+  const p=plan(turn({
+    action:'book',
+    entities:{
+      resourceCode:'activity-horse',
+      date:'2026-10-02',
+      time:'15:00',
+      durationMinutes:60,
+    },
+  }),emptyTaskStateContainer(),'phase4-exact-availability');
+
+  const wrongResource:KnowledgeBundle={
+    ...available(),
+    facts:[{key:'availability:activity-atv:2026-10-02T15:00:00+07:00:available',value:true,domain:'activity',sourceId:'schedule',sourceType:'activity_live',authoritative:true,fetchedAt:NOW.toISOString()}],
+  };
+  const wrongTime:KnowledgeBundle={
+    ...available(),
+    facts:[{key:'availability:activity-horse:2026-10-02T16:00:00+07:00:available',value:true,domain:'activity',sourceId:'schedule',sourceType:'activity_live',authoritative:true,fetchedAt:NOW.toISOString()}],
+  };
+  assert.equal(resolveDialogDecision(p,[wrongResource]).actionProposal,undefined);
+  assert.equal(resolveDialogDecision(p,[wrongTime]).actionProposal,undefined);
+  assert.equal(resolveDialogDecision(p,[available()]).actionProposal?.toolName,'create_booking');
+});
