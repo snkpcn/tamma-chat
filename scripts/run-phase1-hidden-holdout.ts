@@ -229,10 +229,13 @@ const cases: HoldoutCase[] = [
   },
 ];
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error('PHASE1_HIDDEN_HOLDOUT_NOT_RUN: OPENAI_API_KEY is required.');
-  process.exitCode = 2;
-} else {
+async function main():Promise<void>{
+  if (!process.env.OPENAI_API_KEY) {
+    console.error('PHASE1_HIDDEN_HOLDOUT_NOT_RUN: OPENAI_API_KEY is required.');
+    process.exitCode = 2;
+    return;
+  }
+
   const failures: Array<{ id: string; errors: string[] }> = [];
   const results: Array<{ id: string; domain: string; action: string; speechAct?: string; reviewed: boolean }> = [];
 
@@ -269,3 +272,8 @@ if (!process.env.OPENAI_API_KEY) {
 
   if (failures.length) process.exitCode = 1;
 }
+
+main().catch(error=>{
+  console.error('PHASE1_HIDDEN_HOLDOUT_CRASH',error instanceof Error?error.message:String(error));
+  process.exitCode=1;
+});
