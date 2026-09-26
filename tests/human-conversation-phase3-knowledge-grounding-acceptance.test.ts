@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { HORSE_FACTS, HORSE_FACT_PROVENANCE } from '../netlify/functions/_local-concierge-knowledge';
+import { composeHorseComparisonResponse } from '../netlify/functions/_local-concierge-response';
 import {
   getGroundedFactValue,
   pickByPrecedence,
@@ -125,4 +128,21 @@ test('Phase 3 acceptance: unavailable is not rewritten as authoritative empty', 
   assert.equal(bundle.sources[0]?.status,'unavailable');
   assert.ok(bundle.missing.includes('price'));
   assert.equal(bundle.facts.length,0);
+});
+
+
+test('Phase 3 acceptance: activity SOT does not synthesize operating hours or slot policy', async () => {
+  const source=await readFile(new URL('../netlify/functions/_activity-sot.ts',import.meta.url),'utf8');
+  assert.doesNotMatch(source,/serviceHours\s*:\s*\{\s*start\s*:\s*['"]09:00/u);
+  assert.doesNotMatch(source,/bookingSlotMinutes\s*:\s*30/u);
+});
+
+test('Phase 3 acceptance: static horse claims have explicit owner provenance and a closed claim surface', () => {
+  assert.equal(HORSE_FACT_PROVENANCE.authoritative,true);
+  assert.equal(HORSE_FACT_PROVENANCE.sourceType,'verified_static_catalog');
+  for (const horse of Object.values(HORSE_FACTS)) {
+    assert.deepEqual(Object.keys(horse).sort(),['name','personalityTh','rideFeelTh']);
+  }
+  const response=composeHorseComparisonResponse();
+  assert.doesNotMatch(response,/ปลอดภัยแน่นอน|เหมาะกับมือใหม่|เชื่องกว่า|ดีกว่า/u);
 });
