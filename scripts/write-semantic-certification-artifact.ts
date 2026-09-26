@@ -108,13 +108,13 @@ async function main() {
     return;
   }
 
-  const chunkSize=20;
+  const chunkSize=10;
   const availabilityRetryDelayMs=62_000;
   // Certification-only prompt grouping keeps the LIVE provider in the loop
-  // while reducing free-tier request pressure: up to 20 independent corpus
+  // while reducing free-tier request pressure: up to 10 independent corpus
   // cases share one provider request, but each keeps its own context/message
   // and is parsed/scored independently afterward.
-  const configuredMaxSemanticCases=Number(process.env.SEMANTIC_CERT_MAX_CASES_PER_RUN ?? '158');
+  const configuredMaxSemanticCases=Number(process.env.SEMANTIC_CERT_MAX_CASES_PER_RUN ?? '80');
   const maxSemanticCasesPerRun=Number.isFinite(configuredMaxSemanticCases)
     ? Math.max(1,Math.min(158,Math.floor(configuredMaxSemanticCases)))
     : 158;
