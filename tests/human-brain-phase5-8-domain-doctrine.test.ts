@@ -83,10 +83,11 @@ test('Phase 5.8 RED2: conversational continue/resume request is not confirmation
   assert.equal(byId('l-journey-07').expected.action,'ask');
 });
 
-test('Phase 5.8 RED2: membership profile status fixture contains profile context rather than relying on an ambiguous bare phrase',()=>{
+test('Phase 5.8 RED2: membership profile readback fixture contains profile context and remains informational',()=>{
   const item=byId('membership-02');
   assert.equal(item.expected.domain,'membership');
-  assert.equal(item.expected.action,'status');
+  assert.equal(item.expected.action,'ask');
+  assert.equal(item.simulatedModelOutput?.informationNeed,'none');
   assert.equal(item.context?.activeDomain,'membership');
   assert.ok(item.context?.recentEntities.some(entity=>entity.type==='membership_profile'));
 });
