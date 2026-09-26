@@ -13,11 +13,11 @@ function byId(id:string){
   return item;
 }
 
-test('semantic-v22 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v22');
+test('semantic-v23 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v23');
 });
 
-test('semantic-v22 preserves the four v19 chunk-1 gold meanings',()=>{
+test('semantic-v23 preserves the four v19 chunk-1 gold meanings',()=>{
   const expected:Record<string,{domain:string;action:string;informationNeed:string}>={
     'discover-05':{domain:'ecosystem',action:'recommend',informationNeed:'recommendation'},
     'discover-06':{domain:'ecosystem',action:'recommend',informationNeed:'recommendation'},
@@ -32,7 +32,7 @@ test('semantic-v22 preserves the four v19 chunk-1 gold meanings',()=>{
   }
 });
 
-test('semantic-v22 decision ladder blocks discover/catalog as a generic default',()=>{
+test('semantic-v23 decision ladder blocks discover/catalog as a generic default',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
   assert.ok(p.includes('Do not default to discover + catalog merely because a request is short, asks what is available, or asks to view information'));
   assert.ok(p.includes('FIRST classify evaluative choice requests as recommend'));
