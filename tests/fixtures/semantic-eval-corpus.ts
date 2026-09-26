@@ -131,8 +131,8 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     simulatedModelOutput: { domain: 'ecosystem', intent: 'broad_experience_discovery', action: 'discover', entities: {}, references: [], constraints: [], confidence: 0.88, needsClarification: false } },
   { id: 'discover-07', group: 'broad_discovery', category: 'colloquial', domainArea: 'ecosystem',
     message: 'พาแฟนมา มีไรทำ',
-    expected: { domain: 'ecosystem', action: 'discover' },
-    simulatedModelOutput: { domain: 'ecosystem', intent: 'broad_experience_discovery', action: 'discover', entities: { travelerType: 'couple' }, references: [], constraints: [], confidence: 0.82, needsClarification: false } },
+    expected: { domain: 'ecosystem', action: 'recommend' },
+    simulatedModelOutput: { domain: 'ecosystem', intent: 'couple_experience_recommendation', action: 'recommend', informationNeed: 'recommendation', entities: { travelerType: 'couple' }, references: [], constraints: [], confidence: 0.82, needsClarification: false } },
 
   // --- Semantic equivalence group: restaurant recommendation (3 variants, user-specified) ---
   { id: 'restaurant-01', group: 'restaurant_catalog', category: 'colloquial', domainArea: 'restaurant',
@@ -377,8 +377,8 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     simulatedModelOutput: { domain: 'stay', intent: 'cancel_booking', action: 'cancel', entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false } },
   { id: 'modify-01', category: 'colloquial', domainArea: 'activity',
     message: 'ขอเปลี่ยนเวลาจองม้าได้ไหม',
-    expected: { domain: 'activity', action: 'modify' },
-    simulatedModelOutput: { domain: 'activity', intent: 'modify_booking_time', action: 'modify', entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
+    expected: { domain: 'activity', action: 'ask' },
+    simulatedModelOutput: { domain: 'activity', intent: 'ask_booking_time_change_policy', action: 'ask', informationNeed: 'policy', entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
 
   // --- Support/handoff ---
   { id: 'support-01', category: 'formal', domainArea: 'support',
