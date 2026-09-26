@@ -583,7 +583,6 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
         ...reference,
         resolvedEntityId:matches[0]!.id,
         resolvedEntityIds:undefined,
-        ambiguous:false,
       };
     });
   }
