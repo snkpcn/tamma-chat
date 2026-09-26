@@ -56,6 +56,23 @@ const ACTIVITY_CONTEXT:SemanticContext={
   ],
   lastAction:'ask',
 };
+const ACTIVITY_TASK_CONTEXT:SemanticContext={
+  activeDomain:'activity',
+  recentEntities:[
+    {id:'activity:atv',type:'activity',name:'ATV',domain:'activity',source:'catalog',canonical:true},
+  ],
+  lastAction:'provide_information',
+  activeTopic:'ATV booking',
+  activeTask:{
+    type:'activity_booking',
+    domain:'activity',
+    status:'collecting',
+    knownSlots:{resourceCode:'activity-atv'},
+    missingFields:['date','time','durationMinutes'],
+    selectedEntities:[{id:'activity:atv',type:'activity',name:'ATV',domain:'activity',source:'catalog',canonical:true}],
+    constraints:[],
+  },
+};
 const RESTAURANT_CONTEXT:SemanticContext={
   activeDomain:'restaurant',
   recentEntities:[{id:'menu_set:set-1',type:'proposed_set',name:'ชุดแนะนำ',domain:'restaurant',source:'tool_result',canonical:true}],
@@ -101,10 +118,10 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-activity-02','formal','activity','เด็ก 7 ขวบขี่ม้าได้ไหม','ask','ask_horse_child_policy',{activityType:'horse',childAge:7}),
   c('l-activity-03','formal','activity','ATV สามคันออกพร้อมกันได้ไหม','ask','ask_atv_capacity',{activityType:'atv',quantity:3},undefined,[],false,'policy'),
   c('l-activity-04','colloquial','activity','ไม่เคยยิงธนูเลย เล่นได้ปะ','ask','ask_archery_beginner',{activityType:'archery'},undefined,['beginner']),
-  c('l-activity-05','correction','activity','เปลี่ยนจาก ATV เป็นขี่ม้าแทน','correct_previous','change_activity',{activityType:'horse'},ACTIVITY_CONTEXT),
-  c('l-activity-06','cancel','activity','ไม่เอากิจกรรมแล้ว ยกเลิกก่อน','cancel','cancel_activity',{},ACTIVITY_CONTEXT),
+  c('l-activity-05','correction','activity','เปลี่ยนจาก ATV เป็นขี่ม้าแทน','modify','change_activity',{activityType:'horse'},ACTIVITY_TASK_CONTEXT),
+  c('l-activity-06','cancel','activity','ไม่เอากิจกรรมแล้ว ยกเลิกก่อน','cancel','cancel_activity',{},ACTIVITY_TASK_CONTEXT),
   c('l-activity-07','formal','activity','จอง ATV วันเสาร์ 3 คน','book','book_atv',{activityType:'atv',date:'วันเสาร์',partySize:3}),
-  c('l-activity-08','follow_up','activity','บ่ายสามว่างไหม','status','check_activity_time',{time:'15:00'},ACTIVITY_CONTEXT,[],false,'availability'),
+  c('l-activity-08','follow_up','activity','บ่ายสามว่างไหม','status','check_activity_time',{time:'15:00'},ACTIVITY_TASK_CONTEXT,[],false,'availability'),
   c('l-activity-09','colloquial','ecosystem','อยากทำอะไรชิล ๆ ไม่เหนื่อย','recommend','recommend_low_effort_experience',{},undefined,['low_effort'],false,'recommendation'),
   c('l-activity-10','formal','activity','ช่วยเทียบขี่ม้ากับ ATV ให้หน่อย','compare','compare_activities',{options:['horse','atv']}),
 
@@ -162,7 +179,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-cafe-01','formal','cafe','อินทนินเปิดอยู่ไหม','status','ask_cafe_open',{},undefined,[],false,'availability'),
   c('l-cafe-02','formal','cafe','คาเฟ่มีเมนูอะไรบ้าง','discover','discover_cafe_menu'),
   c('l-cafe-03','colloquial','cafe','มีลาเต้ปะ','discover','discover_cafe_item',{itemName:'ลาเต้'},undefined,[],false,'catalog'),
-  c('l-cafe-04','formal','cafe','อยากถามเรื่องเครื่องดื่มเย็น','ask','ask_cafe_drinks',{category:'cold_drink'}),
+  c('l-cafe-04','formal','cafe','อยากถามเรื่องเครื่องดื่มเย็น','ask','ask_cafe_drinks',{category:'cold_drink'},undefined,[],true),
   c('l-cafe-05','follow_up','cafe','แก้วนี้ราคาเท่าไหร่','ask','ask_cafe_price',{},CAFE_CONTEXT),
 
   // Payment — information/status/cancel only; semantic layer never verifies money itself.
@@ -181,7 +198,7 @@ export const PHASE_L_SEMANTIC_CASES:SemanticEvalCase[]=[
   c('l-journey-05','correction','journey','เปลี่ยนแผน ไม่เอากิจกรรมผจญภัยแล้ว','modify','modify_journey_remove_adventure',{},JOURNEY_CONTEXT,['no_adventure']),
   c('l-journey-06','follow_up','journey','กลับไปแผนเดิมได้ไหม','modify','restore_previous_journey',{},JOURNEY_CONTEXT),
   c('l-journey-07','follow_up','journey','ช่วยต่อจากเมื่อกี้ให้หน่อย','ask','resume_journey',{},JOURNEY_CONTEXT),
-  c('l-support-01','ambiguous','support','ไม่เข้าใจ ช่วยหน่อย','unknown','vague_support',{},undefined,[],true),
+  c('l-support-01','ambiguous','support','ไม่เข้าใจ ช่วยหน่อย','ask','vague_support',{},undefined,[],true),
   c('l-support-02','formal','support','ขอคุยกับทีมงานได้ไหม','ask','request_human_support'),
 
   // Extra Phase L breadth — cross-domain planning and less common customer goals.
