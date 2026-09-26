@@ -9712,3 +9712,54 @@ No DB/schema/backoffice change.
 No paid OpenAI fallback.
 No manual Netlify deploy.
 No sentence-specific runtime keyword patch.
+---
+
+## 2026-09-26 Human Brain semantic-v7 certification provider-budget recovery
+
+Production semantic-v7 deploy before this patch:
+- deploy id: `6ab72368193d2c0008030bb2`
+- commit_ref: `f10ed913d935c1e815fde258153ca27b92cb9454`
+- branch/context: main / production
+- manual_deploy: false
+- state: READY
+
+First semantic-v7 production artifact:
+- status: `incomplete_provider`
+- totalCorpusCases: **158**
+- semanticEvaluated: **0**
+- semanticFailed: **0**
+- providerFailed: **1**
+- resumeStart: **0**
+- availabilityComplete: **false**
+
+The failed case was `discover-01`, but this was NOT a semantic mismatch. Provider diagnostics were:
+- gemini-3.8-flash: HTTP 429
+- gemini-3.7-flash: HTTP 429
+- gemini-3.6-flash: HTTP 429
+- gemini-3.1-flash-lite: 6000 ms timeout
+- remaining 3.5 fallbacks: no useful shared budget remained
+
+Root cause:
+- grouped production certification sends up to 20 independent semantic cases in one structured build-time request.
+- the provider layer was still applying the customer-runtime shared timing policy: 7s total / 6s per attempt.
+- that latency ceiling is correct for live customer requests but too short for a 20-case build-time structured response.
+- the provider therefore cut off the free Gemini fallback before it could finish, even though no customer request was waiting.
+
+Phase 5.15 structural fix:
+- customer/runtime callers remain exactly **7s total / 6s attempt cap**.
+- ONLY caller label `semantic-certification-group` receives a build-time policy of **30s total / 25s attempt cap**.
+- the free Gemini chain remains unchanged in ownership and still precedes any optional secondary provider.
+- paid OpenAI remains OFF unless `THONGTHAI_ALLOW_PAID_FALLBACK=1` is explicitly set; this patch does not set it.
+- semantic version remains `semantic-v7`, so the same-version resumable artifact remains authoritative.
+- no semantic gold/corpus label was changed.
+- no transaction core, DB/schema, backoffice, booking/order/payment path changed.
+
+RED/GREEN:
+- RED One Mind Branch CI: run `36209763298` — 1216 tests, 1214 pass, 2 expected new-policy failures.
+- RED Build Guard: run `36209763194` — PASS.
+- GREEN after timing implementation: One Mind Branch CI run `36209833711` — **1216/1216 PASS**.
+- GREEN Build Guard run `36209833844` — PASS.
+- final wiring lock: One Mind Branch CI run `36209917258` — **1217/1217 PASS**.
+- final wiring Build Guard run `36209917277` — PASS.
+
+This patch exists only to let semantic-v7 production certification complete honestly on the free provider chain. It does not claim semantic acceptance by itself.
