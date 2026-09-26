@@ -1,0 +1,37 @@
+name: Phase 1 Live Semantic Acceptance
+
+on:
+  push:
+    branches:
+      - recovery/human-brain-e2e-conversation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-semantic-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Verify OpenAI credential is configured
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY repository secret is not configured for this acceptance job."
+            exit 2
+          fi
+      - name: Live semantic smoke against OpenAI
+        env:
+          LIVE_EVAL_PROFILE: production-smoke
+          LIVE_EVAL_MIN_PASS_PCT: "95"
+        run: npm run eval:semantic:live
+      - name: Frozen hidden open-world holdout
+        run: npx tsx scripts/run-phase1-hidden-holdout.ts
