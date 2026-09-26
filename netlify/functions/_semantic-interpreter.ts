@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v5';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v6';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -580,7 +580,15 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const multiCandidateIdentityReference = references.some(reference =>
     SINGLE_ENTITY_REFERENCE_TYPES.has(reference.type)
     && (reference.resolvedEntityIds?.length ?? 0) > 1);
-  if (action === 'discover' && informationNeed === 'catalog' && multiCandidateIdentityReference) {
+  if (
+    multiCandidateIdentityReference
+    && (
+      (action === 'discover' && informationNeed === 'catalog')
+      || action === 'confirm'
+    )
+  ) {
+    // With >1 canonical candidate, "which one?" cannot be an executable
+    // selection. Preserve the candidate set and treat it as a question.
     action = 'ask';
   }
 
