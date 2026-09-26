@@ -9364,3 +9364,194 @@ Still true after Phase 5.7:
 4. Treat providerFailed and semanticFailed separately.
 5. Only if availabilityComplete=true is the full semantic score meaningful.
 6. Fix/adjudicate any remaining semantic-v3 failures by semantic pattern, never exact runtime sentence matching.
+
+
+---
+
+## 2026-09-26 Human Brain Phase 5.8 — semantic-v4 cross-domain doctrine
+
+**STATUS: BRANCH GREEN; HOLD MERGE UNTIL semantic-v3 production artifact is read.**
+
+This checkpoint was prepared while the Phase 5.7 semantic-v3 production build/certification was running. It addresses semantic-v2 failure patterns that semantic-v3 did not yet explicitly cover in doctrine. It must not be merged merely because branch CI is green; the semantic-v3 live artifact decides which parts are still necessary.
+
+### Patterns addressed
+
+- promotion is cross-cutting: a promotion about restaurant/activity/stay remains domain=promotion; the business unit is an entity/facet
+- journey vs ecosystem: journey is itinerary/plan/sequence composition; ecosystem is broad browse/recommendation without plan composition
+- physical product stock uses informationNeed=inventory; time/resource availability remains availability
+- explicit membership signup uses confirm in the closed action vocabulary, never book/order
+- "can I change/update X?" is ask + policy; it is not an actual modify instruction
+- intentional "change to X" is modify unless the customer says the previous value was mistaken
+- catalog existence vs live availability remains separated for cafe/menu/item semantics
+- topic-switch fixtures that refer to prior stay context now contain that context instead of asking the model to hallucinate it
+
+### Honest gold adjudications
+
+Phase-L corrections include:
+- l-stay-06 -> modify
+- l-member-04 -> ask + policy
+- l-cafe-03 -> discover + catalog
+- l-journey-04 -> activity + recommend + recommendation
+- l-journey-06 -> modify
+- l-topic-activity-01 -> real stay context supplied
+- l-promo-09 -> promotion + ask + policy
+
+No gold was changed solely to match a model output. Each correction follows the semantic-v3 distinction between question vs mutation, catalog vs availability, and correction vs intentional change.
+
+### RED evidence
+
+Run:
+`36192053371`
+
+Result:
+- tests: **1183**
+- pass: **1178**
+- fail: **5**
+
+Expected failures proved missing:
+- cross-cutting promotion doctrine
+- journey vs ecosystem composition doctrine
+- physical stock inventory doctrine
+- membership signup/capability distinction
+- stale Phase-L gold
+
+### GREEN evidence
+
+Run:
+`36192292667`
+
+Result:
+- **1183 / 1183 PASS**
+- fail 0
+- exact Netlify build command PASS
+- Phase O live gate skipped outside production/main
+- live semantic certification skipped outside production/main
+
+### Scope safety
+
+No DB/schema change.
+No transaction executor change.
+No backoffice change.
+No paid OpenAI fallback.
+No runtime keyword/regex expansion.
+No manual Netlify deploy.
+
+### Merge gate
+
+Do NOT merge Phase 5.8 until the semantic-v3 production artifact from merge `01652daa3864a3bcff98078b85212fe41efacea1` is available and inspected.
+
+If semantic-v3 already passes any targeted pattern, keep the generalized doctrine only if it is semantically correct and regression-safe; do not change gold merely to chase 158/158.
+
+
+---
+
+## 2026-09-26 Human Brain Phase 5.8/5.9 — semantic-v5 full live-v3 closure
+
+**STATUS: IMPLEMENTATION GREEN; READY FOR EXACT PR MERGE + ONE production semantic-v5 certification.**
+
+### Authoritative semantic-v3 production evidence
+
+Production merge:
+`01652daa3864a3bcff98078b85212fe41efacea1`
+
+Netlify deploy:
+`6ab6e78c917b440008e3bf30`
+
+Verified:
+- state = READY
+- branch = main
+- context = production
+- commit_ref = `01652daa3864a3bcff98078b85212fe41efacea1`
+- manual_deploy = false
+
+Readback workflow:
+run `36204308138`
+
+Semantic-v3 artifact:
+- totalCorpusCases = **158**
+- evaluated = **158**
+- semanticEvaluated = **158**
+- pass = **126**
+- semanticFailed = **32**
+- providerFailed = **0**
+- passPct = **79.75%**
+- availabilityComplete = **true**
+
+This proves Phase 5.6 pacing solved certification availability: provider availability is now complete and the remaining failures are semantic/model-output correctness only.
+
+### Semantic-v5 closure strategy
+
+The 32 semantic-v3 failures were adjudicated as a complete set, not sentence-by-sentence runtime patches.
+
+General semantic doctrine added:
+- promotion is a cross-cutting primary domain even when a promotion names restaurant/activity/stay
+- journey means itinerary/plan/sequence composition; ecosystem is broad browse/recommendation without plan composition
+- physical product stock uses inventory; time/resource availability uses availability
+- membership explicit signup uses confirm, never book/order
+- permission/capability questions are ask + policy, not mutations
+- explicit booking/order commitment outranks generic confirm
+- contextual "which one?" is ask, not catalog discovery
+- explicit prior-option selection plus supplied slots remains confirm while preserving slots
+- resume/continue a suspended task is not confirmation
+- topic declarations without a real question need clarification instead of invented catalog intent
+- preference-shaped open requests are recommendation, not generic discovery
+- supplied payment proof/slip is provide_information, not transaction status
+- restoring/reverting a known journey plan is modify
+- room/house type/configuration existence without a date/current-state predicate is catalog, not availability
+
+Structure-only deterministic validation added:
+- unresolved prior selection with zero usable context cannot retain a hallucinated business domain; domain becomes unknown
+- multi-candidate identity lookup classified as catalog discovery is normalized to ask
+- provide_information carrying an explicitly resolved prior selection is normalized to confirm while preserving all supplied slot entities
+- taskDirective=resume_suspended cannot remain confirm
+- transactional actions are NOT auto-created by deterministic normalization; book/order still require model semantic ownership of explicit commitment
+
+Strict JSON robustness:
+- Gemini already uses responseMimeType=application/json
+- parser now tolerates only bounded syntax wrappers: one embedded JSON object and harmless trailing comma
+- no semantic field is inferred from free text
+- provider/output diagnostics still never store raw prompt/model output/PII
+
+Honest corpus/context adjudications:
+- intentional "change X to Y" cases use modify unless the user says the old value was wrong
+- activity cancel/time follow-ups now include real active task context instead of ambiguous multiple browse entities
+- membership profile status case includes membership-profile context
+- cafe topic declaration is ask + needsClarification
+- vague support "ช่วยหน่อย" is support + ask + needsClarification
+- earlier Phase 5.8 cross-domain gold corrections remain in place
+
+Semantic interpreter version:
+`semantic-v5`
+
+### Final branch CI before merge
+
+PR #131 current semantic-v5 head verified:
+`03e51a54ab549e741969ee4ed71193e422001cf3`
+
+One Mind Branch CI:
+run `36204682104`
+- **1192 / 1192 PASS**
+- fail 0
+
+Netlify Build Command Guard:
+run `36204682106`
+- PASS
+
+Live semantic workflow on PR:
+- skipped as expected (GitHub Actions has no provider secrets)
+
+Changed production-scope files remain limited to:
+- `netlify/functions/_semantic-interpreter.ts`
+- semantic eval fixtures/tests
+- `THONGTHAI_HANDOFF.md`
+
+No DB/schema/backoffice/transaction-executor change.
+No paid OpenAI fallback.
+No runtime keyword/regex language router.
+No manual Netlify deploy.
+
+### Next exact action
+
+Merge PR #131 only at the exact re-verified head SHA.
+Merge commit must include `[semantic-cert]` and must not include `[skip netlify]`.
+Then let Netlify auto-deploy once and read the semantic-v5 production artifact.
