@@ -9676,3 +9676,39 @@ Phase 5.12 already changed certification to:
 This commit is intentionally cleanup/docs-only and exists to trigger the next one-shot production semantic certification **after cooldown**. It does not change semantic doctrine, transaction logic, DB, backoffice, or paid fallback policy.
 
 The obsolete PR-only live semantic workflow is removed because GitHub Actions has no model provider secret and that workflow can no longer contribute to production certification.
+---
+
+## 2026-09-26 Human Brain final grouped live certification — semantic-v7 pre-merge checkpoint
+
+Remote truth before this checkpoint:
+- main: `6cc4d58f30102edcf814068e84f45cb0acdd3790` (Phase 5.13 free Gemini fallback)
+- PR: #138 `human-brain/grouped-cert-zero-cost`
+- verified code head before docs: `7d238bd05e6d16221b156d92cb606c7fbaa3a2d0`
+
+Why semantic-v7 exists:
+- semantic-v6 structural ambiguity safety remains intact.
+- doctrine is tightened for contextual follow-ups: bare topic narrowing must not invent live availability, explicit named selection among several recent entities remains a real confirmation of that one entity, proposed date/time phrased as a question is availability/status rather than slot supply, and explicit attribute comparison remains compare rather than recommendation.
+- exact named entity resolution now resolves one recent entity without weakening generic multi-candidate ambiguity.
+
+Final certification harness:
+- production certification groups up to 20 independent corpus cases into one live Gemini request.
+- every case keeps its own context/message and is parsed/scored independently after the provider response.
+- expected labels and simulated gold outputs are never sent to the provider.
+- provider outage does not advance the durable semantic prefix.
+- same-version resume remains authoritative.
+- grouped requests are spaced by the free-tier quota window.
+- paid OpenAI fallback remains OFF.
+
+PR #138 branch CI history:
+- RED: One Mind Branch CI run `36208980407` — 1214 tests, 1213 pass, 1 fail.
+- root cause: an existing golden test expected an unambiguous exact selection reference to omit the optional `ambiguous` field, while the new exact-name resolver emitted `ambiguous:false`.
+- fix: preserve the pre-existing unambiguous reference shape while still resolving the exact entity id; semantic behavior is unchanged and generic multi-candidate ambiguity still asks/clarifies.
+- GREEN: One Mind Branch CI run `36209242303` — **1214 / 1214 PASS**, fail 0.
+- GREEN: Netlify Build Command Guard run `36209242321` — PASS.
+
+Scope remains limited to semantic interpreter/provider-certification harness/tests/documentation.
+No booking/order/payment/modify/cancel transaction-core rewrite.
+No DB/schema/backoffice change.
+No paid OpenAI fallback.
+No manual Netlify deploy.
+No sentence-specific runtime keyword patch.
