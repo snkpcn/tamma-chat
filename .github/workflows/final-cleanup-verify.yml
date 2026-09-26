@@ -1,0 +1,25 @@
+name: Human Brain Final Cleanup Verification
+
+on:
+  push:
+    branches:
+      - human-brain/final-cleanup
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Full regression
+        run: npm test
+      - name: Exact Netlify build command without semantic-cert marker
+        run: node scripts/apply-chat-polish.mjs && node scripts/apply-restaurant-constraint-copy.mjs && node scripts/phase-o-build-gate.mjs && node --import tsx scripts/write-semantic-certification-artifact.ts
