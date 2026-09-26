@@ -5,6 +5,14 @@ Repo: `snkpcn/tamma-chat`
 Production: https://tamma-chat.netlify.app/
 Existing Supabase only: `tamma-customer-data`
 
+## Human Brain semantic-v29 certification checkpoint
+
+- semantic-v29 production chunk 1 is certified 80/80 with semanticFailed=0, providerFailed=0, and failures=[].
+- Production deploy for that checkpoint is `6ab78fc3510c05000868defa` at main `032a16c1e50c1dc4fd426901edc150f8c7dc8337`.
+- semantic-v29 repairs generalized evaluative-question, primary-domain, explicit-category, and correction-versus-modify boundaries without changing corpus gold.
+- This documentation-only checkpoint exists only to trigger same-version certification resume for corpus cases 81-158.
+- Acceptance remains blocked until the combined artifact reports 158/158, semanticFailed=0, providerFailed=0, and availabilityComplete=true.
+
 ## Human Brain semantic-v21 certification checkpoint
 
 - semantic-v21 production chunk 1 is certified 80/80 with semanticFailed=0 and providerFailed=0.
