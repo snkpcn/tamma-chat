@@ -180,6 +180,12 @@ function classifyHttpOutcome(status: number): ProviderAttemptOutcome {
 export function shouldFallbackToSecondaryProvider(error: unknown): boolean {
   return error instanceof LLMAvailabilityError || error instanceof ProviderNotConfiguredError;
 }
+export function semanticTemperatureForCaller(callerLabel: string): number | undefined {
+  return callerLabel === 'semantic-interpreter' || callerLabel === 'semantic-certification-group'
+    ? 0
+    : undefined;
+}
+
 
 async function callGemini(
   systemPrompt: string,
@@ -218,7 +224,14 @@ async function callGemini(
         signal: controller.signal,
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemPrompt }] }, contents,
-          generationConfig: { responseMimeType: 'application/json', thinkingConfig: { thinkingLevel: 'low' }, maxOutputTokens: 4096 },
+          generationConfig: {
+            responseMimeType: 'application/json',
+            thinkingConfig: { thinkingLevel: 'low' },
+            maxOutputTokens: 4096,
+            ...(semanticTemperatureForCaller(callerLabel) !== undefined
+              ? { temperature: semanticTemperatureForCaller(callerLabel) }
+              : {}),
+          },
         }),
       });
       if (!response.ok) {
