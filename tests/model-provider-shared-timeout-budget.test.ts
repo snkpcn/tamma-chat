@@ -29,9 +29,7 @@ function hangingFetchUntilAborted(): typeof fetch {
 
 test('callPreferredModel bounds total worst-case latency to one shared budget, not the sum of independent per-attempt timeouts', async () => {
   const originalFetch = global.fetch;
-  const originalGemini = process.env.GEMINI_API_KEY;
   const originalOpenAI = process.env.OPENAI_API_KEY;
-  process.env.GEMINI_API_KEY = 'test-gemini-key';
   process.env.OPENAI_API_KEY = 'test-openai-key';
   global.fetch = hangingFetchUntilAborted();
 
@@ -45,17 +43,16 @@ test('callPreferredModel bounds total worst-case latency to one shared budget, n
     assert.ok(elapsedMs < 9_000, `expected bounded total latency under the shared budget, got ${elapsedMs}ms`);
   } finally {
     global.fetch = originalFetch;
-    if (originalGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalGemini;
     if (originalOpenAI === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalOpenAI;
   }
 });
 
 test('a fast successful first attempt is unaffected by the shared budget', async () => {
   const originalFetch = global.fetch;
-  const originalGemini = process.env.GEMINI_API_KEY;
-  process.env.GEMINI_API_KEY = 'test-gemini-key';
+  const originalOpenAI = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-openai-key';
   global.fetch = (async () => new Response(JSON.stringify({
-    candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+    output_text: '{"ok":true}',
   }), { status: 200 })) as typeof fetch;
 
   try {
@@ -66,6 +63,6 @@ test('a fast successful first attempt is unaffected by the shared budget', async
     assert.ok(elapsedMs < 1_000, `expected a fast successful call to stay fast, got ${elapsedMs}ms`);
   } finally {
     global.fetch = originalFetch;
-    if (originalGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalGemini;
+    if (originalOpenAI === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalOpenAI;
   }
 });
