@@ -5,6 +5,13 @@ Repo: `snkpcn/tamma-chat`
 Production: https://tamma-chat.netlify.app/
 Existing Supabase only: `tamma-customer-data`
 
+## Human Brain semantic-v15 certification checkpoint
+
+- semantic-v15 production chunk 1 is certified 80/80 with semanticFailed=0 and providerFailed=0.
+- Production deploy for that checkpoint is `6ab74eb87fc55e0007ed5f53` at main `3e86f7cdb309ab311e5393a29e58eb24c829d450`.
+- This checkpoint exists only to trigger the same-version resumable production certification for corpus cases 81-158.
+- Acceptance remains blocked until the combined artifact reports 158/158, semanticFailed=0, providerFailed=0, and availabilityComplete=true.
+
 ## Current Main Acceptance State
 
 Main has advanced beyond the original expected baseline `2d23b4ee2947cfb6ebf24d9c30f16fe7d728294a` through final One-Mind acceptance hardening and follow-up production smoke fixes.
