@@ -585,6 +585,43 @@ function hasVerifiedFacts(bundles: readonly KnowledgeBundle[]): boolean {
   return bundles.some(bundle => bundle.facts.length > 0);
 }
 
+function bangkokDateTimeParts(value:string):{date:string;time:string} | null {
+  const parsed=new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  const parts=new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',hour12:false,
+  }).formatToParts(parsed);
+  const get=(type:string)=>parts.find(part=>part.type===type)?.value;
+  const year=get('year'); const month=get('month'); const day=get('day');
+  const hour=get('hour'); const minute=get('minute');
+  return year&&month&&day&&hour&&minute
+    ? {date:`${year}-${month}-${day}`,time:`${hour}:${minute}`}
+    : null;
+}
+
+function hasMatchingVerifiedAvailability(
+  bundles:readonly KnowledgeBundle[],
+  task:ActiveTask,
+):boolean {
+  const resourceCode=typeof task.slots.resourceCode==='string' ? task.slots.resourceCode : null;
+  const date=typeof task.slots.date==='string' ? task.slots.date : null;
+  const time=typeof task.slots.time==='string' ? task.slots.time : null;
+
+  return bundles.some(bundle=>bundle.facts.some(fact=>{
+    if (fact.value !== true || fact.authoritative !== true || fact.stale === true) return false;
+    const match=fact.key.match(/^availability:([^:]+):(.+):available$/u);
+    if (!match) return false;
+    const [,factResource,startAt]=match;
+    if (resourceCode && factResource !== resourceCode) return false;
+    const actual=bangkokDateTimeParts(startAt!);
+    if ((date||time) && !actual) return false;
+    if (date && actual?.date !== date) return false;
+    if (time && actual?.time !== time) return false;
+    return true;
+  }));
+}
+
 export function resolveDialogDecision(plan: DialogPlan, bundles: readonly KnowledgeBundle[]): DialogDecision {
   if (plan.mode === 'clarify') {
     return { mode: 'clarify', taskStateContainer: plan.taskStateContainer, knowledgeRequests: plan.knowledgeRequests, missingFields: plan.missingFields, responseIntent: 'clarify_ambiguous_entity', reasons: plan.reasons };
@@ -637,7 +674,8 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
   let actionProposal: ActionProposal | undefined;
   if (plan.customerCommitPresent && plan.missingFields.length === 0 && plan.taskStateContainer.activeTask && !unavailable) {
     const availabilityRequested = plan.knowledgeRequests.some(request => request.needs.includes('availability'));
-    const availabilityVerified = !availabilityRequested || bundles.some(bundle => bundle.facts.some(fact => fact.key.includes('available') && fact.value === true));
+    const availabilityVerified = !availabilityRequested
+      || hasMatchingVerifiedAvailability(bundles, plan.taskStateContainer.activeTask);
     if (availabilityVerified) {
       const task = plan.taskStateContainer.activeTask;
       const toolName = TOOL_NAME_FOR_TASK_TYPE[task.type];
