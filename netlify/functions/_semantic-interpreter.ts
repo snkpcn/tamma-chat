@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v26';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v27';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -480,6 +480,8 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 
 FINAL SEMANTIC PRECEDENCE CHECK:
 Before emitting JSON, re-check the CURRENT utterance against these high-priority distinctions. These are semantic precedence rules, not phrase matching:
+- Determine domain from the explicit semantic business object before checking whether a specific record identifier is available. Missing record identity can require clarification, but it must not erase a recognizable business domain. Use unknown only when no business subject can be identified from the current utterance or grounded context; never use unknown merely because a referenced booking, plan, product, or resource has not yet been resolved to one record.
+- An embedded request for qualitative judgment is recommend even when no separate recommendation verb appears. The grammatical shape of a broad what-to-do question does not make it neutral when the requested answer is an opinion about desirability; discover is reserved for an existence/listing answer without qualitative judgment.
 - Resolve explicit category nouns before interpreting place framing or generic action predicates. An explicit canonical category noun anchors its own business domain even when the same utterance also refers to this place, the surrounding area, or a generic action. A place reference such as here or nearby does not widen that explicit category back to ecosystem.
 - Remove only contextual metadata, then classify the semantic remainder. An evaluative property of the requested possibilities remains recommend even when the utterance is short or uses broad question grammar; bare existence or neutral listing remains discover. Metadata neutrality must never erase evaluation already expressed by the request itself.
 - Explicit transaction commitment outranks catalog browsing. When the CURRENT utterance commits to ordering or booking, keep order/book ownership even if the exact product, resource, date, quantity, or other slot is not chosen yet. Missing product or slot details are follow-up fields; they do not downgrade order or book intent to discover.
