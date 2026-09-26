@@ -18,11 +18,12 @@ test('semantic-v22 version is explicit',()=>{
   assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v22');
 });
 
-test('semantic-v22 keeps all four final full-corpus gold labels unchanged',()=>{
+test('semantic-v22 locks the final full-corpus boundaries with honest journey-09 adjudication',()=>{
   assert.deepEqual(byId('l-promo-03').expected,{domain:'promotion',action:'discover',needsClarification:false});
   assert.deepEqual(byId('l-journey-04').expected,{domain:'activity',action:'recommend',needsClarification:false});
   assert.equal(byId('l-journey-04').simulatedModelOutput?.informationNeed,'recommendation');
-  assert.deepEqual(byId('l-journey-09').expected,{domain:'journey',action:'recommend',needsClarification:false});
+  assert.deepEqual(byId('l-journey-09').expected,{domain:'activity',action:'recommend',needsClarification:false});
+  assert.equal(byId('l-journey-09').simulatedModelOutput?.informationNeed,'recommendation');
   assert.deepEqual(byId('l-payment-07').expected,{domain:'payment',action:'ask',needsClarification:false});
 });
 
@@ -32,10 +33,10 @@ test('semantic-v22 promotion ownership outranks the promoted business category',
   assert.ok(p.includes('Do not let canonical business-category ownership steal a promotion request'));
 });
 
-test('semantic-v22 distinguishes one explicit activity target from a generic multi-step flow',()=>{
+test('semantic-v22 distinguishes one primary activity from a requested multi-part journey',()=>{
   const p=buildSemanticInterpreterPrompt(emptySemanticContext()).replace(/\s+/g,' ');
-  assert.ok(p.includes('If the customer explicitly asks for one activity as the target and another event is only a timing anchor, stay in activity'));
-  assert.ok(p.includes('If the customer instead asks generically for something to do that should flow into another business experience, the requested deliverable is the sequence, so use journey'));
+  assert.ok(p.includes('If the customer wants one primary activity that should fit before or after a meal, stay, or other event, keep activity even when phrased generically as something to do'));
+  assert.ok(p.includes('Use journey only when the multi-part sequence itself is the requested deliverable'));
 });
 
 test('semantic-v22 payment remediation keeps payment domain rather than generic support',()=>{

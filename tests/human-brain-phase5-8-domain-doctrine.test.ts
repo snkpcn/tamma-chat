@@ -60,10 +60,13 @@ test('Phase 5.8 RED: remaining Phase-L gold is human-grounded',()=>{
   }
 });
 
-test('Phase 5.8 RED: explicit journey planning fixtures keep journey domain while broad low-effort recommendation stays ecosystem',()=>{
-  for(const id of ['l-journey-01','l-journey-02','l-journey-03','l-journey-08','l-journey-09','l-journey-10']){
+test('Phase 5.8 RED: explicit journey planning stays journey while one-primary meal-anchor stays activity',()=>{
+  for(const id of ['l-journey-01','l-journey-02','l-journey-03','l-journey-08','l-journey-10']){
     assert.equal(byId(id).expected.domain,'journey',id);
   }
+  assert.equal(byId('l-journey-09').expected.domain,'activity');
+  assert.equal(byId('l-journey-09').expected.action,'recommend');
+  assert.equal(byId('l-journey-09').simulatedModelOutput?.informationNeed,'recommendation');
   assert.equal(byId('l-activity-09').expected.domain,'ecosystem');
 });
 
