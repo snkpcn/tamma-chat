@@ -114,10 +114,10 @@ async function main() {
   // limits are project-scoped and vary by model/tier, so the cert runner keeps
   // deliberate headroom instead of assuming fallback model IDs provide fresh
   // project RPM. Override only for controlled certification runs.
-  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '4250');
+  const configuredInterCaseDelayMs=Number(process.env.SEMANTIC_CERT_INTER_CASE_DELAY_MS ?? '6500');
   const interCaseDelayMs=Number.isFinite(configuredInterCaseDelayMs)
     ? Math.max(0,Math.min(15_000,Math.floor(configuredInterCaseDelayMs)))
-    : 4_250;
+    : 6_500;
 
   try {
     const resumeBase=await loadResumeBase();
