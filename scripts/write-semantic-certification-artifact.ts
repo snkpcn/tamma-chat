@@ -149,6 +149,7 @@ async function main() {
         limit:Math.min(chunkSize,remainingChunkBudget),
         availabilityRetries:1,
         availabilityRetryDelayMs,
+        groupRecoveryDelayMs:interGroupDelayMs,
       });
       groupedRequestCount += 1;
       batches.push(batch);
