@@ -186,9 +186,9 @@ test('Phase 6 E2E open-world incident/local/general turns never create business 
 test('Phase 6 metamorphic E2E: explicit restaurant-order paraphrases keep transaction intent after grounded browsing',async()=>{
   const browse='ขอดูเมนูหน่อย';
   const variants=[
-    'เอาตำไทยหนึ่งจาน ส่งพรุ่งนี้หกโมง ชื่อสมชาย 0812345678',
+    'ขอสั่งตำไทยหนึ่งจาน ส่งพรุ่งนี้หกโมง ชื่อสมชาย 0812345678',
     'สั่งตำไทย 1 ที่ พรุ่งนี้เวลา 18:00 สมชาย 0812345678',
-    'รับตำไทยหนึ่งที่นะ พรุ่งนี้หกโมง ลูกค้าชื่อสมชาย เบอร์ 0812345678',
+    'ยืนยันการสั่งตำไทยหนึ่งที่ พรุ่งนี้หกโมง ลูกค้าชื่อสมชาย เบอร์ 0812345678',
   ];
   const adapters:KnowledgeSourceAdapters={
     restaurant:{menu:async()=>ok('menu','restaurant_live',[
