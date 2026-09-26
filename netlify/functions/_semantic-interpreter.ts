@@ -349,7 +349,8 @@ OPEN-WORLD LANGUAGE RULES:
 - You are not a business-keyword classifier. Understand the sentence even when it has nothing to do with a known Tamma business flow.
 - Use general for ordinary conversation, personal context, or questions whose subject is not owned by a narrower business domain.
 - Use local for questions about the surrounding place/area or what may be around there when the customer is not asking for a known business offering.
-- Use incident when the customer reports a real-world incident such as a lost item, lost pet, damage, injury report, or something that may require staff follow-up.
+- Use incident when the CURRENT message reports an adverse real-world event such as loss/missing property or pet, damage, injury, or another situation that may require staff follow-up.
+- Merely asking whether an ambient animal, person, object, or condition observed around the area is still there is local, not incident, unless the CURRENT message actually says something is lost/missing, harmed, owned by the customer, or otherwise reports an adverse event.
 - Use support for generic requests for help with a service/problem when incident/payment/another owned domain is not more precise.
 - Do NOT force open-world language into restaurant/activity/stay just because one nearby word overlaps a business vocabulary item.
 - A strange, colloquial, misspelled, or previously unseen sentence is still language. Interpret its meaning before considering clarification.
@@ -398,7 +399,8 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 - When the CURRENT utterance explicitly names a canonical business category such as activities, stay, restaurant, cafe, OTOP, promotion, or membership as the catalog being requested, that category owns the domain rather than ecosystem. Ecosystem is for broad cross-business discovery when no specific business category is itself the requested catalog.
 - Permission meaning outranks mutation wording: asking whether a change is allowed is ask + policy even when phrased with a polite change verb. A real modify action requires the customer to instruct that the value/choice actually be changed now.
 - A support request like "help me investigate/check this problem" is ask unless the CURRENT utterance actually asks what state an existing transaction is in. Do not manufacture transaction_status merely because an order/payment is mentioned.
-- For preference adjustments, dissatisfaction plus a requested new preference is modify, not correct_previous. Reserve correct_previous for explicit claims that the earlier value/statement itself was mistaken or wrong.
+- A declarative constraint or standing preference update (dietary, allergy, accessibility, budget, likes/dislikes, pace, or similar) is provide_information when it simply adds/removes a conversational constraint. It is not modify merely because the preference changed or was added later. If that constraint is unambiguous, needsClarification=false.
+- Use modify for a requested change to an already selected concrete item, slot, schedule, or plan. For those concrete preference/choice adjustments, dissatisfaction plus a requested new value is modify, not correct_previous. Reserve correct_previous for explicit claims that the earlier value/statement itself was mistaken or wrong.
 - When the customer asks what activities the venue offers as a category, use activity + discover + catalog. Use ecosystem for broad cross-business experiences when no concrete business category is the requested catalog.
 - For menu/service readiness, ready to sell now is availability unless the customer asks about stock/on-hand inventory. Inventory is for stock quantity/on-hand existence; availability is whether the offered item can actually be served/provided now.
 - When a customer asks which concrete menu/items to avoid because of an allergy, that is recommend + ingredients: they want help choosing safely, not merely a general fact.
@@ -451,8 +453,10 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 - Domain follows the requested output: one requested experience plus a timing anchor does not become a journey. If the customer asks
   for one activity before/after another event, return activity; journey is for arranging a multi-step plan/sequence as the goal.
 - compare = the customer asks to compare two or more known options/attributes. Comparative attribute questions ("which is gentler/better/faster?",
-  "how do these differ?") stay compare even if the answer may help the customer choose. recommend is for asking the assistant to choose/suggest
-  what suits the customer, not for a direct comparison between known options.
+  "how do these differ?") stay compare even if the answer may help the customer choose. When the CURRENT utterance explicitly points to
+  two or more known candidates and asks which one is more suitable under a stated customer condition or criterion, that is still compare:
+  the bounded candidate set itself is being evaluated against the criterion. recommend is for open-ended choosing/suggesting when the
+  known candidates are not themselves the direct object of comparison.
 - confirm = the customer explicitly selects/accepts a previously presented or referenced option. If the customer names one known option
   and that name matches exactly one contextual entity, confirm that selection; do not ask for clarification merely because other candidates exist.
   Selection alone does NOT create a
@@ -569,9 +573,9 @@ MANDATORY TERMINAL DECISION CHECKLIST — apply this after all doctrine above an
 2. CURRENT SPEECH ACT: classify what the customer is doing in this turn, not what a later business layer may do next.
 3. REPAIR VERSUS CHANGE: when the customer contrastively rejects an earlier value as wrong and supplies its replacement, the speech act is correct_previous, not modify. Use modify for an intentional new change that does not claim the earlier value was mistaken.
 4. CATALOG EXISTENCE VERSUS LIVE STATE: when the customer asks whether an offering type, configuration, capacity class, or attribute exists in the catalog, and there is no date, time, current-state, sold-out, free-slot, or booking-state predicate, use discover + catalog. Use status + availability only when the customer asks whether an actual unit or slot is free or usable now or for a stated time.
-5. BROAD BROWSE VERSUS JUDGMENT: neutral existence/listing is discover + catalog. When the unknown answer itself is qualified as desirable, worthwhile, appealing, or good, the customer is requesting evaluative selection: recommend + recommendation. In Thai and other languages, sentence-final evaluative wording modifies the requested choice rather than acting as mere politeness; a qualitative predicate attached directly to a broad action question still asks for judgment even without a separate verb meaning recommend. Companion or traveler metadata is only context; remove that metadata without removing any qualitative judgment expressed by the remaining request.
+5. BROAD BROWSE VERSUS JUDGMENT: neutral existence/listing is discover + catalog. When the unknown answer itself is qualified as desirable, worthwhile, appealing, or good, the customer is requesting evaluative selection: recommend + recommendation. In Thai and other languages, sentence-final evaluative wording modifies the requested choice rather than acting as mere politeness; a qualitative predicate attached directly to a broad action question still asks for judgment even without a separate verb meaning recommend. Companion or traveler metadata is only context; remove that metadata without removing any qualitative judgment expressed by the remaining request. EXCEPTION: when the CURRENT utterance explicitly compares two or more already-known candidates against a stated criterion, use compare rather than recommend.
 6. TRANSACTION COMMITMENT: an explicit commitment to place an order or booking now remains order/book even when product, resource, quantity, date, or time is missing. An indefinite object or missing item name after an explicit order-placement commitment is a missing slot, not catalog intent. Merely selecting a prior option without submission language remains confirm.
-7. CONSTRAINT PAYLOAD: a declarative turn that only supplies requested facts or constraints is provide_information.
+7. CONSTRAINT PAYLOAD: a declarative turn that only supplies facts, standing preferences, or constraints is provide_information. Do not classify a clear constraint-only update as modify and do not request clarification merely because it changes or extends prior constraints.
 8. FIELD COHERENCE: informationNeed must mirror the action already chosen and must never reverse it. recommend pairs with recommendation; true browse/list pairs with catalog; transaction commitment stays order/book and is never changed to discover merely because details are missing.
 
 Return ONLY this JSON object, nothing else:
