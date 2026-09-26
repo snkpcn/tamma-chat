@@ -246,7 +246,7 @@ function describeTaskContext(label: string, task: SemanticTaskContext | null | u
   })}`;
 }
 
-function describeContext(context: SemanticContext): string {
+export function describeSemanticContext(context: SemanticContext): string {
   const entities = context.recentEntities
     .map(entity => `${entity.type}:${entity.name} (id=${entity.id}, domain=${entity.domain})`)
     .join('; ');
@@ -282,7 +282,7 @@ broad-discovery request). Do not require a phrase to match anything you've seen 
 
 Today in Bangkok is ${currentBangkok}.
 
-CONVERSATION CONTEXT: ${describeContext(context)}
+CONVERSATION CONTEXT: ${describeSemanticContext(context)}
 If the customer's message plainly continues or references that context (a short follow-up, a selection among
 things just mentioned, a correction, an implicit "the same one"), say so via "references" -- do not treat it
 as if it arrived with no history. If there truly is no relevant context, ordinary new requests need none.
