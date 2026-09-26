@@ -311,8 +311,14 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
     simulatedModelOutput: { domain: 'membership', intent: 'membership_signup_query', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false } },
   { id: 'membership-02', category: 'colloquial', domainArea: 'membership',
     message: 'ขอดูข้อมูลสมาชิกหน่อย',
+    context: {
+      activeDomain: 'membership',
+      recentEntities: [{ id: 'membership:self', type: 'membership_profile', name: 'ข้อมูลสมาชิกของฉัน', domain: 'membership' }],
+      lastAction: 'ask',
+    },
     expected: { domain: 'membership', action: 'status' },
-    simulatedModelOutput: { domain: 'membership', intent: 'view_membership_profile', action: 'status', entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false } },
+    simulatedModelOutput: { domain: 'membership', intent: 'view_membership_profile', action: 'status', informationNeed: 'transaction_status',
+      entities: {}, references: [{ type: 'selected_entity', refersToPriorContext: true }], constraints: [], confidence: 0.85, needsClarification: false } },
 
   // --- OTOP ---
   { id: 'otop-01', category: 'formal', domainArea: 'otop',
@@ -477,8 +483,8 @@ export const SEMANTIC_EVAL_CORPUS: SemanticEvalCase[] = [
   { id: 'correction-05', category: 'correction', domainArea: 'activity',
     message: 'เปลี่ยนวันที่เป็นวันเสาร์',
     context: ACTIVITY_ACTIVE_TASK_CONTEXT,
-    expected: { domain: 'activity', action: 'correct_previous' },
-    simulatedModelOutput: { domain: 'activity', intent: 'correct_date', action: 'correct_previous',
+    expected: { domain: 'activity', action: 'modify' },
+    simulatedModelOutput: { domain: 'activity', intent: 'change_date', action: 'modify',
       entities: { date: 'วันเสาร์' }, references: [], constraints: [], confidence: 0.87, needsClarification: false } },
 
   // --- topic switch (suspend/resume) ---
