@@ -4338,6 +4338,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // be swallowed by a model-composed or stale-domain answer. For a
   // transport-history-free follow-up
   // ("ราคาเท่าไร"), consult only the bounded active_topic snapshot.
+  const preservePromotionFastPath = isPromotionDiscoveryIntent(request.message);
+
   let preserveCafeFastPath = isCafeReadOnlyTurn(request.message);
   if (!preserveCafeFastPath
       && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(request.message.trim())
@@ -4354,7 +4356,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   }
 
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveExperienceDiscoveryFastPath
-      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath && !preserveCafeFastPath) {
+      && !preserveRestaurantFastPath && !preserveLocalConciergeFastPath
+      && !preservePromotionFastPath && !preserveCafeFastPath) {
     try {
       const cachedSemantic = earlyOneMind?.turn.semanticTurn;
       const oneMind = await processOneMindCustomerTurn({
