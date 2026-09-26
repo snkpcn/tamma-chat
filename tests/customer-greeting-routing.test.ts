@@ -118,10 +118,10 @@ test('web chat history fallback still confirms after initial horse context scrol
   assert.equal(draft?.phone, '0999990001');
 });
 
-test('web chat-history horse fallback runs before One-Mind cutover can clarify generically', async () => {
+test('web chat-history horse fallback remains available after the language supervisor reads the turn', async () => {
   const source = await import('node:fs').then(fs => fs.readFileSync('netlify/functions/thongthai-chat.ts', 'utf8'));
-  assert.ok(
-    source.indexOf('const earlyActivityFallback = await activityBookingFallbackResponse(request, guestDbId, channel)')
-      < source.indexOf("process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'"),
-  );
+  const supervisor = source.indexOf('THONGTHAI_HUMAN_CONVERSATION_FIRST');
+  const fallback = source.indexOf('const earlyActivityFallback = await activityBookingFallbackResponse(request, guestDbId, channel)');
+  assert.ok(supervisor > 0);
+  assert.ok(fallback > supervisor, 'Phase 1 requires language understanding before the legacy horse fallback');
 });
