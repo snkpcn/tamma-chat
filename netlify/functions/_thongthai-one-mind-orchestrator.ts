@@ -461,6 +461,31 @@ function isTrustedConversationalCorrection(
   );
 }
 
+function isTrustedConversationalSelection(
+  turn: SemanticTurn,
+  deterministic: SemanticTurn | null,
+): boolean {
+  return Boolean(
+    deterministic
+    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+    && COARSE_READ_ONLY_INTENTS.has(deterministic.intent)
+    && turn.action === 'confirm'
+    && turn.speechAct === 'selection'
+    && turn.domain === deterministic.domain
+    && turn.confidence >= 0.9
+    && turn.needsClarification === false
+    && (Object.keys(turn.entities).length > 0 || turn.references.some(reference => Boolean(reference.resolvedEntityId)))
+  );
+}
+
+function isTrustedConversationalStateRefinement(
+  turn: SemanticTurn,
+  deterministic: SemanticTurn | null,
+): boolean {
+  return isTrustedConversationalCorrection(turn, deterministic)
+    || isTrustedConversationalSelection(turn, deterministic);
+}
+
 function modelRefinementIsUsable(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
@@ -488,7 +513,7 @@ function modelRefinementIsUsable(
     deterministic
     && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
     && !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)
-    && !isTrustedConversationalCorrection(turn, deterministic)
+    && !isTrustedConversationalStateRefinement(turn, deterministic)
   ) {
     return false;
   }
@@ -564,10 +589,10 @@ async function resolveSemanticTurn(
     const mutatingActions = new Set<SemanticTurn['action']>([
       'book', 'order', 'confirm', 'modify', 'cancel', 'correct_previous',
     ]);
-    const trustedConversationalCorrection = isTrustedConversationalCorrection(modelTurn, deterministic);
+    const trustedConversationalStateRefinement = isTrustedConversationalStateRefinement(modelTurn, deterministic);
     if (
       deterministic
-      && !trustedConversationalCorrection
+      && !trustedConversationalStateRefinement
       && (mutatingActions.has(modelTurn.action) || mutatingActions.has(deterministic.action))
       && (modelTurn.domain !== deterministic.domain || modelTurn.action !== deterministic.action)
     ) {
