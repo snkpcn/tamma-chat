@@ -14,7 +14,7 @@ function byId(id:string){
 }
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
 });
 
 test('semantic-v28 keeps journey-02 and informational-02 gold unchanged',()=>{
