@@ -463,6 +463,29 @@ export function deriveDeterministicSemanticTurn(
     : null;
   const effectiveDomain = activeTask?.domain ?? context.activeDomain;
 
+  // Explicit transaction commitment outranks every read-only topic shortcut.
+  // The resource comes from the closed ecosystem activity graph; missing
+  // booking slots remain follow-up fields and do not erase the commitment.
+  const committedActivityTopic=!activeTask && hasCommitMarker(trimmed)
+    ? findActivityTopic(trimmed)
+    : null;
+  if (committedActivityTopic) {
+    return {
+      domain:'activity',
+      intent:'activity_booking_request',
+      action:'book',
+      speechAct:'transaction_request',
+      entities:{
+        activityCode:committedActivityTopic.activityCode,
+        resourceCode:committedActivityTopic.nodeId,
+      },
+      references:[],
+      constraints:[],
+      confidence:0.92,
+      needsClarification:false,
+    };
+  }
+
   // A comparison among recently-shown entities can happen with or without an
   // open task (e.g. "ตัวไหนนิสัยดีกว่า" right after browsing, before any
   // selection is made) -- checked first, and it never touches task state.

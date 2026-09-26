@@ -238,6 +238,24 @@ const FIELD_LABELS_TH: Record<string, string> = {
   checkIn:'วันเช็กอิน', checkOut:'วันเช็กเอาต์', quantity:'จำนวน',
 };
 
+function activeTaskSubjectTh(input: ResponseComposerInput): string {
+  const task=input.dialogDecision.taskStateContainer.activeTask;
+  if (!task) return '';
+  const resource=typeof task.slots.resourceCode==='string' ? task.slots.resourceCode : '';
+  const horse=typeof task.slots.horseName==='string' ? task.slots.horseName : '';
+  if (task.type==='activity_booking') {
+    const subject=resource==='activity-horse'
+      ? `ขี่ม้า${horse ? ` (${horse})` : ''}`
+      : resource==='activity-atv' ? ' ATV'
+        : resource==='activity-archery' ? 'ยิงธนู'
+          : 'กิจกรรม';
+    return `กำลังช่วยจอง${subject}ให้อยู่นะครับ `;
+  }
+  if (task.type==='stay_booking') return 'กำลังช่วยจองที่พักให้อยู่นะครับ ';
+  if (task.type==='restaurant_preorder') return 'กำลังช่วยเตรียมรายการอาหารให้อยู่นะครับ ';
+  return '';
+}
+
 function deterministicMessages(language: ResponseLanguage) {
   if (language === 'en') return {
     unavailable:'I can’t verify the latest information right now, so I won’t guess. I can have the team check it for you.',
@@ -892,7 +910,7 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     } else if (durationChoice?.status === 'unknown' && input.language === 'th') {
       message = 'ตอนนี้ทองไทยยังเช็กระยะเวลาของกิจกรรมนี้ให้ไม่ได้ครับ ไม่ขอเดา ให้ทีมงานช่วยตรวจสอบอีกครั้งนะครับ';
     } else if (input.language === 'th' && missing.length) {
-      message = `ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`;
+      message = `${activeTaskSubjectTh(input)}ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`;
     } else {
       message = copy.clarify;
     }
