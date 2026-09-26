@@ -493,14 +493,54 @@ export async function runGroupedSemanticCertification(options:{
       }
 
       const providerFailure=isProviderFailure;
-      const failure:SemanticCertificationFailure={
-        id:first.id,
-        category:first.category,
+      if(providerFailure){
+        const failure:SemanticCertificationFailure={
+          id:first.id,
+          category:first.category,
+          expected:{
+            domain:first.expected.domain,
+            action:first.expected.action ?? null,
+            needsClarification:first.expected.needsClarification ?? null,
+            informationNeed:expectedInformationNeed(first),
+          },
+          actual:{
+            domain:'error',
+            action:'error',
+            needsClarification:true,
+            informationNeed:'none',
+            confidence:0,
+          },
+          providerError:{name:providerErrorName(error),attempts},
+        };
+        return {
+          kind:'LIVE_MODEL_SEMANTIC_CERTIFICATION',
+          profile,
+          totalCorpusCases:profileCases.length,
+          start,
+          evaluated:1,
+          semanticEvaluated:0,
+          pass:0,
+          failed:1,
+          semanticFailed:0,
+          providerFailed:1,
+          passPct:0,
+          availabilityComplete:false,
+          failures:[failure],
+        };
+      }
+
+      // Provider returned, but the GROUP envelope itself was not parseable.
+      // None of the selected cases has a trustworthy semantic classification,
+      // so every selected case is an explicit semantic/model-output failure.
+      // This prevents resume logic from silently advancing past unscored cases.
+      const failures:SemanticCertificationFailure[]=selected.map(item=>({
+        id:item.id,
+        category:item.category,
         expected:{
-          domain:first.expected.domain,
-          action:first.expected.action ?? null,
-          needsClarification:first.expected.needsClarification ?? null,
-          informationNeed:expectedInformationNeed(first),
+          domain:item.expected.domain,
+          action:item.expected.action ?? null,
+          needsClarification:item.expected.needsClarification ?? null,
+          informationNeed:expectedInformationNeed(item),
         },
         actual:{
           domain:'error',
@@ -509,24 +549,22 @@ export async function runGroupedSemanticCertification(options:{
           informationNeed:'none',
           confidence:0,
         },
-        ...(providerFailure
-          ? {providerError:{name:providerErrorName(error),attempts}}
-          : {semanticError:{name:providerErrorName(error)}}),
-      };
+        semanticError:{name:providerErrorName(error)},
+      }));
       return {
         kind:'LIVE_MODEL_SEMANTIC_CERTIFICATION',
         profile,
         totalCorpusCases:profileCases.length,
         start,
-        evaluated:providerFailure?1:selected.length,
-        semanticEvaluated:providerFailure?0:selected.length,
+        evaluated:selected.length,
+        semanticEvaluated:selected.length,
         pass:0,
-        failed:1,
-        semanticFailed:providerFailure?0:1,
-        providerFailed:providerFailure?1:0,
+        failed:selected.length,
+        semanticFailed:selected.length,
+        providerFailed:0,
         passPct:0,
-        availabilityComplete:!providerFailure,
-        failures:[failure],
+        availabilityComplete:true,
+        failures,
       };
     }
   }
