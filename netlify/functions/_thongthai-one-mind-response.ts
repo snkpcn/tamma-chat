@@ -176,6 +176,53 @@ export function readOnlyCutoverEligibility(
   return { eligible:false, reason:'transactional_or_task_turn' };
 }
 
+function composeOpenWorldDeterministicResponse(
+  turn:OneMindTurnResult,
+  input:OneMindCustomerTurnInput,
+):ComposedResponse | null {
+  const domain = turn.semanticTurn.domain;
+  if (!['general','local','incident','support'].includes(domain)) return null;
+
+  const thai = input.language === 'th';
+  let message:string;
+
+  if (domain === 'incident') {
+    message = thai
+      ? 'รับเรื่องครับ เดี๋ยวช่วยไล่ต่อให้ได้ ขอรายละเอียดสิ่งที่หาย/เหตุที่เกิด จุดที่เห็นครั้งสุดท้าย และเวลาประมาณไหนครับ'
+      : 'I can help track this down. Please share what was lost or what happened, where it was last seen, and roughly when.';
+  } else if (domain === 'local') {
+    message = thai
+      ? 'ทองไทยเข้าใจว่าถามเรื่องบริเวณรอบ ๆ ครับ แต่ถ้าเป็นสถานการณ์หน้างานตอนนี้ ทองไทยไม่มีข้อมูลสดให้ยืนยันและไม่ขอเดา ถ้าต้องการให้ทีมช่วยเช็ก บอกจุดหรือช่วงเวลาที่หมายถึงได้ครับ'
+      : 'I understand this is about the nearby area. I do not have live on-site visibility, so I will not guess. Tell me the spot or time you mean and I can route it for checking.';
+  } else if (domain === 'support') {
+    message = turn.semanticTurn.needsClarification
+      ? (thai
+          ? 'ได้ครับ ขอรายละเอียดปัญหากับสิ่งที่อยากให้ช่วยต่ออีกนิด จะได้ส่งต่อให้ตรงเรื่องครับ'
+          : 'Sure. Please share a little more about the problem and what you want help with so I can route it correctly.')
+      : (thai
+          ? 'รับทราบครับ ทองไทยเข้าใจเรื่องที่แจ้งแล้ว เดี๋ยวจะยึดข้อมูลที่บอกมานี้เป็นหลักและไม่เดาเกินข้อมูลครับ'
+          : 'Understood. I will use what you told me as the basis and will not guess beyond it.');
+  } else {
+    message = turn.semanticTurn.needsClarification
+      ? (thai
+          ? 'ทองไทยเข้าใจใจความคร่าว ๆ ครับ แต่ยังมีจุดที่ตีความได้มากกว่าหนึ่งแบบ ขอรายละเอียดเพิ่มอีกนิดได้ครับ'
+          : 'I understand the general meaning, but one part is still ambiguous. Please add a little more detail.')
+      : (thai
+          ? 'รับทราบครับ ทองไทยเข้าใจสิ่งที่บอกแล้ว ถ้าต้องใช้ข้อมูลจริงเพิ่มเติมจะเช็กจากแหล่งที่เกี่ยวข้องก่อน ไม่เดาเองครับ'
+          : 'Understood. If this needs factual information, I will use the relevant source rather than guess.');
+  }
+
+  return {
+    message,
+    mode:'deterministic',
+    usedFactKeys:[],
+    composerVersion:ONE_MIND_RESPONSE_VERSION,
+    bibleVersion:'supervisor-only-open-world',
+    channel:input.channel,
+    language:input.language,
+  };
+}
+
 export async function processOneMindCustomerTurn(
   input: OneMindCustomerTurnInput,
   dependencies: Partial<OneMindDependencies> = {},
@@ -207,6 +254,20 @@ export async function processOneMindCustomerTurn(
   }
 
   const composerStartedAt = Date.now();
+  const openWorldResponse = composeOpenWorldDeterministicResponse(turn, input);
+  if (openWorldResponse) {
+    return {
+      status:'composed',
+      turn,
+      response:openWorldResponse,
+      observability:buildOneMindTraceEnvelope({
+        turn,
+        response:openWorldResponse,
+        composerMs:Date.now() - composerStartedAt,
+        totalMs:Date.now() - totalStartedAt,
+      }),
+    };
+  }
   const composerInput: ResponseComposerInput = {
     channel:input.channel as BrainChannel,
     language:input.language,
