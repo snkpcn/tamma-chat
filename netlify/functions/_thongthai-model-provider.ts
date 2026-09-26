@@ -59,7 +59,18 @@ export class LLMAvailabilityError extends LLMRequestError {
   }
 }
 
-const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'] as const;
+const GEMINI_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  // Stable free-tier high-volume fallback. Official Gemini docs list
+  // gemini-3.1-flash-lite as a stable structured-output model with free-tier
+  // pricing and low thinking support. Keep it after the newer models so it is
+  // used only when their project/model quota or availability is exhausted.
+  'gemini-3.1-flash-lite',
+] as const;
 type GeminiModel = (typeof GEMINI_MODELS)[number];
 const OPENAI_MODEL = 'gpt-5.6-luna';
 
