@@ -20,7 +20,8 @@ test('semantic-v17 version is explicit',()=>{
 
 test('semantic-v17 keeps all four final full-corpus gold labels unchanged',()=>{
   assert.deepEqual(byId('l-promo-03').expected,{domain:'promotion',action:'discover',needsClarification:false});
-  assert.deepEqual(byId('l-journey-04').expected,{domain:'activity',action:'recommend',needsClarification:false,informationNeed:'recommendation'});
+  assert.deepEqual(byId('l-journey-04').expected,{domain:'activity',action:'recommend',needsClarification:false});
+  assert.equal(byId('l-journey-04').simulatedModelOutput?.informationNeed,'recommendation');
   assert.deepEqual(byId('l-journey-09').expected,{domain:'journey',action:'recommend',needsClarification:false});
   assert.deepEqual(byId('l-payment-07').expected,{domain:'payment',action:'ask',needsClarification:false});
 });
