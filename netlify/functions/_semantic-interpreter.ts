@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v8';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v9';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -367,6 +367,27 @@ ACTION TAXONOMY (apply by meaning, not keywords):
 - A customer asking what to do next after a failure, rejection, or error is requesting remediation guidance, so use ask (normally with
   informationNeed=policy when a procedure/rule is needed). Use status + transaction_status only when the CURRENT question asks what state
   the transaction is in, whether it is still pending/failed, or whether processing succeeded.
+- An explicit transaction request remains book/order even when a required item or slot is still missing. Missing product, date, time,
+  quantity, or other required detail may require clarification, but it does not demote an explicit request to reserve/order now into discover.
+- A requested adjustment because the customer dislikes the current result is modify, not correct_previous. Use correct_previous only when
+  the customer says the earlier statement/value itself was mistaken or wrong; dissatisfaction with a valid prior choice followed by a new
+  desired setting is an intentional modification.
+- Simultaneous capacity without a date/time/current-state predicate is policy, not live availability. Questions about how many units/people
+  can operate together or at once ask the operating rule/capacity. Use status + availability only when asking whether those units are
+  actually free/ready at a current or specified time.
+- Physical-effort constraints alone do not make an open ecosystem recommendation an activity request. If the customer asks broadly what
+  they could do/experience and names no specific activity/category, keep ecosystem + recommend even when constraints mention easy, chill,
+  low-effort, low-walking, exciting, or tiring.
+- A promotion asking whether the referenced offer is still active or valid now is status + availability. Reserve ask + policy for whether
+  the promotion is permitted for a person/channel/membership/combination or under some eligibility rule.
+- A bare item-existence question with no current-state, stock, or time predicate is discover + catalog. A conversational "do you have X?"
+  asks whether X exists in the offering unless the utterance or relevant context explicitly asks about on-hand stock/readiness now.
+- A request for one activity with sequencing merely as a constraint remains activity, not journey. Words such as before/after a meal,
+  before check-in, or after coffee do not create a journey when the requested deliverable is still one activity recommendation.
+- Before returning the JSON, silently verify these boundaries in order: CURRENT requested action beats stale context; explicit
+  transaction commitment survives missing slots; permission questions are ask+policy; catalog existence is not live availability;
+  capacity rules are not live availability; one requested business-domain item is not a journey; broad ecosystem recommendations stay
+  ecosystem unless a concrete business/activity domain is actually requested.
 - compare = the customer asks to compare two or more known options/attributes. Comparative attribute questions ("which is gentler/better/faster?",
   "how do these differ?") stay compare even if the answer may help the customer choose. recommend is for asking the assistant to choose/suggest
   what suits the customer, not for a direct comparison between known options.
