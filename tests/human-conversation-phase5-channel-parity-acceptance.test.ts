@@ -94,4 +94,11 @@ test('Phase 5 acceptance: explicit activity commitment cannot be downgraded to c
   assert.equal(interpreted?.action,'book');
   assert.equal(interpreted?.speechAct,'transaction_request');
   assert.equal(interpreted?.entities.resourceCode,'activity-atv');
+
+  const question=deriveDeterministicSemanticTurn(
+    'ATV จองได้ไหม',
+    {activeDomain:null,activeTopic:null,recentEntities:[],recentConstraints:[],recentTurns:[]},
+    emptyTaskStateContainer(),NOW,
+  );
+  assert.notEqual(question?.action,'book','a booking question is not transaction commitment');
 });

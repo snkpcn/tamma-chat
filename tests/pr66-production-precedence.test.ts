@@ -169,7 +169,7 @@ test('5. WITH an existing active horse booking session, "อยากขี่�
     // isActivityIntentStartMessage phrase) legitimately establishes a real
     // legacy horse booking_sessions row.
     await callLineWebhook([privateEvent('จองขี่ม้า', userId)]);
-    assert.match(text(replies, 0), DURATION_PROMPT_RE, 'sanity check: turn 1 must genuinely have started a legacy session');
+    assert.ok(harness.postsTo('guest_agent_state').some(row => JSON.stringify(row).includes('\"commitmentIntent\":true')), 'sanity check: explicit booking must start canonical committed task state');
     // Turn 2: the fear/care message, sent mid-session.
     await callLineWebhook([privateEvent('อยากขี่ม้า ไม่เคยเลย กลัวตก', userId)]);
     const t = text(replies, 1);
