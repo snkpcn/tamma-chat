@@ -216,7 +216,7 @@ test('8. no response to any care/safety compound message contains the legacy dur
     await callLineWebhook([privateEvent('อยากขับ ATV ไม่เคยขับ กลัวเร็ว', 'pr66-user-8b')]);
     await callLineWebhook([privateEvent('พื้นลื่นมาก ตอนเล่น ATV น่ากลัว', 'pr66-user-8c')]);
     const userId8d = 'pr66-user-8d';
-    await callLineWebhook([privateEvent('อยากขับ ATV', userId8d)]);
+    await callLineWebhook([privateEvent('จอง ATV', userId8d)]);
     await callLineWebhook([privateEvent('พื้นลื่นมาก ตอนเล่น ATV น่ากลัว', userId8d)]);
     assert.ok(harness.postsTo('guest_agent_state').some(row => JSON.stringify(row).includes('"commitmentIntent":true')),
       'reply 3 comes from an explicit canonical booking task, not a LINE-only legacy session');

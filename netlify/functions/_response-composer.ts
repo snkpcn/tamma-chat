@@ -881,7 +881,10 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     message = humanKnowledgeUnknownCopy(input, 'source_unavailable') ?? copy.unavailable;
   } else if (input.degradation.condition === 'fact_unknown') {
     message = humanKnowledgeUnknownCopy(input, 'fact_unknown') ?? copy.unknown;
-  } else if (input.degradation.condition === 'verified_empty') {
+  } else if (input.degradation.condition === 'verified_empty' && input.dialogDecision.mode !== 'collect_field') {
+    // A verified-empty supporting catalog must not erase an explicit task
+    // that is still collecting fields (notably activity duration). Let the
+    // task-aware collection branch below say what cannot be verified.
     message = input.dialogDecision.responseIntent === 'no_active_promotion' ? copy.noPromo : copy.empty;
   } else if (input.dialogDecision.mode === 'clarify') {
     // Zero-cost architecture: a clarify/collect_field decision is a real,
