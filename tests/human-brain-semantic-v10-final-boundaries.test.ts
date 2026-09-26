@@ -8,11 +8,11 @@ import {
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 import { PHASE_L_SEMANTIC_CASES } from './fixtures/phase-l-semantic-cases';
 
-test('semantic-v19 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v19');
+test('semantic-v20 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v20');
 });
 
-test('semantic-v19 doctrine locks the remaining live human-meaning boundaries',()=>{
+test('semantic-v20 doctrine locks the remaining live human-meaning boundaries',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   const required=[
     'asking whether a change is allowed is ask + policy even when phrased with a polite change verb',
@@ -28,7 +28,7 @@ test('semantic-v19 doctrine locks the remaining live human-meaning boundaries',(
   for(const rule of required) assert.ok(prompt.includes(rule),rule);
 });
 
-test('semantic-v19 keeps seven model-wrong golds unchanged and honestly adjudicates two ambiguous golds',()=>{
+test('semantic-v20 keeps seven model-wrong golds unchanged and honestly adjudicates two ambiguous golds',()=>{
   const cases=[...SEMANTIC_EVAL_CORPUS,...PHASE_L_SEMANTIC_CASES];
   const expected:Record<string,{domain:string;action:string;informationNeed?:string}>={
     'modify-01':{domain:'activity',action:'ask',informationNeed:'policy'},
