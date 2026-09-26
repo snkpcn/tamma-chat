@@ -32,7 +32,7 @@ test('Phase 5.10: ambiguous multi-candidate confirmation is normalized to ask',(
 });
 
 test('Phase 5.10: semantic version advances for final live re-certification',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v23');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v24');
 });
 
 test('Phase 5.10: certification runner resumes only same-version incomplete provider artifacts',()=>{
