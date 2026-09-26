@@ -7,13 +7,19 @@
 // - The HTTP wrapper is token-gated and returns 404 when disabled/mismatched.
 
 import {
+  buildSemanticInterpreterPrompt,
+  describeSemanticContext,
   emptySemanticContext,
   interpretSemanticTurn,
+  parseSemanticTurnResponse,
   type SemanticTurn,
 } from './_semantic-interpreter';
-import type {
-  ProviderAttemptDiagnostic,
-  ProviderAttemptOutcome,
+import {
+  callPreferredModel,
+  stripCodeFences,
+  type ChatTurn,
+  type ProviderAttemptDiagnostic,
+  type ProviderAttemptOutcome,
 } from './_thongthai-model-provider';
 import {
   SEMANTIC_EVAL_CORPUS,
@@ -349,6 +355,272 @@ export async function runSemanticCertification(options: {
     providerFailed,
     passPct:semanticEvaluated ? Number((pass / semanticEvaluated * 100).toFixed(2)) : 0,
     availabilityComplete:providerFailed === 0,
+    failures,
+  };
+}
+
+
+type GroupedSemanticRawResult = {
+  id?: unknown;
+  semantic?: unknown;
+};
+
+type GroupedSemanticEnvelope = {
+  results?: unknown;
+};
+
+export type GroupedSemanticClassifier = (
+  items: SemanticEvalCase[],
+) => Promise<Map<string, Record<string, unknown>>>;
+
+function parseGroupedSemanticEnvelope(rawText:string): Map<string,Record<string,unknown>> {
+  const cleaned=stripCodeFences(rawText).replace(/^\uFEFF/,'').trim();
+  let parsed:GroupedSemanticEnvelope;
+  try{
+    parsed=JSON.parse(cleaned) as GroupedSemanticEnvelope;
+  }catch(firstError){
+    const firstBrace=cleaned.indexOf('{');
+    const lastBrace=cleaned.lastIndexOf('}');
+    if(firstBrace<0 || lastBrace<=firstBrace) throw firstError;
+    const slice=cleaned.slice(firstBrace,lastBrace+1);
+    try{
+      parsed=JSON.parse(slice) as GroupedSemanticEnvelope;
+    }catch{
+      parsed=JSON.parse(slice.replace(/,\s*([}\]])/g,'$1')) as GroupedSemanticEnvelope;
+    }
+  }
+
+  if(!Array.isArray(parsed.results)) throw new SyntaxError('Grouped semantic response missing results array');
+  const out=new Map<string,Record<string,unknown>>();
+  for(const item of parsed.results as GroupedSemanticRawResult[]){
+    if(!item || typeof item!=='object') continue;
+    if(typeof item.id!=='string') continue;
+    if(!item.semantic || typeof item.semantic!=='object' || Array.isArray(item.semantic)) continue;
+    out.set(item.id,item.semantic as Record<string,unknown>);
+  }
+  return out;
+}
+
+function groupedSemanticSystemPrompt():string {
+  const runtimePrompt=buildSemanticInterpreterPrompt(emptySemanticContext());
+  const commonPrompt=runtimePrompt.replace(
+    'CONVERSATION CONTEXT: none',
+    'CONVERSATION CONTEXT: supplied independently inside each certification case below',
+  );
+
+  return `${commonPrompt}
+
+BATCH CERTIFICATION MODE:
+- You will receive multiple INDEPENDENT semantic cases in one user message.
+- Treat every case as a separate conversation. NEVER let one case influence another.
+- For each case, use case.context as that case's CONVERSATION CONTEXT and case.message as its CURRENT customer message.
+- Apply exactly the same taxonomy and rules above to each case.
+- Return every requested case exactly once.
+- Return ONLY this JSON object:
+{"results":[{"id":string,"semantic":{"domain":string,"intent":string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}}]}`;
+}
+
+export async function classifySemanticCasesGrouped(
+  items:SemanticEvalCase[],
+):Promise<Map<string,Record<string,unknown>>>{
+  const payload=items.map(item=>({
+    id:item.id,
+    context:describeSemanticContext(item.context ?? emptySemanticContext()),
+    message:item.message,
+  }));
+  const raw=await callPreferredModel(
+    groupedSemanticSystemPrompt(),
+    [{role:'user',content:JSON.stringify({cases:payload})} as ChatTurn],
+    'semantic-certification-group',
+  );
+  return parseGroupedSemanticEnvelope(raw);
+}
+
+export async function runGroupedSemanticCertification(options:{
+  profile?:SemanticCertificationProfile;
+  start?:number;
+  limit?:number;
+  classifyGroup?:GroupedSemanticClassifier;
+  availabilityRetries?:number;
+  availabilityRetryDelayMs?:number;
+}={}):Promise<SemanticCertificationResult>{
+  const profile=options.profile ?? 'full';
+  const corpus=allCases();
+  const profileCases=profile==='production-smoke'
+    ? corpus.filter(item=>PRODUCTION_SMOKE_IDS.has(item.id))
+    : corpus;
+  const start=Math.max(0,Math.min(profileCases.length,Math.floor(options.start ?? 0)));
+  const requestedLimit=Math.floor(options.limit ?? 20);
+  const limit=Math.max(1,Math.min(20,Number.isFinite(requestedLimit)?requestedLimit:20));
+  const selected=profileCases.slice(start,start+limit);
+  const classifyGroup=options.classifyGroup ?? classifySemanticCasesGrouped;
+  const availabilityRetries=Math.max(0,Math.min(3,Math.floor(options.availabilityRetries ?? 0)));
+  const availabilityRetryDelayMs=Math.max(0,Math.min(90_000,Math.floor(options.availabilityRetryDelayMs ?? 0)));
+
+  let availabilityAttempt=0;
+  let rawResults:Map<string,Record<string,unknown>>;
+  while(true){
+    try{
+      rawResults=await classifyGroup(selected);
+      break;
+    }catch(error){
+      const attempts=safeProviderAttempts(error);
+      const isProviderFailure=attempts.length>0;
+      const retryable=isProviderFailure && retryableAvailabilityFailure(attempts);
+      if(retryable && availabilityAttempt<availabilityRetries && availabilityRetryDelayMs>0){
+        availabilityAttempt+=1;
+        await sleep(availabilityRetryDelayMs);
+        continue;
+      }
+
+      const first=selected[0];
+      if(!first) {
+        return {
+          kind:'LIVE_MODEL_SEMANTIC_CERTIFICATION',
+          profile,
+          totalCorpusCases:profileCases.length,
+          start,
+          evaluated:0,
+          semanticEvaluated:0,
+          pass:0,
+          failed:0,
+          semanticFailed:0,
+          providerFailed:0,
+          passPct:0,
+          availabilityComplete:true,
+          failures:[],
+        };
+      }
+
+      const providerFailure=isProviderFailure;
+      const failure:SemanticCertificationFailure={
+        id:first.id,
+        category:first.category,
+        expected:{
+          domain:first.expected.domain,
+          action:first.expected.action ?? null,
+          needsClarification:first.expected.needsClarification ?? null,
+          informationNeed:expectedInformationNeed(first),
+        },
+        actual:{
+          domain:'error',
+          action:'error',
+          needsClarification:true,
+          informationNeed:'none',
+          confidence:0,
+        },
+        ...(providerFailure
+          ? {providerError:{name:providerErrorName(error),attempts}}
+          : {semanticError:{name:providerErrorName(error)}}),
+      };
+      return {
+        kind:'LIVE_MODEL_SEMANTIC_CERTIFICATION',
+        profile,
+        totalCorpusCases:profileCases.length,
+        start,
+        evaluated:providerFailure?1:selected.length,
+        semanticEvaluated:providerFailure?0:selected.length,
+        pass:0,
+        failed:1,
+        semanticFailed:providerFailure?0:1,
+        providerFailed:providerFailure?1:0,
+        passPct:0,
+        availabilityComplete:!providerFailure,
+        failures:[failure],
+      };
+    }
+  }
+
+  let pass=0;
+  let semanticFailed=0;
+  const failures:SemanticCertificationFailure[]=[];
+
+  for(const item of selected){
+    const raw=rawResults.get(item.id);
+    if(!raw){
+      semanticFailed+=1;
+      failures.push({
+        id:item.id,
+        category:item.category,
+        expected:{
+          domain:item.expected.domain,
+          action:item.expected.action ?? null,
+          needsClarification:item.expected.needsClarification ?? null,
+          informationNeed:expectedInformationNeed(item),
+        },
+        actual:{
+          domain:'error',
+          action:'error',
+          needsClarification:true,
+          informationNeed:'none',
+          confidence:0,
+        },
+        semanticError:{name:'MissingGroupedSemanticResult'},
+      });
+      continue;
+    }
+
+    try{
+      const turn=parseSemanticTurnResponse(JSON.stringify(raw),item.context ?? emptySemanticContext());
+      if(matchesExpected(item,turn)){
+        pass+=1;
+      }else{
+        semanticFailed+=1;
+        failures.push({
+          id:item.id,
+          category:item.category,
+          expected:{
+            domain:item.expected.domain,
+            action:item.expected.action ?? null,
+            needsClarification:item.expected.needsClarification ?? null,
+            informationNeed:expectedInformationNeed(item),
+          },
+          actual:{
+            domain:turn.domain,
+            action:turn.action,
+            needsClarification:turn.needsClarification,
+            informationNeed:turn.informationNeed ?? 'none',
+            confidence:turn.confidence,
+          },
+        });
+      }
+    }catch(error){
+      semanticFailed+=1;
+      failures.push({
+        id:item.id,
+        category:item.category,
+        expected:{
+          domain:item.expected.domain,
+          action:item.expected.action ?? null,
+          needsClarification:item.expected.needsClarification ?? null,
+          informationNeed:expectedInformationNeed(item),
+        },
+        actual:{
+          domain:'error',
+          action:'error',
+          needsClarification:true,
+          informationNeed:'none',
+          confidence:0,
+        },
+        semanticError:{name:providerErrorName(error)},
+      });
+    }
+  }
+
+  const semanticEvaluated=selected.length;
+  return {
+    kind:'LIVE_MODEL_SEMANTIC_CERTIFICATION',
+    profile,
+    totalCorpusCases:profileCases.length,
+    start,
+    evaluated:semanticEvaluated,
+    semanticEvaluated,
+    pass,
+    failed:failures.length,
+    semanticFailed,
+    providerFailed:0,
+    passPct:semanticEvaluated?Number((pass/semanticEvaluated*100).toFixed(2)):0,
+    availabilityComplete:true,
     failures,
   };
 }
