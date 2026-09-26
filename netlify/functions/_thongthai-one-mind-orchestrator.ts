@@ -317,6 +317,9 @@ function nextConversationContext(
     lastAction: semanticTurn.action,
     currentTaskReference: activeTask?.taskId ?? null,
     lastToolResultSummary: decision.actionProposal ? 'action_proposed_not_executed' : undefined,
+    summaryFact: semanticTurn.constraints.length
+      ? `customer constraints in ${semanticTurn.domain}: ${semanticTurn.constraints.join(', ')}.`
+      : undefined,
   }, now);
 }
 
