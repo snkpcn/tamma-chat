@@ -35,5 +35,5 @@ test('semantic-v28 treats embedded qualitative judgment as recommendation',()=>{
 });
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v28');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v29');
 });
