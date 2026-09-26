@@ -7,11 +7,11 @@ import {
 } from '../netlify/functions/_semantic-interpreter';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 
-test('semantic-v11 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v11');
+test('semantic-v12 version is explicit',()=>{
+  assert.equal(SEMANTIC_INTERPRETER_VERSION,'semantic-v12');
 });
 
-test('semantic-v11 doctrine locks selection-with-slots and explicit category domain ownership',()=>{
+test('semantic-v12 doctrine locks selection-with-slots and explicit category domain ownership',()=>{
   const prompt=buildSemanticInterpreterPrompt(emptySemanticContext());
   assert.ok(prompt.includes('Selecting a previously presented option while supplying extra scheduling or quantity slots remains confirm'));
   assert.ok(prompt.includes('does not become book/order unless the CURRENT utterance explicitly commits to submit the transaction'));
@@ -19,7 +19,7 @@ test('semantic-v11 doctrine locks selection-with-slots and explicit category dom
   assert.ok(prompt.includes('that category owns the domain rather than ecosystem'));
 });
 
-test('semantic-v11 keeps both completed-v10 first-chunk gold labels unchanged',()=>{
+test('semantic-v12 keeps both completed-v10 first-chunk gold labels unchanged',()=>{
   const byId=(id:string)=>SEMANTIC_EVAL_CORPUS.find(item=>item.id===id)!;
 
   const select=byId('restaurant-preorder-followup-01');
