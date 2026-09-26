@@ -34,7 +34,7 @@ function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise
   return callPreferredModelFromProvider(systemPrompt, messages, 'semantic-interpreter');
 }
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v7';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v8';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -344,6 +344,30 @@ ACTION TAXONOMY (apply by meaning, not keywords):
   still available, or the current status of an existing transaction. Pair resource availability with informationNeed=availability;
   pair an existing booking/order/payment status with informationNeed=transaction_status.
 - ask = an informational/factual question that is not better represented by status, compare, recommend, or discover.
+- Recommendation intent outranks incidental availability framing when the CURRENT message asks the assistant to choose or suggest
+  based on supplied fit criteria such as party size, nights, budget, dietary needs, pace, or preferences. Those details constrain a
+  recommendation; they do not turn "what do you recommend for us?" into a live availability check unless the customer also asks whether
+  a specific resource/date/time is actually free.
+- Menu/catalog existence and CURRENT readiness are different. Asking whether a menu/item is ready to sell, ready now, available now,
+  sold out, or currently serving asks current state: use status + availability (or inventory only for physical packaged-product stock).
+  Use discover + catalog for whether an offering/type exists without a current-readiness predicate.
+- When the customer asks what they should choose or avoid because of an allergen or dietary-safety avoidance requirement, classify the
+  choice itself as recommend + ingredients. A factual ingredient question about one known item can be ask + ingredients, but "what should
+  I avoid / what is suitable for me?" is recommendation.
+- If the customer asks for one activity to fit before/after another experience (for example before a meal), keep domain activity when the
+  requested object is the activity itself. Journey is for composing/structuring the itinerary or sequence as the primary goal, not every
+  sentence that merely mentions temporal relation to another experience.
+- A contextual request meaning "continue from before / carry on from the previous plan" is conversational continuation. Preserve the
+  relevant journey/domain context and use action=ask unless the CURRENT message independently asks for a new recommendation, modification,
+  confirmation, or transaction. Do not regenerate a recommendation merely because the prior context was a plan.
+- Generic confusion/help with no concrete object must set needsClarification=true in support. The assistant cannot safely infer which
+  business object, transaction, or topic needs help from "I don't understand / help me" alone.
+- Eligibility/applicability questions about whether a promotion can be used by this customer/member or in a stated situation are
+  informational permission checks: use promotion + ask + policy. Do not use status unless the customer asks for the current state of an
+  existing promotion/redemption transaction.
+- When the customer says a payment/slip was failed/rejected and asks what to do next, that is remediation guidance: use payment + ask,
+  not status. transaction_status is only for asking what state an existing payment is currently in; a next-step/how-to-fix question is
+  informational guidance (informationNeed may be policy or none).
 - compare = the customer asks to compare two or more known options/attributes. Comparative attribute questions ("which is gentler/better/faster?",
   "how do these differ?") stay compare even if the answer may help the customer choose. recommend is for asking the assistant to choose/suggest
   what suits the customer, not for a direct comparison between known options.
