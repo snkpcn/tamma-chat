@@ -2,26 +2,28 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-test('Phase 5.12: certification accepts same-version incomplete chunks as resume sources',()=>{
+test('Phase 5.12+: certification accepts same-version incomplete chunks as resume sources',()=>{
   const script=readFileSync(new URL('../scripts/write-semantic-certification-artifact.ts',import.meta.url),'utf8');
   assert.match(script,/\['incomplete_provider','incomplete_chunk'\]\.includes/);
 });
 
-test('Phase 5.12: certification is bounded to at most 75 semantic cases per production build',()=>{
+test('Grouped final cert can cover the full 158-case corpus in one bounded production build',()=>{
   const script=readFileSync(new URL('../scripts/write-semantic-certification-artifact.ts',import.meta.url),'utf8');
-  assert.match(script,/SEMANTIC_CERT_MAX_CASES_PER_RUN/);
-  assert.match(script,/Math\.min\(75/);
-  assert.match(script,/semanticCasesThisRun<maxSemanticCasesPerRun/);
-  assert.match(script,/limit:Math\.min\(chunkSize,remainingChunkBudget\)/);
+  assert.match(script,/SEMANTIC_CERT_MAX_CASES_PER_RUN \?\? '158'/);
+  assert.match(script,/Math\.min\(158/);
+  assert.match(script,/runGroupedSemanticCertification/);
+  assert.match(script,/chunkSize=20/);
 });
 
-test('Phase 5.12: final free-tier pacing defaults to nine seconds per case',()=>{
+test('Grouped final cert spaces live provider GROUP requests instead of every individual case',()=>{
   const script=readFileSync(new URL('../scripts/write-semantic-certification-artifact.ts',import.meta.url),'utf8');
-  assert.match(script,/SEMANTIC_CERT_INTER_CASE_DELAY_MS \?\? '9000'/);
-  assert.match(script,/: 9_000/);
+  assert.match(script,/SEMANTIC_CERT_INTER_GROUP_DELAY_MS \?\? '62000'/);
+  assert.match(script,/interGroupDelayMs/);
+  assert.doesNotMatch(script,/SEMANTIC_CERT_INTER_CASE_DELAY_MS/);
 });
 
-test('Phase 5.12: clean partial runs are incomplete_chunk, provider outages stay incomplete_provider',()=>{
+test('Clean partial runs remain resumable and provider outages stay distinct',()=>{
   const script=readFileSync(new URL('../scripts/write-semantic-certification-artifact.ts',import.meta.url),'utf8');
   assert.match(script,/providerFailed>0 \? 'incomplete_provider' : 'incomplete_chunk'/);
+  assert.match(script,/resumeStart/);
 });
