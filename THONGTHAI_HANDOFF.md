@@ -9646,3 +9646,33 @@ No DB/schema/backoffice/transaction-core change.
 No paid OpenAI fallback.
 No manual Netlify deploy.
 No keyword/regex runtime language router.
+
+
+---
+
+## 2026-09-26 Human Brain final certification chunk 2 trigger
+
+Authoritative production semantic-v6 prefix before this trigger:
+
+- semanticVersion = `semantic-v6`
+- totalCorpusCases = **158**
+- semanticEvaluated = **11**
+- pass = **11**
+- semanticFailed = **0**
+- providerFailed = **1**
+- passPct = **100%**
+- availabilityComplete = **false**
+- resumeStart = **11**
+
+The provider failure is free-tier Gemini HTTP 429 at corpus case 12 after the prior run consumed the active quota window. There is **no new semantic failure** in this prefix.
+
+Phase 5.12 already changed certification to:
+- accept same-version incomplete_provider / incomplete_chunk resume artifacts
+- resume from the durable semantic prefix instead of restarting
+- cap each production build at 75 semantic cases
+- pace free-tier calls at 9 seconds per case
+- persist clean partial progress for the next chunk
+
+This commit is intentionally cleanup/docs-only and exists to trigger the next one-shot production semantic certification **after cooldown**. It does not change semantic doctrine, transaction logic, DB, backoffice, or paid fallback policy.
+
+The obsolete PR-only live semantic workflow is removed because GitHub Actions has no model provider secret and that workflow can no longer contribute to production certification.
