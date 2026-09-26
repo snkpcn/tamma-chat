@@ -16,7 +16,7 @@ jobs:
       - name: Wait for final production semantic-v30 artifact
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           url='https://tamma-chat.netlify.app/semantic-certification-result.json'
           for attempt in $(seq 1 20); do
             curl --fail --silent --show-error --retry 2 --retry-delay 2               -H 'Cache-Control: no-cache'               "$url?readback_attempt=$attempt&ts=$(date +%s)"               -o /tmp/semantic-certification-result.json
