@@ -9555,3 +9555,94 @@ No manual Netlify deploy.
 Merge PR #131 only at the exact re-verified head SHA.
 Merge commit must include `[semantic-cert]` and must not include `[skip netlify]`.
 Then let Netlify auto-deploy once and read the semantic-v5 production artifact.
+
+
+---
+
+## 2026-09-26 Human Brain Phase 5.10 — final certification resilience
+
+### Semantic-v5 production evidence
+
+Production merge:
+`9b3d636cabb933090bf3b8e7d86de4f8225efb19`
+
+Netlify deploy:
+`6ab7113f83925f00083cbe5d`
+
+Verified:
+- READY
+- production/main
+- commit_ref exactly `9b3d636cabb933090bf3b8e7d86de4f8225efb19`
+- manual_deploy = false
+
+Readback:
+GitHub Actions run `36205510066`
+
+Artifact:
+- semanticVersion = semantic-v5
+- totalCorpusCases = 158
+- evaluated = 39
+- semanticEvaluated = 38
+- pass = 37
+- semanticFailed = 1
+- providerFailed = 1
+- passPct = 97.37% over semantically evaluated cases only
+- availabilityComplete = false
+
+The one real semantic mismatch before provider interruption was `reference-02`:
+message = `ตัวไหน`
+context contained two horses and no comparison/selection criterion.
+
+This was adjudicated as a corpus ambiguity, not hidden as a model win:
+a human cannot know "which one WHAT?" from that state. The gold contract now requires
+`needsClarification=true` and deliberately does NOT require one action label.
+
+The provider interruption at case 39 was not quota exhaustion:
+- Gemini 3.8 = HTTP 503
+- Gemini 3.7 = HTTP 503
+- later free models lost the remaining shared 7s budget
+- no paid OpenAI was attempted
+
+### Final certification-only resilience
+
+Runtime customer provider behavior is unchanged.
+
+Certification now distinguishes cooldown class:
+- rate_limited / circuit_open -> 61s project-quota cooldown
+- server_error / timeout / network_error -> 10s transient retry
+
+Final one-shot runner uses:
+- availabilityRetries = 2
+- 61s only for rate-limit class
+- 10s for transient outage class
+- existing 4250ms start-to-start inter-case pacing
+- stop cleanly if provider still cannot recover
+- provider failures remain excluded from semantic pass percentage
+
+This prevents a temporary 503 from either:
+- being mislabeled as semantic failure, or
+- wasting a 61-second quota cooldown that was designed for 429.
+
+### Cleanup already prepared
+
+The obsolete PR-only live semantic workflow
+`.github/workflows/human-brain-live-semantic-certification.yml`
+is removed in this branch. It was pinned to an old Phase 5.3 branch and is no longer the acceptance path.
+
+The build-time certification helper is retained because it is stateless and inert unless:
+- production/main AND
+- commit marker `[semantic-cert]` or explicit one-shot environment flag
+
+No permanent `RUN_SEMANTIC_CERTIFICATION=1` flag exists in current `netlify.toml`.
+
+A normal final cleanup deploy without `[semantic-cert]` will therefore not call the model and will remove the generated public certification artifact from the fresh deploy output.
+
+### Safety
+
+No DB/schema mutation.
+No fake transaction.
+No transaction executor change.
+No backoffice change.
+No paid OpenAI enablement.
+No manual Netlify deploy.
+No runtime keyword/regex language router.
