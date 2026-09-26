@@ -5,6 +5,14 @@ Repo: `snkpcn/tamma-chat`
 Production: https://tamma-chat.netlify.app/
 Existing Supabase only: `tamma-customer-data`
 
+## Human Brain semantic-v21 certification checkpoint
+
+- semantic-v21 production chunk 1 is certified 80/80 with semanticFailed=0 and providerFailed=0.
+- Production deploy for that checkpoint is `6ab770ce917b440008f8da1a` at main `291a266f41e488f87d954e091ac2d35cf6d5ef08`.
+- semantic-v21 closes the remaining broad evaluative-guidance discover-vs-recommend boundary without changing the accepted gold meanings.
+- This documentation-only checkpoint exists only to trigger the same-version resumable production certification for corpus cases 81-158.
+- Acceptance remains blocked until the combined artifact reports 158/158, semanticFailed=0, providerFailed=0, and availabilityComplete=true.
+
 ## Human Brain semantic-v17 certification checkpoint
 
 - semantic-v17 production chunk 1 is certified 80/80 with semanticFailed=0 and providerFailed=0.
