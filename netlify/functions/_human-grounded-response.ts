@@ -339,7 +339,8 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
     ?? nameOf(entity.preferredAsset)
     ?? nameOf(entity.preferredHorse)
     ?? nameOf(entity.primaryAsset)
-    ?? nameOf(entity.primary);
+    ?? nameOf(entity.primary)
+    ?? nameOf(entity.horseName);
   const fallback=
     nameOf(entity.fallbackResource)
     ?? nameOf(entity.fallbackHorse)

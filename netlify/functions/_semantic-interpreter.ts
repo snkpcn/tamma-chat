@@ -741,7 +741,12 @@ function canonicalizeEntityAliases(
     adults_count:'adults',
     time_of_day:'timeOfDay',
     excluded_horse:'excludedHorse',
+    excludedHorseName:'excludedHorse',
     preferred_horse_trait:'preferredHorseTrait',
+    horseTemperament:'preferredHorseTrait',
+    primaryHorseName:'primaryHorse',
+    fallbackHorseName:'fallbackHorse',
+    preferredHorseName:'preferredHorse',
     weather_condition:'weatherCondition',
     resource_type:'resourceType',
     promotion_category:'promotionCategory',
@@ -1206,16 +1211,29 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   );
   if (structuredEntityNames.size && context.recentEntities.length) {
     references = references.map(reference => {
-      if (
-        !reference.refersToPriorContext
-        || !['entity_selection','previous_selection','selected_entity'].includes(reference.type)
-      ) return reference;
+      if (!reference.refersToPriorContext) return reference;
+
+      // The model owns language meaning, so a selection turn may legitimately
+      // invent a descriptive reference type ("the brown-and-white one") while
+      // ALSO emitting the canonical structured entity it understood
+      // (e.g. horseName="ภาราดร"). Reference type labels are free-form; they
+      // must not become a hidden keyword gate. When the structured entity name
+      // matches exactly ONE real recent entity, binding that canonical id is a
+      // bounded context lookup, not language inference. For non-selection
+      // turns keep the narrower historical reference-type guard unchanged.
+      const selectionTurn = action === 'confirm' || speechAct === 'selection';
+      const knownSingleEntityReference = [
+        'entity_selection','previous_selection','selected_entity',
+      ].includes(reference.type);
+      if (!selectionTurn && !knownSingleEntityReference) return reference;
+
       const matches = context.recentEntities.filter(entity => structuredEntityNames.has(entity.name));
       if (matches.length !== 1) return reference;
       return {
         ...reference,
         resolvedEntityId:matches[0]!.id,
         resolvedEntityIds:undefined,
+        ambiguous:undefined,
       };
     });
   }
@@ -1240,17 +1258,24 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const SINGLE_ENTITY_REFERENCE_TYPES = new Set([
     'entity_selection','previous_selection','selected_entity',
   ]);
+  const selectionTurnRequiresOneEntity = action === 'confirm' || speechAct === 'selection';
+  const requiresSingleEntity = (reference:SemanticReference):boolean =>
+    SINGLE_ENTITY_REFERENCE_TYPES.has(reference.type)
+    || (selectionTurnRequiresOneEntity && reference.refersToPriorContext);
   const hasAmbiguousReference = references.some(reference =>
     reference.ambiguous === true
     || (
-      SINGLE_ENTITY_REFERENCE_TYPES.has(reference.type)
+      requiresSingleEntity(reference)
       && (reference.resolvedEntityIds?.length ?? 0) > 1
     ));
 
   // Structure-only semantic validation. The model owns language meaning; these
   // rules only reconcile its closed fields/references against canonical context.
+  // Reference "type" itself is free-form model output; on a selection turn,
+  // ANY prior-context reference must resolve to one identity before it can
+  // remain a confirm action.
   const multiCandidateIdentityReference = references.some(reference =>
-    SINGLE_ENTITY_REFERENCE_TYPES.has(reference.type)
+    requiresSingleEntity(reference)
     && (reference.resolvedEntityIds?.length ?? 0) > 1);
   if (
     multiCandidateIdentityReference

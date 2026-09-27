@@ -267,12 +267,26 @@ export function resolveCanonicalScopeAgainstFacts(
     if (scope.status === 'ambiguous' && scope.pendingFocusName) {
       const wantsCode=scope.pendingFocusName.startsWith('promo_code:');
       const target=wantsCode ? scope.pendingFocusName.slice('promo_code:'.length) : scope.pendingFocusName;
-      const ids=[...map.keys()]
+      const expandedIds=[...map.keys()]
         .map(key=>key.match(/^promo:([^:]+):name$/)?.[1])
         .filter((value):value is string=>Boolean(value));
+      const legacyIds=[...map.entries()]
+        .flatMap(([key,value])=>{
+          const match=key.match(/^promo:([^:]+)$/u);
+          if(!match || !value || typeof value!=='object' || Array.isArray(value)) return [];
+          return [match[1]!];
+        });
+      const ids=[...new Set([...expandedIds,...legacyIds])];
       const matches=ids.filter(id=>{
-        const value=wantsCode ? map.get(`promo:${id}:campaignCode`) : map.get(`promo:${id}:name`);
-        return typeof value==='string' && value===target;
+        const expanded=wantsCode ? map.get(`promo:${id}:campaignCode`) : map.get(`promo:${id}:name`);
+        if(typeof expanded==='string' && expanded===target) return true;
+        const legacy=map.get(`promo:${id}`);
+        if(!legacy || typeof legacy!=='object' || Array.isArray(legacy)) return false;
+        const record=legacy as Record<string,unknown>;
+        const legacyValue=wantsCode
+          ? record.campaignCode
+          : (typeof record.name==='string' ? record.name : record.title);
+        return typeof legacyValue==='string' && legacyValue===target;
       });
       if(matches.length!==1){
         return {
@@ -334,7 +348,7 @@ export function resolveCanonicalScopeAgainstFacts(
   }
 
   if (scope.domain === 'stay') {
-    if (scope.status === 'ambiguous' && scope.pendingFocusName) {
+  if (scope.status === 'ambiguous' && scope.pendingFocusName) {
       const matches = [...map.keys()]
         .map(key => key.match(/^stay:([^:]+):name$/)?.[1])
         .filter((value): value is string => Boolean(value))
@@ -366,6 +380,36 @@ export function resolveCanonicalScopeAgainstFacts(
       if (parents.length) return { ...scope, canonicalParentIds: [...new Set(parents)], provenance: `${scope.provenance}+stay_parent_backfilled_from_live_catalog` };
     }
     return scope;
+  }
+
+  // A semantic activity TYPE is intentionally coarse (horse/atv/archery),
+  // while the live catalog may use a different parent activityCode
+  // (e.g. horse_riding). Resolve that relationship from the catalog itself:
+  // asset.type -> asset.activityCode. This keeps the scope firewall generic
+  // and avoids hardcoding a type->parent translation table.
+  if (
+    scope.status === 'resolved'
+    && scope.canonicalEntityIds.length === 0
+    && scope.canonicalParentIds.length === 1
+  ) {
+    const declaredParentOrType = scope.canonicalParentIds[0]!;
+    const assetCodes = [...map.keys()]
+      .map(key => key.match(/^activity_asset:([^:]+):type$/)?.[1])
+      .filter((value): value is string => Boolean(value))
+      .filter(code => map.get(`activity_asset:${code}:type`) === declaredParentOrType);
+    const liveParents = assetCodes
+      .map(code => map.get(`activity_asset:${code}:activityCode`))
+      .filter((value): value is string => typeof value === 'string' && value.length > 0);
+    if (liveParents.length) {
+      const resolvedParents=[...new Set(liveParents)];
+      return {
+        ...scope,
+        canonicalParentIds:resolvedParents,
+        provenance:resolvedParents.length === 1 && resolvedParents[0] === declaredParentOrType
+          ? scope.provenance
+          : `${scope.provenance}+activity_type_resolved_against_live_catalog`,
+      };
+    }
   }
 
   if (scope.status === 'ambiguous' && scope.pendingFocusName) {

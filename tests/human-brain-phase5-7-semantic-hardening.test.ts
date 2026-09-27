@@ -65,6 +65,70 @@ test('Phase 5.7 RED: ambiguous prior-context selection is mechanically marked am
   assert.equal(turn.needsClarification,true);
 });
 
+test('PR G certification: descriptive selection reference binds from a unique structured entity, not reference-type keywords',()=>{
+  const context:SemanticContext={
+    activeDomain:'activity',
+    recentEntities:[
+      {id:'horse:thongthai',type:'horse',name:'ทองไทย',domain:'activity'},
+      {id:'horse:paradon',type:'horse',name:'ภาราดร',domain:'activity'},
+    ],
+    lastAction:'discover',
+  };
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    domain:'activity',
+    intent:'select_described_horse',
+    action:'confirm',
+    speechAct:'selection',
+    informationNeed:'none',
+    entities:{horseName:'ภาราดร'},
+    references:[{
+      type:'descriptive_entity',
+      value:'the previously described one',
+      refersToPriorContext:true,
+    }],
+    constraints:[],
+    confidence:0.95,
+    needsClarification:false,
+  }),context);
+
+  assert.equal(turn.references[0]?.resolvedEntityId,'horse:paradon');
+  assert.equal(turn.references[0]?.resolvedEntityIds,undefined);
+  assert.equal(turn.action,'confirm');
+  assert.equal(turn.needsClarification,false);
+});
+
+test('PR G certification: an arbitrary descriptive reference with multiple candidates fails closed instead of confirming',()=>{
+  const context:SemanticContext={
+    activeDomain:'activity',
+    recentEntities:[
+      {id:'horse:thongthai',type:'horse',name:'ทองไทย',domain:'activity'},
+      {id:'horse:paradon',type:'horse',name:'ภาราดร',domain:'activity'},
+    ],
+    lastAction:'discover',
+  };
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    domain:'activity',
+    intent:'select_described_horse',
+    action:'confirm',
+    speechAct:'selection',
+    informationNeed:'none',
+    entities:{},
+    references:[{
+      type:'descriptive_entity',
+      value:'the one I mean',
+      refersToPriorContext:true,
+    }],
+    constraints:[],
+    confidence:0.95,
+    needsClarification:false,
+  }),context);
+
+  assert.equal(turn.references[0]?.resolvedEntityId,undefined);
+  assert.equal(turn.references[0]?.resolvedEntityIds?.length,2);
+  assert.equal(turn.action,'ask');
+  assert.equal(turn.needsClarification,true);
+});
+
 test('Phase 5.7 RED: a closed read-only informationNeed outranks provide_information label drift',()=>{
   const turn=parseSemanticTurnResponse(JSON.stringify({
     domain:'activity',
