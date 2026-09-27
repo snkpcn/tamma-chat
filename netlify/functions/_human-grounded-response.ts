@@ -531,10 +531,14 @@ export function renderRestaurantResponse(input: HumanGroundedRenderInput): Human
   if(turn.informationNeed==='availability') {
     const unavailableSource=sources.some(source=>source.need==='availability'&&source.status==='unavailable');
     const emptySource=sources.some(source=>source.need==='availability'&&source.status==='empty');
+    const requested=[turn.entities.date,turn.entities.time]
+      .filter((value):value is string=>typeof value==='string'&&Boolean(value.trim()))
+      .map(value=>value.trim()).join(' ');
+    const subject=requested ? `ช่วง ${requested} ` : '';
     if(unavailableSource || !sources.some(source=>source.need==='availability')) {
-      return {message:'ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ครับ เลยไม่ขอเดาว่าเต็มหรือว่าง และยังไม่ได้ทำรายการให้',usedFactKeys:[]};
+      return {message:`ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้สำหรับ ${subject}ครับ เลยไม่ขอเดาว่าเต็มหรือว่าง และยังไม่ได้ทำรายการให้`,usedFactKeys:[]};
     }
-    if(emptySource) return {message:'ตรวจข้อมูลที่มีแล้ว ตอนนี้ยังไม่พบโต๊ะว่างที่ยืนยันได้ตามเงื่อนไขที่ถามครับ และยังไม่ได้จอง',usedFactKeys:[]};
+    if(emptySource) return {message:`ตรวจข้อมูลที่มีแล้ว ตอนนี้ยังไม่พบโต๊ะว่างที่ยืนยันได้สำหรับ ${subject}ครับ และยังไม่ได้จอง`,usedFactKeys:[]};
   }
 
   if(turn.informationNeed==='transaction_status') {
