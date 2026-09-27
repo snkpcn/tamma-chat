@@ -700,7 +700,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function canonicalizeEntityAliases(value: Record<string, unknown>): Record<string, unknown> {
+function canonicalizeEntityAliases(
+  value: Record<string, unknown>,
+  domain: SemanticDomain,
+): Record<string, unknown> {
   const entities={...value};
   const aliases:Record<string,string>={
     party_size:'partySize',
@@ -717,6 +720,9 @@ function canonicalizeEntityAliases(value: Record<string, unknown>): Record<strin
     promotion_category:'promotionCategory',
     selection_criterion:'selectionCriterion',
     previous_party_size:'previousPartySize',
+    guestCount:'partySize',
+    budget_thb:'budgetAmount',
+    startDate:'date',
   };
   for(const [from,to] of Object.entries(aliases)){
     if(entities[to]===undefined && entities[from]!==undefined) entities[to]=entities[from];
@@ -725,6 +731,19 @@ function canonicalizeEntityAliases(value: Record<string, unknown>): Record<strin
   if(budget && typeof budget==='object' && !Array.isArray(budget)){
     const amount=Number((budget as Record<string,unknown>).amount);
     if(Number.isFinite(amount) && entities.budgetAmount===undefined) entities.budgetAmount=amount;
+  }
+
+  // Models naturally name a selected horse as activity_asset. Downstream
+  // working-state code uses the canonical horseName slot. Copy the value only
+  // in the activity domain and only when the asset is a plain string; nested
+  // operational entity objects remain untouched.
+  if (
+    domain==='activity'
+    && entities.horseName===undefined
+    && typeof entities.activity_asset==='string'
+    && entities.activity_asset.trim()
+  ) {
+    entities.horseName=entities.activity_asset.trim();
   }
   return entities;
 }
@@ -922,7 +941,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
   let references = resolveReferences(normalizeReferences(parsed.references), context);
-  const entities = canonicalizeEntityAliases(asRecord(parsed.entities));
+  const entities = canonicalizeEntityAliases(asRecord(parsed.entities), domain);
   domain = normalizeCrossDomainJourney(domain, action, informationNeed, entities, references, context);
 
   const structuredEntityNames = new Set(
