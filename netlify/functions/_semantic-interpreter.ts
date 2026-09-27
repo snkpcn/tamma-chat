@@ -1173,7 +1173,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
       Boolean(reference.resolvedEntityId)
       || Boolean(reference.resolvedEntityIds?.length)
       || Boolean(reference.resolvedTaskSlot)
-      || reference.resolvedFromConversation === true)
+      || reference.resolvedFromConversation === true
     )
     && Boolean(context.activeDomain)
     && context.activeDomain !== 'unknown'
