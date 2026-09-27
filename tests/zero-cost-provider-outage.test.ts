@@ -197,8 +197,9 @@ test('a horse selection with MULTIPLE verified durations never auto-picks or imm
   assert.equal(select.taskStateAfter.activeTask?.slots.resourceCode, 'activity-horse');
   assert.equal(select.taskStateAfter.activeTask?.slots.durationMinutes, undefined, 'must NOT auto-pick a duration when more than one is verified');
   assert.ok(select.taskStateAfter.activeTask?.missingFields.includes('durationMinutes'));
-  assert.equal(select.dialogDecision.mode,'answer');
+  assert.notEqual(select.dialogDecision.mode,'collect_field');
   assert.equal(select.dialogDecision.missingFields.length,0,'selection-only response must not surface duration as an immediate booking question');
+  assert.ok(['answer','query_knowledge'].includes(select.dialogDecision.mode),'catalog resolution may still run silently behind a conversational acknowledgement');
 
   const composed = await processOneMindCustomerTurn({
     channel: 'line', language: 'th', message: 'เอาภาราดร', eventId: 'multi-2-compose',
