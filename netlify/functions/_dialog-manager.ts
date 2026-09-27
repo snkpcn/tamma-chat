@@ -41,6 +41,7 @@ import {
   type KnowledgeSourceAdapters,
 } from './_knowledge-resolver';
 import { resolveActivityDurationOptions, resolveActivityResourceCode } from './_activity-catalog-policy';
+import { deriveSemanticMeaning } from './_semantic-meaning';
 
 // ---------------------------------------------------------------------------
 // Contracts
@@ -126,8 +127,21 @@ const TASK_WORTHY_ACTIONS: ReadonlySet<SemanticAction> = new Set(['confirm', 'pr
 
 /** Only 'book'/'order' count as an explicit customer commitment to actually
  *  perform a transaction. 'confirm' (e.g. "เอาภาราดร") is a SELECTION, not
- *  a booking commitment -- see "READY != EXECUTE" in the brief. */
+ *  a booking commitment -- see "READY != EXECUTE" in the brief.
+ *
+ *  Human Core PR B: every call site below now asks isExplicitTransaction
+ *  (backed by the SemanticMeaning contract's commitmentLevel) instead of
+ *  checking this set directly, so "is this turn a real commitment" has one
+ *  authoritative answer shared with every other consumer of the contract,
+ *  not four independent readings of the same action set. COMMIT_ACTIONS
+ *  itself stays as the one place that spells out which raw actions count --
+ *  deriveSemanticMeaning's commitmentLevel is derived from this exact set
+ *  (see _semantic-meaning.ts's TRANSACTION_ACTIONS). */
 const COMMIT_ACTIONS: ReadonlySet<SemanticAction> = new Set(['book', 'order']);
+
+function isExplicitTransaction(turn: SemanticTurn): boolean {
+  return deriveSemanticMeaning(turn).commitmentLevel === 'explicit_transaction';
+}
 
 /** An active task is INTERRUPTIBLE: having an unfinished task does not mean
  *  every following message is a slot fill. These actions are inherently
@@ -188,7 +202,7 @@ function hasResolvedTaskReference(turn: SemanticTurn): boolean {
  * never turn arbitrary customer text into a slot-fill turn.
  */
 function turnContributesToActiveTask(turn: SemanticTurn, task: ActiveTask): boolean {
-  if (turn.action === 'cancel' || COMMIT_ACTIONS.has(turn.action)) return true;
+  if (turn.action === 'cancel' || isExplicitTransaction(turn)) return true;
 
   // A read-only information request owns any date/time/party-size values it
   // carries as QUERY PARAMETERS, not as booking-slot mutations. Production
@@ -454,7 +468,7 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   // Remember an explicit book/order request across the remaining slot-
   // collection turns. This flag is conversational intent only: it cannot
   // execute a tool and it does not replace the separate confirmation gate.
-  if (COMMIT_ACTIONS.has(turn.action) && container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+  if (isExplicitTransaction(turn) && container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
     container = applyTaskStateEvent(container, {
       kind:'mark_commitment', eventId:`${eventId}:commitment_intent`,
     }, now);
@@ -573,7 +587,7 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       // yet, needs the SAME real catalog data discovery already fetches --
       // never a hardcoded/guessed value.
       if (task && needsActivityCatalogResolution(task)) return [{ ...base, domain: 'activity', needs: ['catalog'] }];
-      if (task && task.missingFields.length === 0 && (turn.action === 'provide_information' || COMMIT_ACTIONS.has(turn.action))) {
+      if (task && task.missingFields.length === 0 && (turn.action === 'provide_information' || isExplicitTransaction(turn))) {
         return [{ ...base, domain: 'activity', needs: ['availability'] }];
       }
       return [];
@@ -636,7 +650,7 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   // resurface a collect_field prompt for something that no longer exists.
   const hasOpenTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
   const missingFields = hasOpenTask ? container.activeTask!.missingFields : [];
-  const currentTurnCommit = COMMIT_ACTIONS.has(turn.action);
+  const currentTurnCommit = isExplicitTransaction(turn);
   const customerCommitPresent = currentTurnCommit || Boolean(container.activeTask?.commitmentIntent);
   if (currentTurnCommit) reasons.push('explicit_commit_received');
 
