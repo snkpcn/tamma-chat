@@ -377,7 +377,11 @@ export function filterFactsByCanonicalScope(
       const menuMatch = fact.key.match(/^menu:([^:]+):/);
       if (menuMatch) {
         const id = menuMatch[1]!;
-        if (allowedEntities.has(`menu:${id}`)) return true;
+        // An entity-focused question must never widen back out to sibling
+        // menu rows merely because the resolved entity also has a category
+        // parent. Category membership is only a selector when there is no
+        // explicit canonical entity in scope.
+        if (allowedEntities.size) return allowedEntities.has(`menu:${id}`);
         const category = map.get(`menu:${id}:category`);
         return typeof category === 'string' && allowedParents.has(`${MENU_CATEGORY_KIND}:${category}`);
       }
