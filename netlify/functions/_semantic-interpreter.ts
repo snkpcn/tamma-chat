@@ -651,6 +651,7 @@ Core rules:
 - Any adverse-event report uses domain=incident even when its subject is an animal, property, a local place, or an organization service; narrower domains apply only when no incident is being reported.
 - When the customer explicitly contrasts two or more known alternatives against a criterion, action=compare (informationNeed may be recommendation). Use action=recommend for open-ended suggestions without a fixed comparison set.
 - Domain nouns identify subject; preserve the actual predicate, dates, times, party size, constraints, negation, and stated preferences.
+- A customer merely reporting their own plan, pause, state, or situation is speechAct=statement. Use request/request_help only when they ask the assistant or organization to do something.
 - A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
 - For a descriptive reference, use bounded context evidence: when prior context uniquely links the description to a named entity, emit that canonical entity name as the reference value so the deterministic resolver can bind it. If several entities fit, keep it unresolved and request clarification.
 - IDs may only come from canonical context below. Otherwise leave unresolved.
@@ -795,7 +796,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const normalizedMeaning = typeof parsed.normalizedMeaning === 'string'
     ? parsed.normalizedMeaning.trim().slice(0, 360)
     : '';
-  const speechAct = VALID_SPEECH_ACTS.includes(parsed.speechAct as SemanticSpeechAct)
+  let speechAct = VALID_SPEECH_ACTS.includes(parsed.speechAct as SemanticSpeechAct)
     ? parsed.speechAct as SemanticSpeechAct
     : 'unknown';
   const domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
@@ -811,6 +812,13 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   // A recommendation action is itself a recommendation information request.
   // Keep this facet coherent even if the model leaves the optional facet as none.
   if (action === 'recommend' && informationNeed === 'none') informationNeed = 'recommendation';
+  // Closed-field consistency: a true request must ask the system to act/answer.
+  // `provide_information` with no requested facet or task directive represents
+  // the customer reporting their own state/plan, not an instruction to execute.
+  if (speechAct === 'request' && action === 'provide_information'
+      && informationNeed === 'none' && taskDirective === undefined) {
+    speechAct = 'statement';
+  }
   const confidenceRaw = Number(parsed.confidence);
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
