@@ -770,15 +770,20 @@ function normalizeCrossDomainJourney(
   const activities = Array.isArray(entities.activities)
     ? entities.activities.filter(item=>item && typeof item==='object')
     : [];
+  const itinerary = Array.isArray(entities.itinerary)
+    ? entities.itinerary.filter(item=>item && typeof item==='object')
+    : [];
+  const structuredSteps = [...activities, ...itinerary];
   const scheduledDays = new Set(
-    activities
+    structuredSteps
       .map(item=>Number((item as Record<string,unknown>).day))
       .filter(day=>Number.isFinite(day) && day > 0)
   );
   const hasStayStructure = entities.stay !== undefined
     || entities.stayNights !== undefined
+    || entities.stayDurationNights !== undefined
     || entities.tripDurationDays !== undefined;
-  const hasStructuredMultiStepPlan = activities.length >= 2
+  const hasStructuredMultiStepPlan = structuredSteps.length >= 2
     && (scheduledDays.size >= 2 || hasStayStructure);
   const isMultiDomainPlan = (crossDomainKeys.length >= 2 || hasStructuredMultiStepPlan)
     && (action==='recommend' || action==='discover' || action==='ask')
