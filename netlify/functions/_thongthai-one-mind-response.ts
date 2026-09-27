@@ -32,6 +32,14 @@ import {
   buildOneMindTraceEnvelope,
   type OneMindTraceEnvelope,
 } from './_one-mind-observability';
+import {
+  applyConversationContextUpdate,
+  parseConversationContextState,
+} from './_conversation-context';
+import {
+  compareAndSwapGuestAgentState,
+  loadGuestAgentStateSnapshot,
+} from './_guest-agent-state-store';
 
 export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
@@ -182,6 +190,39 @@ function taskStateChanged(turn: OneMindTurnResult): boolean {
   return JSON.stringify(turn.taskStateBefore) !== JSON.stringify(turn.taskStateAfter);
 }
 
+async function persistAssistantConversationTurn(
+  input:OneMindCustomerTurnInput,
+  turn:OneMindTurnResult,
+  response:ComposedResponse,
+  stateDependencies:Partial<AuthoritativeStateDependencies>,
+  now:Date,
+):Promise<boolean> {
+  const guestDbId=turn.identity.guestDbId;
+  if (!guestDbId || input.persistState === false || !turn.trace.statePersisted) return false;
+
+  const loadSnapshot=stateDependencies.loadSnapshot ?? loadGuestAgentStateSnapshot;
+  const compareAndSwap=stateDependencies.compareAndSwap ?? compareAndSwapGuestAgentState;
+  const assistantEventId=(`assistant:${input.eventId}`).slice(0,180);
+
+  // The assistant's own reply is bounded/redacted by the SAME conversation
+  // reducer as user turns. Without this, a natural follow-up such as
+  // "ตัวไหนที่เมื่อกี้บอกว่านิ่งกว่า" has no evidence of what Thongthai
+  // actually said, so stale task state can hijack the next turn.
+  for(let attempt=0;attempt<4;attempt+=1){
+    const snapshot=await loadSnapshot(guestDbId);
+    const current=parseConversationContextState(snapshot.state.conversationContext,now);
+    const next=applyConversationContextUpdate(current,{
+      eventId:assistantEventId,
+      channel:input.channel,
+      assistantMessage:response.message,
+    },now);
+    const written=await compareAndSwap(guestDbId,snapshot,{set:{conversationContext:next}},now);
+    if(written.status==='applied') return true;
+    if(written.status==='unconfigured') return false;
+  }
+  return false;
+}
+
 export async function processOneMindCustomerTurn(
   input: OneMindCustomerTurnInput,
   dependencies: Partial<OneMindDependencies> = {},
@@ -279,6 +320,19 @@ export async function processOneMindCustomerTurn(
     : null;
   const response = deterministicFastPath ?? membershipFastPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
   const composerMs = Date.now() - composerStartedAt;
+  const assistantContextPersisted=await persistAssistantConversationTurn(
+    input,turn,response,stateDependencies,new Date(now.getTime()+1),
+  ).catch(error=>{
+    console.error('THONGTHAI_ASSISTANT_CONTEXT_PERSIST_ERROR',error instanceof Error?error.message.slice(0,180):'unknown');
+    return false;
+  });
+  if(input.persistState !== false && turn.trace.statePersisted && !assistantContextPersisted){
+    console.log('THONGTHAI_OBSERVABILITY',JSON.stringify({
+      assistant_context_persisted:false,
+      event_id:input.eventId,
+      channel:input.channel,
+    }));
+  }
   return {
     status:'composed',
     turn,
