@@ -455,10 +455,32 @@ function deriveForActiveTask(
   const correcting = hasCorrectionMarker(message);
   const committing = hasCommitMarker(message);
   if (!Object.keys(entities).length && !references.length && !committing) return null;
+  const selectingKnownAsset = Boolean(knownActivityAsset);
   return {
     domain: task.domain,
-    intent: correcting ? 'task_field_correction' : (entityMatch ? 'select_prior_entity' : 'task_slot_update'),
-    action: committing ? 'book' : correcting ? 'correct_previous' : (entityMatch ? 'confirm' : 'provide_information'),
+    intent: committing
+      ? 'transaction_request_for_prior_entity'
+      : correcting
+        ? 'task_field_correction'
+        : entityMatch
+          ? 'select_prior_entity'
+          : selectingKnownAsset
+            ? 'select_known_activity_asset'
+            : 'task_slot_update',
+    action: committing
+      ? 'book'
+      : correcting
+        ? 'correct_previous'
+        : (entityMatch || selectingKnownAsset)
+          ? 'confirm'
+          : 'provide_information',
+    speechAct: committing
+      ? 'transaction_request'
+      : correcting
+        ? 'correction'
+        : (entityMatch || selectingKnownAsset)
+          ? 'selection'
+          : undefined,
     entities,
     references,
     constraints: [],
@@ -626,10 +648,13 @@ export function deriveDeterministicSemanticTurn(
     if (time) entities.time = time;
     if (partySize) entities.partySize = partySize;
     if (durationMinutes) entities.durationMinutes = durationMinutes;
+    const committing=hasCommitMarker(trimmed);
+    const correcting=hasCorrectionMarker(trimmed);
     return {
       domain: 'activity',
       intent: 'select_known_activity_asset',
-      action: hasCommitMarker(trimmed) ? 'book' : hasCorrectionMarker(trimmed) ? 'correct_previous' : 'confirm',
+      action: committing ? 'book' : correcting ? 'correct_previous' : 'confirm',
+      speechAct: committing ? 'transaction_request' : correcting ? 'correction' : 'selection',
       entities,
       references: [{ type: 'entity_selection', value: knownActivityAsset.name, refersToPriorContext: false, resolvedEntityId: knownActivityAsset.entityId }],
       constraints: [],
