@@ -236,22 +236,30 @@ async function persistAssistantConversationTurn(
   for(let attempt=0;attempt<4;attempt+=1){
     const snapshot=await loadSnapshot(guestDbId);
     const current=parseConversationContextState(snapshot.state.conversationContext,now);
+    const isRecommendationTurn=
+      ['recommend','compare'].includes(turn.semanticTurn.action)
+      || turn.semanticTurn.informationNeed==='recommendation';
+    const hasDurableRecommendationEvidence=response.usedFactKeys.some(key=>
+      /(?:temperament|beginnerSuitable|suitability|spiceLevel|requiresMembership|recommend)/iu.test(key)
+    );
+    // The single long-reference slot is deliberately sticky: a later generic
+    // itinerary/menu recommendation must not erase an earlier entity-specific
+    // comparison that a human can naturally refer back to several turns later
+    // ("the calmer one you mentioned"). Immediate newer recommendations still
+    // live in recentTurns/rollingSummary; durable evaluative evidence may
+    // replace this slot.
+    const shouldReplaceLongRecommendation=
+      turn.semanticTurn.action==='compare'
+      || hasDurableRecommendationEvidence
+      || (!current.lastRecommendationReference && isRecommendationTurn);
     const next=applyConversationContextUpdate(current,{
       eventId:assistantEventId,
       channel:input.channel,
       assistantMessage:response.message,
-      lastRecommendationReference:(
-        ['recommend','compare'].includes(turn.semanticTurn.action)
-        || turn.semanticTurn.informationNeed==='recommendation'
-        || response.usedFactKeys.some(key=>/(?:temperament|beginnerSuitable|recommend)/iu.test(key))
-      )
+      lastRecommendationReference:shouldReplaceLongRecommendation
         ? response.message.slice(0,320)
         : undefined,
-      summaryFact:(
-        ['recommend','compare'].includes(turn.semanticTurn.action)
-        || turn.semanticTurn.informationNeed==='recommendation'
-        || response.usedFactKeys.some(key=>/(?:temperament|beginnerSuitable|recommend)/iu.test(key))
-      )
+      summaryFact:(isRecommendationTurn || hasDurableRecommendationEvidence)
         ? `assistant recommendation in ${turn.semanticTurn.domain}: ${response.message.slice(0,180)}.`
         : undefined,
     },now);
