@@ -50,6 +50,7 @@ import {
   LLMAvailabilityError,
   ProviderNotConfiguredError,
 } from './_thongthai-model-provider';
+import { emitZeroCallTurn } from './_ai-cost-ledger';
 import {
   processDialogTurnDetailed,
   type DialogDecision,
@@ -525,12 +526,22 @@ async function resolveSemanticTurn(
   message: string,
   context: SemanticContext,
   taskState: TaskStateContainer,
+  input: Pick<OneMindTurnInput, 'channel'|'eventId'|'canonicalAnonymousId'|'providerUserKey'|'guestDbId'>,
   deps: OneMindDependencies,
   now: Date = new Date(),
 ): Promise<SemanticTurn> {
   const deterministic = deriveDeterministicSemanticTurn(message, context, taskState, now);
+  const conversationId = input.canonicalAnonymousId ?? input.providerUserKey ?? input.guestDbId ?? 'unknown';
 
-  // Human Conversation Recovery: LANGUAGE FIRST.
+  // Production cost architecture: an exact deterministic/contextual result is
+  // authoritative and costs zero. Only coarse or genuinely unclassified
+  // language reaches the paid semantic boundary.
+  if (!deterministicNeedsLanguageRefinement(deterministic, taskState, message)) {
+    emitZeroCallTurn({ conversationId, eventId:input.eventId, channel:input.channel });
+    return { ...deterministic!, semanticSource:'deterministic_fallback' };
+  }
+
+  // Human Conversation Recovery: LANGUAGE SUPERVISOR WHEN NEEDED.
   //
   // Every ordinary customer utterance is read by the semantic model first.
   // Deterministic parsing is no longer allowed to become the primary owner of
@@ -544,7 +555,15 @@ async function resolveSemanticTurn(
   // only decides what the customer meant; the Dialog Manager / legacy
   // transaction boundary still decides whether anything may be executed.
   try {
-    const modelTurn = await deps.interpretSemanticTurn(message, context);
+    const modelTurn = await deps.interpretSemanticTurn(message, context, {
+      callContext:{
+        conversationId,
+        guestDbId:input.guestDbId ?? null,
+        channel:input.channel,
+        eventId:input.eventId,
+        callerLabel:'semantic-interpreter',
+      },
+    });
 
     if (!modelRefinementIsUsable(modelTurn, deterministic)) {
       if (deterministic) {
@@ -676,7 +695,7 @@ async function computeOneMindTurnFromState(
     suspendedTask:semanticTaskContext(taskStateBefore.suspendedTask),
   };
   const semanticStartedAt = Date.now();
-  const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, deps, now);
+  const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, input, deps, now);
   const semanticMs = Date.now() - semanticStartedAt;
 
   // Human Brain Phase 3: durable memory is evaluated only AFTER current-turn
