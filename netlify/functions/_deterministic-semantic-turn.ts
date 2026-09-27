@@ -97,13 +97,26 @@ const ASSET_NEGATION_BEFORE_NAME_RE = /(?:ไม่เอา|ไม่ใช่|
  * match, so this works regardless of which name is mentioned first.
  */
 export function findKnownActivityAssetSelection(message: string): typeof ACTIVITY_ASSET_SELECTIONS[number] | null {
-  const accepted = ACTIVITY_ASSET_SELECTIONS.filter(item => {
+  const accepted = ACTIVITY_ASSET_SELECTIONS.flatMap(item => {
     const match = item.pattern.exec(message);
-    if (!match) return false;
+    if (!match) return [];
     const before = message.slice(Math.max(0, match.index - 12), match.index);
-    return !ASSET_NEGATION_BEFORE_NAME_RE.test(before);
+    if (ASSET_NEGATION_BEFORE_NAME_RE.test(before)) return [];
+    return [{ item, index:match.index }];
   });
-  return accepted[0] ?? null;
+  if (!accepted.length) return null;
+
+  // In a correction the human often states OLD choice first and NEW choice
+  // after the correction clause ("had A, changed to B"). The last accepted
+  // canonical name is the replacement. This is grammatical precedence, not
+  // a sentence patch, and also makes provider-outage fallback agree with the
+  // semantic model instead of resurrecting stale state.
+  if (hasCorrectionMarker(message) && accepted.length > 1) {
+    return accepted.reduce((latest, candidate) =>
+      candidate.index > latest.index ? candidate : latest
+    ).item;
+  }
+  return accepted[0]!.item;
 }
 
 function isInventoryCountQuestion(message: string): boolean {
