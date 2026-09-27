@@ -392,3 +392,30 @@ test('light-activity recommendation lists verified activities, not only horse as
   assert.match(response.message,/ความหนัก|ไม่ขอเดา/u);
   assert.doesNotMatch(response.message,/ภาราดร \/ ทองไทย/u);
 });
+
+
+test('conditional availability renderer preserves preferredAsset and fallbackAsset names from live semantic shape',()=>{
+  const availabilityBundle:KnowledgeBundle={
+    domain:'activity',
+    sources:[{need:'availability',sourceId:'availability-test',sourceType:'activity_live',status:'empty'}],
+    facts:[],entities:[],missing:['availability'],warnings:[],freshness:'live',
+  };
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',
+      intent:'conditional_horse_availability_with_fallback',
+      action:'status',
+      informationNeed:'availability',
+      entities:{
+        preferredAsset:{id:'activity_asset:horse-paradorn',name:'ภาราดร'},
+        fallbackAsset:{id:'activity_asset:horse-thongthai',name:'ทองไทย'},
+      },
+      constraints:['fallback_to_thongthai_if_paradorn_unavailable','no_booking_if_both_unavailable','no_transaction'],
+    }),
+    bundles:[availabilityBundle],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/ภาราดร/u);
+  assert.match(response.message,/ทองไทย/u);
+  assert.match(response.message,/ยังไม่ได้.*จอง|ยังไม่ได้ทำรายการ/u);
+});
