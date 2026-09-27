@@ -653,6 +653,15 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
     && !customerCommitPresent
     && turn.action !== 'cancel';
 
+  const namedActivitySelectionUpdate =
+    turn.domain === 'activity'
+    && turn.action === 'provide_information'
+    && typeof turn.entities.horseName === 'string'
+    && turn.entities.horseName.trim().length > 0
+    && turn.references.some(reference =>
+      reference.type === 'entity_selection'
+      && Boolean(reference.resolvedEntityId));
+
   const isNonTransactionalStateUpdate = hasOpenTask
     && !customerCommitPresent
     && !['book','order','cancel'].includes(turn.action)
@@ -661,6 +670,7 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
       || turn.speechAct === 'correction'
       || turn.action === 'correct_previous'
       || turn.action === 'modify'
+      || namedActivitySelectionUpdate
     );
 
   if (isTaskSideQuestion) reasons.push('task_side_question_preserved');
