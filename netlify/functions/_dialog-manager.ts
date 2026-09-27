@@ -653,8 +653,19 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
     && !customerCommitPresent
     && turn.action !== 'cancel';
 
+  const isNonTransactionalStateUpdate = hasOpenTask
+    && !customerCommitPresent
+    && !['book','order','cancel'].includes(turn.action)
+    && (
+      turn.speechAct === 'selection'
+      || turn.speechAct === 'correction'
+      || turn.action === 'correct_previous'
+      || turn.action === 'modify'
+    );
+
   if (isTaskSideQuestion) reasons.push('task_side_question_preserved');
   if (isTaskUnrelatedTurn) reasons.push('task_unrelated_turn_preserved');
+  if (isNonTransactionalStateUpdate) reasons.push('nontransactional_state_update_preserved');
 
   // Knowledge requests are about the CURRENT turn too. An unrelated turn
   // must not trigger catalog/availability work merely because the preserved
@@ -663,11 +674,13 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   if (turn.intent === 'summarize_active_task') reasons.push('task_summary_requested');
 
   // Missing fields still live on the preserved task, but they are NOT
-  // response-facing on a turn that did not actually continue that task.
-  const responseMissingFields = (isTaskSideQuestion || isTaskUnrelatedTurn) ? [] : missingFields;
+  // response-facing on a turn that merely selects/corrects conversational
+  // state without a booking/order commitment. A human "เอาตัวนั้น" should
+  // be acknowledged first, not immediately converted into a slot interview.
+  const responseMissingFields = (isTaskSideQuestion || isTaskUnrelatedTurn || isNonTransactionalStateUpdate) ? [] : missingFields;
 
   let mode: DialogMode;
-  if (!hasOpenTask || isTaskSideQuestion || isTaskUnrelatedTurn) {
+  if (!hasOpenTask || isTaskSideQuestion || isTaskUnrelatedTurn || isNonTransactionalStateUpdate) {
     mode = knowledgeRequests.length ? 'query_knowledge' : 'answer';
   } else if (missingFields.length > 0) {
     mode = 'collect_field';
