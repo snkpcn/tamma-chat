@@ -157,6 +157,10 @@ type ResultRow={
   intent:string;
   clarification:boolean;
   response?:string;
+  normalizedMeaning?:string;
+  entities?:Record<string,unknown>;
+  constraints?:string[];
+  speechAct?:string;
   errors:string[];
 };
 
@@ -303,6 +307,10 @@ async function main():Promise<void>{
         intent:result.turn.semanticTurn.intent,
         clarification:result.turn.semanticTurn.needsClarification,
         response:result.status==='composed' ? result.response.message.slice(0,240) : undefined,
+        normalizedMeaning:result.turn.semanticTurn.normalizedMeaning,
+        entities:result.turn.semanticTurn.entities,
+        constraints:result.turn.semanticTurn.constraints,
+        speechAct:result.turn.semanticTurn.speechAct,
         errors,
       });
     }catch(error){
@@ -320,7 +328,7 @@ async function main():Promise<void>{
     pass:rows.length-failures.length,
     failed:failures.length,
     passPct:Number(((rows.length-failures.length)*100/rows.length).toFixed(2)),
-    failures:failures.map(row=>({n:row.n,message:row.message,errors:row.errors,domain:row.domain,action:row.action,need:row.need,mode:row.mode,intent:row.intent,response:row.response})),
+    failures:failures.map(row=>({n:row.n,message:row.message,errors:row.errors,domain:row.domain,action:row.action,need:row.need,mode:row.mode,intent:row.intent,speechAct:row.speechAct,normalizedMeaning:row.normalizedMeaning,entities:row.entities,constraints:row.constraints,response:row.response})),
     rows,
     noTransactionProposals:rows.every(row=>!row.errors.includes('unexpected actionProposal')),
   },null,2));
