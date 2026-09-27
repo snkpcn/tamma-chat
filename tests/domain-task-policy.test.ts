@@ -20,18 +20,34 @@ test('activity_booking missing fields are grounded in createBooking\'s real vali
   assert.deepEqual(computeTaskMissingFields(complete), []);
 });
 
-test('stay_booking requires canonical selection, date range, and party size; restaurant booking requires date', () => {
+test('stay_booking requires canonical selection/date range/party size; restaurant table booking requires full contact + slot details', () => {
   const stay = createActiveTask({ type: 'stay_booking', sourceChannel: 'web', now: NOW });
   assert.deepEqual(computeTaskMissingFields(stay), ['resourceCode', 'date', 'endDate', 'partySize']);
   const restaurantBooking = createActiveTask({ type: 'restaurant_booking', sourceChannel: 'web', initialSlots: { date: '2026-09-19' }, now: NOW });
-  assert.deepEqual(computeTaskMissingFields(restaurantBooking), []);
+  assert.deepEqual(computeTaskMissingFields(restaurantBooking), ['time', 'partySize', 'customerName', 'phone']);
+  const complete = createActiveTask({
+    type:'restaurant_booking', sourceChannel:'web',
+    initialSlots:{date:'2026-09-19',time:'18:00',partySize:4,customerName:'สมชาย',phone:'0610169999'},
+    now:NOW,
+  });
+  assert.deepEqual(computeTaskMissingFields(complete), []);
 });
 
-test('restaurant_preorder delegates to the REAL missingRestaurantPreorderFields, not a re-derived copy', () => {
+test('restaurant_preorder reuses real draft policy and additionally requires explicit structured items', () => {
   const task = createActiveTask({ type: 'restaurant_preorder', sourceChannel: 'web', initialSlots: { date: '2026-09-19', customerName: 'สมชาย' }, now: NOW });
-  const expected = missingRestaurantPreorderFields({ date: '2026-09-19', time: null, customerName: 'สมชาย', phone: null, email: null, acceptedAt: NOW.toISOString() });
-  assert.deepEqual(computeTaskMissingFields(task), expected);
-  assert.deepEqual(expected, ['time', 'phone']);
+  const draftMissing = missingRestaurantPreorderFields({ date: '2026-09-19', time: null, customerName: 'สมชาย', phone: null, email: null, acceptedAt: NOW.toISOString() });
+  assert.deepEqual(draftMissing, ['time', 'phone']);
+  assert.deepEqual(computeTaskMissingFields(task), ['items', ...draftMissing]);
+
+  const complete = createActiveTask({
+    type:'restaurant_preorder', sourceChannel:'web',
+    initialSlots:{
+      items:[{name:'ส้มตำไทย',quantity:2}],date:'2026-09-19',time:'18:00',
+      customerName:'สมชาย',phone:'0610169999',
+    },
+    now:NOW,
+  });
+  assert.deepEqual(computeTaskMissingFields(complete), []);
 });
 
 test('promotion_redemption delegates to the REAL missingPromotionFields, including its requiresDateTime conditional', () => {
@@ -68,7 +84,7 @@ test('domains with no authored policy yet return [] rather than a guessed rule',
 test('DOMAIN_TASK_REQUIRED_FIELDS only lists the three genuinely static domains, not the two conditional ones', () => {
   assert.deepEqual(DOMAIN_TASK_REQUIRED_FIELDS.activity_booking, ['resourceCode', 'date', 'durationMinutes']);
   assert.deepEqual(DOMAIN_TASK_REQUIRED_FIELDS.stay_booking, ['resourceCode', 'date', 'endDate', 'partySize']);
-  assert.deepEqual(DOMAIN_TASK_REQUIRED_FIELDS.restaurant_booking, ['date']);
+  assert.deepEqual(DOMAIN_TASK_REQUIRED_FIELDS.restaurant_booking, ['date', 'time', 'partySize', 'customerName', 'phone']);
   assert.equal(DOMAIN_TASK_REQUIRED_FIELDS.restaurant_preorder, undefined, 'restaurant_preorder is conditional/data-dependent, not a static list');
   assert.equal(DOMAIN_TASK_REQUIRED_FIELDS.promotion_redemption, undefined, 'promotion_redemption is conditional on requiresDateTime, not a static list');
 });
