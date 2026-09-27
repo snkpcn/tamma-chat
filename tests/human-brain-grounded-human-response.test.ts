@@ -343,3 +343,52 @@ test('stay availability clarification never borrows a stale activity entity from
   assert.match(response.message,/วันไหน|เข้าพัก/u);
   assert.doesNotMatch(response.message,/ภาราดร|ขี่ม้า/u);
 });
+
+
+test('conditional horse availability answers the named fallback rule instead of dumping the activity catalog',()=>{
+  const availability:KnowledgeBundle={
+    domain:'activity',
+    sources:[{need:'availability',sourceId:'availability-test',sourceType:'activity_live',status:'empty'}],
+    facts:[],entities:[],missing:['availability'],warnings:[],freshness:'live',
+  };
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',
+      intent:'check_horse_availability_with_fallback',
+      action:'status',
+      informationNeed:'availability',
+      speechAct:'request',
+      entities:{
+        primaryResource:{id:'activity_asset:horse-paradorn',name:'ภาราดร'},
+        fallbackResource:{id:'activity_asset:horse-thongthai',name:'ทองไทย'},
+      },
+      constraints:['fallback_to_thongthai_if_paradorn_unavailable','no_booking_if_both_unavailable','no_transaction'],
+    }),
+    bundles:[activityBundle,availability],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/ภาราดร/u);
+  assert.match(response.message,/ทองไทย/u);
+  assert.match(response.message,/ยังไม่ได้.*จอง|ไม่ได้เลือกหรือจอง/u);
+  assert.doesNotMatch(response.message,/กิจกรรมที่มีตอนนี้/u);
+});
+
+test('light-activity recommendation lists verified activities, not only horse asset names',()=>{
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',
+      intent:'recommend_light_afternoon_activities',
+      action:'recommend',
+      informationNeed:'recommendation',
+      speechAct:'question',
+      entities:{party:{children:2,adults:3}},
+      constraints:['light_activity'],
+    }),
+    bundles:[activityBundle],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/ขี่ม้า/u);
+  assert.match(response.message,/ยิงธนู/u);
+  assert.match(response.message,/ความหนัก|ไม่ขอเดา/u);
+  assert.doesNotMatch(response.message,/ภาราดร \/ ทองไทย/u);
+});
