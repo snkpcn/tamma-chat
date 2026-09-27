@@ -31,7 +31,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v30';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -598,6 +598,7 @@ informationNeed: one of none | availability | price | schedule | inventory | cat
 - Activity: safety=is it safe; suitability=does it fit me (beginner/health/age/child); equipment=how gear/controls work.
 - Stay: capacity=how many guests/bedrooms a stay option supports; amenities=whether a named facility/service exists; policy=check-in/check-out/booking rules. For a policy question set entities.policyTopic to one of check_in | check_out | room_service | booking_window | final_confirmation when that exact topic is understood. For a focused bedroom type set entities.bedrooms to a number. For a specific accommodation use an already-known canonical resourceCode when available, otherwise resourceName/accommodationName. For length of stay use entities.nights; for an explicit checkout date use entities.endDate.
 - Stay transaction boundary: selecting a house/room, asking whether it is free, asking a question after selecting it, or saying a bare acknowledgement is planning/read-only, never book. Use action=book and speechAct=transaction_request only when the CURRENT turn explicitly asks to submit a booking. A selection such as "take this one" is speechAct=selection with action=confirm/provide_information, not book.
+- Restaurant: for one concrete menu item, put its stated name in entities.itemName; if context already supplies a canonical menu id, use entities.menuItemId. For a menu category put the category label in entities.menuCategory. For an explicit order, put concrete requested lines in entities.items as [{"name":string,"quantity":number}] and include customerName/phone/email only when the customer actually supplied them. Never invent a dish, quantity, contact value, or order line.
 taskDirective: OPTIONAL one of cancel_active | suspend_active | resume_suspended, only for the bounded conversational working task as described above
 entities: an object of whatever concrete values the message actually states (e.g. {"partySize":2}, {"date":"พรุ่งนี้"}, {"time":"บ่ายสาม"}, {"horseName":"ภาราดร"}) -- never invent a value that wasn't stated
 references: an array of {"type":string,"value"?:string,"refersToPriorContext":boolean} for anything in the message that points at something from context rather than being fully self-contained (a pronoun/deictic like "ตัวไหน", "อันนั้น", "อันเมื่อกี้", a bare correction, an implicit continuation). Omit entirely if the message is fully self-contained.
@@ -852,6 +853,41 @@ function canonicalizeEntityAliases(
   // Stay fields are structural model output, not renderer keyword matches.
   // Normalize aliases/types once so scope, dialog state, and execution all
   // consume the same closed values.
+  if (domain==='restaurant') {
+    if (entities.itemName===undefined) {
+      const itemNameSource=['menuItemName','menu_item_name','dishName','dish_name','foodName','food_name']
+        .map(key=>entities[key])
+        .find((v):v is string=>typeof v==='string'&&v.trim().length>0);
+      if(itemNameSource) entities.itemName=itemNameSource.trim();
+    }
+    if (entities.menuItemId===undefined) {
+      const menuIdSource=['menu_item_id','menuId','menu_id']
+        .map(key=>entities[key])
+        .find((v):v is string=>typeof v==='string'&&v.trim().length>0);
+      if(menuIdSource) entities.menuItemId=menuIdSource.trim();
+    }
+    if (entities.menuCategory===undefined) {
+      const categorySource=['menu_category','categoryName','category_name']
+        .map(key=>entities[key])
+        .find((v):v is string=>typeof v==='string'&&v.trim().length>0);
+      if(categorySource) entities.menuCategory=categorySource.trim();
+    }
+    for(const key of ['itemName','menuItemId','menuCategory','customerName','phone','email'] as const){
+      if(typeof entities[key]==='string') entities[key]=entities[key].trim();
+    }
+    if(Array.isArray(entities.items)){
+      const normalizedItems=entities.items.flatMap(value=>{
+        if(!value||typeof value!=='object'||Array.isArray(value)) return [];
+        const row=value as Record<string,unknown>;
+        const name=typeof row.name==='string'?row.name.trim():'';
+        const quantity=Number(row.quantity);
+        if(!name) return [];
+        return [{name,quantity:Number.isInteger(quantity)&&quantity>=1&&quantity<=50?quantity:1}];
+      });
+      entities.items=normalizedItems;
+    }
+  }
+
   if (domain==='stay') {
     const bedroomCount=Number(entities.bedrooms);
     if (Number.isInteger(bedroomCount) && bedroomCount>0 && bedroomCount<=20) entities.bedrooms=bedroomCount;
