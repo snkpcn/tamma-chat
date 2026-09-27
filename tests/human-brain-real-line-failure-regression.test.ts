@@ -11,6 +11,8 @@ import {
 import type { GuestAgentStateSnapshot } from '../netlify/functions/_guest-agent-state-store';
 import type { KnowledgeSourceAdapters, SourceResult } from '../netlify/functions/_knowledge-resolver';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
+import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
+import { createActiveTask, emptyTaskStateContainer, setSelectedEntities } from '../netlify/functions/_task-state';
 
 const NOW = new Date('2026-09-27T12:00:00+07:00');
 const CANON = '71111111-1111-4111-8111-111111111111';
@@ -214,4 +216,55 @@ test('REAL LINE: conditional fallback remains read-only and cannot replace the c
   assert.deepEqual(result.taskStateAfter.activeTask?.slots,before);
   assert.equal(result.dialogDecision.actionProposal,undefined);
   assert.ok(result.dialogDecision.knowledgeRequests.some(r=>r.needs.includes('availability')));
+});
+
+
+test('REAL LINE: explicit horse correction replaces stale selected entity instead of preserving the old horse identity', async()=>{
+  const active=createActiveTask({
+    type:'activity_booking',
+    sourceChannel:'line',
+    initialSlots:{resourceCode:'activity-horse',horseName:'ภาราดร',date:'2026-09-28',time:'17:00'},
+  },NOW);
+  const paradorn={id:'activity_asset:horse-paradorn',type:'horse',name:'ภาราดร',domain:'activity' as const,source:'catalog' as const,canonical:true};
+  const thongthai={id:'activity_asset:horse-thongthai',type:'horse',name:'ทองไทย',domain:'activity' as const,source:'catalog' as const,canonical:true};
+  const taskState={
+    ...emptyTaskStateContainer(),
+    activeTask:setSelectedEntities(active,[paradorn],NOW),
+  };
+  const conversation={
+    ...emptyConversationContextState(NOW),
+    activeDomain:'activity' as const,
+    recentEntities:[paradorn,thongthai],
+  };
+  let snapshot:GuestAgentStateSnapshot={
+    exists:true,
+    state:{conversationContext:conversation,taskState},
+    updatedAt:NOW.toISOString(),
+  };
+  const message='เมื่อกี้บอกว่าเอาภาราดร เปลี่ยนใจละ เอาทองไทยเหมือนเดิม แต่เวลาเดิมนะ';
+  const deps:Partial<OneMindDependencies>={
+    resolveCanonicalGuestId:async()=>CANON,
+    guestDbIdFromAnonymousId:async()=>GUEST,
+    interpretSemanticTurn:async()=>semantic({
+      domain:'activity',intent:'correct_horse_selection',action:'correct_previous',speechAct:'correction',
+      entities:{horseName:'ทองไทย'},
+      references:[{type:'task_slot',value:'time',refersToPriorContext:true,resolvedTaskSlot:'time'}],
+    }),
+    buildKnowledgeAdapters:()=>({activity:{catalog:async()=>emptyResult('activity-catalog','activity_live')}}),
+    mirrorActivityTaskToLegacySession:async()=>{},
+  };
+  const result=await processThongthaiOneMindTurnAuthoritative({
+    channel:'line',message,eventId:'real-line-horse-correction',providerUserKey:'line-key',persistState:true,
+  },deps,{
+    loadSnapshot:async()=>snapshot,
+    compareAndSwap:async(_id,current,patch)=>{
+      snapshot={exists:true,state:{...current.state,...(patch.set??{})},updatedAt:new Date(NOW.getTime()+1000).toISOString()};
+      return {status:'applied',snapshot};
+    },
+  },new Date(NOW.getTime()+1000));
+
+  assert.equal(result.taskStateAfter.activeTask?.slots.horseName,'ทองไทย');
+  assert.equal(result.taskStateAfter.activeTask?.slots.time,'17:00');
+  assert.equal(result.taskStateAfter.activeTask?.selectedEntities[0]?.name,'ทองไทย');
+  assert.equal(result.dialogDecision.actionProposal,undefined);
 });
