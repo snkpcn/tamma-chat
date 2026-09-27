@@ -5,6 +5,7 @@ import {
   aiCostPolicy,
   calculateAiCostUsd,
   estimateInputTokens,
+  pricingForModel,
   reserveWorstCaseCostUsd,
 } from '../netlify/functions/_ai-cost-policy';
 import {
@@ -43,6 +44,51 @@ test('production defaults enforce the owner hard cap and compact semantic output
   assert.ok(policy.maxCallsPerConversation<=6);
   assert.ok(policy.semanticMaxOutputTokens>=300&&policy.semanticMaxOutputTokens<=500);
   assert.ok(policy.absoluteInputTokens<=5_000);
+});
+
+
+test('reviewed OpenAI rates and owner caps fail closed against unsafe configuration',()=>{
+  const terra=pricingForModel('gpt-5.6-terra');
+  assert.deepEqual(terra,{
+    inputUsdPerMillion:2,
+    cachedInputUsdPerMillion:0.2,
+    outputUsdPerMillion:12,
+  });
+  const sol=pricingForModel('gpt-5.6-sol');
+  assert.deepEqual(sol,{
+    inputUsdPerMillion:4,
+    cachedInputUsdPerMillion:0.4,
+    outputUsdPerMillion:20,
+  });
+  assert.ok(
+    reserveWorstCaseCostUsd('unreviewed-production-model',5_000,400)>0.05,
+    'unknown production model must fail closed rather than inherit a cheap guessed rate',
+  );
+
+  const keys=[
+    'THONGTHAI_MAX_CONVERSATION_AI_COST_USD',
+    'THONGTHAI_MAX_AI_CALLS_PER_TURN',
+    'THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION',
+    'THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS',
+  ] as const;
+  const before=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
+  try{
+    process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD='0.50';
+    process.env.THONGTHAI_MAX_AI_CALLS_PER_TURN='4';
+    process.env.THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION='99';
+    process.env.THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS='800';
+    const policy=aiCostPolicy();
+    assert.equal(policy.maxConversationCostUsd,0.05);
+    assert.equal(policy.maxCallsPerTurn,1);
+    assert.equal(policy.maxCallsPerConversation,6);
+    assert.ok(policy.semanticMaxOutputTokens<=500);
+  }finally{
+    for(const key of keys){
+      const value=before[key];
+      if(value===undefined) delete process.env[key];
+      else process.env[key]=value;
+    }
+  }
 });
 
 test('semantic prompt is relevance-based and stays inside normal/complex token targets',()=>{
