@@ -44,11 +44,28 @@ function unavailable(sourceId: string, sourceType: KnowledgeSourceType, error: u
 async function restaurantMenuAdapter(now: Date = new Date()): Promise<SourceResult> {
   try {
     const items = await listRestaurantMenu();
-    const facts: GroundedFact[] = items.flatMap(item => [
-      { key: `menu:${item.menu_item_id}:price`, value: item.selling_price, domain: 'restaurant' as const, sourceId: 'restaurant_menu_live', sourceType: 'restaurant_live' as const, authoritative: true, fetchedAt: now.toISOString() },
-      { key: `menu:${item.menu_item_id}:orderable`, value: item.is_orderable, domain: 'restaurant' as const, sourceId: 'restaurant_menu_live', sourceType: 'restaurant_live' as const, authoritative: true, fetchedAt: now.toISOString() },
-      { key: `menu:${item.menu_item_id}:name`, value: item.name, domain: 'restaurant' as const, sourceId: 'restaurant_menu_live', sourceType: 'restaurant_live' as const, authoritative: true, fetchedAt: now.toISOString() },
-    ]);
+    const fetchedAt = now.toISOString();
+    const facts: GroundedFact[] = items.flatMap(item => {
+      const base = {
+        domain: 'restaurant' as const,
+        sourceId: 'restaurant_menu_live',
+        sourceType: 'restaurant_live' as const,
+        authoritative: true,
+        fetchedAt,
+        updatedAt: item.source_updated_at,
+      };
+      return [
+        { ...base, key: `menu:${item.menu_item_id}:name`, value: item.name },
+        { ...base, key: `menu:${item.menu_item_id}:category`, value: item.category_name },
+        { ...base, key: `menu:${item.menu_item_id}:price`, value: item.selling_price },
+        { ...base, key: `menu:${item.menu_item_id}:orderable`, value: item.is_orderable },
+        { ...base, key: `menu:${item.menu_item_id}:availableServings`, value: item.available_servings },
+        { ...base, key: `menu:${item.menu_item_id}:ingredients`, value: item.ingredient_names },
+        { ...base, key: `menu:${item.menu_item_id}:unavailableIngredients`, value: item.unavailable_ingredients },
+        { ...base, key: `menu:${item.menu_item_id}:signature`, value: item.is_signature },
+        ...(item.description ? [{ ...base, key: `menu:${item.menu_item_id}:description`, value: item.description }] : []),
+      ];
+    });
     return ok('restaurant_menu_live', 'restaurant_live', facts, now);
   } catch (error) { return unavailable('restaurant_menu_live', 'restaurant_live', error, now); }
 }
