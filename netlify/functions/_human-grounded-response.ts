@@ -650,6 +650,7 @@ export function renderPromotionRecommendation(input: HumanGroundedRenderInput): 
     return {message:'ตอนนี้ทองไทยยังเช็กโปรโมชั่นล่าสุดไม่ได้ครับ เลยไม่ขอเดาโปรหรือสิทธิ์ให้ผิด',usedFactKeys:[]};
   }
 
+  const noMembership=wants(input,['no_new_membership','no_membership','ไม่สมัครสมาชิก','สมาชิกเพิ่ม']);
   const ids=[...new Set([...map.keys()]
     .map(key=>key.match(/^promo:([^:]+):name$/u)?.[1])
     .filter((value):value is string=>Boolean(value)))];
@@ -665,11 +666,26 @@ export function renderPromotionRecommendation(input: HumanGroundedRenderInput): 
     startAt:map.get(`promo:${id}:startAt`),
     endAt:map.get(`promo:${id}:endAt`),
     eligible:map.get(`promo:${id}:eligible`),
+    requiresMembership:map.get(`promo:${id}:requiresMembership`),
     redemptionCount:map.get(`promo:${id}:redemptionCount`),
     maxRedemptions:map.get(`promo:${id}:maxRedemptions`),
-  })).filter(row=>typeof row.name==='string'&&row.name.trim()&&row.eligible===true);
+  })).filter(row=>typeof row.name==='string'&&row.name.trim()&&row.eligible===true)
+    .filter(row=>!noMembership || row.requiresMembership===false);
 
-  if(!rows.length) {
+  // Backward-compatible verified object facts used by older adapters/tests.
+  // They remain read-only; real PR G execution identity still requires the
+  // expanded live campaign facts + eligible=true.
+  const legacyRows=facts(input).flatMap(fact=>{
+    if(fact.domain!=='promotion'||!fact.value||typeof fact.value!=='object'||Array.isArray(fact.value)) return [];
+    const value=fact.value as Record<string,unknown>;
+    const name=typeof value.name==='string'?value.name:(typeof value.title==='string'?value.title:'');
+    const requiresMembership=typeof value.requiresMembership==='boolean'?value.requiresMembership:undefined;
+    if(!name || (noMembership&&requiresMembership!==false)) return [];
+    return [{id:`legacy:${fact.key}`,name,code:undefined,description:value.description,normalTotal:undefined,promoTotal:undefined,discountPct:undefined,startAt:undefined,endAt:undefined,eligible:true,requiresMembership,redemptionCount:undefined,maxRedemptions:undefined,legacyKey:fact.key}];
+  });
+  const allRows=[...rows,...legacyRows];
+
+  if(!allRows.length) {
     const verifiedEmpty=promotionSources.some(source=>source.status==='empty');
     return verifiedEmpty
       ? {message:'ตอนนี้ยังไม่มีโปรโมชั่นที่ระบบยืนยันว่าเปิดใช้งานครับ',usedFactKeys:[]}
@@ -677,8 +693,9 @@ export function renderPromotionRecommendation(input: HumanGroundedRenderInput): 
   }
 
   const used:string[]=[];
-  const lines=rows.slice(0,5).map(row=>{
-    used.push(`promo:${row.id}:name`,`promo:${row.id}:eligible`);
+  const lines=allRows.slice(0,5).map(row=>{
+    if('legacyKey' in row && typeof row.legacyKey==='string') used.push(row.legacyKey);
+    else used.push(`promo:${row.id}:name`,`promo:${row.id}:eligible`);
     const pieces=[`• ${String(row.name)}`];
     if(typeof row.promoTotal==='number'){
       used.push(`promo:${row.id}:promoTotal`);
