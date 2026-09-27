@@ -809,7 +809,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   let speechAct = VALID_SPEECH_ACTS.includes(parsed.speechAct as SemanticSpeechAct)
     ? parsed.speechAct as SemanticSpeechAct
     : 'unknown';
-  const domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
+  let domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
   const parsedAction = VALID_ACTIONS.includes(parsed.action as SemanticAction) ? parsed.action as SemanticAction : 'unknown';
   const taskDirective = VALID_TASK_DIRECTIVES.includes(parsed.taskDirective as SemanticTaskDirective)
     ? parsed.taskDirective as SemanticTaskDirective
@@ -828,6 +828,14 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   if (speechAct === 'request' && action === 'provide_information'
       && informationNeed === 'none' && taskDirective === undefined) {
     speechAct = 'statement';
+  }
+
+  // Closed-field coherence repair: an explicit incident_report already says
+  // WHAT KIND of real-world event this is. Missing place/resource detail may
+  // still require clarification, but it must not erase incident ownership.
+  // Repair only UNKNOWN here; do not override a concrete business domain.
+  if (speechAct === 'incident_report' && domain === 'unknown') {
+    domain = 'incident';
   }
   const confidenceRaw = Number(parsed.confidence);
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
