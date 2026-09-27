@@ -190,6 +190,16 @@ function hasResolvedTaskReference(turn: SemanticTurn): boolean {
 function turnContributesToActiveTask(turn: SemanticTurn, task: ActiveTask): boolean {
   if (turn.action === 'cancel' || COMMIT_ACTIONS.has(turn.action)) return true;
 
+  // A read-only information request owns any date/time/party-size values it
+  // carries as QUERY PARAMETERS, not as booking-slot mutations. Production
+  // example: "พรุ่งนี้ม้าตัวไหนว่างช่วง 16:30" must check availability and
+  // must not fill the unfinished horse booking's time then ask for duration.
+  // A bare slot-shaped ask with no explicit information need ("บ่ายสามได้ปะ")
+  // remains a hybrid continuation for backwards-compatible task filling.
+  if (SIDE_QUESTION_ACTIONS.has(turn.action) && (turn.informationNeed ?? 'none') !== 'none') {
+    return false;
+  }
+
   // Hybrid read-only questions may also state a real task slot ("บ่ายสามได้ปะ").
   if (providesTaskSlotValue(turn.entities)) return true;
 
@@ -359,11 +369,11 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     // carries a concrete slot/reference to establish what is being corrected.
     // "just asking, I did not ask you to book" must suppress progression,
     // never manufacture a new preorder/booking task from an empty correction.
-    if (
-      turn.action === 'correct_previous'
-      && Object.keys(taskSlotPatch(turn.entities)).length === 0
-      && !hasResolvedTaskReference(turn)
-    ) {
+    if (turn.action === 'correct_previous') {
+      // A correction without an active/resumed working task corrects
+      // conversational meaning, not a nonexistent booking. Concrete values
+      // like partySize must never manufacture a new reservation task merely
+      // because the customer corrected an earlier recommendation/context.
       reasons.push('no_active_task');
       return {container,reasons};
     }
@@ -392,7 +402,11 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       reasons.push('discovery_only');
       return { container, reasons };
     }
-  } else if (container.activeTask!.domain === turn.domain && Object.keys(turn.entities).length) {
+  } else if (
+    container.activeTask!.domain === turn.domain
+    && Object.keys(turn.entities).length
+    && turnContributesToActiveTask(turn, container.activeTask!)
+  ) {
     const slotPatch = taskSlotPatch(turn.entities);
     if (Object.keys(slotPatch).length) {
       container = applyTaskStateEvent(container, {
@@ -478,10 +492,16 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'restaurant', needs: ['catalog', 'recommendations_input'] }];
       return [];
     case 'activity':
-      if (turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
-      if (turn.intent === 'activity_inventory_count') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
-      if (turn.intent === 'ask_price') return [{ ...base, domain: 'activity', needs: ['price'] }];
-      if (turn.action === 'compare' || turn.action === 'ask') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
+      // Route mutable questions from the CLOSED informationNeed facet, never
+      // a free-form model intent label. Resource availability is not the same
+      // thing as the status of an existing booking.
+      if (turn.informationNeed === 'availability') return [{ ...base, domain: 'activity', needs: ['availability'] }];
+      if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'activity', needs: ['schedule'] }];
+      if (turn.informationNeed === 'price') return [{ ...base, domain: 'activity', needs: ['price'] }];
+      if (turn.informationNeed === 'inventory' || turn.intent === 'activity_inventory_count') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
+      if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
+      if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
+      if (turn.action === 'compare' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
       if (turn.action === 'discover') return [{ ...base, domain: 'activity', needs: ['catalog'] }];
       // Authoritative resourceCode/duration resolution (see
       // _activity-catalog-policy.ts, applied in processDialogTurnDetailed
@@ -495,12 +515,16 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       }
       return [];
     case 'stay':
-      if (turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
+      if (turn.informationNeed === 'availability') return [{ ...base, domain: 'stay', needs: ['availability'] }];
+      if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'stay', needs: ['schedule'] }];
+      if (turn.informationNeed === 'price') return [{ ...base, domain: 'stay', needs: ['price'] }];
+      if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
+      if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'stay', needs: ['catalog', 'availability'] }];
       if (task && task.missingFields.length === 0) return [{ ...base, domain: 'stay', needs: ['availability'] }];
       return [];
     case 'promotion':
-      if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'promotion', needs: ['promotion_eligibility'] }];
+      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'promotion', needs: ['promotion_eligibility'] }];
       return [];
     case 'otop':
       if (turn.action === 'status') return [{ ...base, domain: 'otop', needs: ['order_status'] }];
