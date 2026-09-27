@@ -1830,10 +1830,10 @@ export function resolveRestaurantPreorderProposalArgs(
     date:typeof value.date==='string'?value.date:'',
     time:typeof value.time==='string'?value.time:'',
     items,
-    customerName:typeof value.customerName==='string'?value.customerName:'',
-    ...(typeof value.phone==='string'&&value.phone?{phone:value.phone}:{}),
-    ...(typeof value.email==='string'&&value.email?{email:value.email}:{}),
-    ...(typeof value.note==='string'&&value.note?{note:value.note}:{}),
+    customerName:typeof value.customerName==='string'?value.customerName.trim():'',
+    ...(typeof value.phone==='string'&&value.phone.trim()?{phone:value.phone.trim()}:{}),
+    ...(typeof value.email==='string'&&value.email.trim()?{email:value.email.trim()}:{}),
+    ...(typeof value.note==='string'&&value.note.trim()?{note:value.note.trim()}:{}),
   };
 }
 
