@@ -1206,16 +1206,29 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   );
   if (structuredEntityNames.size && context.recentEntities.length) {
     references = references.map(reference => {
-      if (
-        !reference.refersToPriorContext
-        || !['entity_selection','previous_selection','selected_entity'].includes(reference.type)
-      ) return reference;
+      if (!reference.refersToPriorContext) return reference;
+
+      // The model owns language meaning, so a selection turn may legitimately
+      // invent a descriptive reference type ("the brown-and-white one") while
+      // ALSO emitting the canonical structured entity it understood
+      // (e.g. horseName="ภาราดร"). Reference type labels are free-form; they
+      // must not become a hidden keyword gate. When the structured entity name
+      // matches exactly ONE real recent entity, binding that canonical id is a
+      // bounded context lookup, not language inference. For non-selection
+      // turns keep the narrower historical reference-type guard unchanged.
+      const selectionTurn = action === 'confirm' || speechAct === 'selection';
+      const knownSingleEntityReference = [
+        'entity_selection','previous_selection','selected_entity',
+      ].includes(reference.type);
+      if (!selectionTurn && !knownSingleEntityReference) return reference;
+
       const matches = context.recentEntities.filter(entity => structuredEntityNames.has(entity.name));
       if (matches.length !== 1) return reference;
       return {
         ...reference,
         resolvedEntityId:matches[0]!.id,
         resolvedEntityIds:undefined,
+        ambiguous:undefined,
       };
     });
   }
