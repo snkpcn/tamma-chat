@@ -273,6 +273,8 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
       if(!['activity','ecosystem'].includes(t.domain)) errors.push(`domain=${t.domain}`);
       if(t.action!=='recommend') errors.push(`action=${t.action}`);
       if(result.turn.dialogDecision.mode==='collect_field') errors.push('recommendation hijacked into task collection');
+      if(result.status==='composed' && !hasAny(response,['ขี่ม้า','ยิงธนู'])) errors.push('light-activity response failed to surface verified activities');
+      if(result.status==='composed' && /ภาราดร\s*\/\s*ทองไทย/u.test(response)) errors.push('light-activity response collapsed into horse asset list');
       break;
     case 12:
       if(t.speechAct!=='correction' && t.action!=='correct_previous') errors.push(`not correction: speechAct=${t.speechAct} action=${t.action}`);
@@ -289,11 +291,15 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
       if(t.informationNeed!=='availability' && t.action!=='status') errors.push(`conditional fallback not availability/status: action=${t.action} need=${t.informationNeed}`);
       if(['confirm','book','order'].includes(t.action)) errors.push(`conditional fallback mutated selection: ${t.action}`);
       if(result.status==='composed' && /ล็อกตัวเลือก|เลือกภาราดรให้แล้ว|จอง.*ภาราดร/u.test(response)) errors.push('conditional response prematurely selected/booked primary horse');
+      if(result.status==='composed' && /กิจกรรมที่มีตอนนี้/u.test(response)) errors.push('conditional availability response regressed to unrelated catalog dump');
+      if(result.status==='composed' && (!response.includes('ภาราดร') || !response.includes('ทองไทย'))) errors.push('conditional availability response dropped named primary/fallback horses');
       break;
     case 15:
       if(t.domain!=='stay') errors.push(`domain=${t.domain}`);
       if(t.informationNeed!=='availability') errors.push(`need=${t.informationNeed}`);
       if(result.turn.dialogDecision.mode==='collect_field') errors.push('room availability hijacked into booking');
+      if(result.status==='composed' && /ขี่ม้า|ภาราดร|ทองไทย/u.test(response)) errors.push('stay clarification contaminated by stale activity context');
+      if(result.status==='composed' && t.needsClarification && !/วัน|เข้าพัก|เช็กอิน/u.test(response)) errors.push('stay availability clarification did not ask the missing stay-specific detail');
       break;
     case 16:
       if(t.intent!=='summarize_active_task' && !hasAny(t.normalizedMeaning??'', ['สรุป','summary'])) errors.push(`summary intent=${t.intent}`);
