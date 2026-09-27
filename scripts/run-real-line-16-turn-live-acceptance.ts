@@ -258,6 +258,7 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
       if(t.domain!=='activity') errors.push(`domain=${t.domain}`);
       if(t.informationNeed!=='price') errors.push(`need=${t.informationNeed}`);
       if(result.turn.dialogDecision.mode==='collect_field') errors.push('price query hijacked into slot collection');
+      if(t.needsClarification || result.turn.dialogDecision.mode==='clarify') errors.push('price query ignored the same-domain selected activity context');
       break;
     case 9:
       if(t.domain!=='promotion' && t.domain!=='restaurant') errors.push(`domain=${t.domain}`);
