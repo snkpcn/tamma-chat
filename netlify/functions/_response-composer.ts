@@ -11,7 +11,7 @@
 import type { BrainChannel } from './_thongthai-brain-v3';
 import type { SemanticTurn } from './_semantic-interpreter';
 import type { DialogDecision } from './_dialog-manager';
-import type { KnowledgeBundle, GroundedFact } from './_knowledge-resolver';
+import type { KnowledgeBundle, GroundedFact, KnowledgeNeed, KnowledgeRequest } from './_knowledge-resolver';
 import {
   planModelDegradation,
   type DegradationPlan,
@@ -31,7 +31,7 @@ import {
   renderJourneyPlan,
 } from './_human-grounded-response';
 
-export const RESPONSE_COMPOSER_VERSION = 'response-composer-v1';
+export const RESPONSE_COMPOSER_VERSION = 'response-composer-v2';
 const MAX_FACTS_IN_PROMPT = 100;
 const PRICE_QUESTION_RE = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/iu;
 const HOW_IT_WORKS_RE = /(?:ยังไง|อย่างไร|ไง|วิธี|ทำยังไง|เล่นยังไง|ขี่.*ไง)/iu;
@@ -737,10 +737,104 @@ export function composeMembershipInformationResponse(input: ResponseComposerInpu
 
 type UnknownKnowledgeCondition = 'source_unavailable' | 'fact_unknown';
 
+type UnknownKnowledgeTarget = {
+  request: KnowledgeRequest;
+  need: KnowledgeNeed;
+};
+
+/** PR G: translate the Semantic Interpreter's customer-facing information
+ * need into the Knowledge Resolver's source taxonomy. These are two separate
+ * contracts on purpose; the response layer must bridge them explicitly
+ * rather than comparing unlike enum values and silently falling back to
+ * generic copy. */
+function semanticPreferredKnowledgeNeeds(input: ResponseComposerInput): KnowledgeNeed[] {
+  const turn = input.semanticTurn;
+  if (!turn) return [];
+  switch (turn.informationNeed ?? 'none') {
+    case 'availability': return ['availability'];
+    case 'price': return ['price'];
+    case 'schedule': return ['schedule'];
+    case 'inventory': return ['inventory'];
+    case 'catalog': return ['catalog'];
+    case 'ingredients': return ['ingredients'];
+    case 'recommendation': return ['recommendations_input'];
+    case 'policy': return ['stable_policy'];
+    case 'transaction_status':
+      if (turn.domain === 'restaurant') return ['order_status'];
+      if (turn.domain === 'membership') return ['membership_status'];
+      return ['booking_status'];
+    case 'capacity':
+    case 'amenities':
+    case 'safety':
+    case 'suitability':
+    case 'equipment':
+      return ['entity_details'];
+    default:
+      return [];
+  }
+}
+
+function degradedKnowledgePairs(
+  input: ResponseComposerInput,
+  condition: UnknownKnowledgeCondition,
+): Set<string> {
+  const degraded = new Set<string>();
+  for (const bundle of input.knowledgeBundles) {
+    const sourcedNeeds = new Set(bundle.sources.map(source => source.need));
+    for (const source of bundle.sources) {
+      if (source.status !== 'unavailable') continue;
+      const matches = condition === 'source_unavailable'
+        ? source.reason !== 'no_source_registered'
+        : source.reason === 'no_source_registered';
+      if (matches) degraded.add(`${bundle.domain}\u0000${source.need}`);
+    }
+    if (condition === 'fact_unknown') {
+      for (const need of bundle.missing) {
+        if (!sourcedNeeds.has(need)) degraded.add(`${bundle.domain}\u0000${need}`);
+      }
+    }
+  }
+  return degraded;
+}
+
+/** Pick the request that actually failed, not merely knowledgeRequests[0].
+ * Compound turns can have a healthy catalog request followed by failed live
+ * availability. Choosing the first request in that case produces fluent but
+ * wrong-topic copy. */
+function selectUnknownKnowledgeTarget(
+  input: ResponseComposerInput,
+  condition: UnknownKnowledgeCondition,
+): UnknownKnowledgeTarget | null {
+  const candidates = input.dialogDecision.knowledgeRequests.flatMap(request =>
+    request.needs.map(need => ({ request, need }))
+  );
+  if (!candidates.length) return null;
+
+  const degraded = degradedKnowledgePairs(input, condition);
+  const preferred = new Set(semanticPreferredKnowledgeNeeds(input));
+  const pairKey = (target: UnknownKnowledgeTarget) => `${target.request.domain}\u0000${target.need}`;
+
+  return candidates.find(target => degraded.has(pairKey(target)) && preferred.has(target.need))
+    ?? candidates.find(target => degraded.has(pairKey(target)))
+    ?? candidates.find(target => preferred.has(target.need))
+    ?? candidates[0]!;
+}
+
+function mergedKnowledgeEntities(input: ResponseComposerInput, request: KnowledgeRequest): Record<string, unknown> {
+  const task = input.dialogDecision.taskStateContainer.activeTask;
+  const taskSlots = task?.domain === request.domain ? task.slots : {};
+  const semanticEntities = input.semanticTurn?.domain === request.domain ? input.semanticTurn.entities : {};
+  // Current-turn semantic entities are most specific, then the normalized
+  // request, then prior task slots. This keeps a correction such as a new
+  // date/time from being overwritten by stale task state.
+  return { ...taskSlots, ...request.entities, ...semanticEntities };
+}
+
 function firstCustomerFacingEntity(entities: Record<string, unknown>): string | null {
   const keys = [
     'itemName', 'menuItemName', 'menuItem', 'productName', 'activityName',
-    'serviceName', 'roomType', 'horseName', 'resourceName', 'promotionName', 'name',
+    'accommodationName', 'serviceName', 'roomType', 'horseName', 'resourceName',
+    'promotionName', 'name',
   ];
   for (const key of keys) {
     const value = entities[key];
@@ -749,17 +843,50 @@ function firstCustomerFacingEntity(entities: Record<string, unknown>): string | 
   return null;
 }
 
+function resolvedEntityName(input: ResponseComposerInput, domain: string): string | null {
+  for (const bundle of input.knowledgeBundles) {
+    if (bundle.domain !== domain) continue;
+    const entity = bundle.entities.find(candidate => candidate.canonical && candidate.name.trim());
+    if (entity) return entity.name.trim();
+  }
+  const task = input.dialogDecision.taskStateContainer.activeTask;
+  if (task?.domain === domain) {
+    const selected = task.selectedEntities.find(entity => entity.name.trim());
+    if (selected) return selected.name.trim();
+  }
+  return null;
+}
+
 function thaiWhen(entities: Record<string, unknown>): string {
   const date = typeof entities.date === 'string' ? entities.date.trim() : '';
+  const checkIn = typeof entities.checkIn === 'string' ? entities.checkIn.trim() : '';
+  const checkOut = typeof entities.checkOut === 'string' ? entities.checkOut.trim() : '';
+  const endDate = typeof entities.endDate === 'string' ? entities.endDate.trim() : '';
   const time = typeof entities.time === 'string' ? entities.time.trim() : '';
-  if (date && time) return `${date} เวลา ${time}`;
-  if (date) return date;
+  const from = date || checkIn;
+  const to = checkOut || endDate;
+  const range = from && to && to !== from ? `${from} ถึง ${to}` : from;
+  if (range && time) return `${range} เวลา ${time}`;
+  if (range) return range;
   if (time) return `เวลา ${time}`;
   return '';
 }
 
-function unknownSubject(domain: string, named: string | null): string {
+function unknownSubject(domain: string, named: string | null, language: ResponseLanguage): string {
   if (named) return named;
+  if (language !== 'th') {
+    const fallback: Record<string, string> = {
+      restaurant:'this restaurant request',
+      activity:'this activity',
+      stay:'this stay',
+      promotion:'this promotion',
+      otop:'this product',
+      cafe:'this item',
+      membership:'this membership request',
+      journey:'this plan',
+    };
+    return fallback[domain] ?? 'this request';
+  }
   const fallback: Record<string, string> = {
     restaurant:'เมนูนี้',
     activity:'กิจกรรมนี้',
@@ -773,89 +900,141 @@ function unknownSubject(domain: string, named: string | null): string {
   return fallback[domain] ?? 'เรื่องนี้';
 }
 
-/**
- * Human fallback for a meaning that is already known but whose mutable fact
- * cannot be verified. This is RENDERING ONLY: it never interprets user text.
- * Domain + information need + entities were decided upstream by the semantic
- * brain and deterministic dialog/knowledge layers.
- */
 function humanKnowledgeUnknownCopy(
   input: ResponseComposerInput,
   condition: UnknownKnowledgeCondition,
 ): string | null {
-  const request = input.dialogDecision.knowledgeRequests.find(candidate => candidate.needs.length > 0);
-  if (!request) return null;
+  const target = selectUnknownKnowledgeTarget(input, condition);
+  if (!target) return null;
 
-  const need = request.needs[0];
-  const named = firstCustomerFacingEntity(request.entities);
-  const subject = unknownSubject(request.domain, named);
+  const { request, need } = target;
+  const entities = mergedKnowledgeEntities(input, request);
+  const named = firstCustomerFacingEntity(entities) ?? resolvedEntityName(input, request.domain);
+  const subject = unknownSubject(request.domain, named, input.language);
+  const when = thaiWhen(entities);
 
   if (input.language !== 'th') {
-    const when = thaiWhen(request.entities);
-    const timing = when ? ` (${when})` : '';
+    const timing = when ? ` for ${when}` : '';
     if (need === 'availability') return `I can't verify live availability${timing} right now, so I don't want to guess.`;
     if (need === 'price') return `I can't verify the current price for ${subject} right now, so I don't want to guess.`;
     if (need === 'schedule') return `I can't verify the current schedule${timing} right now, so I don't want to guess.`;
+    if (need === 'inventory') return `I can't verify the current inventory for ${subject} right now, so I don't want to guess.`;
+    if (need === 'stable_policy') return `I don't have a verified policy answer for ${subject} yet, so I don't want to guess.`;
+    if (['booking_status','order_status','membership_status'].includes(need)) {
+      return `I can't verify the latest status for ${subject} right now, so I don't want to guess.`;
+    }
     return condition === 'source_unavailable'
       ? `I can't verify the latest information for ${subject} right now, so I don't want to guess.`
       : `I don't have a verified answer for ${subject} yet, so I don't want to guess.`;
   }
 
-  const when = thaiWhen(request.entities);
-  const lead = when ? `${when} ` : '';
+  const timing = when ? `สำหรับ ${when}` : '';
+  const cannotCheck = condition === 'source_unavailable';
 
   if (need === 'availability') {
     if (request.domain === 'restaurant') {
-      return `${lead}ตอนนี้ทองไทยยังเช็กโต๊ะว่างแบบเรียลไทม์ไม่ได้ครับ เลยยังบอกไม่ได้ว่าเต็มหรือว่าง ไม่อยากเดาให้ผิดครับ`;
+      return cannotCheck
+        ? `ตอนนี้ทองไทยยังเช็กโต๊ะว่าง${timing ? ` ${timing}` : ''}แบบสดให้ไม่ได้ครับ เลยยังยืนยันไม่ได้ว่าว่างหรือเต็ม และไม่ขอเดาให้ผิด`
+        : `โต๊ะ${timing ? ` ${timing}` : ''}ตอนนี้ยังไม่มีข้อมูลว่างหรือเต็มที่ยืนยันได้ครับ ทองไทยเลยไม่ขอเดา`;
     }
     if (request.domain === 'stay') {
-      return `${lead}ตอนนี้ทองไทยยังเช็กห้องว่างแบบเรียลไทม์ไม่ได้ครับ เลยยังบอกไม่ได้ว่ามีห้องเหลือไหม ไม่อยากเดาให้ผิดครับ`;
+      return cannotCheck
+        ? `ตอนนี้ทองไทยยังเช็กห้องว่าง${timing ? ` ${timing}` : ''}แบบสดให้ไม่ได้ครับ เลยยังยืนยันไม่ได้ว่ามีห้องเหลือไหม และไม่ขอเดาให้ผิด`
+        : `ห้องพัก${timing ? ` ${timing}` : ''}ตอนนี้ยังไม่มีข้อมูลว่างที่ยืนยันได้ครับ ทองไทยเลยไม่ขอเดา`;
     }
     if (request.domain === 'activity') {
-      return `${lead}ตอนนี้ทองไทยยังเช็กคิวว่างของ${subject}ไม่ได้ครับ เลยยังบอกไม่ได้ว่าว่างหรือเต็ม ไม่อยากเดาให้ผิดครับ`;
+      return cannotCheck
+        ? `ตอนนี้ทองไทยยังเช็กคิวว่างของ${subject}${timing ? ` ${timing}` : ''}แบบสดให้ไม่ได้ครับ เลยยังยืนยันไม่ได้ว่าว่างหรือเต็ม และไม่ขอเดาให้ผิด`
+        : `คิวของ${subject}${timing ? ` ${timing}` : ''}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ ทองไทยเลยไม่ขอเดา`;
     }
-    return `${lead}ตอนนี้ทองไทยยังเช็กความว่างล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากเดาให้ผิด`;
+    return cannotCheck
+      ? `ตอนนี้ทองไทยยังเช็กความว่างล่าสุดของ${subject}${timing ? ` ${timing}` : ''}ไม่ได้ครับ เลยไม่ขอเดาให้ผิด`
+      : `ความว่างของ${subject}${timing ? ` ${timing}` : ''}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่ขอเดา`;
   }
 
   if (need === 'schedule') {
-    const target = request.domain === 'activity' ? 'รอบกิจกรรม' : `ตารางเวลาของ${subject}`;
-    return `${lead}ตอนนี้ทองไทยยังเช็ก${target}ที่อัปเดตไม่ได้ครับ เลยไม่อยากเดาเวลาให้ผิด`;
+    const targetName = request.domain === 'activity' ? `รอบของ${subject}` : `ตารางเวลาของ${subject}`;
+    return cannotCheck
+      ? `ตอนนี้ทองไทยยังเช็ก${targetName}${timing ? ` ${timing}` : ''}ที่อัปเดตให้ไม่ได้ครับ เลยไม่ขอเดาเวลาให้ผิด`
+      : `${targetName}${timing ? ` ${timing}` : ''}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่ขอเดาเวลา`;
   }
 
   if (need === 'price') {
-    if (condition === 'source_unavailable') {
-      return `ตอนนี้ทองไทยยังเช็กราคาล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากเดาราคาให้ผิด`;
-    }
-    return `ราคาของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากเดาราคาให้ผิด`;
+    return cannotCheck
+      ? `ตอนนี้ทองไทยยังเช็กราคาล่าสุดของ${subject}ให้ไม่ได้ครับ เลยไม่ขอเดาราคาให้ผิด`
+      : `ราคาของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่ขอเดาราคา`;
   }
 
   if (need === 'inventory') {
-    return `ตอนนี้ทองไทยยังเช็กจำนวน${subject}ที่มีจริงไม่ได้ครับ เลยไม่อยากเดาจำนวนให้ผิด`;
+    return cannotCheck
+      ? `ตอนนี้ทองไทยยังเช็กจำนวน${subject}ที่มีจริงให้ไม่ได้ครับ เลยไม่ขอเดาจำนวนให้ผิด`
+      : `จำนวน${subject}ที่มีอยู่ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่ขอเดาจำนวน`;
   }
 
   if (need === 'catalog') {
-    return `ตอนนี้ทองไทยยังเช็กรายการล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากบอกข้อมูลที่อาจเก่า`;
+    return cannotCheck
+      ? `ตอนนี้ทองไทยยังเช็กรายการล่าสุดของ${subject}ให้ไม่ได้ครับ เลยไม่อยากบอกข้อมูลที่อาจเก่า`
+      : `รายการของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากเดา`;
   }
 
   if (need === 'ingredients') {
-    return `ส่วนผสมของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครบครับ เลยไม่อยากเดา โดยเฉพาะถ้าเกี่ยวกับของที่แพ้หรือของที่งด`;
+    return `ส่วนผสมของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครบครับ เลยไม่ขอเดา โดยเฉพาะถ้าเกี่ยวกับของที่แพ้หรือของที่งด`;
   }
 
-  if (need === 'policy') {
-    return `เรื่องเงื่อนไขของ${subject}ตอนนี้ทองไทยยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากตอบเดา ๆ`;
+  if (need === 'stable_policy') {
+    return `เงื่อนไขของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่ขอตอบเดา ๆ`;
   }
 
-  if (need === 'transaction_status') {
-    return `ตอนนี้ทองไทยยังเช็กสถานะล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากบอกสถานะผิด`;
+  if (['booking_status','order_status','membership_status'].includes(need)) {
+    return cannotCheck
+      ? `ตอนนี้ทองไทยยังเช็กสถานะล่าสุดของ${subject}ให้ไม่ได้ครับ เลยไม่ขอบอกสถานะเดา ๆ`
+      : `สถานะของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่ขอเดา`;
   }
 
-  if (need === 'recommendation') {
-    return `ตอนนี้ข้อมูลที่ยืนยันได้ยังไม่พอให้ทองไทยแนะนำ${subject}แบบมั่นใจครับ เลยไม่อยากเดาให้`;
+  if (need === 'recommendations_input') {
+    return `ตอนนี้ข้อมูลที่ยืนยันได้ยังไม่พอให้ทองไทยแนะนำ${subject}แบบมั่นใจครับ เลยไม่ขอเดาให้`;
+  }
+
+  if (need === 'promotion_eligibility') {
+    return cannotCheck
+      ? `ตอนนี้ทองไทยยังเช็กสิทธิ์โปรโมชันของ${subject}ให้ไม่ได้ครับ เลยไม่ขอเดาว่าใช้ได้หรือไม่ได้`
+      : `สิทธิ์โปรโมชันของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่ขอเดา`;
   }
 
   return condition === 'source_unavailable'
-    ? `ตอนนี้ทองไทยยังเช็กข้อมูลล่าสุดของ${subject}ไม่ได้ครับ เลยไม่อยากเดาให้ผิด`
-    : `${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากตอบเดา ๆ`;
+    ? `ตอนนี้ทองไทยยังเช็กข้อมูลล่าสุดของ${subject}ให้ไม่ได้ครับ เลยไม่ขอเดาให้ผิด`
+    : `${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่ขอตอบเดา ๆ`;
+}
+
+/** PR G: for a pure read/status/discovery turn, a known knowledge failure is
+ * customer-visible truth and must be phrased before a domain renderer can
+ * replace it with a domain-specific template. Recommendation/comparison and
+ * transactional turns still keep their richer existing renderers because
+ * they can legitimately combine partial grounded facts with the failed
+ * source. */
+function shouldLeadWithHumanKnowledgeGap(input: ResponseComposerInput): boolean {
+  if (!['source_unavailable','fact_unknown'].includes(input.degradation.condition)) return false;
+  if (input.operationalOutcome?.executed) return false;
+  if (['collect_field','propose_action','execute_tool'].includes(input.dialogDecision.mode)) return false;
+  const action = input.semanticTurn?.action;
+  return action === 'ask' || action === 'status' || action === 'discover';
+}
+
+function composeHumanKnowledgeGapResponse(input: ResponseComposerInput): ComposedResponse | null {
+  if (!shouldLeadWithHumanKnowledgeGap(input)) return null;
+  const condition = input.degradation.condition as UnknownKnowledgeCondition;
+  const message = humanKnowledgeUnknownCopy(input, condition);
+  if (!message) return null;
+  assertOperationalClaimSafety(message, input.operationalOutcome);
+  return {
+    message:polishCustomerMessage(message, input.channel),
+    mode:'deterministic',
+    usedFactKeys:[],
+    composerVersion:RESPONSE_COMPOSER_VERSION,
+    bibleVersion:THONGTHAI_BIBLE_VERSION,
+    channel:input.channel,
+    language:input.language,
+  };
 }
 
 const TASK_SUMMARY_FIELDS_TH: Record<string, string> = {
@@ -1151,6 +1330,14 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
   // OpenAI is a semantic supervisor, not the customer-facing voice.
   // Customer wording is therefore rendered only from already-decided,
   // already-grounded state. No model call is permitted in this layer.
+  //
+  // PR G: a pure structured knowledge gap is itself authoritative truth.
+  // Render that centrally before domain copy so SOURCE_UNAVAILABLE and
+  // FACT_UNKNOWN cannot be mistaken for VERIFIED_EMPTY or an unrelated
+  // first knowledge request.
+  const knowledgeGap = composeHumanKnowledgeGapResponse(input);
+  if (knowledgeGap) return knowledgeGap;
+
   const grounded = composeGroundedDeterministicResponse(input);
   if (grounded) return grounded;
   return composeDeterministicResponse(input);
