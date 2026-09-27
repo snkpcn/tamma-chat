@@ -4,6 +4,7 @@ import {
   buildSemanticInterpreterPrompt,
   emptySemanticContext,
   SEMANTIC_INTERPRETER_VERSION,
+  parseSemanticTurnResponse,
 } from '../netlify/functions/_semantic-interpreter';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
 
@@ -41,4 +42,25 @@ test('semantic-v29 terminal audit separates repair from intentional change', () 
 
 test('semantic-v29 version is explicit', () => {
   assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
+});
+
+
+test('incident_report with unknown domain is repaired to incident without hiding clarification', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'lost pet nearby',
+    speechAct:'incident_report',
+    domain:'unknown',
+    intent:'report_missing_pet',
+    action:'provide_information',
+    informationNeed:'none',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.96,
+    needsClarification:true,
+    clarificationReason:'exact_location_missing',
+  }), emptySemanticContext());
+  assert.equal(turn.domain, 'incident');
+  assert.equal(turn.speechAct, 'incident_report');
+  assert.equal(turn.needsClarification, true);
 });
