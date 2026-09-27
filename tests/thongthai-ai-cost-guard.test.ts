@@ -14,6 +14,11 @@ import {
 } from '../netlify/functions/_semantic-interpreter';
 import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
 import { deterministicNeedsLanguageRefinement } from '../netlify/functions/_thongthai-one-mind-orchestrator';
+import {
+  AiBudgetBlockedError,
+  finalizeAiCall,
+  reserveAiCall,
+} from '../netlify/functions/_ai-cost-ledger';
 import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
 
 function source(path:string):string {
@@ -157,7 +162,7 @@ test('20/50/100-turn simulations cannot reserve beyond $0.05 per conversation',(
     let calls=0;
     for(let turn=0;turn<turns;turn+=1){
       if(turn%3!==0) continue;
-      const reservation=reserveWorstCaseCostUsd('gpt-5.6-terra',2_500,policy.semanticMaxOutputTokens);
+      const reservation=reserveWorstCaseCostUsd('gpt-5.6-terra',policy.absoluteInputTokens,policy.semanticMaxOutputTokens);
       if(calls>=policy.maxCallsPerConversation||cost+reservation>policy.maxConversationCostUsd) continue;
       cost+=reservation;
       calls+=1;
@@ -184,7 +189,7 @@ test('100-conversation synthetic traffic has zero cap violations and reports sta
       if(!semanticNeeded) continue;
       const inputTokens=1_400+((conversation*97+turn*131)%2_400);
       const outputTokens=120+((conversation+turn)%180);
-      const reservation=reserveWorstCaseCostUsd('gpt-5.6-terra',inputTokens,policy.semanticMaxOutputTokens);
+      const reservation=reserveWorstCaseCostUsd('gpt-5.6-terra',policy.absoluteInputTokens,policy.semanticMaxOutputTokens);
       if(calls>=policy.maxCallsPerConversation||cost+reservation>policy.maxConversationCostUsd) continue;
       cost+=calculateAiCostUsd('gpt-5.6-terra',{inputTokens,cachedInputTokens:0,outputTokens});
       calls+=1;
@@ -215,6 +220,70 @@ test('100-conversation synthetic traffic has zero cap violations and reports sta
   assert.ok(report.callsPerTurn<=1);
   assert.ok(report.zeroCallTurnPct>50);
   console.log('THONGTHAI_AI_COST_STRESS',JSON.stringify(report));
+});
+
+
+test('persistent ledger replays a completed semantic result for the same event without a second paid call',async()=>{
+  const originalFetch=global.fetch;
+  const originalUrl=process.env.SUPABASE_URL;
+  const originalKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://cost-ledger.test';
+  process.env.SUPABASE_SERVICE_ROLE_KEY='test-service-role';
+  let row:{state:Record<string,unknown>;updated_at:string}|null=null;
+  global.fetch=(async(_url:RequestInfo|URL,init?:RequestInit)=>{
+    const method=String(init?.method??'GET').toUpperCase();
+    if(method==='GET') return new Response(JSON.stringify(row?[row]:[]),{status:200});
+    const body=JSON.parse(String(init?.body??'{}')) as {state:Record<string,unknown>;updated_at:string};
+    row={state:body.state,updated_at:body.updated_at};
+    return new Response(JSON.stringify([row]),{status:200});
+  }) as typeof fetch;
+  try{
+    const context={
+      conversationId:'cost-conversation-1',guestDbId:'guest-1',channel:'line',
+      eventId:'line-event-1',callerLabel:'semantic-interpreter',
+    };
+    const first=await reserveAiCall(context,'gpt-5.6-terra',['stable doctrine','ข้อความลูกค้า'],400);
+    assert.equal(first.kind,'reserved');
+    if(first.kind!=='reserved') return;
+    await finalizeAiCall(first,{inputTokens:1_500,cachedInputTokens:500,outputTokens:150},'{"domain":"general"}',true);
+    const duplicate=await reserveAiCall(context,'gpt-5.6-terra',['stable doctrine','ข้อความลูกค้า'],400);
+    assert.equal(duplicate.kind,'replay');
+    if(duplicate.kind==='replay') assert.equal(duplicate.output,'{"domain":"general"}');
+    const ledger=(row?.state.aiCostLedger??{}) as {callCount?:number;events?:unknown[]};
+    assert.equal(ledger.callCount,1);
+    assert.equal(ledger.events?.length,1);
+  }finally{
+    global.fetch=originalFetch;
+    if(originalUrl===undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL=originalUrl;
+    if(originalKey===undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY=originalKey;
+  }
+});
+
+test('pre-call reservation blocks the network path when the next worst case could exceed the cap',async()=>{
+  const originalCap=process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD;
+  const originalUrl=process.env.SUPABASE_URL;
+  const originalKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalFetch=global.fetch;
+  process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD='0.001';
+  process.env.SUPABASE_URL='https://cost-ledger.test';
+  process.env.SUPABASE_SERVICE_ROLE_KEY='test-service-role';
+  let fetches=0;
+  global.fetch=(async()=>{fetches+=1;return new Response('[]',{status:200});}) as typeof fetch;
+  try{
+    await assert.rejects(
+      reserveAiCall({
+        conversationId:'cost-conversation-2',guestDbId:'guest-2',channel:'web',
+        eventId:'web-event-1',callerLabel:'semantic-interpreter',
+      },'gpt-5.6-terra',['prompt','message'],400),
+      (error:unknown)=>error instanceof AiBudgetBlockedError&&error.reason==='budget',
+    );
+    assert.equal(fetches,1,'only the ledger read is allowed; no OpenAI request exists in this layer');
+  }finally{
+    global.fetch=originalFetch;
+    if(originalCap===undefined) delete process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD; else process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD=originalCap;
+    if(originalUrl===undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL=originalUrl;
+    if(originalKey===undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY=originalKey;
+  }
 });
 
 test('source guard: reservation precedes fetch and customer production has no paid reviewer/retry loop',()=>{
