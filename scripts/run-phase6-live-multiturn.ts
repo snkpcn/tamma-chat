@@ -117,12 +117,31 @@ async function main():Promise<void>{
     assert.equal(committed.speechAct,'transaction_request');
   });
 
+  // Root-cause note (2026-09-27): this canary used to rely on
+  // 'bounded-sol-review-unresolved-reference' leaving its reference
+  // genuinely unresolved to force a review call. Once resolveReferences was
+  // fixed to trust bounded conversation evidence regardless of the model's
+  // reference.type spelling (see _semantic-interpreter.ts), that turn -- and
+  // several others in this file that carry real recentTurns/recentEntities --
+  // now correctly resolve without needing a second opinion, which is the
+  // intended behavior, not a regression. A live confirmed Sol call must not
+  // depend on incidental reference-resolution gaps elsewhere in this
+  // corpus, so this turn is deliberately given ZERO bounded evidence at all
+  // (no recentEntities, recentTurns, rollingSummary, or lastRecommendationReference)
+  // while still pointing at prior context -- nothing can resolve it, so the
+  // primary model's own confidence must stay low regardless of any future
+  // reference-resolution fix.
+  await check('bounded-sol-review-genuinely-unresolvable-reference',async()=>{
+    const result=await interpretSemanticTurnForCertification('เอาอันเดิมนั่นแหละเหมือนที่คุยกันไว้',emptySemanticContext());
+    assert.ok(result.confidence<0.72||result.needsClarification,'a reference with zero bounded evidence must stay low-confidence or ask for clarification, never guess');
+  });
+
   await check('bounded-sol-review-observed',async()=>{
     assert.ok(counts.review>0,'at least one structurally weak/contextual turn must exercise live Sol review');
     assert.ok(counts.review<counts.primary,'Sol must remain bounded and must not run on every Terra turn');
   });
 
-  const total=7;
+  const total=8;
   originalLog(JSON.stringify({
     kind:'PHASE6_LIVE_MULTITURN_SEMANTIC_ACCEPTANCE',
     total,pass:passed,failed:failures.length,
