@@ -1743,7 +1743,8 @@ export function resolveSupervisedStayCutover(
  * This function deliberately has no message/request parameter. */
 export type SupervisedRestaurantCutoverDecision =
   | { kind:'respond'; response:ComposedResponse }
-  | { kind:'execute_preorder'; args:Record<string, unknown> };
+  | { kind:'execute_preorder'; args:Record<string, unknown> }
+  | { kind:'execute_table_booking'; args:Record<string, unknown> };
 
 /** Human Core PR F terminal Restaurant boundary. Once the OpenAI supervisor
  * owns Restaurant meaning, the turn cannot fall into legacy dietary/advisor
@@ -1760,10 +1761,14 @@ export function resolveSupervisedRestaurantCutover(
 
   const meaning = turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
   const proposal = turn.dialogDecision.actionProposal;
-  if (meaning.commitmentLevel === 'explicit_transaction'
-      && proposal?.toolName === 'create_restaurant_preorder'
-      && proposal.customerCommitPresent) {
-    return { kind:'execute_preorder', args:resolveRestaurantPreorderProposalArgs(proposal) };
+  if (meaning.commitmentLevel === 'explicit_transaction' && proposal?.customerCommitPresent) {
+    if (proposal.toolName === 'create_restaurant_preorder') {
+      return { kind:'execute_preorder', args:resolveRestaurantPreorderProposalArgs(proposal) };
+    }
+    if (proposal.toolName === 'create_booking'
+        && turn.dialogDecision.taskStateContainer.activeTask?.type === 'restaurant_booking') {
+      return { kind:'execute_table_booking', args:resolveRestaurantTableBookingProposalArgs(proposal) };
+    }
   }
 
   const composerInput = {
@@ -1788,6 +1793,23 @@ export function resolveSupervisedRestaurantCutover(
 
 /** Defense-in-depth sanitizer for a proposal already validated by Dialog
  * Manager/domain policy. No customer message enters this function. */
+export function resolveRestaurantTableBookingProposalArgs(
+  proposal: { validatedArgs:Record<string, unknown> },
+): Record<string, unknown> {
+  const args = proposal.validatedArgs;
+  const partySize = Number(args.partySize);
+  return {
+    ...args,
+    serviceType:'restaurant',
+    ...(typeof args.date === 'string' ? { date:args.date.trim() } : {}),
+    ...(typeof args.time === 'string' ? { time:args.time.trim() } : {}),
+    ...(Number.isInteger(partySize) ? { partySize } : {}),
+    ...(typeof args.customerName === 'string' ? { customerName:args.customerName.trim() } : {}),
+    ...(typeof args.phone === 'string' ? { phone:args.phone.trim() } : {}),
+    ...(typeof args.email === 'string' ? { email:args.email.trim() } : {}),
+  };
+}
+
 export function resolveRestaurantPreorderProposalArgs(
   proposal: { validatedArgs:Record<string, unknown> },
 ): Record<string, unknown> {
@@ -3551,6 +3573,57 @@ async function executeDeterministicActivityBooking(
   };
 }
 
+async function executeDeterministicRestaurantTableBooking(
+  args: Record<string, unknown>,
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse> {
+  // Human Core PR F: Restaurant table booking execution consumes only the
+  // Dialog Manager's structured proposal. request is transport context only.
+  const date = typeof args.date === 'string' ? args.date.trim() : '';
+  const time = typeof args.time === 'string' ? args.time.trim() : '';
+  const partySize = Number(args.partySize);
+  const customerName = typeof args.customerName === 'string' ? args.customerName.trim() : '';
+  const phone = typeof args.phone === 'string' ? args.phone.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)
+      || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(time)
+      || !Number.isInteger(partySize) || partySize < 1 || partySize > 50
+      || !customerName || !phone) {
+    return {
+      message:'ยังส่งคำขอจองโต๊ะไม่ได้ครับ ข้อมูลวัน เวลา จำนวนคน ชื่อ หรือเบอร์โทรยังไม่ครบ',
+      intent:'booking', contextUpdates:{}, journeyAction:{type:'none',journey:null},
+      suggestedActions:[], responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+    };
+  }
+
+  const firstResponse: BrainResponse = {
+    message:'', intent:'booking', contextUpdates:{}, journeyAction:{type:'none',journey:null},
+    suggestedActions:[], responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+  };
+  const [result] = await executeBrainTools(guestDbId, channel, [{
+    name:'create_booking',
+    args:{ ...args, serviceType:'restaurant', date, time, partySize, customerName, phone },
+  }], firstResponse, request);
+  if (!result?.ok) {
+    return { ...firstResponse, message:'ยังส่งคำขอจองโต๊ะไม่สำเร็จครับ ระบบยังไม่ยืนยันรอบที่ขอ จึงยังไม่ได้สร้างรายการจอง' };
+  }
+
+  let detail: Record<string, unknown> = {};
+  try { detail = JSON.parse(result.detail) as Record<string, unknown>; } catch { /* safe copy below */ }
+  const bookingCode = typeof detail.bookingCode === 'string' ? detail.bookingCode : '';
+  const status = typeof detail.status === 'string' ? detail.status : 'requested';
+  return {
+    ...firstResponse,
+    message:[
+      'รับคำขอจองโต๊ะเข้าระบบแล้วครับ ✅',
+      bookingCode ? `เลขที่คำขอ ${bookingCode}` : '',
+      `${date} เวลา ${time} · ${partySize} ท่าน`,
+      status === 'confirmed' ? 'สถานะ: ยืนยันแล้ว' : 'สถานะ: รอทีมงานยืนยัน',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 async function executeDeterministicRestaurantPreorder(
   args: Record<string, unknown>,
   request: BrainRequest,
@@ -4389,6 +4462,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const supervisedRestaurant = earlyOneMind
     ? resolveSupervisedRestaurantCutover(earlyOneMind, channel, request.language)
     : null;
+  if (supervisedRestaurant?.kind === 'execute_table_booking') {
+    const executed = await executeDeterministicRestaurantTableBooking(
+      supervisedRestaurant.args,
+      request,
+      guestDbId,
+      channel,
+    );
+    const polished = polishedResponse(executed, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
   if (supervisedRestaurant?.kind === 'execute_preorder') {
     const executed = await executeDeterministicRestaurantPreorder(
       supervisedRestaurant.args,
