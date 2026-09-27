@@ -1,6 +1,6 @@
 # Thongthai AI Cost Guard — Certification Checkpoint
 
-Source checkpoint: `29643792ba4e100a063a29cafbbdc2942347b02f`
+Source checkpoint: `91f57a812faf2e5acb6159397389f67a53b29821`
 
 ## Production contract
 
