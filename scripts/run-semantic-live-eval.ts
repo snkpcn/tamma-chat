@@ -1,3 +1,4 @@
+process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE = '1';
 // Phase L live semantic conformance runner.
 // NOT part of npm test / normal CI. Run only in an acceptance environment with
 // real provider credentials before Phase O.
@@ -44,7 +45,7 @@ if(!process.env.GEMINI_API_KEY&&!process.env.OPENAI_API_KEY){
 
   for(const evalCase of selected){
     try{
-      const turn=await interpretSemanticTurn(evalCase.message,evalCase.context??emptySemanticContext());
+      const turn=await interpretSemanticTurn(evalCase.message,evalCase.context??emptySemanticContext(,{ certificationMode:true }));
       const domainOk=turn.domain===evalCase.expected.domain;
       const actionOk=evalCase.expected.action===undefined||turn.action===evalCase.expected.action;
       const clarificationOk=evalCase.expected.needsClarification===undefined
