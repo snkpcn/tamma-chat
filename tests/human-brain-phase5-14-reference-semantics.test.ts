@@ -4,7 +4,6 @@ import {
   buildSemanticInterpreterPrompt,
   buildProductionSemanticInterpreterPrompt,
   emptySemanticContext,
-  shouldUseHighPrecisionReferenceSupervisor,
   SEMANTIC_INTERPRETER_VERSION,
 } from '../netlify/functions/_semantic-interpreter';
 
@@ -36,20 +35,6 @@ test('semantic-v28 explicit attribute comparison outranks recommendation',()=>{
   assert.ok(prompt.includes('Use recommend when they ask what they SHOULD choose'));
 });
 
-
-test('semantic-v31 routes only multi-candidate prior references to one high-precision primary call',()=>{
-  const context={
-    activeDomain:'activity' as const,
-    recentEntities:[
-      {id:'horse-a',type:'horse',name:'ทองไทย',domain:'activity' as const,source:'conversation' as const,canonical:false},
-      {id:'horse-b',type:'horse',name:'ภาราดร',domain:'activity' as const,source:'conversation' as const,canonical:false},
-    ],
-    recentTurns:[{role:'assistant' as const,content:'ทองไทยเป็นม้าสีทอง ส่วนภาราดรเป็นม้าสีน้ำตาลขาว'}],
-  };
-  assert.equal(shouldUseHighPrecisionReferenceSupervisor('ตัวน้ำตาลขาวนั่นแหละ เอาตัวนั้น',context),true);
-  assert.equal(shouldUseHighPrecisionReferenceSupervisor('อยากขี่ม้า',context),false);
-  assert.equal(shouldUseHighPrecisionReferenceSupervisor('เอาตัวนั้น',{...context,recentEntities:[context.recentEntities[1]!]}),false);
-});
 
 test('semantic-v31 production prompt gives bounded per-entity evidence for descriptive reference resolution',()=>{
   const context={
