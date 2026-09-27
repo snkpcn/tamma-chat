@@ -213,3 +213,66 @@ test('Human Brain Phase 1 canonical gate: dietary memory cannot hijack a later r
     assert.match(reply, /18:00/u);
   });
 });
+
+// Production cost invariant (Human Core PR A, 2026-09-27): the H1 audit found
+// that the early One-Mind attempt's own semantic result (earlyOneMind) was
+// never assigned, so a turn the early attempt could not fully compose (e.g.
+// a domain not yet cut over to One-Mind, which returns 'legacy_required')
+// silently re-attempted interpretSemanticTurn in TWO further call sites
+// later in the same request (the "cutover" One-Mind attempt, and
+// deterministicActivityResponse's own independent processOneMindCustomerTurn
+// call) instead of reusing the already-computed meaning.
+//
+// The cost ledger's own eventId-keyed idempotency (_ai-cost-ledger.ts's
+// reserveAiCall) already prevents this from becoming an actual duplicate
+// OpenAI charge -- a repeated attempt for the same event replays the first
+// call's cached output and logs 'ai_duplicate_call_prevented' rather than
+// hitting the network again. But the application code still wastefully
+// re-attempts the whole reservation/prompt-building path for nothing, and
+// each such attempt is a real (if currently caught) violation of "at most
+// one paid semantic call per customer turn" that a future change to the
+// ledger's own safety net would turn into an actual double charge. The
+// correct fix is for the application itself to never attempt a call it
+// already has the answer to -- proven here by asserting that log NEVER
+// appears, not by relying on the ledger to keep catching it.
+test('Human Brain Phase 1 cost invariant: no call site re-attempts a semantic call the request already has an answer for', async () => {
+  await withHarness(async harness => {
+    const gid = guestId('human-brain-cost-invariant-legacy-required');
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+      originalLog(...(args as []));
+    };
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      // 'support' is not one of One-Mind's read-only-cutover domains, so the
+      // early attempt understands the turn correctly but must still defer
+      // execution to the legacy owner ('legacy_required') -- exactly the
+      // shape of turn the audit found silently re-attempted.
+      domain: 'support',
+      intent: 'contact_staff_other_matter',
+      action: 'ask',
+      informationNeed: 'none',
+      speechAct: 'request_help',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.95,
+      needsClarification: false,
+    });
+
+    try {
+      await processThongthaiChatCore(
+        brainRequest('อยากติดต่อทีมงานเรื่องอื่นที่ไม่เกี่ยวกับเรื่องที่คุยกันได้ไหมครับ', gid, 'line'),
+        'human-brain-cost-invariant-legacy-required',
+      );
+    } finally {
+      console.log = originalLog;
+    }
+
+    const duplicateAttempts = logs.filter(line => line.includes('ai_duplicate_call_prevented'));
+    assert.equal(duplicateAttempts.length, 0,
+      'a domain not yet cut over to One-Mind must still reuse the early attempt\'s own semantic result in every later call site (the cutover attempt AND deterministicActivityResponse) -- none of them may re-attempt interpretSemanticTurn for a request that already has an answer, even though the cost ledger currently catches and no-ops the repeat');
+  });
+});

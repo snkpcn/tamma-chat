@@ -268,6 +268,32 @@ test('REGRESSION: a correction naming BOTH the rejected and the newly-chosen hor
   }
 });
 
+// Human Core PR A (2026-09-27): "ทองไทย" is both a horse's name AND the
+// assistant/business's own name. A question that merely NAMES the
+// assistant/business ("ร้านทองไทยเปิดกี่โมงคะ", "ทองไทยตอบได้เร็วไหม") must
+// never be classified as choosing the ทองไทย horse -- this was previously
+// unconditional, so it was also silently registered in
+// EXACT_ZERO_CALL_INTENTS as 'select_known_activity_asset', skipping the
+// real semantic model entirely for a question the model should read. The
+// fix is structural (any question-phrased message is excluded), not a
+// patch for these exact sentences, so it protects both listed assets and
+// any future one sharing this ambiguity.
+test('a question merely naming the assistant/business ("ทองไทย") is never classified as choosing that horse', () => {
+  const context: SemanticContext = { activeDomain: 'activity', recentEntities: [] };
+  for (const message of [
+    'ร้านทองไทยเปิดกี่โมงคะ',
+    'ทองไทยตอบได้เร็วไหม',
+    'ภาราดรราคาเท่าไหร่',
+    'ทองไทยหรือภาราดรตัวไหนดีกว่ากัน',
+  ]) {
+    const turn = deriveDeterministicSemanticTurn(message, context, emptyTaskStateContainer());
+    if (turn) {
+      assert.notEqual(turn.action, 'confirm', `${message}: a question must not be classified as a selection`);
+      assert.equal(turn.entities.horseName, undefined, `${message}: a question must not fill horseName as a side effect`);
+    }
+  }
+});
+
 test('an inventory-count question on an active activity task stays a side-question instead of resuming missing-field collection', () => {
   const taskState: TaskStateContainer = {
     ...emptyTaskStateContainer(),

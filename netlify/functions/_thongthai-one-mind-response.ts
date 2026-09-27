@@ -328,7 +328,13 @@ export async function processOneMindCustomerTurn(
     channel:input.channel as BrainChannel,
     language:input.language,
     userMessage:input.message,
-    semanticTurn:turn.semanticTurn,
+    // dialogSemanticTurn, not the bare semanticTurn -- see OneMindTurnResult's
+    // own doc comment. The Dialog Manager already planned knowledge/task-state
+    // from the memory-merged constraint set; rendering from a DIFFERENT
+    // (unmerged) constraint set is exactly the defect that let a remembered
+    // allergy be present in state but silently absent from the recommendation
+    // copy the customer actually reads.
+    semanticTurn:turn.dialogSemanticTurn,
     dialogDecision:turn.dialogDecision,
     knowledgeBundles:turn.groundedKnowledge,
     degradation:turn.knowledgeDegradation,

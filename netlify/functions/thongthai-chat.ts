@@ -69,7 +69,6 @@ import { recordOneMindTrace } from './_one-mind-observability';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
 import {
-  buildPendingPromotionRedemption,
   decidePromotionFallback,
   formatPromotionClarificationMessage,
   formatPromotionListMessage,
@@ -1309,7 +1308,7 @@ export async function promotionContinuationResponse(
  * active_promotions_live data already loaded into runtime.worldFacts --
  * never a fresh guess, never an invented promotion/price/item.
  */
-async function promotionDiscoveryFallbackResponse(
+export async function promotionDiscoveryFallbackResponse(
   request: BrainRequest,
   runtime: BrainRuntimeContext,
   guestDbId: string | null,
@@ -1334,12 +1333,15 @@ async function promotionDiscoveryFallbackResponse(
     };
   }
   if (decision.kind === 'list') {
+    // A pure discovery listing ("มีโปรอะไร") is not acceptance -- even when
+    // exactly one promo is active, seeing the list must never by itself
+    // start a pending redemption the customer never asked for (see
+    // decidePromotionFallback's own isGenuinePromotionAcceptance: only a
+    // 'start_redemption' decision, reached below, represents real intent).
     return {
       message: formatPromotionListMessage(decision.promotions), intent:'recommendation', contextUpdates:{},
       journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
-      agentStateUpdate: decision.promotions.length === 1
-        ? { pendingPromotionRedemption: buildPendingPromotionRedemption(decision.promotions[0]!) }
-        : {},
+      agentStateUpdate: {},
       semanticMemoryUpdates:[], toolCalls:[],
     };
   }
@@ -1516,6 +1518,16 @@ async function deterministicActivityResponse(
   channel: BrainChannel,
   transportEventId: string,
   providerUserKey: string | null,
+  // Production cost invariant: at most one paid semantic call per customer
+  // turn. This is a THIRD independent call site invoking
+  // processOneMindCustomerTurn for the same incoming request (the other two
+  // are the early "understand first" attempt and the later cutover attempt
+  // in processThongthaiChatCore) -- without a cached semantic turn to reuse,
+  // it would pay to re-run interpretSemanticTurn a third time. The cost
+  // ledger's own eventId-keyed idempotency prevents an actual duplicate
+  // OpenAI charge, but the request still wastefully re-attempts the whole
+  // reservation/prompt-building path for nothing.
+  cachedSemantic?: SemanticTurn,
 ): Promise<BrainResponse | null> {
   const direct = directCommittedActivityBookingArgs(request.message);
   if (direct) {
@@ -1532,7 +1544,9 @@ async function deterministicActivityResponse(
     guestDbId,
     durableMemory: durableMemoryFromRequest(request),
     persistState: true,
-  });
+  }, cachedSemantic ? {
+    interpretSemanticTurn: async () => cachedSemantic,
+  } : undefined);
 
   const turn = oneMind.status === 'composed' || oneMind.status === 'legacy_required'
     ? oneMind.turn
@@ -1617,6 +1631,41 @@ function extractThaiMonthDate(message: string): string | null {
 
 function activityFallbackCommit(message: string): boolean {
   return hasCommitMarker(message) || /^(?:ยืนยัน|ตกลง|โอเค|confirm)(?:\s|$|ครับ|ค่ะ|คะ|คับ)/iu.test(message.trim());
+}
+
+// hasCommitMarker's phrases ("จองเลย", "ยืนยันจอง"/"ยืนยันการจอง",
+// "สั่งเลย"/"ยืนยันการสั่ง") name the transaction itself and are trustworthy
+// authorization on their own, at any point in the conversation. The REST of
+// activityFallbackCommit's markers (a bare "ยืนยัน"/"ตกลง"/"โอเค") are
+// generic agreement words -- "yes" to WHATEVER the bot's last message said,
+// not specifically "submit this booking". Real risk this closes: this
+// fallback's own draft/missing-field check scans the WHOLE joined
+// conversation text for slot values, so once a genuine slot-filling
+// exchange has ever completed all required fields, EVERY later bare "โอเค"
+// -- even one replying to a completely unrelated later message (a weather
+// question, a compliment) -- would otherwise re-fire the exact same stale
+// draft as a fresh, real booking write. A generic acknowledgement is only
+// trustworthy as booking authorization when it is a direct reply to the
+// bot HAVING JUST SHOWN this fallback's own ready-to-confirm summary --
+// see ACTIVITY_BOOKING_CONFIRM_PROMPT_MARKER below, embedded in that exact
+// summary text and checked against nothing but the bot's own immediately
+// preceding turn.
+const ACTIVITY_BOOKING_CONFIRM_PROMPT_MARKER = 'เพื่อส่งคำขอจองเข้าระบบครับ';
+
+function repliesToActivityBookingConfirmPrompt(request: BrainRequest): boolean {
+  const last = request.chatHistory[request.chatHistory.length - 1];
+  return Boolean(last) && last.role === 'assistant' && last.content.includes(ACTIVITY_BOOKING_CONFIRM_PROMPT_MARKER);
+}
+
+// The gate an actual booking WRITE may rely on: either an explicit
+// booking/order verb (safe anywhere), or a generic acknowledgement that is
+// verifiably answering this fallback's own just-shown confirmation prompt
+// (safe because it can only mean "yes, submit THIS booking"). A bare
+// acknowledgement that fails this second check falls through to
+// re-showing the summary instead of executing -- never silently booking.
+export function authorizedActivityBookingCommit(request: BrainRequest): boolean {
+  if (!activityFallbackCommit(request.message)) return false;
+  return hasCommitMarker(request.message) || repliesToActivityBookingConfirmPrompt(request);
 }
 
 function activityFallbackName(userTurns: string[]): string | null {
@@ -3145,7 +3194,7 @@ function missingActivityFallbackFields(draft: Record<string, unknown>): string[]
 function activityBookingFallbackPrompt(request: BrainRequest): BrainResponse | null {
   const draft = activityBookingFallbackDraft(request);
   if (!draft) return null;
-  if (activityFallbackCommit(request.message)) return null;
+  if (authorizedActivityBookingCommit(request)) return null;
   const missing = missingActivityFallbackFields(draft);
   const horseName = String(draft.horseName);
   const summary = [
@@ -3159,7 +3208,7 @@ function activityBookingFallbackPrompt(request: BrainRequest): BrainResponse | n
   return {
     message: missing.length
       ? [`รับทราบครับ ผมล็อกตัวเลือกเป็น ${horseName} ไว้ในบทสนทนานี้`, ...summary, `ขอเพิ่มอีกนิดครับ: ${missing.join(', ')}`].join('\n')
-      : [`สรุปคำขอจองขี่ม้า ${horseName}`, ...summary, 'ถ้าถูกต้อง พิมพ์ “ยืนยัน” เพื่อส่งคำขอจองเข้าระบบครับ'].join('\n'),
+      : [`สรุปคำขอจองขี่ม้า ${horseName}`, ...summary, `ถ้าถูกต้อง พิมพ์ “ยืนยัน” ${ACTIVITY_BOOKING_CONFIRM_PROMPT_MARKER}`].join('\n'),
     intent: 'booking',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
@@ -3819,6 +3868,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         durableMemory:durableMemoryFromRequest(request),
         persistState:true,
       }, {}, {}, undefined, { requireSemanticSupervisor:true });
+      // Production cost invariant: at most one paid semantic call per
+      // customer turn. This early attempt already spent it (or already
+      // knows the provider is unavailable) -- record the result so every
+      // later consumer in this request (supervisedRestaurantStatus below,
+      // and the cachedSemantic reuse in the second One-Mind attempt further
+      // down) sees it, instead of silently discarding it and paying for
+      // interpretSemanticTurn a second time for the same request.
+      earlyOneMind = oneMind;
       await recordOneMindTrace(oneMind.observability);
       // Only a real OpenAI-owned interpretation consumes the early semantic
       // slot. If the supervisor is unavailable, leave the later proven
@@ -4642,6 +4699,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     channel,
     transportEventId,
     providerUserKey,
+    earlyOneMind?.turn.semanticTurn,
   ).catch(error => {
     console.error('THONGTHAI_ACTIVITY_DETERMINISTIC_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
     return null;
