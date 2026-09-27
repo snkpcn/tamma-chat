@@ -334,33 +334,6 @@ export function resolveCanonicalScopeAgainstFacts(
   }
 
   if (scope.domain === 'stay') {
-    // A semantic activity TYPE is intentionally coarse (horse/atv/archery),
-  // while the live catalog may use a different parent activityCode
-  // (e.g. horse_riding). Resolve that relationship from the catalog itself:
-  // asset.type -> asset.activityCode. This keeps the scope firewall generic
-  // and avoids hardcoding a type->parent translation table.
-  if (
-    scope.status === 'resolved'
-    && scope.provenance === 'declared_activity_type'
-    && scope.canonicalParentIds.length === 1
-  ) {
-    const declaredType = scope.canonicalParentIds[0]!;
-    const assetCodes = [...map.keys()]
-      .map(key => key.match(/^activity_asset:([^:]+):type$/)?.[1])
-      .filter((value): value is string => Boolean(value))
-      .filter(code => map.get(`activity_asset:${code}:type`) === declaredType);
-    const liveParents = assetCodes
-      .map(code => map.get(`activity_asset:${code}:activityCode`))
-      .filter((value): value is string => typeof value === 'string' && value.length > 0);
-    if (liveParents.length) {
-      return {
-        ...scope,
-        canonicalParentIds:[...new Set(liveParents)],
-        provenance:`${scope.provenance}+activity_type_resolved_against_live_catalog`,
-      };
-    }
-  }
-
   if (scope.status === 'ambiguous' && scope.pendingFocusName) {
       const matches = [...map.keys()]
         .map(key => key.match(/^stay:([^:]+):name$/)?.[1])
@@ -393,6 +366,33 @@ export function resolveCanonicalScopeAgainstFacts(
       if (parents.length) return { ...scope, canonicalParentIds: [...new Set(parents)], provenance: `${scope.provenance}+stay_parent_backfilled_from_live_catalog` };
     }
     return scope;
+  }
+
+  // A semantic activity TYPE is intentionally coarse (horse/atv/archery),
+  // while the live catalog may use a different parent activityCode
+  // (e.g. horse_riding). Resolve that relationship from the catalog itself:
+  // asset.type -> asset.activityCode. This keeps the scope firewall generic
+  // and avoids hardcoding a type->parent translation table.
+  if (
+    scope.status === 'resolved'
+    && scope.provenance === 'declared_activity_type'
+    && scope.canonicalParentIds.length === 1
+  ) {
+    const declaredType = scope.canonicalParentIds[0]!;
+    const assetCodes = [...map.keys()]
+      .map(key => key.match(/^activity_asset:([^:]+):type$/)?.[1])
+      .filter((value): value is string => Boolean(value))
+      .filter(code => map.get(`activity_asset:${code}:type`) === declaredType);
+    const liveParents = assetCodes
+      .map(code => map.get(`activity_asset:${code}:activityCode`))
+      .filter((value): value is string => typeof value === 'string' && value.length > 0);
+    if (liveParents.length) {
+      return {
+        ...scope,
+        canonicalParentIds:[...new Set(liveParents)],
+        provenance:`${scope.provenance}+activity_type_resolved_against_live_catalog`,
+      };
+    }
   }
 
   if (scope.status === 'ambiguous' && scope.pendingFocusName) {
