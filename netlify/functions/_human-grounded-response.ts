@@ -517,7 +517,7 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
       priceKey:map.has(priceKey) ? priceKey : undefined,
       category:typeof map.get(categoryKey) === 'string' ? String(map.get(categoryKey)) : undefined,
       categoryKey:map.has(categoryKey) ? categoryKey : undefined,
-      orderable:map.get(orderableKey) === true,
+      orderable:typeof map.get(orderableKey) === 'boolean' ? map.get(orderableKey) as boolean : undefined,
       orderableKey:map.has(orderableKey) ? orderableKey : undefined,
       availableServings:typeof map.get(servingsKey) === 'number' ? map.get(servingsKey) as number : undefined,
       servingsKey:map.has(servingsKey) ? servingsKey : undefined,
@@ -574,7 +574,7 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
   let ingredientUnknown = false;
 
   for (const row of rows) {
-    if (!row.orderable || (typeof row.availableServings === 'number' && row.availableServings <= 0)) continue;
+    if (row.orderable === false || (typeof row.availableServings === 'number' && row.availableServings <= 0)) continue;
     const ingredientWords = row.ingredients?.map(value => String(value).toLowerCase()) ?? null;
     if ((noShrimp || noPork) && !ingredientWords) {
       ingredientUnknown = true;
@@ -618,9 +618,12 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
   const total=chosen.every(row=>row.price!==undefined)
     ? chosen.reduce((sum,row)=>sum+(row.price??0),0)
     : null;
+  const availabilityVerified=chosen.every(row=>row.orderable===true);
   const intro=noShrimp||noPork
-    ? 'จากส่วนผสมและสถานะเมนูที่ตรวจยืนยันได้ ตัวเลือกที่ไม่ชนข้อจำกัดที่บอกมีครับ'
-    : 'จากเมนูที่ยืนยันว่าพร้อมสั่ง ลองดูชุดนี้ได้ครับ';
+    ? 'จากส่วนผสมและข้อมูลเมนูที่ตรวจยืนยันได้ ตัวเลือกที่ไม่ชนข้อจำกัดที่บอกมีครับ'
+    : availabilityVerified
+      ? 'จากเมนูที่ยืนยันว่าพร้อมสั่ง ลองดูชุดนี้ได้ครับ'
+      : 'จากข้อมูลเมนูที่ยืนยันได้ ลองดูชุดนี้ได้ครับ';
   const notes:string[]=[];
   if(total!==null) notes.push('ถ้าเอารายการละ 1 จาน รวม '+Math.round(total)+' บาท');
   if(budget!==null && total!==null) notes.push(total<=budget
