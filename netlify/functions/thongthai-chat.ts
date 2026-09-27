@@ -1571,11 +1571,32 @@ async function deterministicActivityResponse(
   const proposal = turn.dialogDecision.actionProposal;
   if (!proposal || proposal.toolName !== 'create_booking' || !proposal.customerCommitPresent) return null;
   return executeDeterministicActivityBooking(
-    { ...proposal.validatedArgs } as Record<string, unknown>,
+    resolveActivityBookingProposalArgs(proposal, turn.dialogDecision.taskStateContainer.activeTask),
     request,
     guestDbId,
     channel,
   );
+}
+
+/** Human Core PR D: task.slots (== proposal.validatedArgs) never carries a
+ *  human-readable asset name -- that lives on the task's OWN
+ *  selectedEntities, already resolved by the semantic supervisor/dialog
+ *  manager earlier in the conversation (see _dialog-manager.ts's
+ *  resolveSelectedEntities). Reading it from there, instead of letting
+ *  executeDeterministicActivityBooking re-derive it from THIS turn's raw
+ *  message, means the booking confirmation names the actually-selected
+ *  asset even when the customer's final commit message doesn't restate its
+ *  name -- and never a wrong name matched from unrelated text in that
+ *  message. */
+export function resolveActivityBookingProposalArgs(
+  proposal: { validatedArgs: Record<string, unknown> },
+  activeTask: { selectedEntities: readonly { id: string; name: string }[] } | null | undefined,
+): Record<string, unknown> {
+  const selectedAssetEntity = activeTask?.selectedEntities.find(entity => entity.id.startsWith('activity_asset:'));
+  return {
+    ...proposal.validatedArgs,
+    ...(selectedAssetEntity ? { horseName: selectedAssetEntity.name } : {}),
+  };
 }
 
 export function directCommittedActivityBookingArgs(message: string): Record<string, unknown> | null {
@@ -3250,8 +3271,16 @@ async function executeDeterministicActivityBooking(
   guestDbId: string | null,
   channel: BrainChannel,
 ): Promise<BrainResponse> {
+  // Human Core PR D: pure execution glue -- trusts only the already-decided
+  // horseName the caller supplied (from a raw-text draft that already named
+  // it, or now from the supervisor's own task.selectedEntities; see
+  // deterministicActivityResponse above). Never falls back to re-scanning
+  // THIS turn's raw request.message: a bare confirmation ("ยืนยัน") names no
+  // asset at all, and re-scanning risked matching an unrelated name merely
+  // mentioned in the same message (e.g. a compliment about the other horse)
+  // instead of the one actually selected earlier in the conversation.
   const horseName = typeof args.horseName === 'string' ? args.horseName : null;
-  const selectedAsset = horseName ? activityAssetFromText(horseName) : activityAssetFromText(request.message);
+  const selectedAsset = horseName ? activityAssetFromText(horseName) : null;
   const selectedHorseName = horseName ?? selectedAsset?.name ?? null;
   const note = selectedAsset ? formatActivityAssetNote(selectedAsset) : (typeof args.note === 'string' ? args.note : null);
 
