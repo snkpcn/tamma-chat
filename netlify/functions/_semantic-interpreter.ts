@@ -1015,6 +1015,7 @@ export function semanticTurnNeedsReview(
     && !reference.resolvedEntityId
     && !reference.resolvedEntityIds?.length
     && !reference.resolvedTaskSlot
+    && !reference.resolvedFromConversation
   );
   const contextCouldResolve = Boolean(
     context.recentEntities.length
