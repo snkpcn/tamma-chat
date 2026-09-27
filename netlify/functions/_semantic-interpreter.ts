@@ -811,7 +811,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     : 'unknown';
   let domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
   const parsedAction = VALID_ACTIONS.includes(parsed.action as SemanticAction) ? parsed.action as SemanticAction : 'unknown';
-  const taskDirective = VALID_TASK_DIRECTIVES.includes(parsed.taskDirective as SemanticTaskDirective)
+  let taskDirective = VALID_TASK_DIRECTIVES.includes(parsed.taskDirective as SemanticTaskDirective)
     ? parsed.taskDirective as SemanticTaskDirective
     : undefined;
   const intent = typeof parsed.intent === 'string' && /^[a-z][a-z0-9_]{1,79}$/.test(parsed.intent) ? parsed.intent : 'unknown';
@@ -826,8 +826,12 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   // `provide_information` with no requested facet or task directive represents
   // the customer reporting their own state/plan, not an instruction to execute.
   if (speechAct === 'request' && action === 'provide_information'
-      && informationNeed === 'none' && taskDirective === undefined) {
+      && informationNeed === 'none'
+      && (taskDirective === undefined || (!context.activeTask && !context.suspendedTask))) {
     speechAct = 'statement';
+    // A self-directed pause/plan cannot suspend a nonexistent conversational
+    // task. Discard a stray model directive when there is no task to control.
+    if (!context.activeTask && !context.suspendedTask) taskDirective = undefined;
   }
 
   // Closed-field coherence repair: an explicit incident_report already says
@@ -927,7 +931,10 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && context.recentEntities.length === 0
     && !context.activeTask
     && !context.suspendedTask;
-  const validatedDomain: SemanticDomain = hasUnresolvedReference && noUsableContext ? 'unknown' : domain;
+  const validatedDomain: SemanticDomain =
+    speechAct === 'incident_report' && domain === 'incident'
+      ? 'incident'
+      : (hasUnresolvedReference && noUsableContext ? 'unknown' : domain);
 
   return {
     normalizedMeaning: normalizedMeaning || undefined,
