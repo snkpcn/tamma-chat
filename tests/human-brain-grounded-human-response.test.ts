@@ -551,3 +551,26 @@ test('a plain ATV recommendation request never surfaces horse or archery assets 
   assert.match(response.message,/ATV 1/u);
   assert.match(response.message,/ATV 2/u);
 });
+
+
+test('conditional availability renderer preserves primaryHorseName / fallbackHorseName aliases',()=>{
+  const availabilityBundle:KnowledgeBundle={
+    domain:'activity',
+    sources:[{need:'availability',sourceId:'availability-test',sourceType:'activity_live',status:'empty'}],
+    facts:[],entities:[],missing:['availability'],warnings:[],freshness:'live',
+  };
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',
+      intent:'conditional_horse_availability_with_fallback',
+      action:'status',
+      informationNeed:'availability',
+      entities:{primaryHorseName:'ภาราดร',fallbackHorseName:'ทองไทย'},
+      constraints:['no_booking_if_both_unavailable'],
+    }),
+    bundles:[availabilityBundle],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/ภาราดร/u);
+  assert.match(response.message,/ทองไทย/u);
+});
