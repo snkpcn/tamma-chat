@@ -648,6 +648,8 @@ Core rules:
 - Unknown or ambiguous references require clarification; never guess an entity or fact. Missing business data does NOT make the customer's meaning ambiguous.
 - Open world: general=ordinary non-business conversation; local=surrounding area; incident=loss/damage/injury/adverse event; support=service help not owned by a narrower domain.
 - A report of loss, damage, injury, or another adverse event remains speechAct=incident_report even when the same sentence asks staff to help.
+- Any adverse-event report uses domain=incident even when its subject is an animal, property, a local place, or an organization service; narrower domains apply only when no incident is being reported.
+- When the customer explicitly contrasts two or more known alternatives against a criterion, action=compare (informationNeed may be recommendation). Use action=recommend for open-ended suggestions without a fixed comparison set.
 - Domain nouns identify subject; preserve the actual predicate, dates, times, party size, constraints, negation, and stated preferences.
 - IDs may only come from canonical context below. Otherwise leave unresolved.
 
