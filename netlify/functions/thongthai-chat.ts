@@ -1756,6 +1756,80 @@ export function resolveStayBookingProposalArgs(
   };
 }
 
+export type SupervisedRestaurantCutoverDecision =
+  | { kind:'respond'; response:ComposedResponse }
+  | { kind:'execute_preorder'; args:Record<string, unknown> };
+
+/** Human Core PR F terminal Restaurant boundary. Once OpenAI semantic
+ * supervision succeeds, Restaurant cannot fall into raw-text advisor/preorder
+ * parsing or the legacy brain. It either renders structured grounded state or
+ * executes one already-verified ActionProposal. */
+export function resolveSupervisedRestaurantCutover(
+  oneMind:Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel:BrainChannel,
+  language:BrainRequest['language'],
+):SupervisedRestaurantCutoverDecision|null {
+  const turn=oneMind.turn;
+  if(turn.semanticTurn.domain!=='restaurant'||turn.semanticTurn.semanticSource!=='openai_supervisor') return null;
+  if(oneMind.status==='composed') return {kind:'respond',response:oneMind.response};
+
+  const meaning=deriveSemanticMeaning(turn.semanticTurn);
+  const proposal=turn.dialogDecision.actionProposal;
+  if(meaning.commitmentLevel==='explicit_transaction'
+      && proposal?.toolName==='create_restaurant_preorder'
+      && proposal.customerCommitPresent) {
+    return {kind:'execute_preorder',args:resolveRestaurantPreorderProposalArgs(proposal)};
+  }
+
+  const composerInput={
+    channel,
+    language,
+    semanticTurn:turn.dialogSemanticTurn,
+    dialogDecision:turn.dialogDecision,
+    knowledgeBundles:turn.groundedKnowledge,
+    degradation:turn.knowledgeDegradation,
+    operationalOutcome:null,
+  };
+  const stateOrCollection=turn.dialogDecision.mode==='collect_field'
+    || turn.semanticTurn.speechAct==='selection'
+    || turn.semanticTurn.speechAct==='correction'
+    || turn.semanticTurn.speechAct==='preference_update'
+    || ['confirm','modify','correct_previous','provide_information'].includes(turn.semanticTurn.action);
+  const response=stateOrCollection
+    ? composeDeterministicResponse(composerInput)
+    : composeGroundedDeterministicResponse(composerInput) ?? composeDeterministicResponse(composerInput);
+  return {kind:'respond',response};
+}
+
+/** Whitelists only the structured fields createRestaurantPreorder owns.
+ * Quantities are never defaulted here; PR F's dialog policy already refuses a
+ * proposal until every line has a verified explicit quantity. */
+export function resolveRestaurantPreorderProposalArgs(
+  proposal:{validatedArgs:Record<string,unknown>},
+):Record<string,unknown> {
+  const value=proposal.validatedArgs;
+  const items=Array.isArray(value.items)
+    ? value.items.flatMap(item=>{
+        if(!item||typeof item!=='object'||Array.isArray(item)) return [];
+        const row=item as Record<string,unknown>;
+        const name=typeof row.name==='string'?row.name.trim():'';
+        const quantity=Number(row.quantity);
+        return name&&Number.isInteger(quantity)&&quantity>=1&&quantity<=50
+          ? [{name,quantity}]
+          : [];
+      })
+    : [];
+  return {
+    date:typeof value.date==='string'?value.date:'',
+    time:typeof value.time==='string'?value.time:'',
+    items,
+    customerName:typeof value.customerName==='string'?value.customerName:'',
+    ...(typeof value.phone==='string'&&value.phone?{phone:value.phone}:{}),
+    ...(typeof value.email==='string'&&value.email?{email:value.email}:{}),
+    ...(typeof value.note==='string'&&value.note?{note:value.note}:{}),
+  };
+}
+
 export function directCommittedActivityBookingArgs(message: string): Record<string, unknown> | null {
   if (!hasCommitMarker(message)) return null;
   const selectedAsset = activityAssetFromText(message);
@@ -3512,6 +3586,41 @@ async function executeDeterministicStayBooking(
     ].filter(Boolean).join('\n'),
   };
 }
+async function executeDeterministicRestaurantPreorder(
+  args:Record<string,unknown>,
+  request:BrainRequest,
+  guestDbId:string|null,
+  channel:BrainChannel,
+):Promise<BrainResponse> {
+  const firstResponse:BrainResponse={
+    message:'',intent:'order',contextUpdates:{},journeyAction:{type:'none',journey:null},
+    suggestedActions:[],responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+  };
+  if(!guestDbId) return {...firstResponse,message:'ตอนนี้ยังเปิดออเดอร์ในระบบไม่ได้ครับ กรุณาลองใหม่อีกครั้ง'};
+  const [result]=await executeBrainTools(
+    guestDbId,channel,[{name:'create_restaurant_preorder',args}],firstResponse,request,
+  );
+  if(!result?.ok) return {...firstResponse,message:preorderFailureMessage(result?.detail??'execution_failed')};
+
+  let detail:Record<string,unknown>={};
+  try{detail=JSON.parse(result.detail) as Record<string,unknown>;}catch{/* safe defaults */}
+  const duplicate=detail.duplicate===true;
+  const code=typeof detail.preorderCode==='string'?detail.preorderCode:'';
+  const pickup=typeof detail.requestedFor==='string'?formatPreorderPickup(detail.requestedFor):'';
+  const total=typeof detail.totalAmount==='number'?detail.totalAmount:null;
+  return {
+    ...firstResponse,
+    message:[
+      duplicate?'รายการนี้มีอยู่แล้วครับ ✅':'เรียบร้อยครับ ✅',
+      code?`🍽️ ออเดอร์ ${code}`:'🍽️ ตำมา-ชาติ',
+      pickup?`🕑 รับอาหาร ${pickup}`:'',
+      total!==null?`💰 รวม ${Math.round(total)} บาท`:'',
+      '📌 สถานะ: รอร้านรับออเดอร์',
+      duplicate?'ทองไทยใช้รายการเดิมให้ ไม่ได้สร้างซ้ำครับ':'ส่งเข้าหลังร้านและแจ้งทีมแล้วครับ',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 // Service Mind -- compliment/complaint/suggestion/safety-issue/system-
 // feedback. Checked early (right after the activity-booking fallback,
 // before One-Mind and every other deterministic responder) for two
@@ -4231,6 +4340,41 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       intent:polished.intent,
       contextUpdates:polished.contextUpdates,
       journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  // Human Core PR F: terminal Restaurant boundary. A usable supervised
+  // Restaurant meaning cannot reach restaurantPreorderDialogResponse,
+  // deterministicRestaurantResponse, raw-text advisor routing, or
+  // runThongthaiBrain below this point.
+  const supervisedRestaurant=earlyOneMind
+    ? resolveSupervisedRestaurantCutover(earlyOneMind,channel,request.language)
+    : null;
+  if(supervisedRestaurant?.kind==='execute_preorder') {
+    const executed=await executeDeterministicRestaurantPreorder(
+      supervisedRestaurant.args,request,guestDbId,channel,
+    );
+    const polished=polishedResponse(executed,channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,
+      contextUpdates:polished.contextUpdates,journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+  if(supervisedRestaurant?.kind==='respond') {
+    const semantic=earlyOneMind!.turn.semanticTurn;
+    const polished=polishedResponse({
+      message:supervisedRestaurant.response.message,
+      intent:semantic.action==='discover'||semantic.action==='recommend'?'recommendation':'information',
+      contextUpdates:{},journeyAction:{type:'none',journey:null},suggestedActions:[],
+      responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+    },channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,
+      contextUpdates:polished.contextUpdates,journeyAction:polished.journeyAction,
       suggestedActions:polished.suggestedActions,
     });
   }
