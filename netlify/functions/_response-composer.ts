@@ -643,8 +643,11 @@ export function composeGroundedDeterministicResponse(input: ResponseComposerInpu
   const humanGrounded = renderJourneyPlan(input)
     ?? renderRestaurantRecommendation(input)
     ?? renderPromotionRecommendation(input)
-    ?? renderActivityAvailability(input)
-    ?? renderActivityRecommendation(input);
+    // Compound activity turns (preference + availability + rain fallback)
+    // need the richer recommendation renderer first; pure availability then
+    // falls through to the narrow availability renderer.
+    ?? renderActivityRecommendation(input)
+    ?? renderActivityAvailability(input);
   if (humanGrounded) {
     return {
       message:polishCustomerMessage(humanGrounded.message, input.channel),
