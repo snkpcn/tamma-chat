@@ -166,7 +166,7 @@ const SIDE_QUESTION_ACTIONS: ReadonlySet<SemanticAction> = new Set(['ask', 'disc
 const KNOWN_TASK_SLOT_KEYS = new Set([
   'date', 'time', 'partySize', 'durationMinutes', 'resourceCode', 'quantity',
   'customerName', 'phone', 'checkIn', 'checkOut', 'endDate', 'nights',
-  'bedrooms', 'roomType',
+  'bedrooms', 'roomType', 'itemName', 'items',
 ]);
 
 function providesTaskSlotValue(entities: Record<string, unknown>): boolean {
@@ -941,6 +941,52 @@ function applyActivityCatalogPolicy(
   return applied ? planDialogTurn({ ...input, taskState: container }, now) : null;
 }
 
+/** Pure Restaurant preorder slot normalization. It consumes only semantic
+ * entities/task state that already exist: explicit structured order lines, or
+ * one canonical menu selection plus an explicit quantity. It never reads the
+ * customer's sentence and never supplies a default quantity. */
+export function resolveRestaurantStructuredSlots(task: ActiveTask): Record<string, unknown> {
+  if (task.type !== 'restaurant_preorder') return {};
+
+  const existing = Array.isArray(task.slots.items) ? task.slots.items : [];
+  const normalizedExisting = existing.flatMap(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const row = value as Record<string, unknown>;
+    const name = typeof row.name === 'string' ? row.name.trim() : '';
+    const quantity = Number(row.quantity);
+    return name && Number.isInteger(quantity) && quantity >= 1 && quantity <= 50
+      ? [{ name, quantity }]
+      : [];
+  });
+  if (normalizedExisting.length === existing.length && normalizedExisting.length > 0) {
+    return { items: normalizedExisting };
+  }
+
+  const quantity = Number(task.slots.quantity);
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 50) return {};
+
+  const named = typeof task.slots.itemName === 'string' ? task.slots.itemName.trim() : '';
+  const selected = task.selectedEntities.filter(entity => entity.id.startsWith('menu:'));
+  const name = named || (selected.length === 1 ? selected[0]!.name.trim() : '');
+  return name ? { items:[{ name, quantity }] } : {};
+}
+
+function applyRestaurantStructuredPolicy(plan: DialogPlan, input: DialogInput, now: Date): DialogPlan | null {
+  const task = plan.taskStateContainer.activeTask;
+  if (!task || task.type !== 'restaurant_preorder') return null;
+  const slotPatch = resolveRestaurantStructuredSlots(task);
+  if (!Object.keys(slotPatch).length) return null;
+
+  const before = JSON.stringify(task.slots.items ?? null);
+  const after = JSON.stringify(slotPatch.items ?? null);
+  if (before === after) return null;
+
+  const container = applyTaskStateEvent(plan.taskStateContainer, {
+    kind:'update_slots', eventId:`${input.eventId}:restaurant_structured_items`, slotPatch,
+  }, now);
+  return planDialogTurn({ ...input, taskState:container }, now);
+}
+
 /** Pure Stay slot normalization. It consumes only already-understood
  * SemanticMeaning/task state: a canonical selected stay entity, ISO check-in
  * date, and either ISO checkout or a numeric night count. No customer text is
@@ -986,6 +1032,8 @@ export async function processDialogTurnDetailed(
   now: Date = new Date(),
 ): Promise<DialogTurnResult> {
   let plan = planDialogTurn(input, now);
+  const restaurantReplanned = applyRestaurantStructuredPolicy(plan, input, now);
+  if (restaurantReplanned) plan = restaurantReplanned;
   const stayReplanned = applyStayStructuredPolicy(plan, input, now);
   if (stayReplanned) plan = stayReplanned;
   let bundles = await resolveBundles(plan, adapters, now);
