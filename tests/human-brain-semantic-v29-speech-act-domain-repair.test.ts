@@ -104,3 +104,33 @@ test('incident domain survives an unresolved deictic reference while clarificati
   assert.equal(turn.speechAct, 'incident_report');
   assert.equal(turn.needsClarification, true);
 });
+
+
+test('generic previous-plan reference is backed by bounded conversation evidence without inventing an entity id', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'journey' as const,
+    recentTurns:[
+      {role:'user' as const,content:'ช่วยจัดทริปคร่าว ๆ'},
+      {role:'assistant' as const,content:'วันแรกขี่ม้า วันที่สองกินข้าวแล้วซื้อของฝาก'},
+    ],
+    lastRecommendationReference:'วันแรกขี่ม้า วันที่สองกินข้าวแล้วซื้อของฝาก',
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'keep the previous plan but move it to tomorrow',
+    speechAct:'correction',
+    domain:'journey',
+    intent:'modify_previous_plan_date',
+    action:'modify',
+    informationNeed:'none',
+    entities:{date:'2026-09-28'},
+    references:[{type:'previous_plan',value:'previous plan',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.97,
+    needsClarification:false,
+  }), context);
+  assert.equal(turn.domain,'journey');
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.references[0]?.resolvedFromConversation,true);
+  assert.equal(turn.references[0]?.resolvedEntityId,undefined);
+});
