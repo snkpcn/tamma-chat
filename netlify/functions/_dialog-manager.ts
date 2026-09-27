@@ -276,22 +276,25 @@ function explicitSelectionNames(turn: SemanticTurn): string[] {
 }
 
 function resolveSelectedEntities(turn: SemanticTurn, conversationContext: ConversationContextState): SemanticContextEntity[] {
-  const ids = turn.references.flatMap(reference => (reference.resolvedEntityId ? [reference.resolvedEntityId] : (reference.resolvedEntityIds ?? [])));
   const byId = new Map(conversationContext.recentEntities.map(entity => [entity.id, entity] as const));
+
+  // CURRENT explicit named choice outranks every prior-context reference.
+  // This ordering matters for human corrections such as "เมื่อกี้เอาภาราดร
+  // แต่เปลี่ยนเป็นทองไทย": the sentence legitimately mentions BOTH the stale
+  // antecedent and the replacement. A resolver that consumes the old
+  // reference first silently resurrects ภาราดร.
+  const names = explicitSelectionNames(turn);
+  if (names.length) {
+    const matches = conversationContext.recentEntities.filter(entity => names.includes(entity.name));
+    const unique = [...new Map(matches.map(entity => [entity.id, entity] as const)).values()];
+    if (unique.length === 1) return unique;
+  }
+
+  const ids = turn.references.flatMap(reference => (reference.resolvedEntityId ? [reference.resolvedEntityId] : (reference.resolvedEntityIds ?? [])));
   const resolvedByReference = ids
     .map(id => byId.get(id))
     .filter((entity): entity is SemanticContextEntity => Boolean(entity));
-  if (resolvedByReference.length) return resolvedByReference;
-
-  // Explicit CURRENT named selections/corrections outrank a stale selected
-  // entity. The language supervisor names the human-facing entity; canonical
-  // conversation context supplies the id. Never guess an id if no exact name
-  // is present in canonical context.
-  const names = explicitSelectionNames(turn);
-  if (!names.length) return [];
-  const matches = conversationContext.recentEntities.filter(entity => names.includes(entity.name));
-  const unique = [...new Map(matches.map(entity => [entity.id, entity] as const)).values()];
-  return unique.length === 1 ? unique : [];
+  return resolvedByReference.length === 1 ? resolvedByReference : [];
 }
 
 function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateContainer; reasons: DialogReasonCode[] } {
