@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/thongthai-one-mind-architecture
+      - 'human-core/**'
   pull_request:
     branches:
       - main
