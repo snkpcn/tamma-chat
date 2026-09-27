@@ -15,10 +15,7 @@ import {
   planModelDegradation,
   type DegradationPlan,
 } from './_graceful-degradation';
-import {
-  callPreferredModel,
-  stripCodeFences,
-} from './_thongthai-model-provider';
+import { stripCodeFences } from './_thongthai-model-provider';
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
@@ -240,6 +237,40 @@ const FIELD_LABELS_TH: Record<string, string> = {
   resourceCode:'รายการที่ต้องการ', customerName:'ชื่อผู้จอง', phone:'เบอร์ติดต่อ',
   checkIn:'วันเช็กอิน', checkOut:'วันเช็กเอาต์', quantity:'จำนวน',
 };
+
+function activeTaskSubjectTh(input: ResponseComposerInput): string {
+  const task=input.dialogDecision.taskStateContainer.activeTask;
+  if (!task) return '';
+  const resource=typeof task.slots.resourceCode==='string' ? task.slots.resourceCode : '';
+  const horse=typeof task.slots.horseName==='string' ? task.slots.horseName : '';
+  if (task.type==='activity_booking') {
+    const subject=resource==='activity-horse'
+      ? `ขี่ม้า${horse ? ` (${horse})` : ''}`
+      : resource==='activity-atv' ? ' ATV'
+        : resource==='activity-archery' ? 'ยิงธนู'
+          : 'กิจกรรม';
+    return `กำลังช่วยจอง${subject}ให้อยู่นะครับ `;
+  }
+  if (task.type==='stay_booking') return 'กำลังช่วยจองที่พักให้อยู่นะครับ ';
+  if (task.type==='restaurant_preorder') return 'กำลังช่วยเตรียมรายการอาหารให้อยู่นะครับ ';
+  return '';
+}
+
+function verifiedEmptyTaskMessageTh(input: ResponseComposerInput): string | null {
+  const task=input.dialogDecision.taskStateContainer.activeTask;
+  if (!task || task.commitmentIntent !== true) return null;
+  const context=activeTaskSubjectTh(input).replace(/กำลังช่วย|ให้อยู่นะครับ\s*$/gu,'').trim();
+  if (task.type==='activity_booking') {
+    return `ตอนนี้ยังไม่พบคิว${context || 'กิจกรรม'}ที่ตรงกับรายละเอียดที่ขอครับ ยังไม่ได้ยืนยันการจอง`;
+  }
+  if (task.type==='stay_booking') {
+    return 'ตอนนี้ยังไม่พบที่พักว่างที่ตรงกับรายละเอียดที่ขอครับ ยังไม่ได้ยืนยันการจอง';
+  }
+  if (task.type==='restaurant_preorder') {
+    return 'ตอนนี้ยังไม่พบรายการอาหารที่ตรงกับคำขอนี้ครับ ยังไม่ได้ส่งออเดอร์';
+  }
+  return null;
+}
 
 function deterministicMessages(language: ResponseLanguage) {
   if (language === 'en') return {
@@ -866,8 +897,15 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     message = humanKnowledgeUnknownCopy(input, 'source_unavailable') ?? copy.unavailable;
   } else if (input.degradation.condition === 'fact_unknown') {
     message = humanKnowledgeUnknownCopy(input, 'fact_unknown') ?? copy.unknown;
-  } else if (input.degradation.condition === 'verified_empty') {
-    message = input.dialogDecision.responseIntent === 'no_active_promotion' ? copy.noPromo : copy.empty;
+  } else if (input.degradation.condition === 'verified_empty' && input.dialogDecision.mode !== 'collect_field') {
+    // A verified-empty supporting catalog must not erase an explicit task
+    // that is still collecting fields (notably activity duration). Let the
+    // task-aware collection branch below say what cannot be verified.
+    message = input.dialogDecision.responseIntent === 'no_active_promotion'
+      ? copy.noPromo
+      : input.language === 'th'
+        ? (verifiedEmptyTaskMessageTh(input) ?? copy.empty)
+        : copy.empty;
   } else if (input.dialogDecision.mode === 'clarify') {
     // Zero-cost architecture: a clarify/collect_field decision is a real,
     // already-computed machine decision from the Dialog Manager -- it does
@@ -895,7 +933,7 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     } else if (durationChoice?.status === 'unknown' && input.language === 'th') {
       message = 'ตอนนี้ทองไทยยังเช็กระยะเวลาของกิจกรรมนี้ให้ไม่ได้ครับ ไม่ขอเดา ให้ทีมงานช่วยตรวจสอบอีกครั้งนะครับ';
     } else if (input.language === 'th' && missing.length) {
-      message = `ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`;
+      message = `${activeTaskSubjectTh(input)}ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`;
     } else {
       message = copy.clarify;
     }
@@ -939,55 +977,11 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
 }
 
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
-  if (input.dialogDecision.responseIntent === 'active_task_summary') {
-    return composeDeterministicResponse(input);
-  }
-
-  // If the model stack itself is the degraded component, do not immediately
-  // call it again just to phrase the failure.
-  if (input.degradation.condition === 'model_unavailable'
-      || input.degradation.condition === 'model_invalid'
-      || input.degradation.condition === 'internal_error') {
-    return composeDeterministicResponse(input);
-  }
-
-  // EMPTY/UNAVAILABLE/UNKNOWN have short canonical deterministic copy; this
-  // makes failure truth independent of another model call.
-  if (input.degradation.condition === 'source_unavailable'
-      || input.degradation.condition === 'verified_empty'
-      || input.degradation.condition === 'fact_unknown') {
-    return composeDeterministicResponse(input);
-  }
-
-  // Comparison safety is a machine decision, not a wording preference.
-  // If the Dialog Manager could not verify the precise comparison attribute
-  // for the candidate entities (for example horse temperament), do NOT hand
-  // the turn to a model that might fill the missing trait with plausible
-  // prose. Speak the canonical "cannot verify" copy deterministically.
-  if (input.dialogDecision.responseIntent === 'cannot_verify_comparison') {
-    return composeDeterministicResponse(input);
-  }
-
-  try {
-    const prompt = buildResponseComposerPrompt(input);
-    const raw = await callPreferredModel(
-      prompt,
-      [{ role:'user', content:'Compose the final customer response from the supplied decision and verified facts.' }],
-      'response-composer',
-    );
-    const parsed = parseComposedResponse(raw, input);
-    return {
-      message:polishCustomerMessage(parsed.message, input.channel),
-      mode:'model',
-      usedFactKeys:parsed.usedFactKeys,
-      composerVersion:RESPONSE_COMPOSER_VERSION,
-      bibleVersion:THONGTHAI_BIBLE_VERSION,
-      channel:input.channel,
-      language:input.language,
-    };
-  } catch (error) {
-    const groundedAvailable = allFacts(input.knowledgeBundles).length > 0;
-    const degraded = planModelDegradation(error, { deterministicFallbackAvailable:groundedAvailable });
-    return composeDeterministicResponse({ ...input, degradation:degraded });
-  }
+  // Human Conversation Recovery contract:
+  // OpenAI is a semantic supervisor, not the customer-facing voice.
+  // Customer wording is therefore rendered only from already-decided,
+  // already-grounded state. No model call is permitted in this layer.
+  const grounded = composeGroundedDeterministicResponse(input);
+  if (grounded) return grounded;
+  return composeDeterministicResponse(input);
 }

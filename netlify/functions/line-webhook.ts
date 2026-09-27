@@ -10,7 +10,6 @@ import { handleRestaurantPreorderPostback, handleRestaurantStockText } from './_
 import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
   handleCustomerPaymentSlip,
-  handleCustomerPaymentText,
   handleLinePaymentGroupText,
   handleLinePaymentPostback,
 } from './_payments';
@@ -390,17 +389,9 @@ async function handleCustomerPaymentEvent(
     return true;
   }
 
-  if (item.type === 'message' && item.message?.type === 'text' && typeof item.message.text === 'string') {
-    try {
-      const reply = await handleCustomerPaymentText(anonymousId, item.message.text);
-      if (!reply?.length) return false;
-      await replyToLine(item.replyToken, reply as LineMessage[], accessToken);
-      return true;
-    } catch (error) {
-      console.error('LINE_PAYMENT_TEXT_ERROR', error instanceof Error ? error.message.slice(0, 300) : 'unknown');
-      return false;
-    }
-  }
+  // Text commands must pass through processThongthaiChatCore/One-Mind first.
+  // This pre-core adapter is intentionally media-only (payment slip upload).
+
 
   return false;
 }

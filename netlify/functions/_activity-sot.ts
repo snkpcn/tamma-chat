@@ -55,7 +55,10 @@ export async function loadActivityWorldFacts(): Promise<WorldFactRow[]> {
     const now = new Date().toISOString();
     return [{
       fact_key:'activity_catalog_live', category:'operations',
-      fact_value:{ timezone:'Asia/Bangkok', serviceHours:{ start:'09:00', end:'17:00' }, bookingSlotMinutes:30, activities },
+      // Only values read from the operational tables plus stable timezone.
+      // Operating hours / slot policy are deliberately absent until a
+      // canonical configured source provides them.
+      fact_value:{ timezone:'Asia/Bangkok', activities },
       source:'activity_offerings+activity_assets', updated_at:now,
     }];
   } catch (error) {

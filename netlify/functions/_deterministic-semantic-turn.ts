@@ -15,6 +15,7 @@ import {
   hasCancelMarker, hasCommitMarker, hasCorrectionMarker,
 } from './_slot-parsers';
 import { isExperienceDiscoveryIntent } from './_experience-discovery';
+import { isPromotionDiscoveryIntent } from './_promotion-dialog';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 
 export const DETERMINISTIC_SEMANTIC_TURN_VERSION = 'deterministic-semantic-turn-v1';
@@ -66,6 +67,17 @@ function directResourceCode(entity: SemanticContextEntity): string | null {
 function findActivityTopic(message: string): { nodeId: string; activityCode: string } | null {
   const match = ACTIVITY_TOPIC_KEYWORDS.find(item => item.keyword.test(message) && Boolean(findEcosystemNode(item.nodeId)));
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
+}
+
+function hasStandaloneTransactionRequest(message:string):boolean {
+  if (hasCommitMarker(message)) return true;
+  if (!/(?:จอง|สั่ง)/u.test(message)) return false;
+  // Conversational task control ("กลับมาจอง...ต่อ") resumes state; it is not
+  // a new commitment. Questions and explicit negation remain read-only.
+  if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
+  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้)?\s*(?:จอง|สั่ง)|ยกเลิก/u.test(message)) return false;
+  if (/[?？]|ไหม|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร/u.test(message)) return false;
+  return true;
 }
 
 // A small, closed set of negation markers, not a growing phrase table --
@@ -152,6 +164,17 @@ function findMembershipTopic(message: string): boolean {
  *  differs from the active task's. Reuses the SAME topic-narrow markers
  *  already used for the no-task case, never a new phrase table. */
 function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
+  // Promotion questions are cross-cutting by design. A current membership,
+  // restaurant, stay, or activity context must never absorb a clear request
+  // to browse promotions. Reuse the existing promotion dialog classifier so
+  // this remains one shared intent class rather than a new phrase patch.
+  if (isPromotionDiscoveryIntent(message)) {
+    return {
+      domain: 'promotion', intent: 'promotion_discovery', action: 'discover',
+      informationNeed: 'catalog',
+      entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false,
+    };
+  }
   if (findRestaurantTopicNarrow(message)) {
     return {
       domain: 'restaurant', intent: 'restaurant_topic_switch', action: 'discover',
@@ -451,6 +474,42 @@ export function deriveDeterministicSemanticTurn(
     : null;
   const effectiveDomain = activeTask?.domain ?? context.activeDomain;
 
+  // Explicit transaction commitment outranks every read-only topic shortcut.
+  // The resource comes from the closed ecosystem activity graph; missing
+  // booking slots remain follow-up fields and do not erase the commitment.
+  const committedActivityTopic=!activeTask && hasStandaloneTransactionRequest(trimmed)
+    ? findActivityTopic(trimmed)
+    : null;
+  if (committedActivityTopic) {
+    const asset=findKnownActivityAssetSelection(trimmed);
+    const entities:Record<string,unknown>={
+      activityCode:committedActivityTopic.activityCode,
+      resourceCode:committedActivityTopic.nodeId,
+    };
+    if (asset) entities.horseName=asset.name;
+    const date=extractDate(trimmed,now);
+    const time=extractTime(trimmed);
+    const partySize=extractPartySize(trimmed);
+    const durationMinutes=extractDurationMinutes(trimmed);
+    if (date) entities.date=date;
+    if (time) entities.time=time;
+    if (partySize) entities.partySize=partySize;
+    if (durationMinutes) entities.durationMinutes=durationMinutes;
+    return {
+      domain:'activity',
+      intent:'activity_booking_request',
+      action:'book',
+      speechAct:'transaction_request',
+      entities,
+      references:asset
+        ? [{type:'entity_selection',value:asset.name,refersToPriorContext:false,resolvedEntityId:asset.entityId}]
+        : [],
+      constraints:[],
+      confidence:0.92,
+      needsClarification:false,
+    };
+  }
+
   // A comparison among recently-shown entities can happen with or without an
   // open task (e.g. "ตัวไหนนิสัยดีกว่า" right after browsing, before any
   // selection is made) -- checked first, and it never touches task state.
@@ -517,10 +576,18 @@ export function deriveDeterministicSemanticTurn(
   const entityMatch = findEntityByName(trimmed, context.recentEntities);
   if (entityMatch) {
     const resourceCode = directResourceCode(entityMatch);
+    const domain = entityMatch.domain === 'unknown' ? (context.activeDomain ?? 'unknown') : entityMatch.domain;
+    const committing = hasStandaloneTransactionRequest(trimmed);
+    const action: SemanticTurn['action'] = committing
+      ? domain === 'restaurant' ? 'order'
+        : domain === 'activity' || domain === 'stay' ? 'book'
+          : 'confirm'
+      : 'confirm';
     return {
-      domain: entityMatch.domain === 'unknown' ? (context.activeDomain ?? 'unknown') : entityMatch.domain,
-      intent: 'select_prior_entity',
-      action: 'confirm',
+      domain,
+      intent: committing ? 'transaction_request_for_prior_entity' : 'select_prior_entity',
+      action,
+      speechAct: committing ? 'transaction_request' : 'selection',
       // Lands directly as resourceCode where that's valid (stay/restaurant/
       // otop); for an activity asset, resourceCode resolves authoritatively
       // downstream from selectedEntities instead (see directResourceCode).
@@ -580,16 +647,26 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
-  // Narrowing to a specific known activity ("ม้าล่ะ" / "ATV ล่ะ").
+  // A generic transaction commitment applies to the canonical activity
+  // topic even before a named asset is selected. Missing asset/date/duration
+  // are follow-up slots; they must never downgrade "book <activity>" into a
+  // catalog browse. This is structural (shared commit marker + ecosystem
+  // activity node), not a phrase table.
   if (activityTopic) {
+    const committing=hasCommitMarker(trimmed);
     return {
       domain: 'activity',
-      intent: 'activity_topic_narrow',
-      action: 'discover',
-      entities: { activityCode: activityTopic.activityCode },
+      intent: committing ? 'activity_booking_request' : 'activity_topic_narrow',
+      action: committing ? 'book' : 'discover',
+      speechAct: committing ? 'transaction_request' : undefined,
+      informationNeed: committing ? undefined : 'catalog',
+      entities: {
+        activityCode: activityTopic.activityCode,
+        ...(committing ? {resourceCode:activityTopic.nodeId} : {}),
+      },
       references: [],
       constraints: [],
-      confidence: 0.85,
+      confidence: 0.9,
       needsClarification: false,
     };
   }
@@ -652,6 +729,20 @@ export function deriveDeterministicSemanticTurn(
       references: [],
       constraints: [],
       confidence: 0.82,
+      needsClarification: false,
+    };
+  }
+
+  if (isPromotionDiscoveryIntent(trimmed)) {
+    return {
+      domain: 'promotion',
+      intent: 'promotion_discovery',
+      action: 'discover',
+      informationNeed: 'catalog',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.9,
       needsClarification: false,
     };
   }

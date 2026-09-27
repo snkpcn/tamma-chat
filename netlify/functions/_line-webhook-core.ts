@@ -1,6 +1,5 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { handleLineBookingMessage, handleLineMembershipMessage } from './_operations-db';
 import { splitCustomerMessageForLine } from './_chat-copy-style';
 import { processThongthaiChatCore } from './thongthai-chat';
 import { isSimpleGreetingMessage, isCasualAttentionMessage, isShortUnclearTextMessage, categorizeDegradedFallback } from './thongthai-chat';
@@ -485,32 +484,9 @@ async function handleEvent(
     }));
   };
 
-  try {
-    const membershipReply = await handleLineMembershipMessage(lineGuestId(userId), userId, message);
-    if (membershipReply) {
-      deterministicResponder = 'membership';
-      finalResponseKind = 'membership';
-      logPrivateChatAttempt();
-      await replyToLine(replyToken, splitText(membershipReply).map(text => ({ type: 'text', text })), accessToken);
-      return;
-    }
-  } catch (error) {
-    console.error('LINE_MEMBERSHIP_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-  }
-  try {
-    const bookingReply = await handleLineBookingMessage(lineGuestId(userId), userId, message);
-    if (bookingReply) {
-      deterministicResponder = 'booking';
-      finalResponseKind = 'booking';
-      console.log('LEGACY_BOOKING_CONSUMED', JSON.stringify({ replyPreview: bookingReply.slice(0, 80) }));
-      console.log('FINAL_RESPONSE_SOURCE', JSON.stringify({ source: 'legacy_line_booking' }));
-      logPrivateChatAttempt();
-      await replyToLine(replyToken, splitText(bookingReply).map(text => ({ type: 'text', text })), accessToken);
-      return;
-    }
-  } catch (error) {
-    console.error('LINE_BOOKING_FLOW_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-  }
+  // All private customer text enters the same canonical web/LINE brain first.
+  // Channel-specific presentation remains below; no LINE-only semantic router
+  // may consume booking or membership language ahead of One-Mind.
   // deterministicResponder/llmAttempted were already set accurately above
   // for the casual/greeting case -- askThongthaiReliably is still called
   // either way (it's the single entry point into processThongthaiChatCore,

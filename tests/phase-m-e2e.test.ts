@@ -148,7 +148,7 @@ test('M4 activity: explicit booking commit reaches ActionProposal but never exec
   const adapters:KnowledgeSourceAdapters={
     activity:{
       availability:async()=>ok('activity_schedule','activity_live',[
-        fact('activity:activity-horse:2026-09-19:15:00:available',true,'activity','activity_schedule','activity_live'),
+        fact('availability:activity-horse:2026-09-19T15:00:00+07:00:available',true,'activity','activity_schedule','activity_live'),
       ]),
       catalog:async()=>ok('activity_catalog','activity_live',[
         fact('activity:horse:name','ขี่ม้า','activity','activity_catalog','activity_live'),
@@ -187,7 +187,7 @@ test('M5 stay explicit commit proposes existing create_booking contract only aft
   });
   const adapters:KnowledgeSourceAdapters={
     stay:{availability:async()=>ok('stay_schedule','stay_live',[
-      fact('stay:stay-house-1:2026-09-20:available',true,'stay','stay_schedule','stay_live'),
+      fact('availability:stay-house-1:2026-09-20T12:00:00+07:00:available',true,'stay','stay_schedule','stay_live'),
     ])},
   };
   const result=await processThongthaiOneMindTurnAuthoritative({

@@ -103,8 +103,17 @@ export const SOURCE_PRECEDENCE: Record<KnowledgeSourceType, number> = {
 };
 
 export function pickByPrecedence(candidates: readonly GroundedFact[]): GroundedFact | null {
-  if (!candidates.length) return null;
-  return candidates.reduce((best, candidate) => (SOURCE_PRECEDENCE[candidate.sourceType] > SOURCE_PRECEDENCE[best.sourceType] ? candidate : best));
+  // Provenance fields are enforcement, not decoration. A stale or explicitly
+  // non-authoritative value is never eligible to become business truth even
+  // when it is the only candidate.
+  const usable = candidates.filter(candidate =>
+    candidate.authoritative === true
+    && candidate.stale !== true
+    && Boolean(candidate.sourceId)
+    && Boolean(candidate.fetchedAt)
+  );
+  if (!usable.length) return null;
+  return usable.reduce((best, candidate) => (SOURCE_PRECEDENCE[candidate.sourceType] > SOURCE_PRECEDENCE[best.sourceType] ? candidate : best));
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +265,26 @@ function computeFreshness(sources: readonly KnowledgeSourceTrace[]): KnowledgeBu
   return 'live';
 }
 
+type FactRejectionReason =
+  | 'non_authoritative'
+  | 'stale'
+  | 'source_type_mismatch'
+  | 'domain_mismatch'
+  | 'missing_provenance';
+
+function factRejectionReason(
+  fact:GroundedFact,
+  expectedSourceType:KnowledgeSourceType,
+  expectedDomain:SemanticDomain,
+):FactRejectionReason | null {
+  if (fact.authoritative !== true) return 'non_authoritative';
+  if (fact.stale === true) return 'stale';
+  if (fact.sourceType !== expectedSourceType) return 'source_type_mismatch';
+  if (fact.domain !== expectedDomain) return 'domain_mismatch';
+  if (!fact.sourceId || !fact.fetchedAt) return 'missing_provenance';
+  return null;
+}
+
 /** The main orchestrator. Only calls the ONE adapter each requested need
  *  routes to -- never every adapter in `adapters`. Never synthesizes a
  *  GroundedFact itself; every fact in the result came from a SourceResult
@@ -280,8 +309,33 @@ export async function resolveKnowledge(request: KnowledgeRequest, adapters: Know
       result = { status: 'unavailable', sourceId: 'adapter_threw', sourceType: route.sourceType, fetchedAt: now.toISOString(), error: error instanceof Error ? error.message : 'unknown' };
     }
     if (result.status === 'ok') {
-      facts.push(...result.data);
-      sources.push({ need, sourceId: result.sourceId, sourceType: result.sourceType, status: 'ok' });
+      // The selected route owns source identity. An adapter cannot relabel a
+      // Bible/static/memory value as a live operational answer.
+      if (result.sourceType !== route.sourceType) {
+        missing.push(need);
+        warnings.push(`source_contract_mismatch:${need}`);
+        sources.push({ need, sourceId:result.sourceId, sourceType:route.sourceType, status:'unavailable', reason:'source_unavailable' });
+        continue;
+      }
+
+      const accepted:GroundedFact[] = [];
+      for (const fact of result.data) {
+        const rejected = factRejectionReason(fact, route.sourceType, request.domain);
+        if (rejected) warnings.push(`fact_rejected:${need}:${rejected}`);
+        else accepted.push(fact);
+      }
+
+      if (accepted.length) {
+        facts.push(...accepted);
+        sources.push({ need, sourceId:result.sourceId, sourceType:route.sourceType, status:'ok' });
+      } else if (result.data.length) {
+        // The source responded, but none of its values satisfied the
+        // authoritative contract. This is UNKNOWN/UNAVAILABLE, never EMPTY.
+        missing.push(need);
+        sources.push({ need, sourceId:result.sourceId, sourceType:route.sourceType, status:'unavailable', reason:'source_unavailable' });
+      } else {
+        sources.push({ need, sourceId:result.sourceId, sourceType:route.sourceType, status:'empty' });
+      }
     } else if (result.status === 'empty') {
       sources.push({ need, sourceId: result.sourceId, sourceType: result.sourceType, status: 'empty' });
     } else {

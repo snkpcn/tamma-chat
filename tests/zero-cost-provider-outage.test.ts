@@ -163,13 +163,11 @@ test('canonical activity flow retains context/selection/slots through provider o
     assert.doesNotMatch(t4Composed.response.message, GENERIC_APOLOGY);
   }
 
-  // Human Brain 5.2 intentionally gives the read-only "บ่ายสามได้ปะ" side
-  // question to Language Brain first. The forced outage must fall back without
-  // losing any slot or proposing a transaction. All actual slot-filling turns
-  // stay deterministic; therefore this canonical flow has exactly one bounded
-  // semantic attempt.
-  assert.equal(modelCallCount, 1,
-    'only the read-only availability side-question may attempt Language Brain; slot filling must remain deterministic');
+  // Human Conversation Recovery: every ordinary turn is read by Language
+  // Brain first. During a forced outage each turn falls back to deterministic
+  // parsing without losing slots or proposing a transaction.
+  assert.equal(modelCallCount, 5,
+    'every ordinary turn in this canonical flow should attempt Language Brain before deterministic outage fallback');
 });
 
 test('a horse activity with MULTIPLE verified durations asks ONE question showing the real choices, never auto-picks one', async () => {
@@ -310,7 +308,7 @@ test('a genuinely ambiguous zero-LLM turn asks ONE clarifying question instead o
 });
 
 
-test('activity inventory-count question answers from authoritative asset inventory with ZERO LLM calls', async () => {
+test('activity inventory-count question is language-supervised then answers from authoritative asset inventory', async () => {
   const state = memoryState();
   let modelCallCount = 0;
   const deps: Partial<OneMindDependencies> = {
@@ -337,7 +335,7 @@ test('activity inventory-count question answers from authoritative asset invento
     assert.doesNotMatch(result.response.message, /ข้อมูลที่ทองไทยเช็กยืนยันได้ตอนนี้/u);
     assert.doesNotMatch(result.response.message, GENERIC_APOLOGY);
   }
-  assert.equal(modelCallCount, 0, 'inventory-count question must not spend an LLM call');
+  assert.equal(modelCallCount, 1, 'inventory-count language should be supervised once before grounded inventory lookup');
 });
 
 

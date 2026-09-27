@@ -15,7 +15,7 @@ const NOW = new Date('2026-09-18T10:00:00.000Z');
 function stayAvailability(): SourceResult {
   return {
     status: 'ok', sourceId: 'service_resources_stay', sourceType: 'stay_live', fetchedAt: NOW.toISOString(),
-    data: [{ key: 'stay:room-a:2026-09-19:available', value: true, domain: 'stay', sourceId: 'service_resources_stay', sourceType: 'stay_live', authoritative: true, fetchedAt: NOW.toISOString() }],
+    data: [{ key: 'availability:stay:room-a:2026-09-19T12:00:00+07:00:available', value: true, domain: 'stay', sourceId: 'service_resources_stay', sourceType: 'stay_live', authoritative: true, fetchedAt: NOW.toISOString() }],
   };
 }
 

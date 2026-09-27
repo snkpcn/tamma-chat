@@ -143,7 +143,7 @@ test('an explicit "book" action with all fields present and verified availabilit
   let plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'confirm', entities: { resourceCode: 'activity-horse', date: '2026-09-19', durationMinutes: 60 } }), eventId: 'evt-1' }));
   plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'book', entities: {} }), taskState: plan.taskStateContainer, eventId: 'evt-2' }));
   assert.equal(plan.customerCommitPresent, true);
-  const bundle = { domain: 'activity' as const, sources: [{ need: 'availability' as const, sourceId: 's', sourceType: 'activity_live' as const, status: 'ok' as const }], facts: [{ key: 'activity:activity-horse:2026-09-19:available', value: true, domain: 'activity' as const, sourceId: 's', sourceType: 'activity_live' as const, authoritative: true, fetchedAt: NOW.toISOString() }], entities: [], missing: [], warnings: [], freshness: 'live' as const };
+  const bundle = { domain: 'activity' as const, sources: [{ need: 'availability' as const, sourceId: 's', sourceType: 'activity_live' as const, status: 'ok' as const }], facts: [{ key: 'availability:activity-horse:2026-09-19T12:00:00+07:00:available', value: true, domain: 'activity' as const, sourceId: 's', sourceType: 'activity_live' as const, authoritative: true, fetchedAt: NOW.toISOString() }], entities: [], missing: [], warnings: [], freshness: 'live' as const };
   const decision = resolveDialogDecision(plan, [bundle]);
   assert.equal(decision.mode, 'propose_action');
   assert.equal(decision.actionProposal?.toolName, 'create_booking');
@@ -224,7 +224,7 @@ test('processDialogTurn end-to-end: replaying the same turn twice never duplicat
   taskState = plan.taskStateContainer;
   const bookInput: DialogInput = input({ semanticTurn: turn({ domain: 'activity', action: 'book', entities: {} }), eventId: 'evt-2', taskState });
   const adaptersWithAvailability: KnowledgeSourceAdapters = {
-    activity: { availability: async () => okResult('schedule', [{ key: 'activity:activity-horse:2026-09-19:available', value: true, domain: 'activity', sourceId: 'schedule', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }]) },
+    activity: { availability: async () => okResult('schedule', [{ key: 'availability:activity-horse:2026-09-19T12:00:00+07:00:available', value: true, domain: 'activity', sourceId: 'schedule', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }]) },
   };
   const firstDecision = await processDialogTurn(bookInput, adaptersWithAvailability, NOW);
   const secondDecision = await processDialogTurn({ ...bookInput, taskState: firstDecision.taskStateContainer }, adaptersWithAvailability, NOW);

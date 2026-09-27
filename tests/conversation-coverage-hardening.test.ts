@@ -68,7 +68,7 @@ function horseCatalogFacts(): GroundedFact[] {
 const GENERIC_APOLOGY = /ตอบเรื่องนี้ให้แม่นไม่ได้|คิดช้ากว่าปกติ/;
 const DURATION_PROMPT = /เลือกระยะเวลา|ขอระยะเวลา/;
 
-test('conversation-coverage hardening: exact multi-turn LINE UAT survives provider outage; only coarse read-only turns attempt Language Brain', async () => {
+test('conversation-coverage hardening: exact multi-turn LINE UAT survives provider outage while every ordinary turn attempts Language Brain first', async () => {
   const state = memoryState();
   let modelCallCount = 0;
   const deps: Partial<OneMindDependencies> = {
@@ -210,8 +210,8 @@ test('conversation-coverage hardening: exact multi-turn LINE UAT survives provid
   // must fall back to the exact deterministic candidate while transactional
   // slot/correction/cancel turns remain model-free. The five attempts in this
   // script are the bounded read-only questions/switches only.
-  assert.equal(modelCallCount, 5,
-    'only the five coarse read-only turns may attempt Language Brain; transactional state turns must remain deterministic');
+  assert.equal(modelCallCount, 11,
+    'every ordinary turn should attempt Language Brain first; deterministic parsing is outage fallback, not primary language ownership');
 });
 
 test('a comparison for beginner-suitability with no verified data is also honest, never hallucinated', async () => {

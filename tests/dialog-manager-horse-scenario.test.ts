@@ -29,7 +29,7 @@ function activityCatalogFacts(): SourceResult {
 function availabilityFacts(available: boolean): SourceResult {
   return {
     status: 'ok', sourceId: 'schedule_rows', sourceType: 'activity_live', fetchedAt: NOW.toISOString(),
-    data: [{ key: 'activity:activity-horse:2026-09-19:15:00:available', value: available, domain: 'activity', sourceId: 'schedule_rows', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
+    data: [{ key: 'availability:activity-horse:2026-09-19T15:00:00+07:00:available', value: available, domain: 'activity', sourceId: 'schedule_rows', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
   };
 }
 
@@ -82,11 +82,11 @@ test('canonical horse-booking scenario, all 7 turns, through the REAL Dialog Man
   // Turn 5: พรุ่งนี้สองคน -- same task, date+partySize merged.
   const step5 = HORSE_BOOKING_SCENARIO[4]!;
   const context5 = buildSemanticContext(conversationContext, NOW);
-  const turn5 = parseSemanticTurnResponse(JSON.stringify(step5.simulatedModelOutput), context5);
+  const turn5 = parseSemanticTurnResponse(JSON.stringify({ ...step5.simulatedModelOutput, entities: { ...step5.simulatedModelOutput.entities, date: '2026-09-19', partySize: 2 } }), context5);
   decision = await processDialogTurn({ semanticTurn: turn5, conversationContext, taskState, channel: step5.channel, eventId: step5.eventId }, adapters, NOW);
   taskState = decision.taskStateContainer;
   assert.equal(taskState.activeTask!.taskId, taskId);
-  assert.equal(taskState.activeTask!.slots.date, 'พรุ่งนี้');
+  assert.equal(taskState.activeTask!.slots.date, '2026-09-19');
   assert.equal(taskState.activeTask!.slots.partySize, 2);
   conversationContext = applyConversationContextUpdate(conversationContext, { ...step5.contextUpdate, channel: step5.channel, eventId: step5.eventId, userMessage: step5.message }, NOW);
 
@@ -95,11 +95,11 @@ test('canonical horse-booking scenario, all 7 turns, through the REAL Dialog Man
   // AND no booking is created merely because most fields are present.
   const step6 = HORSE_BOOKING_SCENARIO[5]!;
   const context6 = buildSemanticContext(conversationContext, NOW);
-  const turn6 = parseSemanticTurnResponse(JSON.stringify(step6.simulatedModelOutput), context6);
+  const turn6 = parseSemanticTurnResponse(JSON.stringify({ ...step6.simulatedModelOutput, entities: { ...step6.simulatedModelOutput.entities, time: '15:00' } }), context6);
   decision = await processDialogTurn({ semanticTurn: turn6, conversationContext, taskState, channel: step6.channel, eventId: step6.eventId }, adapters, NOW);
   taskState = decision.taskStateContainer;
   assert.equal(taskState.activeTask!.taskId, taskId);
-  assert.equal(taskState.activeTask!.slots.time, 'บ่ายสาม');
+  assert.equal(taskState.activeTask!.slots.time, '15:00');
   assert.deepEqual(taskState.activeTask!.missingFields, ['durationMinutes']);
   assert.equal(decision.mode, 'collect_field', 'duration is still missing -- must collect it, not book');
   assert.notEqual(decision.mode, 'propose_action');

@@ -63,6 +63,9 @@ export type ActiveTask = {
   missingFields: string[];
   selectedEntities: SemanticContextEntity[];
   constraints: string[];
+  /** Persisted customer intent to transact. This is NOT execution
+   * confirmation; it only survives slot collection across turns. */
+  commitmentIntent: boolean;
   sourceChannel: string;
   createdAt: string;
   updatedAt: string;
@@ -160,6 +163,7 @@ export function createActiveTask(params: {
     missingFields: recomputeMissingFields(slots, requiredFields),
     selectedEntities: [],
     constraints: [],
+    commitmentIntent:false,
     sourceChannel: params.sourceChannel,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -277,6 +281,7 @@ export type TaskStateEvent =
   | { kind: 'update_slots'; eventId: string; slotPatch: Record<string, unknown>; requiredFields?: readonly string[] }
   | { kind: 'set_entities'; eventId: string; entities: SemanticContextEntity[] }
   | { kind: 'add_constraint'; eventId: string; constraint: string }
+  | { kind: 'mark_commitment'; eventId: string }
   | { kind: 'transition'; eventId: string; nextStatus: ActiveTaskStatus }
   | { kind: 'suspend'; eventId: string }
   | { kind: 'resume'; eventId: string };
@@ -303,6 +308,10 @@ export function applyTaskStateEvent(container: TaskStateContainer, event: TaskSt
     case 'add_constraint': {
       if (!withEvent.activeTask) return withEvent;
       return { ...withEvent, activeTask: addTaskConstraint(withEvent.activeTask, event.constraint, now) };
+    }
+    case 'mark_commitment': {
+      if (!withEvent.activeTask || isTerminalTaskStatus(withEvent.activeTask.status)) return withEvent;
+      return { ...withEvent, activeTask:{ ...withEvent.activeTask, commitmentIntent:true, updatedAt:now.toISOString() } };
     }
     case 'transition': {
       if (!withEvent.activeTask) return withEvent;
@@ -344,9 +353,11 @@ export function parseTaskState(raw: unknown): TaskStateContainer {
   if (!raw || typeof raw !== 'object') return emptyTaskStateContainer();
   const candidate = raw as Partial<TaskStateContainer>;
   if (candidate.schemaVersion !== TASK_STATE_SCHEMA_VERSION) return emptyTaskStateContainer();
-  const activeTask = isValidActiveTask(candidate.activeTask) ? candidate.activeTask : null;
-  const suspendedTask = isValidActiveTask(candidate.suspendedTask) ? candidate.suspendedTask : null;
-  const lastSupersededTask = isValidActiveTask(candidate.lastSupersededTask) ? candidate.lastSupersededTask : null;
+  const normalizeCommitment = (task:ActiveTask | null):ActiveTask | null =>
+    task ? { ...task, commitmentIntent:task.commitmentIntent === true } : null;
+  const activeTask = normalizeCommitment(isValidActiveTask(candidate.activeTask) ? candidate.activeTask : null);
+  const suspendedTask = normalizeCommitment(isValidActiveTask(candidate.suspendedTask) ? candidate.suspendedTask : null);
+  const lastSupersededTask = normalizeCommitment(isValidActiveTask(candidate.lastSupersededTask) ? candidate.lastSupersededTask : null);
   const recentEventIds = Array.isArray(candidate.recentEventIds) ? candidate.recentEventIds.filter((x): x is string => typeof x === 'string').slice(-MAX_RECENT_EVENT_IDS) : [];
   return { schemaVersion: TASK_STATE_SCHEMA_VERSION, activeTask, suspendedTask, lastSupersededTask, recentEventIds };
 }
@@ -395,7 +406,7 @@ export function adaptBookingSessionToTask(row: LegacyBookingSessionRow, sourceCh
     taskId: `legacy:booking_session:${sourceChannel}`,
     type, domain: TASK_TYPE_DOMAIN[type],
     status: LEGACY_BOOKING_SESSION_STATUS[row.status] ?? 'collecting',
-    slots, missingFields, selectedEntities: [], constraints: [],
+    slots, missingFields, selectedEntities: [], constraints: [], commitmentIntent:false,
     sourceChannel, createdAt: timestamp, updatedAt: timestamp,
   };
 }
@@ -411,7 +422,7 @@ export function adaptRestaurantProposedSetToTask(state: RestaurantProposedSetSta
   return {
     taskId: `legacy:restaurant_proposed_set:${sourceChannel}`,
     type: 'restaurant_preorder', domain: TASK_TYPE_DOMAIN.restaurant_preorder, status: 'collecting',
-    slots, missingFields, selectedEntities: [], constraints: [],
+    slots, missingFields, selectedEntities: [], constraints: [], commitmentIntent:false,
     sourceChannel, createdAt: state.createdAt ?? timestamp, updatedAt: timestamp,
   };
 }
@@ -427,7 +438,7 @@ export function adaptPendingPromotionRedemptionToTask(pending: PendingPromotionR
       customerName: pending.draft.customerName, phone: pending.draft.phone, email: pending.draft.email,
     },
     missingFields: missingPromotionFields(pending),
-    selectedEntities: [], constraints: [],
+    selectedEntities: [], constraints: [], commitmentIntent:true,
     sourceChannel, createdAt: pending.draft.acceptedAt ?? timestamp, updatedAt: timestamp,
   };
 }

@@ -2,97 +2,80 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   callPreferredModel,
-  resetGeminiCircuitForTests,
+  callSemanticSupervisor,
+  callSemanticReviewer,
+  OPENAI_SEMANTIC_PRIMARY_MODEL,
+  OPENAI_SEMANTIC_REVIEW_MODEL,
 } from '../netlify/functions/_thongthai-model-provider';
 
-function jsonResponse(body: unknown, status: number, headers: Record<string,string> = {}) {
-  return new Response(JSON.stringify(body), { status, headers });
+function jsonResponse(body: unknown, status: number) {
+  return new Response(JSON.stringify(body), { status });
 }
 
-test('Human Brain 5.4 RED: a 429 on one Gemini model falls through to the next FREE Gemini model instead of killing all Gemini', async () => {
+test('Human Conversation Recovery: provider is OpenAI-only and primary semantic model is Terra', async () => {
   const originalFetch = global.fetch;
-  const originalGemini = process.env.GEMINI_API_KEY;
-  const originalOpenAI = process.env.OPENAI_API_KEY;
-  const originalPaidFallback = process.env.THONGTHAI_ALLOW_PAID_FALLBACK;
-  process.env.GEMINI_API_KEY = 'test-gemini-key';
+  const originalKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = 'test-openai-key';
-  delete process.env.THONGTHAI_ALLOW_PAID_FALLBACK;
-  resetGeminiCircuitForTests();
 
-  const urls: string[] = [];
+  const urls:string[] = [];
+  const bodies:any[] = [];
+  global.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    urls.push(String(url));
+    bodies.push(JSON.parse(String(init?.body ?? '{}')));
+    return jsonResponse({ output_text:'{"ok":true}' }, 200);
+  }) as typeof fetch;
+
+  try {
+    assert.equal(await callSemanticSupervisor('system', [{role:'user',content:'hi'}]), '{"ok":true}');
+    assert.equal(urls.length, 1);
+    assert.match(urls[0]!, /api\.openai\.com\/v1\/responses/);
+    assert.equal(bodies[0].model, OPENAI_SEMANTIC_PRIMARY_MODEL);
+    assert.equal(OPENAI_SEMANTIC_PRIMARY_MODEL, 'gpt-5.6-terra');
+  } finally {
+    global.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalKey;
+  }
+});
+
+test('Human Conversation Recovery: bounded reviewer uses Sol only when explicitly called', async () => {
+  const originalFetch = global.fetch;
+  const originalKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+
+  const models:string[] = [];
+  global.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    models.push(JSON.parse(String(init?.body ?? '{}')).model);
+    return jsonResponse({ output_text:'{"ok":true}' }, 200);
+  }) as typeof fetch;
+
+  try {
+    await callSemanticReviewer('system', [{role:'user',content:'review'}]);
+    assert.deepEqual(models, [OPENAI_SEMANTIC_REVIEW_MODEL]);
+    assert.equal(OPENAI_SEMANTIC_REVIEW_MODEL, 'gpt-5.6-sol');
+  } finally {
+    global.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalKey;
+  }
+});
+
+test('Human Conversation Recovery: backward-compatible provider entrypoint no longer calls Gemini', async () => {
+  const originalFetch = global.fetch;
+  const originalKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+  const urls:string[] = [];
+
   global.fetch = (async (url: RequestInfo | URL) => {
     urls.push(String(url));
-    if (urls.length === 1) return jsonResponse({}, 429, { 'retry-after': '10' });
-    return jsonResponse({ candidates:[{ content:{ parts:[{ text:'{"ok":true}' }] } }] }, 200);
+    return jsonResponse({ output_text:'{"ok":true}' }, 200);
   }) as typeof fetch;
 
   try {
-    const result = await callPreferredModel('system', [{ role:'user', content:'hi' }], 'test');
-    assert.equal(result, '{"ok":true}');
-    assert.equal(urls.length, 2, '429 on one model must not suppress the next free Gemini model');
-    assert.match(urls[0], /generativelanguage\.googleapis\.com/);
-    assert.match(urls[1], /generativelanguage\.googleapis\.com/);
-    assert.notEqual(urls[0], urls[1], 'fallback must be a different Gemini model');
-    assert.ok(!urls.some(url => url.includes('api.openai.com')), 'paid OpenAI must remain disabled');
+    assert.equal(await callPreferredModel('system', [{role:'user',content:'hi'}], 'test'), '{"ok":true}');
+    assert.equal(urls.length, 1);
+    assert.ok(urls.every(url => url.includes('api.openai.com')));
+    assert.ok(urls.every(url => !url.includes('googleapis.com')));
   } finally {
     global.fetch = originalFetch;
-    resetGeminiCircuitForTests();
-    if (originalGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalGemini;
-    if (originalOpenAI === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalOpenAI;
-    if (originalPaidFallback === undefined) delete process.env.THONGTHAI_ALLOW_PAID_FALLBACK; else process.env.THONGTHAI_ALLOW_PAID_FALLBACK = originalPaidFallback;
-  }
-});
-
-test('Human Brain 5.4 RED: model-specific 429 circuit skips only that model on the next turn', async () => {
-  const originalFetch = global.fetch;
-  const originalGemini = process.env.GEMINI_API_KEY;
-  process.env.GEMINI_API_KEY = 'test-gemini-key';
-  resetGeminiCircuitForTests();
-
-  const urls: string[] = [];
-  let firstModelUrl = '';
-  global.fetch = (async (url: RequestInfo | URL) => {
-    const value = String(url);
-    urls.push(value);
-    if (!firstModelUrl) {
-      firstModelUrl = value;
-      return jsonResponse({}, 429, { 'retry-after':'60' });
-    }
-    return jsonResponse({ candidates:[{ content:{ parts:[{ text:'{"ok":true}' }] } }] }, 200);
-  }) as typeof fetch;
-
-  try {
-    assert.equal(await callPreferredModel('system', [{role:'user',content:'one'}], 'test'), '{"ok":true}');
-    const callsAfterFirstTurn = urls.length;
-    assert.equal(await callPreferredModel('system', [{role:'user',content:'two'}], 'test'), '{"ok":true}');
-    const secondTurnUrls = urls.slice(callsAfterFirstTurn);
-    assert.ok(secondTurnUrls.length >= 1);
-    assert.ok(!secondTurnUrls.includes(firstModelUrl), 'only the rate-limited model must stay circuit-open');
-  } finally {
-    global.fetch = originalFetch;
-    resetGeminiCircuitForTests();
-    if (originalGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalGemini;
-  }
-});
-
-test('Human Brain 5.4 RED: provider chain includes current stable Gemini 3.8 before older fallbacks', async () => {
-  const originalFetch = global.fetch;
-  const originalGemini = process.env.GEMINI_API_KEY;
-  process.env.GEMINI_API_KEY = 'test-gemini-key';
-  resetGeminiCircuitForTests();
-
-  let firstUrl = '';
-  global.fetch = (async (url: RequestInfo | URL) => {
-    if (!firstUrl) firstUrl = String(url);
-    return jsonResponse({ candidates:[{ content:{ parts:[{ text:'{"ok":true}' }] } }] }, 200);
-  }) as typeof fetch;
-
-  try {
-    await callPreferredModel('system', [{role:'user',content:'hi'}], 'test');
-    assert.match(firstUrl, /gemini-3\.8-flash/);
-  } finally {
-    global.fetch = originalFetch;
-    resetGeminiCircuitForTests();
-    if (originalGemini === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = originalGemini;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalKey;
   }
 });

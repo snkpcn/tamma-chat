@@ -40,6 +40,17 @@ export const ECOSYSTEM_PATHS: EcosystemPath[] = [
  *  stable facts; actual night-by-night AVAILABILITY is not listed here on
  *  purpose because it changes daily and must never be answered from a
  *  static table. */
+export const HOMESTAY_FACT_PROVENANCE = Object.freeze({
+  sourceId:'owner_verified_homestay_config_v1',
+  sourceType:'canonical_organization_config',
+  authoritative:true,
+  allowedClaimKeys:[
+    'totalHouses','twoBedroomHouses','oneBedroomHouses',
+    'checkInByTh','checkOutByTh','roomServiceHoursTh',
+    'bookingWindowTh','finalConfirmationChannelsTh',
+  ] as const,
+});
+
 export type HomestayFacts = {
   totalHouses: number;
   twoBedroomHouses: number;
