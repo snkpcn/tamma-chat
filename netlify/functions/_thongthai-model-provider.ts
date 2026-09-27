@@ -78,7 +78,7 @@ export function providerTimingPolicyForCaller(callerLabel: string): {
   totalBudgetMs: number;
   perAttemptCapMs: number;
 } {
-  if (callerLabel === 'semantic-certification-group') {
+  if (callerLabel.startsWith('semantic-certification-')) {
     return {
       totalBudgetMs: SEMANTIC_CERT_TOTAL_PROVIDER_BUDGET_MS,
       perAttemptCapMs: SEMANTIC_CERT_PER_ATTEMPT_CAP_MS,
