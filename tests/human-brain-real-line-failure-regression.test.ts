@@ -302,3 +302,36 @@ test('REAL LINE: composed assistant reply is persisted so the next human referen
   assert.ok(state.recentTurns?.some(turn=>turn.role==='assistant'&&turn.content.includes('สมัครสมาชิก')),
     'assistant-facing answer must be bounded into conversation evidence for later references');
 });
+
+
+test('REAL LINE: compound horse availability plus preference keeps catalog facts for the recommendation clause', async()=>{
+  const message='compound activity recommendation with timing';
+  const run=scriptedConversation({
+    [message]:semantic({
+      domain:'activity',
+      intent:'horse_riding_availability_and_fallback',
+      action:'status',
+      informationNeed:'availability',
+      speechAct:'request',
+      entities:{
+        date:'2026-09-28',
+        excludedHorse:'ทองไทย',
+        preferredHorseTrait:'calm',
+        weatherCondition:'rain',
+      },
+      constraints:['exclude_thongthai','calm_horse','rain_fallback_activity'],
+    }),
+  },{
+    activity:{
+      catalog:async()=>emptyResult('activity-catalog','activity_live'),
+      availability:async()=>emptyResult('activity-schedule','activity_live'),
+    },
+  });
+  const result=await run(message);
+  const request=result.dialogDecision.knowledgeRequests.find(req=>req.domain==='activity');
+  assert.ok(request);
+  assert.ok(request.needs.includes('availability'));
+  assert.ok(request.needs.includes('catalog'));
+  assert.ok(request.needs.includes('entity_details'));
+  assert.equal(result.dialogDecision.actionProposal,undefined);
+});
