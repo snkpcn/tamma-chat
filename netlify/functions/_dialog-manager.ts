@@ -166,7 +166,7 @@ const SIDE_QUESTION_ACTIONS: ReadonlySet<SemanticAction> = new Set(['ask', 'disc
 const KNOWN_TASK_SLOT_KEYS = new Set([
   'date', 'time', 'partySize', 'durationMinutes', 'resourceCode', 'quantity',
   'customerName', 'phone', 'checkIn', 'checkOut', 'endDate', 'nights',
-  'bedrooms', 'roomType',
+  'bedrooms', 'roomType', 'itemName', 'items',
 ]);
 
 function providesTaskSlotValue(entities: Record<string, unknown>): boolean {
