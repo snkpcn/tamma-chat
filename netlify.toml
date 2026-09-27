@@ -4,12 +4,11 @@
   functions = "netlify/functions"
 
 [build.environment]
-  # Phase P closure: One-Mind is now the primary path for supported read-only
-  # and task-continuation turns (never propose_action/execute_tool -- see
-  # readOnlyCutoverEligibility in _thongthai-one-mind-response.ts and the
-  # structural proof in tests/one-mind-never-executes.test.ts that this
-  # pipeline never calls a transaction executor). Legacy remains the
-  # fallback for domains not yet cut over and for any real transaction.
+  # Human Conversation Recovery: One-Mind owns shared semantic/context/task
+  # decisions on web and LINE. It may create a non-executing action proposal
+  # only after explicit commitment and grounded checks; it never calls a
+  # booking/order/payment executor. Legacy deterministic executors remain the
+  # separate transaction boundary where still supported.
   THONGTHAI_ONE_MIND_CUTOVER = "1"
 
 
