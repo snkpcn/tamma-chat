@@ -394,12 +394,23 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     // "just asking, I did not ask you to book" must suppress progression,
     // never manufacture a new preorder/booking task from an empty correction.
     if (turn.action === 'correct_previous') {
-      // A correction without an active/resumed working task corrects
-      // conversational meaning, not a nonexistent booking. Concrete values
-      // like partySize must never manufacture a new reservation task merely
-      // because the customer corrected an earlier recommendation/context.
-      reasons.push('no_active_task');
-      return {container,reasons};
+      // A correction without an active/resumed task normally corrects
+      // conversational meaning only (e.g. "5 people -> 4"), so it must not
+      // manufacture a booking. A NAMED current selection is different: the
+      // customer can replace a previously discussed choice before any task
+      // existed. Preserve that bounded working selection as a task, still
+      // without commitmentIntent and therefore without transaction authority.
+      const names=explicitSelectionNames(turn);
+      const defaultType=DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
+      if (names.length > 0 && defaultType) {
+        container = applyTaskStateEvent(container, {
+          kind:'start', eventId:`${eventId}:task_merge`,
+          params:{type:defaultType,sourceChannel:channel,initialSlots:taskSlotPatch(turn.entities)},
+        }, now);
+      } else {
+        reasons.push('no_active_task');
+        return {container,reasons};
+      }
     }
 
     // Human Conversation Recovery: a preference/constraint declaration is
