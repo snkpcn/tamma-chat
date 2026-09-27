@@ -269,3 +269,24 @@ test('active-task summary ignores stale unresolved references and never asks cla
   assert.equal(turn.references.length, 0);
   assert.equal(turn.clarificationReason, undefined);
 });
+
+
+test('camelCase counts and selected_activity_asset canonicalize to downstream task fields', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'change the selected horse and correct group composition',
+    speechAct:'correction',
+    domain:'activity',
+    intent:'change_selection_and_group',
+    action:'correct_previous',
+    informationNeed:'none',
+    entities:{selected_activity_asset:'ทองไทย',partySize:4,childCount:1,adultCount:3},
+    references:[],
+    constraints:[],
+    confidence:0.98,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.entities.horseName,'ทองไทย');
+  assert.equal(turn.entities.partySize,4);
+  assert.equal(turn.entities.children,1);
+  assert.equal(turn.entities.adults,3);
+});
