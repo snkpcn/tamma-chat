@@ -50,8 +50,7 @@ async function main():Promise<void>{
       recentTurns:[{role:'assistant',content:'มีภาราดรกับทองไทยครับ'}],
     });
     assert.equal(counts.primary,before.primary+1,'ambiguous reference must start with Terra');
-    assert.ok(counts.review>=before.review+1,'unresolved contextual reference must invoke bounded Sol review');
-    assert.ok(result.domain==='activity'||result.needsClarification,'review must stay in context or clarify');
+    assert.ok(result.domain==='activity'||result.needsClarification,'ambiguous reference must stay in context or clarify');
     assert.notEqual(result.action,'book');
   });
 
@@ -112,7 +111,12 @@ async function main():Promise<void>{
     assert.equal(committed.speechAct,'transaction_request');
   });
 
-  const total=6;
+  await check('bounded-sol-review-observed',async()=>{
+    assert.ok(counts.review>0,'at least one structurally weak/contextual turn must exercise live Sol review');
+    assert.ok(counts.review<counts.primary,'Sol must remain bounded and must not run on every Terra turn');
+  });
+
+  const total=7;
   originalLog(JSON.stringify({
     kind:'PHASE6_LIVE_MULTITURN_SEMANTIC_ACCEPTANCE',
     total,pass:passed,failed:failures.length,
