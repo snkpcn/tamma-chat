@@ -1741,6 +1741,77 @@ export function resolveSupervisedStayCutover(
 /** Structured-only Stay transaction args. Canonical selection lives on the
  * active task; dates/party size/nights were normalized by the dialog layer.
  * This function deliberately has no message/request parameter. */
+export type SupervisedRestaurantCutoverDecision =
+  | { kind:'respond'; response:ComposedResponse }
+  | { kind:'execute_preorder'; args:Record<string, unknown> };
+
+/** Human Core PR F terminal Restaurant boundary. Once the OpenAI supervisor
+ * owns Restaurant meaning, the turn cannot fall into legacy dietary/advisor
+ * regexes, raw preorder parsers, or runThongthaiBrain. */
+export function resolveSupervisedRestaurantCutover(
+  oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel: BrainChannel,
+  language: BrainRequest['language'],
+): SupervisedRestaurantCutoverDecision | null {
+  const turn = oneMind.turn;
+  if (turn.semanticTurn.domain !== 'restaurant'
+      || turn.semanticTurn.semanticSource !== 'openai_supervisor') return null;
+  if (oneMind.status === 'composed') return { kind:'respond', response:oneMind.response };
+
+  const meaning = turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
+  const proposal = turn.dialogDecision.actionProposal;
+  if (meaning.commitmentLevel === 'explicit_transaction'
+      && proposal?.toolName === 'create_restaurant_preorder'
+      && proposal.customerCommitPresent) {
+    return { kind:'execute_preorder', args:resolveRestaurantPreorderProposalArgs(proposal) };
+  }
+
+  const composerInput = {
+    channel,
+    language,
+    semanticTurn:turn.dialogSemanticTurn,
+    dialogDecision:turn.dialogDecision,
+    knowledgeBundles:turn.groundedKnowledge,
+    degradation:turn.knowledgeDegradation,
+    operationalOutcome:null,
+  };
+  const stateUpdate = turn.semanticTurn.speechAct === 'selection'
+    || turn.semanticTurn.speechAct === 'correction'
+    || turn.semanticTurn.action === 'modify'
+    || turn.semanticTurn.action === 'correct_previous'
+    || turn.semanticTurn.action === 'provide_information';
+  const response = stateUpdate
+    ? composeDeterministicResponse(composerInput)
+    : composeGroundedDeterministicResponse(composerInput) ?? composeDeterministicResponse(composerInput);
+  return { kind:'respond', response };
+}
+
+/** Defense-in-depth sanitizer for a proposal already validated by Dialog
+ * Manager/domain policy. No customer message enters this function. */
+export function resolveRestaurantPreorderProposalArgs(
+  proposal: { validatedArgs:Record<string, unknown> },
+): Record<string, unknown> {
+  const args = proposal.validatedArgs;
+  const items = Array.isArray(args.items)
+    ? args.items.flatMap(value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+        const row = value as Record<string, unknown>;
+        const name = typeof row.name === 'string' ? row.name.trim() : '';
+        const quantity = Number(row.quantity);
+        return name && Number.isInteger(quantity) && quantity >= 1 && quantity <= 50
+          ? [{ name, quantity }]
+          : [];
+      })
+    : [];
+  return {
+    ...args,
+    items,
+    ...(typeof args.customerName === 'string' ? { customerName:args.customerName.trim() } : {}),
+    ...(typeof args.phone === 'string' ? { phone:args.phone.trim() } : {}),
+    ...(typeof args.email === 'string' ? { email:args.email.trim() } : {}),
+  };
+}
+
 export function resolveStayBookingProposalArgs(
   proposal: { validatedArgs:Record<string, unknown> },
   activeTask: { selectedEntities:readonly { id:string; name:string }[] } | null | undefined,
@@ -3476,6 +3547,83 @@ async function executeDeterministicActivityBooking(
       bookingCode ? `เลขที่จอง ${bookingCode}` : '',
       selectedHorseName ? `ม้าที่เลือก: ${selectedHorseName}` : '',
       'ทีมงานจะยืนยันอีกครั้งทาง LINE / โทร / อีเมล',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
+async function executeDeterministicRestaurantPreorder(
+  args: Record<string, unknown>,
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse> {
+  // Human Core PR F: structured-only Restaurant execution. The customer
+  // sentence is never parsed here; request is transport context only.
+  const items = Array.isArray(args.items)
+    ? args.items.flatMap(value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+        const row = value as Record<string, unknown>;
+        const name = typeof row.name === 'string' ? row.name.trim() : '';
+        const quantity = Number(row.quantity);
+        return name && Number.isInteger(quantity) && quantity >= 1 && quantity <= 50
+          ? [{ name, quantity }]
+          : [];
+      })
+    : [];
+  const date = typeof args.date === 'string' ? args.date.trim() : '';
+  const time = typeof args.time === 'string' ? args.time.trim() : '';
+  const customerName = typeof args.customerName === 'string' ? args.customerName.trim() : '';
+  const phone = typeof args.phone === 'string' ? args.phone.trim() : '';
+  if (!items.length || !/^\d{4}-\d{2}-\d{2}$/u.test(date)
+      || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(time)
+      || !customerName || !phone) {
+    return {
+      message:'ยังส่งออเดอร์ไม่ได้ครับ ข้อมูลรายการอาหาร/จำนวน วัน เวลา ชื่อ หรือเบอร์โทรยังไม่ครบ',
+      intent:'order', contextUpdates:{}, journeyAction:{type:'none',journey:null},
+      suggestedActions:[], responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+    };
+  }
+
+  const firstResponse: BrainResponse = {
+    message:'', intent:'order', contextUpdates:{}, journeyAction:{type:'none',journey:null},
+    suggestedActions:[], responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+  };
+  const [result] = await executeBrainTools(guestDbId, channel, [{
+    name:'create_restaurant_preorder',
+    args:{
+      ...args,
+      date,
+      time,
+      items,
+      customerName,
+      phone,
+    },
+  }], firstResponse, request);
+  if (!result?.ok) {
+    return { ...firstResponse, message:'ยังส่งออเดอร์ไม่สำเร็จครับ ระบบร้านตรวจรายการหรือจำนวนที่พร้อมสั่งไม่ผ่าน จึงยังไม่ได้สร้างออเดอร์' };
+  }
+
+  let detail: Record<string, unknown> = {};
+  try { detail = JSON.parse(result.detail) as Record<string, unknown>; } catch { /* keep safe defaults */ }
+  const preorderCode = typeof detail.preorderCode === 'string' ? detail.preorderCode : '';
+  const totalAmount = typeof detail.totalAmount === 'number' ? detail.totalAmount : null;
+  const createdItems = Array.isArray(detail.items) ? detail.items : [];
+  const itemLines = createdItems.flatMap(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const row = value as Record<string, unknown>;
+    const name = typeof row.name === 'string' ? row.name : '';
+    const quantity = Number(row.quantity);
+    return name && Number.isFinite(quantity) ? [`• ${name} × ${quantity}`] : [];
+  });
+  return {
+    ...firstResponse,
+    message:[
+      'ส่งออเดอร์เข้าระบบแล้วครับ ✅',
+      preorderCode ? `เลขออเดอร์ ${preorderCode}` : '',
+      ...itemLines,
+      totalAmount !== null ? `รวม ${Math.round(totalAmount)} บาท` : '',
+      `รับอาหาร ${date} เวลา ${time}`,
+      'สถานะ: รอร้านรับออเดอร์',
     ].filter(Boolean).join('\n'),
   };
 }
