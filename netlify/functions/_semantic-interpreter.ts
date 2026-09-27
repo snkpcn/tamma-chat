@@ -741,6 +741,39 @@ function canonicalizeEntityAliases(
     if(Number.isFinite(amount) && entities.budgetAmount===undefined) entities.budgetAmount=amount;
   }
 
+  // Models sometimes group ordinary slot facts under a semantic envelope
+  // (e.g. reservation:{date,time,partySize}). Downstream dialog/task logic
+  // consumes one canonical flat slot contract. Copy ONLY a bounded set of
+  // generic structural fields, never arbitrary nested business objects.
+  const structuralContainers=['reservation','booking','party','group','request','stay'] as const;
+  const structuralAliases:Record<string,string>={
+    date:'date',
+    time:'time',
+    partySize:'partySize',
+    party_size:'partySize',
+    guestCount:'partySize',
+    guest_count:'partySize',
+    adults:'adults',
+    adultCount:'adults',
+    adult_count:'adults',
+    children:'children',
+    childCount:'children',
+    child_count:'children',
+    durationMinutes:'durationMinutes',
+    duration_minutes:'durationMinutes',
+    quantity:'quantity',
+    nights:'nights',
+  };
+  for(const containerKey of structuralContainers){
+    const nested=entities[containerKey];
+    if(!nested || typeof nested!=='object' || Array.isArray(nested)) continue;
+    for(const [from,to] of Object.entries(structuralAliases)){
+      if(entities[to]!==undefined) continue;
+      const nestedValue=(nested as Record<string,unknown>)[from];
+      if(nestedValue!==undefined) entities[to]=nestedValue;
+    }
+  }
+
   // Models naturally name a selected horse as activity_asset. Downstream
   // working-state code uses the canonical horseName slot. Copy the value only
   // in the activity domain and only when the asset is a plain string; nested
@@ -1134,6 +1167,32 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && !hasUnresolvedReference
     && !hasAmbiguousReference;
 
+  const resolvedConversationContinuation =
+    references.some(reference => reference.refersToPriorContext && reference.resolvedFromConversation === true)
+    && references.filter(reference => reference.refersToPriorContext).every(reference =>
+      Boolean(reference.resolvedEntityId)
+      || Boolean(reference.resolvedEntityIds?.length)
+      || Boolean(reference.resolvedTaskSlot)
+      || reference.resolvedFromConversation === true)
+    )
+    && Boolean(context.activeDomain)
+    && context.activeDomain !== 'unknown'
+    && ['ask','modify','recommend','provide_information','correct_previous'].includes(action)
+    && confidence >= 0.7;
+
+  // A generic "same plan / previous request" reference is backed by bounded
+  // conversation evidence, not a canonical entity id. When that reference is
+  // fully resolved, inherit only the prior DOMAIN if the model emitted a
+  // noncommittal general/unknown domain. Current action/entities still come
+  // from the language model, so old context cannot invent a transaction.
+  if (
+    resolvedConversationContinuation
+    && (domain === 'general' || domain === 'unknown')
+    && context.activeDomain
+  ) {
+    domain = context.activeDomain;
+  }
+
   const noUsableContext = !context.activeDomain
     && context.recentEntities.length === 0
     && !context.activeTask
@@ -1165,10 +1224,10 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion)
+    needsClarification: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
       ? false
       : (parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification),
-    clarificationReason: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion)
+    clarificationReason: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
       ? undefined
       : (typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
         ? parsed.clarificationReason.trim()
