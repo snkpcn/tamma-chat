@@ -646,9 +646,8 @@ Core rules:
 - Understand natural/colloquial Thai, typos, ellipsis, corrections, topic shifts, and multi-intent sentences by meaning.
 - Current message outranks stale context. Use context only to resolve real references or continuation.
 - Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
-- Explicit non-transaction language such as "ยังไม่จอง", "ยังไม่ต้องสั่ง", "แค่ถาม/แค่เช็ก", "ห้ามจอง", or "ถ้าไม่ว่างไม่ต้องทำอะไร" outranks stale task state. Keep the turn read-only unless the CURRENT message separately and explicitly commits to a transaction.
-- Conditional fallback language ("if A is unavailable use B; if both are unavailable do nothing") is an availability/status decision rule, NOT an immediate selection or booking. Preserve the alternatives/condition in entities or constraints, but do not emit confirm/book/order merely because one fallback option is named.
-- When the CURRENT message explicitly replaces a prior choice ("เปลี่ยนใจ", "ไม่ใช่อันนั้น เอา...", "เอาอีกตัว"), the new choice outranks the old selected entity/task value. Treat it as a correction/modification/selection according to the actual request, never as confirmation of the stale choice.
+- Current no-transaction wording keeps the turn read-only. Conditional "if A unavailable use B; if neither, do nothing" = status/availability, never immediate confirm/book/order.
+- Current corrections/replacements outrank stale selections and task values.
 - Conversation task directives cancel_active/suspend_active/resume_suspended affect working state only, never a real transaction.
 - Catalog existence differs from live availability. recommendation differs from neutral discovery. correction differs from a new modification.
 - For reservable hospitality resources (room/house/table/activity slot), a bare existence-at-use question such as whether one "is available/มีไหม" is availability, not stock inventory. Use inventory only for explicit on-hand stock/count questions.
@@ -659,7 +658,7 @@ Core rules:
 - Any adverse-event report uses domain=incident even when its subject is an animal, property, a local place, or an organization service; narrower domains apply only when no incident is being reported.
 - When the customer explicitly contrasts two or more known alternatives against a criterion, action=compare (informationNeed may be recommendation). Use action=recommend for open-ended suggestions without a fixed comparison set.
 - Domain nouns identify subject; preserve the actual predicate, dates, times, party size, constraints, negation, and stated preferences.
-- Preserve ALL meaningful clauses in a compound turn. A request can simultaneously contain a preference/selection, date/time, exclusion, and a fallback question (for example weather contingency). Do not answer/classify only the first recognizable clause and discard the rest.
+- Preserve all meaningful clauses in compound turns; do not drop later constraints, corrections, or fallback questions.
 - A customer merely reporting their own plan, pause, state, or situation is speechAct=statement. Use request/request_help only when they ask the assistant or organization to do something.
 - If the customer explicitly retracts/corrects a previously inferred intent (for example clarifying that they were only asking and were NOT requesting a booking/order/confirmation), use speechAct=correction. This is a correction of conversational meaning even when no slot value changes; keep it read-only and never infer a transaction.
 - A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
