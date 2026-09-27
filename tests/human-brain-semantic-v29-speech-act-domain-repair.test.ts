@@ -405,3 +405,54 @@ test('mixed stay activity dining shopping live shape canonicalizes ecosystem pla
   }), emptySemanticContext());
   assert.equal(turn.domain,'journey');
 });
+
+
+test('nested reservation envelope exposes canonical date time and partySize slots', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'check a table for four people tomorrow around 18:00',
+    speechAct:'question',
+    domain:'restaurant',
+    intent:'check_table_availability_with_nearby_time_recommendation',
+    action:'status',
+    informationNeed:'availability',
+    entities:{reservation:{date:'2026-09-28',time:'~18:00',partySize:4}},
+    references:[],
+    constraints:['fallback_nearby_time_if_unavailable'],
+    confidence:0.97,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.entities.date,'2026-09-28');
+  assert.equal(turn.entities.time,'~18:00');
+  assert.equal(turn.entities.partySize,4);
+});
+
+test('resolved previous-plan continuation inherits journey domain and suppresses redundant clarification', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'journey' as const,
+    recentTurns:[
+      {role:'user' as const,content:'plan a two-day trip'},
+      {role:'assistant' as const,content:'day one horse riding, day two meal and souvenirs'},
+    ],
+    lastRecommendationReference:'day one horse riding, day two meal and souvenirs',
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'keep the same plan but move it to tomorrow',
+    speechAct:'correction',
+    domain:'unknown',
+    intent:'modify_previous_plan_date',
+    action:'modify',
+    informationNeed:'none',
+    entities:{date:'2026-09-28'},
+    references:[{type:'previous_plan',value:'same plan',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.78,
+    needsClarification:true,
+    clarificationReason:'prior_plan_reference',
+  }), context);
+  assert.equal(turn.domain,'journey');
+  assert.equal(turn.action,'modify');
+  assert.equal(turn.references[0]?.resolvedFromConversation,true);
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.clarificationReason,undefined);
+});
