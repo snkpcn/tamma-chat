@@ -272,7 +272,7 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         const horseCare=textOf(capture.replies[8]);
         assert.match(horseCare,/ขี่ม้า|ทีมงาน|ช้า|กลัว/u);
         assert.doesNotMatch(horseCare,/ชำระเงิน|เลือกระยะเวลา\s*30/u);
-        assert.equal(h.modelCallCount(),callsBeforeHorse+1,'horse intent must pass through the language supervisor once');
+        assert.equal(h.modelCallCount(),callsBeforeHorse,'proven horse-care intake is deterministic and must remain zero-call');
 
         // 10 — horse-name collision is now correctly interpreted inside horse context.
         await callLine('เอาทองไทย',user);
