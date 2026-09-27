@@ -9,7 +9,7 @@ import {
   processOneMindCustomerTurn,
 } from '../netlify/functions/_thongthai-one-mind-response';
 import type { GuestAgentStateSnapshot } from '../netlify/functions/_guest-agent-state-store';
-import type { KnowledgeSourceAdapters, SourceResult } from '../netlify/functions/_knowledge-resolver';
+import type { GroundedFact, KnowledgeSourceAdapters, SourceResult } from '../netlify/functions/_knowledge-resolver';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
 import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
 import { createActiveTask, emptyTaskStateContainer, setSelectedEntities } from '../netlify/functions/_task-state';
@@ -383,4 +383,66 @@ test('REAL LINE: language correction value wins over shallow first-number extrac
   assert.equal(result.semanticTurn.entities.children,1);
   assert.notEqual(result.dialogDecision.mode,'collect_field');
   assert.equal(result.dialogDecision.actionProposal,undefined);
+});
+
+
+test('REAL LINE: durable entity recommendation survives later cross-domain recommendations for descriptive follow-up', async()=>{
+  let snapshot:GuestAgentStateSnapshot={exists:false,state:{},updatedAt:null};
+  let rev=0;
+  const makeFact=(key:string,value:unknown,domain:GroundedFact['domain'],sourceType:GroundedFact['sourceType']):GroundedFact=>({
+    key,value,domain,sourceId:'sticky-rec-test',sourceType,authoritative:true,fetchedAt:NOW.toISOString(),
+  });
+  const ok=(sourceType:GroundedFact['sourceType'],data:GroundedFact[]):SourceResult=>({
+    status:'ok',sourceId:'sticky-rec-test',sourceType,fetchedAt:NOW.toISOString(),data,
+  });
+  const meanings:Record<string,SemanticTurn>={
+    horse:semantic({
+      domain:'activity',intent:'recommend_calm_horse',action:'recommend',informationNeed:'recommendation',speechAct:'request',
+      entities:{},constraints:['calm_temperament'],
+    }),
+    trip:semantic({
+      domain:'journey',intent:'compose_trip',action:'recommend',informationNeed:'recommendation',speechAct:'request',
+      entities:{tripDurationDays:2},constraints:[],
+    }),
+  };
+  const deps:Partial<OneMindDependencies>={
+    resolveCanonicalGuestId:async()=>CANON,
+    guestDbIdFromAnonymousId:async()=>GUEST,
+    interpretSemanticTurn:async message=>structuredClone(meanings[message]!),
+    buildKnowledgeAdapters:()=>({
+      activity:{catalog:async()=>ok('activity_live',[
+        makeFact('activity:horse_riding:name','ขี่ม้า','activity','activity_live'),
+        makeFact('activity_asset:horse-paradorn:name','ภาราดร','activity','activity_live'),
+        makeFact('temperament:activity_asset:horse-paradorn','calm','activity','activity_live'),
+      ])},
+      restaurant:{menu:async()=>ok('restaurant_live',[makeFact('menu:m1:name','ไก่ย่าง','restaurant','restaurant_live')])},
+      stay:{catalog:async()=>ok('stay_live',[makeFact('stay:s1:name','บ้านสองห้องนอน','stay','stay_live')])},
+      otop:{catalog:async()=>ok('otop_live',[makeFact('otop:o1:name','ของฝากชุมชน','otop','otop_live')])},
+    }),
+  };
+  const stateDeps={
+    loadSnapshot:async()=>snapshot,
+    compareAndSwap:async(_id:string,current:GuestAgentStateSnapshot,patch:{set?:Record<string,unknown>;removeKeys?:string[]},at:Date)=>{
+      rev+=1;
+      const next={...current.state,...(patch.set??{})};
+      for(const key of patch.removeKeys??[]) delete next[key];
+      snapshot={exists:true,state:next,updatedAt:new Date(at.getTime()+rev).toISOString()};
+      return {status:'applied' as const,snapshot};
+    },
+  };
+  const first=await processOneMindCustomerTurn({
+    channel:'line',language:'th',message:'horse',eventId:'sticky-rec-1',
+    providerUserKey:'sticky-rec',persistState:true,
+  },deps,stateDeps,NOW,{requireSemanticSupervisor:true});
+  assert.equal(first.status,'composed');
+  const afterFirst=snapshot.state.conversationContext as {lastRecommendationReference?:string|null};
+  assert.match(afterFirst.lastRecommendationReference??'',/ภาราดร/u);
+
+  const second=await processOneMindCustomerTurn({
+    channel:'line',language:'th',message:'trip',eventId:'sticky-rec-2',
+    providerUserKey:'sticky-rec',persistState:true,
+  },deps,stateDeps,new Date(NOW.getTime()+60_000),{requireSemanticSupervisor:true});
+  assert.equal(second.status,'composed');
+  const afterSecond=snapshot.state.conversationContext as {lastRecommendationReference?:string|null};
+  assert.match(afterSecond.lastRecommendationReference??'',/ภาราดร/u);
 });
