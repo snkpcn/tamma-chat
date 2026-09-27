@@ -266,11 +266,32 @@ function detectTopicTransition(taskState: TaskStateContainer, domain: SemanticDo
   return 'none';
 }
 
+function explicitSelectionNames(turn: SemanticTurn): string[] {
+  if (!['confirm','modify','correct_previous'].includes(turn.action)) return [];
+  const keys = ['horseName','resourceName','roomType','itemName','productName','promotionName','name'];
+  return [...new Set(keys
+    .map(key => turn.entities[key])
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map(value => value.trim()))];
+}
+
 function resolveSelectedEntities(turn: SemanticTurn, conversationContext: ConversationContextState): SemanticContextEntity[] {
   const ids = turn.references.flatMap(reference => (reference.resolvedEntityId ? [reference.resolvedEntityId] : (reference.resolvedEntityIds ?? [])));
-  if (!ids.length) return [];
   const byId = new Map(conversationContext.recentEntities.map(entity => [entity.id, entity] as const));
-  return ids.map(id => byId.get(id)).filter((entity): entity is SemanticContextEntity => Boolean(entity));
+  const resolvedByReference = ids
+    .map(id => byId.get(id))
+    .filter((entity): entity is SemanticContextEntity => Boolean(entity));
+  if (resolvedByReference.length) return resolvedByReference;
+
+  // Explicit CURRENT named selections/corrections outrank a stale selected
+  // entity. The language supervisor names the human-facing entity; canonical
+  // conversation context supplies the id. Never guess an id if no exact name
+  // is present in canonical context.
+  const names = explicitSelectionNames(turn);
+  if (!names.length) return [];
+  const matches = conversationContext.recentEntities.filter(entity => names.includes(entity.name));
+  const unique = [...new Map(matches.map(entity => [entity.id, entity] as const)).values()];
+  return unique.length === 1 ? unique : [];
 }
 
 function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateContainer; reasons: DialogReasonCode[] } {
@@ -426,8 +447,19 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   }
 
   const selectedEntities = resolveSelectedEntities(turn, conversationContext);
-  if (selectedEntities.length && container.activeTask) {
-    container = applyTaskStateEvent(container, { kind: 'set_entities', eventId: `${eventId}:entities`, entities: selectedEntities }, now);
+  if (container.activeTask) {
+    if (selectedEntities.length) {
+      container = applyTaskStateEvent(container, { kind: 'set_entities', eventId: `${eventId}:entities`, entities: selectedEntities }, now);
+    } else if (
+      explicitSelectionNames(turn).length > 0
+      && container.activeTask.selectedEntities.length > 0
+    ) {
+      // The customer explicitly replaced a named choice but the new name is
+      // not yet canonicalized in recentEntities. Clear the old canonical
+      // selection rather than letting stale identity contradict the new slot.
+      // The downstream catalog resolver may canonicalize the new name later.
+      container = applyTaskStateEvent(container, { kind: 'set_entities', eventId: `${eventId}:entities`, entities: [] }, now);
+    }
   }
 
   if (container.activeTask) {
