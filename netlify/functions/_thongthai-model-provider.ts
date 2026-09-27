@@ -140,7 +140,8 @@ async function callOpenAIModel(
 
   const certificationMode = process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE === '1'
     && callerLabel.includes('certification');
-  if (!costContext && !certificationMode) {
+  const networkFreeUnitTestMode = Boolean(process.env.NODE_TEST_CONTEXT);
+  if (!costContext && !certificationMode && !networkFreeUnitTestMode) {
     throw new LLMAvailabilityError('OpenAI cost context is required in customer production', [
       { provider:'openai', model, outcome:'request_error', elapsedMs:0 },
     ]);
