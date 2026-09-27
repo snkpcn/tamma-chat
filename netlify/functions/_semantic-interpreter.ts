@@ -774,17 +774,20 @@ function canonicalizeEntityAliases(
     }
   }
 
-  // Models naturally name a selected horse as activity_asset. Downstream
-  // working-state code uses the canonical horseName slot. Copy the value only
-  // in the activity domain and only when the asset is a plain string; nested
-  // operational entity objects remain untouched.
-  if (
-    domain==='activity'
-    && entities.horseName===undefined
-    && typeof entities.activity_asset==='string'
-    && entities.activity_asset.trim()
-  ) {
-    entities.horseName=entities.activity_asset.trim();
+  // Models naturally name a selected horse as activity_asset, or sometimes
+  // just the bare "horse" field a correction turn uses ("เปลี่ยนใจละ เอา
+  // ทองไทยเหมือนเดิม" produced entities:{horse:"ทองไทย",replacedHorse:...}
+  // live). Downstream working-state code (and the response composer's own
+  // "แก้ตัวเลือกเป็น <name>" acknowledgement) uses the canonical horseName
+  // slot -- without this, a live-observed correction fell back to a generic
+  // "แก้ข้อมูลตามที่บอกแล้วครับ" that never names which horse was chosen.
+  // Copy the value only in the activity domain and only when the asset is a
+  // plain string; nested operational entity objects remain untouched.
+  if (domain==='activity' && entities.horseName===undefined) {
+    const bareHorseSource = ['activity_asset','horse','selectedHorse','selected_horse']
+      .map(key => entities[key])
+      .find((v): v is string => typeof v==='string' && v.trim().length>0);
+    if (bareHorseSource) entities.horseName=bareHorseSource.trim();
   }
   return entities;
 }

@@ -528,3 +528,29 @@ test('promotion best-value follow-up resolves from conversation evidence instead
   assert.equal(turn.needsClarification,false);
   assert.equal(turn.clarificationReason,undefined);
 });
+
+// Real 16-turn live acceptance regression (2026-09-27, turn 2): "เมื่อกี้บอก
+// ว่าเอาภาราดร เปลี่ยนใจละ เอาทองไทยเหมือนเดิม แต่เวลาเดิมนะ" was classified
+// perfectly (domain/action/constraints all correct) but the live model put
+// the corrected horse under a bare `horse` key (with the old one under
+// `replacedHorse`), not the canonical `horseName`/`activity_asset` keys the
+// alias table already knew about. The response composer's
+// conversationalStateUpdateMessage only names the corrected entity when
+// entities.horseName is present, so it silently fell back to a generic
+// "แก้ข้อมูลตามที่บอกแล้วครับ" that never said which horse was chosen.
+test('correction entities.horse (bare key) canonicalizes to horseName like activity_asset already does', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'switch the horse selection back to ทองไทย, keep the same time',
+    speechAct:'correction',
+    domain:'activity',
+    intent:'correct_horse_selection_keep_time',
+    action:'correct_previous',
+    informationNeed:'none',
+    entities:{activity:'ขี่ม้า',horse:'ทองไทย',replacedHorse:'ภาราดร',timeReference:'เวลาเดิม'},
+    references:[],
+    constraints:['horse_thongthai','keep_previous_time'],
+    confidence:0.95,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.entities.horseName,'ทองไทย');
+});
