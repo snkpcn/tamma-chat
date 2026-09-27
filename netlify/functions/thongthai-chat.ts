@@ -4383,6 +4383,47 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Human Core PR F: terminal Restaurant cutover. A usable supervised
+  // Restaurant meaning must end here and never reach legacy restaurant
+  // advisor/preorder raw-text parsing or the legacy general LLM below.
+  const supervisedRestaurant = earlyOneMind
+    ? resolveSupervisedRestaurantCutover(earlyOneMind, channel, request.language)
+    : null;
+  if (supervisedRestaurant?.kind === 'execute_preorder') {
+    const executed = await executeDeterministicRestaurantPreorder(
+      supervisedRestaurant.args,
+      request,
+      guestDbId,
+      channel,
+    );
+    const polished = polishedResponse(executed, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+  if (supervisedRestaurant?.kind === 'respond') {
+    const semantic = earlyOneMind!.turn.semanticTurn;
+    const polished = polishedResponse({
+      message:supervisedRestaurant.response.message,
+      intent:semantic.action === 'discover' || semantic.action === 'recommend' ? 'recommendation' : 'information',
+      contextUpdates:{}, journeyAction:{type:'none',journey:null}, suggestedActions:[],
+      responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+    }, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
   // Phase 2 closeout — resolve the answer to Thongthai's own persisted
   // question before ordinary domain routing. Safety/authority + service
   // feedback remain above this block. If the customer states a clear new
