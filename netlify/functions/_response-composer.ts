@@ -26,6 +26,7 @@ import {
   renderActivityCareResponse,
   renderActivityRecommendation,
   renderStayResponse,
+  renderRestaurantResponse,
   renderRestaurantRecommendation,
   renderPromotionRecommendation,
   renderJourneyPlan,
@@ -261,7 +262,7 @@ const FIELD_LABELS_TH: Record<string, string> = {
   date:'วัน', time:'เวลา', durationMinutes:'ระยะเวลา', partySize:'จำนวนคน',
   resourceCode:'รายการที่ต้องการ', customerName:'ชื่อผู้จอง', phone:'เบอร์ติดต่อ',
   checkIn:'วันเช็กอิน', checkOut:'วันเช็กเอาต์', endDate:'วันเช็กเอาต์',
-  nights:'จำนวนคืน', bedrooms:'จำนวนห้องนอน', quantity:'จำนวน',
+  nights:'จำนวนคืน', bedrooms:'จำนวนห้องนอน', quantity:'จำนวน', items:'รายการอาหาร',
 };
 
 function activeTaskSubjectTh(input: ResponseComposerInput): string {
@@ -645,7 +646,7 @@ function groundedIntro(input: ResponseComposerInput): string {
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
   const humanGrounded = renderJourneyPlan(input)
     ?? renderStayResponse(input)
-    ?? renderRestaurantRecommendation(input)
+    ?? renderRestaurantResponse(input)
     ?? renderPromotionRecommendation(input)
     // Compound activity turns (preference + availability + rain fallback)
     // need the richer recommendation renderer first; pure availability then
