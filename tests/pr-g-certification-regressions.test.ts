@@ -111,3 +111,30 @@ test('PR G cert: ambiguous asset-code aliases are never guessed',()=>{
   const reconciled=reconcileActivitySemanticEntityNames(turn,[bundle]);
   assert.equal(reconciled.entities.excludedHorse,'alpha');
 });
+
+
+test('PR G cert: focused promotion follow-up resolves against verified object-shaped promotion facts',()=>{
+  const facts:GroundedFact[]=[
+    {
+      key:'promo:restaurant-current',
+      value:{name:'โปรร้านอาหาร',requiresMembership:false},
+      domain:'promotion',sourceId:'promotion-test',sourceType:'promotion_runtime',
+      authoritative:true,fetchedAt:NOW,
+    },
+  ];
+  const meaning=deriveSemanticMeaning({
+    domain:'promotion',intent:'recommend_best_dining_promotion',action:'recommend',
+    informationNeed:'recommendation',entities:{promotionCategory:'restaurant'},
+    references:[{type:'selected_entity',value:'โปรร้านอาหาร',refersToPriorContext:true}],
+    constraints:['no_additional_membership_required'],
+    confidence:.99,needsClarification:false,
+  });
+  const initial=deriveCanonicalKnowledgeScope(meaning);
+  assert.equal(initial.status,'ambiguous');
+  const resolved=resolveCanonicalScopeAgainstFacts(initial,facts);
+  assert.equal(resolved.status,'resolved');
+  assert.deepEqual(resolved.canonicalEntityIds,['promo:restaurant-current']);
+  const filtered=filterFactsByCanonicalScope(facts,resolved);
+  assert.equal(filtered.length,1);
+  assert.equal(filtered[0]?.key,'promo:restaurant-current');
+});
