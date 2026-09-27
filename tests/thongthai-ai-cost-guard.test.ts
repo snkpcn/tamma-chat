@@ -34,7 +34,7 @@ test('cost calculator handles cached and uncached input from one canonical modul
     outputUsdPerMillion:8,
   });
   assert.equal(cost,0.0022);
-  assert.equal(reserveWorstCaseCostUsd('test',1_000,100),0.007);
+  assert.equal(reserveWorstCaseCostUsd('gpt-5.6-terra',1_000,100),0.0032);
 });
 
 test('production defaults enforce the owner hard cap and compact semantic output',()=>{
