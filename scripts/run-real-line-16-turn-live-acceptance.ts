@@ -53,18 +53,18 @@ function empty(sourceId:string,sourceType:KnowledgeSourceType):SourceResult {
 }
 
 const activityFacts:GroundedFact[]=[
-  fact('activity:horse_riding:name','ขี่ม้า','activity','activity-test','activity_live'),
-  fact('activity:horse_riding:resourceCode','activity-horse','activity','activity-test','activity_live'),
-  fact('activity:horse_riding:30min:price',300,'activity','activity-test','activity_live'),
-  fact('activity:horse_riding:60min:price',550,'activity','activity-test','activity_live'),
+  fact('activity:horse:name','ขี่ม้า','activity','activity-test','activity_live'),
+  fact('activity:horse:resourceCode','activity-horse','activity','activity-test','activity_live'),
+  fact('activity:horse:30min:price',300,'activity','activity-test','activity_live'),
+  fact('activity:horse:60min:price',550,'activity','activity-test','activity_live'),
   fact('activity_asset:horse-paradorn:name','ภาราดร','activity','activity-test','activity_live'),
   fact('activity_asset:horse-paradorn:type','horse','activity','activity-test','activity_live'),
-  fact('activity_asset:horse-paradorn:activityCode','horse_riding','activity','activity-test','activity_live'),
+  fact('activity_asset:horse-paradorn:activityCode','horse','activity','activity-test','activity_live'),
   fact('temperament:activity_asset:horse-paradorn','calm','activity','activity-test','activity_live'),
   fact('beginnerSuitable:activity_asset:horse-paradorn',true,'activity','activity-test','activity_live'),
   fact('activity_asset:horse-thongthai:name','ทองไทย','activity','activity-test','activity_live'),
   fact('activity_asset:horse-thongthai:type','horse','activity','activity-test','activity_live'),
-  fact('activity_asset:horse-thongthai:activityCode','horse_riding','activity','activity-test','activity_live'),
+  fact('activity_asset:horse-thongthai:activityCode','horse','activity','activity-test','activity_live'),
   fact('temperament:activity_asset:horse-thongthai','lively','activity','activity-test','activity_live'),
   fact('beginnerSuitable:activity_asset:horse-thongthai',true,'activity','activity-test','activity_live'),
   fact('activity:archery:name','ยิงธนู','activity','activity-test','activity_live'),
@@ -94,7 +94,11 @@ const otopFacts:GroundedFact[]=[
 ];
 
 const promotionFacts:GroundedFact[]=[
-  fact('promo:restaurant-current',{name:'โปรร้านอาหาร',requiresMembership:false},'promotion','promotion-test','promotion_runtime'),
+  fact('promo:restaurant-current:name','โปรร้านอาหาร','promotion','promotion-test','promotion_runtime'),
+  fact('promo:restaurant-current:eligible',true,'promotion','promotion-test','promotion_runtime'),
+  fact('promo:restaurant-current:requiresMembership',false,'promotion','promotion-test','promotion_runtime'),
+  fact('promo:restaurant-current:businessScope','restaurant','promotion','promotion-test','promotion_runtime'),
+  fact('promo:restaurant-current:discountPct',10,'promotion','promotion-test','promotion_runtime'),
 ];
 
 const adapters:KnowledgeSourceAdapters={
