@@ -566,6 +566,12 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') {
         return [{ ...base, domain: 'restaurant', needs: ['order_status'] }];
       }
+      // Human Core PR F: a write-ready preorder must be checked against the
+      // current live menu before an ActionProposal can exist. createRestaurantPreorder
+      // still re-validates at execution as defense in depth.
+      if (task && task.missingFields.length === 0 && isExplicitTransaction(turn)) {
+        return [{ ...base, domain:'restaurant', needs:['catalog'] }];
+      }
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'restaurant', needs: ['catalog', 'recommendations_input'] }];
       return [];
     case 'activity':
@@ -804,6 +810,34 @@ function hasMatchingVerifiedAvailability(
   }));
 }
 
+function hasVerifiedRestaurantPreorderItems(
+  bundles:readonly KnowledgeBundle[],
+  task:ActiveTask,
+):boolean {
+  if(task.type!=='restaurant_preorder' || !Array.isArray(task.slots.items) || task.slots.items.length===0) return false;
+  const menuFacts=new Map<string,unknown>();
+  for(const bundle of bundles) {
+    if(bundle.domain!=='restaurant') continue;
+    for(const fact of bundle.facts) menuFacts.set(fact.key,fact.value);
+  }
+  const ids=[...menuFacts.keys()]
+    .map(key=>key.match(/^menu:([^:]+):name$/u)?.[1])
+    .filter((value):value is string=>Boolean(value));
+  return task.slots.items.every(item=>{
+    if(!item||typeof item!=='object'||Array.isArray(item)) return false;
+    const row=item as Record<string,unknown>;
+    const name=typeof row.name==='string'?row.name.trim():'';
+    const quantity=Number(row.quantity);
+    if(!name||!Number.isInteger(quantity)||quantity<1||quantity>50) return false;
+    const matching=ids.filter(id=>menuFacts.get(`menu:${id}:name`)===name);
+    if(matching.length!==1) return false;
+    const id=matching[0]!;
+    return menuFacts.get(`menu:${id}:orderable`)===true
+      && typeof menuFacts.get(`menu:${id}:availableServings`)==='number'
+      && Number(menuFacts.get(`menu:${id}:availableServings`))>=quantity;
+  });
+}
+
 export function resolveDialogDecision(plan: DialogPlan, bundles: readonly KnowledgeBundle[]): DialogDecision {
   if (plan.mode === 'clarify') {
     return { mode: 'clarify', taskStateContainer: plan.taskStateContainer, knowledgeRequests: plan.knowledgeRequests, missingFields: plan.missingFields, responseIntent: 'clarify_ambiguous_entity', reasons: plan.reasons };
@@ -858,8 +892,13 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
     const availabilityRequested = plan.knowledgeRequests.some(request => request.needs.includes('availability'));
     const availabilityVerified = !availabilityRequested
       || hasMatchingVerifiedAvailability(bundles, plan.taskStateContainer.activeTask);
-    if (availabilityVerified) {
-      const task = plan.taskStateContainer.activeTask;
+    const task = plan.taskStateContainer.activeTask;
+    const restaurantVerified = task.type !== 'restaurant_preorder'
+      || hasVerifiedRestaurantPreorderItems(bundles, task);
+    if (!restaurantVerified && task.type === 'restaurant_preorder') {
+      reasons.push('knowledge_unverified');
+    }
+    if (availabilityVerified && restaurantVerified) {
       const toolName = TOOL_NAME_FOR_TASK_TYPE[task.type];
       if (toolName) {
         mode = 'propose_action';
@@ -941,6 +980,50 @@ function applyActivityCatalogPolicy(
   return applied ? planDialogTurn({ ...input, taskState: container }, now) : null;
 }
 
+/** Pure Restaurant slot normalization. It consumes only structured semantic/task
+ * state. A selected canonical menu entity plus an explicit quantity can become
+ * one preorder line; a one-line items payload missing quantity may borrow the
+ * same explicit quantity slot. No raw customer text is read here. */
+export function resolveRestaurantStructuredSlots(task:ActiveTask):Record<string,unknown> {
+  if(task.type!=='restaurant_preorder') return {};
+  const current=Array.isArray(task.slots.items)?task.slots.items:[];
+  const valid=current.length>0&&current.every(item=>{
+    if(!item||typeof item!=='object'||Array.isArray(item)) return false;
+    const row=item as Record<string,unknown>;
+    const quantity=Number(row.quantity);
+    return typeof row.name==='string'&&Boolean(row.name.trim())
+      && Number.isInteger(quantity)&&quantity>=1&&quantity<=50;
+  });
+  if(valid) return {};
+
+  const quantity=Number(task.slots.quantity);
+  const explicitQuantity=Number.isInteger(quantity)&&quantity>=1&&quantity<=50 ? quantity : null;
+  if(current.length===1&&explicitQuantity!==null&&current[0]&&typeof current[0]==='object'&&!Array.isArray(current[0])) {
+    const name=(current[0] as Record<string,unknown>).name;
+    if(typeof name==='string'&&name.trim()) return {items:[{name:name.trim(),quantity:explicitQuantity}]};
+  }
+
+  const selected=task.selectedEntities.filter(entity=>entity.id.startsWith('menu:'));
+  if(selected.length===1&&explicitQuantity!==null) {
+    return {items:[{name:selected[0]!.name,quantity:explicitQuantity}]};
+  }
+
+  const itemName=typeof task.slots.itemName==='string'?task.slots.itemName.trim():'';
+  if(itemName&&explicitQuantity!==null) return {items:[{name:itemName,quantity:explicitQuantity}]};
+  return {};
+}
+
+function applyRestaurantStructuredPolicy(plan:DialogPlan,input:DialogInput,now:Date):DialogPlan|null {
+  const task=plan.taskStateContainer.activeTask;
+  if(!task||task.type!=='restaurant_preorder') return null;
+  const slotPatch=resolveRestaurantStructuredSlots(task);
+  if(!Object.keys(slotPatch).length) return null;
+  const container=applyTaskStateEvent(plan.taskStateContainer,{
+    kind:'update_slots',eventId:`${input.eventId}:restaurant_structured_autofill`,slotPatch,
+  },now);
+  return planDialogTurn({...input,taskState:container},now);
+}
+
 /** Pure Stay slot normalization. It consumes only already-understood
  * SemanticMeaning/task state: a canonical selected stay entity, ISO check-in
  * date, and either ISO checkout or a numeric night count. No customer text is
@@ -986,6 +1069,8 @@ export async function processDialogTurnDetailed(
   now: Date = new Date(),
 ): Promise<DialogTurnResult> {
   let plan = planDialogTurn(input, now);
+  const restaurantReplanned = applyRestaurantStructuredPolicy(plan, input, now);
+  if (restaurantReplanned) plan = restaurantReplanned;
   const stayReplanned = applyStayStructuredPolicy(plan, input, now);
   if (stayReplanned) plan = stayReplanned;
   let bundles = await resolveBundles(plan, adapters, now);
