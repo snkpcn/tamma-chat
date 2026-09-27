@@ -371,6 +371,8 @@ export function renderJourneyPlan(input: HumanGroundedRenderInput): HumanGrounde
 
   if (!activity && !meal && !stay && !gift) return null;
   const lines = ['จัดเป็นแผนคร่าว ๆ จากตัวเลือกที่มีข้อมูลยืนยันได้แบบนี้ครับ'];
+  const date = semanticEntities(input).date;
+  if (typeof date === 'string' && date.trim()) lines.push('เริ่มตามวันที่ที่แก้ล่าสุด: ' + date.trim());
   if (activity) {
     lines.push('วันแรก: ' + activity.name);
     used.push(activity.key);
