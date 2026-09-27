@@ -861,6 +861,23 @@ function hasMatchingVerifiedAvailability(
   }));
 }
 
+function hasVerifiedPromotionRedemption(
+  bundles:readonly KnowledgeBundle[],
+  task:ActiveTask,
+):boolean {
+  if(task.type!=='promotion_redemption') return true;
+  const campaignId=typeof task.slots.campaignId==='string'
+    ? task.slots.campaignId.trim().replace(/^promo:/u,'')
+    : '';
+  if(!campaignId) return false;
+  return bundles.some(bundle=>bundle.domain==='promotion' && bundle.facts.some(fact=>
+    fact.key===`promo:${campaignId}:eligible`
+    && fact.value===true
+    && fact.authoritative===true
+    && fact.stale!==true
+  ));
+}
+
 export function resolveDialogDecision(plan: DialogPlan, bundles: readonly KnowledgeBundle[]): DialogDecision {
   if (plan.mode === 'clarify') {
     return { mode: 'clarify', taskStateContainer: plan.taskStateContainer, knowledgeRequests: plan.knowledgeRequests, missingFields: plan.missingFields, responseIntent: 'clarify_ambiguous_entity', reasons: plan.reasons };
@@ -912,11 +929,13 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
   // (not merely "no source configured for it").
   let actionProposal: ActionProposal | undefined;
   if (plan.customerCommitPresent && plan.missingFields.length === 0 && plan.taskStateContainer.activeTask && !unavailable) {
+    const task = plan.taskStateContainer.activeTask;
     const availabilityRequested = plan.knowledgeRequests.some(request => request.needs.includes('availability'));
     const availabilityVerified = !availabilityRequested
-      || hasMatchingVerifiedAvailability(bundles, plan.taskStateContainer.activeTask);
-    if (availabilityVerified) {
-      const task = plan.taskStateContainer.activeTask;
+      || hasMatchingVerifiedAvailability(bundles, task);
+    const promotionVerified = hasVerifiedPromotionRedemption(bundles, task);
+    if (!promotionVerified && task.type==='promotion_redemption') reasons.push('knowledge_unverified');
+    if (availabilityVerified && promotionVerified) {
       const toolName = TOOL_NAME_FOR_TASK_TYPE[task.type];
       if (toolName) {
         mode = 'propose_action';
