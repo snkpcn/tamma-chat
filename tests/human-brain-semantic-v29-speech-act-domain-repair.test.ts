@@ -356,3 +356,29 @@ test('elliptic price question uses same-domain active task instead of needless s
   assert.equal(turn.informationNeed,'price');
   assert.equal(turn.needsClarification,false);
 });
+
+
+test('live ecosystem itinerary shape canonicalizes to journey', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'two-night trip: horse on day one, food and souvenirs on day two',
+    speechAct:'request',
+    domain:'ecosystem',
+    intent:'plan_multi_day_itinerary',
+    action:'recommend',
+    informationNeed:'recommendation',
+    entities:{
+      stayDurationNights:2,
+      itinerary:[
+        {day:1,activity:'horse riding'},
+        {day:2,activities:['dining','souvenir shopping']},
+      ],
+    },
+    references:[],
+    constraints:[],
+    confidence:0.98,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.domain,'journey');
+  assert.equal(turn.intent,'plan_multi_day_itinerary');
+  assert.equal(turn.action,'recommend');
+});
