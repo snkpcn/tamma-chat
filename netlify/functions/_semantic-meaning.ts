@@ -151,6 +151,22 @@ function deriveFocus(turn: SemanticTurn): { focusKind: SemanticFocusKind; focusV
     return { focusKind: 'entity_type', focusValue: turn.entities.activityCode.trim().toLowerCase() };
   }
 
+  if (turn.domain === 'stay') {
+    const resourceCode = typeof turn.entities.resourceCode === 'string' ? turn.entities.resourceCode.trim() : '';
+    if (resourceCode) return { focusKind: 'entity', focusValue: resourceCode.startsWith('stay:') ? resourceCode : `stay:${resourceCode}` };
+
+    const statedName = [turn.entities.accommodationName, turn.entities.resourceName]
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    if (statedName) return { focusKind: 'entity', focusValue: statedName.trim() };
+
+    const bedrooms = Number(turn.entities.bedrooms);
+    if (Number.isInteger(bedrooms) && bedrooms > 0) {
+      return { focusKind: 'entity_type', focusValue: `bedrooms:${bedrooms}` };
+    }
+    const roomType = typeof turn.entities.roomType === 'string' ? turn.entities.roomType.trim() : '';
+    if (roomType) return { focusKind: 'entity_type', focusValue: `room_type:${roomType}` };
+  }
+
   const priorRef = turn.references.find(reference => reference.refersToPriorContext);
   if (priorRef) return { focusKind: 'prior_reference', focusValue: priorRef.value ?? null };
 

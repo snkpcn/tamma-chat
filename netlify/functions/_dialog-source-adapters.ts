@@ -17,6 +17,7 @@ import { ACTIVITY_ASSET_ATTRIBUTE_KEYS } from './_activity-catalog-policy';
 import { loadActivePromotionsWorldFact } from './_promotions-runtime';
 import {
   listBookingOptions,
+  listStayBookingOptions,
   listOtopProducts,
   listServiceResources,
   loadLatestBookingStatus,
@@ -152,6 +153,7 @@ function numberValue(request: KnowledgeRequest, key: string): number | null {
 export function bookingAvailabilityArgs(request: KnowledgeRequest): {
   serviceType: 'activity' | 'stay';
   date: string | null;
+  endDate: string | null;
   resourceCode: string | null;
   durationMinutes: number | null;
   partySize: number | null;
@@ -160,6 +162,7 @@ export function bookingAvailabilityArgs(request: KnowledgeRequest): {
   return {
     serviceType: request.domain,
     date: stringValue(request, 'date'),
+    endDate: stringValue(request, 'endDate'),
     resourceCode: stringValue(request, 'resourceCode'),
     durationMinutes: numberValue(request, 'durationMinutes'),
     partySize: numberValue(request, 'partySize'),
@@ -172,15 +175,11 @@ function availabilityAdapter(environment: 'live' | 'test' = 'live') {
     const sourceType: KnowledgeSourceType = request.domain === 'stay' ? 'stay_live' : 'activity_live';
     const sourceId = request.domain === 'stay' ? 'stay_booking_options_live' : 'activity_booking_options_live';
     if (!args?.date) return unavailable(sourceId, sourceType, new Error('missing_date'), now);
+    if (args.serviceType === 'stay' && !args.endDate) return unavailable(sourceId, sourceType, new Error('missing_end_date'), now);
     try {
-      const options = await listBookingOptions(
-        args.serviceType,
-        args.date,
-        environment,
-        args.resourceCode,
-        args.durationMinutes,
-        args.partySize,
-      );
+      const options = args.serviceType === 'stay'
+        ? await listStayBookingOptions(args.date, args.endDate!, environment, args.resourceCode, args.partySize)
+        : await listBookingOptions(args.serviceType, args.date, environment, args.resourceCode, args.durationMinutes, args.partySize);
       const facts: GroundedFact[] = options.flatMap(option => {
         const keyBase = `availability:${option.resourceCode}:${option.startAt}`;
         return [
@@ -190,6 +189,21 @@ function availabilityAdapter(environment: 'live' | 'test' = 'live') {
           { key: `${keyBase}:endAt`, value: option.endAt, domain: request.domain, sourceId, sourceType, authoritative: true, fetchedAt: now.toISOString() },
         ];
       });
+      if (request.domain === 'stay') {
+        // Carry canonical Stay type relationships in the SAME bundle as
+        // mutable availability, so the central scope firewall can filter an
+        // intentionally broad operational result without relying on renderer
+        // keywords or on facts from a different request/bundle.
+        const resources = await listServiceResources('stay');
+        for (const resource of resources) {
+          facts.push({ key:`stay:${resource.code}:name`, value:resource.name, domain:'stay', sourceId, sourceType, authoritative:true, fetchedAt:now.toISOString(), updatedAt:resource.updatedAt });
+          const bedrooms = Number(resource.metadata.bedrooms ?? resource.metadata.bedroom_count);
+          if (Number.isInteger(bedrooms) && bedrooms > 0) facts.push({ key:`stay:${resource.code}:bedrooms`, value:bedrooms, domain:'stay', sourceId, sourceType, authoritative:true, fetchedAt:now.toISOString(), updatedAt:resource.updatedAt });
+          const roomType = [resource.metadata.roomType, resource.metadata.room_type, resource.metadata.accommodation_room_type_code]
+            .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+          if (roomType) facts.push({ key:`stay:${resource.code}:roomType`, value:roomType.trim(), domain:'stay', sourceId, sourceType, authoritative:true, fetchedAt:now.toISOString(), updatedAt:resource.updatedAt });
+        }
+      }
       return ok(sourceId, sourceType, facts, now);
     } catch (error) { return unavailable(sourceId, sourceType, error, now); }
   };
@@ -199,11 +213,25 @@ async function stayCatalogAdapter(_request: KnowledgeRequest, now: Date = new Da
   const sourceId = 'stay_service_resources_live';
   try {
     const resources = await listServiceResources('stay');
-    const facts: GroundedFact[] = resources.flatMap(resource => [
-      { key: `stay:${resource.code}:name`, value: resource.name, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
-      { key: `stay:${resource.code}:description`, value: resource.description, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
-      { key: `stay:${resource.code}:capacity`, value: resource.defaultCapacity, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
-    ]);
+    const facts: GroundedFact[] = resources.flatMap(resource => {
+      const base: GroundedFact[] = [
+        { key: `stay:${resource.code}:name`, value: resource.name, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
+        { key: `stay:${resource.code}:description`, value: resource.description, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
+        { key: `stay:${resource.code}:capacity`, value: resource.defaultCapacity, domain: 'stay' as const, sourceId, sourceType: 'stay_live' as const, authoritative: true, fetchedAt: now.toISOString(), updatedAt: resource.updatedAt },
+      ];
+      const bedrooms = Number(resource.metadata.bedrooms ?? resource.metadata.bedroom_count);
+      if (Number.isInteger(bedrooms) && bedrooms > 0) base.push({ key:`stay:${resource.code}:bedrooms`, value:bedrooms, domain:'stay', sourceId, sourceType:'stay_live', authoritative:true, fetchedAt:now.toISOString(), updatedAt:resource.updatedAt });
+      const roomType = [resource.metadata.roomType, resource.metadata.room_type, resource.metadata.accommodation_room_type_code]
+        .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+      if (roomType) base.push({ key:`stay:${resource.code}:roomType`, value:roomType.trim(), domain:'stay', sourceId, sourceType:'stay_live', authoritative:true, fetchedAt:now.toISOString(), updatedAt:resource.updatedAt });
+      const amenities = Array.isArray(resource.metadata.amenities)
+        ? resource.metadata.amenities.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map(value => value.trim())
+        : [];
+      if (amenities.length) base.push({ key:`stay:${resource.code}:amenities`, value:[...new Set(amenities)], domain:'stay', sourceId, sourceType:'stay_live', authoritative:true, fetchedAt:now.toISOString(), updatedAt:resource.updatedAt });
+      const price = Number(resource.metadata.pricePerNight ?? resource.metadata.price_per_night ?? resource.metadata.price);
+      if (Number.isFinite(price) && price >= 0) base.push({ key:`stay:${resource.code}:price`, value:price, domain:'stay', sourceId, sourceType:'stay_live', authoritative:true, fetchedAt:now.toISOString(), updatedAt:resource.updatedAt });
+      return base;
+    });
     return ok(sourceId, 'stay_live', facts, now);
   } catch (error) { return unavailable(sourceId, 'stay_live', error, now); }
 }

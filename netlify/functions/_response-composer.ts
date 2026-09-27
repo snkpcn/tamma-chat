@@ -25,6 +25,7 @@ import {
   renderActivityAvailability,
   renderActivityCareResponse,
   renderActivityRecommendation,
+  renderStayResponse,
   renderRestaurantRecommendation,
   renderPromotionRecommendation,
   renderJourneyPlan,
@@ -259,7 +260,8 @@ export function assertOperationalClaimSafety(
 const FIELD_LABELS_TH: Record<string, string> = {
   date:'วัน', time:'เวลา', durationMinutes:'ระยะเวลา', partySize:'จำนวนคน',
   resourceCode:'รายการที่ต้องการ', customerName:'ชื่อผู้จอง', phone:'เบอร์ติดต่อ',
-  checkIn:'วันเช็กอิน', checkOut:'วันเช็กเอาต์', quantity:'จำนวน',
+  checkIn:'วันเช็กอิน', checkOut:'วันเช็กเอาต์', endDate:'วันเช็กเอาต์',
+  nights:'จำนวนคืน', bedrooms:'จำนวนห้องนอน', quantity:'จำนวน',
 };
 
 function activeTaskSubjectTh(input: ResponseComposerInput): string {
@@ -642,6 +644,7 @@ function groundedIntro(input: ResponseComposerInput): string {
 
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
   const humanGrounded = renderJourneyPlan(input)
+    ?? renderStayResponse(input)
     ?? renderRestaurantRecommendation(input)
     ?? renderPromotionRecommendation(input)
     // Compound activity turns (preference + availability + rain fallback)
@@ -862,6 +865,9 @@ const TASK_SUMMARY_FIELDS_TH: Record<string, string> = {
   quantity:'จำนวน',
   checkIn:'วันเช็กอิน',
   checkOut:'วันเช็กเอาต์',
+  endDate:'วันเช็กเอาต์',
+  nights:'จำนวนคืน',
+  bedrooms:'จำนวนห้องนอน',
   roomType:'ประเภทห้อง',
   seatPreference:'ที่นั่ง',
   budget:'งบ',

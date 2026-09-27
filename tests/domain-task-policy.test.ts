@@ -20,9 +20,9 @@ test('activity_booking missing fields are grounded in createBooking\'s real vali
   assert.deepEqual(computeTaskMissingFields(complete), []);
 });
 
-test('stay_booking and restaurant_booking only require date (createBooking does not hard-enforce anything else for them)', () => {
+test('stay_booking requires canonical selection, date range, and party size; restaurant booking requires date', () => {
   const stay = createActiveTask({ type: 'stay_booking', sourceChannel: 'web', now: NOW });
-  assert.deepEqual(computeTaskMissingFields(stay), ['date']);
+  assert.deepEqual(computeTaskMissingFields(stay), ['resourceCode', 'date', 'endDate', 'partySize']);
   const restaurantBooking = createActiveTask({ type: 'restaurant_booking', sourceChannel: 'web', initialSlots: { date: '2026-09-19' }, now: NOW });
   assert.deepEqual(computeTaskMissingFields(restaurantBooking), []);
 });
@@ -67,7 +67,7 @@ test('domains with no authored policy yet return [] rather than a guessed rule',
 
 test('DOMAIN_TASK_REQUIRED_FIELDS only lists the three genuinely static domains, not the two conditional ones', () => {
   assert.deepEqual(DOMAIN_TASK_REQUIRED_FIELDS.activity_booking, ['resourceCode', 'date', 'durationMinutes']);
-  assert.deepEqual(DOMAIN_TASK_REQUIRED_FIELDS.stay_booking, ['date']);
+  assert.deepEqual(DOMAIN_TASK_REQUIRED_FIELDS.stay_booking, ['resourceCode', 'date', 'endDate', 'partySize']);
   assert.deepEqual(DOMAIN_TASK_REQUIRED_FIELDS.restaurant_booking, ['date']);
   assert.equal(DOMAIN_TASK_REQUIRED_FIELDS.restaurant_preorder, undefined, 'restaurant_preorder is conditional/data-dependent, not a static list');
   assert.equal(DOMAIN_TASK_REQUIRED_FIELDS.promotion_redemption, undefined, 'promotion_redemption is conditional on requiresDateTime, not a static list');

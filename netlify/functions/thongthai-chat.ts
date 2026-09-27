@@ -68,6 +68,7 @@ import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
+import { deriveSemanticMeaning } from './_semantic-meaning';
 import {
   decidePromotionFallback,
   formatPromotionClarificationMessage,
@@ -1686,6 +1687,71 @@ export function resolveActivityBookingProposalArgs(
       horseName: selectedAssetEntity.name,
       activityAssetCode,
       note: formatActivityAssetNote({ name: selectedAssetEntity.name, assetCode: activityAssetCode }),
+    } : {}),
+  };
+}
+
+export type SupervisedStayCutoverDecision =
+  | { kind:'respond'; response:ComposedResponse }
+  | { kind:'execute_booking'; args:Record<string, unknown> };
+
+/** Terminal Stay boundary after a usable OpenAI semantic result. No raw
+ * customer sentence crosses this API: normal Stay either renders from the
+ * existing SemanticMeaning/scope/knowledge state or executes one validated,
+ * explicitly committed proposal. */
+export function resolveSupervisedStayCutover(
+  oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel: BrainChannel,
+  language: BrainRequest['language'],
+): SupervisedStayCutoverDecision | null {
+  const turn = oneMind.turn;
+  if (turn.semanticTurn.domain !== 'stay' || turn.semanticTurn.semanticSource !== 'openai_supervisor') return null;
+  if (oneMind.status === 'composed') return { kind:'respond', response:oneMind.response };
+
+  const meaning = deriveSemanticMeaning(turn.semanticTurn);
+  const proposal = turn.dialogDecision.actionProposal;
+  if (meaning.commitmentLevel === 'explicit_transaction'
+      && proposal?.toolName === 'create_booking'
+      && proposal.customerCommitPresent) {
+    return {
+      kind:'execute_booking',
+      args:resolveStayBookingProposalArgs(proposal, turn.dialogDecision.taskStateContainer.activeTask),
+    };
+  }
+
+  const composerInput = {
+    channel,
+    language,
+    semanticTurn:turn.dialogSemanticTurn,
+    dialogDecision:turn.dialogDecision,
+    knowledgeBundles:turn.groundedKnowledge,
+    degradation:turn.knowledgeDegradation,
+    operationalOutcome:null,
+  };
+  const stateUpdate = turn.semanticTurn.speechAct === 'selection'
+    || turn.semanticTurn.speechAct === 'correction'
+    || turn.semanticTurn.action === 'modify'
+    || turn.semanticTurn.action === 'correct_previous';
+  const response = stateUpdate
+    ? composeDeterministicResponse(composerInput)
+    : composeGroundedDeterministicResponse(composerInput) ?? composeDeterministicResponse(composerInput);
+  return { kind:'respond', response };
+}
+
+/** Structured-only Stay transaction args. Canonical selection lives on the
+ * active task; dates/party size/nights were normalized by the dialog layer.
+ * This function deliberately has no message/request parameter. */
+export function resolveStayBookingProposalArgs(
+  proposal: { validatedArgs:Record<string, unknown> },
+  activeTask: { selectedEntities:readonly { id:string; name:string }[] } | null | undefined,
+): Record<string, unknown> {
+  const stays = activeTask?.selectedEntities.filter(entity => entity.id.startsWith('stay:')) ?? [];
+  const selected = stays.length === 1 ? stays[0] : null;
+  return {
+    ...proposal.validatedArgs,
+    ...(selected ? {
+      resourceCode:selected.id.replace(/^stay:/u, ''),
+      accommodationName:selected.name,
     } : {}),
   };
 }
@@ -3413,6 +3479,39 @@ async function executeDeterministicActivityBooking(
     ].filter(Boolean).join('\n'),
   };
 }
+
+async function executeDeterministicStayBooking(
+  args: Record<string, unknown>,
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse> {
+  // Pure structured glue: request is passed only as transport context to the
+  // existing tool runtime. This function never reads request.message or runs
+  // any date/entity/commitment parser.
+  const accommodationName = typeof args.accommodationName === 'string' ? args.accommodationName : null;
+  const firstResponse: BrainResponse = {
+    message:'', intent:'booking', contextUpdates:{},
+    journeyAction:{ type:'none', journey:null }, suggestedActions:[],
+    responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+  };
+  const [result] = await executeBrainTools(guestDbId, channel, [{
+    name:'create_booking', args:{ serviceType:'stay', ...args },
+  }], firstResponse, request);
+  if (!result?.ok) return { ...firstResponse, message:'ยังส่งคำขอจองที่พักไม่สำเร็จครับ กรุณาตรวจวันเข้าพัก วันออก จำนวนคน และตัวเลือกที่พักอีกครั้ง' };
+  let detail: Record<string, unknown> = {};
+  try { detail = JSON.parse(result.detail) as Record<string, unknown>; } catch { /* keep defaults */ }
+  const bookingCode = typeof detail.bookingCode === 'string' ? detail.bookingCode : '';
+  return {
+    ...firstResponse,
+    message:[
+      'ส่งคำขอจองที่พักเข้าระบบแล้วครับ ✅',
+      bookingCode ? `เลขที่จอง ${bookingCode}` : '',
+      accommodationName ? `ที่พักที่เลือก: ${accommodationName}` : '',
+      'ทีมงานจะตรวจสอบและยืนยันอีกครั้งทาง LINE / โทร / อีเมล',
+    ].filter(Boolean).join('\n'),
+  };
+}
 // Service Mind -- compliment/complaint/suggestion/safety-issue/system-
 // feedback. Checked early (right after the activity-booking fallback,
 // before One-Mind and every other deterministic responder) for two
@@ -4097,6 +4196,42 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       contextUpdates: polished.contextUpdates,
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Human Core PR E: the equivalent terminal boundary for Stay. A usable
+  // OpenAI-owned Stay meaning cannot reach homestayFactsResponse, any other
+  // raw-text Stay responder, or runThongthaiBrain below this point.
+  const supervisedStay = earlyOneMind
+    ? resolveSupervisedStayCutover(earlyOneMind, channel, request.language)
+    : null;
+  if (supervisedStay?.kind === 'execute_booking') {
+    const executed = await executeDeterministicStayBooking(supervisedStay.args, request, guestDbId, channel);
+    const polished = polishedResponse(executed, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+  if (supervisedStay?.kind === 'respond') {
+    const semantic = earlyOneMind!.turn.semanticTurn;
+    const polished = polishedResponse({
+      message:supervisedStay.response.message,
+      intent:semantic.action === 'discover' || semantic.action === 'recommend' ? 'recommendation' : 'information',
+      contextUpdates:{}, journeyAction:{ type:'none', journey:null }, suggestedActions:[],
+      responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+    }, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
     });
   }
 

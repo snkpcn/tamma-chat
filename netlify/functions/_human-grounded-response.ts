@@ -9,6 +9,7 @@ import type { SemanticTurn } from './_semantic-interpreter';
 import type { DialogDecision } from './_dialog-manager';
 import type { GroundedFact, KnowledgeBundle } from './_knowledge-resolver';
 import { resolveActivityCareFact, resourceCodeForActivityCode } from './_activity-care-policy';
+import { HOMESTAY_FACTS, HOMESTAY_FACT_PROVENANCE } from './_tamma-domain-knowledge';
 
 export type HumanGroundedRenderInput = {
   language: string;
@@ -38,6 +39,117 @@ function facts(input: HumanGroundedRenderInput): GroundedFact[] {
 
 function factMap(input: HumanGroundedRenderInput): Map<string, unknown> {
   return new Map(facts(input).map(fact => [fact.key, fact.value] as const));
+}
+
+/** Human Core PR E: one generic Stay knowledge capability. It receives the
+ * supervisor's closed informationNeed/entities plus facts already filtered by
+ * CanonicalKnowledgeScope. It never sees customer text and never broadens a
+ * focused result. */
+export function renderStayResponse(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
+  const turn = input.semanticTurn;
+  if (!turn || turn.domain !== 'stay' || input.language !== 'th') return null;
+  const map = factMap(input);
+  const used: string[] = [];
+  const scope = input.dialogDecision.knowledgeRequests.find(request => request.domain === 'stay')?.scope;
+  if (scope?.breadth === 'focused' && scope.status !== 'resolved') return null;
+
+  if (turn.informationNeed === 'policy') {
+    const topic = typeof turn.entities.policyTopic === 'string' ? turn.entities.policyTopic : null;
+    const claims: Partial<Record<string, { value:string; key:typeof HOMESTAY_FACT_PROVENANCE.allowedClaimKeys[number] }>> = {
+      check_in: { value:HOMESTAY_FACTS.checkInByTh, key:'checkInByTh' },
+      check_out: { value:HOMESTAY_FACTS.checkOutByTh, key:'checkOutByTh' },
+      room_service: { value:HOMESTAY_FACTS.roomServiceHoursTh, key:'roomServiceHoursTh' },
+      booking_window: { value:HOMESTAY_FACTS.bookingWindowTh, key:'bookingWindowTh' },
+      final_confirmation: { value:HOMESTAY_FACTS.finalConfirmationChannelsTh, key:'finalConfirmationChannelsTh' },
+    };
+    const claim = topic ? claims[topic] : null;
+    if (!claim || !HOMESTAY_FACT_PROVENANCE.allowedClaimKeys.includes(claim.key)) return { message:'เรื่องนี้ยังไม่มีข้อมูลนโยบายที่ยืนยันได้ครับ ทองไทยไม่ขอเดา', usedFactKeys:[] };
+    return { message:`${claim.value}ครับ`, usedFactKeys:[`${HOMESTAY_FACT_PROVENANCE.sourceId}:${claim.key}`] };
+  }
+
+  const bedrooms = Number(turn.entities.bedrooms);
+  if (turn.informationNeed === 'catalog' && Number.isInteger(bedrooms)) {
+    const count = bedrooms === 1 ? HOMESTAY_FACTS.oneBedroomHouses
+      : bedrooms === 2 ? HOMESTAY_FACTS.twoBedroomHouses : null;
+    if (count == null) return { message:`ตอนนี้ยังไม่มีข้อมูลยืนยันสำหรับที่พักแบบ ${bedrooms} ห้องนอนครับ`, usedFactKeys:[] };
+    return {
+      message:`ที่เฮือนสเตย์มีแบบ ${bedrooms} ห้องนอน ${count} หลังครับ`,
+      usedFactKeys:[`${HOMESTAY_FACT_PROVENANCE.sourceId}:${bedrooms === 1 ? 'oneBedroomHouses' : 'twoBedroomHouses'}`],
+    };
+  }
+
+  const rows = [...map.keys()]
+    .map(key => key.match(/^stay:([^:]+):name$/u)?.[1])
+    .filter((value): value is string => Boolean(value))
+    .map(code => ({
+      code,
+      name:map.get(`stay:${code}:name`),
+      capacity:map.get(`stay:${code}:capacity`),
+      bedrooms:map.get(`stay:${code}:bedrooms`),
+      price:map.get(`stay:${code}:price`),
+      amenities:map.get(`stay:${code}:amenities`),
+    }))
+    .filter(row => typeof row.name === 'string' && row.name.trim());
+
+  if (turn.informationNeed === 'amenities') {
+    const withFacts = rows.filter(row => Array.isArray(row.amenities) && row.amenities.length);
+    if (!withFacts.length) return { message:'สิ่งอำนวยความสะดวกเรื่องนี้ยังไม่มีข้อมูลที่ยืนยันได้ครับ ทองไทยไม่ขอเดา', usedFactKeys:[] };
+    const lines = withFacts.map(row => {
+      used.push(`stay:${row.code}:name`, `stay:${row.code}:amenities`);
+      return `• ${row.name}: ${(row.amenities as unknown[]).join(', ')}`;
+    });
+    return { message:`สิ่งอำนวยความสะดวกที่ยืนยันได้ตอนนี้ครับ\n${lines.join('\n')}`, usedFactKeys:used };
+  }
+
+  if (turn.informationNeed === 'capacity') {
+    const withFacts = rows.filter(row => typeof row.capacity === 'number');
+    if (!withFacts.length) return { message:'ตอนนี้ยังไม่มีข้อมูลความจุที่ยืนยันได้สำหรับตัวเลือกนี้ครับ', usedFactKeys:[] };
+    const lines = withFacts.map(row => {
+      used.push(`stay:${row.code}:name`, `stay:${row.code}:capacity`);
+      if (typeof row.bedrooms === 'number') used.push(`stay:${row.code}:bedrooms`);
+      return `• ${row.name}${typeof row.bedrooms === 'number' ? ` — ${row.bedrooms} ห้องนอน` : ''} — รองรับ ${row.capacity} คน`;
+    });
+    return { message:lines.join('\n'), usedFactKeys:used };
+  }
+
+  if (turn.informationNeed === 'price') {
+    const priced = rows.filter(row => typeof row.price === 'number');
+    if (!priced.length) return { message:'ราคาที่พักล่าสุดยังไม่มีข้อมูลที่ยืนยันได้ครับ ทองไทยไม่ขอเดาราคา', usedFactKeys:[] };
+    const lines = priced.map(row => {
+      used.push(`stay:${row.code}:name`, `stay:${row.code}:price`);
+      return `• ${row.name} — ${row.price} บาท`;
+    });
+    return { message:lines.join('\n'), usedFactKeys:used };
+  }
+
+  if (turn.informationNeed === 'availability') {
+    const availability = [...map.entries()].filter(([key]) => /^availability:[^:]+:.*:available$/u.test(key));
+    if (!availability.length) {
+      const source = input.knowledgeBundles.flatMap(bundle => bundle.sources).find(item => item.need === 'availability');
+      return source?.status === 'empty'
+        ? { message:'ทองไทยเช็กช่วงที่ขอแล้ว ตอนนี้ยังไม่พบที่พักว่างครับ และยังไม่ได้จอง', usedFactKeys:[] }
+        : { message:'ตอนนี้ทองไทยยังเช็กห้องว่างตามช่วงที่ขอไม่ได้ครับ เลยไม่อยากเดาให้ผิด', usedFactKeys:[] };
+    }
+    const lines = availability.map(([key, value]) => {
+      const code = key.match(/^availability:([^:]+):/u)?.[1] ?? '';
+      const name = map.get(`stay:${code}:name`) ?? code;
+      used.push(key);
+      return `• ${name}: ${value === true ? 'มีว่างตามช่วงที่ขอ' : 'ไม่พบห้องว่างตามช่วงที่ขอ'}`;
+    });
+    return { message:lines.join('\n'), usedFactKeys:used };
+  }
+
+  if (['discover','recommend','compare','ask'].includes(turn.action) || turn.informationNeed === 'catalog' || turn.informationNeed === 'recommendation') {
+    if (!rows.length) return null;
+    const lines = rows.map(row => {
+      used.push(`stay:${row.code}:name`);
+      if (typeof row.bedrooms === 'number') used.push(`stay:${row.code}:bedrooms`);
+      if (typeof row.capacity === 'number') used.push(`stay:${row.code}:capacity`);
+      return `• ${row.name}${typeof row.bedrooms === 'number' ? ` — ${row.bedrooms} ห้องนอน` : ''}${typeof row.capacity === 'number' ? ` — รองรับ ${row.capacity} คน` : ''}`;
+    });
+    return { message:`🏡 ที่พักที่ยืนยันได้ตอนนี้ครับ\n${lines.join('\n')}`, usedFactKeys:used };
+  }
+  return null;
 }
 
 function semanticEntities(input: HumanGroundedRenderInput): Record<string, unknown> {

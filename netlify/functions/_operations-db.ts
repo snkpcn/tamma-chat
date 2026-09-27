@@ -1358,6 +1358,23 @@ export async function listBookingOptions(
   return output;
 }
 
+/** Read-only Stay availability uses the exact same multi-night scheduler as
+ * createBooking. It accepts only structured dates/resource identity and
+ * never parses customer language. */
+export async function listStayBookingOptions(
+  date:string,
+  endDate:string,
+  environment:'live'|'test'='live',
+  resourceCode?:string|null,
+  partySize?:number|null,
+):Promise<BookingOption[]> {
+  return scheduleRowsForBooking({
+    serviceType:'stay', date, endDate, environment,
+    resourceCode:resourceCode ?? undefined,
+    partySize:partySize ?? null,
+  });
+}
+
 export interface ServiceResourceSnapshot {
   code: string;
   name: string;
@@ -1510,25 +1527,28 @@ async function scheduleRowsForBooking(args: {
   if (!(checkOut > checkIn)) return [];
   const nights = Math.round((checkOut.getTime() - checkIn.getTime()) / 86400000);
   if (nights < 1 || nights > 30) return [];
-  const resource = resources[0];
+  const output: BookingOption[] = [];
   const endBound = `${args.endDate}T23:59:59+07:00`;
-  const res = await dbFetch(
-    `service_schedules?resource_id=eq.${resource.id}&environment=eq.${args.environment}&status=eq.open`
-    + `&start_at=gte.${encodeURIComponent(`${args.date}T00:00:00+07:00`)}`
-    + `&start_at=lt.${encodeURIComponent(endBound)}`
-    + '&select=id,start_at,end_at,capacity_total,capacity_reserved&order=start_at.asc',
-  );
-  const rows = await res.json() as Array<{ id: string; start_at: string; end_at: string; capacity_total: number; capacity_reserved: number }>;
-  const picked = rows.slice(0, nights).map(row => ({
-    scheduleId: row.id,
-    resourceCode: resource.code,
-    resourceName: resource.name,
-    serviceType: args.serviceType,
-    startAt: row.start_at,
-    endAt: row.end_at,
-    available: Math.max(0, Number(row.capacity_total) - Number(row.capacity_reserved)),
-  }));
-  return picked.length === nights ? picked : [];
+  for (const resource of resources) {
+    const res = await dbFetch(
+      `service_schedules?resource_id=eq.${resource.id}&environment=eq.${args.environment}&status=eq.open`
+      + `&start_at=gte.${encodeURIComponent(`${args.date}T00:00:00+07:00`)}`
+      + `&start_at=lt.${encodeURIComponent(endBound)}`
+      + '&select=id,start_at,end_at,capacity_total,capacity_reserved&order=start_at.asc',
+    );
+    const rows = await res.json() as Array<{ id: string; start_at: string; end_at: string; capacity_total: number; capacity_reserved: number }>;
+    const picked = rows.slice(0, nights).map(row => ({
+      scheduleId: row.id,
+      resourceCode: resource.code,
+      resourceName: resource.name,
+      serviceType: args.serviceType,
+      startAt: row.start_at,
+      endAt: row.end_at,
+      available: Math.max(0, Number(row.capacity_total) - Number(row.capacity_reserved)),
+    }));
+    if (picked.length === nights) output.push(...picked);
+  }
+  return output;
 }
 
 function shiftIsoDate(date: string, days: number): string {
@@ -1585,6 +1605,11 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
   if (input.serviceType === 'activity') {
     if (!input.resourceCode) throw new Error('activity_resource_required');
     if (![30, 60, 90].includes(Number(input.durationMinutes))) throw new Error('activity_duration_required');
+  }
+  if (input.serviceType === 'stay') {
+    if (!input.resourceCode) throw new Error('stay_resource_required');
+    if (!input.endDate) throw new Error('stay_checkout_required');
+    if (!Number.isFinite(Number(input.partySize)) || Number(input.partySize) < 1) throw new Error('stay_party_size_required');
   }
   const options = await scheduleRowsForBooking({
     serviceType: input.serviceType,

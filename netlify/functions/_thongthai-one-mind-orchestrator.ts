@@ -202,7 +202,8 @@ function normalizeMessage(message: string): string {
 // state but never enter the semantic prompt.
 const SEMANTIC_TASK_SLOT_KEYS = new Set([
   'date', 'time', 'partySize', 'durationMinutes', 'quantity',
-  'checkIn', 'checkOut', 'horseName', 'roomType', 'seatPreference',
+  'checkIn', 'checkOut', 'endDate', 'nights', 'horseName', 'roomType',
+  'bedrooms', 'resourceCode', 'seatPreference',
   'budget', 'budgetBand', 'activityCode', 'serviceType',
 ]);
 
