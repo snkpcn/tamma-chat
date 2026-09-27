@@ -149,6 +149,19 @@ test('8. focused Restaurant scope resolves exact menu item and filters sibling m
   assert.ok(!filtered.some(f=>f.key==='menu:b:price'));
 });
 
+test('8b. focused menu entity does not leak a sibling from the same category',()=>{
+  const turn=semantic({informationNeed:'price',entities:{itemName:'ส้มตำไทย'}});
+  const initial=deriveCanonicalKnowledgeScope(deriveSemanticMeaning(turn));
+  const facts=[
+    baseFact('menu:a:name','ส้มตำไทย'),baseFact('menu:a:category','ส้มตำ'),baseFact('menu:a:price',80),
+    baseFact('menu:b:name','ส้มตำปู'),baseFact('menu:b:category','ส้มตำ'),baseFact('menu:b:price',90),
+  ];
+  const resolved=resolveCanonicalScopeAgainstFacts(initial,facts);
+  const filtered=filterFactsByCanonicalScope(facts,resolved);
+  assert.ok(filtered.some(f=>f.key==='menu:a:price'));
+  assert.ok(!filtered.some(f=>f.key==='menu:b:price'));
+});
+
 test('9. unresolved focused Restaurant scope fails closed instead of leaking sibling menu facts',()=>{
   const turn=semantic({informationNeed:'ingredients',entities:{itemName:'เมนูที่ไม่มีจริง'}});
   const initial=deriveCanonicalKnowledgeScope(deriveSemanticMeaning(turn));
