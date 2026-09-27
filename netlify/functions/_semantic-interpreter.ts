@@ -1253,17 +1253,24 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const SINGLE_ENTITY_REFERENCE_TYPES = new Set([
     'entity_selection','previous_selection','selected_entity',
   ]);
+  const selectionTurnRequiresOneEntity = action === 'confirm' || speechAct === 'selection';
+  const requiresSingleEntity = (reference:SemanticReference):boolean =>
+    SINGLE_ENTITY_REFERENCE_TYPES.has(reference.type)
+    || (selectionTurnRequiresOneEntity && reference.refersToPriorContext);
   const hasAmbiguousReference = references.some(reference =>
     reference.ambiguous === true
     || (
-      SINGLE_ENTITY_REFERENCE_TYPES.has(reference.type)
+      requiresSingleEntity(reference)
       && (reference.resolvedEntityIds?.length ?? 0) > 1
     ));
 
   // Structure-only semantic validation. The model owns language meaning; these
   // rules only reconcile its closed fields/references against canonical context.
+  // Reference "type" itself is free-form model output; on a selection turn,
+  // ANY prior-context reference must resolve to one identity before it can
+  // remain a confirm action.
   const multiCandidateIdentityReference = references.some(reference =>
-    SINGLE_ENTITY_REFERENCE_TYPES.has(reference.type)
+    requiresSingleEntity(reference)
     && (reference.resolvedEntityIds?.length ?? 0) > 1);
   if (
     multiCandidateIdentityReference
