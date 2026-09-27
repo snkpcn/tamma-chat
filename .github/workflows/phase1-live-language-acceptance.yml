@@ -40,3 +40,9 @@ jobs:
           THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
           THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
         run: npx tsx scripts/run-phase1-hidden-holdout.ts
+      - name: Run Phase 6 live multi-turn semantic acceptance
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
+          THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
+        run: npx tsx scripts/run-phase6-live-multiturn.ts
