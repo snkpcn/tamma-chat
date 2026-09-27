@@ -332,6 +332,47 @@ test('pre-call reservation blocks the network path when the next worst case coul
   }
 });
 
+// Release-gate regression (2026-09-27): _thongthai-brain-v3.ts's own
+// callPreferredModel wrapper never forwarded a costContext to the provider,
+// so every real production call from runThongthaiBrain (still the load-
+// bearing fallback for any turn/domain the One-Mind read-only cutover and
+// zero-cost deterministic degradation don't resolve) hit the provider's own
+// "OpenAI cost context is required in customer production" gate and threw
+// before ever reaching OpenAI -- invisible to every existing test because
+// node:test sets NODE_TEST_CONTEXT, which is the guard's own test bypass.
+test('runThongthaiBrain\'s callPreferredModel forwards a costContext past the production cost-guard gate',async()=>{
+  const {callPreferredModel,LLMAvailabilityError}=await import('../netlify/functions/_thongthai-brain-v3');
+  const originalKey=process.env.OPENAI_API_KEY;
+  const originalTestContext=process.env.NODE_TEST_CONTEXT;
+  process.env.OPENAI_API_KEY='test-key-for-gate-check-only-never-a-real-network-call-in-this-branch';
+  delete process.env.NODE_TEST_CONTEXT;
+  try{
+    await assert.rejects(
+      ()=>callPreferredModel('system prompt',[{role:'user',content:'hi'}]),
+      (error:unknown)=>error instanceof LLMAvailabilityError&&error.message.includes('cost context is required'),
+      'sanity check: the guard itself must still reject a call with no costContext at all in production',
+    );
+    await assert.rejects(
+      ()=>callPreferredModel('system prompt',[{role:'user',content:'hi'}],{
+        conversationId:'probe',guestDbId:null,channel:'web',eventId:'evt-1',callerLabel:'thongthai-brain-v3',
+      }),
+      (error:unknown)=>error instanceof LLMAvailabilityError&&!error.message.includes('cost context is required'),
+      'once a costContext is supplied, the call must get PAST the cost-context gate -- the ledger rejecting a null guestDbId proves this without needing a real OpenAI network call',
+    );
+  }finally{
+    if(originalKey===undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY=originalKey;
+    if(originalTestContext===undefined) delete process.env.NODE_TEST_CONTEXT; else process.env.NODE_TEST_CONTEXT=originalTestContext;
+  }
+});
+
+test('source guard: runThongthaiBrain always threads runtime.costContext into callPreferredModel',()=>{
+  const brain=source('netlify/functions/_thongthai-brain-v3.ts');
+  const runFn=brain.slice(brain.indexOf('export async function runThongthaiBrain'));
+  const calls=runFn.match(/callPreferredModel\([^)]*\)/gu)??[];
+  assert.ok(calls.length>=2,'expected both the primary and JSON-repair-retry calls');
+  for(const call of calls) assert.match(call,/runtime\.costContext/u,`call site missing runtime.costContext: ${call}`);
+});
+
 test('source guard: reservation precedes fetch and customer production has no paid reviewer/retry loop',()=>{
   const provider=source('netlify/functions/_thongthai-model-provider.ts');
   const semantic=source('netlify/functions/_semantic-interpreter.ts');

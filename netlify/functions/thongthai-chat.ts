@@ -4457,10 +4457,27 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     ? history
     : [...history, { role: 'user', content: request.message }];
 
-  const [communityOfferings, runtime] = await Promise.all([
+  const [communityOfferings, loadedRuntime] = await Promise.all([
     loadVerifiedCommunityOfferings(),
     loadBrainRuntime(guestDbId, channel),
   ]);
+  // The provider's cost guard requires a real AiCallContext for any
+  // production (non-certification, non-test) call -- see
+  // _thongthai-brain-v3.ts's callPreferredModel. Without this, every real
+  // invocation of the legacy brain fallback (runThongthaiBrain, still load-
+  // bearing for domains/turns the One-Mind read-only cutover and zero-cost
+  // deterministic degradation don't resolve) threw before ever reaching
+  // OpenAI, silently collapsing to the generic "คิดช้ากว่าปกติ" apology.
+  const runtime: BrainRuntimeContext = {
+    ...loadedRuntime,
+    costContext: {
+      conversationId: providerUserKey ?? guestDbId ?? 'unknown',
+      guestDbId,
+      channel,
+      eventId: transportEventId,
+      callerLabel: 'thongthai-brain-v3',
+    },
+  };
 
   // A promotion redemption already in progress must reliably finish
   // regardless of LLM health -- checked unconditionally, before the LLM,

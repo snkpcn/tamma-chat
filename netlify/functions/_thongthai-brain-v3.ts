@@ -19,6 +19,7 @@ import {
   stripCodeFences,
   type ChatTurn,
 } from './_thongthai-model-provider';
+import type { AiCallContext } from './_ai-cost-ledger';
 
 export { ProviderNotConfiguredError, LLMAvailabilityError, stripCodeFences };
 export type { ChatTurn };
@@ -26,8 +27,17 @@ export type { ChatTurn };
 export const THONGTHAI_BRAIN_VERSION = '2026-09-agentic-operations-v3-activity-inventory';
 export { THONGTHAI_BIBLE_VERSION };
 
-function callPreferredModel(systemPrompt: string, messages: ChatTurn[]): Promise<string> {
-  return callPreferredModelFromProvider(systemPrompt, messages, 'thongthai-brain-v3');
+// The provider's own cost-guard gate requires a real AiCallContext for any
+// non-certification, non-test call (see _thongthai-model-provider.ts's
+// callOpenAIModel: "OpenAI cost context is required in customer production").
+// This wrapper used to call the provider with no costContext at all, which
+// meant every real production invocation of the legacy brain (runThongthaiBrain,
+// still the fallback for domains/turns One-Mind's read-only cutover and the
+// zero-cost deterministic degradation don't resolve) threw immediately before
+// ever reaching OpenAI. Threading the caller's own costContext through fixes
+// that without touching the guard itself.
+function callPreferredModel(systemPrompt: string, messages: ChatTurn[], costContext?: AiCallContext): Promise<string> {
+  return callPreferredModelFromProvider(systemPrompt, messages, 'thongthai-brain-v3', costContext);
 }
 export { callPreferredModel };
 export interface GuestContext {
@@ -110,6 +120,10 @@ export interface BrainRuntimeContext {
   }>;
   worldFacts: Array<{ fact_key: string; category: string; fact_value: unknown; source: string | null; updated_at: string }>;
   toolResults: BrainToolResult[];
+  /** Optional in existing call sites (tests, other runtime consumers) --
+   *  required in real production for runThongthaiBrain's own OpenAI call to
+   *  pass the cost guard. See callPreferredModel's own comment. */
+  costContext?: AiCallContext;
 }
 export interface BrainResponse {
   message: string;
@@ -530,11 +544,11 @@ export function availabilityBrainResponse(): BrainResponse {
 }
 export async function runThongthaiBrain(req: BrainRequest, communityOfferings: VerifiedCommunityOffering[], messages: ChatTurn[], runtime: BrainRuntimeContext): Promise<BrainResponse> {
   const prompt = buildBrainPrompt(req, communityOfferings, runtime);
-  let raw = await callPreferredModel(prompt, messages);
+  let raw = await callPreferredModel(prompt, messages, runtime.costContext);
   try { return adaptResponse(validateBrainResponse(JSON.parse(stripCodeFences(raw)), runtime), req); }
   catch (firstError) {
     const repaired: ChatTurn[] = [...messages, { role: 'assistant', content: raw }, { role: 'user', content: `Your previous response was invalid: ${(firstError as Error).message}. Return ONLY a corrected JSON object matching the schema.` }];
-    raw = await callPreferredModel(prompt, repaired);
+    raw = await callPreferredModel(prompt, repaired, runtime.costContext);
     return adaptResponse(validateBrainResponse(JSON.parse(stripCodeFences(raw)), runtime), req);
   }
 }
