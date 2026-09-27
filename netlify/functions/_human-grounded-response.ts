@@ -136,8 +136,16 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
     }
     return null;
   };
-  const primary=nameOf(entity.primaryResource) ?? nameOf(entity.primaryHorse);
-  const fallback=nameOf(entity.fallbackResource) ?? nameOf(entity.fallbackHorse);
+  const primary=
+    nameOf(entity.primaryResource)
+    ?? nameOf(entity.primaryHorse)
+    ?? nameOf(entity.preferredAsset)
+    ?? nameOf(entity.preferredHorse)
+    ?? nameOf(entity.primaryAsset);
+  const fallback=
+    nameOf(entity.fallbackResource)
+    ?? nameOf(entity.fallbackHorse)
+    ?? nameOf(entity.fallbackAsset);
   const names=[primary,fallback].filter((value):value is string=>Boolean(value));
   const noTransaction=semanticText(input).includes('no_transaction')
     || semanticText(input).includes('no_booking')
