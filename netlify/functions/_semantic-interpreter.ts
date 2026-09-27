@@ -168,6 +168,9 @@ export type SemanticContext = {
   openQuestion?: string;
   activeTopic?: string;
   rollingSummary?: string;
+  /** Bounded customer-visible recommendation evidence retained specifically
+   *  for later "the one you recommended earlier" references. */
+  lastRecommendationReference?: string;
   recentTurns?: SemanticContextTurn[];
   activeTask?: SemanticTaskContext | null;
   suspendedTask?: SemanticTaskContext | null;
@@ -191,6 +194,9 @@ export type SemanticReference = {
   /** Exact privacy-safe task slot key resolved from SemanticContext.activeTask.
    *  This is a pointer to canonical task state, never a model-invented value. */
   resolvedTaskSlot?: string;
+  /** Generic plan/topic reference backed by bounded conversation evidence,
+   *  not by a canonical business entity id. */
+  resolvedFromConversation?: boolean;
   ambiguous?: boolean;
 };
 
@@ -242,7 +248,12 @@ export function confidenceBucket(confidence: number): 'high' | 'medium' | 'low' 
 }
 
 export function toSemanticInterpretationMeta(turn: SemanticTurn): SemanticInterpretationMeta {
-  const resolved = turn.references.filter(reference => Boolean(reference.resolvedEntityId) || Boolean(reference.resolvedEntityIds?.length)).length;
+  const resolved = turn.references.filter(reference =>
+    Boolean(reference.resolvedEntityId)
+    || Boolean(reference.resolvedEntityIds?.length)
+    || Boolean(reference.resolvedTaskSlot)
+    || reference.resolvedFromConversation === true
+  ).length;
   return {
     semanticVersion: SEMANTIC_INTERPRETER_VERSION,
     domain: turn.domain,
@@ -622,6 +633,7 @@ export function buildProductionSemanticInterpreterPrompt(
     activeTask:task(context.activeTask),
     suspendedTask:referencesPrior ? task(context.suspendedTask) : null,
     rollingSummary:referencesPrior ? context.rollingSummary?.slice(0, 360) : undefined,
+    lastRecommendationReference:referencesPrior ? context.lastRecommendationReference?.slice(0, 320) : undefined,
   };
   const vocabulary = [
     /(?:อาหาร|เมนู|โต๊ะ|กิน|ร้าน)/u.test(message) || context.activeDomain === 'restaurant'
@@ -723,6 +735,16 @@ export function resolveReferences(references: SemanticReference[], context: Sema
 
     if (reference.type === 'selected_entity' && context.activeTask?.selectedEntities.length === 1) {
       return { ...reference, resolvedEntityId:context.activeTask.selectedEntities[0]!.id };
+    }
+
+    // A prior plan/topic/turn is conversation evidence, not a business entity.
+    // Resolve only explicit generic-reference TYPES against bounded history;
+    // descriptive/entity references still require a real entity match below.
+    if (
+      /(?:plan|itinerary|journey|topic|turn|conversation|previous_request|prior_request)/iu.test(reference.type)
+      && ((context.recentTurns?.length ?? 0) > 0 || Boolean(context.rollingSummary) || Boolean(context.lastRecommendationReference))
+    ) {
+      return { ...reference, resolvedFromConversation:true };
     }
 
     if (!context.recentEntities.length) return reference;
@@ -884,7 +906,8 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     reference.refersToPriorContext
     && !reference.resolvedEntityId
     && !reference.resolvedEntityIds?.length
-    && !reference.resolvedTaskSlot);
+    && !reference.resolvedTaskSlot
+    && !reference.resolvedFromConversation);
   const SINGLE_ENTITY_REFERENCE_TYPES = new Set([
     'entity_selection','previous_selection','selected_entity',
   ]);
