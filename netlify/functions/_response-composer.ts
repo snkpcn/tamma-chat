@@ -929,10 +929,25 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
   const task = input.dialogDecision.taskStateContainer.activeTask;
   const noCommitment = !task?.commitmentIntent;
 
+  const namedActivitySelection =
+    turn.domain === 'activity'
+    && turn.action === 'provide_information'
+    && typeof turn.entities.horseName === 'string'
+    && turn.entities.horseName.trim().length > 0
+    && turn.references.some(reference =>
+      reference.type === 'entity_selection'
+      && Boolean(reference.resolvedEntityId));
+
   if (
     noCommitment
     && !['book','order','cancel'].includes(turn.action)
-    && (turn.speechAct === 'selection' || turn.speechAct === 'correction' || turn.action === 'correct_previous' || turn.action === 'modify')
+    && (
+      turn.speechAct === 'selection'
+      || turn.speechAct === 'correction'
+      || turn.action === 'correct_previous'
+      || turn.action === 'modify'
+      || namedActivitySelection
+    )
   ) {
     const entities = turn.entities;
     const chosenFromEntities = [
