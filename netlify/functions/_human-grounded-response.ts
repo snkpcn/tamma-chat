@@ -57,8 +57,13 @@ function wants(input: HumanGroundedRenderInput, fragments: readonly string[]): b
 function numericEntity(input: HumanGroundedRenderInput, keys: readonly string[]): number | null {
   const entities = semanticEntities(input);
   for (const key of keys) {
-    const value = Number(entities[key]);
+    const raw=entities[key];
+    const value = Number(raw);
     if (Number.isFinite(value) && value >= 0) return value;
+    if(raw && typeof raw==='object' && !Array.isArray(raw)){
+      const amount=Number((raw as Record<string,unknown>).amount);
+      if(Number.isFinite(amount) && amount>=0) return amount;
+    }
   }
   return null;
 }
@@ -115,7 +120,7 @@ function explicitExcludedNames(input: HumanGroundedRenderInput, names: readonly 
 
 export function renderActivityRecommendation(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
   const turn = input.semanticTurn;
-  if (!turn || turn.domain !== 'activity' || turn.action !== 'recommend' || input.language !== 'th') return null;
+  if (!turn || turn.domain !== 'activity' || input.language !== 'th') return null;
 
   const map = factMap(input);
   const assets = activityAssetRows(input);
@@ -123,6 +128,12 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
   const wantsCalm = wants(input, ['prefer_calm', 'calm_horse', 'calmer', 'นิ่ง', 'ใจเย็น']);
   const wantsBeginner = wants(input, ['beginner', 'มือใหม่', 'ไม่เคยขี่']);
   const wantsRain = wants(input, ['rain', 'ฝน', 'weather_fallback']);
+  const hasRecommendationShape = turn.action === 'recommend'
+    || wantsCalm
+    || wantsBeginner
+    || wantsRain
+    || excluded.size > 0;
+  if(!hasRecommendationShape) return null;
 
   if (wantsCalm || wantsBeginner) {
     const matching = assets
@@ -154,6 +165,16 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
           used.push(other.key);
         } else {
           lines.push('ส่วนกรณีฝนตก ตอนนี้ยังไม่มีข้อมูลยืนยันกิจกรรมทดแทนที่เปิดได้แน่นอนครับ');
+        }
+      }
+      if(turn.informationNeed==='availability'){
+        const availabilitySources=input.knowledgeBundles
+          .flatMap(bundle=>bundle.sources)
+          .filter(source=>source.need==='availability');
+        if(availabilitySources.some(source=>source.status==='empty')){
+          lines.push('ส่วนคิวตามวันและเวลาที่ถาม ตอนนี้ยังไม่มีเวลาว่างที่ยืนยันจากข้อมูลที่ตรวจได้ครับ');
+        }else if(availabilitySources.some(source=>source.status==='unavailable')){
+          lines.push('ส่วนคิวตามวันและเวลาที่ถาม ตอนนี้ยังเช็กข้อมูลสดให้ยืนยันไม่ได้ครับ');
         }
       }
       return { message: lines.join('\n'), usedFactKeys: [...new Set(used)] };
