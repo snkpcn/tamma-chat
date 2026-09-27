@@ -957,7 +957,14 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const validatedDomain: SemanticDomain =
     speechAct === 'incident_report' && domain === 'incident'
       ? 'incident'
-      : (hasUnresolvedReference && noUsableContext ? 'unknown' : domain);
+      // A local-area question remains semantically LOCAL even when the exact
+      // map/place referent ("around there", "nearby") is unresolved. Missing
+      // location detail is a clarification problem, not a domain-erasure
+      // problem. This mirrors the incident rule above without guessing any
+      // location or business fact.
+      : domain === 'local'
+        ? 'local'
+        : (hasUnresolvedReference && noUsableContext ? 'unknown' : domain);
 
   return {
     normalizedMeaning: normalizedMeaning || undefined,
