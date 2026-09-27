@@ -644,8 +644,10 @@ Core rules:
 - Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
 - Conversation task directives cancel_active/suspend_active/resume_suspended affect working state only, never a real transaction.
 - Catalog existence differs from live availability. recommendation differs from neutral discovery. correction differs from a new modification.
-- Unknown or ambiguous references require clarification; never guess an entity or fact.
+- A constraint/preference-only declaration is speechAct=preference_update and action=provide_information, never modify. Emit only newly stated constraints as short canonical snake_case values such as no_pork/no_shrimp/no_spicy.
+- Unknown or ambiguous references require clarification; never guess an entity or fact. Missing business data does NOT make the customer's meaning ambiguous.
 - Open world: general=ordinary non-business conversation; local=surrounding area; incident=loss/damage/injury/adverse event; support=service help not owned by a narrower domain.
+- A report of loss, damage, injury, or another adverse event remains speechAct=incident_report even when the same sentence asks staff to help.
 - Domain nouns identify subject; preserve the actual predicate, dates, times, party size, constraints, negation, and stated preferences.
 - IDs may only come from canonical context below. Otherwise leave unresolved.
 
