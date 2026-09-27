@@ -416,7 +416,7 @@ const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
   'activity_inventory_count',
 ]);
 
-function deterministicNeedsLanguageRefinement(
+export function deterministicNeedsLanguageRefinement(
   turn: SemanticTurn | null,
   taskState: TaskStateContainer,
   message: string,
