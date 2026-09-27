@@ -167,6 +167,7 @@ const KNOWN_TASK_SLOT_KEYS = new Set([
   'date', 'time', 'partySize', 'durationMinutes', 'resourceCode', 'quantity',
   'customerName', 'phone', 'checkIn', 'checkOut', 'endDate', 'nights',
   'bedrooms', 'roomType', 'itemName', 'items',
+  'campaignId', 'campaignCode', 'promotionName',
 ]);
 
 function providesTaskSlotValue(entities: Record<string, unknown>): boolean {
@@ -662,7 +663,14 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (task && task.missingFields.length === 0) return [{ ...base, domain: 'stay', needs: ['availability'] }];
       return [];
     case 'promotion':
-      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'promotion', needs: ['promotion_eligibility'] }];
+      // Promotion eligibility/identity is mutable live state. Every bounded
+      // planning/status/selection/commit turn reuses the same verified runtime
+      // source so campaignId, price and eligibility can never come from stale
+      // conversational prose or a raw-text matcher.
+      if (
+        ['discover','ask','recommend','status','confirm','order','modify','correct_previous','provide_information'].includes(turn.action)
+        || task?.type === 'promotion_redemption'
+      ) return [{ ...base, domain:'promotion', needs:['promotion_eligibility'] }];
       return [];
     case 'otop':
       if (turn.action === 'status') return [{ ...base, domain: 'otop', needs: ['order_status'] }];
@@ -853,6 +861,23 @@ function hasMatchingVerifiedAvailability(
   }));
 }
 
+function hasVerifiedPromotionRedemption(
+  bundles:readonly KnowledgeBundle[],
+  task:ActiveTask,
+):boolean {
+  if(task.type!=='promotion_redemption') return true;
+  const campaignId=typeof task.slots.campaignId==='string'
+    ? task.slots.campaignId.trim().replace(/^promo:/u,'')
+    : '';
+  if(!campaignId) return false;
+  return bundles.some(bundle=>bundle.domain==='promotion' && bundle.facts.some(fact=>
+    fact.key===`promo:${campaignId}:eligible`
+    && fact.value===true
+    && fact.authoritative===true
+    && fact.stale!==true
+  ));
+}
+
 export function resolveDialogDecision(plan: DialogPlan, bundles: readonly KnowledgeBundle[]): DialogDecision {
   if (plan.mode === 'clarify') {
     return { mode: 'clarify', taskStateContainer: plan.taskStateContainer, knowledgeRequests: plan.knowledgeRequests, missingFields: plan.missingFields, responseIntent: 'clarify_ambiguous_entity', reasons: plan.reasons };
@@ -904,11 +929,13 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
   // (not merely "no source configured for it").
   let actionProposal: ActionProposal | undefined;
   if (plan.customerCommitPresent && plan.missingFields.length === 0 && plan.taskStateContainer.activeTask && !unavailable) {
+    const task = plan.taskStateContainer.activeTask;
     const availabilityRequested = plan.knowledgeRequests.some(request => request.needs.includes('availability'));
     const availabilityVerified = !availabilityRequested
-      || hasMatchingVerifiedAvailability(bundles, plan.taskStateContainer.activeTask);
-    if (availabilityVerified) {
-      const task = plan.taskStateContainer.activeTask;
+      || hasMatchingVerifiedAvailability(bundles, task);
+    const promotionVerified = hasVerifiedPromotionRedemption(bundles, task);
+    if (!promotionVerified && task.type==='promotion_redemption') reasons.push('knowledge_unverified');
+    if (availabilityVerified && promotionVerified) {
       const toolName = TOOL_NAME_FOR_TASK_TYPE[task.type];
       if (toolName) {
         mode = 'propose_action';
@@ -1039,6 +1066,87 @@ function applyRestaurantStructuredPolicy(plan: DialogPlan, input: DialogInput, n
   return planDialogTurn({ ...input, taskState:container }, now);
 }
 
+/** Promotion identity normalization from VERIFIED live promotion facts.
+ * This never reads customer text and never chooses "the only active promo"
+ * without structured evidence. Multiple/conflicting/name-duplicate matches
+ * fail closed by returning no patch. */
+export function resolvePromotionStructuredSlots(
+  task: ActiveTask,
+  bundles: readonly KnowledgeBundle[],
+): Record<string, unknown> {
+  if (task.type !== 'promotion_redemption') return {};
+
+  const map=new Map<string,unknown>();
+  for(const bundle of bundles){
+    if(bundle.domain!=='promotion') continue;
+    for(const fact of bundle.facts) map.set(fact.key,fact.value);
+  }
+  const ids=[...new Set([...map.keys()]
+    .map(key=>key.match(/^promo:([^:]+):name$/)?.[1])
+    .filter((value):value is string=>Boolean(value)))]
+    .filter(id=>map.get(`promo:${id}:eligible`)===true);
+  if(!ids.length) return {};
+
+  const evidenceSets:string[][]=[];
+  const slotId=typeof task.slots.campaignId==='string' ? task.slots.campaignId.trim().replace(/^promo:/u,'') : '';
+  if(slotId) evidenceSets.push(ids.filter(id=>id===slotId));
+
+  const selected=[...new Set(task.selectedEntities
+    .map(entity=>entity.id.match(/^promo:(.+)$/u)?.[1])
+    .filter((value):value is string=>Boolean(value)))];
+  if(selected.length) evidenceSets.push(ids.filter(id=>selected.includes(id)));
+
+  const campaignCode=typeof task.slots.campaignCode==='string' ? task.slots.campaignCode.trim() : '';
+  if(campaignCode) evidenceSets.push(ids.filter(id=>map.get(`promo:${id}:campaignCode`)===campaignCode));
+
+  const promotionName=[task.slots.promotionName,task.slots.title]
+    .find((value):value is string=>typeof value==='string'&&value.trim().length>0)?.trim() ?? '';
+  if(promotionName) evidenceSets.push(ids.filter(id=>map.get(`promo:${id}:name`)===promotionName));
+
+  if(!evidenceSets.length || evidenceSets.some(set=>set.length===0)) return {};
+  const matches=evidenceSets.reduce((current,set)=>current.filter(id=>set.includes(id)),ids);
+  const unique=[...new Set(matches)];
+  if(unique.length!==1) return {};
+
+  const id=unique[0]!;
+  const patch:Record<string,unknown>={campaignId:id};
+  const copy=(slot:string,factSuffix:string)=>{
+    const value=map.get(`promo:${id}:${factSuffix}`);
+    if(value!==undefined) patch[slot]=value;
+  };
+  copy('campaignCode','campaignCode');
+  copy('title','name');
+  copy('promotionName','name');
+  copy('items','items');
+  copy('requiresDateTime','requiresDateTime');
+  copy('promoTotal','promoTotal');
+  copy('normalTotal','normalTotal');
+  copy('discountPct','discountPct');
+  copy('businessScope','businessScope');
+  return patch;
+}
+
+function applyPromotionStructuredPolicy(
+  plan: DialogPlan,
+  bundles: readonly KnowledgeBundle[],
+  input: DialogInput,
+  now: Date,
+): DialogPlan | null {
+  const task=plan.taskStateContainer.activeTask;
+  if(!task || task.type!=='promotion_redemption') return null;
+  const slotPatch=resolvePromotionStructuredSlots(task,bundles);
+  if(!Object.keys(slotPatch).length) return null;
+  const changed=Object.entries(slotPatch).some(([key,value])=>
+    JSON.stringify(task.slots[key]??null)!==JSON.stringify(value??null));
+  if(!changed) return null;
+  const container=applyTaskStateEvent(plan.taskStateContainer,{
+    kind:'update_slots',
+    eventId:`${input.eventId}:promotion_verified_identity`,
+    slotPatch,
+  },now);
+  return planDialogTurn({...input,taskState:container},now);
+}
+
 /** Pure Stay slot normalization. It consumes only already-understood
  * SemanticMeaning/task state: a canonical selected stay entity, ISO check-in
  * date, and either ISO checkout or a numeric night count. No customer text is
@@ -1089,6 +1197,12 @@ export async function processDialogTurnDetailed(
   const stayReplanned = applyStayStructuredPolicy(plan, input, now);
   if (stayReplanned) plan = stayReplanned;
   let bundles = await resolveBundles(plan, adapters, now);
+
+  const promotionReplanned=applyPromotionStructuredPolicy(plan,bundles,input,now);
+  if(promotionReplanned){
+    plan=promotionReplanned;
+    bundles=await resolveBundles(plan,adapters,now);
+  }
 
   const replanned = applyActivityCatalogPolicy(plan, bundles, input, now);
   if (replanned) {

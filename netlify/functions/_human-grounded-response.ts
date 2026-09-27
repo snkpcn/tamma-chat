@@ -639,61 +639,88 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
 }
 
 export function renderPromotionRecommendation(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
-  const turn = input.semanticTurn;
-  if (!turn || turn.domain !== 'promotion' || !['recommend', 'discover', 'ask'].includes(turn.action) || input.language !== 'th') return null;
+  const turn=input.semanticTurn;
+  if(!turn || turn.domain!=='promotion' || input.language!=='th') return null;
+  if(!['recommend','discover','ask','status','compare'].includes(turn.action)) return null;
 
-  const promotionFacts = facts(input).filter(fact => fact.domain === 'promotion');
-  if (!promotionFacts.length) return null;
-  const noMembership = wants(input, ['no_new_membership', 'no_membership', 'ไม่สมัครสมาชิก', 'สมาชิกเพิ่ม']);
-  const options: Array<{ name: string; key: string; requiresMembership?: boolean; detail?: string }> = [];
-
-  for (const fact of promotionFacts) {
-    if (fact.value && typeof fact.value === 'object' && !Array.isArray(fact.value)) {
-      const value = fact.value as Record<string, unknown>;
-      const name = typeof value.name === 'string' ? value.name : typeof value.title === 'string' ? value.title : null;
-      if (!name) continue;
-      const requiresMembership = typeof value.requiresMembership === 'boolean' ? value.requiresMembership : undefined;
-      if (noMembership && requiresMembership !== false) continue;
-      const detail = typeof value.detail === 'string'
-        ? value.detail
-        : typeof value.description === 'string' ? value.description : undefined;
-      options.push({ name, key: fact.key, requiresMembership, detail });
-    }
+  const map=factMap(input);
+  const sources=input.knowledgeBundles.flatMap(bundle=>bundle.sources);
+  const promotionSources=sources.filter(source=>source.need==='promotion_eligibility');
+  if(promotionSources.some(source=>source.status==='unavailable')) {
+    return {message:'ตอนนี้ทองไทยยังเช็กโปรโมชั่นล่าสุดไม่ได้ครับ เลยไม่ขอเดาโปรหรือสิทธิ์ให้ผิด',usedFactKeys:[]};
   }
 
-  const map = factMap(input);
-  const ids = [...new Set([...map.keys()]
-    .map(key => key.match(/^(?:promo|promotion):([^:]+):(?:name|title)$/)?.[1])
-    .filter((value): value is string => Boolean(value)))];
-  for (const id of ids) {
-    const nameKey = [
-      'promo:' + id + ':name',
-      'promotion:' + id + ':name',
-      'promo:' + id + ':title',
-      'promotion:' + id + ':title',
-    ].find(key => typeof map.get(key) === 'string');
-    if (!nameKey) continue;
-    const reqKey = ['promo:' + id + ':requiresMembership', 'promotion:' + id + ':requiresMembership'].find(key => map.has(key));
-    const req = reqKey ? map.get(reqKey) : undefined;
-    if (noMembership && req !== false) continue;
-    options.push({
-      name: String(map.get(nameKey)),
-      key: nameKey,
-      requiresMembership: typeof req === 'boolean' ? req : undefined,
-    });
-  }
+  const noMembership=wants(input,['no_new_membership','no_membership','ไม่สมัครสมาชิก','สมาชิกเพิ่ม']);
+  const ids=[...new Set([...map.keys()]
+    .map(key=>key.match(/^promo:([^:]+):name$/u)?.[1])
+    .filter((value):value is string=>Boolean(value)))];
 
-  const unique = [...new Map(options.map(option => [option.name, option] as const)).values()];
-  if (!unique.length) return null;
-  const shown = unique.slice(0, 3);
-  const lines = shown.map(option => {
-    const membership = option.requiresMembership === false ? ' — ไม่ต้องสมัครสมาชิกเพิ่ม' : '';
-    const detail = option.detail ? ' — ' + option.detail : '';
-    return '• ' + option.name + membership + detail;
+  const rows=ids.map(id=>({
+    id,
+    name:map.get(`promo:${id}:name`),
+    code:map.get(`promo:${id}:campaignCode`),
+    description:map.get(`promo:${id}:description`),
+    normalTotal:map.get(`promo:${id}:normalTotal`),
+    promoTotal:map.get(`promo:${id}:promoTotal`),
+    discountPct:map.get(`promo:${id}:discountPct`),
+    startAt:map.get(`promo:${id}:startAt`),
+    endAt:map.get(`promo:${id}:endAt`),
+    eligible:map.get(`promo:${id}:eligible`),
+    requiresMembership:map.get(`promo:${id}:requiresMembership`),
+    redemptionCount:map.get(`promo:${id}:redemptionCount`),
+    maxRedemptions:map.get(`promo:${id}:maxRedemptions`),
+  })).filter(row=>typeof row.name==='string'&&row.name.trim()&&row.eligible===true)
+    .filter(row=>!noMembership || row.requiresMembership===false);
+
+  // Backward-compatible verified object facts used by older adapters/tests.
+  // They remain read-only; real PR G execution identity still requires the
+  // expanded live campaign facts + eligible=true.
+  const legacyRows=facts(input).flatMap(fact=>{
+    if(fact.domain!=='promotion'||!fact.value||typeof fact.value!=='object'||Array.isArray(fact.value)) return [];
+    const value=fact.value as Record<string,unknown>;
+    const name=typeof value.name==='string'?value.name:(typeof value.title==='string'?value.title:'');
+    const requiresMembership=typeof value.requiresMembership==='boolean'?value.requiresMembership:undefined;
+    if(!name || (noMembership&&requiresMembership!==false)) return [];
+    return [{id:`legacy:${fact.key}`,name,code:undefined,description:value.description,normalTotal:undefined,promoTotal:undefined,discountPct:undefined,startAt:undefined,endAt:undefined,eligible:true,requiresMembership,redemptionCount:undefined,maxRedemptions:undefined,legacyKey:fact.key}];
   });
+  const allRows=[...rows,...legacyRows];
+
+  if(!allRows.length) {
+    const verifiedEmpty=promotionSources.some(source=>source.status==='empty');
+    return verifiedEmpty
+      ? {message:'ตอนนี้ยังไม่มีโปรโมชั่นที่ระบบยืนยันว่าเปิดใช้งานครับ',usedFactKeys:[]}
+      : {message:'ตอนนี้ยังไม่มีโปรโมชั่นที่ตรวจยืนยันได้ครับ',usedFactKeys:[]};
+  }
+
+  const used:string[]=[];
+  const lines=allRows.slice(0,5).map(row=>{
+    if('legacyKey' in row && typeof row.legacyKey==='string') used.push(row.legacyKey);
+    else used.push(`promo:${row.id}:name`,`promo:${row.id}:eligible`);
+    const pieces=[`• ${String(row.name)}`];
+    if(typeof row.promoTotal==='number'){
+      used.push(`promo:${row.id}:promoTotal`);
+      pieces.push(`— ${Math.round(row.promoTotal)} บาท`);
+      if(typeof row.normalTotal==='number'){
+        used.push(`promo:${row.id}:normalTotal`);
+        pieces.push(`(ปกติ ${Math.round(row.normalTotal)} บาท)`);
+      }
+    } else if(typeof row.discountPct==='number'){
+      used.push(`promo:${row.id}:discountPct`);
+      pieces.push(`— ลด ${Math.round(row.discountPct)}%`);
+    }
+    if(typeof row.description==='string'&&row.description.trim()){
+      used.push(`promo:${row.id}:description`);
+      pieces.push(`— ${row.description.trim()}`);
+    }
+    return pieces.join(' ');
+  });
+
+  if(turn.informationNeed==='price') {
+    return {message:lines.join('\n'),usedFactKeys:[...new Set(used)]};
+  }
   return {
-    message: ['โปรที่ตรงเงื่อนไขและมีข้อมูลยืนยันตอนนี้ครับ', ...lines].join('\n'),
-    usedFactKeys: [...new Set(shown.map(option => option.key))],
+    message:['โปรที่ระบบยืนยันว่าเปิดใช้อยู่ตอนนี้ครับ',...lines,'ถ้าสนใจโปรไหน บอกชื่อโปรได้ก่อนครับ — แค่เลือกโปรยังไม่ถือว่าใช้สิทธิ์'].join('\n'),
+    usedFactKeys:[...new Set(used)],
   };
 }
 

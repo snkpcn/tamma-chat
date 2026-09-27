@@ -1791,6 +1791,76 @@ export function resolveSupervisedRestaurantCutover(
   return { kind:'respond', response };
 }
 
+export type SupervisedPromotionCutoverDecision =
+  | { kind:'respond'; response:ComposedResponse }
+  | { kind:'execute_redemption'; args:Record<string, unknown> };
+
+/** Human Core PR G terminal Promotion boundary. Once OpenAI supervision owns
+ * Promotion meaning, normal turns render from structured state/live facts and
+ * an actual redemption can only execute an already-verified ActionProposal.
+ * No raw customer sentence crosses this boundary. */
+export function resolveSupervisedPromotionCutover(
+  oneMind:Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel:BrainChannel,
+  language:BrainRequest['language'],
+):SupervisedPromotionCutoverDecision|null {
+  const turn=oneMind.turn;
+  if(turn.semanticTurn.domain!=='promotion'
+      || turn.semanticTurn.semanticSource!=='openai_supervisor') return null;
+  if(oneMind.status==='composed') return {kind:'respond',response:oneMind.response};
+
+  const meaning=turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
+  const proposal=turn.dialogDecision.actionProposal;
+  if(meaning.commitmentLevel==='explicit_transaction'
+      && proposal?.toolName==='redeem_promotion'
+      && proposal.customerCommitPresent
+      && turn.dialogDecision.taskStateContainer.activeTask?.type==='promotion_redemption') {
+    return {kind:'execute_redemption',args:resolvePromotionRedemptionProposalArgs(proposal)};
+  }
+
+  const composerInput={
+    channel,
+    language,
+    semanticTurn:turn.dialogSemanticTurn,
+    dialogDecision:turn.dialogDecision,
+    knowledgeBundles:turn.groundedKnowledge,
+    degradation:turn.knowledgeDegradation,
+    operationalOutcome:null,
+  };
+  const stateUpdate=turn.semanticTurn.speechAct==='selection'
+    || turn.semanticTurn.speechAct==='correction'
+    || ['confirm','modify','correct_previous','provide_information'].includes(turn.semanticTurn.action);
+  const response=stateUpdate
+    ? composeDeterministicResponse(composerInput)
+    : composeGroundedDeterministicResponse(composerInput) ?? composeDeterministicResponse(composerInput);
+  return {kind:'respond',response};
+}
+
+/** Structured-only Promotion redemption sanitizer. campaignId may enter the
+ * executor only after Dialog Manager verified it against live eligible facts. */
+export function resolvePromotionRedemptionProposalArgs(
+  proposal:{validatedArgs:Record<string,unknown>},
+):Record<string,unknown> {
+  const value=proposal.validatedArgs;
+  const campaignId=typeof value.campaignId==='string'
+    ? value.campaignId.trim().replace(/^promo:/u,'')
+    : '';
+  return {
+    campaignId,
+    ...(typeof value.campaignCode==='string'&&value.campaignCode.trim()?{campaignCode:value.campaignCode.trim()}:{}),
+    ...(typeof value.title==='string'&&value.title.trim()?{title:value.title.trim()}:{}),
+    ...(typeof value.promotionName==='string'&&value.promotionName.trim()?{promotionName:value.promotionName.trim()}:{}),
+    requiresDateTime:value.requiresDateTime!==false,
+    ...(typeof value.promoTotal==='number'&&Number.isFinite(value.promoTotal)?{promoTotal:value.promoTotal}:{}),
+    ...(typeof value.date==='string'&&value.date.trim()?{date:value.date.trim()}:{}),
+    ...(typeof value.time==='string'&&value.time.trim()?{time:value.time.trim()}:{}),
+    customerName:typeof value.customerName==='string'?value.customerName.trim():'',
+    ...(typeof value.phone==='string'&&value.phone.trim()?{phone:value.phone.trim()}:{}),
+    ...(typeof value.email==='string'&&value.email.trim()?{email:value.email.trim()}:{}),
+    ...(typeof value.note==='string'&&value.note.trim()?{note:value.note.trim()}:{}),
+  };
+}
+
 /** Defense-in-depth sanitizer for a proposal already validated by Dialog
  * Manager/domain policy. No customer message enters this function. */
 export function resolveRestaurantTableBookingProposalArgs(
@@ -3701,6 +3771,72 @@ async function executeDeterministicRestaurantPreorder(
   };
 }
 
+async function executeDeterministicPromotionRedemption(
+  args:Record<string,unknown>,
+  request:BrainRequest,
+  guestDbId:string|null,
+  channel:BrainChannel,
+):Promise<BrainResponse> {
+  // request is transport context only. No request.message parsing is allowed.
+  const campaignId=typeof args.campaignId==='string'?args.campaignId.trim():'';
+  const customerName=typeof args.customerName==='string'?args.customerName.trim():'';
+  const requiresDateTime=args.requiresDateTime!==false;
+  const date=typeof args.date==='string'?args.date.trim():'';
+  const time=typeof args.time==='string'?args.time.trim():'';
+  const firstResponse:BrainResponse={
+    message:'',intent:'booking',contextUpdates:{},journeyAction:{type:'none',journey:null},
+    suggestedActions:[],responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+  };
+  if(!guestDbId||!campaignId||!customerName||(requiresDateTime&&(!date||!time))) {
+    return {
+      ...firstResponse,
+      message:'ยังใช้สิทธิ์โปรโมชันไม่ได้ครับ เพราะข้อมูลโปร ชื่อผู้รับสิทธิ์ หรือวันเวลาที่ยืนยันต้องใช้ยังไม่ครบ และยังไม่ได้สร้างรายการ',
+    };
+  }
+
+  const safeArgs={
+    campaignId,
+    customerName,
+    ...(date?{date}:{}),
+    ...(time?{time}:{}),
+    ...(typeof args.phone==='string'&&args.phone.trim()?{phone:args.phone.trim()}:{}),
+    ...(typeof args.email==='string'&&args.email.trim()?{email:args.email.trim()}:{}),
+    ...(typeof args.note==='string'&&args.note.trim()?{note:args.note.trim()}:{}),
+  };
+  const [result]=await executeBrainTools(
+    guestDbId,channel,[{name:'redeem_promotion',args:safeArgs}],firstResponse,request,
+  );
+  if(!result?.ok) return {...firstResponse,message:promotionRedemptionFailureMessage(result?.detail??'execution_failed')};
+
+  let detail:Record<string,unknown>={};
+  try{detail=JSON.parse(result.detail) as Record<string,unknown>;}catch{/* safe defaults */}
+  const status=typeof detail.status==='string'?detail.status:'requested';
+  const campaignCode=typeof detail.campaignCode==='string'
+    ? detail.campaignCode
+    : (typeof args.campaignCode==='string'?args.campaignCode:'');
+  const title=typeof args.title==='string'
+    ? args.title
+    : (typeof args.promotionName==='string'?args.promotionName:'โปรโมชันที่เลือก');
+  const preorder=detail.preorder&&typeof detail.preorder==='object'&&!Array.isArray(detail.preorder)
+    ? detail.preorder as Record<string,unknown>
+    : null;
+  const preorderCode=preorder&&typeof preorder.preorderCode==='string'?preorder.preorderCode:'';
+  const promoTotal=typeof args.promoTotal==='number'?args.promoTotal:null;
+
+  return {
+    ...firstResponse,
+    message:[
+      status==='redeemed'?'ใช้สิทธิ์โปรโมชันเรียบร้อยครับ ✅':'บันทึกคำขอใช้สิทธิ์โปรโมชันแล้วครับ ✅',
+      `💡 ${title}`,
+      campaignCode?`รหัสโปร ${campaignCode}`:'',
+      preorderCode?`🍽️ ออเดอร์ ${preorderCode}`:'',
+      date&&time?`🕑 วันที่ ${date} เวลา ${time}`:'',
+      promoTotal!==null?`💰 ราคาพิเศษ ${Math.round(promoTotal)} บาท`:'',
+      status==='redeemed'?'สถานะ: ใช้สิทธิ์แล้ว':'สถานะ: รอดำเนินการ/ยืนยัน',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 async function executeDeterministicStayBooking(
   args: Record<string, unknown>,
   request: BrainRequest,
@@ -4510,6 +4646,40 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       intent:polished.intent,
       contextUpdates:polished.contextUpdates,
       journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  // Human Core PR G: terminal Promotion boundary. Supervised Promotion
+  // cannot reach promotionContinuationResponse, raw promotion matchers, or
+  // runThongthaiBrain below this point.
+  const supervisedPromotion=earlyOneMind
+    ? resolveSupervisedPromotionCutover(earlyOneMind,channel,request.language)
+    : null;
+  if(supervisedPromotion?.kind==='execute_redemption') {
+    const executed=await executeDeterministicPromotionRedemption(
+      supervisedPromotion.args,request,guestDbId,channel,
+    );
+    const polished=polishedResponse(executed,channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,
+      contextUpdates:polished.contextUpdates,journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+  if(supervisedPromotion?.kind==='respond') {
+    const semantic=earlyOneMind!.turn.semanticTurn;
+    const polished=polishedResponse({
+      message:supervisedPromotion.response.message,
+      intent:semantic.action==='discover'||semantic.action==='recommend'?'recommendation':'information',
+      contextUpdates:{},journeyAction:{type:'none',journey:null},suggestedActions:[],
+      responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+    },channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,
+      contextUpdates:polished.contextUpdates,journeyAction:polished.journeyAction,
       suggestedActions:polished.suggestedActions,
     });
   }
