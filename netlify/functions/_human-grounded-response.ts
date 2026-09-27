@@ -471,40 +471,111 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
 
 export function renderRestaurantRecommendation(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
   const turn = input.semanticTurn;
-  if (!turn || turn.domain !== 'restaurant' || turn.action !== 'recommend' || input.language !== 'th') return null;
+  if (!turn || turn.domain !== 'restaurant' || input.language !== 'th') return null;
 
   const map = factMap(input);
+  const restaurantSources = input.knowledgeBundles.flatMap(bundle => bundle.sources)
+    .filter(source => input.knowledgeBundles.some(bundle => bundle.domain === 'restaurant' && bundle.sources.includes(source)));
+  const sourcesFor = (need:string) => restaurantSources.filter(source => source.need === need);
+
+  if (turn.informationNeed === 'availability') {
+    const availability = sourcesFor('availability');
+    if (availability.some(source => source.status === 'unavailable')) {
+      return { message:'ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ครับ เลยไม่ขอเดาว่าเต็มหรือว่าง และยังไม่ได้ทำรายการจองให้', usedFactKeys:[] };
+    }
+    if (availability.length && availability.every(source => source.status === 'empty')) {
+      return { message:'ตอนนี้ยังไม่พบโต๊ะว่างที่ยืนยันได้ตามวันและเวลาที่ถามครับ และยังไม่ได้ทำรายการจองให้', usedFactKeys:[] };
+    }
+  }
+
+  if (turn.informationNeed === 'transaction_status') {
+    const status = sourcesFor('order_status');
+    if (status.some(source => source.status === 'unavailable')) {
+      return { message:'ตอนนี้ยังเช็กสถานะออเดอร์จากระบบให้ยืนยันไม่ได้ครับ เลยไม่ขอเดาสถานะ', usedFactKeys:[] };
+    }
+  }
+
   const ids = [...new Set([...map.keys()]
     .map(key => key.match(/^menu:([^:]+):name$/)?.[1])
     .filter((value): value is string => Boolean(value)))];
   if (!ids.length) return null;
 
+  const rows = ids.flatMap(id => {
+    const nameKey = `menu:${id}:name`;
+    const name = map.get(nameKey);
+    if (typeof name !== 'string' || !name.trim()) return [];
+    const priceKey = `menu:${id}:price`;
+    const categoryKey = `menu:${id}:category`;
+    const orderableKey = `menu:${id}:orderable`;
+    const servingsKey = `menu:${id}:availableServings`;
+    const ingredientsKey = `menu:${id}:ingredients`;
+    return [{
+      id,
+      name:name.trim(),
+      nameKey,
+      price:typeof map.get(priceKey) === 'number' ? map.get(priceKey) as number : undefined,
+      priceKey:map.has(priceKey) ? priceKey : undefined,
+      category:typeof map.get(categoryKey) === 'string' ? String(map.get(categoryKey)) : undefined,
+      categoryKey:map.has(categoryKey) ? categoryKey : undefined,
+      orderable:map.get(orderableKey) === true,
+      orderableKey:map.has(orderableKey) ? orderableKey : undefined,
+      availableServings:typeof map.get(servingsKey) === 'number' ? map.get(servingsKey) as number : undefined,
+      servingsKey:map.has(servingsKey) ? servingsKey : undefined,
+      ingredients:Array.isArray(map.get(ingredientsKey)) ? map.get(ingredientsKey) as unknown[] : undefined,
+      ingredientsKey:map.has(ingredientsKey) ? ingredientsKey : undefined,
+    }];
+  });
+
+  if (turn.informationNeed === 'price') {
+    const priced = rows.filter(row => row.price !== undefined).slice(0, 8);
+    if (!priced.length) return { message:'ตอนนี้ยังไม่มีราคาที่ตรวจยืนยันได้สำหรับเมนูที่ถามครับ', usedFactKeys:[] };
+    const used:string[]=[];
+    const lines=priced.map(row=>{
+      used.push(row.nameKey);
+      if(row.priceKey) used.push(row.priceKey);
+      return `• ${row.name} — ${Math.round(row.price!)} บาท`;
+    });
+    return { message:['ราคาที่ตรวจจากเมนูปัจจุบันครับ',...lines].join('\n'), usedFactKeys:[...new Set(used)] };
+  }
+
+  if (turn.informationNeed === 'ingredients') {
+    const shown=rows.slice(0,5);
+    const used:string[]=[];
+    const lines=shown.map(row=>{
+      used.push(row.nameKey);
+      if(!row.ingredientsKey || !row.ingredients) return `• ${row.name} — ยังไม่มีข้อมูลส่วนผสมที่ยืนยันครบ`;
+      used.push(row.ingredientsKey);
+      return `• ${row.name} — ${row.ingredients.map(value=>String(value)).join(', ')}`;
+    });
+    return { message:['ส่วนผสมที่ตรวจได้จากข้อมูลเมนูครับ',...lines].join('\n'), usedFactKeys:[...new Set(used)] };
+  }
+
+  if (turn.action === 'discover' || (turn.action === 'ask' && turn.informationNeed === 'catalog')) {
+    const visible=rows.filter(row=>row.orderable).slice(0,10);
+    if(!visible.length) return { message:'ตอนนี้ยังไม่พบเมนูที่ยืนยันว่าพร้อมสั่งในข้อมูลล่าสุดครับ', usedFactKeys:[] };
+    const used:string[]=[];
+    const lines=visible.map(row=>{
+      used.push(row.nameKey);
+      if(row.priceKey) used.push(row.priceKey);
+      if(row.orderableKey) used.push(row.orderableKey);
+      return row.price!==undefined ? `• ${row.name} — ${Math.round(row.price)} บาท` : `• ${row.name}`;
+    });
+    return { message:['เมนูที่ยืนยันว่าพร้อมสั่งตอนนี้มีประมาณนี้ครับ',...lines].join('\n'), usedFactKeys:[...new Set(used)] };
+  }
+
+  if (turn.action !== 'recommend') return null;
+
   const noShrimp = hasFoodSafetyConstraint(input, ['no_shrimp', 'avoid_shrimp', 'shrimp_allergy', 'กุ้ง']);
   const noPork = hasFoodSafetyConstraint(input, ['no_pork', 'avoid_pork', 'หมู']);
   const lowSpice = wants(input, ['no_spicy', 'low_spicy', 'mild', 'ไม่เผ็ด', 'เผ็ดน้อย']);
   const budget = numericEntity(input, ['budget', 'budgetMax', 'maxBudget', 'budgetThb']);
-
-  const accepted: Array<{
-    name: string;
-    nameKey: string;
-    price?: number;
-    priceKey?: string;
-    ingredientsKey?: string;
-    spiceKey?: string;
-  }> = [];
+  const accepted: typeof rows = [];
   let spiceUnknown = false;
   let ingredientUnknown = false;
 
-  for (const id of ids) {
-    const nameKey = 'menu:' + id + ':name';
-    const name = map.get(nameKey);
-    if (typeof name !== 'string' || !name.trim()) continue;
-
-    const ingredientsKey = 'menu:' + id + ':ingredients';
-    const ingredients = map.get(ingredientsKey);
-    const ingredientWords = Array.isArray(ingredients)
-      ? ingredients.map(value => String(value).toLowerCase())
-      : null;
+  for (const row of rows) {
+    if (!row.orderable || (typeof row.availableServings === 'number' && row.availableServings <= 0)) continue;
+    const ingredientWords = row.ingredients?.map(value => String(value).toLowerCase()) ?? null;
     if ((noShrimp || noPork) && !ingredientWords) {
       ingredientUnknown = true;
       continue;
@@ -512,71 +583,53 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     if (noShrimp && ingredientWords!.some(value => value.includes('shrimp') || value.includes('prawn') || value.includes('กุ้ง'))) continue;
     if (noPork && ingredientWords!.some(value => value.includes('pork') || value.includes('หมู'))) continue;
 
-    let spiceKey: string | undefined;
     if (lowSpice) {
-      spiceKey = ['menu:' + id + ':spiceLevel', 'menu:' + id + ':spicyLevel', 'menu:' + id + ':spicy']
-        .find(key => map.has(key));
-      if (spiceKey) {
+      const spiceKey = [`menu:${row.id}:spiceLevel`, `menu:${row.id}:spicyLevel`, `menu:${row.id}:spicy`].find(key => map.has(key));
+      if (!spiceKey) spiceUnknown = true;
+      else {
         const spice = String(map.get(spiceKey)).toLowerCase();
         if (['hot', 'spicy', 'high', 'เผ็ดมาก'].some(value => spice.includes(value))) continue;
-      } else {
-        spiceUnknown = true;
       }
     }
-
-    const priceKey = 'menu:' + id + ':price';
-    const priceRaw = map.get(priceKey);
-    const price = typeof priceRaw === 'number' ? priceRaw : undefined;
-    if (budget !== null && price !== undefined && price > budget) continue;
-
-    accepted.push({
-      name: name.trim(),
-      nameKey,
-      price,
-      priceKey: price !== undefined ? priceKey : undefined,
-      ingredientsKey: Array.isArray(ingredients) ? ingredientsKey : undefined,
-      spiceKey,
-    });
+    if (budget !== null && row.price !== undefined && row.price > budget) continue;
+    accepted.push(row);
   }
 
   if (!accepted.length) {
     if (noShrimp || noPork) {
-      return {
-        message: 'ตอนนี้ข้อมูลส่วนผสมที่ยืนยันได้ยังไม่พอให้จัดชุดตามข้อจำกัดนี้แบบปลอดภัยครับ เลยไม่ขอเดา',
-        usedFactKeys: [],
-      };
+      return { message:'ตอนนี้ข้อมูลส่วนผสมที่ยืนยันได้ยังไม่พอให้จัดเมนูตามข้อจำกัดนี้แบบปลอดภัยครับ เลยไม่ขอเดา', usedFactKeys:[] };
     }
-    return null;
+    if (lowSpice) {
+      return { message:'ตอนนี้ยังไม่มีข้อมูลระดับความเผ็ดที่ยืนยันได้พอให้เลือกเมนูไม่เผ็ดแบบชัวร์ ๆ ครับ เลยไม่ขอเดา', usedFactKeys:[] };
+    }
+    return { message:'ตอนนี้ยังไม่พบเมนูที่ตรงเงื่อนไขและยืนยันว่าพร้อมสั่งครับ', usedFactKeys:[] };
   }
 
-  const chosen = accepted.slice(0, 3);
-  const used: string[] = [];
-  const lines = chosen.map(item => {
-    used.push(item.nameKey);
-    if (item.priceKey) used.push(item.priceKey);
-    if (item.ingredientsKey) used.push(item.ingredientsKey);
-    if (item.spiceKey) used.push(item.spiceKey);
-    return item.price !== undefined
-      ? '• ' + item.name + ' — ' + Math.round(item.price) + ' บาท'
-      : '• ' + item.name;
+  const chosen=accepted.slice(0,3);
+  const used:string[]=[];
+  const lines=chosen.map(row=>{
+    used.push(row.nameKey);
+    if(row.priceKey) used.push(row.priceKey);
+    if(row.ingredientsKey && (noShrimp||noPork)) used.push(row.ingredientsKey);
+    if(row.orderableKey) used.push(row.orderableKey);
+    if(row.servingsKey) used.push(row.servingsKey);
+    return row.price!==undefined ? `• ${row.name} — ${Math.round(row.price)} บาท` : `• ${row.name}`;
   });
-  const total = chosen.every(item => item.price !== undefined)
-    ? chosen.reduce((sum, item) => sum + (item.price ?? 0), 0)
+  const total=chosen.every(row=>row.price!==undefined)
+    ? chosen.reduce((sum,row)=>sum+(row.price??0),0)
     : null;
-  const intro = noShrimp || noPork
-    ? 'จากส่วนผสมที่มีข้อมูลยืนยัน เมนูที่ไม่ชนข้อจำกัดที่บอกมีครับ'
-    : 'จากเมนูและราคาที่มีข้อมูลยืนยัน ลองชุดนี้ได้ครับ';
-  const notes: string[] = [];
-  if (total !== null) notes.push('ถ้าเอารายการละ 1 จาน รวม ' + Math.round(total) + ' บาท');
-  if (budget !== null && total !== null) {
-    notes.push(total <= budget
-      ? 'ยังอยู่ในงบ ' + Math.round(budget) + ' บาท'
-      : 'เกินงบ ' + Math.round(budget) + ' บาท');
-  }
-  if (lowSpice && spiceUnknown) notes.push('ระดับความเผ็ดยังมีบางรายการที่ไม่มีข้อมูลยืนยัน จึงควรย้ำกับร้านอีกครั้งครับ');
-  if (ingredientUnknown) notes.push('รายการที่ไม่มีข้อมูลส่วนผสมครบถูกตัดออกจากคำแนะนำนี้');
+  const intro=noShrimp||noPork
+    ? 'จากส่วนผสมและสถานะเมนูที่ตรวจยืนยันได้ ตัวเลือกที่ไม่ชนข้อจำกัดที่บอกมีครับ'
+    : 'จากเมนูที่ยืนยันว่าพร้อมสั่ง ลองดูชุดนี้ได้ครับ';
+  const notes:string[]=[];
+  if(total!==null) notes.push('ถ้าเอารายการละ 1 จาน รวม '+Math.round(total)+' บาท');
+  if(budget!==null && total!==null) notes.push(total<=budget
+    ? 'ยังอยู่ในงบ '+Math.round(budget)+' บาท'
+    : 'เกินงบ '+Math.round(budget)+' บาท');
+  if(lowSpice && spiceUnknown) notes.push('ระดับความเผ็ดของบางรายการยังไม่มีข้อมูลยืนยัน จึงยังฟันธงเรื่องความเผ็ดไม่ได้ครับ');
+  if(ingredientUnknown) notes.push('รายการที่ไม่มีข้อมูลส่วนผสมครบถูกตัดออกจากคำแนะนำนี้');
 
-  return { message: [intro, ...lines, ...notes].join('\n'), usedFactKeys: [...new Set(used)] };
+  return { message:[intro,...lines,...notes].join('\n'), usedFactKeys:[...new Set(used)] };
 }
 
 export function renderPromotionRecommendation(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
