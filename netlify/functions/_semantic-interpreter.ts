@@ -700,6 +700,61 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function canonicalizeEntityAliases(value: Record<string, unknown>): Record<string, unknown> {
+  const entities={...value};
+  const aliases:Record<string,string>={
+    party_size:'partySize',
+    guest_count:'partySize',
+    child_count:'children',
+    children_count:'children',
+    adult_count:'adults',
+    adults_count:'adults',
+    time_of_day:'timeOfDay',
+    excluded_horse:'excludedHorse',
+    preferred_horse_trait:'preferredHorseTrait',
+    weather_condition:'weatherCondition',
+    resource_type:'resourceType',
+    promotion_category:'promotionCategory',
+    selection_criterion:'selectionCriterion',
+    previous_party_size:'previousPartySize',
+  };
+  for(const [from,to] of Object.entries(aliases)){
+    if(entities[to]===undefined && entities[from]!==undefined) entities[to]=entities[from];
+  }
+  const budget=entities.budget;
+  if(budget && typeof budget==='object' && !Array.isArray(budget)){
+    const amount=Number((budget as Record<string,unknown>).amount);
+    if(Number.isFinite(amount) && entities.budgetAmount===undefined) entities.budgetAmount=amount;
+  }
+  return entities;
+}
+
+function normalizeCrossDomainJourney(
+  domain:SemanticDomain,
+  action:SemanticAction,
+  informationNeed:SemanticInformationNeed,
+  entities:Record<string,unknown>,
+  references:readonly SemanticReference[],
+  context:SemanticContext,
+):SemanticDomain {
+  if(domain!=='ecosystem') return domain;
+  const crossDomainKeys=['stay','activity','restaurant','otop','cafe']
+    .filter(key=>entities[key]!==undefined);
+  const isMultiDomainPlan = crossDomainKeys.length >= 2
+    && (action==='recommend' || action==='discover' || action==='ask')
+    && (informationNeed==='recommendation' || informationNeed==='catalog' || informationNeed==='none');
+  if(isMultiDomainPlan) return 'journey';
+
+  const continuesJourney = context.activeDomain==='journey'
+    && ['modify','ask','recommend','provide_information'].includes(action)
+    && references.some(reference=>reference.refersToPriorContext && (
+      reference.resolvedFromConversation
+      || Boolean(reference.resolvedTaskSlot)
+      || Boolean(reference.resolvedEntityId)
+    ));
+  return continuesJourney ? 'journey' : domain;
+}
+
 function normalizeReferences(value: unknown): SemanticReference[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -867,7 +922,8 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
   let references = resolveReferences(normalizeReferences(parsed.references), context);
-  const entities = asRecord(parsed.entities);
+  const entities = canonicalizeEntityAliases(asRecord(parsed.entities));
+  domain = normalizeCrossDomainJourney(domain, action, informationNeed, entities, references, context);
 
   const structuredEntityNames = new Set(
     Object.values(entities)
