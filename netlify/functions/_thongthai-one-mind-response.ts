@@ -351,6 +351,15 @@ export async function processOneMindCustomerTurn(
   // (see resolveDialogDecision's anti-hallucination check in
   // _dialog-manager.ts) -- no model call could add anything, it could only
   // risk phrasing it in a way that implies an answer was found.
+  const explicitNamedActivitySelection =
+    turn.semanticTurn.domain === 'activity'
+    && turn.semanticTurn.action === 'provide_information'
+    && typeof turn.semanticTurn.entities.horseName === 'string'
+    && turn.semanticTurn.entities.horseName.trim().length > 0
+    && turn.semanticTurn.references.some(reference =>
+      reference.type === 'entity_selection'
+      && Boolean(reference.resolvedEntityId));
+
   const conversationalStateUpdate = !turn.dialogDecision.actionProposal
     && !turn.taskStateAfter.activeTask?.commitmentIntent
     && !['book','order','cancel'].includes(turn.semanticTurn.action)
@@ -359,6 +368,7 @@ export async function processOneMindCustomerTurn(
       || turn.semanticTurn.speechAct === 'correction'
       || turn.semanticTurn.action === 'correct_previous'
       || turn.semanticTurn.action === 'modify'
+      || explicitNamedActivitySelection
     );
   const deterministicFastPath = (turn.dialogDecision.mode === 'collect_field' || turn.dialogDecision.mode === 'clarify'
       || turn.dialogDecision.responseIntent === 'cannot_verify_comparison'
