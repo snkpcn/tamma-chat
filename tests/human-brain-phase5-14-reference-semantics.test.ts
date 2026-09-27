@@ -49,6 +49,7 @@ test('semantic-v31 production prompt gives bounded per-entity evidence for descr
   assert.match(prompt,/recentEntityEvidence/u);
   assert.match(prompt,/ทองไทยเป็นม้าสีทอง/u);
   assert.match(prompt,/ภาราดรเป็นม้าสีน้ำตาลขาว/u);
-  assert.match(prompt,/references MUST use that entity's exact name as reference\.value/u);
-  assert.match(prompt,/returning all candidate IDs is NOT a resolved selection/u);
+  assert.match(prompt,/set reference\.value to that exact listed name/u);
+  assert.match(prompt,/Multiple plausible entities require clarification/u);
+  assert.match(prompt,/multiple candidate IDs are not a resolved selection/u);
 });
