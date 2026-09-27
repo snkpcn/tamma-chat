@@ -312,3 +312,34 @@ test('horse replacement emitted as modify with activity_asset acknowledges the n
   assert.match(response.message,/ทองไทย/u);
   assert.match(response.message,/ยังไม่ได้จอง/u);
 });
+
+
+test('stay availability clarification never borrows a stale activity entity from another domain',()=>{
+  const horse={id:'activity_asset:horse-paradorn',type:'horse',name:'ภาราดร',domain:'activity' as const,source:'catalog' as const,canonical:true};
+  const staleActivity=setSelectedEntities(
+    createActiveTask({type:'activity_booking',sourceChannel:'line',initialSlots:{horseName:'ภาราดร'}},AT),
+    [horse],
+    AT,
+  );
+  const state={...emptyTaskStateContainer(),activeTask:staleActivity};
+  const response=composeDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'stay',
+      intent:'find_available_room_for_three',
+      action:'status',
+      informationNeed:'availability',
+      speechAct:'request',
+      entities:{partySize:3,resourceType:'room'},
+      needsClarification:true,
+    }),
+    bundles:[],
+    dialogDecision:decision({
+      mode:'clarify',
+      taskStateContainer:state,
+      responseIntent:'clarify_ambiguous_entity',
+      reasons:['ambiguous_entity'],
+    }),
+  }));
+  assert.match(response.message,/วันไหน|เข้าพัก/u);
+  assert.doesNotMatch(response.message,/ภาราดร|ขี่ม้า/u);
+});
