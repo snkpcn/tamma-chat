@@ -227,6 +227,9 @@ async function persistAssistantConversationTurn(
       eventId:assistantEventId,
       channel:input.channel,
       assistantMessage:response.message,
+      lastRecommendationReference:['recommend','compare'].includes(turn.semanticTurn.action)
+        ? response.message.slice(0,320)
+        : undefined,
     },now);
     const written=await compareAndSwap(guestDbId,snapshot,{set:{conversationContext:next}},now);
     if(written.status==='applied') return true;
