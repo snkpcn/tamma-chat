@@ -446,3 +446,66 @@ test('conditional availability renderer preserves generic primary/fallback live 
   assert.match(response.message,/ทองไทย/u);
   assert.match(response.message,/ไม่ได้.*จอง|ไม่ได้ทำรายการ/u);
 });
+
+// Production smoke-test regression (2026-09-27): "อยากขี่ม้าพรุ่งนี้ตอนเย็น
+// มีม้าตัวไหนแนะนำบ้างครับ" (a plain "which horse do you recommend"
+// request, no calm/beginner/light/rain preference and nothing excluded) hit
+// renderActivityRecommendation's final catch-all branch, which listed EVERY
+// activity_asset fact present -- ATVs and archery lanes included -- instead
+// of scoping to the one activity type the semantic turn's own entities
+// already identified. Root cause: activityAssetRows/renderActivityRecommendation
+// never scoped by activity_asset:<code>:type the way _response-composer.ts's
+// own naturalActivityTopicSummary already does. Fixed generally (all three
+// activity types), not by matching this exact sentence.
+const mixedActivityBundle=bundle('activity','activity_live',[
+  fact('activity:horse_riding:name','ขี่ม้า','activity','activity_live'),
+  fact('activity_asset:horse-paradorn:name','ภาราดร','activity','activity_live'),
+  fact('activity_asset:horse-paradorn:activityCode','horse_riding','activity','activity_live'),
+  fact('activity_asset:horse-paradorn:type','horse','activity','activity_live'),
+  fact('activity_asset:horse-thongthai:name','ทองไทย','activity','activity_live'),
+  fact('activity_asset:horse-thongthai:activityCode','horse_riding','activity','activity_live'),
+  fact('activity_asset:horse-thongthai:type','horse','activity','activity_live'),
+  fact('activity:atv:name','ATV','activity','activity_live'),
+  fact('activity_asset:atv-1:name','ATV 1','activity','activity_live'),
+  fact('activity_asset:atv-1:activityCode','atv','activity','activity_live'),
+  fact('activity_asset:atv-1:type','atv','activity','activity_live'),
+  fact('activity_asset:atv-2:name','ATV 2','activity','activity_live'),
+  fact('activity_asset:atv-2:activityCode','atv','activity','activity_live'),
+  fact('activity_asset:atv-2:type','atv','activity','activity_live'),
+  fact('activity:archery:name','ยิงธนู','activity','activity_live'),
+  fact('activity_asset:archery-1:name','ช่องยิง 1','activity','activity_live'),
+  fact('activity_asset:archery-1:activityCode','archery','activity','activity_live'),
+  fact('activity_asset:archery-1:type','archery','activity','activity_live'),
+]);
+
+test('a plain horse-riding recommendation request never surfaces ATV or archery assets from the shared activity catalog',()=>{
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',intent:'horse_riding_recommendation',action:'recommend',informationNeed:'recommendation',
+      entities:{activity:'ขี่ม้า',date:'2026-09-28',timeOfDay:'evening'},
+      normalizedMeaning:'Customer wants to go horse riding tomorrow evening and asks which horse is recommended.',
+    }),
+    bundles:[mixedActivityBundle],
+  }));
+  assert.ok(response);
+  assert.doesNotMatch(response.message,/ATV/u,'must not surface ATV assets for a horse-only request');
+  assert.doesNotMatch(response.message,/ช่องยิง|ยิงธนู/u,'must not surface archery assets for a horse-only request');
+  assert.match(response.message,/ภาราดร/u);
+  assert.match(response.message,/ทองไทย/u);
+});
+
+test('a plain ATV recommendation request never surfaces horse or archery assets from the shared activity catalog',()=>{
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',intent:'atv_recommendation',action:'recommend',informationNeed:'recommendation',
+      entities:{activity:'ATV'},
+      normalizedMeaning:'Customer asks which ATV is recommended.',
+    }),
+    bundles:[mixedActivityBundle],
+  }));
+  assert.ok(response);
+  assert.doesNotMatch(response.message,/ภาราดร|ทองไทย/u,'must not surface horse assets for an ATV-only request');
+  assert.doesNotMatch(response.message,/ช่องยิง|ยิงธนู/u,'must not surface archery assets for an ATV-only request');
+  assert.match(response.message,/ATV 1/u);
+  assert.match(response.message,/ATV 2/u);
+});
