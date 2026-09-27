@@ -4,6 +4,7 @@
 // Final human-response certification after grounded response and reference fixes.
 // Certification rerun after compound-turn and journey coherence fixes.
 // Final rerun after open-world local-domain and bounded-reference review fixes.
+// Static checkpoint includes journey/entity/recommendation recovery fixes before the next paid live pass.
 process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE = '1';
 
 import assert from 'node:assert/strict';
