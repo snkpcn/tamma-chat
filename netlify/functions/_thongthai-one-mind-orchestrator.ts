@@ -416,6 +416,19 @@ const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
   'activity_inventory_count',
 ]);
 
+// Exact context/state operations whose meaning is already canonical. These are
+// the production zero-call path; broad natural-language buckets are excluded.
+const EXACT_ZERO_CALL_INTENTS: ReadonlySet<string> = new Set([
+  'task_cancel',
+  'task_field_correction',
+  'task_slot_update',
+  'select_prior_entity',
+  'select_known_activity_asset',
+  'resume_active_task',
+  'activity_booking_request',
+  'transaction_request_for_prior_entity',
+]);
+
 export function deterministicNeedsLanguageRefinement(
   turn: SemanticTurn | null,
   taskState: TaskStateContainer,
@@ -424,6 +437,8 @@ export function deterministicNeedsLanguageRefinement(
   if (!turn) return true;
 
   if (EXACT_READ_ONLY_DETERMINISTIC_INTENTS.has(turn.intent)) return false;
+  if (mayContainMultipleClauses(message)) return true;
+  if (EXACT_ZERO_CALL_INTENTS.has(turn.intent)) return false;
 
   // Preserve Phase 2's proven active-task restaurant switch behavior: a pure
   // switch can remain zero-model, while a compound sentence is read as a
@@ -432,10 +447,10 @@ export function deterministicNeedsLanguageRefinement(
     return mayContainMultipleClauses(message);
   }
 
-  // Transactional / state-mutating meaning remains deterministic whenever the
-  // mature parser already has it. The Language Brain is not allowed to become
-  // a write-policy engine.
-  if (!LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)) return false;
+  // A state-mutating candidate that is not in the exact allow-list above still
+  // needs semantic supervision. The downstream transaction layer remains the
+  // only execution authority.
+  if (!LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)) return true;
 
   // Coarse read-only candidates are FALLBACKS, not final language ownership.
   // This includes read-only side questions asked while a booking/order task is
