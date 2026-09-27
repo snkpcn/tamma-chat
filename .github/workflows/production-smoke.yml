@@ -1,0 +1,38 @@
+name: Production Smoke (real deployed endpoint)
+
+# Human Core final certification: exercises the REAL deployed Netlify
+# production customer endpoint from a runner with real network access
+# (this repository's own sandbox/dev environments may have none). Manual
+# trigger only -- this is a certification gate, not a per-commit check, and
+# must never run automatically on every push.
+#
+# Safety contract: every message scripts/run-production-smoke.ts sends is
+# read-only/discovery/status/correction. No case authorizes a transaction,
+# so no real booking/order/payment/redemption is ever created. See that
+# script's own header comment for the full safety contract.
+on:
+  workflow_dispatch:
+    inputs:
+      production_url:
+        description: 'Production endpoint to test (defaults to the real deployed URL)'
+        required: false
+        default: 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat'
+
+permissions:
+  contents: read
+
+jobs:
+  production-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run real production smoke (read-only, no transactions)
+        env:
+          THONGTHAI_PRODUCTION_URL: ${{ inputs.production_url }}
+        run: npx tsx scripts/run-production-smoke.ts
