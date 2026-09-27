@@ -721,8 +721,12 @@ function canonicalizeEntityAliases(
     selection_criterion:'selectionCriterion',
     previous_party_size:'previousPartySize',
     guestCount:'partySize',
+    childCount:'children',
+    adultCount:'adults',
     budget_thb:'budgetAmount',
     startDate:'date',
+    selected_activity_asset:'horseName',
+    selectedActivityAsset:'horseName',
   };
   for(const [from,to] of Object.entries(aliases)){
     if(entities[to]===undefined && entities[from]!==undefined) entities[to]=entities[from];
