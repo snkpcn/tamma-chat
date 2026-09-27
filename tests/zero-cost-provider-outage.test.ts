@@ -214,7 +214,7 @@ test('a horse selection with MULTIPLE verified durations never auto-picks or imm
   }
 });
 
-test('a horse activity with NO verified duration says it cannot be verified yet, never guesses a default', async () => {
+test('a horse selection with NO verified duration acknowledges the horse without guessing or pushing a default duration', async () => {
   const state = memoryState();
   const deps: Partial<OneMindDependencies> = {
     resolveCanonicalGuestId: async () => CANON,
@@ -241,7 +241,9 @@ test('a horse activity with NO verified duration says it cannot be verified yet,
   }, deps, state, new Date(NOW.getTime() + 1000));
   assert.equal(composed.status, 'composed');
   if (composed.status === 'composed') {
-    assert.match(composed.response.message, /เช็กระยะเวลา|ไม่ขอเดา|ยังไม่มีข้อมูลยืนยัน/);
+    assert.match(composed.response.message, /ภาราดร/);
+    assert.match(composed.response.message, /ยังไม่ได้จอง/);
+    assert.doesNotMatch(composed.response.message, /30 นาที|60 นาที|90 นาที|เลือกระยะเวลา/);
     assert.doesNotMatch(composed.response.message, GENERIC_APOLOGY);
   }
 });
