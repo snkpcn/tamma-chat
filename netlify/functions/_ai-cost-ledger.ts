@@ -178,7 +178,12 @@ export async function reserveAiCall(
   }
 
   const key = eventKey(context);
-  const reservedCostUsd = roundUsd(reserveWorstCaseCostUsd(model, estimatedInputTokens, maxOutputTokens));
+  // Reserve against the configured absolute input ceiling, not the average
+  // estimate. Correctness never depends on prompt caching or optimistic token
+  // estimation; a request that could cross the cap is blocked before fetch.
+  const reservedCostUsd = roundUsd(
+    reserveWorstCaseCostUsd(model, policy.absoluteInputTokens, maxOutputTokens),
+  );
 
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
     const snapshot = await loadGuestAgentStateSnapshot(context.guestDbId);
