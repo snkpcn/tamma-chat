@@ -158,6 +158,7 @@ function promotionEligibilityAdapter(channel: BrainChannel): (now?: Date) => Pro
             ['maxRedemptions',promo.maxRedemptions],
             ['redemptionCount',promo.redemptionCount],
             ['requiresDateTime',promo.requiresDateTime],
+            ['requiresMembership',promo.requiresMembership],
             ['automatedHandoff',promo.automatedHandoff],
             ['eligible',true],
           ];
