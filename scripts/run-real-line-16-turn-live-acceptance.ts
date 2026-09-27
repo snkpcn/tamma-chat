@@ -1,5 +1,6 @@
 // Owner real-conversation certification: paid live smoke is intentional; no production transaction/data mutation.
 // Rerun after semantic refinement + structured JSON ceiling fixes.
+// Final owner acceptance rerun after state, journey, and context fixes.
 process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE = '1';
 
 import assert from 'node:assert/strict';
