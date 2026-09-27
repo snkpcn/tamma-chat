@@ -8,6 +8,7 @@
 import type { SemanticTurn } from './_semantic-interpreter';
 import type { DialogDecision } from './_dialog-manager';
 import type { GroundedFact, KnowledgeBundle } from './_knowledge-resolver';
+import { resolveActivityCareFact, resourceCodeForActivityCode } from './_activity-care-policy';
 
 export type HumanGroundedRenderInput = {
   language: string;
@@ -169,6 +170,37 @@ function explicitExcludedNames(input: HumanGroundedRenderInput, names: readonly 
     }
   }
   return result;
+}
+
+/** Human Core PR D: the ONE generic activity care/safety/suitability/
+ *  equipment capability, consuming only the semantic supervisor's own
+ *  informationNeed (safety/suitability/equipment -- see
+ *  _semantic-interpreter.ts) plus a static, verified policy fact (see
+ *  _activity-care-policy.ts) -- never raw customer text. Supersedes
+ *  thongthai-chat.ts's horseCareFearResponse/horseSafetyQuestionResponse/
+ *  atvCareIntentResponse/archeryCareIntentResponse for whatever this single
+ *  capability already covers; a topic/resourceCode combination with no
+ *  verified fact yet returns null so those legacy responders (or a plain
+ *  clarification) remain the honest fallback rather than a fabricated
+ *  answer. */
+export function renderActivityCareResponse(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
+  const turn = input.semanticTurn;
+  if (!turn || turn.domain !== 'activity' || input.language !== 'th') return null;
+  if (turn.informationNeed !== 'safety' && turn.informationNeed !== 'suitability' && turn.informationNeed !== 'equipment') return null;
+
+  const entities = semanticEntities(input);
+  const activeTask = input.dialogDecision.taskStateContainer.activeTask;
+  const slotResourceCode = activeTask?.type === 'activity_booking' && typeof activeTask.slots.resourceCode === 'string'
+    ? activeTask.slots.resourceCode
+    : null;
+  const entityActivityCode = typeof entities.activityCode === 'string' ? entities.activityCode : null;
+  const resourceCode = slotResourceCode
+    ?? (entityActivityCode ? resourceCodeForActivityCode(entityActivityCode) : null)
+    ?? (typeof entities.horseName === 'string' && entities.horseName.trim() ? 'activity-horse' : null);
+
+  const message = resolveActivityCareFact(resourceCode, turn.informationNeed);
+  if (!message) return null;
+  return { message, usedFactKeys: [] };
 }
 
 export function renderActivityAvailability(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {

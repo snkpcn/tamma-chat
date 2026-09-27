@@ -97,7 +97,17 @@ export type SemanticInformationNeed =
   | 'recommendation'
   | 'ingredients'
   | 'policy'
-  | 'transaction_status';
+  | 'transaction_status'
+  // Human Core PR D: three closed, generic activity-care capabilities
+  // (kept intentionally coarse to fit the production prompt's hard token
+  // budget -- see _activity-care-policy.ts for what each answers with).
+  // 'safety' = general "is it safe" reassurance. 'suitability' = does this
+  // fit ME (beginner/experience/health/age/child). 'equipment' = how the
+  // gear/controls work. The response layer, not this module, decides the
+  // exact wording per resourceCode.
+  | 'safety'
+  | 'suitability'
+  | 'equipment';
 
 const VALID_DOMAINS: SemanticDomain[] = [
   'ecosystem', 'restaurant', 'stay', 'activity', 'promotion', 'membership',
@@ -120,6 +130,7 @@ const VALID_SPEECH_ACTS: SemanticSpeechAct[] = [
 const VALID_INFORMATION_NEEDS: SemanticInformationNeed[] = [
   'none', 'availability', 'price', 'schedule', 'inventory', 'catalog',
   'recommendation', 'ingredients', 'policy', 'transaction_status',
+  'safety', 'suitability', 'equipment',
 ];
 
 /** A single entity Thongthai currently knows about from recent conversation --
@@ -570,7 +581,7 @@ speechAct: one of question | statement | preference_update | correction | select
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | general | local | incident | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
 action: one of ask | discover | recommend | compare | book | order | modify | cancel | confirm | status | provide_information | correct_previous | unknown
-informationNeed: one of none | availability | price | schedule | inventory | catalog | recommendation | ingredients | policy | transaction_status
+informationNeed: one of none | availability | price | schedule | inventory | catalog | recommendation | ingredients | policy | transaction_status | safety | suitability | equipment
 - informationNeed is a CLOSED machine-facing meaning facet, independent of the free-form intent label.
 - Use availability when the customer asks whether a table/room/activity/time/resource is free, full, open, or available.
 - Use inventory for current physical-product stock/quantity existence (for example an OTOP product or packaged retail item). Do not
@@ -579,6 +590,7 @@ informationNeed: one of none | availability | price | schedule | inventory | cat
   stock/time state. A room/house TYPE or bedroom configuration with no date/current-state predicate is catalog, not availability.
 - Use transaction_status only when asking the status of an already-existing booking/order/payment/member transaction.
 - Use none when the turn is conversational or the question is not an information lookup.
+- Activity: safety=is it safe; suitability=does it fit me (beginner/health/age/child); equipment=how gear/controls work.
 taskDirective: OPTIONAL one of cancel_active | suspend_active | resume_suspended, only for the bounded conversational working task as described above
 entities: an object of whatever concrete values the message actually states (e.g. {"partySize":2}, {"date":"พรุ่งนี้"}, {"time":"บ่ายสาม"}, {"horseName":"ภาราดร"}) -- never invent a value that wasn't stated
 references: an array of {"type":string,"value"?:string,"refersToPriorContext":boolean} for anything in the message that points at something from context rather than being fully self-contained (a pronoun/deictic like "ตัวไหน", "อันนั้น", "อันเมื่อกี้", a bare correction, an implicit continuation). Omit entirely if the message is fully self-contained.
@@ -808,6 +820,7 @@ function canonicalizeEntityAliases(
   } else if (typeof entities.activityCode==='string') {
     entities.activityCode=entities.activityCode.trim().toLowerCase();
   }
+
   return entities;
 }
 

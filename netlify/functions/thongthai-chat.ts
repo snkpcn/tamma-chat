@@ -89,6 +89,7 @@ import {
 } from './_slot-parsers';
 import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask, suspendActiveTask } from './_task-state';
 import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
+import { renderActivityCareResponse } from './_human-grounded-response';
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
 import { EXPERIENCES } from '../../src/data/experiences';
 import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
@@ -1569,7 +1570,36 @@ async function deterministicActivityResponse(
   }
 
   const proposal = turn.dialogDecision.actionProposal;
-  if (!proposal || proposal.toolName !== 'create_booking' || !proposal.customerCommitPresent) return null;
+  if (!proposal || proposal.toolName !== 'create_booking' || !proposal.customerCommitPresent) {
+    // Human Core PR D: before falling through toward the legacy raw-text
+    // care/safety cascade (or runThongthaiBrain), give the semantic
+    // supervisor's OWN understanding of this turn (informationNeed=safety/
+    // suitability/equipment) one chance to answer from a verified policy
+    // fact -- the same zero-cost composer path a 'composed' turn already
+    // uses, just also reachable here for a legacy_required turn (e.g. an
+    // active booking task) that the composed-only eligibility gate doesn't
+    // cover. Returns null (never guesses) when no fact exists yet for this
+    // resourceCode/topic, leaving the legacy cascade as the honest fallback.
+    const careAnswer = renderActivityCareResponse({
+      language: request.language,
+      semanticTurn: turn.dialogSemanticTurn,
+      dialogDecision: turn.dialogDecision,
+      knowledgeBundles: turn.groundedKnowledge,
+    });
+    if (careAnswer) {
+      return {
+        message: careAnswer.message,
+        intent: 'information',
+        contextUpdates: {},
+        journeyAction: { type: 'none', journey: null },
+        suggestedActions: [],
+        responseStyle: 'direct',
+        semanticMemoryUpdates: [],
+        toolCalls: [],
+      };
+    }
+    return null;
+  }
   return executeDeterministicActivityBooking(
     resolveActivityBookingProposalArgs(proposal, turn.dialogDecision.taskStateContainer.activeTask),
     request,
@@ -3961,6 +3991,47 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         'THONGTHAI_HUMAN_CONVERSATION_FIRST_ERROR',
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
       );
+    }
+  }
+
+  // Human Core PR D: for a legacy_required activity turn where the semantic
+  // supervisor already understood the meaning as a care/safety/suitability/
+  // equipment question (informationNeed=safety/suitability/equipment),
+  // answer from the same verified-fact composer a 'composed' turn already
+  // uses -- BEFORE the ~30-function legacy raw-text care cascade below gets
+  // a chance to independently re-interpret the same message. A topic/
+  // resourceCode with no verified fact yet returns null, leaving that
+  // cascade as the honest fallback for the remaining capability gap.
+  if (earlyOneMind
+      && earlyOneMind.status === 'legacy_required'
+      && earlyOneMind.turn.semanticTurn.domain === 'activity'
+      && earlyOneMind.turn.semanticTurn.semanticSource === 'openai_supervisor'
+      && !earlyOneMind.turn.dialogDecision.actionProposal) {
+    const careAnswer = renderActivityCareResponse({
+      language: request.language,
+      semanticTurn: earlyOneMind.turn.dialogSemanticTurn,
+      dialogDecision: earlyOneMind.turn.dialogDecision,
+      knowledgeBundles: earlyOneMind.turn.groundedKnowledge,
+    });
+    if (careAnswer) {
+      const polished = polishedResponse({
+        message: careAnswer.message,
+        intent: 'information',
+        contextUpdates: {},
+        journeyAction: { type: 'none', journey: null },
+        suggestedActions: [],
+        responseStyle: 'direct',
+        semanticMemoryUpdates: [],
+        toolCalls: [],
+      }, channel);
+      await persistBrainRuntime(guestDbId, channel, polished);
+      return coreResult(200, {
+        message: polished.message,
+        intent: polished.intent,
+        contextUpdates: polished.contextUpdates,
+        journeyAction: polished.journeyAction,
+        suggestedActions: polished.suggestedActions,
+      });
     }
   }
 
