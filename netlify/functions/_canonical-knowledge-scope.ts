@@ -78,6 +78,7 @@ const STAY_KIND = 'stay';
 const STAY_TYPE_KIND = 'stay_type';
 const MENU_KIND = 'menu';
 const MENU_CATEGORY_KIND = 'menu_category';
+const PROMO_KIND = 'promo';
 
 function emptyScope(
   meaning: Pick<SemanticMeaning, 'domain' | 'scopeBreadth' | 'focusKind'>,
@@ -110,12 +111,37 @@ export function deriveCanonicalKnowledgeScope(meaning: SemanticMeaning): Canonic
   }
 
   // breadth === 'focused' from here.
-  if (meaning.domain !== 'activity' && meaning.domain !== 'stay' && meaning.domain !== 'restaurant') {
+  if (meaning.domain !== 'activity' && meaning.domain !== 'stay' && meaning.domain !== 'restaurant' && meaning.domain !== 'promotion') {
     // Focused in a domain this contract doesn't canonicalize yet -- remain
     // unresolved rather than guessing, but this is intentionally inert
     // until that domain's own PR wires it (see filterFactsByCanonicalScope,
     // which only firewalls domains it understands).
     return emptyScope(meaning, 'unresolved', 'domain_not_yet_canonicalized');
+  }
+
+  if (meaning.domain === 'promotion') {
+    if (meaning.focusKind === 'entity' && meaning.focusValue) {
+      if (meaning.focusValue.startsWith(`${PROMO_KIND}:`)) {
+        return {
+          ...emptyScope(meaning,'resolved','resolved_promotion_entity_reference'),
+          canonicalEntityIds:[meaning.focusValue],
+          allowedEntityKinds:[PROMO_KIND],
+        };
+      }
+      return {
+        ...emptyScope(meaning,'ambiguous',meaning.focusValue.startsWith('promo_code:')
+          ? 'promotion_code_pending_sot_lookup'
+          : 'promotion_name_pending_sot_lookup'),
+        allowedEntityKinds:[PROMO_KIND],
+        pendingFocusName:meaning.focusValue,
+      };
+    }
+    if (meaning.focusKind === 'prior_reference') {
+      return meaning.focusValue
+        ? {...emptyScope(meaning,'ambiguous','prior_promotion_reference_pending_sot_lookup'),allowedEntityKinds:[PROMO_KIND],pendingFocusName:meaning.focusValue}
+        : emptyScope(meaning,'unresolved','prior_promotion_reference_without_evidence');
+    }
+    return emptyScope(meaning,'unresolved','no_promotion_focus_signal');
   }
 
   if (meaning.domain === 'restaurant') {
@@ -234,8 +260,41 @@ export function resolveCanonicalScopeAgainstFacts(
   scope: CanonicalKnowledgeScope,
   facts: readonly ScopableFact[],
 ): CanonicalKnowledgeScope {
-  if (scope.domain !== 'activity' && scope.domain !== 'stay' && scope.domain !== 'restaurant') return scope;
+  if (scope.domain !== 'activity' && scope.domain !== 'stay' && scope.domain !== 'restaurant' && scope.domain !== 'promotion') return scope;
   const map = factMapFrom(facts);
+
+  if (scope.domain === 'promotion') {
+    if (scope.status === 'ambiguous' && scope.pendingFocusName) {
+      const wantsCode=scope.pendingFocusName.startsWith('promo_code:');
+      const target=wantsCode ? scope.pendingFocusName.slice('promo_code:'.length) : scope.pendingFocusName;
+      const ids=[...map.keys()]
+        .map(key=>key.match(/^promo:([^:]+):name$/)?.[1])
+        .filter((value):value is string=>Boolean(value));
+      const matches=ids.filter(id=>{
+        const value=wantsCode ? map.get(`promo:${id}:campaignCode`) : map.get(`promo:${id}:name`);
+        return typeof value==='string' && value===target;
+      });
+      if(matches.length!==1){
+        return {
+          ...scope,
+          status:matches.length>1?'ambiguous':'unresolved',
+          canonicalEntityIds:[],
+          provenance:matches.length>1
+            ? 'promotion_focus_not_unique_in_live_catalog'
+            : 'promotion_focus_not_found_in_live_catalog',
+        };
+      }
+      return {
+        ...scope,
+        status:'resolved',
+        canonicalEntityIds:[`promo:${matches[0]!}`],
+        provenance:wantsCode
+          ? 'promotion_code_resolved_against_live_catalog'
+          : 'promotion_name_resolved_against_live_catalog',
+      };
+    }
+    return scope;
+  }
 
   if (scope.domain === 'restaurant') {
     if (scope.status === 'ambiguous' && scope.pendingFocusName) {
@@ -364,7 +423,7 @@ export function filterFactsByCanonicalScope(
   facts: readonly ScopableFact[],
   scope: CanonicalKnowledgeScope,
 ): readonly ScopableFact[] {
-  if (scope.domain !== 'activity' && scope.domain !== 'stay' && scope.domain !== 'restaurant') return facts;
+  if (scope.domain !== 'activity' && scope.domain !== 'stay' && scope.domain !== 'restaurant' && scope.domain !== 'promotion') return facts;
   if (scope.breadth === 'domain_wide' || scope.breadth === 'unknown') return facts;
   // breadth === 'focused'
   if (scope.status !== 'resolved') return [];
@@ -372,6 +431,14 @@ export function filterFactsByCanonicalScope(
   const allowedEntities = new Set(scope.canonicalEntityIds);
   if (!allowedParents.size && !allowedEntities.size) return facts;
   const map = factMapFrom(facts);
+  if (scope.domain === 'promotion') {
+    return facts.filter(fact=>{
+      if(fact.key==='promo:active_promotions_live') return false;
+      const match=fact.key.match(/^promo:([^:]+):/);
+      if(!match) return true;
+      return allowedEntities.has(`promo:${match[1]!}`);
+    });
+  }
   if (scope.domain === 'restaurant') {
     return facts.filter(fact => {
       const menuMatch = fact.key.match(/^menu:([^:]+):/);
