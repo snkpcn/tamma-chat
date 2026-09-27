@@ -221,3 +221,51 @@ test('prior-plan modification stays journey when bounded conversation evidence r
   assert.equal(turn.domain,'journey');
   assert.equal(turn.needsClarification,false);
 });
+
+
+test('structured multi-step ecosystem plan canonicalizes to journey', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'two-night multi-step plan',
+    speechAct:'request',
+    domain:'ecosystem',
+    intent:'plan_multi_day_itinerary',
+    action:'recommend',
+    informationNeed:'recommendation',
+    entities:{
+      stay:{nights:2},
+      activities:[
+        {name:'horse riding',day:1},
+        {name:'dining',day:2},
+        {name:'souvenir shopping',day:2},
+      ],
+    },
+    references:[],
+    constraints:['stay_two_nights'],
+    confidence:0.97,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.domain, 'journey');
+  assert.equal(turn.action, 'recommend');
+  assert.equal(turn.informationNeed, 'recommendation');
+});
+
+test('active-task summary ignores stale unresolved references and never asks clarification', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'summarize current selections without booking',
+    speechAct:'question',
+    domain:'activity',
+    intent:'summarize_active_task',
+    action:'ask',
+    informationNeed:'none',
+    entities:{},
+    references:[{type:'previous_selection',value:'that one',refersToPriorContext:true}],
+    constraints:['no_booking'],
+    confidence:0.97,
+    needsClarification:true,
+    clarificationReason:'stale_reference',
+  }), emptySemanticContext());
+  assert.equal(turn.intent, 'summarize_active_task');
+  assert.equal(turn.needsClarification, false);
+  assert.equal(turn.references.length, 0);
+  assert.equal(turn.clarificationReason, undefined);
+});
