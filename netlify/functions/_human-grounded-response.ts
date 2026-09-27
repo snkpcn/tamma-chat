@@ -544,6 +544,27 @@ export function renderRestaurantResponse(input: HumanGroundedRenderInput): Human
     }
   }
 
+  if(turn.action==='order' && !input.dialogDecision.actionProposal && input.dialogDecision.missingFields.length===0) {
+    const task=input.dialogDecision.taskStateContainer.activeTask;
+    const requested=task?.type==='restaurant_preorder'&&Array.isArray(task.slots.items)
+      ? task.slots.items.filter((value):value is Record<string,unknown>=>Boolean(value)&&typeof value==='object'&&!Array.isArray(value))
+      : [];
+    if(requested.length) {
+      const problems:string[]=[];
+      for(const item of requested) {
+        const name=typeof item.name==='string'?item.name.trim():'';
+        const quantity=Number(item.quantity);
+        const row=rows.find(candidate=>candidate.name===name);
+        if(!row) problems.push(name?`หาเมนู “${name}” ในรายการล่าสุดไม่เจอ`:'มีรายการที่ชื่อเมนูไม่ครบ');
+        else if(row.orderable!==true) problems.push(`${name} ตอนนี้ไม่พร้อมสั่ง`);
+        else if(typeof row.availableServings!=='number') problems.push(`${name} ยังยืนยันจำนวนที่พร้อมขายไม่ได้`);
+        else if(Number.isInteger(quantity)&&row.availableServings<quantity) problems.push(`${name} เหลือพร้อมขายไม่พอสำหรับ ${quantity} รายการ`);
+      }
+      if(problems.length) return {message:['ยังเปิดออเดอร์ไม่ได้ครับ',...problems.map(value=>`• ${value}`),'ยังไม่ได้สร้างรายการให้ครับ'].join('\n'),usedFactKeys:[]};
+    }
+    return {message:'ข้อมูลสำหรับออเดอร์นี้ยังยืนยันจากเมนูสดได้ไม่ครบครับ เลยยังไม่ได้สร้างรายการให้',usedFactKeys:[]};
+  }
+
   if(turn.informationNeed==='catalog' || turn.action==='discover' || turn.action==='ask' || turn.action==='compare') {
     if(!rows.length) {
       const menuSource=sources.find(source=>['catalog','price','ingredients','recommendations_input'].includes(source.need));
