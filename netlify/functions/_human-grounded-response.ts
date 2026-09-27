@@ -469,6 +469,106 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
   return null;
 }
 
+/** Human Core PR F: one terminal Restaurant knowledge renderer for
+ * already-understood semantics. It consumes only the supervisor's closed
+ * informationNeed/action/entities and verified menu facts that have already
+ * passed CanonicalKnowledgeScope. No raw customer text is accepted here. */
+export function renderRestaurantResponse(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
+  const turn=input.semanticTurn;
+  if(!turn || turn.domain!=='restaurant' || input.language!=='th') return null;
+
+  if(turn.action==='recommend') return renderRestaurantRecommendation(input);
+
+  const map=factMap(input);
+  const sources=input.knowledgeBundles.flatMap(bundle=>bundle.sources);
+  const warnings=input.knowledgeBundles.flatMap(bundle=>bundle.warnings);
+  if(warnings.includes('scope_unresolved_facts_filtered')) {
+    return { message:'ตอนนี้หาเมนูที่ระบุจากรายการจริงไม่เจอครับ เลยไม่ขอเดาข้อมูลของเมนูอื่นมาแทน', usedFactKeys:[] };
+  }
+
+  const ids=[...new Set([...map.keys()]
+    .map(key=>key.match(/^menu:([^:]+):name$/u)?.[1])
+    .filter((value):value is string=>Boolean(value)))];
+  const rows=ids.map(id=>({
+    id,
+    name:map.get(`menu:${id}:name`),
+    category:map.get(`menu:${id}:category`),
+    price:map.get(`menu:${id}:price`),
+    orderable:map.get(`menu:${id}:orderable`),
+    availableServings:map.get(`menu:${id}:availableServings`),
+    ingredients:map.get(`menu:${id}:ingredients`),
+    unavailableIngredients:map.get(`menu:${id}:unavailableIngredients`),
+    description:map.get(`menu:${id}:description`),
+  })).filter(row=>typeof row.name==='string'&&row.name.trim());
+
+  if(turn.informationNeed==='price') {
+    if(!rows.length) return {message:'ตอนนี้ยังไม่มีราคาที่ตรวจยืนยันได้สำหรับเมนูที่ถามครับ',usedFactKeys:[]};
+    const used:string[]=[];
+    const lines=rows.map(row=>{
+      used.push(`menu:${row.id}:name`);
+      if(typeof row.price==='number') used.push(`menu:${row.id}:price`);
+      return typeof row.price==='number'
+        ? `• ${row.name} — ${Math.round(row.price)} บาท`
+        : `• ${row.name} — ยังไม่มีราคาที่ตรวจยืนยันได้`;
+    });
+    return {message:lines.join('\n'),usedFactKeys:[...new Set(used)]};
+  }
+
+  if(turn.informationNeed==='ingredients') {
+    if(!rows.length) return {message:'ตอนนี้ยังไม่มีข้อมูลส่วนผสมที่ตรวจยืนยันได้สำหรับเมนูที่ถามครับ',usedFactKeys:[]};
+    const used:string[]=[];
+    const lines=rows.map(row=>{
+      used.push(`menu:${row.id}:name`);
+      if(Array.isArray(row.ingredients)) {
+        used.push(`menu:${row.id}:ingredients`);
+        return `• ${row.name}: ${row.ingredients.map(value=>String(value)).join(', ')}`;
+      }
+      return `• ${row.name}: ยังไม่มีข้อมูลส่วนผสมที่ตรวจยืนยันได้`;
+    });
+    return {message:lines.join('\n'),usedFactKeys:[...new Set(used)]};
+  }
+
+  if(turn.informationNeed==='availability') {
+    const unavailableSource=sources.some(source=>source.need==='availability'&&source.status==='unavailable');
+    const emptySource=sources.some(source=>source.need==='availability'&&source.status==='empty');
+    if(unavailableSource || !sources.some(source=>source.need==='availability')) {
+      return {message:'ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ครับ เลยไม่ขอเดาว่าเต็มหรือว่าง และยังไม่ได้ทำรายการให้',usedFactKeys:[]};
+    }
+    if(emptySource) return {message:'ตรวจข้อมูลที่มีแล้ว ตอนนี้ยังไม่พบโต๊ะว่างที่ยืนยันได้ตามเงื่อนไขที่ถามครับ และยังไม่ได้จอง',usedFactKeys:[]};
+  }
+
+  if(turn.informationNeed==='transaction_status') {
+    const unavailable=sources.some(source=>source.need==='order_status'&&source.status==='unavailable');
+    if(unavailable || !sources.some(source=>source.need==='order_status')) {
+      return {message:'ตอนนี้ทองไทยยังตรวจสถานะออเดอร์จากแหล่งข้อมูลยืนยันไม่ได้ครับ เลยไม่ขอเดาสถานะให้',usedFactKeys:[]};
+    }
+  }
+
+  if(turn.informationNeed==='catalog' || turn.action==='discover' || turn.action==='ask' || turn.action==='compare') {
+    if(!rows.length) {
+      const menuSource=sources.find(source=>['catalog','price','ingredients','recommendations_input'].includes(source.need));
+      return menuSource?.status==='empty'
+        ? {message:'ตอนนี้ยังไม่มีเมนูที่ยืนยันจากระบบให้แสดงครับ',usedFactKeys:[]}
+        : null;
+    }
+    const used:string[]=[];
+    const shown=rows.slice(0,12);
+    const lines=shown.map(row=>{
+      used.push(`menu:${row.id}:name`);
+      if(typeof row.price==='number') used.push(`menu:${row.id}:price`);
+      if(typeof row.orderable==='boolean') used.push(`menu:${row.id}:orderable`);
+      const price=typeof row.price==='number' ? ` — ${Math.round(row.price)} บาท` : '';
+      const availability=row.orderable===false || (typeof row.availableServings==='number'&&row.availableServings<=0)
+        ? ' — ตอนนี้ไม่พร้อมสั่ง'
+        : '';
+      return `• ${row.name}${price}${availability}`;
+    });
+    return {message:['🍽️ เมนูที่ยืนยันได้ตอนนี้ครับ',...lines].join('\n'),usedFactKeys:[...new Set(used)]};
+  }
+
+  return null;
+}
+
 export function renderRestaurantRecommendation(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
   const turn = input.semanticTurn;
   if (!turn || turn.domain !== 'restaurant' || turn.action !== 'recommend' || input.language !== 'th') return null;
