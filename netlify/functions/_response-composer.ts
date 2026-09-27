@@ -22,6 +22,7 @@ import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
 import { extractTime } from './_slot-parsers';
 import {
+  renderActivityAvailability,
   renderActivityRecommendation,
   renderRestaurantRecommendation,
   renderPromotionRecommendation,
@@ -642,6 +643,7 @@ export function composeGroundedDeterministicResponse(input: ResponseComposerInpu
   const humanGrounded = renderJourneyPlan(input)
     ?? renderRestaurantRecommendation(input)
     ?? renderPromotionRecommendation(input)
+    ?? renderActivityAvailability(input)
     ?? renderActivityRecommendation(input);
   if (humanGrounded) {
     return {
