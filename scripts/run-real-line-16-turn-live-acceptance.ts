@@ -2,6 +2,7 @@
 // Rerun after semantic refinement + structured JSON ceiling fixes.
 // Final owner acceptance rerun after state, journey, and context fixes.
 // Final human-response certification after grounded response and reference fixes.
+// Final rerun after journey-shape, conditional-fallback, and selection-state fixes.
 // Final 16/16 rerun after durable recommendation and human-response hardening.
 // Certification rerun after compound-turn and journey coherence fixes.
 // Final rerun after open-world local-domain and bounded-reference review fixes.
