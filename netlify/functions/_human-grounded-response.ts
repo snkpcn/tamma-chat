@@ -335,6 +335,7 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
   };
   const primary=
     nameOf(entity.primaryResource)
+    ?? nameOf(entity.primaryHorseName)
     ?? nameOf(entity.primaryHorse)
     ?? nameOf(entity.preferredAsset)
     ?? nameOf(entity.preferredHorse)
@@ -342,6 +343,7 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
     ?? nameOf(entity.primary);
   const fallback=
     nameOf(entity.fallbackResource)
+    ?? nameOf(entity.fallbackHorseName)
     ?? nameOf(entity.fallbackHorse)
     ?? nameOf(entity.fallbackAsset)
     ?? nameOf(entity.fallback);
