@@ -502,6 +502,13 @@ function needsActivityCatalogResolution(task: ActiveTask): boolean {
   return !task.slots.durationMinutes;
 }
 
+function hasRecommendationCriteria(turn:SemanticTurn):boolean {
+  if(turn.action==='recommend' || turn.informationNeed==='recommendation') return true;
+  const entityKeys=Object.keys(turn.entities).map(key=>key.toLowerCase());
+  if(entityKeys.some(key=>/(?:prefer|trait|criterion|exclude|fallback|suitable|family|exertion)/u.test(key))) return true;
+  return turn.constraints.some(constraint=>/(?:prefer|calm|beginner|exclude|fallback|family|exertion|suitable|weather)/iu.test(constraint));
+}
+
 /** Translates semantic/task state into INFORMATION NEEDS -- never queries
  *  every source every turn. Returns at most one KnowledgeRequest per domain
  *  actually implicated by this turn. */
@@ -541,7 +548,17 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       // Route mutable questions from the CLOSED informationNeed facet, never
       // a free-form model intent label. Resource availability is not the same
       // thing as the status of an existing booking.
-      if (turn.informationNeed === 'availability') return [{ ...base, domain: 'activity', needs: ['availability'] }];
+      if (turn.informationNeed === 'availability') {
+        // A compound human turn can ask about timing while ALSO carrying a
+        // recommendation criterion (preferred trait, exclusion, fallback
+        // option). Fetch both the live availability source and the verified
+        // catalog/entity facts so the response does not collapse into an
+        // empty availability sentence and discard the recommendation clause.
+        const needs = hasRecommendationCriteria(turn)
+          ? ['availability','entity_details','catalog'] as const
+          : ['availability'] as const;
+        return [{ ...base, domain:'activity', needs:[...needs] }];
+      }
       if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'activity', needs: ['schedule'] }];
       if (turn.informationNeed === 'price') return [{ ...base, domain: 'activity', needs: ['price'] }];
       if (turn.informationNeed === 'inventory' || turn.intent === 'activity_inventory_count') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
