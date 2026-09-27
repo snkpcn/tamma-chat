@@ -960,7 +960,8 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   // A request to summarize the current working state is answered from the
   // canonical task container itself. It must never become ambiguous merely
   // because the model also emitted a stale/unresolved prior-context reference.
-  if (parsed.intent === 'summarize_active_task') {
+  const isActiveTaskSummary = intent === 'summarize_active_task';
+  if (isActiveTaskSummary) {
     references = [];
   }
 
@@ -1076,11 +1077,15 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification,
-    clarificationReason: typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
-      ? parsed.clarificationReason.trim()
-      : (ambiguousReferenceRequiresClarification ? 'ambiguous_reference'
-        : (hasUnresolvedReference ? 'unresolved_reference' : undefined)),
+    needsClarification: isActiveTaskSummary
+      ? false
+      : (parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification),
+    clarificationReason: isActiveTaskSummary
+      ? undefined
+      : (typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
+        ? parsed.clarificationReason.trim()
+        : (ambiguousReferenceRequiresClarification ? 'ambiguous_reference'
+          : (hasUnresolvedReference ? 'unresolved_reference' : undefined))),
     taskDirective,
   };
 }
