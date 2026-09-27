@@ -118,6 +118,53 @@ function explicitExcludedNames(input: HumanGroundedRenderInput, names: readonly 
   return result;
 }
 
+export function renderActivityAvailability(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
+  const turn=input.semanticTurn;
+  if(!turn || turn.domain!=='activity' || turn.informationNeed!=='availability' || input.language!=='th') return null;
+
+  const availabilitySources=input.knowledgeBundles
+    .flatMap(bundle=>bundle.sources)
+    .filter(source=>source.need==='availability');
+  if(!availabilitySources.length) return null;
+
+  const entity=semanticEntities(input);
+  const nameOf=(value:unknown):string|null=>{
+    if(typeof value==='string'&&value.trim()) return value.trim();
+    if(value&&typeof value==='object'&&!Array.isArray(value)){
+      const name=(value as Record<string,unknown>).name;
+      if(typeof name==='string'&&name.trim()) return name.trim();
+    }
+    return null;
+  };
+  const primary=nameOf(entity.primaryResource) ?? nameOf(entity.primaryHorse);
+  const fallback=nameOf(entity.fallbackResource) ?? nameOf(entity.fallbackHorse);
+  const names=[primary,fallback].filter((value):value is string=>Boolean(value));
+  const noTransaction=semanticText(input).includes('no_transaction')
+    || semanticText(input).includes('no_booking')
+    || semanticText(input).includes('ไม่จอง');
+
+  if(availabilitySources.some(source=>source.status==='unavailable')){
+    const subject=names.length ? names.join(' / ') : 'ม้าที่ถาม';
+    return {
+      message:`ตอนนี้ยังเช็กคิวสดของ ${subject} ให้ยืนยันไม่ได้ครับ${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''}`,
+      usedFactKeys:[],
+    };
+  }
+  if(availabilitySources.every(source=>source.status==='empty')){
+    if(names.length){
+      return {
+        message:`ตอนนี้ยังไม่มีคิวว่างที่ยืนยันได้สำหรับ ${names.join(' / ')} ตามเงื่อนไขที่ถามครับ${noTransaction?' เลยยังไม่ได้เลือกหรือจองอะไรให้':''}`,
+        usedFactKeys:[],
+      };
+    }
+    return {
+      message:`ตอนนี้ยังไม่มีม้าตัวไหนที่มีคิวว่างยืนยันตรงเงื่อนไขที่ถามครับ${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''}`,
+      usedFactKeys:[],
+    };
+  }
+  return null;
+}
+
 export function renderActivityRecommendation(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
   const turn = input.semanticTurn;
   if (!turn || turn.domain !== 'activity' || input.language !== 'th') return null;
@@ -127,13 +174,30 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
   const excluded = explicitExcludedNames(input, assets.map(asset => asset.name));
   const wantsCalm = wants(input, ['prefer_calm', 'calm_horse', 'calm_temperament', 'preferred_horse_trait', 'calmer', 'นิ่ง', 'ใจเย็น']);
   const wantsBeginner = wants(input, ['beginner', 'มือใหม่', 'ไม่เคยขี่']);
+  const wantsLight = wants(input, ['light_activity', 'low_exertion', 'not_too_tiring', 'ไม่หนัก', 'ไม่เหนื่อย']);
   const wantsRain = wants(input, ['rain', 'ฝน', 'weather_fallback']);
   const hasRecommendationShape = turn.action === 'recommend'
     || wantsCalm
     || wantsBeginner
+    || wantsLight
     || wantsRain
     || excluded.size > 0;
   if(!hasRecommendationShape) return null;
+
+  if (wantsLight && !wantsCalm && !wantsBeginner) {
+    const activityNames=[...map.entries()]
+      .filter(([key,value])=>/^activity:[^:]+:name$/u.test(key)&&typeof value==='string')
+      .map(([key,value])=>({key,name:String(value)}));
+    if(activityNames.length){
+      return {
+        message:[
+          'กิจกรรมที่มีข้อมูลยืนยันตอนนี้มี ' + activityNames.map(item=>item.name).join(' / ') + ' ครับ',
+          'แต่ข้อมูลระดับความหนักและความเหมาะกับเด็กของแต่ละกิจกรรมยังไม่ครบพอให้ฟันธงว่าอันไหนเบาที่สุด เลยไม่ขอเดาให้ครับ',
+        ].join('\n'),
+        usedFactKeys:activityNames.map(item=>item.key),
+      };
+    }
+  }
 
   if (wantsCalm || wantsBeginner) {
     const matching = assets
