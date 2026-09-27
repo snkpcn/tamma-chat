@@ -205,9 +205,9 @@ async function persistAssistantConversationTurn(
   const assistantEventId=(`assistant:${input.eventId}`).slice(0,180);
 
   // The assistant's own reply is bounded/redacted by the SAME conversation
-  // reducer as user turns. Without this, a natural follow-up such as
-  // "ตัวไหนที่เมื่อกี้บอกว่านิ่งกว่า" has no evidence of what Thongthai
-  // actually said, so stale task state can hijack the next turn.
+  // reducer as user turns. Without this, a natural follow-up referring
+  // to what Thongthai just said has no assistant-turn evidence, so stale task
+  // state can hijack the next turn.
   for(let attempt=0;attempt<4;attempt+=1){
     const snapshot=await loadSnapshot(guestDbId);
     const current=parseConversationContextState(snapshot.state.conversationContext,now);
