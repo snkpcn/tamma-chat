@@ -69,6 +69,13 @@ function findActivityTopic(message: string): { nodeId: string; activityCode: str
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
 }
 
+// General "is this phrased as a question" structural signal, shared by
+// every place in this file that must tell a genuine commitment/selection
+// apart from someone merely asking about the same words. Not a phrase
+// table for one sentence or one asset -- any message matching this is
+// read-only, whatever domain or name it names.
+const QUESTION_MARKER_RE = /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
+
 function hasStandaloneTransactionRequest(message:string):boolean {
   if (hasCommitMarker(message)) return true;
   if (!/(?:จอง|สั่ง)/u.test(message)) return false;
@@ -76,7 +83,7 @@ function hasStandaloneTransactionRequest(message:string):boolean {
   // a new commitment. Questions and explicit negation remain read-only.
   if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
   if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้)?\s*(?:จอง|สั่ง)|ยกเลิก/u.test(message)) return false;
-  if (/[?？]|ไหม|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร/u.test(message)) return false;
+  if (QUESTION_MARKER_RE.test(message)) return false;
   return true;
 }
 
@@ -96,7 +103,18 @@ const ASSET_NEGATION_BEFORE_NAME_RE = /(?:ไม่เอา|ไม่ใช่|
  * preceding text ends with a negation marker is excluded before picking a
  * match, so this works regardless of which name is mentioned first.
  */
+// One of the two known assets ("ทองไทย") is also the assistant/business's
+// own name. A bare mention is not the same as choosing it -- "ทองไทยตอบเร็ว
+// จังเลย" (a compliment to the assistant) or "ร้านทองไทยเปิดกี่โมง" (a
+// question about the business) are not selections, but this lexicon match
+// alone can't tell the difference from real text like "เอาทองไทย"/
+// "ทองไทยครับ". A genuine selection is a short statement, never a question;
+// this reuses the SAME general QUESTION_MARKER_RE structural signal
+// hasStandaloneTransactionRequest above already uses, not a phrase specific
+// to this one name -- so it protects both listed assets and any future one
+// added to the same lexicon.
 export function findKnownActivityAssetSelection(message: string): typeof ACTIVITY_ASSET_SELECTIONS[number] | null {
+  if (QUESTION_MARKER_RE.test(message)) return null;
   const accepted = ACTIVITY_ASSET_SELECTIONS.flatMap(item => {
     const match = item.pattern.exec(message);
     if (!match) return [];

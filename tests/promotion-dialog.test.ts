@@ -144,6 +144,34 @@ test('multiple active promotions with an unspecific accept message asks for clar
   }
 });
 
+// --- PR A item 2d: a mere mention/question must never be treated as
+// acceptance, even when matchPromotionByText resolves it to exactly one
+// promo by name -- only isPromotionAcceptIntent's explicit phrases, or a
+// genuine want/accept verb with no question marker, count as real intent.
+// See _promotion-dialog.ts's isGenuinePromotionAcceptance.
+
+test('a price/info QUESTION naming the promo item is never treated as acceptance, even though it resolves to exactly one promo', () => {
+  const promotions = [promo()];
+  for (const message of ['โปรตำไทยราคาเท่าไหร่', 'โปรตำไทยมีอะไรบ้าง', 'โปรตำไทยเป็นยังไง']) {
+    const decision = decidePromotionFallback(message, promotions);
+    assert.notEqual(decision.kind, 'start_redemption', message);
+  }
+});
+
+test('a genuine want/accept verb naming the specific promo (no generic "นี้") still starts redemption', () => {
+  const promotions = [promo()];
+  const decision = decidePromotionFallback('เอาโปรตำไทยค่ะ', promotions);
+  assert.equal(decision.kind, 'start_redemption');
+});
+
+test('a bare mention with no accept verb and no question marker still does not accept on its own', () => {
+  const promotions = [promo()];
+  // Real production shape: the customer names the promo item as part of an
+  // unrelated statement, not a request for it ("ตำไทย" mentioned in passing).
+  const decision = decidePromotionFallback('เมื่อวานกินโปรตำไทยไปแล้ว', promotions);
+  assert.notEqual(decision.kind, 'start_redemption');
+});
+
 // --- state round-trip ---
 
 test('a pending redemption written to agentState round-trips through parsePendingPromotionRedemption', () => {

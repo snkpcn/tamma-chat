@@ -140,6 +140,14 @@ export type OneMindTrace = {
 export type OneMindTurnResult = {
   identity: OneMindIdentity;
   semanticTurn: SemanticTurn;
+  /** semanticTurn with planMemoryRelevance's durable-memory constraints
+   *  (e.g. a remembered shrimp allergy) folded in -- the SAME authoritative
+   *  constraint set the Dialog Manager itself planned knowledge/task-state
+   *  from (see semanticTurnForDialog). Response composition must render
+   *  from THIS turn, never the bare semanticTurn above: a recommendation
+   *  must never be produced from a constraint set different from the one
+   *  the rest of the turn was actually decided against. */
+  dialogSemanticTurn: SemanticTurn;
   dialogPlan: DialogPlan;
   dialogDecision: DialogDecision;
   groundedKnowledge: KnowledgeBundle[];
@@ -418,12 +426,23 @@ const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
 
 // Exact context/state operations whose meaning is already canonical. These are
 // the production zero-call path; broad natural-language buckets are excluded.
+//
+// 'select_known_activity_asset' was removed from this set (Human Core PR A):
+// it comes from a bounded name lexicon (_deterministic-semantic-turn.ts's
+// findKnownActivityAssetSelection), and one of the two known names
+// ("ทองไทย") is also the assistant/business's own name. Treating a bare
+// mention as an unconditionally-trusted zero-call selection meant any
+// message that named the assistant became "select the ทองไทย horse" without
+// ever consulting the real semantic model. It remains available as a
+// genuine outage-fallback candidate (deriveDeterministicSemanticTurn still
+// produces it, and it still answers when the supervisor is unavailable) --
+// it is simply no longer trusted enough to skip the model when the model
+// IS available.
 const EXACT_ZERO_CALL_INTENTS: ReadonlySet<string> = new Set([
   'task_cancel',
   'task_field_correction',
   'task_slot_update',
   'select_prior_entity',
-  'select_known_activity_asset',
   'resume_active_task',
   'transaction_request_for_prior_entity',
 ]);
@@ -835,6 +854,7 @@ async function computeOneMindTurnFromState(
   return {
     identity,
     semanticTurn,
+    dialogSemanticTurn,
     dialogPlan: dialog.plan,
     dialogDecision: dialog.decision,
     groundedKnowledge: dialog.bundles,

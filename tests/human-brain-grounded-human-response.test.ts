@@ -120,6 +120,34 @@ test('restaurant recommendation filters verified shrimp constraint and does not 
   assert.match(response.message,/อยู่ในงบ 1000 บาท/u);
 });
 
+// PR A item 3: a remembered "shrimp_allergy" (the durable-memory canonical
+// key -- see _memory-relevance.ts's FOOD_CONSTRAINTS) must be recognized
+// exactly like the current-turn "no_shrimp" phrasing above. Before this fix,
+// none of the checked fragments matched "shrimp_allergy" literally, so a
+// remembered allergy present in the merged constraint set was silently
+// dropped from the actual recommendation text.
+test('restaurant recommendation filters a REMEMBERED "shrimp_allergy" constraint the same as a stated "no_shrimp" one',()=>{
+  const restaurant=bundle('restaurant','restaurant_live',[
+    fact('menu:thai-salad:name','ตำไทย','restaurant','restaurant_live'),
+    fact('menu:thai-salad:price',89,'restaurant','restaurant_live'),
+    fact('menu:thai-salad:ingredients',['papaya','peanut'],'restaurant','restaurant_live'),
+    fact('menu:shrimp:name','กุ้งทอด','restaurant','restaurant_live'),
+    fact('menu:shrimp:price',220,'restaurant','restaurant_live'),
+    fact('menu:shrimp:ingredients',['shrimp'],'restaurant','restaurant_live'),
+  ]);
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'restaurant',intent:'meal_recommendation',action:'recommend',informationNeed:'recommendation',
+      entities:{partySize:2},constraints:['shrimp_allergy'],
+    }),
+    bundles:[restaurant],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/ตำไทย/u);
+  assert.doesNotMatch(response.message,/กุ้งทอด/u,
+    'a remembered shrimp allergy must never surface a shrimp dish, even though the CURRENT turn never said "no_shrimp" itself');
+});
+
 test('journey renderer composes verified cross-domain options instead of dumping one catalog or generic fallback',()=>{
   const restaurant=bundle('restaurant','restaurant_live',[fact('menu:chicken:name','ไก่ย่าง','restaurant','restaurant_live')]);
   const stay=bundle('stay','stay_live',[fact('stay:two-bedroom:name','บ้านสองห้องนอน','stay','stay_live')]);

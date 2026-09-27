@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { promotionContinuationResponse } from '../netlify/functions/thongthai-chat';
+import { promotionContinuationResponse, promotionDiscoveryFallbackResponse } from '../netlify/functions/thongthai-chat';
 import type { BrainRequest, BrainRuntimeContext } from '../netlify/functions/_thongthai-brain-v3';
 import type { PendingPromotionRedemption, PromotionListItem } from '../netlify/functions/_promotion-dialog';
 
@@ -57,6 +57,25 @@ function runtimeWith(pending: PendingPromotionRedemption): BrainRuntimeContext {
     toolResults: [],
   };
 }
+
+function runtimeNoPending(): BrainRuntimeContext {
+  return {
+    agentState: {},
+    semanticMemory: [],
+    worldFacts: [{ fact_key: 'active_promotions_live', category: 'operations', fact_value: { promotions: [promo()] }, source: null, updated_at: '2026-09-18T00:00:00.000Z' }],
+    toolResults: [],
+  };
+}
+
+// PR A item 2d: a pure discovery listing must never plant a pending
+// redemption on its own, even when exactly one promo is active -- only a
+// genuine acceptance (decidePromotionFallback's 'start_redemption') may.
+test('a pure discovery question ("มีโปรอะไร") with exactly one active promo does NOT start a pending redemption', async () => {
+  const response = await promotionDiscoveryFallbackResponse(request('มีโปรอะไร'), runtimeNoPending(), null, 'line');
+  assert.ok(response);
+  assert.equal(response!.agentStateUpdate?.pendingPromotionRedemption, undefined,
+    'seeing the promo list is not the same as accepting it');
+});
 
 test('repeated "มีโปรอะไร" with a pending redemption re-shows the promo list, does not continue redemption', async () => {
   const pending = freshPending();

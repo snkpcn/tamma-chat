@@ -61,6 +61,24 @@ export function isPromotionAcceptIntent(message: string): boolean {
   return ACCEPT_RE.test(message);
 }
 
+// matchPromotionByText matches a promo by TITLE OR ITEM NAME substring alone
+// -- real production risk this closes: a promo-related PRICE/INFO QUESTION
+// that happens to name the promo/item ("โปรตำไทยราคาเท่าไหร่", "โปรตำไทยมีอะไรบ้าง")
+// matches exactly the same way a genuine acceptance would ("เอาโปรตำไทย"), so
+// matching alone can never be trusted as acceptance -- it must also be
+// paired with a genuine want/accept verb, and never win when the message is
+// itself phrased as a question. Structural, not phrase-specific: the SAME
+// closed "is this phrased as a question" signal used elsewhere in this
+// codebase (see _deterministic-semantic-turn.ts's QUESTION_MARKER_RE).
+const PROMOTION_ACCEPT_VERB_RE = /(เอา|รับ|ขอ(?!โทษ)|อยากได้|อยากรับ|สนใจ)/u;
+const PROMOTION_QUESTION_MARKER_RE = /[?？]|ไหม|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|เท่าไหร่|เท่าไร|กี่บาท|ราคา/u;
+
+function isGenuinePromotionAcceptance(message: string, matched: PromotionListItem | null): boolean {
+  if (isPromotionAcceptIntent(message)) return true;
+  if (!matched) return false;
+  return PROMOTION_ACCEPT_VERB_RE.test(message) && !PROMOTION_QUESTION_MARKER_RE.test(message);
+}
+
 function normalizeThai(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -174,7 +192,7 @@ export type PromotionFallbackDecision =
 export function decidePromotionFallback(message: string, promotions: PromotionListItem[]): PromotionFallbackDecision {
   if (!isPromotionMention(message)) return { kind: 'not_promo_related' };
   const matched = matchPromotionByText(message, promotions);
-  const wantsToAccept = isPromotionAcceptIntent(message) || Boolean(matched);
+  const wantsToAccept = isGenuinePromotionAcceptance(message, matched);
 
   if (wantsToAccept) {
     const target = matched ?? (promotions.length === 1 ? promotions[0] : null);

@@ -54,6 +54,32 @@ function wants(input: HumanGroundedRenderInput, fragments: readonly string[]): b
   return fragments.some(fragment => text.includes(fragment.toLowerCase()));
 }
 
+/** Dietary/allergy SAFETY checks -- unlike general preference signals (e.g.
+ *  wantsCalm/wantsBeginner below, which stay on wants()) -- must never be
+ *  decided from normalizedMeaning. That field is free-form observability
+ *  text, and the wider architecture keeps it out of routing/decisions for
+ *  exactly this reason: a customer's own paraphrase ("I like the pork belly
+ *  here") could otherwise flip a safety filter through blob-substring
+ *  matching, which can't tell a positive mention from a restriction. Reads
+ *  ONLY the closed constraints array, matching either a durable-memory
+ *  canonical key (_memory-relevance.ts's FOOD_CONSTRAINTS -- a remembered
+ *  allergy is stored as "X_allergy", a stated current-turn preference as
+ *  "no_X", and both must be recognized) or a raw ingredient word some flows
+ *  still write directly. Real production gap this closes: "shrimp_allergy"
+ *  (the durable memory key) matched none of the previously-checked
+ *  fragments, so a remembered allergy could be present in state but
+ *  silently absent from the recommendation copy actually shown. */
+function hasFoodSafetyConstraint(input: HumanGroundedRenderInput, keys: readonly string[]): boolean {
+  const turn = input.semanticTurn;
+  const constraints = turn?.constraints
+    ?? input.dialogDecision.knowledgeRequests.flatMap(request => request.constraints);
+  const lowered = keys.map(key => key.toLowerCase());
+  return constraints.some(constraint => {
+    const value = constraint.toLowerCase();
+    return lowered.some(key => value.includes(key));
+  });
+}
+
 function numericEntity(input: HumanGroundedRenderInput, keys: readonly string[]): number | null {
   const entities = semanticEntities(input);
   for (const key of keys) {
@@ -318,8 +344,8 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     .filter((value): value is string => Boolean(value)))];
   if (!ids.length) return null;
 
-  const noShrimp = wants(input, ['no_shrimp', 'avoid_shrimp', 'กุ้ง']);
-  const noPork = wants(input, ['no_pork', 'avoid_pork', 'หมู']);
+  const noShrimp = hasFoodSafetyConstraint(input, ['no_shrimp', 'avoid_shrimp', 'shrimp_allergy', 'กุ้ง']);
+  const noPork = hasFoodSafetyConstraint(input, ['no_pork', 'avoid_pork', 'หมู']);
   const lowSpice = wants(input, ['no_spicy', 'low_spicy', 'mild', 'ไม่เผ็ด', 'เผ็ดน้อย']);
   const budget = numericEntity(input, ['budget', 'budgetMax', 'maxBudget', 'budgetThb']);
 
