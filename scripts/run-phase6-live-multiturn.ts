@@ -18,8 +18,8 @@ const counts={primary:0,review:0};
 const originalLog=console.log;
 console.log=(...args:unknown[])=>{
   if(args[0]==='THONGTHAI_MODEL_PROVIDER_SUCCESS'){
-    if(args[1]==='semantic-interpreter'&&args[2]===primaryModel) counts.primary+=1;
-    if(args[1]==='semantic-reviewer'&&args[2]===reviewModel) counts.review+=1;
+    if(args[1]==='semantic-certification-primary'&&args[2]===primaryModel) counts.primary+=1;
+    if(args[1]==='semantic-certification-reviewer'&&args[2]===reviewModel) counts.review+=1;
   }
   originalLog(...args);
 };
