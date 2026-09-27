@@ -95,7 +95,7 @@ test('at least twenty deterministic/context-safe customer turns use zero paid ca
     ],
   };
   const cases:Array<{message:string;context:SemanticContext;task:ReturnType<typeof emptyTaskStateContainer>}>= [
-    'พรุ่งนี้','วันนี้','6 ตุลาคม','บ่ายสอง','14:30','สองคน','3 คน','ครึ่งชั่วโมง','60 นาที',
+    'พรุ่งนี้','วันนี้','6 ตุลาคม','บ่ายสอง','14:30','สองคน','3 คน','45 นาที','60 นาที',
     'ยกเลิกเรื่องนี้','ไม่เอาแล้ว ยกเลิก','เอาทองไทย','เอาภาราดร',
     'ไม่ใช่ทองไทย เอาภาราดร','เพิ่มเป็น 4 คน','จองเลยตอน 11 โมง สองคน',
     'ขอจองขี่ม้า','จองขี่ม้าพรุ่งนี้',
