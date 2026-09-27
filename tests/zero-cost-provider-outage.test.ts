@@ -117,10 +117,15 @@ test('canonical activity flow retains context/selection/slots through provider o
   assert.equal(t2.taskStateAfter.activeTask?.slots.resourceCode, 'activity-horse', 'must resolve to the REAL activity resourceCode, not the asset id');
   assert.equal(t2.taskStateAfter.activeTask?.slots.durationMinutes, 30, 'a single verified duration must auto-fill');
   assert.equal(t2.taskStateAfter.activeTask?.selectedEntities[0]?.name, 'ภาราดร');
-  assert.equal(t2.dialogDecision.mode, 'collect_field');
-  assert.deepEqual(t2.dialogDecision.missingFields, ['date'], 'only date should remain -- resourceCode and duration were resolved authoritatively');
+  // Selection alone is NOT booking commitment. Keep the task's internal
+  // missing date for later, but the response-facing decision acknowledges the
+  // selected horse first instead of immediately interrogating for booking
+  // slots. A later explicit slot/commit turn can continue the same task.
+  assert.equal(t2.dialogDecision.mode, 'answer');
+  assert.deepEqual(t2.dialogDecision.missingFields, [], 'selection-only turn must not expose booking missing fields');
+  assert.ok(t2.taskStateAfter.activeTask?.missingFields.includes('date'), 'the working task still remembers date is needed later');
   const eligibility2 = readOnlyCutoverEligibility(t2);
-  assert.equal(eligibility2.eligible, true, 'a collect_field task-continuation turn must not be forced onto legacy');
+  assert.equal(eligibility2.eligible, true, 'a nontransactional selection must stay inside One-Mind');
 
   // Turn 3: "พรุ่งนี้สองคน" -- date + party size, filled onto the SAME task.
   const t3 = await processThongthaiOneMindTurnAuthoritative({
@@ -170,7 +175,7 @@ test('canonical activity flow retains context/selection/slots through provider o
     'every ordinary turn in this canonical flow should attempt Language Brain before deterministic outage fallback');
 });
 
-test('a horse activity with MULTIPLE verified durations asks ONE question showing the real choices, never auto-picks one', async () => {
+test('a horse selection with MULTIPLE verified durations never auto-picks or immediately pushes a duration question', async () => {
   const state = memoryState();
   const deps: Partial<OneMindDependencies> = {
     resolveCanonicalGuestId: async () => CANON,
@@ -191,7 +196,9 @@ test('a horse activity with MULTIPLE verified durations asks ONE question showin
 
   assert.equal(select.taskStateAfter.activeTask?.slots.resourceCode, 'activity-horse');
   assert.equal(select.taskStateAfter.activeTask?.slots.durationMinutes, undefined, 'must NOT auto-pick a duration when more than one is verified');
-  assert.ok(select.dialogDecision.missingFields.includes('durationMinutes'));
+  assert.ok(select.taskStateAfter.activeTask?.missingFields.includes('durationMinutes'));
+  assert.equal(select.dialogDecision.mode,'answer');
+  assert.equal(select.dialogDecision.missingFields.length,0,'selection-only response must not surface duration as an immediate booking question');
 
   const composed = await processOneMindCustomerTurn({
     channel: 'line', language: 'th', message: 'เอาภาราดร', eventId: 'multi-2-compose',
@@ -199,8 +206,9 @@ test('a horse activity with MULTIPLE verified durations asks ONE question showin
   }, deps, state, new Date(NOW.getTime() + 1000));
   assert.equal(composed.status, 'composed');
   if (composed.status === 'composed') {
-    assert.match(composed.response.message, /30 นาที/);
-    assert.match(composed.response.message, /60 นาที/);
+    assert.match(composed.response.message, /ภาราดร/);
+    assert.match(composed.response.message, /ยังไม่ได้จอง/);
+    assert.doesNotMatch(composed.response.message, /30 นาที|60 นาที|เลือกระยะเวลา/);
     assert.doesNotMatch(composed.response.message, GENERIC_APOLOGY);
   }
 });
