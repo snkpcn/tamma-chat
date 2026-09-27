@@ -9812,3 +9812,74 @@ This patch exists only to let semantic-v7 production certification complete hone
 - The bounded quota-spaced malformed-group retry removed the prior grouped JSON SyntaxError noise in this run.
 - Remaining chunk-1 mismatches to adjudicate/fix after full-corpus evidence: `stay-01`, `reference-02`, `journey-01`, `modify-01`, `informational-01`.
 - This checkpoint intentionally makes no DONE/perfect claim. Next production certification build must resume semantic-v12 at corpus index 80.
+
+## Human Brain -- Real LINE Conversation Recovery: Reference-Resolution & Entity-Key Root Causes (2026-09-27)
+
+Owner's real-LINE 16-turn acceptance stalled at 87.5% (14/16) across two prior
+checkpoints (1b7fa47b1468 was a false green; 7dc5ae0f125a genuinely regressed
+to 14/16) despite passing synthetic unit tests for the same two bugs. Root
+cause: two independent places in `_semantic-interpreter.ts` assumed the live
+model would spell things one specific way, and the live model didn't.
+
+**Bug 1 -- reference resolution keyed off `reference.type` spelling.**
+`resolveReferences` only trusted a `refersToPriorContext:true` reference
+against bounded conversation evidence (recentTurns/rollingSummary/
+lastRecommendationReference) when its free-text `type` field matched a fixed
+English keyword regex (`plan|itinerary|journey|topic|turn|conversation|
+previous_request|prior_request`). The model is not contractually bound to
+that spelling. Live turns 6 ("เอาอันเดิม แต่เปลี่ยนเป็นพรุ่งนี้") and 10
+("เอาโปรร้านอาหารที่คุ้มสุด...", a promotion already surfaced the prior turn)
+both used a `type` outside that list and fell through to an unresolved
+reference, producing a needless "หมายถึง...ใช่ไหมครับ" clarification instead
+of using evidence that was clearly there. Fix: trust
+`refersToPriorContext:true` plus real bounded evidence whenever no named
+catalog entity matches, regardless of the `type` string's spelling (see
+`resolveReferences`'s two bounded-evidence fallback branches). Regression
+tests use `type` values deliberately outside the old keyword list
+(`same_as_before_reference`, `same_offer_reference`) and are load-bearing
+verified against the pre-fix code.
+
+Fixing this also exposed that `scripts/run-phase6-live-multiturn.ts`'s
+`bounded-sol-review-observed` canary had been incidentally relying on the
+SAME bug (an unresolved reference forcing a live Sol review call) to prove
+the Sol-review path gets exercised at all. Once references resolve
+correctly, that specific canary turn no longer needs a second opinion --
+correct behavior, not a regression -- so a turn with genuinely zero bounded
+evidence (empty context, a bare "same as before" reference) was added so the
+canary depends on the primary model's own confidence calibration, never on
+incidental reference-resolution gaps elsewhere in the corpus.
+
+**Bug 2 -- entity canonicalization keyed off entity-key spelling.**
+The activity-domain horse-selection canonicalization only copied
+`entities.activity_asset` into the canonical `entities.horseName` slot the
+response composer's `conversationalStateUpdateMessage` reads to phrase
+"แก้ตัวเลือกเป็น <name> แล้วครับ". Live turn 2 ("เมื่อกี้บอกว่าเอาภาราดร
+เปลี่ยนใจละ เอาทองไทยเหมือนเดิม แต่เวลาเดิมนะ") was classified with a fully
+correct domain/action/constraints, but the model put the corrected horse
+under a bare `horse` key (old one under `replacedHorse`), so the composer
+silently fell back to a generic "แก้ข้อมูลตามที่บอกแล้วครับ" that never named
+which horse was chosen. Fix: `canonicalizeEntityAliases` now accepts a bare
+`horse`/`selectedHorse`/`selected_horse` string as a source for `horseName`,
+same as `activity_asset` already was. Load-bearing verified.
+
+Both bugs are the same root-cause CLASS: hardcoded, closed spelling lists
+for values a language model is free to phrase differently call to call.
+Neither required widening scope, a new architecture, or touching the AI cost
+guard -- both are narrow fixes inside `_semantic-interpreter.ts`'s existing
+reference-resolution and entity-canonicalization functions.
+
+**Result:** full local suite 1439/1439 passing; exact Netlify build command
+clean; live certification at commit `1cf0a2f1b32de67419fbdbbb7ad5b36551ff0ea7`
+-- Phase 1 open-world live acceptance 12/12, frozen hidden holdout 12/12,
+Phase 6 live multi-turn 7/7 (bounded Sol review observed and bounded),
+**real LINE 16-turn human conversation acceptance 16/16 (100%)**. No second
+paid semantic call was introduced; the existing Terra-primary/Sol-bounded-
+review architecture and cost guard are unchanged. No production deploy, no
+merge -- PR #184 remains a draft on `human-brain/real-line-conversation-recovery`.
+
+Also fixed a real, unrelated cost leak found while investigating this round:
+PR #184's title carried a permanent `[run live]` tag, which combined with
+`Phase 1 Live Language Acceptance`'s `pull_request` trigger to auto-fire the
+full paid 4-suite OpenAI live-certification job on every ordinary push --
+205 times on this branch alone before it was caught. Retitled the PR to drop
+the tag; the paid suite now only runs via explicit `workflow_dispatch`.
