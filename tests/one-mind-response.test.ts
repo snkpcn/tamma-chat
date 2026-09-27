@@ -131,13 +131,13 @@ test('initial G.2 gate still refuses a task turn that reaches an ActionProposal'
   assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'transactional_or_task_turn'});
 });
 
-test('G.2 gate allows membership/cafe read-only turns but still keeps unfinished transactional domains on legacy', () => {
-  for (const domain of ['membership','cafe'] as const) {
+test('G.2 gate allows membership/cafe/journey read-only turns but keeps payment/support on legacy', () => {
+  for (const domain of ['membership','cafe','journey'] as const) {
     const r=result();
     r.semanticTurn={...r.semanticTurn,domain};
     assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:true});
   }
-  for (const domain of ['journey','payment','support'] as const) {
+  for (const domain of ['payment','support'] as const) {
     const r=result();
     r.semanticTurn={...r.semanticTurn,domain};
     assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'domain_not_cut_over'});
@@ -155,4 +155,30 @@ test('response bridge centralizes wording in Response Composer and contains no T
   assert.match(source,/composeThongthaiResponse/);
   assert.match(source,/processThongthaiOneMindTurnAuthoritative/);
   assert.doesNotMatch(source,/[ก-๙]{4,}/u);
+});
+
+
+test('journey modify with no transactional task remains eligible for One-Mind read-only composition', () => {
+  const r=result();
+  r.semanticTurn={
+    ...r.semanticTurn,
+    domain:'journey',
+    intent:'modify_itinerary_date',
+    action:'modify',
+    speechAct:'request',
+    informationNeed:'none',
+    entities:{date:'2026-09-28'},
+    references:[{type:'previous_request',refersToPriorContext:true,resolvedFromConversation:true}],
+  };
+  r.taskStateBefore=emptyTaskStateContainer();
+  r.taskStateAfter=emptyTaskStateContainer();
+  r.dialogDecision={
+    mode:'query_knowledge',
+    taskStateContainer:emptyTaskStateContainer(),
+    knowledgeRequests:[],
+    missingFields:[],
+    responseIntent:'grounded_answer',
+    reasons:[],
+  };
+  assert.deepEqual(readOnlyCutoverEligibility(r),{eligible:true});
 });

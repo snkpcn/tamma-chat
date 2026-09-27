@@ -272,7 +272,7 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         const horseCare=textOf(capture.replies[8]);
         assert.match(horseCare,/ขี่ม้า|ทีมงาน|ช้า|กลัว/u);
         assert.doesNotMatch(horseCare,/ชำระเงิน|เลือกระยะเวลา\s*30/u);
-        assert.equal(h.modelCallCount(),callsBeforeHorse+1,'horse intent must pass through the language supervisor once');
+        assert.equal(h.modelCallCount(),callsBeforeHorse,'proven horse-care intake is deterministic and must remain zero-call');
 
         // 10 — horse-name collision is now correctly interpreted inside horse context.
         await callLine('เอาทองไทย',user);
@@ -378,7 +378,7 @@ test('full signed LINE regression: explicit horse intent suspends stale unrelate
 
         assert.match(selection,/^ได้ครับ เลือกทองไทย/u);
         assert.doesNotMatch(selection,/หมายถึงอยากเลือก|เรียกทองไทยผู้ช่วยแชท/u);
-        assert.equal(h.modelCallCount(),callsBeforeHorse+2,'horse care and contextual selection must each be language-supervised once');
+        assert.equal(h.modelCallCount(),callsBeforeHorse+1,'horse care is language-supervised; canonical contextual selection is zero-call');
 
         const afterSelection=stateFor(h,user).taskState as {
           activeTask?:{domain?:string;slots?:Record<string,unknown>}|null;
@@ -422,7 +422,7 @@ test('full signed LINE regression: horse-care opener persists beginner experienc
         assert.match(selection,/^ได้ครับ เลือกทองไทย/u);
         assert.doesNotMatch(selection,/เคยขี่ม้ามาก่อนไหม/u,'must not ask an already answered experience question again');
         assert.match(selection,/มากี่คนครับ/u,'only the genuinely missing party-size question should remain');
-        assert.equal(h.modelCallCount(),calls+1,'selection continuation must be language-supervised once, then keep the deterministic business flow');
+        assert.equal(h.modelCallCount(),calls,'canonical selection continuation must remain zero-call and keep the deterministic business flow');
       } finally { capture.restore(); }
     });
   } finally {

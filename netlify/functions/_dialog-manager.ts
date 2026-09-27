@@ -190,6 +190,16 @@ function hasResolvedTaskReference(turn: SemanticTurn): boolean {
 function turnContributesToActiveTask(turn: SemanticTurn, task: ActiveTask): boolean {
   if (turn.action === 'cancel' || COMMIT_ACTIONS.has(turn.action)) return true;
 
+  // A read-only information request owns any date/time/party-size values it
+  // carries as QUERY PARAMETERS, not as booking-slot mutations. Production
+  // example: "พรุ่งนี้ม้าตัวไหนว่างช่วง 16:30" must check availability and
+  // must not fill the unfinished horse booking's time then ask for duration.
+  // A bare slot-shaped ask with no explicit information need ("บ่ายสามได้ปะ")
+  // remains a hybrid continuation for backwards-compatible task filling.
+  if (SIDE_QUESTION_ACTIONS.has(turn.action) && (turn.informationNeed ?? 'none') !== 'none') {
+    return false;
+  }
+
   // Hybrid read-only questions may also state a real task slot ("บ่ายสามได้ปะ").
   if (providesTaskSlotValue(turn.entities)) return true;
 
@@ -256,11 +266,35 @@ function detectTopicTransition(taskState: TaskStateContainer, domain: SemanticDo
   return 'none';
 }
 
+function explicitSelectionNames(turn: SemanticTurn): string[] {
+  if (!['confirm','modify','correct_previous'].includes(turn.action)) return [];
+  const keys = ['horseName','resourceName','roomType','itemName','productName','promotionName','name'];
+  return [...new Set(keys
+    .map(key => turn.entities[key])
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map(value => value.trim()))];
+}
+
 function resolveSelectedEntities(turn: SemanticTurn, conversationContext: ConversationContextState): SemanticContextEntity[] {
-  const ids = turn.references.flatMap(reference => (reference.resolvedEntityId ? [reference.resolvedEntityId] : (reference.resolvedEntityIds ?? [])));
-  if (!ids.length) return [];
   const byId = new Map(conversationContext.recentEntities.map(entity => [entity.id, entity] as const));
-  return ids.map(id => byId.get(id)).filter((entity): entity is SemanticContextEntity => Boolean(entity));
+
+  // CURRENT explicit named choice outranks every prior-context reference.
+  // This ordering matters for human corrections such as "เมื่อกี้เอาภาราดร
+  // แต่เปลี่ยนเป็นทองไทย": the sentence legitimately mentions BOTH the stale
+  // antecedent and the replacement. A resolver that consumes the old
+  // reference first silently resurrects ภาราดร.
+  const names = explicitSelectionNames(turn);
+  if (names.length) {
+    const matches = conversationContext.recentEntities.filter(entity => names.includes(entity.name));
+    const unique = [...new Map(matches.map(entity => [entity.id, entity] as const)).values()];
+    if (unique.length === 1) return unique;
+  }
+
+  const ids = turn.references.flatMap(reference => (reference.resolvedEntityId ? [reference.resolvedEntityId] : (reference.resolvedEntityIds ?? [])));
+  const resolvedByReference = ids
+    .map(id => byId.get(id))
+    .filter((entity): entity is SemanticContextEntity => Boolean(entity));
+  return resolvedByReference.length === 1 ? resolvedByReference : [];
 }
 
 function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateContainer; reasons: DialogReasonCode[] } {
@@ -359,13 +393,24 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     // carries a concrete slot/reference to establish what is being corrected.
     // "just asking, I did not ask you to book" must suppress progression,
     // never manufacture a new preorder/booking task from an empty correction.
-    if (
-      turn.action === 'correct_previous'
-      && Object.keys(taskSlotPatch(turn.entities)).length === 0
-      && !hasResolvedTaskReference(turn)
-    ) {
-      reasons.push('no_active_task');
-      return {container,reasons};
+    if (turn.action === 'correct_previous') {
+      // A correction without an active/resumed task normally corrects
+      // conversational meaning only (e.g. "5 people -> 4"), so it must not
+      // manufacture a booking. A NAMED current selection is different: the
+      // customer can replace a previously discussed choice before any task
+      // existed. Preserve that bounded working selection as a task, still
+      // without commitmentIntent and therefore without transaction authority.
+      const names=explicitSelectionNames(turn);
+      const defaultType=DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
+      if (names.length > 0 && defaultType) {
+        container = applyTaskStateEvent(container, {
+          kind:'start', eventId:`${eventId}:task_merge`,
+          params:{type:defaultType,sourceChannel:channel,initialSlots:taskSlotPatch(turn.entities)},
+        }, now);
+      } else {
+        reasons.push('no_active_task');
+        return {container,reasons};
+      }
     }
 
     // Human Conversation Recovery: a preference/constraint declaration is
@@ -392,7 +437,11 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       reasons.push('discovery_only');
       return { container, reasons };
     }
-  } else if (container.activeTask!.domain === turn.domain && Object.keys(turn.entities).length) {
+  } else if (
+    container.activeTask!.domain === turn.domain
+    && Object.keys(turn.entities).length
+    && turnContributesToActiveTask(turn, container.activeTask!)
+  ) {
     const slotPatch = taskSlotPatch(turn.entities);
     if (Object.keys(slotPatch).length) {
       container = applyTaskStateEvent(container, {
@@ -412,8 +461,19 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   }
 
   const selectedEntities = resolveSelectedEntities(turn, conversationContext);
-  if (selectedEntities.length && container.activeTask) {
-    container = applyTaskStateEvent(container, { kind: 'set_entities', eventId: `${eventId}:entities`, entities: selectedEntities }, now);
+  if (container.activeTask) {
+    if (selectedEntities.length) {
+      container = applyTaskStateEvent(container, { kind: 'set_entities', eventId: `${eventId}:entities`, entities: selectedEntities }, now);
+    } else if (
+      explicitSelectionNames(turn).length > 0
+      && container.activeTask.selectedEntities.length > 0
+    ) {
+      // The customer explicitly replaced a named choice but the new name is
+      // not yet canonicalized in recentEntities. Clear the old canonical
+      // selection rather than letting stale identity contradict the new slot.
+      // The downstream catalog resolver may canonicalize the new name later.
+      container = applyTaskStateEvent(container, { kind: 'set_entities', eventId: `${eventId}:entities`, entities: [] }, now);
+    }
   }
 
   if (container.activeTask) {
@@ -440,6 +500,13 @@ function needsActivityCatalogResolution(task: ActiveTask): boolean {
     return task.selectedEntities.some(entity => entity.id.startsWith('activity_asset:'));
   }
   return !task.slots.durationMinutes;
+}
+
+function hasRecommendationCriteria(turn:SemanticTurn):boolean {
+  if(turn.action==='recommend' || turn.informationNeed==='recommendation') return true;
+  const entityKeys=Object.keys(turn.entities).map(key=>key.toLowerCase());
+  if(entityKeys.some(key=>/(?:prefer|trait|criterion|exclude|fallback|suitable|family|exertion)/u.test(key))) return true;
+  return turn.constraints.some(constraint=>/(?:prefer|calm|beginner|exclude|fallback|family|exertion|suitable|weather)/iu.test(constraint));
 }
 
 /** Translates semantic/task state into INFORMATION NEEDS -- never queries
@@ -478,10 +545,26 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'restaurant', needs: ['catalog', 'recommendations_input'] }];
       return [];
     case 'activity':
-      if (turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
-      if (turn.intent === 'activity_inventory_count') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
-      if (turn.intent === 'ask_price') return [{ ...base, domain: 'activity', needs: ['price'] }];
-      if (turn.action === 'compare' || turn.action === 'ask') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
+      // Route mutable questions from the CLOSED informationNeed facet, never
+      // a free-form model intent label. Resource availability is not the same
+      // thing as the status of an existing booking.
+      if (turn.informationNeed === 'availability') {
+        // A compound human turn can ask about timing while ALSO carrying a
+        // recommendation criterion (preferred trait, exclusion, fallback
+        // option). Fetch both the live availability source and the verified
+        // catalog/entity facts so the response does not collapse into an
+        // empty availability sentence and discard the recommendation clause.
+        const needs = hasRecommendationCriteria(turn)
+          ? ['availability','entity_details','catalog'] as const
+          : ['availability'] as const;
+        return [{ ...base, domain:'activity', needs:[...needs] }];
+      }
+      if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'activity', needs: ['schedule'] }];
+      if (turn.informationNeed === 'price') return [{ ...base, domain: 'activity', needs: ['price'] }];
+      if (turn.informationNeed === 'inventory' || turn.intent === 'activity_inventory_count') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
+      if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
+      if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
+      if (turn.action === 'compare' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
       if (turn.action === 'discover') return [{ ...base, domain: 'activity', needs: ['catalog'] }];
       // Authoritative resourceCode/duration resolution (see
       // _activity-catalog-policy.ts, applied in processDialogTurnDetailed
@@ -495,12 +578,16 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       }
       return [];
     case 'stay':
-      if (turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
+      if (turn.informationNeed === 'availability') return [{ ...base, domain: 'stay', needs: ['availability'] }];
+      if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'stay', needs: ['schedule'] }];
+      if (turn.informationNeed === 'price') return [{ ...base, domain: 'stay', needs: ['price'] }];
+      if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
+      if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'stay', needs: ['catalog', 'availability'] }];
       if (task && task.missingFields.length === 0) return [{ ...base, domain: 'stay', needs: ['availability'] }];
       return [];
     case 'promotion':
-      if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'promotion', needs: ['promotion_eligibility'] }];
+      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'promotion', needs: ['promotion_eligibility'] }];
       return [];
     case 'otop':
       if (turn.action === 'status') return [{ ...base, domain: 'otop', needs: ['order_status'] }];
@@ -514,6 +601,19 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       return [];
     case 'ecosystem':
       if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'ecosystem', needs: ['catalog'] }];
+      return [];
+    case 'journey':
+      // Journey composition is cross-domain by definition. Fetch the
+      // authoritative read-only catalogs the composer may sequence; never
+      // invent a plan from Bible prose or fall back to a keyword router.
+      if (turn.action === 'recommend' || turn.action === 'discover' || turn.action === 'ask' || turn.action === 'modify') {
+        return [
+          { ...base, domain:'activity', needs:['catalog','entity_details'] },
+          { ...base, domain:'restaurant', needs:['catalog','recommendations_input'] },
+          { ...base, domain:'stay', needs:['catalog'] },
+          { ...base, domain:'otop', needs:['catalog'] },
+        ];
+      }
       return [];
     default:
       return [];
@@ -553,8 +653,29 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
     && !customerCommitPresent
     && turn.action !== 'cancel';
 
+  const namedActivitySelectionUpdate =
+    turn.domain === 'activity'
+    && turn.action === 'provide_information'
+    && typeof turn.entities.horseName === 'string'
+    && turn.entities.horseName.trim().length > 0
+    && turn.references.some(reference =>
+      reference.type === 'entity_selection'
+      && Boolean(reference.resolvedEntityId));
+
+  const isNonTransactionalStateUpdate = hasOpenTask
+    && !customerCommitPresent
+    && !['book','order','cancel'].includes(turn.action)
+    && (
+      turn.speechAct === 'selection'
+      || turn.speechAct === 'correction'
+      || turn.action === 'correct_previous'
+      || turn.action === 'modify'
+      || namedActivitySelectionUpdate
+    );
+
   if (isTaskSideQuestion) reasons.push('task_side_question_preserved');
   if (isTaskUnrelatedTurn) reasons.push('task_unrelated_turn_preserved');
+  if (isNonTransactionalStateUpdate) reasons.push('nontransactional_state_update_preserved');
 
   // Knowledge requests are about the CURRENT turn too. An unrelated turn
   // must not trigger catalog/availability work merely because the preserved
@@ -563,11 +684,13 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   if (turn.intent === 'summarize_active_task') reasons.push('task_summary_requested');
 
   // Missing fields still live on the preserved task, but they are NOT
-  // response-facing on a turn that did not actually continue that task.
-  const responseMissingFields = (isTaskSideQuestion || isTaskUnrelatedTurn) ? [] : missingFields;
+  // response-facing on a turn that merely selects/corrects conversational
+  // state without a booking/order commitment. A human "เอาตัวนั้น" should
+  // be acknowledged first, not immediately converted into a slot interview.
+  const responseMissingFields = (isTaskSideQuestion || isTaskUnrelatedTurn || isNonTransactionalStateUpdate) ? [] : missingFields;
 
   let mode: DialogMode;
-  if (!hasOpenTask || isTaskSideQuestion || isTaskUnrelatedTurn) {
+  if (!hasOpenTask || isTaskSideQuestion || isTaskUnrelatedTurn || isNonTransactionalStateUpdate) {
     mode = knowledgeRequests.length ? 'query_knowledge' : 'answer';
   } else if (missingFields.length > 0) {
     mode = 'collect_field';

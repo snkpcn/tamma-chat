@@ -32,6 +32,14 @@ import {
   buildOneMindTraceEnvelope,
   type OneMindTraceEnvelope,
 } from './_one-mind-observability';
+import {
+  applyConversationContextUpdate,
+  parseConversationContextState,
+} from './_conversation-context';
+import {
+  compareAndSwapGuestAgentState,
+  loadGuestAgentStateSnapshot,
+} from './_guest-agent-state-store';
 
 export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
@@ -39,12 +47,14 @@ const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','statu
 // Phase P closure: 'ecosystem' joins the cutover set here -- unlike every
 // other domain, it has no entry in _dialog-manager.ts's
 // DEFAULT_TASK_TYPE_FOR_DOMAIN, so a turn classified into it can NEVER
-// create an ActiveTask and therefore can never reach an ActionProposal;
-// including it carries none of the transaction-executor risk the remaining
-// exclusions (membership/cafe/journey/payment/support) still do, so those
-// stay on legacy until their own equivalence is proven -- "do not force
-// unfinished transactional cutover".
-const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe','general','local','incident']);
+// create an ActiveTask and therefore can never reach an ActionProposal.
+// Journey is also cut over now for read-only itinerary composition: legacy
+// keyword routing demonstrably misrouted multi-day plans into unrelated
+// weather/activity handlers. Journey has no transaction executor mapping, so
+// read-only composition/task-state continuation remains inside One-Mind while
+// any future real transaction proposal would still be rejected by the gate.
+// Payment/support remain on legacy until their own equivalence is proven.
+const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe','journey','general','local','incident']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
 // Task-worthy modes that only ever COLLECT/CLARIFY information -- they never
 // execute or even propose a transaction (see DialogMode/COMMIT_ACTIONS in
@@ -145,6 +155,31 @@ export function readOnlyCutoverEligibility(
       && !turn.taskStateAfter.activeTask) {
     return { eligible:true };
   }
+  if (turn.semanticTurn.action === 'correct_previous'
+      && turn.semanticTurn.speechAct === 'correction'
+      && !turn.taskStateBefore.activeTask
+      && !turn.taskStateAfter.activeTask
+      && !turn.dialogDecision.actionProposal) {
+    // Correcting conversational facts (for example group composition) is
+    // read-only when there is no booking/order task to mutate. Sending this
+    // back to a raw-text legacy router is exactly how human corrections were
+    // turning into generic fallbacks.
+    return { eligible:true };
+  }
+
+  // Journey/itinerary modification edits only the bounded conversational
+  // plan. There is no journey transaction executor or booking task behind it,
+  // so sending "same plan, change it to tomorrow" to legacy raw-text routing
+  // is both unnecessary and harmful. Real booking/order actions remain
+  // protected by ActionProposal and the transaction gate above.
+  if (turn.semanticTurn.domain === 'journey'
+      && turn.semanticTurn.action === 'modify'
+      && !turn.taskStateBefore.activeTask
+      && !turn.taskStateAfter.activeTask
+      && !turn.dialogDecision.actionProposal) {
+    return { eligible:true };
+  }
+
   // A pure preference/constraint declaration is also safe conversation.
   // It changes no booking/order/payment state and must not be forced back into
   // a keyword parser merely because the semantic action is
@@ -178,6 +213,61 @@ export function readOnlyCutoverEligibility(
 
 function taskStateChanged(turn: OneMindTurnResult): boolean {
   return JSON.stringify(turn.taskStateBefore) !== JSON.stringify(turn.taskStateAfter);
+}
+
+async function persistAssistantConversationTurn(
+  input:OneMindCustomerTurnInput,
+  turn:OneMindTurnResult,
+  response:ComposedResponse,
+  stateDependencies:Partial<AuthoritativeStateDependencies>,
+  now:Date,
+):Promise<boolean> {
+  const guestDbId=turn.identity.guestDbId;
+  if (!guestDbId || input.persistState === false || !turn.trace.statePersisted) return false;
+
+  const loadSnapshot=stateDependencies.loadSnapshot ?? loadGuestAgentStateSnapshot;
+  const compareAndSwap=stateDependencies.compareAndSwap ?? compareAndSwapGuestAgentState;
+  const assistantEventId=(`assistant:${input.eventId}`).slice(0,180);
+
+  // The assistant's own reply is bounded/redacted by the SAME conversation
+  // reducer as user turns. Without this, a natural follow-up referring
+  // to what Thongthai just said has no assistant-turn evidence, so stale task
+  // state can hijack the next turn.
+  for(let attempt=0;attempt<4;attempt+=1){
+    const snapshot=await loadSnapshot(guestDbId);
+    const current=parseConversationContextState(snapshot.state.conversationContext,now);
+    const isRecommendationTurn=
+      ['recommend','compare'].includes(turn.semanticTurn.action)
+      || turn.semanticTurn.informationNeed==='recommendation';
+    const hasDurableRecommendationEvidence=response.usedFactKeys.some(key=>
+      /(?:temperament|beginnerSuitable|suitability|spiceLevel|requiresMembership|recommend)/iu.test(key)
+    );
+    // The single long-reference slot is deliberately sticky: a later generic
+    // itinerary/menu recommendation must not erase an earlier entity-specific
+    // comparison that a human can naturally refer back to several turns later
+    // ("the calmer one you mentioned"). Immediate newer recommendations still
+    // live in recentTurns/rollingSummary; durable evaluative evidence may
+    // replace this slot.
+    const shouldReplaceLongRecommendation=
+      turn.semanticTurn.action==='compare'
+      || hasDurableRecommendationEvidence
+      || (!current.lastRecommendationReference && isRecommendationTurn);
+    const next=applyConversationContextUpdate(current,{
+      eventId:assistantEventId,
+      channel:input.channel,
+      assistantMessage:response.message,
+      lastRecommendationReference:shouldReplaceLongRecommendation
+        ? response.message.slice(0,320)
+        : undefined,
+      summaryFact:(isRecommendationTurn || hasDurableRecommendationEvidence)
+        ? `assistant recommendation in ${turn.semanticTurn.domain}: ${response.message.slice(0,180)}.`
+        : undefined,
+    },now);
+    const written=await compareAndSwap(guestDbId,snapshot,{set:{conversationContext:next}},now);
+    if(written.status==='applied') return true;
+    if(written.status==='unconfigured') return false;
+  }
+  return false;
 }
 
 export async function processOneMindCustomerTurn(
@@ -238,6 +328,7 @@ export async function processOneMindCustomerTurn(
     channel:input.channel as BrainChannel,
     language:input.language,
     userMessage:input.message,
+    semanticTurn:turn.semanticTurn,
     dialogDecision:turn.dialogDecision,
     knowledgeBundles:turn.groundedKnowledge,
     degradation:turn.knowledgeDegradation,
@@ -260,8 +351,28 @@ export async function processOneMindCustomerTurn(
   // (see resolveDialogDecision's anti-hallucination check in
   // _dialog-manager.ts) -- no model call could add anything, it could only
   // risk phrasing it in a way that implies an answer was found.
+  const explicitNamedActivitySelection =
+    turn.semanticTurn.domain === 'activity'
+    && turn.semanticTurn.action === 'provide_information'
+    && typeof turn.semanticTurn.entities.horseName === 'string'
+    && turn.semanticTurn.entities.horseName.trim().length > 0
+    && turn.semanticTurn.references.some(reference =>
+      reference.type === 'entity_selection'
+      && Boolean(reference.resolvedEntityId));
+
+  const conversationalStateUpdate = !turn.dialogDecision.actionProposal
+    && !turn.taskStateAfter.activeTask?.commitmentIntent
+    && !['book','order','cancel'].includes(turn.semanticTurn.action)
+    && (
+      turn.semanticTurn.speechAct === 'selection'
+      || turn.semanticTurn.speechAct === 'correction'
+      || turn.semanticTurn.action === 'correct_previous'
+      || turn.semanticTurn.action === 'modify'
+      || explicitNamedActivitySelection
+    );
   const deterministicFastPath = (turn.dialogDecision.mode === 'collect_field' || turn.dialogDecision.mode === 'clarify'
-      || turn.dialogDecision.responseIntent === 'cannot_verify_comparison')
+      || turn.dialogDecision.responseIntent === 'cannot_verify_comparison'
+      || conversationalStateUpdate)
     ? composeDeterministicResponse(composerInput)
     : null;
   const membershipFastPath = !deterministicFastPath
@@ -277,6 +388,19 @@ export async function processOneMindCustomerTurn(
     : null;
   const response = deterministicFastPath ?? membershipFastPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
   const composerMs = Date.now() - composerStartedAt;
+  const assistantContextPersisted=await persistAssistantConversationTurn(
+    input,turn,response,stateDependencies,new Date(now.getTime()+1),
+  ).catch(error=>{
+    console.error('THONGTHAI_ASSISTANT_CONTEXT_PERSIST_ERROR',error instanceof Error?error.message.slice(0,180):'unknown');
+    return false;
+  });
+  if(input.persistState !== false && turn.trace.statePersisted && !assistantContextPersisted){
+    console.log('THONGTHAI_OBSERVABILITY',JSON.stringify({
+      assistant_context_persisted:false,
+      event_id:input.eventId,
+      channel:input.channel,
+    }));
+  }
   return {
     status:'composed',
     turn,

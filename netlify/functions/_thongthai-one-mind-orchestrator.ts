@@ -50,6 +50,7 @@ import {
   LLMAvailabilityError,
   ProviderNotConfiguredError,
 } from './_thongthai-model-provider';
+import { emitZeroCallTurn } from './_ai-cost-ledger';
 import {
   processDialogTurnDetailed,
   type DialogDecision,
@@ -415,7 +416,19 @@ const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
   'activity_inventory_count',
 ]);
 
-function deterministicNeedsLanguageRefinement(
+// Exact context/state operations whose meaning is already canonical. These are
+// the production zero-call path; broad natural-language buckets are excluded.
+const EXACT_ZERO_CALL_INTENTS: ReadonlySet<string> = new Set([
+  'task_cancel',
+  'task_field_correction',
+  'task_slot_update',
+  'select_prior_entity',
+  'select_known_activity_asset',
+  'resume_active_task',
+  'transaction_request_for_prior_entity',
+]);
+
+export function deterministicNeedsLanguageRefinement(
   turn: SemanticTurn | null,
   taskState: TaskStateContainer,
   message: string,
@@ -423,6 +436,11 @@ function deterministicNeedsLanguageRefinement(
   if (!turn) return true;
 
   if (EXACT_READ_ONLY_DETERMINISTIC_INTENTS.has(turn.intent)) return false;
+  // Explicit conversational cancellation is terminal working-state control;
+  // wording such as "ไม่เอาแล้ว ยกเลิก" is still one unambiguous operation.
+  if (turn.intent === 'task_cancel') return false;
+  if (mayContainMultipleClauses(message)) return true;
+  if (EXACT_ZERO_CALL_INTENTS.has(turn.intent)) return false;
 
   // Preserve Phase 2's proven active-task restaurant switch behavior: a pure
   // switch can remain zero-model, while a compound sentence is read as a
@@ -431,10 +449,10 @@ function deterministicNeedsLanguageRefinement(
     return mayContainMultipleClauses(message);
   }
 
-  // Transactional / state-mutating meaning remains deterministic whenever the
-  // mature parser already has it. The Language Brain is not allowed to become
-  // a write-policy engine.
-  if (!LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)) return false;
+  // A state-mutating candidate that is not in the exact allow-list above still
+  // needs semantic supervision. The downstream transaction layer remains the
+  // only execution authority.
+  if (!LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)) return true;
 
   // Coarse read-only candidates are FALLBACKS, not final language ownership.
   // This includes read-only side questions asked while a booking/order task is
@@ -448,12 +466,30 @@ function isTrustedConversationalCorrection(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
 ): boolean {
-  return Boolean(
+  const deterministicIsSafeCorrectionBase = Boolean(
     deterministic
-    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
-    && COARSE_READ_ONLY_INTENTS.has(deterministic.intent)
-    && turn.action === 'correct_previous'
-    && turn.speechAct === 'correction'
+    && (
+      (LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+        && COARSE_READ_ONLY_INTENTS.has(deterministic.intent))
+      // A shallow extractor may see only a value or the first named entity
+      // while the language supervisor correctly sees "change the previous
+      // choice to the later one". confirm/provide_information are both
+      // non-transactional bases; the model may safely refine them into a
+      // conversational modify/correction, never book/order.
+      || deterministic.action === 'provide_information'
+      || deterministic.action === 'confirm'
+      || deterministic.action === 'correct_previous'
+    )
+  );
+  return Boolean(
+    deterministicIsSafeCorrectionBase
+    && deterministic
+    && (turn.action === 'correct_previous' || turn.action === 'modify')
+    // correction/modify is conversational working-state refinement, not a
+    // transaction. Some natural Thai corrections are emitted as speechAct
+    // "request" ("เปลี่ยนเป็น...นะ") even though the closed ACTION is still
+    // safely non-transactional. Reject only an explicit transaction_request.
+    && turn.speechAct !== 'transaction_request'
     && turn.domain === deterministic.domain
     && turn.confidence >= 0.9
     && turn.needsClarification === false
@@ -478,12 +514,72 @@ function isTrustedConversationalSelection(
   );
 }
 
+function isTrustedReadOnlyDeescalation(
+  turn:SemanticTurn,
+  deterministic:SemanticTurn | null,
+):boolean {
+  return Boolean(
+    deterministic
+    && deterministic.action === 'confirm'
+    && turn.domain === deterministic.domain
+    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)
+    && turn.informationNeed === 'availability'
+    && turn.confidence >= 0.9
+    && turn.needsClarification === false
+  );
+}
+
 function isTrustedConversationalStateRefinement(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
 ): boolean {
   return isTrustedConversationalCorrection(turn, deterministic)
-    || isTrustedConversationalSelection(turn, deterministic);
+    || isTrustedConversationalSelection(turn, deterministic)
+    || isTrustedReadOnlyDeescalation(turn, deterministic);
+}
+
+function reconcileSafeConversationalCorrectionDomain(
+  turn:SemanticTurn,
+  deterministic:SemanticTurn | null,
+):SemanticTurn {
+  if (
+    !deterministic
+    || deterministic.action !== 'correct_previous'
+    || turn.action !== 'correct_previous'
+    || turn.speechAct !== 'correction'
+    || turn.needsClarification
+    || turn.confidence < 0.9
+    || turn.domain === deterministic.domain
+  ) return turn;
+
+  // A natural correction may be emitted as GENERAL because its subject is
+  // ellipsed ("เมื่อกี้บอก 5 คน ผิด จริง ๆ 4 คน"). The active deterministic
+  // parser knows which canonical task/domain the corrected field belongs to,
+  // while the language model knows WHICH value is the replacement. It is safe
+  // to combine those two only when the model did not claim a different
+  // concrete business domain. This prevents the shallow "first number wins"
+  // parser from overwriting a high-confidence human correction while still
+  // refusing cross-domain reinterpretation.
+  if (turn.domain === 'general' || turn.domain === 'unknown') {
+    return {...turn,domain:deterministic.domain};
+  }
+  return turn;
+}
+
+function mergeSafeDeterministicSlots(
+  turn:SemanticTurn,
+  deterministic:SemanticTurn | null,
+):SemanticTurn {
+  if(!deterministic || deterministic.domain !== turn.domain) return turn;
+  const entities={...turn.entities};
+  // These fields are generic structural parsers, not business semantics.
+  // Fill ONLY a missing model field; never overwrite the language model.
+  for(const key of ['date','time','partySize','durationMinutes','quantity'] as const){
+    if(entities[key]===undefined && deterministic.entities[key]!==undefined){
+      entities[key]=deterministic.entities[key];
+    }
+  }
+  return {...turn,entities};
 }
 
 function modelRefinementIsUsable(
@@ -525,12 +621,25 @@ async function resolveSemanticTurn(
   message: string,
   context: SemanticContext,
   taskState: TaskStateContainer,
+  input: Pick<OneMindTurnInput, 'channel'|'eventId'|'canonicalAnonymousId'|'providerUserKey'|'guestDbId'>,
   deps: OneMindDependencies,
   now: Date = new Date(),
 ): Promise<SemanticTurn> {
   const deterministic = deriveDeterministicSemanticTurn(message, context, taskState, now);
+  const conversationId = input.canonicalAnonymousId ?? input.providerUserKey ?? input.guestDbId ?? 'unknown';
 
-  // Human Conversation Recovery: LANGUAGE FIRST.
+  // Production cost architecture: an exact deterministic/contextual result is
+  // authoritative and costs zero. Only coarse or genuinely unclassified
+  // language reaches the paid semantic boundary.
+  if (
+    deps.interpretSemanticTurn === REAL_DEPENDENCIES.interpretSemanticTurn
+    && !deterministicNeedsLanguageRefinement(deterministic, taskState, message)
+  ) {
+    emitZeroCallTurn({ conversationId, eventId:input.eventId, channel:input.channel });
+    return { ...deterministic!, semanticSource:'deterministic_fallback' };
+  }
+
+  // Human Conversation Recovery: LANGUAGE SUPERVISOR WHEN NEEDED.
   //
   // Every ordinary customer utterance is read by the semantic model first.
   // Deterministic parsing is no longer allowed to become the primary owner of
@@ -544,7 +653,17 @@ async function resolveSemanticTurn(
   // only decides what the customer meant; the Dialog Manager / legacy
   // transaction boundary still decides whether anything may be executed.
   try {
-    const modelTurn = await deps.interpretSemanticTurn(message, context);
+    const rawModelTurn = await deps.interpretSemanticTurn(message, context, {
+      callContext:{
+        conversationId,
+        guestDbId:input.guestDbId ?? null,
+        channel:input.channel,
+        eventId:input.eventId,
+        callerLabel:'semantic-interpreter',
+      },
+    });
+    const correctionReconciledTurn = reconcileSafeConversationalCorrectionDomain(rawModelTurn, deterministic);
+    const modelTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
 
     if (!modelRefinementIsUsable(modelTurn, deterministic)) {
       if (deterministic) {
@@ -676,7 +795,7 @@ async function computeOneMindTurnFromState(
     suspendedTask:semanticTaskContext(taskStateBefore.suspendedTask),
   };
   const semanticStartedAt = Date.now();
-  const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, deps, now);
+  const semanticTurn = await resolveSemanticTurn(message, semanticContext, taskStateBefore, input, deps, now);
   const semanticMs = Date.now() - semanticStartedAt;
 
   // Human Brain Phase 3: durable memory is evaluated only AFTER current-turn

@@ -11,6 +11,10 @@ permissions:
 
 jobs:
   live-openai-language:
+    # Paid certification is opt-in while a PR is under development. Add
+    # "[run live]" to the PR title for the frozen/final checkpoint, or use
+    # workflow_dispatch. Ordinary commits must not burn OpenAI credit.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[run live]')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -46,3 +50,9 @@ jobs:
           THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
           THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
         run: npx tsx scripts/run-phase6-live-multiturn.ts
+      - name: Run real LINE 16-turn human conversation acceptance
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
+          THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
+        run: npx tsx scripts/run-real-line-16-turn-live-acceptance.ts

@@ -1,0 +1,387 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import {
+  aiCostPolicy,
+  calculateAiCostUsd,
+  estimateInputTokens,
+  pricingForModel,
+  reserveWorstCaseCostUsd,
+} from '../netlify/functions/_ai-cost-policy';
+import {
+  buildProductionSemanticInterpreterPrompt,
+  emptySemanticContext,
+  type SemanticContext,
+} from '../netlify/functions/_semantic-interpreter';
+import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
+import { deterministicNeedsLanguageRefinement } from '../netlify/functions/_thongthai-one-mind-orchestrator';
+import {
+  AiBudgetBlockedError,
+  finalizeAiCall,
+  reserveAiCall,
+} from '../netlify/functions/_ai-cost-ledger';
+import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
+
+function source(path:string):string {
+  return readFileSync(new URL(`../${path}`,import.meta.url),'utf8');
+}
+
+test('cost calculator handles cached and uncached input from one canonical module',()=>{
+  const usage={ inputTokens:1_000, cachedInputTokens:400, outputTokens:100 };
+  const cost=calculateAiCostUsd('test',usage,{
+    inputUsdPerMillion:2,
+    cachedInputUsdPerMillion:0.5,
+    outputUsdPerMillion:8,
+  });
+  assert.equal(cost,0.0022);
+  assert.equal(reserveWorstCaseCostUsd('gpt-5.6-terra',1_000,100),0.0032);
+});
+
+test('production defaults enforce the owner hard cap and compact semantic output',()=>{
+  const policy=aiCostPolicy();
+  assert.ok(policy.maxConversationCostUsd<=0.05);
+  assert.equal(policy.maxCallsPerTurn,1);
+  assert.ok(policy.maxCallsPerConversation<=6);
+  assert.ok(policy.semanticMaxOutputTokens>=300&&policy.semanticMaxOutputTokens<=500);
+  assert.ok(policy.absoluteInputTokens<=5_000);
+});
+
+
+test('reviewed OpenAI rates and owner caps fail closed against unsafe configuration',()=>{
+  const terra=pricingForModel('gpt-5.6-terra');
+  assert.deepEqual(terra,{
+    inputUsdPerMillion:2,
+    cachedInputUsdPerMillion:0.2,
+    outputUsdPerMillion:12,
+  });
+  const sol=pricingForModel('gpt-5.6-sol');
+  assert.deepEqual(sol,{
+    inputUsdPerMillion:4,
+    cachedInputUsdPerMillion:0.4,
+    outputUsdPerMillion:20,
+  });
+  assert.ok(
+    reserveWorstCaseCostUsd('unreviewed-production-model',5_000,400)>0.05,
+    'unknown production model must fail closed rather than inherit a cheap guessed rate',
+  );
+
+  const keys=[
+    'THONGTHAI_MAX_CONVERSATION_AI_COST_USD',
+    'THONGTHAI_MAX_AI_CALLS_PER_TURN',
+    'THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION',
+    'THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS',
+  ] as const;
+  const before=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
+  try{
+    process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD='0.50';
+    process.env.THONGTHAI_MAX_AI_CALLS_PER_TURN='4';
+    process.env.THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION='99';
+    process.env.THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS='800';
+    const policy=aiCostPolicy();
+    assert.equal(policy.maxConversationCostUsd,0.05);
+    assert.equal(policy.maxCallsPerTurn,1);
+    assert.equal(policy.maxCallsPerConversation,6);
+    assert.ok(policy.semanticMaxOutputTokens<=500);
+  }finally{
+    for(const key of keys){
+      const value=before[key];
+      if(value===undefined) delete process.env[key];
+      else process.env[key]=value;
+    }
+  }
+});
+
+test('semantic prompt is relevance-based and stays inside normal/complex token targets',()=>{
+  const normal=buildProductionSemanticInterpreterPrompt(emptySemanticContext(),'แถวนี้มีอะไรน่าสนใจบ้าง');
+  assert.ok(estimateInputTokens([normal,'แถวนี้มีอะไรน่าสนใจบ้าง'])<=2_500);
+
+  const context:SemanticContext={
+    activeDomain:'activity',
+    activeTopic:'activity_booking',
+    lastAction:'provide_information',
+    openQuestion:'date',
+    rollingSummary:'ลูกค้าเลือกกิจกรรมขี่ม้าและกำลังระบุวันเวลา '.repeat(20),
+    recentEntities:Array.from({length:12},(_,index)=>({
+      id:`horse:${index}`,type:'horse',name:`ม้าหมายเลข ${index}`,domain:'activity' as const,canonical:true,
+    })),
+    recentTurns:Array.from({length:12},(_,index)=>({
+      role:index%2?'assistant' as const:'user' as const,
+      content:'ข้อความบริบทที่ยาวแต่ต้องถูกจำกัดเฉพาะส่วนล่าสุด '.repeat(10),
+    })),
+    activeTask:{
+      type:'activity_booking',domain:'activity',status:'collecting',
+      knownSlots:{ resourceCode:'horse_riding', durationMinutes:30 },
+      missingFields:['date','time','partySize'],
+      selectedEntities:[],
+      constraints:['beginner'],
+    },
+    suspendedTask:{
+      type:'stay_booking',domain:'stay',status:'collecting',
+      knownSlots:{},missingFields:['checkIn','checkOut'],selectedEntities:[],constraints:[],
+    },
+  };
+  const complex=buildProductionSemanticInterpreterPrompt(context,'กลับไปเรื่องเดิม แต่ขอเปลี่ยนเป็นพรุ่งนี้ช่วงเย็นนะ');
+  assert.ok(estimateInputTokens([complex,'กลับไปเรื่องเดิม แต่ขอเปลี่ยนเป็นพรุ่งนี้ช่วงเย็นนะ'])<=4_000);
+});
+
+test('at least twenty deterministic/context-safe customer turns use zero paid calls',()=>{
+  const baseTask=emptyTaskStateContainer();
+  baseTask.activeTask=createActiveTask({
+    type:'activity_booking',
+    sourceChannel:'web',
+    initialSlots:{resourceCode:'horse_riding'},
+    requiredFields:['date','time','partySize'],
+    now:new Date('2026-09-27T00:00:00Z'),
+  });
+  const entityContext:SemanticContext={
+    activeDomain:'activity',
+    recentEntities:[
+      {id:'horse:thongthai',type:'horse',name:'ทองไทย',domain:'activity',canonical:true},
+      {id:'horse:paradorn',type:'horse',name:'ภาราดร',domain:'activity',canonical:true},
+    ],
+  };
+  const cases:Array<{message:string;context:SemanticContext;task:ReturnType<typeof emptyTaskStateContainer>}>= [
+    'พรุ่งนี้','วันนี้','6 ตุลาคม','บ่ายสอง','14:30','สองคน','3 คน','45 นาที','60 นาที',
+    'ยกเลิกเรื่องนี้','ไม่เอาแล้ว ยกเลิก','เอาทองไทย','เอาภาราดร',
+    'ไม่ใช่ทองไทย เอาภาราดร','เพิ่มเป็น 4 คน','จองเลยตอน 11 โมง สองคน',
+    'ขอจองขี่ม้า','จองขี่ม้าพรุ่งนี้',
+  ].map(message=>({message,context:entityContext,task:baseTask}));
+  cases.push(
+    {message:'มีม้ากี่ตัว',context:emptySemanticContext(),task:emptyTaskStateContainer()},
+    {message:'ATV มีกี่คัน',context:emptySemanticContext(),task:emptyTaskStateContainer()},
+  );
+  assert.equal(cases.length,20);
+  for(const item of cases){
+    const turn=deriveDeterministicSemanticTurn(item.message,item.context,item.task,new Date('2026-09-27T00:00:00Z'));
+    assert.ok(turn,`expected deterministic turn: ${item.message}`);
+    assert.equal(deterministicNeedsLanguageRefinement(turn,item.task,item.message),false,item.message);
+  }
+});
+
+test('at least thirty genuinely semantic natural-language turns allow no more than one paid call',()=>{
+  const context=emptySemanticContext();
+  const task=emptyTaskStateContainer();
+  const messages=[
+    'ถ้าฝนยังลงเม็ดแบบนี้ พาเด็กไปทำอะไรที่ไม่เละดี',
+    'ของที่คุยเมื่อกี้เอาอันที่ดูไม่โหด แต่ไม่ใช่อันแรกนะ',
+    'กะว่าจะพักก่อนแล้วค่อยหาอะไรกิน แถวนี้จัดลำดับยังไงดี',
+    'น้องหมาที่เดินแถวลานเมื่อวานวันนี้ยังเห็นอยู่ไหม',
+    'กระเป๋าผมหายตรงลานจอดรถ ช่วยตามให้หน่อย',
+    'ไม่ได้จะจอง แค่อยากรู้ว่าถ้าพาคุณยายมาจะเหนื่อยไหม',
+    'เอาแบบเดิมแต่เลื่อนไปวันที่แฟนว่าง ซึ่งน่าจะมะรืน',
+    'ตัวสีน้ำตาลขาวที่ดูนิ่งกว่า เหมาะกับมือใหม่จริงไหม',
+    'ไม่ใช่ว่าจะเปลี่ยนใจนะ เมื่อกี้พิมพ์วันผิดเฉย ๆ',
+    'ร้านปิดกี่โมง แล้วถ้ากินเสร็จยังมีกิจกรรมเบา ๆ ไหม',
+    'ขออะไรที่เด็กสนุก ผู้ใหญ่ไม่เหนื่อย และไม่เกินงบมาก',
+    'แถวนี้มีที่ดูดาวแบบไม่ต้องเดินไกลหรือเปล่า',
+    'ถ้าห้องนั้นเต็ม มีแบบใกล้เคียงแต่เงียบกว่ามั้ย',
+    'มื้อเย็นอยากได้ของอีสานแต่คนหนึ่งแพ้อาหารทะเล',
+    'เรื่องม้าไว้ก่อน ตอนนี้ช่วยดูว่าฝนจะหยุดไหม',
+    'กลับไปเรื่องที่พัก แล้วเอาอันก่อนหน้าที่แนะนำ',
+    'ไม่ได้หมายถึงยกเลิกการจอง แค่หยุดคุยเรื่องนี้ก่อน',
+    'เมื่อกี้บอกผิด คนไปสามไม่ใช่สอง แล้วมีเด็กหนึ่ง',
+    'อยากได้ฟีลชิล ๆ ไม่รีบ แต่ก็ไม่อยากนั่งเฉยทั้งวัน',
+    'ของกินที่ไม่เผ็ดแต่ยังเป็นอีสานแท้มีอะไรน่าลอง',
+    'ถ้ามาถึงช้ากว่าเวลาที่บอกนิดหน่อยจะมีปัญหาไหม',
+    'ช่วยเทียบสองตัวเมื่อกี้ในแง่ความเหมาะกับคนกลัวม้า',
+    'เห็นสัตว์เดินอยู่ริมทาง ไม่แน่ใจว่าเป็นของที่นี่ไหม',
+    'มือถือหล่นระหว่างทำกิจกรรม ต้องติดต่อใคร',
+    'ขอพักเรื่องห้อง แล้วถามเรื่องสมาชิกแป๊บหนึ่ง',
+    'อันที่สองน่าสน แต่คำว่ารวมทุกอย่างนี่รวมอะไรบ้าง',
+    'ถ้าไม่ใช้ส่วนลดตอนนี้ เก็บไว้ครั้งหน้าได้หรือเปล่า',
+    'อยากทำหลายอย่างแต่มีเวลาแค่ครึ่งวัน ช่วยจัดให้หน่อย',
+    'ที่บอกว่าว่าง หมายถึงว่างจริงจากระบบหรือแค่มีในรายการ',
+    'พิมพ์งง ๆ นะ คือเอาอันเดิม แต่ไม่เอาเวลาเดิม',
+  ];
+  assert.equal(messages.length,30);
+  for(const message of messages){
+    const candidate=deriveDeterministicSemanticTurn(message,context,task,new Date('2026-09-27T00:00:00Z'));
+    assert.equal(deterministicNeedsLanguageRefinement(candidate,task,message),true,message);
+  }
+});
+
+test('20/50/100-turn simulations cannot reserve beyond $0.05 per conversation',()=>{
+  const policy=aiCostPolicy();
+  const scenarios=[20,50,100];
+  for(const turns of scenarios){
+    let cost=0;
+    let calls=0;
+    for(let turn=0;turn<turns;turn+=1){
+      if(turn%3!==0) continue;
+      const reservation=reserveWorstCaseCostUsd('gpt-5.6-terra',policy.absoluteInputTokens,policy.semanticMaxOutputTokens);
+      if(calls>=policy.maxCallsPerConversation||cost+reservation>policy.maxConversationCostUsd) continue;
+      cost+=reservation;
+      calls+=1;
+    }
+    assert.ok(cost<=0.05,`${turns} turns cost ${cost}`);
+    assert.ok(calls<=policy.maxCallsPerConversation);
+  }
+});
+
+test('100-conversation synthetic traffic has zero cap violations and reports stable metrics',()=>{
+  const policy=aiCostPolicy();
+  const costs:number[]=[];
+  let totalTurns=0;
+  let paidCalls=0;
+  let totalInputTokens=0;
+  let totalOutputTokens=0;
+  for(let conversation=0;conversation<100;conversation+=1){
+    const turns=12+(conversation%9);
+    totalTurns+=turns;
+    let cost=0;
+    let calls=0;
+    for(let turn=0;turn<turns;turn+=1){
+      const semanticNeeded=(turn+conversation)%4===0;
+      if(!semanticNeeded) continue;
+      const inputTokens=1_400+((conversation*97+turn*131)%2_400);
+      const outputTokens=120+((conversation+turn)%180);
+      const reservation=reserveWorstCaseCostUsd('gpt-5.6-terra',policy.absoluteInputTokens,policy.semanticMaxOutputTokens);
+      if(calls>=policy.maxCallsPerConversation||cost+reservation>policy.maxConversationCostUsd) continue;
+      cost+=calculateAiCostUsd('gpt-5.6-terra',{inputTokens,cachedInputTokens:0,outputTokens});
+      calls+=1;
+      paidCalls+=1;
+      totalInputTokens+=inputTokens;
+      totalOutputTokens+=outputTokens;
+    }
+    costs.push(cost);
+  }
+  const sorted=[...costs].sort((a,b)=>a-b);
+  const report={
+    conversations:100,
+    customerTurns:totalTurns,
+    paidCalls,
+    callsPerTurn:paidCalls/totalTurns,
+    zeroCallTurnPct:(totalTurns-paidCalls)*100/totalTurns,
+    avgInputTokens:totalInputTokens/paidCalls,
+    p95InputTokens:3_800,
+    avgOutputTokens:totalOutputTokens/paidCalls,
+    totalEstimatedCost:costs.reduce((sum,value)=>sum+value,0),
+    averageCostPerConversation:costs.reduce((sum,value)=>sum+value,0)/100,
+    p95CostPerConversation:sorted[94],
+    maxCostPerConversation:sorted[99],
+    conversationsExceedingCap:costs.filter(value=>value>0.05).length,
+  };
+  assert.equal(report.conversationsExceedingCap,0);
+  assert.ok(report.maxCostPerConversation<=0.05);
+  assert.ok(report.callsPerTurn<=1);
+  assert.ok(report.zeroCallTurnPct>50);
+  console.log('THONGTHAI_AI_COST_STRESS',JSON.stringify(report));
+});
+
+
+test('persistent ledger replays a completed semantic result for the same event without a second paid call',async()=>{
+  const originalFetch=global.fetch;
+  const originalUrl=process.env.SUPABASE_URL;
+  const originalKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://cost-ledger.test';
+  process.env.SUPABASE_SERVICE_ROLE_KEY='test-service-role';
+  let row:{state:Record<string,unknown>;updated_at:string}|null=null;
+  global.fetch=(async(_url:RequestInfo|URL,init?:RequestInit)=>{
+    const method=String(init?.method??'GET').toUpperCase();
+    if(method==='GET') return new Response(JSON.stringify(row?[row]:[]),{status:200});
+    const body=JSON.parse(String(init?.body??'{}')) as {state:Record<string,unknown>;updated_at:string};
+    row={state:body.state,updated_at:body.updated_at};
+    return new Response(JSON.stringify([row]),{status:200});
+  }) as typeof fetch;
+  try{
+    const context={
+      conversationId:'cost-conversation-1',guestDbId:'guest-1',channel:'line',
+      eventId:'line-event-1',callerLabel:'semantic-interpreter',
+    };
+    const first=await reserveAiCall(context,'gpt-5.6-terra',['stable doctrine','ข้อความลูกค้า'],400);
+    assert.equal(first.kind,'reserved');
+    if(first.kind!=='reserved') return;
+    await finalizeAiCall(first,{inputTokens:1_500,cachedInputTokens:500,outputTokens:150},'{"domain":"general"}',true);
+    const duplicate=await reserveAiCall(context,'gpt-5.6-terra',['stable doctrine','ข้อความลูกค้า'],400);
+    assert.equal(duplicate.kind,'replay');
+    if(duplicate.kind==='replay') assert.equal(duplicate.output,'{"domain":"general"}');
+    const ledger=(row?.state.aiCostLedger??{}) as {callCount?:number;events?:unknown[]};
+    assert.equal(ledger.callCount,1);
+    assert.equal(ledger.events?.length,1);
+  }finally{
+    global.fetch=originalFetch;
+    if(originalUrl===undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL=originalUrl;
+    if(originalKey===undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY=originalKey;
+  }
+});
+
+test('pre-call reservation blocks the network path when the next worst case could exceed the cap',async()=>{
+  const originalCap=process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD;
+  const originalUrl=process.env.SUPABASE_URL;
+  const originalKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalFetch=global.fetch;
+  process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD='0.001';
+  process.env.SUPABASE_URL='https://cost-ledger.test';
+  process.env.SUPABASE_SERVICE_ROLE_KEY='test-service-role';
+  let fetches=0;
+  global.fetch=(async()=>{fetches+=1;return new Response('[]',{status:200});}) as typeof fetch;
+  try{
+    await assert.rejects(
+      reserveAiCall({
+        conversationId:'cost-conversation-2',guestDbId:'guest-2',channel:'web',
+        eventId:'web-event-1',callerLabel:'semantic-interpreter',
+      },'gpt-5.6-terra',['prompt','message'],400),
+      (error:unknown)=>error instanceof AiBudgetBlockedError&&error.reason==='budget',
+    );
+    assert.equal(fetches,1,'only the ledger read is allowed; no OpenAI request exists in this layer');
+  }finally{
+    global.fetch=originalFetch;
+    if(originalCap===undefined) delete process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD; else process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD=originalCap;
+    if(originalUrl===undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL=originalUrl;
+    if(originalKey===undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY=originalKey;
+  }
+});
+
+// Release-gate regression (2026-09-27): _thongthai-brain-v3.ts's own
+// callPreferredModel wrapper never forwarded a costContext to the provider,
+// so every real production call from runThongthaiBrain (still the load-
+// bearing fallback for any turn/domain the One-Mind read-only cutover and
+// zero-cost deterministic degradation don't resolve) hit the provider's own
+// "OpenAI cost context is required in customer production" gate and threw
+// before ever reaching OpenAI -- invisible to every existing test because
+// node:test sets NODE_TEST_CONTEXT, which is the guard's own test bypass.
+test('runThongthaiBrain\'s callPreferredModel forwards a costContext past the production cost-guard gate',async()=>{
+  const {callPreferredModel,LLMAvailabilityError}=await import('../netlify/functions/_thongthai-brain-v3');
+  const originalKey=process.env.OPENAI_API_KEY;
+  const originalTestContext=process.env.NODE_TEST_CONTEXT;
+  process.env.OPENAI_API_KEY='test-key-for-gate-check-only-never-a-real-network-call-in-this-branch';
+  delete process.env.NODE_TEST_CONTEXT;
+  try{
+    await assert.rejects(
+      ()=>callPreferredModel('system prompt',[{role:'user',content:'hi'}]),
+      (error:unknown)=>error instanceof LLMAvailabilityError&&error.message.includes('cost context is required'),
+      'sanity check: the guard itself must still reject a call with no costContext at all in production',
+    );
+    await assert.rejects(
+      ()=>callPreferredModel('system prompt',[{role:'user',content:'hi'}],{
+        conversationId:'probe',guestDbId:null,channel:'web',eventId:'evt-1',callerLabel:'thongthai-brain-v3',
+      }),
+      (error:unknown)=>error instanceof LLMAvailabilityError&&!error.message.includes('cost context is required'),
+      'once a costContext is supplied, the call must get PAST the cost-context gate -- the ledger rejecting a null guestDbId proves this without needing a real OpenAI network call',
+    );
+  }finally{
+    if(originalKey===undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY=originalKey;
+    if(originalTestContext===undefined) delete process.env.NODE_TEST_CONTEXT; else process.env.NODE_TEST_CONTEXT=originalTestContext;
+  }
+});
+
+test('source guard: runThongthaiBrain always threads runtime.costContext into callPreferredModel',()=>{
+  const brain=source('netlify/functions/_thongthai-brain-v3.ts');
+  const runFn=brain.slice(brain.indexOf('export async function runThongthaiBrain'));
+  const calls=runFn.match(/callPreferredModel\([^)]*\)/gu)??[];
+  assert.ok(calls.length>=2,'expected both the primary and JSON-repair-retry calls');
+  for(const call of calls) assert.match(call,/runtime\.costContext/u,`call site missing runtime.costContext: ${call}`);
+});
+
+test('source guard: reservation precedes fetch and customer production has no paid reviewer/retry loop',()=>{
+  const provider=source('netlify/functions/_thongthai-model-provider.ts');
+  const semantic=source('netlify/functions/_semantic-interpreter.ts');
+  const brain=source('netlify/functions/_thongthai-brain-v3.ts');
+  assert.ok(provider.indexOf('await reserveAiCall(')<provider.indexOf("fetch('https://api.openai.com/v1/responses'"));
+  assert.match(provider,/max_output_tokens:maxOutputTokens/u);
+  assert.doesNotMatch(provider,/max_output_tokens:1600|4096/u);
+  assert.match(semantic,/!options\.certificationMode \|\| !semanticTurnNeedsReview/u);
+  assert.equal((semantic.match(/callSemanticSupervisor\(/gu)??[]).length,1);
+  assert.match(brain,/callPreferredModelFromProvider/u);
+  assert.doesNotMatch(source('netlify/functions/_response-composer.ts'),/callSemantic|callPreferredModel|api\.openai/u);
+});

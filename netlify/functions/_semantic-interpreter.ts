@@ -24,6 +24,7 @@
 // create Brain -> Semantic Interpreter -> Brain. See THONGTHAI_HANDOFF.md
 // (Phase B.1) and tests/model-provider-no-cycle.test.ts for the static proof.
 import { callSemanticSupervisor, callSemanticReviewer, stripCodeFences, type ChatTurn } from './_thongthai-model-provider';
+import type { AiCallContext } from './_ai-cost-ledger';
 // Ecosystem vocabulary/relationships come from the ONE canonical Bible source
 // (Phase A), not a second hand-typed paraphrase -- _thongthai-bible-generated.ts
 // is a plain generated data module with zero imports of its own, so importing
@@ -167,6 +168,9 @@ export type SemanticContext = {
   openQuestion?: string;
   activeTopic?: string;
   rollingSummary?: string;
+  /** Bounded customer-visible recommendation evidence retained specifically
+   *  for later "the one you recommended earlier" references. */
+  lastRecommendationReference?: string;
   recentTurns?: SemanticContextTurn[];
   activeTask?: SemanticTaskContext | null;
   suspendedTask?: SemanticTaskContext | null;
@@ -190,6 +194,12 @@ export type SemanticReference = {
   /** Exact privacy-safe task slot key resolved from SemanticContext.activeTask.
    *  This is a pointer to canonical task state, never a model-invented value. */
   resolvedTaskSlot?: string;
+  /** Generic plan/topic reference backed by bounded conversation evidence,
+   *  not by a canonical business entity id. */
+  resolvedFromConversation?: boolean;
+  /** Entity identity recovered from the bounded assistant recommendation
+   * evidence retained in conversation context. */
+  resolvedFromRecommendation?: boolean;
   ambiguous?: boolean;
 };
 
@@ -241,7 +251,12 @@ export function confidenceBucket(confidence: number): 'high' | 'medium' | 'low' 
 }
 
 export function toSemanticInterpretationMeta(turn: SemanticTurn): SemanticInterpretationMeta {
-  const resolved = turn.references.filter(reference => Boolean(reference.resolvedEntityId) || Boolean(reference.resolvedEntityIds?.length)).length;
+  const resolved = turn.references.filter(reference =>
+    Boolean(reference.resolvedEntityId)
+    || Boolean(reference.resolvedEntityIds?.length)
+    || Boolean(reference.resolvedTaskSlot)
+    || reference.resolvedFromConversation === true
+  ).length;
   return {
     semanticVersion: SEMANTIC_INTERPRETER_VERSION,
     domain: turn.domain,
@@ -349,13 +364,17 @@ OPEN-WORLD LANGUAGE RULES:
 - You are not a business-keyword classifier. Understand the sentence even when it has nothing to do with a known Tamma business flow.
 - Use general for ordinary conversation, personal context, or questions whose subject is not owned by a narrower business domain.
 - Use local for questions about the surrounding place/area or what may be around there when the customer is not asking for a known business offering.
+- Deictic place language such as "around here", "around there", "nearby", or an equivalent colloquial reference is enough to establish domain=local when the customer asks about the surrounding area. Do not use domain=unknown merely because the exact map coordinate/place name is not present; missing operational location detail can be clarified downstream without losing the semantic domain.
 - Use incident when the CURRENT message reports an adverse real-world event such as loss/missing property or pet, damage, injury, or another situation that may require staff follow-up.
+- Incident ownership is determined by the adverse event itself, not by whether every location/resource detail is already known. If the customer clearly reports something lost/missing, harmed, damaged, or otherwise gone wrong, keep domain=incident even when exact place, timing, owner detail, or follow-up logistics still need clarification.
 - Merely asking whether an ambient animal, person, object, or condition observed around the area is still there is local, not incident, unless the CURRENT message actually says something is lost/missing, harmed, owned by the customer, or otherwise reports an adverse event.
 - Use support for generic requests for help with a service/problem when incident/payment/another owned domain is not more precise.
 - Do NOT force open-world language into restaurant/activity/stay just because one nearby word overlaps a business vocabulary item.
 - A strange, colloquial, misspelled, or previously unseen sentence is still language. Interpret its meaning before considering clarification.
 - normalizedMeaning must be a short neutral paraphrase of the CURRENT customer's meaning. It is internal semantic state, NEVER customer-facing prose.
 - speechAct describes what the person is doing conversationally, independent of domain.
+- Distinguish a request TO Thongthai from a statement of the customer's own intended action. If the customer merely announces that they/their group will pause, rest, wait, leave, continue later, or take another self-directed action and asks Thongthai to do nothing, use speechAct=statement even when Thai politeness/volitional wording uses "ขอ". Use speechAct=request only when the customer actually asks Thongthai/staff/service to do, provide, allow, arrange, or answer something.
+- If the customer explicitly retracts or corrects a previously inferred conversational intent (for example clarifying that they were only asking, not requesting a booking/order/confirmation), use speechAct=correction. Treat this as a correction of conversational meaning even when no date, quantity, or entity value is changed; never promote it into a transaction.
 
 DOMAIN-SCOPE TAXONOMY:
 - ecosystem = generic whole-property discovery/recommendation when the customer asks broadly what there is to do, play, visit, or
@@ -582,6 +601,100 @@ Return ONLY this JSON object, nothing else:
 {"normalizedMeaning":string,"speechAct":string,"domain":string,"intent":string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}`;
 }
 
+
+export function buildProductionSemanticInterpreterPrompt(
+  context: SemanticContext,
+  message = '',
+): string {
+  const currentBangkok = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const compactEntities = context.recentEntities.slice(0, 6).map(entity => ({
+    id:entity.id, type:entity.type, name:entity.name, domain:entity.domain,
+    canonical:entity.canonical === true,
+  }));
+  const compactTurns = (context.recentTurns ?? []).slice(-4).map(turn => ({
+    role:turn.role, content:turn.content.slice(0, 240),
+  }));
+  const task = (value:SemanticTaskContext | null | undefined) => value ? {
+    type:value.type,
+    domain:value.domain,
+    status:value.status,
+    knownSlots:value.knownSlots,
+    missingFields:value.missingFields.slice(0, 8),
+    selectedEntities:value.selectedEntities.slice(0, 4).map(entity => ({ id:entity.id, name:entity.name })),
+    constraints:value.constraints.slice(0, 8),
+  } : null;
+  const referencesPrior = /(?:เดิม|เมื่อกี้|ก่อนหน้า|อันนั้น|ตัวนั้น|เหมือนเดิม|กลับไป|ต่อเรื่อง|same|previous|that one)/iu.test(message);
+  const compactContext = {
+    activeDomain:context.activeDomain,
+    activeTopic:context.activeTopic?.slice(0, 100),
+    lastAction:context.lastAction,
+    openQuestion:context.openQuestion?.slice(0, 120),
+    recentEntities:compactEntities,
+    recentTurns:compactTurns,
+    activeTask:task(context.activeTask),
+    suspendedTask:referencesPrior ? task(context.suspendedTask) : null,
+    rollingSummary:referencesPrior ? context.rollingSummary?.slice(0, 360) : undefined,
+    lastRecommendationReference:referencesPrior ? context.lastRecommendationReference?.slice(0, 320) : undefined,
+  };
+  const vocabulary = [
+    /(?:อาหาร|เมนู|โต๊ะ|กิน|ร้าน)/u.test(message) || context.activeDomain === 'restaurant'
+      ? 'restaurant=food/menu/table/dining' : null,
+    /(?:พัก|ห้อง|บ้าน|เช็คอิน|เช็คเอาท์)/u.test(message) || context.activeDomain === 'stay'
+      ? 'stay=rooms/houses/check-in/check-out' : null,
+    /(?:ม้า|ขี่|ATV|ยิงธนู|กิจกรรม)/iu.test(message) || context.activeDomain === 'activity'
+      ? 'activity=horse riding/ATV/archery' : null,
+    /(?:กาแฟ|คาเฟ่|อินทนิล)/u.test(message) || context.activeDomain === 'cafe'
+      ? 'cafe=Inthanin/cafe/drinks' : null,
+    /(?:สินค้า|ของฝาก|OTOP)/iu.test(message) || context.activeDomain === 'otop'
+      ? 'otop=local products/souvenirs' : null,
+    /(?:สมาชิก|สิทธิ|แต้ม)/u.test(message) || context.activeDomain === 'membership'
+      ? 'membership=membership/status/benefits' : null,
+    /(?:โปร|ส่วนลด|โปรโมชั่น)/u.test(message) || context.activeDomain === 'promotion'
+      ? 'promotion=offers/discounts' : null,
+  ].filter(Boolean);
+
+  return `You are Thongthai's semantic supervisor. Understand the CURRENT customer message and return compact JSON. Never answer the customer, invent business facts, decide availability/price/policy, call tools, or execute/mutate booking/order/payment.
+
+Core rules:
+- Understand natural/colloquial Thai, typos, ellipsis, corrections, topic shifts, and multi-intent sentences by meaning.
+- Current message outranks stale context. Use context only to resolve real references or continuation.
+- Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
+- Current no-transaction wording keeps the turn read-only. Conditional "if A unavailable use B; if neither, do nothing" = status/availability, never immediate confirm/book/order.
+- Current corrections/replacements outrank stale selections and task values.
+- lastRecommendationReference is bounded evidence of what Thongthai previously recommended. Use it to resolve descriptive follow-ups across topic switches; if it uniquely identifies a recent entity, follow that entity's domain rather than stale activeDomain.
+- Asking what is selected/provided so far => intent=summarize_active_task, action=ask, informationNeed=none; never transaction_status.
+- Conversation task directives cancel_active/suspend_active/resume_suspended affect working state only, never a real transaction.
+- Catalog existence differs from live availability. recommendation differs from neutral discovery. correction differs from a new modification.
+- For reservable hospitality resources (room/house/table/activity slot), a bare existence-at-use question such as whether one "is available/มีไหม" is availability, not stock inventory. Use inventory only for explicit on-hand stock/count questions.
+- A constraint/preference-only declaration is speechAct=preference_update and action=provide_information, never modify. Emit only newly stated constraints as short canonical snake_case values such as no_pork/no_shrimp/no_spicy.
+- Unknown or ambiguous references require clarification; never guess an entity or fact. Missing business data does NOT make the customer's meaning ambiguous.
+- Open world: general=ordinary non-business conversation; local=surrounding area; incident=loss/damage/injury/adverse event; support=service help not owned by a narrower domain.
+- A report of loss, damage, injury, or another adverse event remains speechAct=incident_report even when the same sentence asks staff to help.
+- Any adverse-event report uses domain=incident even when its subject is an animal, property, a local place, or an organization service; narrower domains apply only when no incident is being reported.
+- When the customer explicitly contrasts two or more known alternatives against a criterion, action=compare (informationNeed may be recommendation). Use action=recommend for open-ended suggestions without a fixed comparison set.
+- Domain nouns identify subject; preserve the actual predicate, dates, times, party size, constraints, negation, and stated preferences.
+- Preserve all meaningful clauses in compound turns; do not drop later constraints, corrections, or fallback questions.
+- A customer merely reporting their own plan, pause, state, or situation is speechAct=statement. Use request/request_help only when they ask the assistant or organization to do something.
+- If the customer explicitly retracts/corrects a previously inferred intent (for example clarifying that they were only asking and were NOT requesting a booking/order/confirmation), use speechAct=correction. This is a correction of conversational meaning even when no slot value changes; keep it read-only and never infer a transaction.
+- A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
+- For a descriptive reference, use bounded context evidence: when prior context uniquely links the description to a named entity, emit that canonical entity name as the reference value so the deterministic resolver can bind it. If several entities fit, keep it unresolved and request clarification.
+- IDs may only come from canonical context below. Otherwise leave unresolved.
+
+Today in Bangkok: ${currentBangkok}
+Relevant organization vocabulary: ${vocabulary.length ? vocabulary.join('; ') : 'none needed'}
+Bounded context: ${JSON.stringify(compactContext)}
+
+Closed domains: ecosystem, restaurant, stay, activity, promotion, membership, otop, cafe, journey, payment, support, general, local, incident, unknown.
+Closed actions: ask, discover, recommend, compare, book, order, modify, cancel, confirm, status, provide_information, correct_previous, unknown.
+Information needs: none, availability, price, schedule, inventory, catalog, recommendation, ingredients, policy, transaction_status.
+Speech acts: question, statement, preference_update, correction, selection, request, transaction_request, incident_report, complaint, request_help, social, unknown.
+
+Return ONLY:
+{"normalizedMeaning":string,"speechAct":string,"domain":string,"intent":snake_case_string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":[{"type":string,"value"?:string,"refersToPriorContext":boolean}],"constraints":string[],"confidence":number_0_to_1,"needsClarification":boolean,"clarificationReason"?:string}`;
+}
+
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
@@ -589,6 +702,155 @@ function asStringArray(value: unknown): string[] {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function canonicalizeEntityAliases(
+  value: Record<string, unknown>,
+  domain: SemanticDomain,
+): Record<string, unknown> {
+  const entities={...value};
+  const aliases:Record<string,string>={
+    party_size:'partySize',
+    guest_count:'partySize',
+    child_count:'children',
+    children_count:'children',
+    adult_count:'adults',
+    adults_count:'adults',
+    time_of_day:'timeOfDay',
+    excluded_horse:'excludedHorse',
+    preferred_horse_trait:'preferredHorseTrait',
+    weather_condition:'weatherCondition',
+    resource_type:'resourceType',
+    promotion_category:'promotionCategory',
+    selection_criterion:'selectionCriterion',
+    previous_party_size:'previousPartySize',
+    guestCount:'partySize',
+    childCount:'children',
+    adultCount:'adults',
+    budget_thb:'budgetAmount',
+    startDate:'date',
+    selected_activity_asset:'horseName',
+    selectedActivityAsset:'horseName',
+  };
+  for(const [from,to] of Object.entries(aliases)){
+    if(entities[to]===undefined && entities[from]!==undefined) entities[to]=entities[from];
+  }
+  const budget=entities.budget;
+  if(budget && typeof budget==='object' && !Array.isArray(budget)){
+    const amount=Number((budget as Record<string,unknown>).amount);
+    if(Number.isFinite(amount) && entities.budgetAmount===undefined) entities.budgetAmount=amount;
+  }
+
+  // Models sometimes group ordinary slot facts under a semantic envelope
+  // (e.g. reservation:{date,time,partySize}). Downstream dialog/task logic
+  // consumes one canonical flat slot contract. Copy ONLY a bounded set of
+  // generic structural fields, never arbitrary nested business objects.
+  const structuralContainers=['reservation','booking','party','group','request','stay'] as const;
+  const structuralAliases:Record<string,string>={
+    date:'date',
+    time:'time',
+    partySize:'partySize',
+    party_size:'partySize',
+    guestCount:'partySize',
+    guest_count:'partySize',
+    adults:'adults',
+    adultCount:'adults',
+    adult_count:'adults',
+    children:'children',
+    childCount:'children',
+    child_count:'children',
+    durationMinutes:'durationMinutes',
+    duration_minutes:'durationMinutes',
+    quantity:'quantity',
+    nights:'nights',
+  };
+  for(const containerKey of structuralContainers){
+    const nested=entities[containerKey];
+    if(!nested || typeof nested!=='object' || Array.isArray(nested)) continue;
+    for(const [from,to] of Object.entries(structuralAliases)){
+      if(entities[to]!==undefined) continue;
+      const nestedValue=(nested as Record<string,unknown>)[from];
+      if(nestedValue!==undefined) entities[to]=nestedValue;
+    }
+  }
+
+  // Models naturally name a selected horse as activity_asset, or sometimes
+  // just the bare "horse" field a correction turn uses ("เปลี่ยนใจละ เอา
+  // ทองไทยเหมือนเดิม" produced entities:{horse:"ทองไทย",replacedHorse:...}
+  // live). Downstream working-state code (and the response composer's own
+  // "แก้ตัวเลือกเป็น <name>" acknowledgement) uses the canonical horseName
+  // slot -- without this, a live-observed correction fell back to a generic
+  // "แก้ข้อมูลตามที่บอกแล้วครับ" that never names which horse was chosen.
+  // Copy the value only in the activity domain and only when the asset is a
+  // plain string; nested operational entity objects remain untouched.
+  if (domain==='activity' && entities.horseName===undefined) {
+    const bareHorseSource = ['activity_asset','horse','selectedHorse','selected_horse']
+      .map(key => entities[key])
+      .find((v): v is string => typeof v==='string' && v.trim().length>0);
+    if (bareHorseSource) entities.horseName=bareHorseSource.trim();
+  }
+  return entities;
+}
+
+function normalizeCrossDomainJourney(
+  domain:SemanticDomain,
+  action:SemanticAction,
+  informationNeed:SemanticInformationNeed,
+  entities:Record<string,unknown>,
+  references:readonly SemanticReference[],
+  context:SemanticContext,
+):SemanticDomain {
+  if(domain!=='ecosystem') return domain;
+  const crossDomainKeys=['stay','activity','restaurant','otop','cafe']
+    .filter(key=>entities[key]!==undefined);
+  const activities = Array.isArray(entities.activities)
+    ? entities.activities.filter(item=>item && typeof item==='object')
+    : [];
+  const itinerary = Array.isArray(entities.itinerary)
+    ? entities.itinerary.filter(item=>item && typeof item==='object')
+    : [];
+  const structuredSteps = [...activities, ...itinerary];
+  const scheduledDays = new Set(
+    structuredSteps
+      .map(item=>Number((item as Record<string,unknown>).day))
+      .filter(day=>Number.isFinite(day) && day > 0)
+  );
+  const hasStayStructure = entities.stay !== undefined
+    || entities.stayNights !== undefined
+    || entities.stayDurationNights !== undefined
+    || entities.tripDurationDays !== undefined;
+  const hasActivityStructure = structuredSteps.length > 0
+    || entities.activity !== undefined;
+  const hasDiningStructure = entities.dining !== undefined
+    || entities.restaurant !== undefined
+    || entities.meal !== undefined;
+  const hasShoppingStructure = entities.shopping !== undefined
+    || entities.otop !== undefined
+    || entities.souvenir !== undefined;
+  const hasCafeStructure = entities.cafe !== undefined;
+  const structuredDomainFacetCount = [
+    hasStayStructure,
+    hasActivityStructure,
+    hasDiningStructure,
+    hasShoppingStructure,
+    hasCafeStructure,
+  ].filter(Boolean).length;
+  const hasStructuredMultiStepPlan =
+    (structuredSteps.length >= 2 && (scheduledDays.size >= 2 || hasStayStructure))
+    || structuredDomainFacetCount >= 2;
+  const isMultiDomainPlan = (crossDomainKeys.length >= 2 || hasStructuredMultiStepPlan)
+    && (action==='recommend' || action==='discover' || action==='ask')
+    && (informationNeed==='recommendation' || informationNeed==='catalog' || informationNeed==='none');
+  if(isMultiDomainPlan) return 'journey';
+
+  const continuesJourney = context.activeDomain==='journey'
+    && ['modify','ask','recommend','provide_information'].includes(action)
+    && references.some(reference=>reference.refersToPriorContext && (
+      reference.resolvedFromConversation
+      || Boolean(reference.resolvedTaskSlot)
+      || Boolean(reference.resolvedEntityId)
+    ));
+  return continuesJourney ? 'journey' : domain;
 }
 
 function normalizeReferences(value: unknown): SemanticReference[] {
@@ -628,7 +890,15 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       return { ...reference, resolvedEntityId:context.activeTask.selectedEntities[0]!.id };
     }
 
-    if (!context.recentEntities.length) return reference;
+    // A prior plan/topic/promotion is conversation evidence, not a catalog
+    // entity -- it will never appear in recentEntities, so a journey/
+    // promotion-domain reference with no tracked entities at all must still
+    // reach the bounded-evidence fallback below rather than bailing out here.
+    const hasBoundedConversationEvidence =
+      (context.recentTurns?.length ?? 0) > 0 || Boolean(context.rollingSummary) || Boolean(context.lastRecommendationReference);
+    if (!context.recentEntities.length) {
+      return hasBoundedConversationEvidence ? { ...reference, resolvedFromConversation:true } : reference;
+    }
     const byExactName = value
       ? context.recentEntities.filter(entity => entity.name === value || entity.name.includes(value) || value.includes(entity.name))
       : [];
@@ -639,6 +909,23 @@ export function resolveReferences(references: SemanticReference[], context: Sema
     if (byExactName.length > 1) {
       return { ...reference, ambiguous: true, resolvedEntityIds: byExactName.map(entity => entity.id) };
     }
+
+    // Descriptive follow-ups may omit the name entirely ("the calmer one you
+    // recommended"). The assistant's bounded recommendation evidence is real
+    // conversation context. If it names exactly ONE recent canonical entity,
+    // bind that identity instead of letting the current active topic erase it.
+    const recommendationMatches = context.lastRecommendationReference
+      ? context.recentEntities.filter(entity =>
+          context.lastRecommendationReference!.includes(entity.name))
+      : [];
+    if (recommendationMatches.length === 1) {
+      return {
+        ...reference,
+        resolvedEntityId:recommendationMatches[0]!.id,
+        resolvedFromRecommendation:true,
+      };
+    }
+
     // No named match (e.g. "ตัวไหน" names nothing specific) -- if context has
     // exactly one recent entity in the active domain, that's the plausible
     // antecedent; if there are several, it's a genuine multi-way reference
@@ -651,6 +938,14 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       ...reference,
       resolvedEntityIds:inDomain.map(entity => entity.id),
     };
+
+    // No named business entity matched even though context HAS tracked
+    // entities (e.g. an activity-domain horse list exists but this
+    // reference is really about a prior plan/topic, not an entity). Same
+    // bounded-evidence trust as the empty-recentEntities branch above.
+    if (hasBoundedConversationEvidence) {
+      return { ...reference, resolvedFromConversation:true };
+    }
     return reference;
   });
 }
@@ -709,12 +1004,12 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const normalizedMeaning = typeof parsed.normalizedMeaning === 'string'
     ? parsed.normalizedMeaning.trim().slice(0, 360)
     : '';
-  const speechAct = VALID_SPEECH_ACTS.includes(parsed.speechAct as SemanticSpeechAct)
+  let speechAct = VALID_SPEECH_ACTS.includes(parsed.speechAct as SemanticSpeechAct)
     ? parsed.speechAct as SemanticSpeechAct
     : 'unknown';
-  const domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
+  let domain = VALID_DOMAINS.includes(parsed.domain as SemanticDomain) ? parsed.domain as SemanticDomain : 'unknown';
   const parsedAction = VALID_ACTIONS.includes(parsed.action as SemanticAction) ? parsed.action as SemanticAction : 'unknown';
-  const taskDirective = VALID_TASK_DIRECTIVES.includes(parsed.taskDirective as SemanticTaskDirective)
+  let taskDirective = VALID_TASK_DIRECTIVES.includes(parsed.taskDirective as SemanticTaskDirective)
     ? parsed.taskDirective as SemanticTaskDirective
     : undefined;
   const intent = typeof parsed.intent === 'string' && /^[a-z][a-z0-9_]{1,79}$/.test(parsed.intent) ? parsed.intent : 'unknown';
@@ -725,11 +1020,39 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   // A recommendation action is itself a recommendation information request.
   // Keep this facet coherent even if the model leaves the optional facet as none.
   if (action === 'recommend' && informationNeed === 'none') informationNeed = 'recommendation';
+  // Closed-field consistency: a true request must ask the system to act/answer.
+  // `provide_information` with no requested facet or task directive represents
+  // the customer reporting their own state/plan, not an instruction to execute.
+  if (speechAct === 'request' && action === 'provide_information'
+      && informationNeed === 'none'
+      && (taskDirective === undefined || (!context.activeTask && !context.suspendedTask))) {
+    speechAct = 'statement';
+    // A self-directed pause/plan cannot suspend a nonexistent conversational
+    // task. Discard a stray model directive when there is no task to control.
+    if (!context.activeTask && !context.suspendedTask) taskDirective = undefined;
+  }
+
+  // Closed-field coherence repair: an explicit incident_report already says
+  // WHAT KIND of real-world event this is. Missing place/resource detail may
+  // still require clarification, but it must not erase incident ownership.
+  // Repair only UNKNOWN here; do not override a concrete business domain.
+  if (speechAct === 'incident_report' && domain === 'unknown') {
+    domain = 'incident';
+  }
   const confidenceRaw = Number(parsed.confidence);
   const confidence = Number.isFinite(confidenceRaw) ? Math.min(1, Math.max(0, confidenceRaw)) : 0;
 
   let references = resolveReferences(normalizeReferences(parsed.references), context);
-  const entities = asRecord(parsed.entities);
+  const entities = canonicalizeEntityAliases(asRecord(parsed.entities), domain);
+  domain = normalizeCrossDomainJourney(domain, action, informationNeed, entities, references, context);
+
+  // A request to summarize the current working state is answered from the
+  // canonical task container itself. It must never become ambiguous merely
+  // because the model also emitted a stale/unresolved prior-context reference.
+  const isActiveTaskSummary = intent === 'summarize_active_task';
+  if (isActiveTaskSummary) {
+    references = [];
+  }
 
   const structuredEntityNames = new Set(
     Object.values(entities)
@@ -768,7 +1091,8 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     reference.refersToPriorContext
     && !reference.resolvedEntityId
     && !reference.resolvedEntityIds?.length
-    && !reference.resolvedTaskSlot);
+    && !reference.resolvedTaskSlot
+    && !reference.resolvedFromConversation);
   const SINGLE_ENTITY_REFERENCE_TYPES = new Set([
     'entity_selection','previous_selection','selected_entity',
   ]);
@@ -811,11 +1135,88 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     hasAmbiguousReference
     && !(['ask','discover','recommend','compare'] as SemanticAction[]).includes(parsedAction);
 
+  const recommendationResolvedEntity = references
+    .find(reference => reference.resolvedFromRecommendation && reference.resolvedEntityId);
+  if (
+    recommendationResolvedEntity?.resolvedEntityId
+    && (domain === 'ecosystem' || domain === 'general' || domain === 'unknown')
+  ) {
+    const canonical = context.recentEntities.find(entity =>
+      entity.id === recommendationResolvedEntity.resolvedEntityId);
+    if (canonical && canonical.domain !== 'unknown') domain = canonical.domain;
+  }
+
+  const allPriorReferencesResolved = references.length > 0
+    && references.filter(reference => reference.refersToPriorContext).length > 0
+    && references.filter(reference => reference.refersToPriorContext).every(reference =>
+      Boolean(reference.resolvedEntityId)
+      || Boolean(reference.resolvedEntityIds?.length)
+      || Boolean(reference.resolvedTaskSlot)
+      || reference.resolvedFromConversation === true);
+  const resolvedSelectionClarification =
+    allPriorReferencesResolved
+    && references.some(reference => reference.resolvedFromRecommendation)
+    && (
+      speechAct === 'selection'
+      || action === 'confirm'
+      || action === 'provide_information'
+      || action === 'modify'
+      || action === 'correct_previous'
+    );
+
+  const taskForCurrentDomain = [context.activeTask, context.suspendedTask]
+    .find(task => task?.domain === domain) ?? null;
+  const taskBacksEllipticPriceQuestion =
+    informationNeed === 'price'
+    && Boolean(taskForCurrentDomain)
+    && (
+      (taskForCurrentDomain?.selectedEntities.length ?? 0) > 0
+      || typeof taskForCurrentDomain?.knownSlots.resourceCode === 'string'
+    )
+    && !hasUnresolvedReference
+    && !hasAmbiguousReference;
+
+  const resolvedConversationContinuation =
+    references.some(reference => reference.refersToPriorContext && reference.resolvedFromConversation === true)
+    && references.filter(reference => reference.refersToPriorContext).every(reference =>
+      Boolean(reference.resolvedEntityId)
+      || Boolean(reference.resolvedEntityIds?.length)
+      || Boolean(reference.resolvedTaskSlot)
+      || reference.resolvedFromConversation === true
+    )
+    && Boolean(context.activeDomain)
+    && context.activeDomain !== 'unknown'
+    && ['ask','modify','recommend','provide_information','correct_previous'].includes(action)
+    && confidence >= 0.7;
+
+  // A generic "same plan / previous request" reference is backed by bounded
+  // conversation evidence, not a canonical entity id. When that reference is
+  // fully resolved, inherit only the prior DOMAIN if the model emitted a
+  // noncommittal general/unknown domain. Current action/entities still come
+  // from the language model, so old context cannot invent a transaction.
+  if (
+    resolvedConversationContinuation
+    && (domain === 'general' || domain === 'unknown')
+    && context.activeDomain
+  ) {
+    domain = context.activeDomain;
+  }
+
   const noUsableContext = !context.activeDomain
     && context.recentEntities.length === 0
     && !context.activeTask
     && !context.suspendedTask;
-  const validatedDomain: SemanticDomain = hasUnresolvedReference && noUsableContext ? 'unknown' : domain;
+  const validatedDomain: SemanticDomain =
+    speechAct === 'incident_report' && domain === 'incident'
+      ? 'incident'
+      // A local-area question remains semantically LOCAL even when the exact
+      // map/place referent ("around there", "nearby") is unresolved. Missing
+      // location detail is a clarification problem, not a domain-erasure
+      // problem. This mirrors the incident rule above without guessing any
+      // location or business fact.
+      : domain === 'local'
+        ? 'local'
+        : (hasUnresolvedReference && noUsableContext ? 'unknown' : domain);
 
   return {
     normalizedMeaning: normalizedMeaning || undefined,
@@ -832,11 +1233,15 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification,
-    clarificationReason: typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
-      ? parsed.clarificationReason.trim()
-      : (ambiguousReferenceRequiresClarification ? 'ambiguous_reference'
-        : (hasUnresolvedReference ? 'unresolved_reference' : undefined)),
+    needsClarification: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
+      ? false
+      : (parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification),
+    clarificationReason: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
+      ? undefined
+      : (typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
+        ? parsed.clarificationReason.trim()
+        : (ambiguousReferenceRequiresClarification ? 'ambiguous_reference'
+          : (hasUnresolvedReference ? 'unresolved_reference' : undefined))),
     taskDirective,
   };
 }
@@ -866,6 +1271,7 @@ export function semanticTurnNeedsReview(
     && !reference.resolvedEntityId
     && !reference.resolvedEntityIds?.length
     && !reference.resolvedTaskSlot
+    && !reference.resolvedFromConversation
   );
   const contextCouldResolve = Boolean(
     context.recentEntities.length
@@ -876,7 +1282,7 @@ export function semanticTurnNeedsReview(
 
   return turn.confidence < 0.72
     || turn.action === 'unknown'
-    || (turn.domain === 'unknown' && meaningfulText && !turn.needsClarification)
+    || (turn.domain === 'unknown' && meaningfulText)
     || (unresolvedReference && contextCouldResolve);
 }
 
@@ -887,15 +1293,26 @@ export function semanticTurnNeedsReview(
  * only when the primary result is structurally weak/uncertain. Neither model
  * is allowed to answer the customer or execute a business action here.
  */
+export type SemanticInterpretOptions = {
+  callContext?: AiCallContext;
+  certificationMode?: boolean;
+};
+
 export async function interpretSemanticTurn(
   message: string,
   context: SemanticContext = emptySemanticContext(),
+  options: SemanticInterpretOptions = {},
 ): Promise<SemanticTurn> {
-  const prompt = buildSemanticInterpreterPrompt(context);
+  const prompt = buildProductionSemanticInterpreterPrompt(context, message);
   const messages:ChatTurn[] = [{ role:'user', content:message }];
-  const primaryRaw = await callSemanticSupervisor(prompt, messages, 'semantic-interpreter');
+  const primaryRaw = await callSemanticSupervisor(
+    prompt,
+    messages,
+    options.certificationMode ? 'semantic-certification-primary' : 'semantic-interpreter',
+    options.callContext,
+  );
   const primary = parseSemanticTurnResponse(primaryRaw, context);
-  if (!semanticTurnNeedsReview(primary, message, context)) return primary;
+  if (!options.certificationMode || !semanticTurnNeedsReview(primary, message, context)) return primary;
 
   const reviewPrompt = `${prompt}
 
@@ -911,7 +1328,8 @@ Do not become more eager to transact. Return the same JSON schema only.`;
         { role:'assistant', content:primaryRaw },
         { role:'user', content:'Review the original message and return the corrected semantic JSON only.' },
       ],
-      'semantic-reviewer',
+      'semantic-certification-reviewer',
+      undefined,
     );
     const reviewed = parseSemanticTurnResponse(reviewedRaw, context);
 

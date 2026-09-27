@@ -242,6 +242,7 @@ export function buildSemanticContext(state: ConversationContextState, now: Date 
     openQuestion: live.openQuestion ?? undefined,
     activeTopic: live.activeTopic ?? undefined,
     rollingSummary: live.rollingSummary || undefined,
+    lastRecommendationReference: live.lastRecommendationReference || undefined,
     // recentTurns are already redacted and bounded at write time by this
     // module. Passing that same bounded evidence to the semantic layer gives
     // natural short follow-ups real context without creating a second chat log.

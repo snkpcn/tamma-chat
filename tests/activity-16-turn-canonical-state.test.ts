@@ -114,7 +114,11 @@ test('CRITICAL REQUIREMENT: the exact 16-turn activity booking conversation work
   assert.equal(t5.taskStateAfter.activeTask?.slots.horseName, 'ภาราดร');
   assert.equal(t5.taskStateAfter.activeTask?.sourceChannel, 'line');
   assert.deepEqual(t5.taskStateAfter.activeTask?.missingFields.sort(), ['date', 'durationMinutes']);
-  assert.equal(t5.dialogDecision.mode, 'collect_field');
+  // Selecting a horse is working-state evidence, not a booking commitment.
+  // The task may resolve catalog facts behind the scenes, but customer-facing
+  // flow must acknowledge the selection before asking booking slots.
+  assert.notEqual(t5.dialogDecision.mode, 'collect_field');
+  assert.deepEqual(t5.dialogDecision.missingFields, []);
 
   // Turn 6: "ราคาเท่าไหร่" -- side question on an OPEN task must be
   // answered, never swallowed by a missing-field prompt.
