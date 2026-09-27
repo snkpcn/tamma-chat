@@ -1100,6 +1100,18 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
       || action === 'correct_previous'
     );
 
+  const taskForCurrentDomain = [context.activeTask, context.suspendedTask]
+    .find(task => task?.domain === domain) ?? null;
+  const taskBacksEllipticPriceQuestion =
+    informationNeed === 'price'
+    && Boolean(taskForCurrentDomain)
+    && (
+      (taskForCurrentDomain?.selectedEntities.length ?? 0) > 0
+      || typeof taskForCurrentDomain?.knownSlots.resourceCode === 'string'
+    )
+    && !hasUnresolvedReference
+    && !hasAmbiguousReference;
+
   const noUsableContext = !context.activeDomain
     && context.recentEntities.length === 0
     && !context.activeTask
@@ -1131,10 +1143,10 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: (isActiveTaskSummary || resolvedSelectionClarification)
+    needsClarification: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion)
       ? false
       : (parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification),
-    clarificationReason: (isActiveTaskSummary || resolvedSelectionClarification)
+    clarificationReason: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion)
       ? undefined
       : (typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
         ? parsed.clarificationReason.trim()
