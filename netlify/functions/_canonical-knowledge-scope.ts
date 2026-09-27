@@ -267,12 +267,26 @@ export function resolveCanonicalScopeAgainstFacts(
     if (scope.status === 'ambiguous' && scope.pendingFocusName) {
       const wantsCode=scope.pendingFocusName.startsWith('promo_code:');
       const target=wantsCode ? scope.pendingFocusName.slice('promo_code:'.length) : scope.pendingFocusName;
-      const ids=[...map.keys()]
+      const expandedIds=[...map.keys()]
         .map(key=>key.match(/^promo:([^:]+):name$/)?.[1])
         .filter((value):value is string=>Boolean(value));
+      const legacyIds=[...map.entries()]
+        .flatMap(([key,value])=>{
+          const match=key.match(/^promo:([^:]+)$/u);
+          if(!match || !value || typeof value!=='object' || Array.isArray(value)) return [];
+          return [match[1]!];
+        });
+      const ids=[...new Set([...expandedIds,...legacyIds])];
       const matches=ids.filter(id=>{
-        const value=wantsCode ? map.get(`promo:${id}:campaignCode`) : map.get(`promo:${id}:name`);
-        return typeof value==='string' && value===target;
+        const expanded=wantsCode ? map.get(`promo:${id}:campaignCode`) : map.get(`promo:${id}:name`);
+        if(typeof expanded==='string' && expanded===target) return true;
+        const legacy=map.get(`promo:${id}`);
+        if(!legacy || typeof legacy!=='object' || Array.isArray(legacy)) return false;
+        const record=legacy as Record<string,unknown>;
+        const legacyValue=wantsCode
+          ? record.campaignCode
+          : (typeof record.name==='string' ? record.name : record.title);
+        return typeof legacyValue==='string' && legacyValue===target;
       });
       if(matches.length!==1){
         return {
