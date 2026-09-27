@@ -471,19 +471,20 @@ function isTrustedConversationalCorrection(
     && (
       (LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
         && COARSE_READ_ONLY_INTENTS.has(deterministic.intent))
-      // Generic slot extraction can see only a value ("ทองไทย", a date,
-      // party size) while the language model sees that the HUMAN meaning is
-      // "I changed/corrected the previous choice". Both paths are
-      // non-transactional; allowing correct_previous here prevents stale
-      // task state from overruling the current sentence.
+      // A shallow extractor may see only a value or the first named entity
+      // while the language supervisor correctly sees "change the previous
+      // choice to the later one". confirm/provide_information are both
+      // non-transactional bases; the model may safely refine them into a
+      // conversational modify/correction, never book/order.
       || deterministic.action === 'provide_information'
+      || deterministic.action === 'confirm'
     )
   );
   return Boolean(
     deterministicIsSafeCorrectionBase
     && deterministic
-    && turn.action === 'correct_previous'
-    && turn.speechAct === 'correction'
+    && (turn.action === 'correct_previous' || turn.action === 'modify')
+    && (turn.speechAct === 'correction' || turn.speechAct === 'selection')
     && turn.domain === deterministic.domain
     && turn.confidence >= 0.9
     && turn.needsClarification === false
@@ -508,12 +509,44 @@ function isTrustedConversationalSelection(
   );
 }
 
+function isTrustedReadOnlyDeescalation(
+  turn:SemanticTurn,
+  deterministic:SemanticTurn | null,
+):boolean {
+  return Boolean(
+    deterministic
+    && deterministic.action === 'confirm'
+    && turn.domain === deterministic.domain
+    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)
+    && turn.informationNeed === 'availability'
+    && turn.confidence >= 0.9
+    && turn.needsClarification === false
+  );
+}
+
 function isTrustedConversationalStateRefinement(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
 ): boolean {
   return isTrustedConversationalCorrection(turn, deterministic)
-    || isTrustedConversationalSelection(turn, deterministic);
+    || isTrustedConversationalSelection(turn, deterministic)
+    || isTrustedReadOnlyDeescalation(turn, deterministic);
+}
+
+function mergeSafeDeterministicSlots(
+  turn:SemanticTurn,
+  deterministic:SemanticTurn | null,
+):SemanticTurn {
+  if(!deterministic || deterministic.domain !== turn.domain) return turn;
+  const entities={...turn.entities};
+  // These fields are generic structural parsers, not business semantics.
+  // Fill ONLY a missing model field; never overwrite the language model.
+  for(const key of ['date','time','partySize','durationMinutes','quantity'] as const){
+    if(entities[key]===undefined && deterministic.entities[key]!==undefined){
+      entities[key]=deterministic.entities[key];
+    }
+  }
+  return {...turn,entities};
 }
 
 function modelRefinementIsUsable(
@@ -587,7 +620,7 @@ async function resolveSemanticTurn(
   // only decides what the customer meant; the Dialog Manager / legacy
   // transaction boundary still decides whether anything may be executed.
   try {
-    const modelTurn = await deps.interpretSemanticTurn(message, context, {
+    const rawModelTurn = await deps.interpretSemanticTurn(message, context, {
       callContext:{
         conversationId,
         guestDbId:input.guestDbId ?? null,
@@ -596,6 +629,7 @@ async function resolveSemanticTurn(
         callerLabel:'semantic-interpreter',
       },
     });
+    const modelTurn = mergeSafeDeterministicSlots(rawModelTurn, deterministic);
 
     if (!modelRefinementIsUsable(modelTurn, deterministic)) {
       if (deterministic) {
