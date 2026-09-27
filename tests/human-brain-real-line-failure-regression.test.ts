@@ -335,3 +335,52 @@ test('REAL LINE: compound horse availability plus preference keeps catalog facts
   assert.ok(request.needs.includes('entity_details'));
   assert.equal(result.dialogDecision.actionProposal,undefined);
 });
+
+
+test('REAL LINE: nontransactional horse selection is acknowledged before missing booking slots', async()=>{
+  const first='เอาภาราดร';
+  const follow='ตัวไหนนะที่เมื่อกี้บอกว่านิ่งกว่า เอาตัวนั้นแหละ';
+  const run=scriptedConversation({
+    [first]:semantic({
+      domain:'activity',intent:'select_horse',action:'confirm',speechAct:'selection',
+      entities:{resourceCode:'activity-horse',horseName:'ภาราดร'},
+    }),
+    [follow]:semantic({
+      domain:'activity',intent:'select_activity_asset',action:'provide_information',speechAct:'selection',
+      entities:{activity_asset:'ภาราดร'},constraints:['prefer_calm_horse'],
+    }),
+  },{
+    activity:{catalog:async()=>emptyResult('activity-catalog','activity_live')},
+  });
+  await run(first);
+  const result=await run(follow);
+  assert.notEqual(result.dialogDecision.mode,'collect_field');
+  assert.equal(result.dialogDecision.missingFields.length,0);
+  assert.equal(result.dialogDecision.actionProposal,undefined);
+});
+
+test('REAL LINE: language correction value wins over shallow first-number extraction without leaving One-Mind', async()=>{
+  const select='เอาภาราดร';
+  const correction='เมื่อกี้บอก 5 คน ผิด จริง ๆ 4 คน แล้วมีเด็ก 1 คน';
+  const meanings={
+    [select]:semantic({
+      domain:'activity',intent:'select_horse',action:'confirm',speechAct:'selection',
+      entities:{resourceCode:'activity-horse',horseName:'ภาราดร'},
+    }),
+    [correction]:semantic({
+      domain:'general',intent:'correct_party_size',action:'correct_previous',speechAct:'correction',
+      entities:{partySize:4,children:1},
+    }),
+  };
+  const run=scriptedConversation(meanings,{
+    activity:{catalog:async()=>emptyResult('activity-catalog','activity_live')},
+  });
+  await run(select);
+  const result=await run(correction);
+  assert.equal(result.semanticTurn.semanticSource,'openai_supervisor');
+  assert.equal(result.semanticTurn.domain,'activity');
+  assert.equal(result.semanticTurn.entities.partySize,4);
+  assert.equal(result.semanticTurn.entities.children,1);
+  assert.notEqual(result.dialogDecision.mode,'collect_field');
+  assert.equal(result.dialogDecision.actionProposal,undefined);
+});
