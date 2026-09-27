@@ -456,3 +456,75 @@ test('resolved previous-plan continuation inherits journey domain and suppresses
   assert.equal(turn.needsClarification,false);
   assert.equal(turn.clarificationReason,undefined);
 });
+
+// Real 16-turn live acceptance regression (2026-09-27): the model is free to
+// spell a prior-context reference's `type` however it likes -- it is not
+// contractually bound to the literal words "previous_plan"/"prior_request".
+// resolveReferences used to gate its whole "trust bounded conversation
+// evidence" path on a closed keyword regex over that free-text type, so a
+// live model call that reasonably used a different spelling (observed live:
+// something outside plan/itinerary/journey/topic/turn/conversation/
+// previous_request/prior_request) silently fell through to an unresolved
+// reference and a needless "หมายถึงแผนทริปที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ"
+// clarification, even though domain/action/confidence all already qualified
+// for continuation trust. Root-cause fix: resolution now keys off the
+// model's own refersToPriorContext:true signal plus real bounded evidence
+// (recentTurns/rollingSummary/lastRecommendationReference), never off the
+// type string's spelling.
+test('prior-plan continuation resolves from conversation evidence even when reference.type uses a synonym outside the old keyword list', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'journey' as const,
+    recentTurns:[
+      {role:'user' as const,content:'ถ้าพักสองคืนแล้ววันแรกอยากขี่ม้า วันที่สองอยากกินข้าวแล้วซื้อของฝาก ช่วยจัดให้คร่าว ๆ ได้ไหม'},
+      {role:'assistant' as const,content:'จัดเป็นแผนคร่าว ๆ จากตัวเลือกที่มีข้อมูลยืนยันได้แบบนี้ครับ วันแรก: ขี่ม้า วันที่สอง: ตำไทย แล้วต่อด้วย ของฝากชุมชน'},
+    ],
+    lastRecommendationReference:'จัดเป็นแผนคร่าว ๆ วันแรก: ขี่ม้า วันที่สอง: ตำไทย แล้วต่อด้วย ของฝากชุมชน',
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'keep the same itinerary but move it to tomorrow',
+    speechAct:'correction',
+    domain:'journey',
+    intent:'modify_previous_plan_date',
+    action:'ask',
+    informationNeed:'none',
+    entities:{date:'2026-09-28'},
+    references:[{type:'same_as_before_reference',value:'the plan just discussed',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.9,
+    needsClarification:true,
+    clarificationReason:'ambiguous prior reference',
+  }), context);
+  assert.equal(turn.references[0]?.resolvedFromConversation,true);
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.clarificationReason,undefined);
+});
+
+test('promotion best-value follow-up resolves from conversation evidence instead of re-clarifying an already-surfaced promotion', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'promotion' as const,
+    recentTurns:[
+      {role:'user' as const,content:'เมื่อกี้ถามเรื่องห้องอยู่ แต่ช่างมันก่อน มีโปรกินข้าวอะไรตอนนี้บ้าง'},
+      {role:'assistant' as const,content:'โปรที่ตรงเงื่อนไขและมีข้อมูลยืนยันตอนนี้ครับ • โปรร้านอาหาร — ไม่ต้องสมัครสมาชิกเพิ่ม'},
+    ],
+    lastRecommendationReference:'โปรที่ตรงเงื่อนไขและมีข้อมูลยืนยันตอนนี้ครับ • โปรร้านอาหาร — ไม่ต้องสมัครสมาชิกเพิ่ม',
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'take the best-value dining promotion without needing extra membership',
+    speechAct:'request',
+    domain:'promotion',
+    intent:'recommend_best_restaurant_promotion',
+    action:'recommend',
+    informationNeed:'recommendation',
+    entities:{promotion_type:'restaurant_promotion'},
+    references:[{type:'same_offer_reference',value:'restaurant_promotion',refersToPriorContext:true}],
+    constraints:['no_additional_membership_required'],
+    confidence:0.92,
+    needsClarification:true,
+    clarificationReason:'which promotion was meant',
+  }), context);
+  assert.equal(turn.references[0]?.resolvedFromConversation,true);
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.clarificationReason,undefined);
+});

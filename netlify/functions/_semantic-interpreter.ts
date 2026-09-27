@@ -887,17 +887,15 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       return { ...reference, resolvedEntityId:context.activeTask.selectedEntities[0]!.id };
     }
 
-    // A prior plan/topic/turn is conversation evidence, not a business entity.
-    // Resolve only explicit generic-reference TYPES against bounded history;
-    // descriptive/entity references still require a real entity match below.
-    if (
-      /(?:plan|itinerary|journey|topic|turn|conversation|previous_request|prior_request)/iu.test(reference.type)
-      && ((context.recentTurns?.length ?? 0) > 0 || Boolean(context.rollingSummary) || Boolean(context.lastRecommendationReference))
-    ) {
-      return { ...reference, resolvedFromConversation:true };
+    // A prior plan/topic/promotion is conversation evidence, not a catalog
+    // entity -- it will never appear in recentEntities, so a journey/
+    // promotion-domain reference with no tracked entities at all must still
+    // reach the bounded-evidence fallback below rather than bailing out here.
+    const hasBoundedConversationEvidence =
+      (context.recentTurns?.length ?? 0) > 0 || Boolean(context.rollingSummary) || Boolean(context.lastRecommendationReference);
+    if (!context.recentEntities.length) {
+      return hasBoundedConversationEvidence ? { ...reference, resolvedFromConversation:true } : reference;
     }
-
-    if (!context.recentEntities.length) return reference;
     const byExactName = value
       ? context.recentEntities.filter(entity => entity.name === value || entity.name.includes(value) || value.includes(entity.name))
       : [];
@@ -937,6 +935,14 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       ...reference,
       resolvedEntityIds:inDomain.map(entity => entity.id),
     };
+
+    // No named business entity matched even though context HAS tracked
+    // entities (e.g. an activity-domain horse list exists but this
+    // reference is really about a prior plan/topic, not an entity). Same
+    // bounded-evidence trust as the empty-recentEntities branch above.
+    if (hasBoundedConversationEvidence) {
+      return { ...reference, resolvedFromConversation:true };
+    }
     return reference;
   });
 }
