@@ -425,7 +425,6 @@ const EXACT_ZERO_CALL_INTENTS: ReadonlySet<string> = new Set([
   'select_prior_entity',
   'select_known_activity_asset',
   'resume_active_task',
-  'activity_booking_request',
   'transaction_request_for_prior_entity',
 ]);
 
