@@ -322,3 +322,37 @@ test('descriptive prior recommendation selection resolves the unique recommended
   assert.equal(turn.references[0]?.resolvedEntityId,'activity_asset:horse-paradorn');
   assert.equal(turn.references[0]?.resolvedFromRecommendation,true);
 });
+
+
+test('elliptic price question uses same-domain active task instead of needless semantic clarification', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'activity' as const,
+    activeTask:{
+      type:'activity_booking',
+      domain:'activity' as const,
+      status:'collecting',
+      knownSlots:{resourceCode:'activity-horse',horseName:'ภาราดร'},
+      missingFields:['durationMinutes','date'],
+      selectedEntities:[{id:'activity_asset:horse-paradorn',type:'horse',name:'ภาราดร',domain:'activity' as const,source:'catalog' as const,canonical:true}],
+      constraints:[],
+    },
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'check the price of the current item before deciding',
+    speechAct:'question',
+    domain:'activity',
+    intent:'check_price_before_deciding',
+    action:'ask',
+    informationNeed:'price',
+    entities:{},
+    references:[],
+    constraints:['no_booking_now'],
+    confidence:0.95,
+    needsClarification:true,
+    clarificationReason:'item_not_repeated',
+  }), context);
+  assert.equal(turn.domain,'activity');
+  assert.equal(turn.informationNeed,'price');
+  assert.equal(turn.needsClarification,false);
+});
