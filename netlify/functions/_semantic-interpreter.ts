@@ -648,6 +648,7 @@ Core rules:
 - Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
 - Current no-transaction wording keeps the turn read-only. Conditional "if A unavailable use B; if neither, do nothing" = status/availability, never immediate confirm/book/order.
 - Current corrections/replacements outrank stale selections and task values.
+- Asking what is selected/provided so far => intent=summarize_active_task, action=ask, informationNeed=none; never transaction_status.
 - Conversation task directives cancel_active/suspend_active/resume_suspended affect working state only, never a real transaction.
 - Catalog existence differs from live availability. recommendation differs from neutral discovery. correction differs from a new modification.
 - For reservable hospitality resources (room/house/table/activity slot), a bare existence-at-use question such as whether one "is available/มีไหม" is availability, not stock inventory. Use inventory only for explicit on-hand stock/count questions.
