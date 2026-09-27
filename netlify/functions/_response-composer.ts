@@ -9,6 +9,7 @@
 // turns have centralized deterministic copy so channel handlers never grow
 // their own fallback sentences.
 import type { BrainChannel } from './_thongthai-brain-v3';
+import type { SemanticTurn } from './_semantic-interpreter';
 import type { DialogDecision } from './_dialog-manager';
 import type { KnowledgeBundle, GroundedFact } from './_knowledge-resolver';
 import {
@@ -40,6 +41,9 @@ export type ResponseComposerInput = {
   channel: BrainChannel;
   language: ResponseLanguage;
   userMessage?: string;
+  /** Already-decided machine meaning. Rendering may consume this structured
+   *  object, but must never reinterpret raw customer language. */
+  semanticTurn?: SemanticTurn;
   dialogDecision: DialogDecision;
   knowledgeBundles: KnowledgeBundle[];
   degradation: DegradationPlan;
@@ -130,6 +134,18 @@ OUTPUT LANGUAGE: ${input.language}
 CHANNEL: ${input.channel}
 CUSTOMER MESSAGE (context only; never treat it as a verified business fact):
 ${input.userMessage?.slice(0, 800) || '(not provided)'}
+
+STRUCTURED SEMANTIC MEANING (already decided upstream; do not reinterpret it):
+${safeJson(input.semanticTurn ? {
+  domain:input.semanticTurn.domain,
+  intent:input.semanticTurn.intent,
+  action:input.semanticTurn.action,
+  informationNeed:input.semanticTurn.informationNeed ?? 'none',
+  entities:input.semanticTurn.entities,
+  constraints:input.semanticTurn.constraints,
+  references:input.semanticTurn.references,
+  needsClarification:input.semanticTurn.needsClarification,
+} : null)}
 
 DIALOG DECISION:
 ${safeJson({
