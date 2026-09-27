@@ -218,3 +218,48 @@ test('non-transactional party-size correction is acknowledged rather than becomi
   assert.match(response.message,/ยังไม่ได้จอง/u);
   assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้|ขอรายละเอียดเพิ่ม/u);
 });
+
+
+test('compound availability turn still renders the grounded horse recommendation and rain fallback',()=>{
+  const availabilityBundle:KnowledgeBundle={
+    domain:'activity',
+    sources:[{need:'availability',sourceId:'availability-test',sourceType:'activity_live',status:'empty'}],
+    facts:[],entities:[],missing:['availability'],warnings:[],freshness:'live',
+  };
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',
+      intent:'horse_riding_availability_and_rain_fallback',
+      action:'status',
+      informationNeed:'availability',
+      entities:{excludedHorse:'ทองไทย',preferredHorseTrait:'calm',weatherCondition:'rain'},
+      constraints:['exclude_thongthai','calm_horse','rain_fallback_activity'],
+    }),
+    bundles:[activityBundle,availabilityBundle],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/ภาราดร/u);
+  assert.match(response.message,/ฝน/u);
+  assert.match(response.message,/ยิงธนู/u);
+  assert.match(response.message,/คิว|เวลา/u);
+});
+
+test('restaurant recommendation reads a structured budget amount object without losing the budget constraint',()=>{
+  const restaurant=bundle('restaurant','restaurant_live',[
+    fact('menu:thai-salad:name','ตำไทย','restaurant','restaurant_live'),
+    fact('menu:thai-salad:price',89,'restaurant','restaurant_live'),
+    fact('menu:thai-salad:ingredients',['papaya'],'restaurant','restaurant_live'),
+    fact('menu:chicken:name','ไก่ย่าง','restaurant','restaurant_live'),
+    fact('menu:chicken:price',180,'restaurant','restaurant_live'),
+    fact('menu:chicken:ingredients',['chicken'],'restaurant','restaurant_live'),
+  ]);
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'restaurant',intent:'meal_recommendation',action:'recommend',informationNeed:'recommendation',
+      entities:{partySize:3,budget:{amount:1000,currency:'THB'}},constraints:['no_shrimp'],
+    }),
+    bundles:[restaurant],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/งบ 1000 บาท/u);
+});
