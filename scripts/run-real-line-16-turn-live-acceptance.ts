@@ -300,7 +300,7 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
       if(t.domain!=='stay') errors.push(`domain=${t.domain}`);
       if(t.informationNeed!=='availability') errors.push(`need=${t.informationNeed}`);
       if(result.turn.dialogDecision.mode==='collect_field') errors.push('room availability hijacked into booking');
-      if(result.status==='composed' && /ขี่ม้า|ภาราดร|ทองไทย/u.test(response)) errors.push('stay clarification contaminated by stale activity context');
+      if(result.status==='composed' && /ขี่ม้า|ภาราดร|ม้(?:า|าตัว)ทองไทย|ทองไทยแทน/u.test(response)) errors.push('stay clarification contaminated by stale activity context');
       if(result.status==='composed' && t.needsClarification && !/วัน|เข้าพัก|เช็กอิน/u.test(response)) errors.push('stay availability clarification did not ask the missing stay-specific detail');
       break;
     case 16:
