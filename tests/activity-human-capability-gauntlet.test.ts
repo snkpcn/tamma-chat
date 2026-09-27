@@ -12,22 +12,18 @@
 // grounded-human-response.test.ts). "Hidden/paraphrased" here means: none
 // of the Thai wording below is copied from an existing named test fixture.
 //
-// Scope: this gauntlet exercises what Human Core PR D actually changed --
-// the new generic care/safety/suitability/equipment capability, its
-// cross-activity isolation, and the booking-execution structured-args fix.
-// Categories this PR did NOT touch (comparison, correction, prior-context
-// reference, slang/incomplete Thai, switch-topic-and-return, price/how-it-
-// works questions, new-unseen-activity-type discovery) already have
-// dedicated, extensive coverage elsewhere in this suite (see
-// tests/scenario-horse-extended.test.ts, tests/semantic-*-understanding.
-// test.ts, tests/canonical-knowledge-scope.test.ts's C8.1-C8.13, and
-// tests/master-roadmap-phase2-*.test.ts) and are cited rather than
-// re-verified here, per this engagement's practice of not duplicating
-// working coverage.
+// Scope: the table below directly exercises all 30 required semantic
+// capability classes through the production terminal Activity cutover gate.
+// It verifies that already-understood turns always produce a structured
+// response/transaction decision, never fall back to another language owner,
+// and that only an explicit committed proposal can execute.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { composeGroundedDeterministicResponse, composeThongthaiResponse } from '../netlify/functions/_response-composer';
-import { resolveActivityBookingProposalArgs } from '../netlify/functions/thongthai-chat';
+import { composeGroundedDeterministicResponse } from '../netlify/functions/_response-composer';
+import {
+  resolveActivityBookingProposalArgs,
+  resolveSupervisedActivityCutover,
+} from '../netlify/functions/thongthai-chat';
 import { deriveCanonicalKnowledgeScope, resolveCanonicalScopeAgainstFacts, filterFactsByCanonicalScope } from '../netlify/functions/_canonical-knowledge-scope';
 import { deriveSemanticMeaning } from '../netlify/functions/_semantic-meaning';
 import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
@@ -55,6 +51,21 @@ function compose(semanticTurn: SemanticTurn, dialogDecision: DialogDecision = de
     channel: 'web', language: 'th', semanticTurn, dialogDecision,
     knowledgeBundles: [], degradation: { level: 'none', reasons: [] },
   });
+}
+
+function supervisedLegacy(semanticTurn: SemanticTurn, dialogDecision: DialogDecision = decision()) {
+  const supervised = { ...semanticTurn, semanticSource: 'openai_supervisor' as const };
+  return {
+    status: 'legacy_required', reason: 'transactional_or_task_turn',
+    turn: {
+      semanticTurn: supervised,
+      dialogSemanticTurn: supervised,
+      dialogDecision,
+      groundedKnowledge: [],
+      knowledgeDegradation: { condition: 'none', level: 'normal', reasons: [], retryable: false },
+    },
+    observability: {},
+  } as any;
 }
 
 // Scenario group: narrow safety questions per activity, paraphrased
@@ -138,15 +149,106 @@ test('gauntlet: a focused horse scope firewall still isolates horse facts even w
   assert.ok(filtered.every(fact => !fact.key.includes('atv-01')), 'scope correctness: no ATV asset leaks into a focused horse scope');
 });
 
-// Scenario group: zero-additional-paid-call bound for the new capability.
+const readyTask = {
+  ...emptyTaskStateContainer(),
+  activeTask: {
+    taskId: 'gauntlet-ready', type: 'activity_booking', domain: 'activity', status: 'ready',
+    slots: { resourceCode: 'activity-horse', date: '2026-11-02', time: '10:00', durationMinutes: 30, partySize: 1 },
+    missingFields: [],
+    selectedEntities: [{ id: 'activity_asset:horse-thongthai', type: 'horse', name: 'ทองไทย', domain: 'activity', canonical: true }],
+    constraints: [], commitmentIntent: true, sourceChannel: 'line',
+    createdAt: '2026-09-27T00:00:00.000Z', updatedAt: '2026-09-27T00:00:00.000Z',
+  },
+} as any;
 
-test('gauntlet: the new care capability never itself makes a network/model call (paid-call-count = 0 for this layer)', async () => {
-  const before = Date.now();
-  const result = await composeThongthaiResponse({
-    channel: 'line', language: 'th',
-    semanticTurn: turn({ informationNeed: 'safety', entities: { activityCode: 'archery' } }),
-    dialogDecision: decision(), knowledgeBundles: [], degradation: { level: 'none', reasons: [] },
-  });
-  assert.ok(Date.now() - before < 50, 'a real network call could not complete this fast; proves zero paid calls in this layer');
-  assert.equal(result.mode, 'deterministic');
+const committedDecision = decision({
+  mode: 'propose_action', taskStateContainer: readyTask, responseIntent: 'propose_action',
+  actionProposal: {
+    toolName: 'create_booking', validatedArgs: readyTask.activeTask.slots,
+    requiresExplicitConfirmation: true, customerCommitPresent: true, idempotencyKey: 'gauntlet-ready',
+  },
+});
+
+const capabilityCases: Array<{
+  id: number;
+  capability: string;
+  semantic: SemanticTurn;
+  dialog?: DialogDecision;
+  expected: 'respond' | 'execute_booking';
+}> = [
+  { id: 1, capability: 'broad Activity discovery', semantic: turn({ intent: 'broad_activity_discovery', action: 'discover', informationNeed: 'catalog' }), expected: 'respond' },
+  { id: 2, capability: 'focused horse discovery', semantic: turn({ intent: 'horse_discovery', action: 'discover', informationNeed: 'catalog', entities: { activityCode: 'horse' } }), expected: 'respond' },
+  { id: 3, capability: 'focused ATV discovery', semantic: turn({ intent: 'atv_discovery', action: 'discover', informationNeed: 'catalog', entities: { activityCode: 'atv' } }), expected: 'respond' },
+  { id: 4, capability: 'focused archery discovery', semantic: turn({ intent: 'archery_discovery', action: 'discover', informationNeed: 'catalog', entities: { activityCode: 'archery' } }), expected: 'respond' },
+  { id: 5, capability: 'recommendation', semantic: turn({ intent: 'activity_recommendation', action: 'recommend', informationNeed: 'recommendation', constraints: ['beginner'] }), expected: 'respond' },
+  { id: 6, capability: 'comparison', semantic: turn({ intent: 'compare_activity_assets', action: 'compare', entities: { activityCode: 'horse', candidateNames: ['ทองไทย', 'ภาราดร'] } }), expected: 'respond' },
+  { id: 7, capability: 'asset selection', semantic: turn({ intent: 'select_activity_asset', action: 'provide_information', speechAct: 'selection', entities: { horseName: 'ภาราดร' } }), expected: 'respond' },
+  { id: 8, capability: 'correction', semantic: turn({ intent: 'correct_activity_asset', action: 'correct_previous', speechAct: 'correction', entities: { horseName: 'ทองไทย' } }), expected: 'respond' },
+  { id: 9, capability: 'reject previous recommendation', semantic: turn({ intent: 'reject_recommendation', action: 'correct_previous', constraints: ['exclude:horse'] }), expected: 'respond' },
+  { id: 10, capability: 'prior-context reference', semantic: turn({ intent: 'select_prior_entity', action: 'provide_information', references: [{ type: 'entity_selection', value: 'ตัวเมื่อกี้', refersToPriorContext: true, resolvedEntityId: 'activity_asset:horse-pharadon' }] }), expected: 'respond' },
+  { id: 11, capability: 'change one detail only', semantic: turn({ intent: 'change_party_size', action: 'modify', entities: { partySize: 3 } }), expected: 'respond' },
+  { id: 12, capability: 'switch topic then return', semantic: turn({ intent: 'resume_activity', action: 'ask', taskDirective: 'resume_suspended', references: [{ type: 'task', value: 'กลับมาเรื่องกิจกรรม', refersToPriorContext: true, resolvedTaskSlot: 'activity_booking' }] }), expected: 'respond' },
+  { id: 13, capability: 'casual/slang/incomplete Thai', semantic: turn({ intent: 'activity_topic_narrow', action: 'discover', informationNeed: 'catalog', normalizedMeaning: 'asks casually about available activities' }), expected: 'respond' },
+  { id: 14, capability: 'fear/reassurance', semantic: turn({ intent: 'fear_reassurance', action: 'ask', informationNeed: 'suitability', entities: { activityCode: 'horse' }, constraints: ['fearful'] }), expected: 'respond' },
+  { id: 15, capability: 'safety', semantic: turn({ intent: 'activity_safety', action: 'ask', informationNeed: 'safety', entities: { activityCode: 'atv' } }), expected: 'respond' },
+  { id: 16, capability: 'suitability', semantic: turn({ intent: 'activity_suitability', action: 'ask', informationNeed: 'suitability', entities: { activityCode: 'archery', ageYears: 8 } }), expected: 'respond' },
+  { id: 17, capability: 'equipment/control', semantic: turn({ intent: 'activity_controls', action: 'ask', informationNeed: 'equipment', entities: { activityCode: 'atv' } }), expected: 'respond' },
+  { id: 18, capability: 'experience-level question', semantic: turn({ intent: 'beginner_question', action: 'ask', informationNeed: 'suitability', entities: { activityCode: 'horse', experienceLevel: 'beginner' } }), expected: 'respond' },
+  { id: 19, capability: 'price', semantic: turn({ intent: 'activity_price', action: 'ask', informationNeed: 'price', entities: { activityCode: 'horse' } }), expected: 'respond' },
+  { id: 20, capability: 'how-it-works', semantic: turn({ intent: 'activity_how_it_works', action: 'ask', informationNeed: 'policy', entities: { activityCode: 'archery' } }), expected: 'respond' },
+  { id: 21, capability: 'availability', semantic: turn({ intent: 'activity_availability', action: 'ask', informationNeed: 'availability', entities: { activityCode: 'horse', date: '2026-11-02' } }), expected: 'respond' },
+  { id: 22, capability: 'booking vocabulary without booking intent', semantic: turn({ intent: 'ask_before_booking', action: 'ask', informationNeed: 'policy', entities: { activityCode: 'atv' } }), expected: 'respond' },
+  { id: 23, capability: 'explicit booking request still collecting fields', semantic: turn({ intent: 'activity_booking_request', action: 'book', entities: { activityCode: 'horse' } }), dialog: decision({ mode: 'collect_field', missingFields: ['date', 'time'], responseIntent: 'ask_missing_field' }), expected: 'respond' },
+  { id: 24, capability: 'bare acknowledgement without commitment context', semantic: turn({ intent: 'bare_acknowledgement', action: 'confirm', speechAct: 'acknowledgement' }), expected: 'respond' },
+  { id: 25, capability: 'bare confirmation with established explicit transaction context', semantic: turn({ intent: 'confirm_activity_booking', action: 'confirm', speechAct: 'confirmation' }), dialog: committedDecision, expected: 'execute_booking' },
+  { id: 26, capability: 'unknown fact but understood meaning', semantic: turn({ intent: 'unknown_activity_fact', action: 'ask', informationNeed: 'policy', entities: { activityCode: 'horse', fact: 'insurance_limit' } }), expected: 'respond' },
+  { id: 27, capability: 'genuinely ambiguous meaning', semantic: turn({ intent: 'ambiguous_activity_reference', action: 'ask', needsClarification: true, references: [{ type: 'entity', value: 'อันนั้น', refersToPriorContext: true }] }), dialog: decision({ mode: 'clarify', responseIntent: 'clarify_ambiguous_entity' }), expected: 'respond' },
+  { id: 28, capability: 'new unseen activity asset', semantic: turn({ intent: 'select_new_asset', action: 'provide_information', speechAct: 'selection', entities: { activityCode: 'horse', assetName: 'ดาวเหนือ' } }), expected: 'respond' },
+  { id: 29, capability: 'new unseen activity type', semantic: turn({ intent: 'new_activity_type', action: 'ask', informationNeed: 'equipment', entities: { activityCode: 'zipline' } }), expected: 'respond' },
+  { id: 30, capability: 'cross-scope contaminated facts', semantic: turn({ intent: 'focused_horse_question', action: 'ask', informationNeed: 'suitability', entities: { activityCode: 'horse' }, constraints: ['exclude:atv', 'exclude:archery'] }), expected: 'respond' },
+];
+
+test('gauntlet: all 30 required Activity capability classes terminate inside the single-brain boundary', () => {
+  assert.equal(capabilityCases.length, 30);
+  let executions = 0;
+  for (const scenario of capabilityCases) {
+    assert.equal(scenario.semantic.domain, 'activity', `${scenario.id}: domain must remain Activity`);
+    const result = resolveSupervisedActivityCutover(
+      supervisedLegacy(scenario.semantic, scenario.dialog ?? decision()),
+      'line',
+      'th',
+    );
+    assert.ok(result, `${scenario.id}. ${scenario.capability}: must never fall through to a legacy language owner`);
+    assert.equal(result!.kind, scenario.expected, `${scenario.id}. ${scenario.capability}`);
+    if (result!.kind === 'execute_booking') executions += 1;
+
+    if (scenario.id === 22 || scenario.id === 23 || scenario.id === 24) {
+      assert.equal(result!.kind, 'respond', `${scenario.id}: booking words/acknowledgement must not falsely escalate`);
+    }
+    if (scenario.id === 29 && result!.kind === 'respond') {
+      assert.doesNotMatch(result!.response.message, /เบรก|ควบคุมรถ|จับธนู|ขึ้น-ลงม้า/u,
+        'unseen type must fail closed without borrowing another activity policy');
+    }
+    if (scenario.id === 30 && result!.kind === 'respond') {
+      assert.doesNotMatch(result!.response.message, /ATV|ธนู/u, 'focused horse response must not leak contaminated scopes');
+    }
+  }
+  assert.equal(executions, 1, 'only established explicit transaction context may execute');
+});
+
+test('gauntlet: terminal capability rendering makes zero additional provider/network calls', () => {
+  let calls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new Error('network forbidden in structured response planning');
+  }) as typeof fetch;
+  try {
+    for (const scenario of capabilityCases.filter(item => item.expected === 'respond')) {
+      resolveSupervisedActivityCutover(supervisedLegacy(scenario.semantic, scenario.dialog ?? decision()), 'web', 'th');
+    }
+    assert.equal(calls, 0, 'all 29 non-transaction capability paths reuse the one existing semantic result');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

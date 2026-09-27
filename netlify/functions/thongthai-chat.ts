@@ -89,7 +89,11 @@ import {
 } from './_slot-parsers';
 import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask, suspendActiveTask } from './_task-state';
 import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
-import { renderActivityCareResponse } from './_human-grounded-response';
+import {
+  composeDeterministicResponse,
+  composeGroundedDeterministicResponse,
+  type ComposedResponse,
+} from './_response-composer';
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
 import { EXPERIENCES } from '../../src/data/experiences';
 import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
@@ -1554,6 +1558,29 @@ async function deterministicActivityResponse(
     : null;
   if (!turn || turn.semanticTurn.domain !== 'activity') return null;
 
+  // Defense in depth: the main early gate normally consumes every supervised
+  // Activity turn before this compatibility function is reached. If a future
+  // caller invokes this function directly with a cached/supervised result,
+  // preserve the same terminal boundary instead of reopening legacy routing.
+  const supervised = resolveSupervisedActivityCutover(oneMind, channel, request.language);
+  if (supervised?.kind === 'execute_booking') {
+    return executeDeterministicActivityBooking(supervised.args, request, guestDbId, channel);
+  }
+  if (supervised?.kind === 'respond') {
+    return {
+      message: supervised.response.message,
+      intent: turn.semanticTurn.action === 'discover' || turn.semanticTurn.action === 'recommend'
+        ? 'recommendation'
+        : 'information',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    };
+  }
+
   if (oneMind.status === 'composed') {
     return {
       message: oneMind.response.message,
@@ -1571,33 +1598,6 @@ async function deterministicActivityResponse(
 
   const proposal = turn.dialogDecision.actionProposal;
   if (!proposal || proposal.toolName !== 'create_booking' || !proposal.customerCommitPresent) {
-    // Human Core PR D: before falling through toward the legacy raw-text
-    // care/safety cascade (or runThongthaiBrain), give the semantic
-    // supervisor's OWN understanding of this turn (informationNeed=safety/
-    // suitability/equipment) one chance to answer from a verified policy
-    // fact -- the same zero-cost composer path a 'composed' turn already
-    // uses, just also reachable here for a legacy_required turn (e.g. an
-    // active booking task) that the composed-only eligibility gate doesn't
-    // cover. Returns null (never guesses) when no fact exists yet for this
-    // resourceCode/topic, leaving the legacy cascade as the honest fallback.
-    const careAnswer = renderActivityCareResponse({
-      language: request.language,
-      semanticTurn: turn.dialogSemanticTurn,
-      dialogDecision: turn.dialogDecision,
-      knowledgeBundles: turn.groundedKnowledge,
-    });
-    if (careAnswer) {
-      return {
-        message: careAnswer.message,
-        intent: 'information',
-        contextUpdates: {},
-        journeyAction: { type: 'none', journey: null },
-        suggestedActions: [],
-        responseStyle: 'direct',
-        semanticMemoryUpdates: [],
-        toolCalls: [],
-      };
-    }
     return null;
   }
   return executeDeterministicActivityBooking(
@@ -1606,6 +1606,62 @@ async function deterministicActivityResponse(
     guestDbId,
     channel,
   );
+}
+
+export type SupervisedActivityCutoverDecision =
+  | { kind: 'respond'; response: ComposedResponse }
+  | { kind: 'execute_booking'; args: Record<string, unknown> };
+
+/**
+ * The terminal boundary for a usable OpenAI-owned Activity interpretation.
+ *
+ * This function deliberately has no customer-text parameter. Once the
+ * semantic supervisor has succeeded, every normal Activity turn must end in
+ * one of two structured outcomes here:
+ *
+ *  - render from SemanticTurn/DialogDecision/CanonicalKnowledgeScope, or
+ *  - execute the already-authorized ActionProposal.
+ *
+ * Returning null is reserved for non-Activity turns and genuine provider
+ * fallback turns. Consequently a supervised Activity turn cannot continue
+ * into the legacy raw-text responder cascade or runThongthaiBrain.
+ */
+export function resolveSupervisedActivityCutover(
+  oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel: BrainChannel,
+  language: BrainRequest['language'],
+): SupervisedActivityCutoverDecision | null {
+  const turn = oneMind.turn;
+  if (turn.semanticTurn.domain !== 'activity'
+      || turn.semanticTurn.semanticSource !== 'openai_supervisor') return null;
+
+  if (oneMind.status === 'composed') {
+    return { kind: 'respond', response: oneMind.response };
+  }
+
+  const proposal = turn.dialogDecision.actionProposal;
+  if (proposal?.toolName === 'create_booking' && proposal.customerCommitPresent) {
+    return {
+      kind: 'execute_booking',
+      args: resolveActivityBookingProposalArgs(
+        proposal,
+        turn.dialogDecision.taskStateContainer.activeTask,
+      ),
+    };
+  }
+
+  const composerInput = {
+    channel,
+    language,
+    semanticTurn: turn.dialogSemanticTurn,
+    dialogDecision: turn.dialogDecision,
+    knowledgeBundles: turn.groundedKnowledge,
+    degradation: turn.knowledgeDegradation,
+    operationalOutcome: null,
+  };
+  const response = composeGroundedDeterministicResponse(composerInput)
+    ?? composeDeterministicResponse(composerInput);
+  return { kind: 'respond', response };
 }
 
 /** Human Core PR D: task.slots (== proposal.validatedArgs) never carries a
@@ -1623,9 +1679,14 @@ export function resolveActivityBookingProposalArgs(
   activeTask: { selectedEntities: readonly { id: string; name: string }[] } | null | undefined,
 ): Record<string, unknown> {
   const selectedAssetEntity = activeTask?.selectedEntities.find(entity => entity.id.startsWith('activity_asset:'));
+  const activityAssetCode = selectedAssetEntity?.id.replace(/^activity_asset:/, '');
   return {
     ...proposal.validatedArgs,
-    ...(selectedAssetEntity ? { horseName: selectedAssetEntity.name } : {}),
+    ...(selectedAssetEntity && activityAssetCode ? {
+      horseName: selectedAssetEntity.name,
+      activityAssetCode,
+      note: formatActivityAssetNote({ name: selectedAssetEntity.name, assetCode: activityAssetCode }),
+    } : {}),
   };
 }
 
@@ -3301,18 +3362,13 @@ async function executeDeterministicActivityBooking(
   guestDbId: string | null,
   channel: BrainChannel,
 ): Promise<BrainResponse> {
-  // Human Core PR D: pure execution glue -- trusts only the already-decided
-  // horseName the caller supplied (from a raw-text draft that already named
-  // it, or now from the supervisor's own task.selectedEntities; see
-  // deterministicActivityResponse above). Never falls back to re-scanning
-  // THIS turn's raw request.message: a bare confirmation ("ยืนยัน") names no
-  // asset at all, and re-scanning risked matching an unrelated name merely
-  // mentioned in the same message (e.g. a compliment about the other horse)
-  // instead of the one actually selected earlier in the conversation.
+  // Human Core PR D: pure execution glue. The canonical asset id/name/note
+  // have already been resolved from task.selectedEntities by
+  // resolveActivityBookingProposalArgs. This boundary never calls a language
+  // parser -- not on request.message and not even on the structured name.
   const horseName = typeof args.horseName === 'string' ? args.horseName : null;
-  const selectedAsset = horseName ? activityAssetFromText(horseName) : null;
-  const selectedHorseName = horseName ?? selectedAsset?.name ?? null;
-  const note = selectedAsset ? formatActivityAssetNote(selectedAsset) : (typeof args.note === 'string' ? args.note : null);
+  const selectedHorseName = horseName;
+  const note = typeof args.note === 'string' ? args.note : null;
 
   const firstResponse: BrainResponse = {
     message: '',
@@ -3994,45 +4050,54 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     }
   }
 
-  // Human Core PR D: for a legacy_required activity turn where the semantic
-  // supervisor already understood the meaning as a care/safety/suitability/
-  // equipment question (informationNeed=safety/suitability/equipment),
-  // answer from the same verified-fact composer a 'composed' turn already
-  // uses -- BEFORE the ~30-function legacy raw-text care cascade below gets
-  // a chance to independently re-interpret the same message. A topic/
-  // resourceCode with no verified fact yet returns null, leaving that
-  // cascade as the honest fallback for the remaining capability gap.
-  if (earlyOneMind
-      && earlyOneMind.status === 'legacy_required'
-      && earlyOneMind.turn.semanticTurn.domain === 'activity'
-      && earlyOneMind.turn.semanticTurn.semanticSource === 'openai_supervisor'
-      && !earlyOneMind.turn.dialogDecision.actionProposal) {
-    const careAnswer = renderActivityCareResponse({
-      language: request.language,
-      semanticTurn: earlyOneMind.turn.dialogSemanticTurn,
-      dialogDecision: earlyOneMind.turn.dialogDecision,
-      knowledgeBundles: earlyOneMind.turn.groundedKnowledge,
+  // Human Core PR D: a usable OpenAI-owned Activity interpretation is a
+  // TERMINAL routing decision. It may render a structured response or execute
+  // an explicitly-authorized structured proposal, but it may never continue
+  // into the legacy Activity raw-text cascade or the legacy general LLM.
+  // Provider-outage/deterministic interpretations intentionally return null
+  // here and retain the bounded compatibility fallback below.
+  const supervisedActivity = earlyOneMind
+    ? resolveSupervisedActivityCutover(earlyOneMind, channel, request.language)
+    : null;
+  if (supervisedActivity?.kind === 'execute_booking') {
+    const executed = await executeDeterministicActivityBooking(
+      supervisedActivity.args,
+      request,
+      guestDbId,
+      channel,
+    );
+    const polished = polishedResponse(executed, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
     });
-    if (careAnswer) {
-      const polished = polishedResponse({
-        message: careAnswer.message,
-        intent: 'information',
-        contextUpdates: {},
-        journeyAction: { type: 'none', journey: null },
-        suggestedActions: [],
-        responseStyle: 'direct',
-        semanticMemoryUpdates: [],
-        toolCalls: [],
-      }, channel);
-      await persistBrainRuntime(guestDbId, channel, polished);
-      return coreResult(200, {
-        message: polished.message,
-        intent: polished.intent,
-        contextUpdates: polished.contextUpdates,
-        journeyAction: polished.journeyAction,
-        suggestedActions: polished.suggestedActions,
-      });
-    }
+  }
+  if (supervisedActivity?.kind === 'respond') {
+    const semantic = earlyOneMind!.turn.semanticTurn;
+    const polished = polishedResponse({
+      message: supervisedActivity.response.message,
+      intent: semantic.action === 'discover' || semantic.action === 'recommend'
+        ? 'recommendation'
+        : 'information',
+      contextUpdates: {},
+      journeyAction: { type: 'none', journey: null },
+      suggestedActions: [],
+      responseStyle: 'direct',
+      semanticMemoryUpdates: [],
+      toolCalls: [],
+    }, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
   }
 
   // Phase 2 closeout — resolve the answer to Thongthai's own persisted

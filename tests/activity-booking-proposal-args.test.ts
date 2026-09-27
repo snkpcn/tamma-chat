@@ -12,12 +12,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveActivityBookingProposalArgs } from '../netlify/functions/thongthai-chat';
 
-test('a resolved activity_asset selectedEntity supplies horseName onto the booking args', () => {
+test('a resolved activity_asset selectedEntity supplies canonical asset identity/name/note onto the booking args', () => {
   const args = resolveActivityBookingProposalArgs(
     { validatedArgs: { resourceCode: 'activity-horse', date: '2026-10-05', time: '10:00', durationMinutes: 30, partySize: 1 } },
     { selectedEntities: [{ id: 'activity_asset:horse-pharadon', name: 'ภาราดร' }] },
   );
   assert.equal(args.horseName, 'ภาราดร');
+  assert.equal(args.activityAssetCode, 'horse-pharadon');
+  assert.equal(args.note, 'เลือก: ภาราดร [asset:horse-pharadon]');
   assert.equal(args.resourceCode, 'activity-horse');
 });
 
