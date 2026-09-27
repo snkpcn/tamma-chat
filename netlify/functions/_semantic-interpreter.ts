@@ -197,6 +197,9 @@ export type SemanticReference = {
   /** Generic plan/topic reference backed by bounded conversation evidence,
    *  not by a canonical business entity id. */
   resolvedFromConversation?: boolean;
+  /** Entity identity recovered from the bounded assistant recommendation
+   * evidence retained in conversation context. */
+  resolvedFromRecommendation?: boolean;
   ambiguous?: boolean;
 };
 
@@ -660,6 +663,7 @@ Core rules:
 - Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
 - Current no-transaction wording keeps the turn read-only. Conditional "if A unavailable use B; if neither, do nothing" = status/availability, never immediate confirm/book/order.
 - Current corrections/replacements outrank stale selections and task values.
+- lastRecommendationReference is bounded evidence of what Thongthai previously recommended. Use it to resolve descriptive follow-ups across topic switches; if it uniquely identifies a recent entity, follow that entity's domain rather than stale activeDomain.
 - Asking what is selected/provided so far => intent=summarize_active_task, action=ask, informationNeed=none; never transaction_status.
 - Conversation task directives cancel_active/suspend_active/resume_suspended affect working state only, never a real transaction.
 - Catalog existence differs from live availability. recommendation differs from neutral discovery. correction differs from a new modification.
@@ -849,6 +853,23 @@ export function resolveReferences(references: SemanticReference[], context: Sema
     if (byExactName.length > 1) {
       return { ...reference, ambiguous: true, resolvedEntityIds: byExactName.map(entity => entity.id) };
     }
+
+    // Descriptive follow-ups may omit the name entirely ("the calmer one you
+    // recommended"). The assistant's bounded recommendation evidence is real
+    // conversation context. If it names exactly ONE recent canonical entity,
+    // bind that identity instead of letting the current active topic erase it.
+    const recommendationMatches = context.lastRecommendationReference
+      ? context.recentEntities.filter(entity =>
+          context.lastRecommendationReference!.includes(entity.name))
+      : [];
+    if (recommendationMatches.length === 1) {
+      return {
+        ...reference,
+        resolvedEntityId:recommendationMatches[0]!.id,
+        resolvedFromRecommendation:true,
+      };
+    }
+
     // No named match (e.g. "ตัวไหน" names nothing specific) -- if context has
     // exactly one recent entity in the active domain, that's the plausible
     // antecedent; if there are several, it's a genuine multi-way reference
@@ -1050,6 +1071,35 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     hasAmbiguousReference
     && !(['ask','discover','recommend','compare'] as SemanticAction[]).includes(parsedAction);
 
+  const recommendationResolvedEntity = references
+    .find(reference => reference.resolvedFromRecommendation && reference.resolvedEntityId);
+  if (
+    recommendationResolvedEntity?.resolvedEntityId
+    && (domain === 'ecosystem' || domain === 'general' || domain === 'unknown')
+  ) {
+    const canonical = context.recentEntities.find(entity =>
+      entity.id === recommendationResolvedEntity.resolvedEntityId);
+    if (canonical && canonical.domain !== 'unknown') domain = canonical.domain;
+  }
+
+  const allPriorReferencesResolved = references.length > 0
+    && references.filter(reference => reference.refersToPriorContext).length > 0
+    && references.filter(reference => reference.refersToPriorContext).every(reference =>
+      Boolean(reference.resolvedEntityId)
+      || Boolean(reference.resolvedEntityIds?.length)
+      || Boolean(reference.resolvedTaskSlot)
+      || reference.resolvedFromConversation === true);
+  const resolvedSelectionClarification =
+    allPriorReferencesResolved
+    && references.some(reference => reference.resolvedFromRecommendation)
+    && (
+      speechAct === 'selection'
+      || action === 'confirm'
+      || action === 'provide_information'
+      || action === 'modify'
+      || action === 'correct_previous'
+    );
+
   const noUsableContext = !context.activeDomain
     && context.recentEntities.length === 0
     && !context.activeTask
@@ -1081,10 +1131,10 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: isActiveTaskSummary
+    needsClarification: (isActiveTaskSummary || resolvedSelectionClarification)
       ? false
       : (parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification),
-    clarificationReason: isActiveTaskSummary
+    clarificationReason: (isActiveTaskSummary || resolvedSelectionClarification)
       ? undefined
       : (typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
         ? parsed.clarificationReason.trim()
