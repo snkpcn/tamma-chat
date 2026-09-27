@@ -72,6 +72,62 @@ test('correction "ไม่ใช่ เอาทองไทย" replaces the h
   assert.equal(plan.taskStateContainer.activeTask!.slots.horseName, 'ทองไทย');
 });
 
+test('PR F switches preorder -> table booking inside Restaurant without leaking old order slots', () => {
+  let plan = planDialogTurn(input({
+    semanticTurn: turn({
+      domain:'restaurant', action:'order',
+      entities:{restaurantTransactionType:'preorder',items:[{name:'ตำไทย',quantity:2}],budget:500},
+    }),
+    eventId:'restaurant-switch-1',
+  }));
+  const oldId=plan.taskStateContainer.activeTask!.taskId;
+  assert.equal(plan.taskStateContainer.activeTask!.type,'restaurant_preorder');
+
+  plan = planDialogTurn(input({
+    semanticTurn: turn({
+      domain:'restaurant', action:'book',
+      entities:{restaurantTransactionType:'table_booking',date:'2026-10-10',time:'18:00',partySize:4},
+    }),
+    taskState:plan.taskStateContainer,
+    eventId:'restaurant-switch-2',
+  }));
+
+  assert.equal(plan.taskStateContainer.activeTask!.type,'restaurant_booking');
+  assert.notEqual(plan.taskStateContainer.activeTask!.taskId,oldId);
+  assert.equal(plan.taskStateContainer.suspendedTask?.type,'restaurant_preorder');
+  assert.deepEqual(plan.taskStateContainer.suspendedTask?.slots.items,[{name:'ตำไทย',quantity:2}]);
+  assert.equal(plan.taskStateContainer.activeTask!.slots.items,undefined);
+  assert.equal(plan.taskStateContainer.activeTask!.slots.budget,undefined);
+  assert.equal(plan.taskStateContainer.activeTask!.slots.restaurantTransactionType,undefined);
+  assert.equal(plan.taskStateContainer.activeTask!.slots.date,'2026-10-10');
+});
+
+test('PR F switches table booking -> preorder without leaking seating/contact slots', () => {
+  let plan = planDialogTurn(input({
+    semanticTurn: turn({
+      domain:'restaurant', action:'book',
+      entities:{restaurantTransactionType:'table_booking',date:'2026-10-10',time:'18:00',partySize:4,customerName:'สมชาย',phone:'0812345678'},
+    }),
+    eventId:'restaurant-reverse-1',
+  }));
+  assert.equal(plan.taskStateContainer.activeTask!.type,'restaurant_booking');
+
+  plan = planDialogTurn(input({
+    semanticTurn: turn({
+      domain:'restaurant', action:'order',
+      entities:{restaurantTransactionType:'preorder',items:[{name:'ลาบ',quantity:1}]},
+    }),
+    taskState:plan.taskStateContainer,
+    eventId:'restaurant-reverse-2',
+  }));
+
+  assert.equal(plan.taskStateContainer.activeTask!.type,'restaurant_preorder');
+  assert.equal(plan.taskStateContainer.suspendedTask?.type,'restaurant_booking');
+  assert.deepEqual(plan.taskStateContainer.activeTask!.slots.items,[{name:'ลาบ',quantity:1}]);
+  assert.equal(plan.taskStateContainer.activeTask!.slots.partySize,undefined);
+  assert.equal(plan.taskStateContainer.activeTask!.slots.phone,undefined);
+});
+
 // [ambiguity]
 test('needsClarification=true always produces mode=clarify and touches nothing else', () => {
   const plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'confirm', needsClarification: true }) }));
