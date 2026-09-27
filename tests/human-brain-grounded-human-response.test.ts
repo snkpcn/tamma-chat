@@ -178,3 +178,43 @@ test('active-task summary includes suspended selection and explicitly says nothi
   assert.match(response.message,/ภาราดร/u);
   assert.match(response.message,/ยังไม่ได้ยืนยันการจอง/u);
 });
+
+
+test('selection without commitment acknowledges the choice and does not push booking-slot interrogation',()=>{
+  const horse={id:'activity_asset:horse-paradorn',type:'horse',name:'ภาราดร',domain:'activity' as const,source:'catalog' as const,canonical:true};
+  const active=setSelectedEntities(
+    createActiveTask({type:'activity_booking',sourceChannel:'line',initialSlots:{horseName:'ภาราดร'}},AT),
+    [horse],
+    AT,
+  );
+  const state={...emptyTaskStateContainer(),activeTask:active};
+  const response=composeDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',intent:'select_previous_calm_horse',action:'confirm',speechAct:'selection',
+      entities:{horseName:'ภาราดร'},references:[{type:'entity_selection',value:'ภาราดร',refersToPriorContext:true,resolvedEntityId:horse.id}],
+    }),
+    bundles:[],
+    dialogDecision:decision({
+      mode:'collect_field',taskStateContainer:state,responseIntent:'ask_missing_field',
+      missingFields:['durationMinutes','date'],reasons:['missing_field'],
+    }),
+  }));
+  assert.match(response.message,/ภาราดร/u);
+  assert.match(response.message,/ยังไม่ได้จอง/u);
+  assert.doesNotMatch(response.message,/30.*60.*90|เลือกระยะเวลา/u);
+});
+
+test('non-transactional party-size correction is acknowledged rather than becoming a generic fallback',()=>{
+  const response=composeDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',intent:'correct_party_size',action:'correct_previous',speechAct:'correction',
+      entities:{partySize:4,children:1},
+    }),
+    bundles:[],
+    dialogDecision:decision({mode:'answer',responseIntent:'grounded_answer'}),
+  }));
+  assert.match(response.message,/4 คน/u);
+  assert.match(response.message,/เด็ก 1 คน/u);
+  assert.match(response.message,/ยังไม่ได้จอง/u);
+  assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้|ขอรายละเอียดเพิ่ม/u);
+});
