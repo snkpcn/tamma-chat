@@ -293,6 +293,7 @@ export async function processOneMindCustomerTurn(
     channel:input.channel as BrainChannel,
     language:input.language,
     userMessage:input.message,
+    semanticTurn:turn.semanticTurn,
     dialogDecision:turn.dialogDecision,
     knowledgeBundles:turn.groundedKnowledge,
     degradation:turn.knowledgeDegradation,
