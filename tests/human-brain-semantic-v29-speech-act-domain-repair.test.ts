@@ -154,3 +154,70 @@ test('local-area question keeps local domain when the deictic place reference ne
   assert.equal(turn.speechAct, 'question');
   assert.equal(turn.needsClarification, true);
 });
+
+
+test('semantic entity aliases canonicalize snake_case structural slots for downstream state', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'check table for four people',
+    speechAct:'question',
+    domain:'restaurant',
+    intent:'check_table_availability',
+    action:'status',
+    informationNeed:'availability',
+    entities:{party_size:4,child_count:1,adult_count:3},
+    references:[],
+    constraints:[],
+    confidence:0.98,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.entities.partySize,4);
+  assert.equal(turn.entities.children,1);
+  assert.equal(turn.entities.adults,3);
+});
+
+test('cross-domain recommendation with multiple organization domains is canonical journey planning', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'plan two days with stay activity meal and souvenirs',
+    speechAct:'request',
+    domain:'ecosystem',
+    intent:'plan_two_day_itinerary',
+    action:'recommend',
+    informationNeed:'recommendation',
+    entities:{
+      stay:{nights:2},
+      activity:{type:'horse_riding',day:1},
+      restaurant:{purpose:'meal',day:2},
+      otop:{purpose:'souvenir',day:2},
+    },
+    references:[],
+    constraints:['day_1_horse','day_2_meal','day_2_souvenir'],
+    confidence:0.98,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.domain,'journey');
+  assert.equal(turn.action,'recommend');
+});
+
+test('prior-plan modification stays journey when bounded conversation evidence resolves the reference', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'journey' as const,
+    recentTurns:[{role:'assistant' as const,content:'A verified two-day plan was just discussed.'}],
+    lastRecommendationReference:'two-day plan',
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'keep the prior plan but move it to tomorrow',
+    speechAct:'request',
+    domain:'ecosystem',
+    intent:'modify_itinerary_date',
+    action:'modify',
+    informationNeed:'none',
+    entities:{date:'2026-09-28'},
+    references:[{type:'previous_request',value:'prior plan',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.98,
+    needsClarification:false,
+  }), context);
+  assert.equal(turn.domain,'journey');
+  assert.equal(turn.needsClarification,false);
+});
