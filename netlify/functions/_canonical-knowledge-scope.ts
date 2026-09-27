@@ -375,22 +375,25 @@ export function resolveCanonicalScopeAgainstFacts(
   // and avoids hardcoding a type->parent translation table.
   if (
     scope.status === 'resolved'
-    && scope.provenance === 'declared_activity_type'
+    && scope.canonicalEntityIds.length === 0
     && scope.canonicalParentIds.length === 1
   ) {
-    const declaredType = scope.canonicalParentIds[0]!;
+    const declaredParentOrType = scope.canonicalParentIds[0]!;
     const assetCodes = [...map.keys()]
       .map(key => key.match(/^activity_asset:([^:]+):type$/)?.[1])
       .filter((value): value is string => Boolean(value))
-      .filter(code => map.get(`activity_asset:${code}:type`) === declaredType);
+      .filter(code => map.get(`activity_asset:${code}:type`) === declaredParentOrType);
     const liveParents = assetCodes
       .map(code => map.get(`activity_asset:${code}:activityCode`))
       .filter((value): value is string => typeof value === 'string' && value.length > 0);
     if (liveParents.length) {
+      const resolvedParents=[...new Set(liveParents)];
       return {
         ...scope,
-        canonicalParentIds:[...new Set(liveParents)],
-        provenance:`${scope.provenance}+activity_type_resolved_against_live_catalog`,
+        canonicalParentIds:resolvedParents,
+        provenance:resolvedParents.length === 1 && resolvedParents[0] === declaredParentOrType
+          ? scope.provenance
+          : `${scope.provenance}+activity_type_resolved_against_live_catalog`,
       };
     }
   }
