@@ -574,6 +574,19 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
     case 'ecosystem':
       if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'ecosystem', needs: ['catalog'] }];
       return [];
+    case 'journey':
+      // Journey composition is cross-domain by definition. Fetch the
+      // authoritative read-only catalogs the composer may sequence; never
+      // invent a plan from Bible prose or fall back to a keyword router.
+      if (turn.action === 'recommend' || turn.action === 'discover' || turn.action === 'ask' || turn.action === 'modify') {
+        return [
+          { ...base, domain:'activity', needs:['catalog','entity_details'] },
+          { ...base, domain:'restaurant', needs:['catalog','recommendations_input'] },
+          { ...base, domain:'stay', needs:['catalog'] },
+          { ...base, domain:'otop', needs:['catalog'] },
+        ];
+      }
+      return [];
     default:
       return [];
   }
