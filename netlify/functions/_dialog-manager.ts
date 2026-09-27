@@ -995,12 +995,12 @@ function applyRestaurantStructuredPolicy(plan: DialogPlan, input: DialogInput, n
   const slotPatch = resolveRestaurantStructuredSlots(task);
   if (!Object.keys(slotPatch).length) return null;
 
-  const before = JSON.stringify(task.slots.items ?? null);
-  const after = JSON.stringify(slotPatch.items ?? null);
-  if (before === after) return null;
+  const changed = Object.entries(slotPatch).some(([key,value]) =>
+    JSON.stringify(task.slots[key] ?? null) !== JSON.stringify(value ?? null));
+  if (!changed) return null;
 
   const container = applyTaskStateEvent(plan.taskStateContainer, {
-    kind:'update_slots', eventId:`${input.eventId}:restaurant_structured_items`, slotPatch,
+    kind:'update_slots', eventId:`${input.eventId}:restaurant_structured_slots`, slotPatch,
   }, now);
   return planDialogTurn({ ...input, taskState:container }, now);
 }
