@@ -125,7 +125,7 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
   const map = factMap(input);
   const assets = activityAssetRows(input);
   const excluded = explicitExcludedNames(input, assets.map(asset => asset.name));
-  const wantsCalm = wants(input, ['prefer_calm', 'calm_horse', 'calmer', 'นิ่ง', 'ใจเย็น']);
+  const wantsCalm = wants(input, ['prefer_calm', 'calm_horse', 'calm_temperament', 'preferred_horse_trait', 'calmer', 'นิ่ง', 'ใจเย็น']);
   const wantsBeginner = wants(input, ['beginner', 'มือใหม่', 'ไม่เคยขี่']);
   const wantsRain = wants(input, ['rain', 'ฝน', 'weather_fallback']);
   const hasRecommendationShape = turn.action === 'recommend'
