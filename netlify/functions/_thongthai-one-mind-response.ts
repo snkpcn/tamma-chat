@@ -227,7 +227,11 @@ async function persistAssistantConversationTurn(
       eventId:assistantEventId,
       channel:input.channel,
       assistantMessage:response.message,
-      lastRecommendationReference:['recommend','compare'].includes(turn.semanticTurn.action)
+      lastRecommendationReference:(
+        ['recommend','compare'].includes(turn.semanticTurn.action)
+        || turn.semanticTurn.informationNeed==='recommendation'
+        || response.usedFactKeys.some(key=>/(?:temperament|beginnerSuitable|recommend)/iu.test(key))
+      )
         ? response.message.slice(0,320)
         : undefined,
     },now);
