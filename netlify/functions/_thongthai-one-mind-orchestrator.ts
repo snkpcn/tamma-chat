@@ -436,6 +436,9 @@ export function deterministicNeedsLanguageRefinement(
   if (!turn) return true;
 
   if (EXACT_READ_ONLY_DETERMINISTIC_INTENTS.has(turn.intent)) return false;
+  // Explicit conversational cancellation is terminal working-state control;
+  // wording such as "ไม่เอาแล้ว ยกเลิก" is still one unambiguous operation.
+  if (turn.intent === 'task_cancel') return false;
   if (mayContainMultipleClauses(message)) return true;
   if (EXACT_ZERO_CALL_INTENTS.has(turn.intent)) return false;
 
