@@ -350,6 +350,7 @@ OPEN-WORLD LANGUAGE RULES:
 - You are not a business-keyword classifier. Understand the sentence even when it has nothing to do with a known Tamma business flow.
 - Use general for ordinary conversation, personal context, or questions whose subject is not owned by a narrower business domain.
 - Use local for questions about the surrounding place/area or what may be around there when the customer is not asking for a known business offering.
+- Deictic place language such as "around here", "around there", "nearby", or an equivalent colloquial reference is enough to establish domain=local when the customer asks about the surrounding area. Do not use domain=unknown merely because the exact map coordinate/place name is not present; missing operational location detail can be clarified downstream without losing the semantic domain.
 - Use incident when the CURRENT message reports an adverse real-world event such as loss/missing property or pet, damage, injury, or another situation that may require staff follow-up.
 - Incident ownership is determined by the adverse event itself, not by whether every location/resource detail is already known. If the customer clearly reports something lost/missing, harmed, damaged, or otherwise gone wrong, keep domain=incident even when exact place, timing, owner detail, or follow-up logistics still need clarification.
 - Merely asking whether an ambient animal, person, object, or condition observed around the area is still there is local, not incident, unless the CURRENT message actually says something is lost/missing, harmed, owned by the customer, or otherwise reports an adverse event.
@@ -359,6 +360,7 @@ OPEN-WORLD LANGUAGE RULES:
 - normalizedMeaning must be a short neutral paraphrase of the CURRENT customer's meaning. It is internal semantic state, NEVER customer-facing prose.
 - speechAct describes what the person is doing conversationally, independent of domain.
 - Distinguish a request TO Thongthai from a statement of the customer's own intended action. If the customer merely announces that they/their group will pause, rest, wait, leave, continue later, or take another self-directed action and asks Thongthai to do nothing, use speechAct=statement even when Thai politeness/volitional wording uses "ขอ". Use speechAct=request only when the customer actually asks Thongthai/staff/service to do, provide, allow, arrange, or answer something.
+- If the customer explicitly retracts or corrects a previously inferred conversational intent (for example clarifying that they were only asking, not requesting a booking/order/confirmation), use speechAct=correction. Treat this as a correction of conversational meaning even when no date, quantity, or entity value is changed; never promote it into a transaction.
 
 DOMAIN-SCOPE TAXONOMY:
 - ecosystem = generic whole-property discovery/recommendation when the customer asks broadly what there is to do, play, visit, or
