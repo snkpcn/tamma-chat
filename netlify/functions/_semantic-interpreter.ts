@@ -31,7 +31,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v30';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
