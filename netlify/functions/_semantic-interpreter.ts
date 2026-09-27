@@ -31,7 +31,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v30';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -194,6 +194,26 @@ export type SemanticContext = {
 
 export function emptySemanticContext(): SemanticContext {
   return { activeDomain: null, recentEntities: [] };
+}
+
+const PRIOR_REFERENCE_MARKER_RE = /(?:เดิม|เมื่อกี้|ก่อนหน้า|อันนั้น|ตัวนั้น|นั่น|นั่นแหละ|ตัวนี้|อันนี้|เหมือนเดิม|กลับไป|ต่อเรื่อง|same|previous|that one|this one)/iu;
+
+/**
+ * Human Brain semantic-v31: choosing between multiple known prior entities is
+ * a high-precision language-understanding problem. Route that rare turn to the
+ * stronger semantic model as the ONE call for the turn instead of spending a
+ * second call after a cheaper model guessed. This preserves the owner's hard
+ * maxCallsPerTurn=1 production cost invariant.
+ */
+export function shouldUseHighPrecisionReferenceSupervisor(
+  message: string,
+  context: SemanticContext,
+): boolean {
+  if (!PRIOR_REFERENCE_MARKER_RE.test(message)) return false;
+  const candidates = context.activeDomain
+    ? context.recentEntities.filter(entity => entity.domain === context.activeDomain)
+    : context.recentEntities;
+  return candidates.length > 1;
 }
 
 /** A reference the customer made to something outside the literal words of this
@@ -647,13 +667,40 @@ export function buildProductionSemanticInterpreterPrompt(
     selectedEntities:value.selectedEntities.slice(0, 4).map(entity => ({ id:entity.id, name:entity.name })),
     constraints:value.constraints.slice(0, 8),
   } : null;
-  const referencesPrior = /(?:เดิม|เมื่อกี้|ก่อนหน้า|อันนั้น|ตัวนั้น|เหมือนเดิม|กลับไป|ต่อเรื่อง|same|previous|that one)/iu.test(message);
+  const referencesPrior = PRIOR_REFERENCE_MARKER_RE.test(message);
+
+  // Give the language supervisor bounded, per-entity evidence instead of
+  // forcing it to reconstruct descriptor/name relationships from one blended
+  // conversation string. This does not interpret the customer's words in
+  // deterministic code; it only partitions already-visible recent assistant
+  // text at exact known entity-name boundaries.
+  const recentEntityEvidence = compactEntities.flatMap(entity => {
+    const evidence = compactTurns.flatMap(turn => {
+      const start = turn.content.indexOf(entity.name);
+      if (start < 0) return [];
+      const afterName = start + entity.name.length;
+      const laterEntityStarts = compactEntities
+        .filter(other => other.id !== entity.id)
+        .map(other => turn.content.indexOf(other.name, afterName))
+        .filter(position => position >= 0);
+      const end = laterEntityStarts.length
+        ? Math.min(...laterEntityStarts)
+        : Math.min(turn.content.length, afterName + 160);
+      const snippet = turn.content.slice(start, end).trim();
+      return snippet ? [{ role:turn.role, text:snippet }] : [];
+    }).slice(-2);
+    return evidence.length
+      ? [{ id:entity.id, name:entity.name, domain:entity.domain, evidence }]
+      : [];
+  });
+
   const compactContext = {
     activeDomain:context.activeDomain,
     activeTopic:context.activeTopic?.slice(0, 100),
     lastAction:context.lastAction,
     openQuestion:context.openQuestion?.slice(0, 120),
     recentEntities:compactEntities,
+    recentEntityEvidence,
     recentTurns:compactTurns,
     activeTask:task(context.activeTask),
     suspendedTask:referencesPrior ? task(context.suspendedTask) : null,
@@ -701,7 +748,8 @@ Core rules:
 - A customer merely reporting their own plan, pause, state, or situation is speechAct=statement. Use request/request_help only when they ask the assistant or organization to do something.
 - If the customer explicitly retracts/corrects a previously inferred intent (for example clarifying that they were only asking and were NOT requesting a booking/order/confirmation), use speechAct=correction. This is a correction of conversational meaning even when no slot value changes; keep it read-only and never infer a transaction.
 - A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
-- For a descriptive reference, use bounded context evidence: when prior context uniquely links the description to a named entity, emit that canonical entity name as the reference value so the deterministic resolver can bind it. If several entities fit, keep it unresolved and request clarification.
+- For a descriptive prior-context reference, inspect bounded recentEntityEvidence first. If the description uniquely identifies one listed entity, references MUST use that entity's exact name as reference.value (never the descriptor phrase itself) so the deterministic resolver can bind it. If several entities fit, keep it unresolved and request clarification.
+- For a selection among multiple recent entities, returning all candidate IDs is NOT a resolved selection. Resolve one exact entity from bounded evidence or ask one clarification question.
 - IDs may only come from canonical context below. Otherwise leave unresolved.
 - Activity TYPE (not one named asset) named: set entities.activityCode to horse|atv|archery. Not for a whole-domain browse or a named asset (use horseName).
 
@@ -1433,9 +1481,12 @@ export function semanticTurnNeedsReview(
 /**
  * OpenAI-only semantic supervisor.
  *
- * Terra reads every ordinary language turn. Sol is a bounded second opinion
- * only when the primary result is structurally weak/uncertain. Neither model
- * is allowed to answer the customer or execute a business action here.
+ * Terra reads ordinary language turns. Sol is used as the single primary call
+ * for the rare bounded case where a prior-context reference must choose among
+ * multiple known entities; this avoids a second paid call and keeps the hard
+ * one-call-per-turn budget invariant. Certification mode may still ask Sol for
+ * a second opinion when a candidate is structurally weak. Neither model is
+ * allowed to answer the customer or execute a business action here.
  */
 export type SemanticInterpretOptions = {
   callContext?: AiCallContext;
@@ -1449,12 +1500,20 @@ export async function interpretSemanticTurn(
 ): Promise<SemanticTurn> {
   const prompt = buildProductionSemanticInterpreterPrompt(context, message);
   const messages:ChatTurn[] = [{ role:'user', content:message }];
-  const primaryRaw = await callSemanticSupervisor(
-    prompt,
-    messages,
-    options.certificationMode ? 'semantic-certification-primary' : 'semantic-interpreter',
-    options.callContext,
-  );
+  const highPrecisionReference = shouldUseHighPrecisionReferenceSupervisor(message, context);
+  const primaryRaw = highPrecisionReference
+    ? await callSemanticReviewer(
+        prompt,
+        messages,
+        options.certificationMode ? 'semantic-certification-primary-precision' : 'semantic-interpreter-precision',
+        options.callContext,
+      )
+    : await callSemanticSupervisor(
+        prompt,
+        messages,
+        options.certificationMode ? 'semantic-certification-primary' : 'semantic-interpreter',
+        options.callContext,
+      );
   const primary = parseSemanticTurnResponse(primaryRaw, context);
   if (!options.certificationMode || !semanticTurnNeedsReview(primary, message, context)) return primary;
 
