@@ -478,6 +478,7 @@ function isTrustedConversationalCorrection(
       // conversational modify/correction, never book/order.
       || deterministic.action === 'provide_information'
       || deterministic.action === 'confirm'
+      || deterministic.action === 'correct_previous'
     )
   );
   return Boolean(
@@ -535,6 +536,34 @@ function isTrustedConversationalStateRefinement(
   return isTrustedConversationalCorrection(turn, deterministic)
     || isTrustedConversationalSelection(turn, deterministic)
     || isTrustedReadOnlyDeescalation(turn, deterministic);
+}
+
+function reconcileSafeConversationalCorrectionDomain(
+  turn:SemanticTurn,
+  deterministic:SemanticTurn | null,
+):SemanticTurn {
+  if (
+    !deterministic
+    || deterministic.action !== 'correct_previous'
+    || turn.action !== 'correct_previous'
+    || turn.speechAct !== 'correction'
+    || turn.needsClarification
+    || turn.confidence < 0.9
+    || turn.domain === deterministic.domain
+  ) return turn;
+
+  // A natural correction may be emitted as GENERAL because its subject is
+  // ellipsed ("เมื่อกี้บอก 5 คน ผิด จริง ๆ 4 คน"). The active deterministic
+  // parser knows which canonical task/domain the corrected field belongs to,
+  // while the language model knows WHICH value is the replacement. It is safe
+  // to combine those two only when the model did not claim a different
+  // concrete business domain. This prevents the shallow "first number wins"
+  // parser from overwriting a high-confidence human correction while still
+  // refusing cross-domain reinterpretation.
+  if (turn.domain === 'general' || turn.domain === 'unknown') {
+    return {...turn,domain:deterministic.domain};
+  }
+  return turn;
 }
 
 function mergeSafeDeterministicSlots(
@@ -633,7 +662,8 @@ async function resolveSemanticTurn(
         callerLabel:'semantic-interpreter',
       },
     });
-    const modelTurn = mergeSafeDeterministicSlots(rawModelTurn, deterministic);
+    const correctionReconciledTurn = reconcileSafeConversationalCorrectionDomain(rawModelTurn, deterministic);
+    const modelTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
 
     if (!modelRefinementIsUsable(modelTurn, deterministic)) {
       if (deterministic) {
