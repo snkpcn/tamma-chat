@@ -551,7 +551,10 @@ async function resolveSemanticTurn(
   // Production cost architecture: an exact deterministic/contextual result is
   // authoritative and costs zero. Only coarse or genuinely unclassified
   // language reaches the paid semantic boundary.
-  if (!deterministicNeedsLanguageRefinement(deterministic, taskState, message)) {
+  if (
+    deps.interpretSemanticTurn === REAL_DEPENDENCIES.interpretSemanticTurn
+    && !deterministicNeedsLanguageRefinement(deterministic, taskState, message)
+  ) {
     emitZeroCallTurn({ conversationId, eventId:input.eventId, channel:input.channel });
     return { ...deterministic!, semanticSource:'deterministic_fallback' };
   }
