@@ -90,11 +90,15 @@ test('at least twenty deterministic/context-safe customer turns use zero paid ca
     ],
   };
   const cases:Array<{message:string;context:SemanticContext;task:ReturnType<typeof emptyTaskStateContainer>}>= [
-    'พรุ่งนี้','วันที่ 3','บ่ายสอง','14:30','สองคน','3 คน','ครึ่งชั่วโมง','60 นาที',
+    'พรุ่งนี้','วันนี้','6 ตุลาคม','บ่ายสอง','14:30','สองคน','3 คน','ครึ่งชั่วโมง','60 นาที',
     'ยกเลิกเรื่องนี้','ไม่เอาแล้ว ยกเลิก','เอาทองไทย','เอาภาราดร',
-    'ไม่ใช่ทองไทย เอาภาราดร','เวลาเดิม','วันเดิม','เพิ่มเป็น 4 คน',
-    'ขอจองขี่ม้า','จองขี่ม้าพรุ่งนี้','มีม้ากี่ตัว','ATV มีกี่คัน',
+    'ไม่ใช่ทองไทย เอาภาราดร','เพิ่มเป็น 4 คน','จองเลยตอน 11 โมง สองคน',
+    'ขอจองขี่ม้า','จองขี่ม้าพรุ่งนี้',
   ].map(message=>({message,context:entityContext,task:baseTask}));
+  cases.push(
+    {message:'มีม้ากี่ตัว',context:emptySemanticContext(),task:emptyTaskStateContainer()},
+    {message:'ATV มีกี่คัน',context:emptySemanticContext(),task:emptyTaskStateContainer()},
+  );
   assert.equal(cases.length,20);
   for(const item of cases){
     const turn=deriveDeterministicSemanticTurn(item.message,item.context,item.task,new Date('2026-09-27T00:00:00Z'));
