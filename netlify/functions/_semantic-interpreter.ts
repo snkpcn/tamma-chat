@@ -351,12 +351,14 @@ OPEN-WORLD LANGUAGE RULES:
 - Use general for ordinary conversation, personal context, or questions whose subject is not owned by a narrower business domain.
 - Use local for questions about the surrounding place/area or what may be around there when the customer is not asking for a known business offering.
 - Use incident when the CURRENT message reports an adverse real-world event such as loss/missing property or pet, damage, injury, or another situation that may require staff follow-up.
+- Incident ownership is determined by the adverse event itself, not by whether every location/resource detail is already known. If the customer clearly reports something lost/missing, harmed, damaged, or otherwise gone wrong, keep domain=incident even when exact place, timing, owner detail, or follow-up logistics still need clarification.
 - Merely asking whether an ambient animal, person, object, or condition observed around the area is still there is local, not incident, unless the CURRENT message actually says something is lost/missing, harmed, owned by the customer, or otherwise reports an adverse event.
 - Use support for generic requests for help with a service/problem when incident/payment/another owned domain is not more precise.
 - Do NOT force open-world language into restaurant/activity/stay just because one nearby word overlaps a business vocabulary item.
 - A strange, colloquial, misspelled, or previously unseen sentence is still language. Interpret its meaning before considering clarification.
 - normalizedMeaning must be a short neutral paraphrase of the CURRENT customer's meaning. It is internal semantic state, NEVER customer-facing prose.
 - speechAct describes what the person is doing conversationally, independent of domain.
+- Distinguish a request TO Thongthai from a statement of the customer's own intended action. If the customer merely announces that they/their group will pause, rest, wait, leave, continue later, or take another self-directed action and asks Thongthai to do nothing, use speechAct=statement even when Thai politeness/volitional wording uses "ขอ". Use speechAct=request only when the customer actually asks Thongthai/staff/service to do, provide, allow, arrange, or answer something.
 
 DOMAIN-SCOPE TAXONOMY:
 - ecosystem = generic whole-property discovery/recommendation when the customer asks broadly what there is to do, play, visit, or
