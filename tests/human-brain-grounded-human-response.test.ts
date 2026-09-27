@@ -263,3 +263,52 @@ test('restaurant recommendation reads a structured budget amount object without 
   assert.ok(response);
   assert.match(response.message,/งบ 1000 บาท/u);
 });
+
+
+test('selection emitted as provide_information with activity_asset is acknowledged and never turns into a duration prompt',()=>{
+  const horse={id:'activity_asset:horse-paradorn',type:'horse',name:'ภาราดร',domain:'activity' as const,source:'catalog' as const,canonical:true};
+  const active=setSelectedEntities(
+    createActiveTask({type:'activity_booking',sourceChannel:'line',initialSlots:{resourceCode:'activity-horse'}},AT),
+    [horse],
+    AT,
+  );
+  const state={...emptyTaskStateContainer(),activeTask:active};
+  const response=composeDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',
+      intent:'select_activity_asset',
+      action:'provide_information',
+      speechAct:'selection',
+      entities:{activity_asset:'ภาราดร'},
+      constraints:['prefer_calm_horse'],
+    }),
+    bundles:[],
+    dialogDecision:decision({
+      mode:'answer',
+      taskStateContainer:state,
+      responseIntent:'grounded_answer',
+      missingFields:[],
+      reasons:['nontransactional_state_update_preserved'],
+    }),
+  }));
+  assert.match(response.message,/ภาราดร/u);
+  assert.match(response.message,/ยังไม่ได้จอง/u);
+  assert.doesNotMatch(response.message,/30.*60|เลือกระยะเวลา|ขอ.*วัน/u);
+});
+
+test('horse replacement emitted as modify with activity_asset acknowledges the new horse',()=>{
+  const response=composeDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',
+      intent:'change_horse_selection',
+      action:'modify',
+      speechAct:'selection',
+      entities:{activity_asset:'ทองไทย'},
+      constraints:['keep_same_time'],
+    }),
+    bundles:[],
+    dialogDecision:decision({mode:'answer',responseIntent:'grounded_answer'}),
+  }));
+  assert.match(response.message,/ทองไทย/u);
+  assert.match(response.message,/ยังไม่ได้จอง/u);
+});
