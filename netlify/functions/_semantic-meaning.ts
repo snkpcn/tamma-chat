@@ -168,6 +168,17 @@ function deriveFocus(turn: SemanticTurn): { focusKind: SemanticFocusKind; focusV
     }
   }
 
+  if (turn.domain === 'promotion') {
+    const campaignId = typeof turn.entities.campaignId === 'string' ? turn.entities.campaignId.trim() : '';
+    if (campaignId) return { focusKind:'entity', focusValue:campaignId.startsWith('promo:') ? campaignId : `promo:${campaignId}` };
+
+    const campaignCode = typeof turn.entities.campaignCode === 'string' ? turn.entities.campaignCode.trim() : '';
+    if (campaignCode) return { focusKind:'entity', focusValue:`promo_code:${campaignCode}` };
+
+    const promotionName = typeof turn.entities.promotionName === 'string' ? turn.entities.promotionName.trim() : '';
+    if (promotionName) return { focusKind:'entity', focusValue:promotionName };
+  }
+
   if (turn.domain === 'stay') {
     const resourceCode = typeof turn.entities.resourceCode === 'string' ? turn.entities.resourceCode.trim() : '';
     if (resourceCode) return { focusKind: 'entity', focusValue: resourceCode.startsWith('stay:') ? resourceCode : `stay:${resourceCode}` };
