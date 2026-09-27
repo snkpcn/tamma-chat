@@ -926,13 +926,13 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
 
   if (
     noCommitment
-    && (turn.action === 'confirm' || turn.action === 'modify' || turn.action === 'correct_previous')
-    && (turn.speechAct === 'selection' || turn.speechAct === 'correction' || turn.action === 'correct_previous')
+    && !['book','order','cancel'].includes(turn.action)
+    && (turn.speechAct === 'selection' || turn.speechAct === 'correction' || turn.action === 'correct_previous' || turn.action === 'modify')
   ) {
     const entities = turn.entities;
     const chosen = [
-      entities.horseName, entities.resourceName, entities.roomType,
-      entities.itemName, entities.productName, entities.promotionName,
+      entities.horseName, entities.resourceName, entities.activity_asset, entities.activityAsset,
+      entities.roomType, entities.itemName, entities.productName, entities.promotionName,
     ].find(value => typeof value === 'string' && value.trim());
     const partySize = Number(entities.partySize);
     const children = Number(entities.children);
