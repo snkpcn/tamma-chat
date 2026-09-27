@@ -252,8 +252,10 @@ export function resolveTaskTypeForTurn(turn: SemanticTurn): ActiveTaskType | und
   const declared = typeof turn.entities.restaurantTransactionType === 'string'
     ? turn.entities.restaurantTransactionType.trim()
     : '';
-  if (declared === 'table_booking' || turn.action === 'book') return 'restaurant_booking';
-  if (declared === 'preorder' || turn.action === 'order') return 'restaurant_preorder';
+  if (declared === 'table_booking') return 'restaurant_booking';
+  if (declared === 'preorder') return 'restaurant_preorder';
+  if (turn.action === 'book') return 'restaurant_booking';
+  if (turn.action === 'order') return 'restaurant_preorder';
   return 'restaurant_preorder';
 }
 
