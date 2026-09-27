@@ -98,12 +98,18 @@ test('grounded activity recommendation chooses the uniquely verified calm horse 
 test('restaurant recommendation filters verified shrimp constraint and does not pretend unknown spice data is verified',()=>{
   const restaurant=bundle('restaurant','restaurant_live',[
     fact('menu:thai-salad:name','ตำไทย','restaurant','restaurant_live'),
+    fact('menu:thai-salad:orderable',true,'restaurant','restaurant_live'),
+    fact('menu:thai-salad:availableServings',5,'restaurant','restaurant_live'),
     fact('menu:thai-salad:price',89,'restaurant','restaurant_live'),
     fact('menu:thai-salad:ingredients',['papaya','peanut'],'restaurant','restaurant_live'),
     fact('menu:shrimp:name','กุ้งทอด','restaurant','restaurant_live'),
+    fact('menu:shrimp:orderable',true,'restaurant','restaurant_live'),
+    fact('menu:shrimp:availableServings',5,'restaurant','restaurant_live'),
     fact('menu:shrimp:price',220,'restaurant','restaurant_live'),
     fact('menu:shrimp:ingredients',['shrimp'],'restaurant','restaurant_live'),
     fact('menu:chicken:name','ไก่ย่าง','restaurant','restaurant_live'),
+    fact('menu:chicken:orderable',true,'restaurant','restaurant_live'),
+    fact('menu:chicken:availableServings',5,'restaurant','restaurant_live'),
     fact('menu:chicken:price',180,'restaurant','restaurant_live'),
     fact('menu:chicken:ingredients',['chicken'],'restaurant','restaurant_live'),
   ]);
@@ -131,9 +137,13 @@ test('restaurant recommendation filters verified shrimp constraint and does not 
 test('restaurant recommendation filters a REMEMBERED "shrimp_allergy" constraint the same as a stated "no_shrimp" one',()=>{
   const restaurant=bundle('restaurant','restaurant_live',[
     fact('menu:thai-salad:name','ตำไทย','restaurant','restaurant_live'),
+    fact('menu:thai-salad:orderable',true,'restaurant','restaurant_live'),
+    fact('menu:thai-salad:availableServings',5,'restaurant','restaurant_live'),
     fact('menu:thai-salad:price',89,'restaurant','restaurant_live'),
     fact('menu:thai-salad:ingredients',['papaya','peanut'],'restaurant','restaurant_live'),
     fact('menu:shrimp:name','กุ้งทอด','restaurant','restaurant_live'),
+    fact('menu:shrimp:orderable',true,'restaurant','restaurant_live'),
+    fact('menu:shrimp:availableServings',5,'restaurant','restaurant_live'),
     fact('menu:shrimp:price',220,'restaurant','restaurant_live'),
     fact('menu:shrimp:ingredients',['shrimp'],'restaurant','restaurant_live'),
   ]);
@@ -277,9 +287,13 @@ test('compound availability turn still renders the grounded horse recommendation
 test('restaurant recommendation reads a structured budget amount object without losing the budget constraint',()=>{
   const restaurant=bundle('restaurant','restaurant_live',[
     fact('menu:thai-salad:name','ตำไทย','restaurant','restaurant_live'),
+    fact('menu:thai-salad:orderable',true,'restaurant','restaurant_live'),
+    fact('menu:thai-salad:availableServings',5,'restaurant','restaurant_live'),
     fact('menu:thai-salad:price',89,'restaurant','restaurant_live'),
     fact('menu:thai-salad:ingredients',['papaya'],'restaurant','restaurant_live'),
     fact('menu:chicken:name','ไก่ย่าง','restaurant','restaurant_live'),
+    fact('menu:chicken:orderable',true,'restaurant','restaurant_live'),
+    fact('menu:chicken:availableServings',5,'restaurant','restaurant_live'),
     fact('menu:chicken:price',180,'restaurant','restaurant_live'),
     fact('menu:chicken:ingredients',['chicken'],'restaurant','restaurant_live'),
   ]);
