@@ -86,7 +86,7 @@ test('initial G.2 gate allows a safe task-continuation turn (collect_field, no A
   assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:true});
 });
 
-test('G.2 gate refuses a newly-created restaurant preorder so advisor follow-ups are not turned into pickup-field prompts', () => {
+test('G.2 gate allows newly-created bounded restaurant preorder planning without ActionProposal', () => {
   const after={...emptyTaskStateContainer(),activeTask:createActiveTask({
     type:'restaurant_preorder',
     sourceChannel:'web',
@@ -106,7 +106,7 @@ test('G.2 gate refuses a newly-created restaurant preorder so advisor follow-ups
       reasons:['missing_field'],
     },
   });
-  assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'transactional_or_task_turn'});
+  assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:true});
 });
 
 test('initial G.2 gate still refuses a task turn that reaches an ActionProposal', () => {
