@@ -244,6 +244,18 @@ const DEFAULT_TASK_TYPE_FOR_DOMAIN: Partial<Record<SemanticDomain, ActiveTaskTyp
   journey: 'journey_planning',
 };
 
+/** Restaurant has two real transaction types. The semantic supervisor owns
+ * which one the customer means; this consumes only structured semantics. */
+export function resolveTaskTypeForTurn(turn: SemanticTurn): ActiveTaskType | undefined {
+  if (turn.domain !== 'restaurant') return DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
+  const declared = typeof turn.entities.restaurantTransactionType === 'string'
+    ? turn.entities.restaurantTransactionType.trim()
+    : '';
+  if (declared === 'table_booking' || turn.action === 'book') return 'restaurant_booking';
+  if (declared === 'preorder' || turn.action === 'order') return 'restaurant_preorder';
+  return 'restaurant_preorder';
+}
+
 export const TOOL_NAME_FOR_TASK_TYPE: Partial<Record<ActiveTaskType, string>> = {
   activity_booking: 'create_booking',
   stay_booking: 'create_booking',
@@ -417,7 +429,7 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       // existed. Preserve that bounded working selection as a task, still
       // without commitmentIntent and therefore without transaction authority.
       const names=explicitSelectionNames(turn);
-      const defaultType=DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
+      const defaultType=resolveTaskTypeForTurn(turn);
       if (names.length > 0 && defaultType) {
         container = applyTaskStateEvent(container, {
           kind:'start', eventId:`${eventId}:task_merge`,
@@ -443,7 +455,7 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       return { container, reasons };
     }
 
-    const defaultType = DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
+    const defaultType = resolveTaskTypeForTurn(turn);
     if (TASK_WORTHY_ACTIONS.has(turn.action) && defaultType) {
       container = applyTaskStateEvent(container, {
         kind: 'start', eventId: `${eventId}:task_merge`,
@@ -569,7 +581,7 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       // Human Core PR F: a write-ready preorder must be checked against the
       // current live menu before an ActionProposal can exist. createRestaurantPreorder
       // still re-validates at execution as defense in depth.
-      if (task && task.missingFields.length === 0 && isExplicitTransaction(turn)) {
+      if (task?.type === 'restaurant_preorder' && task.missingFields.length === 0 && isExplicitTransaction(turn)) {
         return [{ ...base, domain:'restaurant', needs:['catalog'] }];
       }
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'restaurant', needs: ['catalog', 'recommendations_input'] }];
@@ -985,6 +997,9 @@ function applyActivityCatalogPolicy(
  * one preorder line; a one-line items payload missing quantity may borrow the
  * same explicit quantity slot. No raw customer text is read here. */
 export function resolveRestaurantStructuredSlots(task:ActiveTask):Record<string,unknown> {
+  if(task.type==='restaurant_booking') {
+    return task.slots.serviceType==='restaurant' ? {} : {serviceType:'restaurant'};
+  }
   if(task.type!=='restaurant_preorder') return {};
   const current=Array.isArray(task.slots.items)?task.slots.items:[];
   const valid=current.length>0&&current.every(item=>{
@@ -1015,7 +1030,7 @@ export function resolveRestaurantStructuredSlots(task:ActiveTask):Record<string,
 
 function applyRestaurantStructuredPolicy(plan:DialogPlan,input:DialogInput,now:Date):DialogPlan|null {
   const task=plan.taskStateContainer.activeTask;
-  if(!task||task.type!=='restaurant_preorder') return null;
+  if(!task||(task.type!=='restaurant_preorder'&&task.type!=='restaurant_booking')) return null;
   const slotPatch=resolveRestaurantStructuredSlots(task);
   if(!Object.keys(slotPatch).length) return null;
   const container=applyTaskStateEvent(plan.taskStateContainer,{
