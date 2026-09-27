@@ -23,6 +23,7 @@ import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } fro
 import { extractTime } from './_slot-parsers';
 import {
   renderActivityAvailability,
+  renderActivityCareResponse,
   renderActivityRecommendation,
   renderRestaurantRecommendation,
   renderPromotionRecommendation,
@@ -647,7 +648,8 @@ export function composeGroundedDeterministicResponse(input: ResponseComposerInpu
     // need the richer recommendation renderer first; pure availability then
     // falls through to the narrow availability renderer.
     ?? renderActivityRecommendation(input)
-    ?? renderActivityAvailability(input);
+    ?? renderActivityAvailability(input)
+    ?? renderActivityCareResponse(input);
   if (humanGrounded) {
     return {
       message:polishCustomerMessage(humanGrounded.message, input.channel),
