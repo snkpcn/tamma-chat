@@ -156,3 +156,29 @@ test('response bridge centralizes wording in Response Composer and contains no T
   assert.match(source,/processThongthaiOneMindTurnAuthoritative/);
   assert.doesNotMatch(source,/[ก-๙]{4,}/u);
 });
+
+
+test('journey modify with no transactional task remains eligible for One-Mind read-only composition', () => {
+  const r=result();
+  r.semanticTurn={
+    ...r.semanticTurn,
+    domain:'journey',
+    intent:'modify_itinerary_date',
+    action:'modify',
+    speechAct:'request',
+    informationNeed:'none',
+    entities:{date:'2026-09-28'},
+    references:[{type:'previous_request',refersToPriorContext:true,resolvedFromConversation:true}],
+  };
+  r.taskStateBefore=emptyTaskStateContainer();
+  r.taskStateAfter=emptyTaskStateContainer();
+  r.dialogDecision={
+    mode:'query_knowledge',
+    taskStateContainer:emptyTaskStateContainer(),
+    knowledgeRequests:[],
+    missingFields:[],
+    responseIntent:'grounded_answer',
+    reasons:[],
+  };
+  assert.deepEqual(readOnlyCutoverEligibility(r),{eligible:true});
+});
