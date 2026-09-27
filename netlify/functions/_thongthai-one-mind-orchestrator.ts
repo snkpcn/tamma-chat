@@ -46,6 +46,7 @@ import {
   type SemanticTurn,
 } from './_semantic-interpreter';
 import { deriveDeterministicSemanticTurn } from './_deterministic-semantic-turn';
+import { deriveSemanticMeaning, type SemanticMeaning } from './_semantic-meaning';
 import {
   LLMAvailabilityError,
   ProviderNotConfiguredError,
@@ -148,6 +149,14 @@ export type OneMindTurnResult = {
    *  must never be produced from a constraint set different from the one
    *  the rest of the turn was actually decided against. */
   dialogSemanticTurn: SemanticTurn;
+  /** Human Core PR B: the ONE authoritative SemanticMeaning for this turn,
+   *  derived once from dialogSemanticTurn (the same memory-merged turn the
+   *  Dialog Manager itself planned from). Every consumer that needs to make
+   *  a decision -- is this a real commitment, how broad is the request, is
+   *  this a correction -- should read it from here instead of re-deriving
+   *  its own ad hoc reading of action/speechAct/entities. See
+   *  _semantic-meaning.ts for the contract itself. */
+  semanticMeaning: SemanticMeaning;
   dialogPlan: DialogPlan;
   dialogDecision: DialogDecision;
   groundedKnowledge: KnowledgeBundle[];
@@ -720,10 +729,27 @@ async function resolveSemanticTurn(
     }
 
     // A model must never silently reinterpret an already-proven mutating
-    // command into a DIFFERENT mutation (or vice versa). Natural-language
-    // understanding still happens first, but execution-sensitive conflicts
-    // fall back to the deterministic interpretation until the downstream
-    // transaction layer explicitly proves equivalence.
+    // command into a DIFFERENT mutation. Natural-language understanding
+    // still happens first, but when BOTH sides claim some mutating action
+    // and disagree on which one, execution-sensitive conflicts fall back to
+    // the deterministic interpretation until the downstream transaction
+    // layer explicitly proves equivalence.
+    //
+    // Human Core PR B: this used to fire whenever EITHER side's action was
+    // mutating, not only when both were -- so a bounded deterministic
+    // lexicon match guessing a mutation (e.g. a name lexicon mistaking a
+    // question for a selection) could silently discard an already-usable,
+    // correctly READ-ONLY model result (modelRefinementIsUsable above has
+    // already confirmed it: finite confidence, not low-confidence/unclear,
+    // domain/action known). That direction -- deterministic overriding a
+    // successful semantic result -- is exactly the invariant "the
+    // deterministic brain cannot override a successful semantic result"
+    // this guard must never violate; the escalation direction (a READ-ONLY
+    // deterministic candidate the model tries to escalate into a mutation)
+    // is already independently blocked above, in modelRefinementIsUsable's
+    // own safety boundary. So this guard now only has one real job left:
+    // when the model's OWN result is itself a mutation that disagrees with
+    // deterministic's mutation, prefer the proven deterministic one.
     const mutatingActions = new Set<SemanticTurn['action']>([
       'book', 'order', 'confirm', 'modify', 'cancel', 'correct_previous',
     ]);
@@ -731,7 +757,8 @@ async function resolveSemanticTurn(
     if (
       deterministic
       && !trustedConversationalStateRefinement
-      && (mutatingActions.has(modelTurn.action) || mutatingActions.has(deterministic.action))
+      && mutatingActions.has(modelTurn.action)
+      && mutatingActions.has(deterministic.action)
       && (modelTurn.domain !== deterministic.domain || modelTurn.action !== deterministic.action)
     ) {
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
@@ -855,6 +882,7 @@ async function computeOneMindTurnFromState(
     identity,
     semanticTurn,
     dialogSemanticTurn,
+    semanticMeaning: deriveSemanticMeaning(dialogSemanticTurn),
     dialogPlan: dialog.plan,
     dialogDecision: dialog.decision,
     groundedKnowledge: dialog.bundles,
