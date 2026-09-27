@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { emptyTaskStateContainer, type ActiveTask } from '../netlify/functions/_task-state';
 import { computeTaskMissingFields } from '../netlify/functions/_domain-task-policy';
-import { resolveRestaurantStructuredSlots } from '../netlify/functions/_dialog-manager';
+import { resolveRestaurantStructuredSlots, resolveTaskTypeForTurn } from '../netlify/functions/_dialog-manager';
 import { deriveSemanticMeaning } from '../netlify/functions/_semantic-meaning';
 import {
   deriveCanonicalKnowledgeScope,
@@ -13,6 +13,7 @@ import {
 import { renderRestaurantRecommendation } from '../netlify/functions/_human-grounded-response';
 import {
   resolveRestaurantPreorderProposalArgs,
+  resolveRestaurantTableBookingProposalArgs,
   resolveSupervisedRestaurantCutover,
 } from '../netlify/functions/thongthai-chat';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
@@ -103,6 +104,35 @@ test('4. only explicit order plus customer-commit proposal may execute',()=>{
   assert.equal(committed?.kind,'execute_preorder');
 });
 
+test('4b. Restaurant transaction type routes table booking and preorder to different task/tool paths',()=>{
+  assert.equal(resolveTaskTypeForTurn(semantic({action:'book',entities:{restaurantTransactionType:'table_booking'}})),'restaurant_booking');
+  assert.equal(resolveTaskTypeForTurn(semantic({action:'order',entities:{restaurantTransactionType:'preorder'}})),'restaurant_preorder');
+
+  const slots={date:'2026-10-10',time:'18:00',partySize:4,customerName:'นุ๊ก',phone:'0610169999',serviceType:'restaurant'};
+  const task=active({});
+  (task as any).type='restaurant_booking';
+  task.slots=slots; task.commitmentIntent=true; task.status='ready'; task.missingFields=[];
+  const container={...emptyTaskStateContainer(),activeTask:task};
+  const proposal={toolName:'create_booking',validatedArgs:slots,requiresExplicitConfirmation:true,customerCommitPresent:true,idempotencyKey:'table-1'};
+  const committed=resolveSupervisedRestaurantCutover(result(
+    semantic({action:'book',speechAct:'transaction_request',informationNeed:'none',entities:{restaurantTransactionType:'table_booking'}}),
+    decision({mode:'propose_action',taskStateContainer:container,actionProposal:proposal}),
+  ),'web','th');
+  assert.equal(committed?.kind,'execute_table_booking');
+
+  const args=resolveRestaurantTableBookingProposalArgs({validatedArgs:{...slots,customerName:' นุ๊ก ',phone:' 0610169999 '}});
+  assert.equal(args.serviceType,'restaurant');
+  assert.equal(args.customerName,'นุ๊ก');
+  assert.equal(args.partySize,4);
+});
+
+test('4c. table booking cannot become ready without date/time/party/contact details',()=>{
+  const task=active({});
+  (task as any).type='restaurant_booking';
+  const missing=computeTaskMissingFields(task);
+  for(const field of ['date','time','partySize','customerName','phone']) assert.ok(missing.includes(field));
+});
+
 test('5. Restaurant executor boundary is structured-only and proposal sanitizer drops invalid lines',()=>{
   assert.equal(resolveRestaurantPreorderProposalArgs.length,1);
   const args=resolveRestaurantPreorderProposalArgs({validatedArgs:{
@@ -116,6 +146,11 @@ test('5. Restaurant executor boundary is structured-only and proposal sanitizer 
   const end=source.indexOf('async function executeDeterministicStayBooking',start);
   const executable=source.slice(start,end).replace(/\/\/.*$/gmu,'');
   assert.doesNotMatch(executable,/request\.message|parseRestaurantPreorderTurn|restaurantMenuAdvice|classifyRestaurant/u);
+
+  const tableStart=source.indexOf('async function executeDeterministicRestaurantTableBooking');
+  const tableEnd=source.indexOf('async function executeDeterministicRestaurantPreorder',tableStart);
+  const tableExecutable=source.slice(tableStart,tableEnd).replace(/\/\/.*$/gmu,'');
+  assert.doesNotMatch(tableExecutable,/request\.message|parseRestaurantPreorderTurn|restaurantMenuAdvice|classifyRestaurant/u);
 });
 
 test('6. restaurant preorder policy requires explicit structured items and quantity',()=>{
