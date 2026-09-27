@@ -155,6 +155,18 @@ export function readOnlyCutoverEligibility(
       && !turn.taskStateAfter.activeTask) {
     return { eligible:true };
   }
+  if (turn.semanticTurn.action === 'correct_previous'
+      && turn.semanticTurn.speechAct === 'correction'
+      && !turn.taskStateBefore.activeTask
+      && !turn.taskStateAfter.activeTask
+      && !turn.dialogDecision.actionProposal) {
+    // Correcting conversational facts (for example group composition) is
+    // read-only when there is no booking/order task to mutate. Sending this
+    // back to a raw-text legacy router is exactly how human corrections were
+    // turning into generic fallbacks.
+    return { eligible:true };
+  }
+
   // A pure preference/constraint declaration is also safe conversation.
   // It changes no booking/order/payment state and must not be forced back into
   // a keyword parser merely because the semantic action is
