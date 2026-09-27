@@ -38,5 +38,5 @@ test('semantic-v28 requires an evaluative request beyond companion metadata',()=
 });
 
 test('semantic-v28 version is explicit',()=>{
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v31');
 });
