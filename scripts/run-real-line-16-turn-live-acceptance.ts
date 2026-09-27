@@ -1,3 +1,4 @@
+// Owner real-conversation certification: paid live smoke is intentional; no production transaction/data mutation.
 process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE = '1';
 
 import assert from 'node:assert/strict';
