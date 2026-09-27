@@ -1773,7 +1773,7 @@ export function resolveSupervisedRestaurantCutover(
   if(turn.semanticTurn.domain!=='restaurant'||turn.semanticTurn.semanticSource!=='openai_supervisor') return null;
   if(oneMind.status==='composed') return {kind:'respond',response:oneMind.response};
 
-  const meaning=deriveSemanticMeaning(turn.semanticTurn);
+  const meaning=turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
   const proposal=turn.dialogDecision.actionProposal;
   if(meaning.commitmentLevel==='explicit_transaction'
       && proposal?.toolName==='create_restaurant_preorder'
@@ -3592,13 +3592,40 @@ async function executeDeterministicRestaurantPreorder(
   guestDbId:string|null,
   channel:BrainChannel,
 ):Promise<BrainResponse> {
+  // Structured-only execution boundary. request is transport context for the
+  // existing tool runtime; this function never reads request.message.
   const firstResponse:BrainResponse={
     message:'',intent:'order',contextUpdates:{},journeyAction:{type:'none',journey:null},
     suggestedActions:[],responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
   };
-  if(!guestDbId) return {...firstResponse,message:'ตอนนี้ยังเปิดออเดอร์ในระบบไม่ได้ครับ กรุณาลองใหม่อีกครั้ง'};
+  const date=typeof args.date==='string'?args.date.trim():'';
+  const time=typeof args.time==='string'?args.time.trim():'';
+  const customerName=typeof args.customerName==='string'?args.customerName.trim():'';
+  const phone=typeof args.phone==='string'?args.phone.trim():'';
+  const items=Array.isArray(args.items)
+    ? args.items.flatMap(value=>{
+        if(!value||typeof value!=='object'||Array.isArray(value)) return [];
+        const row=value as Record<string,unknown>;
+        const name=typeof row.name==='string'?row.name.trim():'';
+        const quantity=Number(row.quantity);
+        return name&&Number.isInteger(quantity)&&quantity>=1&&quantity<=50
+          ? [{name,quantity}]
+          : [];
+      })
+    : [];
+  if(!guestDbId||!date||!time||!customerName||!phone||!items.length) {
+    return {
+      ...firstResponse,
+      message:'ยังเปิดออเดอร์ไม่ได้ครับ เพราะรายการ/จำนวน วัน เวลา ชื่อ หรือเบอร์โทรยังไม่ครบ และยังไม่ได้สร้างรายการให้',
+    };
+  }
+  const safeArgs={
+    date,time,items,customerName,phone,
+    ...(typeof args.email==='string'&&args.email.trim()?{email:args.email.trim()}:{}),
+    ...(typeof args.note==='string'&&args.note.trim()?{note:args.note.trim()}:{}),
+  };
   const [result]=await executeBrainTools(
-    guestDbId,channel,[{name:'create_restaurant_preorder',args}],firstResponse,request,
+    guestDbId,channel,[{name:'create_restaurant_preorder',args:safeArgs}],firstResponse,request,
   );
   if(!result?.ok) return {...firstResponse,message:preorderFailureMessage(result?.detail??'execution_failed')};
 
