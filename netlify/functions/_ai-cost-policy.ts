@@ -35,12 +35,12 @@ const DEFAULT_PRICING: Record<string, ModelPricing> = {
   // supported below so pricing can be changed without code changes.
   'gpt-5.6-terra': {
     inputUsdPerMillion: 2,
-    cachedInputUsdPerMillion: 0.5,
-    outputUsdPerMillion: 8,
+    cachedInputUsdPerMillion: 0.2,
+    outputUsdPerMillion: 12,
   },
   'gpt-5.6-sol': {
-    inputUsdPerMillion: 5,
-    cachedInputUsdPerMillion: 1,
+    inputUsdPerMillion: 4,
+    cachedInputUsdPerMillion: 0.4,
     outputUsdPerMillion: 20,
   },
 };
