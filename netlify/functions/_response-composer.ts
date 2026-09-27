@@ -871,43 +871,86 @@ function formatTaskSummaryValue(key: string, value: unknown, language: ResponseL
   return String(value);
 }
 
-function activeTaskSummaryMessage(input: ResponseComposerInput): string {
-  const task = input.dialogDecision.taskStateContainer.activeTask;
-  if (!task) {
-    return input.language === 'th'
-      ? 'ตอนนี้ยังไม่มีรายการที่กำลังเลือกหรือกรอกค้างอยู่ครับ'
-      : 'There is no active selection or in-progress request right now.';
-  }
-
+function taskSummaryItems(
+  task: ResponseComposerInput['dialogDecision']['taskStateContainer']['activeTask'],
+  language: ResponseLanguage,
+): string[] {
+  if (!task) return [];
   const items: string[] = [];
   const selectedNames = [...new Set(task.selectedEntities.map(entity => entity.name.trim()).filter(Boolean))];
   if (selectedNames.length) {
-    items.push(input.language === 'th'
+    items.push(language === 'th'
       ? `รายการที่เลือก: ${selectedNames.join(', ')}`
       : `Selected: ${selectedNames.join(', ')}`);
   }
-
   for (const [key, labelTh] of Object.entries(TASK_SUMMARY_FIELDS_TH)) {
-    // If a canonical selected entity already names the horse, do not repeat
-    // the same selection from the legacy horseName slot.
     if (key === 'horseName' && selectedNames.length) continue;
     const raw = task.slots[key];
     if (raw === undefined || raw === null || raw === '') continue;
-    const value = formatTaskSummaryValue(key, raw, input.language);
+    const value = formatTaskSummaryValue(key, raw, language);
     if (!value) continue;
-    items.push(input.language === 'th' ? `${labelTh}: ${value}` : `${key}: ${value}`);
+    items.push(language === 'th' ? `${labelTh}: ${value}` : `${key}: ${value}`);
   }
+  return items;
+}
 
-  if (!items.length) {
+function activeTaskSummaryMessage(input: ResponseComposerInput): string {
+  const container = input.dialogDecision.taskStateContainer;
+  const activeItems = taskSummaryItems(container.activeTask, input.language);
+  const suspendedItems = taskSummaryItems(container.suspendedTask, input.language);
+
+  if (!activeItems.length && !suspendedItems.length) {
     return input.language === 'th'
-      ? 'ตอนนี้มีรายการที่กำลังดำเนินอยู่ครับ แต่ยังไม่มีรายละเอียดที่ลูกค้าเลือกไว้ให้สรุป'
-      : 'There is an active request, but no customer-facing selections have been captured yet.';
+      ? 'ตอนนี้ยังไม่มีรายการที่กำลังเลือกหรือกรอกค้างอยู่ครับ และยังไม่ได้ยืนยันการจองหรือส่งรายการ'
+      : 'There is no active or suspended selection right now, and nothing has been confirmed or submitted.';
   }
 
   if (input.language === 'th') {
-    return `ตอนนี้ที่เลือกไว้มี:\n• ${items.join('\n• ')}\n\nข้อมูลนี้ยังเป็นรายการที่กำลังคุยกันอยู่ ยังไม่ได้ยืนยันการจองหรือส่งรายการครับ`;
+    const sections: string[] = [];
+    if (activeItems.length) sections.push(`รายการที่กำลังคุยอยู่:\n• ${activeItems.join('\n• ')}`);
+    if (suspendedItems.length) sections.push(`รายการที่พักไว้ก่อน:\n• ${suspendedItems.join('\n• ')}`);
+    return `${sections.join('\n\n')}\n\nทั้งหมดนี้ยังเป็นข้อมูลที่คุยกันอยู่ ยังไม่ได้ยืนยันการจองหรือส่งรายการครับ`;
   }
-  return `Current selections:\n- ${items.join('\n- ')}\n\nThese are still in-progress details, not a confirmed booking or submitted order.`;
+
+  const sections: string[] = [];
+  if (activeItems.length) sections.push(`Current:\n- ${activeItems.join('\n- ')}`);
+  if (suspendedItems.length) sections.push(`Paused:\n- ${suspendedItems.join('\n- ')}`);
+  return `${sections.join('\n\n')}\n\nThese are conversation-state details only; nothing has been confirmed or submitted.`;
+}
+
+function specificClarificationMessage(input: ResponseComposerInput): string | null {
+  if (input.language !== 'th' || !input.semanticTurn) return null;
+  const turn = input.semanticTurn;
+  const task = input.dialogDecision.taskStateContainer.activeTask
+    ?? input.dialogDecision.taskStateContainer.suspendedTask;
+  const entityNames = [
+    ...new Set([
+      ...task?.selectedEntities.map(entity => entity.name).filter(Boolean) ?? [],
+      ...Object.entries(turn.entities)
+        .filter(([key, value]) => /(?:name|horse|room|item|product|promotion)/iu.test(key) && typeof value === 'string')
+        .map(([, value]) => String(value)),
+    ]),
+  ];
+
+  const unresolved = turn.references.find(reference =>
+    reference.refersToPriorContext
+    && !reference.resolvedEntityId
+    && !reference.resolvedEntityIds?.length
+    && !reference.resolvedTaskSlot);
+  if (entityNames.length === 1) {
+    return `หมายถึง ${entityNames[0]} ที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ`;
+  }
+  if (unresolved?.value && !/^(?:เดิม|อันนั้น|ตัวนั้น|same|previous|that one)$/iu.test(unresolved.value.trim())) {
+    return `ที่บอกว่า “${unresolved.value.trim()}” หมายถึงรายการไหนที่คุยไว้ก่อนหน้านี้ครับ`;
+  }
+  if ((turn.informationNeed ?? 'none') === 'price' && task) {
+    return 'ต้องการเช็กราคาของรายการที่กำลังคุยอยู่ใช่ไหมครับ';
+  }
+  if (turn.domain === 'activity') return 'หมายถึงกิจกรรมหรือม้าตัวที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ';
+  if (turn.domain === 'stay') return 'หมายถึงที่พักที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ';
+  if (turn.domain === 'restaurant') return 'หมายถึงเมนูหรือเรื่องร้านอาหารที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ';
+  if (turn.domain === 'journey') return 'หมายถึงแผนทริปที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ';
+  return null;
 }
 
 export function composeDeterministicResponse(input: ResponseComposerInput): ComposedResponse {
@@ -945,14 +988,10 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
         ? (verifiedEmptyTaskMessageTh(input) ?? copy.empty)
         : copy.empty;
   } else if (input.dialogDecision.mode === 'clarify') {
-    // Zero-cost architecture: a clarify/collect_field decision is a real,
-    // already-computed machine decision from the Dialog Manager -- it does
-    // not need the model to have succeeded this turn to be spoken correctly.
-    // Checking mode BEFORE the model-failure branch below means an active
-    // task's slot-collection question still asks for the SPECIFIC missing
-    // field even while the provider is down/circuit-open, instead of
-    // collapsing to the generic "can't answer this right now" apology.
-    message = copy.clarify;
+    // Meaning is already known upstream; ask the narrowest bounded question
+    // supported by structured references/task state instead of a generic
+    // "more details" fallback whenever possible.
+    message = specificClarificationMessage(input) ?? copy.clarify;
   } else if (input.dialogDecision.mode === 'collect_field') {
     const missing = input.dialogDecision.missingFields.slice(0, 2);
     const durationChoice = missing.includes('durationMinutes')
