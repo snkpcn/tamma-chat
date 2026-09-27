@@ -178,7 +178,7 @@ function providesTaskSlotValue(entities: Record<string, unknown>): boolean {
  *  read it (see DialogPlan.compareAttribute below) -- but it is NOT a real
  *  task slot and must never be written into task.slots. Strips it (and any
  *  future non-slot meta keys) before a merge, never before it's read. */
-const NON_SLOT_META_KEYS = new Set(['compareAttribute']);
+const NON_SLOT_META_KEYS = new Set(['compareAttribute', 'restaurantTransactionType']);
 function taskSlotPatch(entities: Record<string, unknown>): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entities)) {
@@ -405,6 +405,40 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       reasons.push('no_active_task');
     }
     return { container, reasons };
+  }
+
+  // Human Core PR F: Restaurant contains TWO transactional task types inside
+  // the same semantic domain. A deliberate switch between table_booking and
+  // preorder must never merge the new transaction's slots into the old task
+  // merely because both domains are "restaurant". Suspend the old working
+  // task, preserve it as resumable state, and start a clean task of the
+  // explicitly requested type. No raw customer text participates here.
+  const desiredRestaurantTask = turn.domain === 'restaurant'
+    ? resolveTaskTypeForTurn(turn)
+    : undefined;
+  const declaredRestaurantTaskSwitch =
+    turn.domain === 'restaurant'
+    && Boolean(container.activeTask)
+    && !isTerminalTaskStatus(container.activeTask!.status)
+    && container.activeTask!.domain === 'restaurant'
+    && (typeof turn.entities.restaurantTransactionType === 'string'
+        || turn.action === 'book'
+        || turn.action === 'order')
+    && Boolean(desiredRestaurantTask)
+    && container.activeTask!.type !== desiredRestaurantTask;
+  if (declaredRestaurantTaskSwitch) {
+    container = applyTaskStateEvent(container, {
+      kind:'suspend', eventId:`${eventId}:restaurant_task_switch_suspend`,
+    }, now);
+    container = applyTaskStateEvent(container, {
+      kind:'start', eventId:`${eventId}:restaurant_task_switch_start`,
+      params:{
+        type:desiredRestaurantTask!,
+        sourceChannel:channel,
+        initialSlots:taskSlotPatch(turn.entities),
+      },
+    }, now);
+    reasons.push('task_suspended_for_topic_switch');
   }
 
   // A terminal task (cancelled/completed/failed/superseded) left sitting in
