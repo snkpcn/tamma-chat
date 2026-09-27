@@ -959,8 +959,12 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
 function specificClarificationMessage(input: ResponseComposerInput): string | null {
   if (input.language !== 'th' || !input.semanticTurn) return null;
   const turn = input.semanticTurn;
-  const task = input.dialogDecision.taskStateContainer.activeTask
+  const candidateTask = input.dialogDecision.taskStateContainer.activeTask
     ?? input.dialogDecision.taskStateContainer.suspendedTask;
+  // Never use a stale task from another domain to phrase clarification for
+  // the current question. That caused a room-availability question to be
+  // answered with "หมายถึง ขี่ม้า ... ใช่ไหม".
+  const task = candidateTask?.domain === turn.domain ? candidateTask : null;
   const entityNames = [
     ...new Set([
       ...task?.selectedEntities.map(entity => entity.name).filter(Boolean) ?? [],
@@ -983,6 +987,21 @@ function specificClarificationMessage(input: ResponseComposerInput): string | nu
   }
   if ((turn.informationNeed ?? 'none') === 'price' && task) {
     return 'ต้องการเช็กราคาของรายการที่กำลังคุยอยู่ใช่ไหมครับ';
+  }
+  if (
+    turn.domain === 'stay'
+    && turn.informationNeed === 'availability'
+    && !turn.entities.date
+    && !turn.entities.checkIn
+  ) {
+    return 'จะเข้าพักวันไหนครับ จะได้เช็กห้องว่างจริงให้ตรงวัน';
+  }
+  if (
+    turn.domain === 'restaurant'
+    && turn.informationNeed === 'availability'
+    && !turn.entities.date
+  ) {
+    return 'ต้องการเช็กโต๊ะวันไหนครับ จะได้เช็กเวลาว่างให้ตรงวัน';
   }
   if (turn.domain === 'activity') return 'หมายถึงกิจกรรมหรือม้าตัวที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ';
   if (turn.domain === 'stay') return 'หมายถึงที่พักที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ';
