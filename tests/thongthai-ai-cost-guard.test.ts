@@ -8,7 +8,7 @@ import {
   reserveWorstCaseCostUsd,
 } from '../netlify/functions/_ai-cost-policy';
 import {
-  buildSemanticInterpreterPrompt,
+  buildProductionSemanticInterpreterPrompt,
   emptySemanticContext,
   type SemanticContext,
 } from '../netlify/functions/_semantic-interpreter';
@@ -41,7 +41,7 @@ test('production defaults enforce the owner hard cap and compact semantic output
 });
 
 test('semantic prompt is relevance-based and stays inside normal/complex token targets',()=>{
-  const normal=buildSemanticInterpreterPrompt(emptySemanticContext(),'แถวนี้มีอะไรน่าสนใจบ้าง');
+  const normal=buildProductionSemanticInterpreterPrompt(emptySemanticContext(),'แถวนี้มีอะไรน่าสนใจบ้าง');
   assert.ok(estimateInputTokens([normal,'แถวนี้มีอะไรน่าสนใจบ้าง'])<=2_500);
 
   const context:SemanticContext={
@@ -69,7 +69,7 @@ test('semantic prompt is relevance-based and stays inside normal/complex token t
       knownSlots:{},missingFields:['checkIn','checkOut'],selectedEntities:[],constraints:[],
     },
   };
-  const complex=buildSemanticInterpreterPrompt(context,'กลับไปเรื่องเดิม แต่ขอเปลี่ยนเป็นพรุ่งนี้ช่วงเย็นนะ');
+  const complex=buildProductionSemanticInterpreterPrompt(context,'กลับไปเรื่องเดิม แต่ขอเปลี่ยนเป็นพรุ่งนี้ช่วงเย็นนะ');
   assert.ok(estimateInputTokens([complex,'กลับไปเรื่องเดิม แต่ขอเปลี่ยนเป็นพรุ่งนี้ช่วงเย็นนะ'])<=4_000);
 });
 
