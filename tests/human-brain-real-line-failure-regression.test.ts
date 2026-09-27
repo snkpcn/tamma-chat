@@ -268,3 +268,37 @@ test('REAL LINE: explicit horse correction replaces stale selected entity instea
   assert.equal(result.taskStateAfter.activeTask?.selectedEntities[0]?.name,'ทองไทย');
   assert.equal(result.dialogDecision.actionProposal,undefined);
 });
+
+
+test('REAL LINE: composed assistant reply is persisted so the next human reference can see what Thongthai actually said', async()=>{
+  let snapshot:GuestAgentStateSnapshot={exists:false,state:{},updatedAt:null};
+  let revision=0;
+  const deps:Partial<OneMindDependencies>={
+    resolveCanonicalGuestId:async()=>CANON,
+    guestDbIdFromAnonymousId:async()=>GUEST,
+    interpretSemanticTurn:async()=>semantic({
+      domain:'membership',intent:'membership_information',action:'ask',speechAct:'question',
+    }),
+    buildKnowledgeAdapters:()=>({}),
+    mirrorActivityTaskToLegacySession:async()=>{},
+  };
+  const stateDeps={
+    loadSnapshot:async()=>snapshot,
+    compareAndSwap:async(_id:string,current:GuestAgentStateSnapshot,patch:{set?:Record<string,unknown>;removeKeys?:string[]})=>{
+      revision+=1;
+      const next={...current.state,...(patch.set??{})};
+      for(const key of patch.removeKeys??[]) delete next[key];
+      snapshot={exists:true,state:next,updatedAt:new Date(NOW.getTime()+revision).toISOString()};
+      return {status:'applied' as const,snapshot};
+    },
+  };
+  const result=await processOneMindCustomerTurn({
+    channel:'line',language:'th',message:'สมัครสมาชิกยังไง',
+    eventId:'real-line-assistant-memory-1',providerUserKey:'line-key',persistState:true,
+  },deps,stateDeps,NOW,{requireSemanticSupervisor:true});
+  assert.equal(result.status,'composed');
+  if(result.status!=='composed') return;
+  const state=snapshot.state.conversationContext as {recentTurns?:Array<{role:string;content:string}>};
+  assert.ok(state.recentTurns?.some(turn=>turn.role==='assistant'&&turn.content.includes('สมัครสมาชิก')),
+    'assistant-facing answer must be bounded into conversation evidence for later references');
+});
