@@ -166,7 +166,7 @@ const SIDE_QUESTION_ACTIONS: ReadonlySet<SemanticAction> = new Set(['ask', 'disc
 const KNOWN_TASK_SLOT_KEYS = new Set([
   'date', 'time', 'partySize', 'durationMinutes', 'resourceCode', 'quantity',
   'customerName', 'phone', 'checkIn', 'checkOut', 'endDate', 'nights',
-  'bedrooms', 'roomType',
+  'bedrooms', 'roomType', 'itemName', 'items',
 ]);
 
 function providesTaskSlotValue(entities: Record<string, unknown>): boolean {
@@ -178,7 +178,7 @@ function providesTaskSlotValue(entities: Record<string, unknown>): boolean {
  *  read it (see DialogPlan.compareAttribute below) -- but it is NOT a real
  *  task slot and must never be written into task.slots. Strips it (and any
  *  future non-slot meta keys) before a merge, never before it's read. */
-const NON_SLOT_META_KEYS = new Set(['compareAttribute']);
+const NON_SLOT_META_KEYS = new Set(['compareAttribute', 'restaurantTransactionType']);
 function taskSlotPatch(entities: Record<string, unknown>): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entities)) {
@@ -243,6 +243,21 @@ const DEFAULT_TASK_TYPE_FOR_DOMAIN: Partial<Record<SemanticDomain, ActiveTaskTyp
   membership: 'membership',
   journey: 'journey_planning',
 };
+
+/** Restaurant has two real transaction types. The semantic supervisor owns
+ * which one the customer means; this function consumes only that structured
+ * meaning (plus the already-closed action), never raw text. */
+export function resolveTaskTypeForTurn(turn: SemanticTurn): ActiveTaskType | undefined {
+  if (turn.domain !== 'restaurant') return DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
+  const declared = typeof turn.entities.restaurantTransactionType === 'string'
+    ? turn.entities.restaurantTransactionType.trim()
+    : '';
+  if (declared === 'table_booking') return 'restaurant_booking';
+  if (declared === 'preorder') return 'restaurant_preorder';
+  if (turn.action === 'book') return 'restaurant_booking';
+  if (turn.action === 'order') return 'restaurant_preorder';
+  return 'restaurant_preorder';
+}
 
 export const TOOL_NAME_FOR_TASK_TYPE: Partial<Record<ActiveTaskType, string>> = {
   activity_booking: 'create_booking',
@@ -392,6 +407,40 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     return { container, reasons };
   }
 
+  // Human Core PR F: Restaurant contains TWO transactional task types inside
+  // the same semantic domain. A deliberate switch between table_booking and
+  // preorder must never merge the new transaction's slots into the old task
+  // merely because both domains are "restaurant". Suspend the old working
+  // task, preserve it as resumable state, and start a clean task of the
+  // explicitly requested type. No raw customer text participates here.
+  const desiredRestaurantTask = turn.domain === 'restaurant'
+    ? resolveTaskTypeForTurn(turn)
+    : undefined;
+  const declaredRestaurantTaskSwitch =
+    turn.domain === 'restaurant'
+    && Boolean(container.activeTask)
+    && !isTerminalTaskStatus(container.activeTask!.status)
+    && container.activeTask!.domain === 'restaurant'
+    && (typeof turn.entities.restaurantTransactionType === 'string'
+        || turn.action === 'book'
+        || turn.action === 'order')
+    && Boolean(desiredRestaurantTask)
+    && container.activeTask!.type !== desiredRestaurantTask;
+  if (declaredRestaurantTaskSwitch) {
+    container = applyTaskStateEvent(container, {
+      kind:'suspend', eventId:`${eventId}:restaurant_task_switch_suspend`,
+    }, now);
+    container = applyTaskStateEvent(container, {
+      kind:'start', eventId:`${eventId}:restaurant_task_switch_start`,
+      params:{
+        type:desiredRestaurantTask!,
+        sourceChannel:channel,
+        initialSlots:taskSlotPatch(turn.entities),
+      },
+    }, now);
+    reasons.push('task_suspended_for_topic_switch');
+  }
+
   // A terminal task (cancelled/completed/failed/superseded) left sitting in
   // container.activeTask must be treated exactly like "no active task" here
   // -- the ORIGINAL check was a bare null-check, so a fresh, unrelated
@@ -417,7 +466,7 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       // existed. Preserve that bounded working selection as a task, still
       // without commitmentIntent and therefore without transaction authority.
       const names=explicitSelectionNames(turn);
-      const defaultType=DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
+      const defaultType=resolveTaskTypeForTurn(turn);
       if (names.length > 0 && defaultType) {
         container = applyTaskStateEvent(container, {
           kind:'start', eventId:`${eventId}:task_merge`,
@@ -443,7 +492,7 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       return { container, reasons };
     }
 
-    const defaultType = DEFAULT_TASK_TYPE_FOR_DOMAIN[turn.domain];
+    const defaultType = resolveTaskTypeForTurn(turn);
     if (TASK_WORTHY_ACTIONS.has(turn.action) && defaultType) {
       container = applyTaskStateEvent(container, {
         kind: 'start', eventId: `${eventId}:task_merge`,
@@ -941,6 +990,55 @@ function applyActivityCatalogPolicy(
   return applied ? planDialogTurn({ ...input, taskState: container }, now) : null;
 }
 
+/** Pure Restaurant preorder slot normalization. It consumes only semantic
+ * entities/task state that already exist: explicit structured order lines, or
+ * one canonical menu selection plus an explicit quantity. It never reads the
+ * customer's sentence and never supplies a default quantity. */
+export function resolveRestaurantStructuredSlots(task: ActiveTask): Record<string, unknown> {
+  if (task.type === 'restaurant_booking') {
+    return task.slots.serviceType === 'restaurant' ? {} : { serviceType:'restaurant' };
+  }
+  if (task.type !== 'restaurant_preorder') return {};
+
+  const existing = Array.isArray(task.slots.items) ? task.slots.items : [];
+  const normalizedExisting = existing.flatMap(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const row = value as Record<string, unknown>;
+    const name = typeof row.name === 'string' ? row.name.trim() : '';
+    const quantity = Number(row.quantity);
+    return name && Number.isInteger(quantity) && quantity >= 1 && quantity <= 50
+      ? [{ name, quantity }]
+      : [];
+  });
+  if (normalizedExisting.length === existing.length && normalizedExisting.length > 0) {
+    return { items: normalizedExisting };
+  }
+
+  const quantity = Number(task.slots.quantity);
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 50) return {};
+
+  const named = typeof task.slots.itemName === 'string' ? task.slots.itemName.trim() : '';
+  const selected = task.selectedEntities.filter(entity => entity.id.startsWith('menu:'));
+  const name = named || (selected.length === 1 ? selected[0]!.name.trim() : '');
+  return name ? { items:[{ name, quantity }] } : {};
+}
+
+function applyRestaurantStructuredPolicy(plan: DialogPlan, input: DialogInput, now: Date): DialogPlan | null {
+  const task = plan.taskStateContainer.activeTask;
+  if (!task || (task.type !== 'restaurant_preorder' && task.type !== 'restaurant_booking')) return null;
+  const slotPatch = resolveRestaurantStructuredSlots(task);
+  if (!Object.keys(slotPatch).length) return null;
+
+  const changed = Object.entries(slotPatch).some(([key,value]) =>
+    JSON.stringify(task.slots[key] ?? null) !== JSON.stringify(value ?? null));
+  if (!changed) return null;
+
+  const container = applyTaskStateEvent(plan.taskStateContainer, {
+    kind:'update_slots', eventId:`${input.eventId}:restaurant_structured_slots`, slotPatch,
+  }, now);
+  return planDialogTurn({ ...input, taskState:container }, now);
+}
+
 /** Pure Stay slot normalization. It consumes only already-understood
  * SemanticMeaning/task state: a canonical selected stay entity, ISO check-in
  * date, and either ISO checkout or a numeric night count. No customer text is
@@ -986,6 +1084,8 @@ export async function processDialogTurnDetailed(
   now: Date = new Date(),
 ): Promise<DialogTurnResult> {
   let plan = planDialogTurn(input, now);
+  const restaurantReplanned = applyRestaurantStructuredPolicy(plan, input, now);
+  if (restaurantReplanned) plan = restaurantReplanned;
   const stayReplanned = applyStayStructuredPolicy(plan, input, now);
   if (stayReplanned) plan = stayReplanned;
   let bundles = await resolveBundles(plan, adapters, now);

@@ -262,6 +262,7 @@ const FIELD_LABELS_TH: Record<string, string> = {
   resourceCode:'รายการที่ต้องการ', customerName:'ชื่อผู้จอง', phone:'เบอร์ติดต่อ',
   checkIn:'วันเช็กอิน', checkOut:'วันเช็กเอาต์', endDate:'วันเช็กเอาต์',
   nights:'จำนวนคืน', bedrooms:'จำนวนห้องนอน', quantity:'จำนวน',
+  items:'รายการอาหารและจำนวน', itemName:'เมนู',
 };
 
 function activeTaskSubjectTh(input: ResponseComposerInput): string {

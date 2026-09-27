@@ -21,7 +21,7 @@ import type { ActiveTask, ActiveTaskType } from './_task-state';
 
 const ACTIVITY_BOOKING_REQUIRED = ['resourceCode', 'date', 'durationMinutes'] as const;
 const STAY_BOOKING_REQUIRED = ['resourceCode', 'date', 'endDate', 'partySize'] as const;
-const RESTAURANT_BOOKING_REQUIRED = ['date'] as const;
+const RESTAURANT_BOOKING_REQUIRED = ['date', 'time', 'partySize', 'customerName', 'phone'] as const;
 
 function missingFromStaticList(slots: Record<string, unknown>, required: readonly string[]): string[] {
   return required.filter(field => slots[field] === null || slots[field] === undefined || slots[field] === '');
@@ -58,10 +58,23 @@ function taskSlotsToPendingPromotionRedemption(task: ActiveTask): PendingPromoti
  *  uses a code-grounded static list (see file header) for the three that
  *  don't. Returns [] for domains with no authored policy yet (membership,
  *  otop_order, cafe_inquiry, journey_planning) -- deliberately NOT guessed. */
+function hasValidRestaurantPreorderItems(task: ActiveTask): boolean {
+  if (!Array.isArray(task.slots.items) || task.slots.items.length === 0) return false;
+  return task.slots.items.every(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+    const row = item as Record<string, unknown>;
+    const name = typeof row.name === 'string' ? row.name.trim() : '';
+    const quantity = Number(row.quantity);
+    return Boolean(name) && Number.isInteger(quantity) && quantity >= 1 && quantity <= 50;
+  });
+}
+
 export function computeTaskMissingFields(task: ActiveTask): string[] {
   switch (task.type) {
-    case 'restaurant_preorder':
-      return missingRestaurantPreorderFields(taskSlotsToRestaurantPreorderDraft(task));
+    case 'restaurant_preorder': {
+      const missing = missingRestaurantPreorderFields(taskSlotsToRestaurantPreorderDraft(task));
+      return hasValidRestaurantPreorderItems(task) ? missing : ['items', ...missing];
+    }
     case 'promotion_redemption':
       return missingPromotionFields(taskSlotsToPendingPromotionRedemption(task));
     case 'activity_booking':

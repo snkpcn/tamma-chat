@@ -76,6 +76,8 @@ const ACTIVITY_ASSET_KIND = 'activity_asset';
 const ACTIVITY_KIND = 'activity';
 const STAY_KIND = 'stay';
 const STAY_TYPE_KIND = 'stay_type';
+const MENU_KIND = 'menu';
+const MENU_CATEGORY_KIND = 'menu_category';
 
 function emptyScope(
   meaning: Pick<SemanticMeaning, 'domain' | 'scopeBreadth' | 'focusKind'>,
@@ -108,12 +110,45 @@ export function deriveCanonicalKnowledgeScope(meaning: SemanticMeaning): Canonic
   }
 
   // breadth === 'focused' from here.
-  if (meaning.domain !== 'activity' && meaning.domain !== 'stay') {
+  if (meaning.domain !== 'activity' && meaning.domain !== 'stay' && meaning.domain !== 'restaurant') {
     // Focused in a domain this contract doesn't canonicalize yet -- remain
     // unresolved rather than guessing, but this is intentionally inert
     // until that domain's own PR wires it (see filterFactsByCanonicalScope,
     // which only firewalls domains it understands).
     return emptyScope(meaning, 'unresolved', 'domain_not_yet_canonicalized');
+  }
+
+  if (meaning.domain === 'restaurant') {
+    if ((meaning.focusKind === 'category' || meaning.focusKind === 'entity_type') && meaning.focusValue) {
+      const category = meaning.focusValue.startsWith(`${MENU_CATEGORY_KIND}:`)
+        ? meaning.focusValue
+        : `${MENU_CATEGORY_KIND}:${meaning.focusValue}`;
+      return {
+        ...emptyScope(meaning, 'resolved', 'declared_menu_category'),
+        canonicalParentIds: [category],
+        allowedEntityKinds: [MENU_KIND, MENU_CATEGORY_KIND],
+      };
+    }
+    if (meaning.focusKind === 'entity' && meaning.focusValue) {
+      if (meaning.focusValue.startsWith(`${MENU_KIND}:`)) {
+        return {
+          ...emptyScope(meaning, 'resolved', 'resolved_menu_entity_reference'),
+          canonicalEntityIds: [meaning.focusValue],
+          allowedEntityKinds: [MENU_KIND, MENU_CATEGORY_KIND],
+        };
+      }
+      return {
+        ...emptyScope(meaning, 'ambiguous', 'named_menu_item_pending_sot_lookup'),
+        allowedEntityKinds: [MENU_KIND, MENU_CATEGORY_KIND],
+        pendingFocusName: meaning.focusValue,
+      };
+    }
+    if (meaning.focusKind === 'prior_reference') {
+      return meaning.focusValue
+        ? { ...emptyScope(meaning, 'ambiguous', 'prior_menu_reference_pending_sot_lookup'), allowedEntityKinds: [MENU_KIND, MENU_CATEGORY_KIND], pendingFocusName: meaning.focusValue }
+        : emptyScope(meaning, 'unresolved', 'prior_menu_reference_without_evidence');
+    }
+    return emptyScope(meaning, 'unresolved', 'no_restaurant_focus_signal');
   }
 
   if (meaning.domain === 'stay') {
@@ -199,8 +234,45 @@ export function resolveCanonicalScopeAgainstFacts(
   scope: CanonicalKnowledgeScope,
   facts: readonly ScopableFact[],
 ): CanonicalKnowledgeScope {
-  if (scope.domain !== 'activity' && scope.domain !== 'stay') return scope;
+  if (scope.domain !== 'activity' && scope.domain !== 'stay' && scope.domain !== 'restaurant') return scope;
   const map = factMapFrom(facts);
+
+  if (scope.domain === 'restaurant') {
+    if (scope.status === 'ambiguous' && scope.pendingFocusName) {
+      const matches = [...map.keys()]
+        .map(key => key.match(/^menu:([^:]+):name$/)?.[1])
+        .filter((value): value is string => Boolean(value))
+        .filter(id => map.get(`menu:${id}:name`) === scope.pendingFocusName);
+      if (matches.length !== 1) {
+        return {
+          ...scope,
+          status: matches.length > 1 ? 'ambiguous' : 'unresolved',
+          canonicalEntityIds: [],
+          canonicalParentIds: [],
+          provenance: matches.length > 1 ? 'named_menu_item_not_unique_in_live_catalog' : 'named_menu_item_not_found_in_live_catalog',
+        };
+      }
+      const id = matches[0]!;
+      const category = map.get(`menu:${id}:category`);
+      return {
+        ...scope,
+        status: 'resolved',
+        canonicalEntityIds: [`menu:${id}`],
+        canonicalParentIds: typeof category === 'string' && category ? [`${MENU_CATEGORY_KIND}:${category}`] : [],
+        provenance: 'named_menu_item_resolved_against_live_catalog',
+      };
+    }
+    if (scope.status === 'resolved' && scope.canonicalEntityIds.length && !scope.canonicalParentIds.length) {
+      const parents = scope.canonicalEntityIds
+        .map(entityId => map.get(`${entityId}:category`))
+        .filter((value): value is string => typeof value === 'string' && value.length > 0)
+        .map(value => `${MENU_CATEGORY_KIND}:${value}`);
+      if (parents.length) {
+        return { ...scope, canonicalParentIds: [...new Set(parents)], provenance: `${scope.provenance}+menu_category_backfilled_from_live_catalog` };
+      }
+    }
+    return scope;
+  }
 
   if (scope.domain === 'stay') {
     if (scope.status === 'ambiguous' && scope.pendingFocusName) {
@@ -292,7 +364,7 @@ export function filterFactsByCanonicalScope(
   facts: readonly ScopableFact[],
   scope: CanonicalKnowledgeScope,
 ): readonly ScopableFact[] {
-  if (scope.domain !== 'activity' && scope.domain !== 'stay') return facts;
+  if (scope.domain !== 'activity' && scope.domain !== 'stay' && scope.domain !== 'restaurant') return facts;
   if (scope.breadth === 'domain_wide' || scope.breadth === 'unknown') return facts;
   // breadth === 'focused'
   if (scope.status !== 'resolved') return [];
@@ -300,6 +372,24 @@ export function filterFactsByCanonicalScope(
   const allowedEntities = new Set(scope.canonicalEntityIds);
   if (!allowedParents.size && !allowedEntities.size) return facts;
   const map = factMapFrom(facts);
+  if (scope.domain === 'restaurant') {
+    return facts.filter(fact => {
+      const menuMatch = fact.key.match(/^menu:([^:]+):/);
+      if (menuMatch) {
+        const id = menuMatch[1]!;
+        // An entity-focused question must never widen back out to sibling
+        // menu rows merely because the resolved entity also has a category
+        // parent. Category membership is only a selector when there is no
+        // explicit canonical entity in scope.
+        if (allowedEntities.size) return allowedEntities.has(`menu:${id}`);
+        const category = map.get(`menu:${id}:category`);
+        return typeof category === 'string' && allowedParents.has(`${MENU_CATEGORY_KIND}:${category}`);
+      }
+      const categoryMatch = fact.key.match(/^menu_category:([^:]+):/);
+      if (categoryMatch) return allowedParents.has(`${MENU_CATEGORY_KIND}:${categoryMatch[1]!}`);
+      return true;
+    });
+  }
   if (scope.domain === 'stay') {
     return facts.filter(fact => {
       // Organization-wide policy remains valid inside every RESOLVED stay

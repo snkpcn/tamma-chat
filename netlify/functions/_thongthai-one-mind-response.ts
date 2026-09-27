@@ -192,14 +192,13 @@ export function readOnlyCutoverEligibility(
       && !turn.dialogDecision.actionProposal) {
     return { eligible:true };
   }
-  // A newly-created restaurant preorder from an ambiguous party/budget
-  // follow-up is not a safe task continuation yet. Let the stateful
-  // deterministic restaurant advisor answer first; only an already-active
-  // preorder may collect pickup fields here.
-  if (!turn.taskStateBefore.activeTask
-      && turn.taskStateAfter.activeTask?.type === 'restaurant_preorder') {
-    return { eligible:false, reason:'transactional_or_task_turn' };
-  }
+  // Human Core PR F: Restaurant now owns its bounded preorder planning
+  // state inside One-Mind. Creating a NEW restaurant_preorder task is safe
+  // when the Dialog Manager is only collecting/clarifying structured fields
+  // and has issued no ActionProposal: this persists planning state only, never
+  // an order write. The generic safe-continuation gate below enforces exactly
+  // those conditions. Real execution still remains blocked above whenever an
+  // ActionProposal exists and is handled only by the terminal Restaurant gate.
   // A turn that merely continues an already-active task (fills a slot,
   // corrects a field, selects an entity, or asks one clarifying question)
   // never reaches an ActionProposal -- checked above -- so it carries none of

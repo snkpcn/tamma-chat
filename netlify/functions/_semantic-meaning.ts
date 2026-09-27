@@ -151,6 +151,23 @@ function deriveFocus(turn: SemanticTurn): { focusKind: SemanticFocusKind; focusV
     return { focusKind: 'entity_type', focusValue: turn.entities.activityCode.trim().toLowerCase() };
   }
 
+  if (turn.domain === 'restaurant') {
+    const menuItemId = typeof turn.entities.menuItemId === 'string' ? turn.entities.menuItemId.trim() : '';
+    if (menuItemId) return { focusKind: 'entity', focusValue: menuItemId.startsWith('menu:') ? menuItemId : `menu:${menuItemId}` };
+
+    const itemName = typeof turn.entities.itemName === 'string' ? turn.entities.itemName.trim() : '';
+    if (itemName) return { focusKind: 'entity', focusValue: itemName };
+
+    const menuCategory = typeof turn.entities.menuCategory === 'string' ? turn.entities.menuCategory.trim() : '';
+    if (menuCategory) return { focusKind: 'category', focusValue: `menu_category:${menuCategory}` };
+
+    const items = Array.isArray(turn.entities.items) ? turn.entities.items : [];
+    if (items.length === 1 && items[0] && typeof items[0] === 'object' && !Array.isArray(items[0])) {
+      const name = (items[0] as Record<string, unknown>).name;
+      if (typeof name === 'string' && name.trim()) return { focusKind: 'entity', focusValue: name.trim() };
+    }
+  }
+
   if (turn.domain === 'stay') {
     const resourceCode = typeof turn.entities.resourceCode === 'string' ? turn.entities.resourceCode.trim() : '';
     if (resourceCode) return { focusKind: 'entity', focusValue: resourceCode.startsWith('stay:') ? resourceCode : `stay:${resourceCode}` };
