@@ -194,15 +194,24 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
   const errors:string[]=[];
   const packed=JSON.stringify(t);
   const task=result.turn.taskStateAfter.activeTask;
+  const response=result.status==='composed' ? result.response.message : '';
 
   if(['book','order'].includes(t.action)) errors.push(`unexpected transaction action=${t.action}`);
   if(result.turn.dialogDecision.actionProposal) errors.push('unexpected actionProposal');
+  if(result.status==='composed' && /ขอรายละเอียดเพิ่มอีกนิด|ช่วยบอกรายละเอียดเพิ่ม|ช่วยบอกเพิ่มอีกนิด/u.test(response)){
+    errors.push('generic clarification fallback leaked into sufficient-context acceptance');
+  }
+  if(result.status==='composed' && /จองเรียบร้อย|ยืนยันการจองแล้ว|ส่งรายการเข้าระบบแล้ว|สั่งเรียบร้อย/u.test(response)){
+    errors.push('response falsely implies completed transaction');
+  }
 
   switch(n){
     case 1:
       if(t.domain!=='activity') errors.push(`domain=${t.domain}`);
       if(!hasAny(packed,['ฝน','rain'])) errors.push('rain contingency lost');
       if(!packed.includes('ทองไทย')) errors.push('Thongthai exclusion lost');
+      if(result.status==='composed' && !response.includes('ภาราดร')) errors.push('response did not surface the verified calmer horse');
+      if(result.status==='composed' && !hasAny(response,['ฝน','rain'])) errors.push('response dropped rain fallback clause');
       break;
     case 2:
       if(t.domain!=='activity') errors.push(`domain=${t.domain}`);
@@ -210,6 +219,7 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
       if(task?.slots.horseName && task.slots.horseName!=='ทองไทย') errors.push(`stale horse slot=${String(task.slots.horseName)}`);
       if(task?.selectedEntities.some(e=>e.name==='ภาราดร')
           && !task.selectedEntities.some(e=>e.name==='ทองไทย')) errors.push('stale selected entity ภาราดร survived correction');
+      if(result.status==='composed' && !response.includes('ทองไทย')) errors.push('response failed to acknowledge corrected horse');
       break;
     case 3:
       if(t.domain!=='restaurant') errors.push(`domain=${t.domain}`);
@@ -222,9 +232,13 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
       if(t.action!=='recommend') errors.push(`action=${t.action}`);
       if(!hasAny(JSON.stringify(t.constraints),['no_shrimp','shrimp','กุ้ง'])) errors.push('no-shrimp constraint lost');
       if(!hasAny(JSON.stringify(t.constraints),['no_spicy','spicy','เผ็ด'])) errors.push('low-spice constraint lost');
+      if(result.status==='composed' && /กุ้งทอด/u.test(response)) errors.push('response violated shrimp constraint');
+      if(result.status==='composed' && !hasAny(response,['ตำไทย','ไก่ย่าง'])) errors.push('response did not make a grounded meal recommendation');
       break;
     case 5:
       if(t.domain!=='journey') errors.push(`domain=${t.domain}`);
+      if(result.status==='composed' && !/วันแรก|วันที่สอง/u.test(response)) errors.push('journey response did not compose a multi-day plan');
+      if(result.status==='composed' && !hasAny(response,['ขี่ม้า','ของฝาก'])) errors.push('journey response dropped requested plan components');
       break;
     case 6:
       if(t.domain==='unknown') errors.push('prior plan reference became unknown');
@@ -233,6 +247,8 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
     case 7:
       if(t.domain!=='activity') errors.push(`domain=${t.domain}`);
       if(result.turn.dialogDecision.mode==='collect_field') errors.push('reference hijacked into missing-slot collection');
+      if(result.status==='composed' && /30\s*\/\s*60\s*\/\s*90|30\s*นาที.*60\s*นาที/u.test(response)) errors.push('response regressed to duration prompt');
+      if(result.status==='composed' && !response.includes('ภาราดร')) errors.push('response failed to resolve prior calmer-horse reference');
       break;
     case 8:
       if(t.domain!=='activity') errors.push(`domain=${t.domain}`);
@@ -247,6 +263,7 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
       if(t.domain!=='promotion') errors.push(`domain=${t.domain}`);
       if(t.action!=='recommend') errors.push(`action=${t.action}`);
       if(!hasAny(JSON.stringify(t.constraints),['membership','สมาชิก'])) errors.push('membership constraint lost');
+      if(result.status==='composed' && !response.includes('โปรร้านอาหาร')) errors.push('response failed to surface verified eligible promotion');
       break;
     case 11:
       if(!['activity','ecosystem'].includes(t.domain)) errors.push(`domain=${t.domain}`);
@@ -261,11 +278,13 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
       if(t.domain!=='activity') errors.push(`domain=${t.domain}`);
       if(t.informationNeed!=='availability') errors.push(`need=${t.informationNeed}`);
       if(result.turn.dialogDecision.mode==='collect_field') errors.push('availability query asked booking slot');
+      if(result.status==='composed' && /30\s*\/\s*60\s*\/\s*90|เลือก.*นาที/u.test(response)) errors.push('availability response asked for booking duration');
       break;
     case 14:
       if(t.domain!=='activity') errors.push(`domain=${t.domain}`);
       if(t.informationNeed!=='availability' && t.action!=='status') errors.push(`conditional fallback not availability/status: action=${t.action} need=${t.informationNeed}`);
       if(['confirm','book','order'].includes(t.action)) errors.push(`conditional fallback mutated selection: ${t.action}`);
+      if(result.status==='composed' && /ล็อกตัวเลือก|เลือกภาราดรให้แล้ว|จอง.*ภาราดร/u.test(response)) errors.push('conditional response prematurely selected/booked primary horse');
       break;
     case 15:
       if(t.domain!=='stay') errors.push(`domain=${t.domain}`);
@@ -275,6 +294,7 @@ function inspectTurn(n:number,result:OneMindCustomerTurnResult):string[] {
     case 16:
       if(t.intent!=='summarize_active_task' && !hasAny(t.normalizedMeaning??'', ['สรุป','summary'])) errors.push(`summary intent=${t.intent}`);
       if(result.turn.dialogDecision.actionProposal) errors.push('summary proposed transaction');
+      if(result.status==='composed' && !/ยังไม่ได้ยืนยันการจอง|ยังไม่ได้จอง|ไม่ได้ยืนยัน/u.test(response)) errors.push('summary response omitted explicit no-transaction status');
       break;
   }
   return errors;
