@@ -75,8 +75,11 @@ export function computeTaskMissingFields(task: ActiveTask): string[] {
       const missing = missingRestaurantPreorderFields(taskSlotsToRestaurantPreorderDraft(task));
       return hasValidRestaurantPreorderItems(task) ? missing : ['items', ...missing];
     }
-    case 'promotion_redemption':
-      return missingPromotionFields(taskSlotsToPendingPromotionRedemption(task));
+    case 'promotion_redemption': {
+      const missing=missingPromotionFields(taskSlotsToPendingPromotionRedemption(task));
+      const campaignId=typeof task.slots.campaignId==='string' ? task.slots.campaignId.trim() : '';
+      return campaignId ? missing : ['campaignId', ...missing];
+    }
     case 'activity_booking':
       return missingFromStaticList(task.slots, ACTIVITY_BOOKING_REQUIRED);
     case 'stay_booking':
