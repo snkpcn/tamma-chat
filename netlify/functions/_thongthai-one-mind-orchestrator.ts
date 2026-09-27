@@ -279,10 +279,10 @@ export async function resolveOneMindIdentity(
 // this, a customer could never deterministically say "เอาภาราดร" after being
 // SHOWN that name this same conversation -- there would be nothing in
 // recentEntities to match against.
-const CATALOG_NAME_FACT_KEY = /^(restaurant|menu|activity|activity_asset|stay|otop)(?::[^:]+)*:([^:]+):name$/;
+const CATALOG_NAME_FACT_KEY = /^(restaurant|menu|activity|activity_asset|stay|otop|promo)(?::[^:]+)*:([^:]+):name$/;
 const FACT_PREFIX_DOMAIN: Partial<Record<string, SemanticTurn['domain']>> = {
   restaurant: 'restaurant', menu: 'restaurant', activity: 'activity', activity_asset: 'activity',
-  stay: 'stay', otop: 'otop',
+  stay: 'stay', otop: 'otop', promo:'promotion',
 };
 
 function entitiesFromGroundedFacts(bundles: readonly KnowledgeBundle[]): SemanticContextEntity[] {
