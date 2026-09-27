@@ -2,6 +2,7 @@
 // Rerun after semantic refinement + structured JSON ceiling fixes.
 // Final owner acceptance rerun after state, journey, and context fixes.
 // Final human-response certification after grounded response and reference fixes.
+// Certification rerun after compound-turn and journey coherence fixes.
 // Final rerun after open-world local-domain and bounded-reference review fixes.
 process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE = '1';
 
