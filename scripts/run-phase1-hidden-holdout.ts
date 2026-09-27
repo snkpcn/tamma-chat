@@ -1,3 +1,4 @@
+process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE = '1';
 // Phase 1 hidden holdout acceptance.
 // Created only after the runtime implementation was frozen and branch CI was green.
 // These utterances are intentionally separate from the development/regression corpora.
@@ -8,6 +9,11 @@ import {
   type SemanticContext,
   type SemanticTurn,
 } from '../netlify/functions/_semantic-interpreter';
+const interpretSemanticTurnForCertification = (
+  message:string,
+  context:Parameters<typeof interpretSemanticTurn>[1],
+) => interpretSemanticTurn(message, context, { certificationMode:true });
+
 
 type HoldoutCase = {
   id: string;
@@ -241,7 +247,7 @@ async function main():Promise<void>{
 
   for (const item of cases) {
     try {
-      const turn = await interpretSemanticTurn(item.message, item.context);
+      const turn = await interpretSemanticTurnForCertification(item.message, item.context);
       const errors = item.check(turn);
       results.push({
         id: item.id,
