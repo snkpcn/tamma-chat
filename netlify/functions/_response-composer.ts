@@ -932,10 +932,15 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
     && (turn.speechAct === 'selection' || turn.speechAct === 'correction' || turn.action === 'correct_previous' || turn.action === 'modify')
   ) {
     const entities = turn.entities;
-    const chosen = [
+    const chosenFromEntities = [
       entities.horseName, entities.resourceName, entities.activity_asset, entities.activityAsset,
+      entities.selected_activity_asset, entities.selectedActivityAsset,
       entities.roomType, entities.itemName, entities.productName, entities.promotionName,
     ].find(value => typeof value === 'string' && value.trim());
+    const chosen = chosenFromEntities
+      ?? (turn.speechAct === 'selection' && task?.selectedEntities.length === 1
+        ? task.selectedEntities[0]!.name
+        : undefined);
     const partySize = Number(entities.partySize);
     const children = Number(entities.children);
     const adults = Number(entities.adults);
