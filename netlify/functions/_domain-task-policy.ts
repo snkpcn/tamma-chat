@@ -21,7 +21,7 @@ import type { ActiveTask, ActiveTaskType } from './_task-state';
 
 const ACTIVITY_BOOKING_REQUIRED = ['resourceCode', 'date', 'durationMinutes'] as const;
 const STAY_BOOKING_REQUIRED = ['resourceCode', 'date', 'endDate', 'partySize'] as const;
-const RESTAURANT_BOOKING_REQUIRED = ['date'] as const;
+const RESTAURANT_BOOKING_REQUIRED = ['date', 'time', 'partySize', 'customerName', 'phone'] as const;
 
 function missingFromStaticList(slots: Record<string, unknown>, required: readonly string[]): string[] {
   return required.filter(field => slots[field] === null || slots[field] === undefined || slots[field] === '');
