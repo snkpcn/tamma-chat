@@ -573,18 +573,18 @@ export function renderRestaurantResponse(input: HumanGroundedRenderInput): Human
         : null;
     }
     const used:string[]=[];
-    const shown=rows.slice(0,12);
+    const shown=rows
+      .filter(row=>row.orderable===true && (typeof row.availableServings!=='number' || row.availableServings>0))
+      .slice(0,12);
+    if(!shown.length) return {message:'ตอนนี้ยังไม่พบเมนูที่ยืนยันว่าพร้อมสั่งในข้อมูลล่าสุดครับ',usedFactKeys:[]};
     const lines=shown.map(row=>{
-      used.push(`menu:${row.id}:name`);
+      used.push(`menu:${row.id}:name`,`menu:${row.id}:orderable`);
       if(typeof row.price==='number') used.push(`menu:${row.id}:price`);
-      if(typeof row.orderable==='boolean') used.push(`menu:${row.id}:orderable`);
+      if(typeof row.availableServings==='number') used.push(`menu:${row.id}:availableServings`);
       const price=typeof row.price==='number' ? ` — ${Math.round(row.price)} บาท` : '';
-      const availability=row.orderable===false || (typeof row.availableServings==='number'&&row.availableServings<=0)
-        ? ' — ตอนนี้ไม่พร้อมสั่ง'
-        : '';
-      return `• ${row.name}${price}${availability}`;
+      return `• ${row.name}${price}`;
     });
-    return {message:['🍽️ เมนูที่ยืนยันได้ตอนนี้ครับ',...lines].join('\n'),usedFactKeys:[...new Set(used)]};
+    return {message:['🍽️ เมนูที่ยืนยันว่าพร้อมสั่งตอนนี้ครับ',...lines].join('\n'),usedFactKeys:[...new Set(used)]};
   }
 
   return null;
@@ -612,6 +612,8 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     priceKey?: string;
     ingredientsKey?: string;
     spiceKey?: string;
+    orderableKey: string;
+    servingsKey?: string;
   }> = [];
   let spiceUnknown = false;
   let ingredientUnknown = false;
@@ -620,6 +622,12 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     const nameKey = 'menu:' + id + ':name';
     const name = map.get(nameKey);
     if (typeof name !== 'string' || !name.trim()) continue;
+
+    const orderableKey='menu:' + id + ':orderable';
+    const servingsKey='menu:' + id + ':availableServings';
+    const orderable=map.get(orderableKey);
+    const servings=map.get(servingsKey);
+    if(orderable!==true || (typeof servings==='number' && servings<=0)) continue;
 
     const ingredientsKey = 'menu:' + id + ':ingredients';
     const ingredients = map.get(ingredientsKey);
@@ -657,6 +665,8 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
       priceKey: price !== undefined ? priceKey : undefined,
       ingredientsKey: Array.isArray(ingredients) ? ingredientsKey : undefined,
       spiceKey,
+      orderableKey,
+      servingsKey: typeof servings==='number' ? servingsKey : undefined,
     });
   }
 
@@ -667,7 +677,13 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
         usedFactKeys: [],
       };
     }
-    return null;
+    if (lowSpice) {
+      return {
+        message:'ตอนนี้ยังไม่มีข้อมูลระดับความเผ็ดและสถานะเมนูที่ยืนยันได้พอให้เลือกแบบไม่เผ็ดอย่างปลอดภัยครับ เลยไม่ขอเดา',
+        usedFactKeys:[],
+      };
+    }
+    return {message:'ตอนนี้ยังไม่พบเมนูที่ตรงเงื่อนไขและยืนยันว่าพร้อมสั่งครับ',usedFactKeys:[]};
   }
 
   const chosen = accepted.slice(0, 3);
@@ -677,6 +693,8 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     if (item.priceKey) used.push(item.priceKey);
     if (item.ingredientsKey) used.push(item.ingredientsKey);
     if (item.spiceKey) used.push(item.spiceKey);
+    used.push(item.orderableKey);
+    if (item.servingsKey) used.push(item.servingsKey);
     return item.price !== undefined
       ? '• ' + item.name + ' — ' + Math.round(item.price) + ' บาท'
       : '• ' + item.name;
