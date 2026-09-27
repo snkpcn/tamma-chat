@@ -918,6 +918,44 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
   return `${sections.join('\n\n')}\n\nThese are conversation-state details only; nothing has been confirmed or submitted.`;
 }
 
+function conversationalStateUpdateMessage(input: ResponseComposerInput): string | null {
+  if (input.language !== 'th' || !input.semanticTurn) return null;
+  const turn = input.semanticTurn;
+  const task = input.dialogDecision.taskStateContainer.activeTask;
+  const noCommitment = !task?.commitmentIntent;
+
+  if (
+    noCommitment
+    && (turn.action === 'confirm' || turn.action === 'modify' || turn.action === 'correct_previous')
+    && (turn.speechAct === 'selection' || turn.speechAct === 'correction' || turn.action === 'correct_previous')
+  ) {
+    const entities = turn.entities;
+    const chosen = [
+      entities.horseName, entities.resourceName, entities.roomType,
+      entities.itemName, entities.productName, entities.promotionName,
+    ].find(value => typeof value === 'string' && value.trim());
+    const partySize = Number(entities.partySize);
+    const children = Number(entities.children);
+    const adults = Number(entities.adults);
+    const parts: string[] = [];
+
+    if (typeof chosen === 'string') {
+      parts.push((turn.action === 'correct_previous' || turn.action === 'modify' ? 'แก้ตัวเลือกเป็น ' : 'เลือกไว้เป็น ') + chosen + ' แล้วครับ');
+    }
+    if (Number.isFinite(partySize) && partySize > 0) parts.push('จำนวนรวม ' + partySize + ' คน');
+    if (Number.isFinite(adults) && adults >= 0) parts.push('ผู้ใหญ่ ' + adults + ' คน');
+    if (Number.isFinite(children) && children >= 0) parts.push('เด็ก ' + children + ' คน');
+
+    if (!parts.length && turn.action === 'correct_previous') {
+      parts.push('แก้ข้อมูลตามที่บอกแล้วครับ');
+    }
+    if (parts.length) {
+      return parts.join(' • ') + '\nตอนนี้ยังเป็นข้อมูลที่คุยกันอยู่ ยังไม่ได้จองหรือส่งรายการครับ';
+    }
+  }
+  return null;
+}
+
 function specificClarificationMessage(input: ResponseComposerInput): string | null {
   if (input.language !== 'th' || !input.semanticTurn) return null;
   const turn = input.semanticTurn;
@@ -974,6 +1012,8 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     message = copy.failed;
   } else if (input.dialogDecision.responseIntent === 'active_task_summary') {
     message = activeTaskSummaryMessage(input);
+  } else if (conversationalStateUpdateMessage(input)) {
+    message = conversationalStateUpdateMessage(input)!;
   } else if (input.degradation.condition === 'source_unavailable') {
     message = humanKnowledgeUnknownCopy(input, 'source_unavailable') ?? copy.unavailable;
   } else if (input.degradation.condition === 'fact_unknown') {
