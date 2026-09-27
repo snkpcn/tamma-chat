@@ -484,7 +484,11 @@ function isTrustedConversationalCorrection(
     deterministicIsSafeCorrectionBase
     && deterministic
     && (turn.action === 'correct_previous' || turn.action === 'modify')
-    && (turn.speechAct === 'correction' || turn.speechAct === 'selection')
+    // correction/modify is conversational working-state refinement, not a
+    // transaction. Some natural Thai corrections are emitted as speechAct
+    // "request" ("เปลี่ยนเป็น...นะ") even though the closed ACTION is still
+    // safely non-transactional. Reject only an explicit transaction_request.
+    && turn.speechAct !== 'transaction_request'
     && turn.domain === deterministic.domain
     && turn.confidence >= 0.9
     && turn.needsClarification === false
