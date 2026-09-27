@@ -205,10 +205,17 @@ test('M6 restaurant preorder: explicit order proposal matches existing determini
     date:'2026-09-19',time:'14:00',customerName:'สมชาย',phone:'0812345678',
     items:[{name:'ตำไทย',quantity:1}],
   });
+  const adapters:KnowledgeSourceAdapters={
+    restaurant:{menu:async()=>ok('restaurant_menu_live','restaurant_live',[
+      fact('menu:tamthai:name','ตำไทย','restaurant','restaurant_menu_live','restaurant_live'),
+      fact('menu:tamthai:orderable',true,'restaurant','restaurant_menu_live','restaurant_live'),
+      fact('menu:tamthai:availableServings',10,'restaurant','restaurant_menu_live','restaurant_live'),
+    ])},
+  };
   const result=await processThongthaiOneMindTurnAuthoritative({
     channel:'line',message:'สั่งชุดนี้เลย พรุ่งนี้บ่ายสอง สมชาย 0812345678',eventId:'m-preorder',
     providerUserKey:'line-key',persistState:true,environment:'test',
-  },oneMindDeps(()=>turn,()=>({})),state.deps,NOW);
+  },oneMindDeps(()=>turn,()=>adapters),state.deps,NOW);
   assert.equal(result.dialogDecision.actionProposal?.toolName,'create_restaurant_preorder');
   assert.equal(readOnlyCutoverEligibility(result).eligible,false);
   const runtime=readFileSync('netlify/functions/_thongthai-runtime-v3.ts','utf8');
