@@ -131,10 +131,42 @@ function promotionEligibilityAdapter(channel: BrainChannel): (now?: Date) => Pro
   return async (now: Date = new Date()): Promise<SourceResult> => {
     try {
       const rows = await loadActivePromotionsWorldFact(channel);
-      const facts: GroundedFact[] = rows.map(row => ({
-        key: `promo:${row.fact_key}`, value: row.fact_value, domain: 'promotion', sourceId: 'promotions_active', sourceType: 'promotion_runtime',
-        authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at,
-      }));
+      const fetchedAt=now.toISOString();
+      const facts: GroundedFact[] = rows.flatMap(row => {
+        const base={domain:'promotion' as const,sourceId:'promotions_active',sourceType:'promotion_runtime' as const,authoritative:true,fetchedAt,updatedAt:row.updated_at};
+        const root:GroundedFact={...base,key:`promo:${row.fact_key}`,value:row.fact_value};
+        const raw=row.fact_value && typeof row.fact_value==='object' && !Array.isArray(row.fact_value)
+          ? row.fact_value as Record<string,unknown> : {};
+        const promotions=Array.isArray(raw.promotions) ? raw.promotions : [];
+        const expanded=promotions.flatMap(value=>{
+          if(!value||typeof value!=='object'||Array.isArray(value)) return [];
+          const promo=value as Record<string,unknown>;
+          const id=typeof promo.campaignId==='string'?promo.campaignId.trim():'';
+          if(!id) return [];
+          const entries:Array<[string,unknown]> = [
+            ['name',promo.title],
+            ['campaignCode',promo.campaignCode],
+            ['description',promo.description],
+            ['businessScope',promo.businessScope],
+            ['promoType',promo.promoType],
+            ['items',promo.items],
+            ['normalTotal',promo.normalTotal],
+            ['promoTotal',promo.promoTotal],
+            ['discountPct',promo.discountPct],
+            ['startAt',promo.startAt],
+            ['endAt',promo.endAt],
+            ['maxRedemptions',promo.maxRedemptions],
+            ['redemptionCount',promo.redemptionCount],
+            ['requiresDateTime',promo.requiresDateTime],
+            ['automatedHandoff',promo.automatedHandoff],
+            ['eligible',true],
+          ];
+          return entries
+            .filter(([,v])=>v!==undefined)
+            .map(([key,v])=>({...base,key:`promo:${id}:${key}`,value:v}));
+        });
+        return [root,...expanded];
+      });
       return ok('promotions_active', 'promotion_runtime', facts, now);
     } catch (error) { return unavailable('promotions_active', 'promotion_runtime', error, now); }
   };
