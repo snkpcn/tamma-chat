@@ -58,7 +58,7 @@ async function main():Promise<void>{
 
   for(const item of cases){
     try{
-      const turn=await interpretSemanticTurn(item.message,item.context??emptySemanticContext(,{ certificationMode:true }));
+      const turn=await interpretSemanticTurn(item.message,item.context??emptySemanticContext(),{ certificationMode:true });
       const checks=[
         item.expect.domain===undefined||turn.domain===item.expect.domain,
         item.expect.speechAct===undefined||turn.speechAct===item.expect.speechAct,
