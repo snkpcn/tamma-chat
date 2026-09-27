@@ -72,7 +72,7 @@ test('LINE + activity_booking + successful state write -> mirror is called with 
   assert.equal(mirrorCalls[0]!.date, '2026-10-03');
   assert.equal(mirrorCalls[0]!.time, '13:00');
   assert.equal(mirrorCalls[0]!.partySize, 2);
-  assert.deepEqual(mirrorCalls[0]!.asset, { name: 'ภาราดร', assetCode: 'horse-pharadon' });
+  assert.deepEqual(mirrorCalls[0]!.asset, { name: 'ภาราดร', assetCode: 'horse-pharadon', resourceCode: 'activity-horse' });
 });
 
 test('web channel never triggers the legacy-session mirror, even for the identical activity_booking task', async () => {

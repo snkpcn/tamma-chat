@@ -26,9 +26,9 @@ function session(overrides: Partial<LineBookingSession> = {}): LineBookingSessio
 
 test('a named horse selection is recognized from free text and maps to the real asset_code', () => {
   const pharadon = activityAssetFromText('เอาภาราดร');
-  assert.deepEqual(pharadon, { name: 'ภาราดร', assetCode: 'horse-pharadon' });
+  assert.deepEqual(pharadon, { name: 'ภาราดร', assetCode: 'horse-pharadon', resourceCode: 'activity-horse' });
   const thongthai = activityAssetFromText('ขอทองไทยครับ');
-  assert.deepEqual(thongthai, { name: 'ทองไทย', assetCode: 'horse-thongthai' });
+  assert.deepEqual(thongthai, { name: 'ทองไทย', assetCode: 'horse-thongthai', resourceCode: 'activity-horse' });
   assert.equal(activityAssetFromText('60 นาที'), null);
 });
 

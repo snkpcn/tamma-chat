@@ -681,6 +681,7 @@ Core rules:
 - A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
 - For a descriptive reference, use bounded context evidence: when prior context uniquely links the description to a named entity, emit that canonical entity name as the reference value so the deterministic resolver can bind it. If several entities fit, keep it unresolved and request clarification.
 - IDs may only come from canonical context below. Otherwise leave unresolved.
+- Activity TYPE (not one named asset) named: set entities.activityCode to horse|atv|archery. Not for a whole-domain browse or a named asset (use horseName).
 
 Today in Bangkok: ${currentBangkok}
 Relevant organization vocabulary: ${vocabulary.length ? vocabulary.join('; ') : 'none needed'}
@@ -788,6 +789,24 @@ function canonicalizeEntityAliases(
       .map(key => entities[key])
       .find((v): v is string => typeof v==='string' && v.trim().length>0);
     if (bareHorseSource) entities.horseName=bareHorseSource.trim();
+  }
+
+  // Human Core PR C: activityCode is the ONE closed, SOT-aligned code
+  // (see _activity-sot.ts's activity_offerings.activity_code) a turn about
+  // a specific activity TYPE -- not a specific named asset -- carries. The
+  // production prompt (buildProductionSemanticInterpreterPrompt) now asks
+  // the model to set entities.activityCode directly when it identifies one;
+  // this also normalizes whatever spelling/casing/nesting the model or an
+  // older prompt path used, the same way horseName is normalized above.
+  // Never Thai keyword matching here -- this only reshapes a value the
+  // model/deterministic layer ALREADY stated into one canonical key.
+  if (domain==='activity' && entities.activityCode===undefined) {
+    const bareActivityCodeSource = ['activity_code','activityType','activity_type']
+      .map(key => entities[key])
+      .find((v): v is string => typeof v==='string' && v.trim().length>0);
+    if (bareActivityCodeSource) entities.activityCode=bareActivityCodeSource.trim().toLowerCase();
+  } else if (typeof entities.activityCode==='string') {
+    entities.activityCode=entities.activityCode.trim().toLowerCase();
   }
   return entities;
 }

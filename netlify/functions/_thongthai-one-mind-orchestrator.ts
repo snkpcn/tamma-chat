@@ -602,7 +602,7 @@ function mergeSafeDeterministicSlots(
   const entities={...turn.entities};
   // These fields are generic structural parsers, not business semantics.
   // Fill ONLY a missing model field; never overwrite the language model.
-  for(const key of ['date','time','partySize','durationMinutes','quantity'] as const){
+  for(const key of ['date','time','partySize','durationMinutes','quantity','activityCode'] as const){
     if(entities[key]===undefined && deterministic.entities[key]!==undefined){
       entities[key]=deterministic.entities[key];
     }

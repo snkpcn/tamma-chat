@@ -25,6 +25,11 @@
 // builds and proves the routing/orchestration contract with mock adapters.
 import type { SemanticAction, SemanticDomain } from './_semantic-interpreter';
 import type { ActiveTask } from './_task-state';
+import {
+  resolveCanonicalScopeAgainstFacts,
+  filterFactsByCanonicalScope,
+  type CanonicalKnowledgeScope,
+} from './_canonical-knowledge-scope';
 
 // ---------------------------------------------------------------------------
 // Normalized query contract
@@ -43,6 +48,15 @@ export type KnowledgeRequest = {
   constraints: string[];
   task?: ActiveTask | null;
   needs: KnowledgeNeed[];
+  /** Human Core PR C: the authoritative CanonicalKnowledgeScope for this
+   *  request (see _canonical-knowledge-scope.ts), when the caller (Dialog
+   *  Manager) has one. resolveKnowledge below refines it against whatever
+   *  facts actually come back and firewalls the bundle to that scope --
+   *  the one place every consumer's facts get scoped, so no individual
+   *  renderer has to remember to filter. Omitted entirely for domains/
+   *  requests this contract doesn't cover yet, which is a strict no-op
+   *  (today's unscoped behavior, unchanged). */
+  scope?: CanonicalKnowledgeScope;
 };
 
 // ---------------------------------------------------------------------------
@@ -345,7 +359,25 @@ export async function resolveKnowledge(request: KnowledgeRequest, adapters: Know
     }
   }
 
-  return { domain: request.domain, sources, facts, entities: [], missing, warnings, freshness: computeFreshness(sources) };
+  // Human Core PR C: the response scope firewall. Runs regardless of which
+  // need(s) were requested or which adapter answered -- every fact this
+  // bundle carries passes through the SAME gate, so no individual renderer
+  // can forget to scope, and no future knowledge source can leak an
+  // over-fetch around it. A request with no scope (a domain this contract
+  // doesn't cover yet, or a genuinely domain-wide/unknown-breadth request)
+  // is a strict no-op: filterFactsByCanonicalScope only ever narrows a
+  // focused+resolved scope or fails closed on focused+unresolved, so
+  // today's behavior for every other case is unchanged.
+  let scopedFacts = facts;
+  if (request.scope) {
+    const refinedScope = resolveCanonicalScopeAgainstFacts(request.scope, facts);
+    scopedFacts = [...filterFactsByCanonicalScope(facts, refinedScope)];
+    if (refinedScope.breadth === 'focused' && refinedScope.status !== 'resolved' && facts.length) {
+      warnings.push('scope_unresolved_facts_filtered');
+    }
+  }
+
+  return { domain: request.domain, sources, facts: scopedFacts, entities: [], missing, warnings, freshness: computeFreshness(sources) };
 }
 
 function guessSourceType(domain: SemanticDomain, need: KnowledgeNeed): KnowledgeSourceType {

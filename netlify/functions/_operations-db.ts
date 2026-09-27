@@ -690,11 +690,11 @@ export function activityDurationFromSession(session: LineBookingSession | null):
  *  (_deterministic-semantic-turn.ts's ACTIVITY_ASSET_SELECTIONS) so there is
  *  exactly one source of truth for "which named assets exist", not a second
  *  copy of the list. */
-export function activityAssetFromText(text: string): { name: string; assetCode: string } | null {
+export function activityAssetFromText(text: string): { name: string; assetCode: string; resourceCode: string } | null {
   const match = findKnownActivityAssetSelection(text);
   if (!match) return null;
   const assetCode = match.entityId.replace(/^activity_asset:/, '');
-  return { name: match.name, assetCode };
+  return { name: match.name, assetCode, resourceCode: match.resourceCode };
 }
 
 export function activityAssetFromSession(session: LineBookingSession | null): { name: string; assetCode: string } | null {

@@ -1578,7 +1578,7 @@ async function deterministicActivityResponse(
   );
 }
 
-function directCommittedActivityBookingArgs(message: string): Record<string, unknown> | null {
+export function directCommittedActivityBookingArgs(message: string): Record<string, unknown> | null {
   if (!hasCommitMarker(message)) return null;
   const selectedAsset = activityAssetFromText(message);
   if (!selectedAsset) return null;

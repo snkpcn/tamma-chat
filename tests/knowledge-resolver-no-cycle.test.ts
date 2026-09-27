@@ -68,7 +68,7 @@ test('_domain-task-policy.ts only imports the expected leaf modules (task-state 
 
 test('_knowledge-resolver.ts only imports the expected leaf modules', async () => {
   const imports = await importsOf('_knowledge-resolver.ts');
-  const allowed = new Set(['./_semantic-interpreter', './_task-state']);
+  const allowed = new Set(['./_semantic-interpreter', './_task-state', './_canonical-knowledge-scope']);
   for (const specifier of imports) assert.ok(allowed.has(specifier), `unexpected import in _knowledge-resolver.ts: ${specifier}`);
 });
 
