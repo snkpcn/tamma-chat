@@ -9883,3 +9883,69 @@ PR #184's title carried a permanent `[run live]` tag, which combined with
 full paid 4-suite OpenAI live-certification job on every ordinary push --
 205 times on this branch alone before it was caught. Retitled the PR to drop
 the tag; the paid suite now only runs via explicit `workflow_dispatch`.
+
+## Final closeout: state/memory/knowledge/channel + cost + LINE transport certification (2026-09-27)
+
+Closes the three items left open after PR H (Cafe cutover, #198) and the
+production-smoke mechanism (#199). Full detail, citations, and arithmetic:
+`docs/THONGTHAI_FINAL_CLOSEOUT_CERTIFICATION.md`. Summary:
+
+1. **State/memory/knowledge/channel certification matrix** — every named
+   invariant (stale-context precedence, correction scoping, entity
+   continuity, suspend/resume non-contamination, memory-relevance ordering,
+   PII exclusion from durable memory, reference resolution, the four-way
+   truth distinction, Web/LINE parity) is cited against exact existing
+   tests. The one genuine gap (the literal named sequence Activity ->
+   Restaurant -> Stay -> Activity) is closed by a new test,
+   `tests/final-certification-cross-domain-sequence.test.ts`. Investigating
+   it surfaced that a read-only side-question in another domain
+   (`_dialog-manager.ts`'s `SIDE_QUESTION_ACTIONS`) leaves the active task's
+   persisted state completely untouched -- a stronger guarantee than
+   suspend/resume, not a new behavior invented to pass the test. Full suite
+   after adding it: 1593/1593.
+
+2. **Cost certification, recomputed from current code** (not quoted from a
+   prior doc): current live policy has no environment override in
+   `netlify.toml`/`.env.example`, so production runs on the pure code
+   defaults -- $0.05 hard USD ceiling, 1 call/turn, 6 calls/conversation,
+   500 max output tokens, 5,000 max input tokens, `gpt-5.6-terra` at
+   $2/$0.20/$12 per 1M input/cached/output. Worst-case reservation math
+   ($0.016/call) means the ledger itself can never admit more than
+   $0.048/conversation, under the configured $0.05 constant. At the repo's
+   own documented 40 THB/USD design assumption that is 1.92 THB (4% margin
+   under the owner's 2 THB cap); at a realistic 32.5-36 THB/USD market rate
+   it is 1.56-1.73 THB (14-22% margin). Traced every `openai.com` reference
+   in `netlify/functions/` to confirm `reserveAiCall` is the single gate
+   for all production OpenAI calls, and confirmed certification-mode's
+   extra Sol-review call is only ever enabled inside standalone
+   certification scripts' own process environment, never in `netlify.toml`
+   or the deployed handler. **Real, now-confirmed-inert finding**: an old,
+   superseded `_thongthai-brain.ts` (no `-v3` suffix) still contains its
+   own unguarded `callOpenAI`/`callGemini` calling `api.openai.com`
+   directly with zero cost-ledger integration -- but its only reference
+   anywhere in the repo is a type-only import in `_thongthai-identity.ts`
+   (erased at compile time), so it is genuinely dead code, not a live risk.
+   Recommend deleting it in a follow-up cleanup PR; not done here since it
+   was outside this task's scope. Cost-guard suite remains green: 1593/1593.
+
+3. **Real LINE HTTPS transport certification**: built
+   `.github/workflows/line-transport-certification.yml`
+   (`workflow_dispatch` only) plus `scripts/run-line-transport-
+   certification.ts`. Step 1 checks only whether `LINE_CHANNEL_SECRET` is
+   configured (never echoes it); if present, the script sends two real
+   HTTPS requests to the deployed `line-webhook` function -- an invalid
+   signature (expect 401) and a validly HMAC-SHA256-signed one (expect
+   200) -- using a LINE `follow` event rather than a `message` event, since
+   `_line-webhook-core.ts`'s `handleEvent()` unconditionally calls the real
+   LINE Reply API once it reaches a text message, and a `follow` event hits
+   the exact same signature-verification gate but returns before any reply
+   or `processThongthaiChatCore` call (`if (event.type !== 'message')
+   return;`). This sandbox has no path to dispatch the workflow or query
+   secret presence without running it, so the live PASS/BLOCKED result is
+   not yet recorded here -- whoever dispatches it next will see either a
+   real pass or the exact `LINE_TRANSPORT_SECRET_NOT_CONFIGURED` marker,
+   never a fabricated result. Every other LINE boundary (webhook deployed,
+   signature verification exists in code, shared `processThongthaiChatCore`
+   path, no separate LINE brain, no channel-local transaction
+   interpretation, 16/16 real LINE live acceptance still green) remains
+   certified independently of that live outcome.
