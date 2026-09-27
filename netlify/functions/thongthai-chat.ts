@@ -1758,7 +1758,8 @@ export function resolveStayBookingProposalArgs(
 
 export type SupervisedRestaurantCutoverDecision =
   | { kind:'respond'; response:ComposedResponse }
-  | { kind:'execute_preorder'; args:Record<string, unknown> };
+  | { kind:'execute_preorder'; args:Record<string, unknown> }
+  | { kind:'execute_table_booking'; args:Record<string, unknown> };
 
 /** Human Core PR F terminal Restaurant boundary. Once OpenAI semantic
  * supervision succeeds, Restaurant cannot fall into raw-text advisor/preorder
@@ -1779,6 +1780,12 @@ export function resolveSupervisedRestaurantCutover(
       && proposal?.toolName==='create_restaurant_preorder'
       && proposal.customerCommitPresent) {
     return {kind:'execute_preorder',args:resolveRestaurantPreorderProposalArgs(proposal)};
+  }
+  if(meaning.commitmentLevel==='explicit_transaction'
+      && proposal?.toolName==='create_booking'
+      && proposal.customerCommitPresent
+      && turn.dialogDecision.taskStateContainer.activeTask?.type==='restaurant_booking') {
+    return {kind:'execute_table_booking',args:resolveRestaurantTableBookingProposalArgs(proposal)};
   }
 
   const composerInput={
@@ -1827,6 +1834,25 @@ export function resolveRestaurantPreorderProposalArgs(
     ...(typeof value.phone==='string'&&value.phone?{phone:value.phone}:{}),
     ...(typeof value.email==='string'&&value.email?{email:value.email}:{}),
     ...(typeof value.note==='string'&&value.note?{note:value.note}:{}),
+  };
+}
+
+/** Structured-only table-booking sanitizer. No raw sentence or inferred
+ * menu/preorder state can cross into create_booking. */
+export function resolveRestaurantTableBookingProposalArgs(
+  proposal:{validatedArgs:Record<string,unknown>},
+):Record<string,unknown> {
+  const value=proposal.validatedArgs;
+  const partySize=Number(value.partySize);
+  return {
+    serviceType:'restaurant',
+    date:typeof value.date==='string'?value.date.trim():'',
+    time:typeof value.time==='string'?value.time.trim():'',
+    partySize:Number.isInteger(partySize)&&partySize>=1&&partySize<=50?partySize:0,
+    customerName:typeof value.customerName==='string'?value.customerName.trim():'',
+    phone:typeof value.phone==='string'?value.phone.trim():'',
+    ...(typeof value.email==='string'&&value.email.trim()?{email:value.email.trim()}:{}),
+    ...(typeof value.note==='string'&&value.note.trim()?{note:value.note.trim()}:{}),
   };
 }
 
@@ -3648,6 +3674,54 @@ async function executeDeterministicRestaurantPreorder(
   };
 }
 
+async function executeDeterministicRestaurantTableBooking(
+  args:Record<string,unknown>,
+  request:BrainRequest,
+  guestDbId:string|null,
+  channel:BrainChannel,
+):Promise<BrainResponse> {
+  const firstResponse:BrainResponse={
+    message:'',intent:'booking',contextUpdates:{},journeyAction:{type:'none',journey:null},
+    suggestedActions:[],responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+  };
+  const date=typeof args.date==='string'?args.date.trim():'';
+  const time=typeof args.time==='string'?args.time.trim():'';
+  const partySize=Number(args.partySize);
+  const customerName=typeof args.customerName==='string'?args.customerName.trim():'';
+  const phone=typeof args.phone==='string'?args.phone.trim():'';
+  if(!guestDbId||!date||!time||!Number.isInteger(partySize)||partySize<1||!customerName||!phone) {
+    return {...firstResponse,message:'ยังส่งคำขอจองโต๊ะไม่ได้ครับ เพราะวัน เวลา จำนวนคน ชื่อ หรือเบอร์โทรยังไม่ครบ และยังไม่ได้สร้างรายการให้'};
+  }
+  const safeArgs={
+    serviceType:'restaurant',date,time,partySize,customerName,phone,
+    ...(typeof args.email==='string'&&args.email.trim()?{email:args.email.trim()}:{}),
+    ...(typeof args.note==='string'&&args.note.trim()?{note:args.note.trim()}:{}),
+  };
+  const [result]=await executeBrainTools(
+    guestDbId,channel,[{name:'create_booking',args:safeArgs}],firstResponse,request,
+  );
+  if(!result?.ok) {
+    const detail=result?.detail??'execution_failed';
+    const message=detail==='no_matching_schedule'||detail==='schedule_full'||detail==='schedule_choice_required'
+      ? 'ช่วงที่ขอยังไม่มีโต๊ะว่างที่ระบบยืนยันให้จองได้ครับ จึงยังไม่ได้สร้างรายการ'
+      : 'ตอนนี้ยังส่งคำขอจองโต๊ะไม่สำเร็จครับ และยังไม่ได้สร้างรายการ';
+    return {...firstResponse,message};
+  }
+  let detail:Record<string,unknown>={};
+  try{detail=JSON.parse(result.detail) as Record<string,unknown>;}catch{/* safe defaults */}
+  const bookingCode=typeof detail.bookingCode==='string'?detail.bookingCode:'';
+  return {
+    ...firstResponse,
+    message:[
+      'ส่งคำขอจองโต๊ะเข้าระบบแล้วครับ ✅',
+      bookingCode?`เลขที่จอง ${bookingCode}`:'',
+      `วันที่ ${date} เวลา ${time}`,
+      `จำนวน ${partySize} คน`,
+      'ทีมงานจะยืนยันอีกครั้งทาง LINE / โทร / อีเมล',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 // Service Mind -- compliment/complaint/suggestion/safety-issue/system-
 // feedback. Checked early (right after the activity-booking fallback,
 // before One-Mind and every other deterministic responder) for two
@@ -4378,6 +4452,18 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const supervisedRestaurant=earlyOneMind
     ? resolveSupervisedRestaurantCutover(earlyOneMind,channel,request.language)
     : null;
+  if(supervisedRestaurant?.kind==='execute_table_booking') {
+    const executed=await executeDeterministicRestaurantTableBooking(
+      supervisedRestaurant.args,request,guestDbId,channel,
+    );
+    const polished=polishedResponse(executed,channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,
+      contextUpdates:polished.contextUpdates,journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
   if(supervisedRestaurant?.kind==='execute_preorder') {
     const executed=await executeDeterministicRestaurantPreorder(
       supervisedRestaurant.args,request,guestDbId,channel,
