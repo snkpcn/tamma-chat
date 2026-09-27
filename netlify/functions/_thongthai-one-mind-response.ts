@@ -167,6 +167,19 @@ export function readOnlyCutoverEligibility(
     return { eligible:true };
   }
 
+  // Journey/itinerary modification edits only the bounded conversational
+  // plan. There is no journey transaction executor or booking task behind it,
+  // so sending "same plan, change it to tomorrow" to legacy raw-text routing
+  // is both unnecessary and harmful. Real booking/order actions remain
+  // protected by ActionProposal and the transaction gate above.
+  if (turn.semanticTurn.domain === 'journey'
+      && turn.semanticTurn.action === 'modify'
+      && !turn.taskStateBefore.activeTask
+      && !turn.taskStateAfter.activeTask
+      && !turn.dialogDecision.actionProposal) {
+    return { eligible:true };
+  }
+
   // A pure preference/constraint declaration is also safe conversation.
   // It changes no booking/order/payment state and must not be forced back into
   // a keyword parser merely because the semantic action is
