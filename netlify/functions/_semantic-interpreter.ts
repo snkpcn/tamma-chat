@@ -882,7 +882,8 @@ function canonicalizeEntityAliases(
         const name=typeof row.name==='string'?row.name.trim():'';
         const quantity=Number(row.quantity);
         if(!name) return [];
-        return [{name,quantity:Number.isInteger(quantity)&&quantity>=1&&quantity<=50?quantity:1}];
+        const validQuantity=Number.isInteger(quantity)&&quantity>=1&&quantity<=50;
+        return [validQuantity?{name,quantity}:{name}];
       });
       entities.items=normalizedItems;
     }
