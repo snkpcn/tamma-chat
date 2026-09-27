@@ -42,6 +42,7 @@ import {
 } from './_knowledge-resolver';
 import { resolveActivityDurationOptions, resolveActivityResourceCode } from './_activity-catalog-policy';
 import { deriveSemanticMeaning } from './_semantic-meaning';
+import { deriveCanonicalKnowledgeScope } from './_canonical-knowledge-scope';
 
 // ---------------------------------------------------------------------------
 // Contracts
@@ -530,7 +531,15 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
   const task = container.activeTask && !isTerminalTaskStatus(container.activeTask.status)
     ? container.activeTask
     : null;
-  const base = { intent: turn.intent, action: turn.action, entities: turn.entities, constraints: turn.constraints, task };
+  // Human Core PR C: every KnowledgeRequest this function builds carries the
+  // ONE authoritative CanonicalKnowledgeScope for the turn (derived once,
+  // here, from SemanticMeaning) -- resolveKnowledge (_knowledge-resolver.ts)
+  // uses it to firewall whatever facts actually come back. For a domain
+  // this contract doesn't canonicalize yet, or a genuinely domain-wide/
+  // unknown-breadth turn, the scope is a structural no-op (today's
+  // unscoped behavior, unchanged).
+  const scope = deriveCanonicalKnowledgeScope(deriveSemanticMeaning(turn));
+  const base = { intent: turn.intent, action: turn.action, entities: turn.entities, constraints: turn.constraints, task, scope };
 
   // This question is about the canonical working state we already own, not
   // about fresh catalog/availability data. Never refetch a catalog just to

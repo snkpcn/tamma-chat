@@ -42,6 +42,22 @@ export type SemanticCommitmentLevel = 'none' | 'exploratory' | 'planning' | 'exp
  *  'unknown' -- not enough signal to say either way. */
 export type SemanticScopeBreadth = 'focused' | 'domain_wide' | 'unknown';
 
+/** WHAT KIND of thing the customer's current turn is focused on -- the
+ *  structural signal CanonicalKnowledgeScope (see _canonical-knowledge-
+ *  scope.ts) canonicalizes against real catalog/SOT relationships.
+ *  'domain' -- the whole domain/catalog, nothing narrower named
+ *    ("ที่นี่มีกิจกรรมอะไรบ้าง").
+ *  'entity_type' -- a category/type of entity, not one specific instance
+ *    ("มีม้าตัวไหนบ้าง", "ATV มีคันไหน").
+ *  'entity' -- one specific, named/resolved instance ("เอาภาราดร").
+ *  'category' -- reserved for a domain that groups entities under a label
+ *    broader than entity_type but narrower than the whole domain (not
+ *    used by activity today; kept for other domains to adopt later).
+ *  'prior_reference' -- points at something from earlier context/state
+ *    that hasn't (yet) resolved to a canonical id ("เอาอันเดิม").
+ *  'unknown' -- not enough signal to say. */
+export type SemanticFocusKind = 'domain' | 'entity_type' | 'entity' | 'category' | 'prior_reference' | 'unknown';
+
 /** A closed, coarse label for WHY the customer is talking to Thongthai at
  *  all, independent of which business domain it's about -- lets a consumer
  *  ask "is this customer trying to get something done vs. get help vs.
@@ -66,9 +82,21 @@ export type SemanticMeaning = {
   informationNeed: SemanticInformationNeed;
   commitmentLevel: SemanticCommitmentLevel;
   scopeBreadth: SemanticScopeBreadth;
+  focusKind: SemanticFocusKind;
+  /** The concrete value behind focusKind -- a resolved canonical entity id
+   *  (focusKind 'entity'), a closed SOT-aligned type code (focusKind
+   *  'entity_type', e.g. 'horse'/'atv'/'archery'), a customer-stated name
+   *  not yet canonicalized (focusKind 'entity' before SOT resolution), or
+   *  bounded prior-context evidence (focusKind 'prior_reference'). null for
+   *  'domain'/'unknown'. NEVER a fabricated operational id -- only what the
+   *  customer actually said or what a reference already resolved to. See
+   *  _canonical-knowledge-scope.ts for turning this into real catalog
+   *  identities. */
+  focusValue: string | null;
   /** A short, closed-vocabulary label for what the turn is actually about --
    *  the resolved entity id when one exists, else `${domain}:${informationNeed}`.
-   *  Never a free paraphrase. */
+   *  Never a free paraphrase. Superseded by focusKind/focusValue for scope
+   *  decisions; kept for existing observability consumers. */
   semanticFocus: string;
   entities: Record<string, unknown>;
   references: SemanticReference[];
@@ -99,11 +127,52 @@ function deriveCommitmentLevel(turn: SemanticTurn): SemanticCommitmentLevel {
   return 'none';
 }
 
-function deriveScopeBreadth(turn: SemanticTurn): SemanticScopeBreadth {
-  const hasResolvedEntity = turn.references.some(reference => Boolean(reference.resolvedEntityId) || Boolean(reference.resolvedEntityIds?.length));
-  if (hasResolvedEntity) return 'focused';
-  if (turn.action === 'discover') return 'domain_wide';
-  return 'unknown';
+// Human Core PR C: scopeBreadth used to come from only two signals (a
+// resolved reference => focused; action==='discover' => domain_wide),
+// which is not real human semantic scope understanding -- "มีม้าตัวไหนบ้าง"
+// (a specific activity TYPE) and "ที่นี่มีกิจกรรมอะไรบ้าง" (the whole
+// domain) both reached action='discover' with no resolved reference, so
+// both collapsed to the SAME breadth. deriveFocus below reads every
+// structural signal the turn actually carries -- a resolved entity
+// reference, a customer-named entity (horseName), a stated entity-type/
+// category code (activityCode, canonicalized in
+// canonicalizeEntityAliases), bounded prior-context evidence, or a bare
+// domain-wide browse -- and scopeBreadth is derived FROM that single
+// focus decision, never independently re-guessed.
+function deriveFocus(turn: SemanticTurn): { focusKind: SemanticFocusKind; focusValue: string | null } {
+  const resolvedRef = turn.references.find(reference => Boolean(reference.resolvedEntityId) || Boolean(reference.resolvedEntityIds?.length));
+  if (resolvedRef) return { focusKind: 'entity', focusValue: resolvedRef.resolvedEntityId ?? resolvedRef.resolvedEntityIds![0]! };
+
+  if (typeof turn.entities.horseName === 'string' && turn.entities.horseName.trim()) {
+    return { focusKind: 'entity', focusValue: turn.entities.horseName.trim() };
+  }
+
+  if (typeof turn.entities.activityCode === 'string' && turn.entities.activityCode.trim()) {
+    return { focusKind: 'entity_type', focusValue: turn.entities.activityCode.trim().toLowerCase() };
+  }
+
+  const priorRef = turn.references.find(reference => reference.refersToPriorContext);
+  if (priorRef) return { focusKind: 'prior_reference', focusValue: priorRef.value ?? null };
+
+  if (turn.action === 'discover' || turn.informationNeed === 'catalog') {
+    return { focusKind: 'domain', focusValue: null };
+  }
+
+  return { focusKind: 'unknown', focusValue: null };
+}
+
+function deriveScopeBreadth(focusKind: SemanticFocusKind): SemanticScopeBreadth {
+  switch (focusKind) {
+    case 'entity':
+    case 'entity_type':
+    case 'category':
+    case 'prior_reference':
+      return 'focused';
+    case 'domain':
+      return 'domain_wide';
+    default:
+      return 'unknown';
+  }
 }
 
 function deriveUserGoal(turn: SemanticTurn, commitmentLevel: SemanticCommitmentLevel): SemanticUserGoal {
@@ -139,6 +208,7 @@ function deriveTemporalMeaning(turn: SemanticTurn): SemanticTemporalMeaning {
  *  normalizedMeaning. */
 export function deriveSemanticMeaning(turn: SemanticTurn): SemanticMeaning {
   const commitmentLevel = deriveCommitmentLevel(turn);
+  const { focusKind, focusValue } = deriveFocus(turn);
   return {
     domain: turn.domain,
     speechAct: turn.speechAct ?? 'unknown',
@@ -146,7 +216,9 @@ export function deriveSemanticMeaning(turn: SemanticTurn): SemanticMeaning {
     action: turn.action,
     informationNeed: turn.informationNeed ?? 'none',
     commitmentLevel,
-    scopeBreadth: deriveScopeBreadth(turn),
+    scopeBreadth: deriveScopeBreadth(focusKind),
+    focusKind,
+    focusValue,
     semanticFocus: deriveSemanticFocus(turn),
     entities: turn.entities,
     references: turn.references,

@@ -107,8 +107,18 @@ function activityAssetRows(input: HumanGroundedRenderInput) {
       'temperament:activity_asset:' + code,
       'activity_asset:' + code + ':temperament',
     ].find(key => map.has(key));
+    // Real production gap: _activity-catalog-policy.ts's
+    // ACTIVITY_ASSET_ATTRIBUTE_KEYS names this attribute
+    // 'beginnerSuitability', which _dialog-source-adapters.ts's live adapter
+    // emits as fact key 'beginnerSuitability:activity_asset:<code>' -- a
+    // spelling neither of the two keys below ever matched, so a real
+    // beginner-suitability fact from the live catalog could never be seen
+    // here. Kept the old spellings too in case another producer still uses
+    // them.
     const beginnerKey = [
+      'beginnerSuitability:activity_asset:' + code,
       'beginnerSuitable:activity_asset:' + code,
+      'activity_asset:' + code + ':beginnerSuitability',
       'activity_asset:' + code + ':beginnerSuitable',
     ].find(key => map.has(key));
     const typeKey = 'activity_asset:' + code + ':type';
@@ -127,38 +137,19 @@ function activityAssetRows(input: HumanGroundedRenderInput) {
   }).filter((row): row is NonNullable<typeof row> => Boolean(row));
 }
 
-// Same three activity types _response-composer.ts's own naturalActivityTopicSummary
-// already labels by activity_asset:<code>:type (horse/atv/archery) -- general
-// across the whole activity catalog, not a one-off for any single activity.
-// Production incident this closes: a plain "which horse do you recommend"
-// request had no matched preference (wantsCalm/wantsBeginner/wantsLight/
-// wantsRain all false), so the final catch-all branch listed EVERY activity
-// asset -- ATVs and archery lanes included -- instead of scoping to the one
-// activity type the customer (and the semantic turn's own entities/message)
-// already identified.
-const ACTIVITY_TYPE_MARKERS: Record<string, RegExp> = {
-  horse: /ม้า|horse/iu,
-  atv: /atv/iu,
-  archery: /ยิงธนู|ธนู|archery/iu,
-};
-
-function requestedActivityType(input: HumanGroundedRenderInput): string | null {
-  const entities = semanticEntities(input);
-  const entityText = JSON.stringify(entities).toLowerCase();
-  const text = semanticText(input) + ' ' + entityText;
-  const matches = Object.entries(ACTIVITY_TYPE_MARKERS).filter(([, pattern]) => pattern.test(text));
-  return matches.length === 1 ? matches[0]![0] : null;
-}
-
-function scopedToRequestedType<T extends { type?: string }>(input: HumanGroundedRenderInput, rows: readonly T[]): T[] {
-  const requested = requestedActivityType(input);
-  if (!requested) return [...rows];
-  const distinctTypes = new Set(rows.map(row => row.type).filter((value): value is string => Boolean(value)));
-  if (distinctTypes.size <= 1) return [...rows];
-  const scoped = rows.filter(row => row.type === requested);
-  return scoped.length ? scoped : [...rows];
-}
-
+// Human Core PR C: this used to re-scope activityAssetRows itself, by
+// regex-matching ACTIVITY_TYPE_MARKERS (horse/atv/archery) against
+// constraints+normalizedMeaning+JSON(entities) -- a second, DOWNSTREAM
+// category guess independent of (and sometimes disagreeing with) whatever
+// the semantic layer actually understood. That regex is retired: the
+// knowledge bundle activityAssetRows reads from is now ALREADY scoped by
+// _knowledge-resolver.ts's own response scope firewall (see
+// _canonical-knowledge-scope.ts's filterFactsByCanonicalScope), driven by
+// the SAME CanonicalKnowledgeScope the Dialog Manager resolved for this
+// turn from real activity_offerings/activity_assets relationships -- never
+// a keyword table, and generalizing to any new activity type added to the
+// catalog with no renderer change. activityAssetRows(input) below is used
+// directly; no re-filtering happens at render time.
 function explicitExcludedNames(input: HumanGroundedRenderInput, names: readonly string[]): Set<string> {
   const text = semanticText(input);
   const entities = semanticEntities(input);
@@ -242,7 +233,7 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
   if (!turn || turn.domain !== 'activity' || input.language !== 'th') return null;
 
   const map = factMap(input);
-  const assets = scopedToRequestedType(input, activityAssetRows(input));
+  const assets = activityAssetRows(input);
   const excluded = explicitExcludedNames(input, assets.map(asset => asset.name));
   const wantsCalm = wants(input, ['prefer_calm', 'calm_horse', 'calm_temperament', 'preferred_horse_trait', 'calmer', 'นิ่ง', 'ใจเย็น']);
   const wantsBeginner = wants(input, ['beginner', 'มือใหม่', 'ไม่เคยขี่']);

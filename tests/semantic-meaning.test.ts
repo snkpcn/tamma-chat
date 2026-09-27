@@ -29,6 +29,60 @@ test('commitmentLevel is explicit_transaction only for book/order or an explicit
   assert.equal(deriveSemanticMeaning(turn({ action: 'cancel' })).commitmentLevel, 'none');
 });
 
+// Human Core PR C1: real semantic scope understanding, using the exact
+// example utterances from the mandate. Each is expressed here as the
+// SemanticTurn shape the real model/deterministic layer would already
+// produce for it (this file tests the pure derivation, not language
+// understanding itself).
+test('domain-wide whole-catalog browse ("ที่นี่มีกิจกรรมอะไรบ้าง"): focusKind domain, scopeBreadth domain_wide', () => {
+  const meaning = deriveSemanticMeaning(turn({ action: 'discover', informationNeed: 'catalog' }));
+  assert.equal(meaning.focusKind, 'domain');
+  assert.equal(meaning.focusValue, null);
+  assert.equal(meaning.scopeBreadth, 'domain_wide');
+});
+
+test('a stated entity TYPE ("มีม้าตัวไหนบ้าง", "ATV มีคันไหน"): focusKind entity_type, scopeBreadth focused', () => {
+  for (const activityCode of ['horse', 'atv', 'archery']) {
+    const meaning = deriveSemanticMeaning(turn({ action: 'discover', informationNeed: 'catalog', entities: { activityCode } }));
+    assert.equal(meaning.focusKind, 'entity_type', activityCode);
+    assert.equal(meaning.focusValue, activityCode);
+    assert.equal(meaning.scopeBreadth, 'focused', activityCode);
+  }
+});
+
+test('a named specific asset ("อยากขี่ม้า มีตัวไหนแนะนำ" once a horse is named): focusKind entity, scopeBreadth focused', () => {
+  const meaning = deriveSemanticMeaning(turn({ action: 'recommend', entities: { horseName: 'ภาราดร' } }));
+  assert.equal(meaning.focusKind, 'entity');
+  assert.equal(meaning.focusValue, 'ภาราดร');
+  assert.equal(meaning.scopeBreadth, 'focused');
+});
+
+test('a resolved canonical reference outranks a bare name: focusValue is the canonical id, not the raw name', () => {
+  const meaning = deriveSemanticMeaning(turn({
+    action: 'confirm',
+    entities: { horseName: 'ภาราดร' },
+    references: [{ type: 'entity_selection', refersToPriorContext: false, resolvedEntityId: 'activity_asset:horse-pharadon' }],
+  }));
+  assert.equal(meaning.focusKind, 'entity');
+  assert.equal(meaning.focusValue, 'activity_asset:horse-pharadon');
+});
+
+test('an unresolved prior-context pointer ("เอาอันเดิม"): focusKind prior_reference, scopeBreadth still focused (bounded, not broad)', () => {
+  const meaning = deriveSemanticMeaning(turn({
+    action: 'confirm',
+    references: [{ type: 'entity_selection', value: 'ม้าที่แนะนำเมื่อกี้', refersToPriorContext: true }],
+  }));
+  assert.equal(meaning.focusKind, 'prior_reference');
+  assert.equal(meaning.focusValue, 'ม้าที่แนะนำเมื่อกี้');
+  assert.equal(meaning.scopeBreadth, 'focused');
+});
+
+test('a genuinely ambiguous broad ask ("มีอะไรสนุก ๆ บ้าง" with no domain/type/entity signal): focusKind unknown, scopeBreadth unknown', () => {
+  const meaning = deriveSemanticMeaning(turn({ domain: 'ecosystem', action: 'ask' }));
+  assert.equal(meaning.focusKind, 'unknown');
+  assert.equal(meaning.scopeBreadth, 'unknown');
+});
+
 test('a bare selection (speechAct selection, action confirm) is planning, never explicit_transaction', () => {
   const meaning = deriveSemanticMeaning(turn({
     action: 'confirm', speechAct: 'selection',

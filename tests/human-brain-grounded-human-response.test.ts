@@ -10,6 +10,8 @@ import type { DialogDecision } from '../netlify/functions/_dialog-manager';
 import type { KnowledgeBundle, GroundedFact, KnowledgeSourceType } from '../netlify/functions/_knowledge-resolver';
 import type { DegradationPlan } from '../netlify/functions/_graceful-degradation';
 import { createActiveTask, emptyTaskStateContainer, setSelectedEntities } from '../netlify/functions/_task-state';
+import { deriveSemanticMeaning } from '../netlify/functions/_semantic-meaning';
+import { deriveCanonicalKnowledgeScope, resolveCanonicalScopeAgainstFacts, filterFactsByCanonicalScope } from '../netlify/functions/_canonical-knowledge-scope';
 
 const NOW='2026-09-27T05:00:00.000Z';
 const AT=new Date(NOW);
@@ -481,10 +483,20 @@ test('conditional availability renderer preserves generic primary/fallback live 
 // renderActivityRecommendation's final catch-all branch, which listed EVERY
 // activity_asset fact present -- ATVs and archery lanes included -- instead
 // of scoping to the one activity type the semantic turn's own entities
-// already identified. Root cause: activityAssetRows/renderActivityRecommendation
-// never scoped by activity_asset:<code>:type the way _response-composer.ts's
-// own naturalActivityTopicSummary already does. Fixed generally (all three
-// activity types), not by matching this exact sentence.
+// already identified. Originally fixed with a downstream ACTIVITY_TYPE_MARKERS
+// regex at render time; Human Core PR C retired that regex and moved scoping
+// upstream into _knowledge-resolver.ts's own response scope firewall (see
+// _canonical-knowledge-scope.ts), driven by the semantic turn's
+// entities.activityCode -- scopedBundle below simulates exactly what that
+// firewall already does to a KnowledgeBundle before a renderer ever sees it,
+// so this test still proves the SAME production guarantee through the real
+// current mechanism, not the retired one.
+function scopedBundle(turn:SemanticTurn, source:KnowledgeBundle):KnowledgeBundle{
+  const scope=deriveCanonicalKnowledgeScope(deriveSemanticMeaning(turn));
+  const refined=resolveCanonicalScopeAgainstFacts(scope, source.facts);
+  return {...source, facts:[...filterFactsByCanonicalScope(source.facts, refined)]};
+}
+
 const mixedActivityBundle=bundle('activity','activity_live',[
   fact('activity:horse_riding:name','ขี่ม้า','activity','activity_live'),
   fact('activity_asset:horse-paradorn:name','ภาราดร','activity','activity_live'),
@@ -507,13 +519,14 @@ const mixedActivityBundle=bundle('activity','activity_live',[
 ]);
 
 test('a plain horse-riding recommendation request never surfaces ATV or archery assets from the shared activity catalog',()=>{
+  const turn=semantic({
+    domain:'activity',intent:'horse_riding_recommendation',action:'recommend',informationNeed:'recommendation',
+    entities:{activityCode:'horse_riding',date:'2026-09-28',timeOfDay:'evening'},
+    normalizedMeaning:'Customer wants to go horse riding tomorrow evening and asks which horse is recommended.',
+  });
   const response=composeGroundedDeterministicResponse(input({
-    semanticTurn:semantic({
-      domain:'activity',intent:'horse_riding_recommendation',action:'recommend',informationNeed:'recommendation',
-      entities:{activity:'ขี่ม้า',date:'2026-09-28',timeOfDay:'evening'},
-      normalizedMeaning:'Customer wants to go horse riding tomorrow evening and asks which horse is recommended.',
-    }),
-    bundles:[mixedActivityBundle],
+    semanticTurn:turn,
+    bundles:[scopedBundle(turn,mixedActivityBundle)],
   }));
   assert.ok(response);
   assert.doesNotMatch(response.message,/ATV/u,'must not surface ATV assets for a horse-only request');
@@ -523,13 +536,14 @@ test('a plain horse-riding recommendation request never surfaces ATV or archery 
 });
 
 test('a plain ATV recommendation request never surfaces horse or archery assets from the shared activity catalog',()=>{
+  const turn=semantic({
+    domain:'activity',intent:'atv_recommendation',action:'recommend',informationNeed:'recommendation',
+    entities:{activityCode:'atv'},
+    normalizedMeaning:'Customer asks which ATV is recommended.',
+  });
   const response=composeGroundedDeterministicResponse(input({
-    semanticTurn:semantic({
-      domain:'activity',intent:'atv_recommendation',action:'recommend',informationNeed:'recommendation',
-      entities:{activity:'ATV'},
-      normalizedMeaning:'Customer asks which ATV is recommended.',
-    }),
-    bundles:[mixedActivityBundle],
+    semanticTurn:turn,
+    bundles:[scopedBundle(turn,mixedActivityBundle)],
   }));
   assert.ok(response);
   assert.doesNotMatch(response.message,/ภาราดร|ทองไทย/u,'must not surface horse assets for an ATV-only request');
