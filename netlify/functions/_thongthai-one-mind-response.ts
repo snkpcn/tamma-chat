@@ -247,6 +247,13 @@ async function persistAssistantConversationTurn(
       )
         ? response.message.slice(0,320)
         : undefined,
+      summaryFact:(
+        ['recommend','compare'].includes(turn.semanticTurn.action)
+        || turn.semanticTurn.informationNeed==='recommendation'
+        || response.usedFactKeys.some(key=>/(?:temperament|beginnerSuitable|recommend)/iu.test(key))
+      )
+        ? `assistant recommendation in ${turn.semanticTurn.domain}: ${response.message.slice(0,180)}.`
+        : undefined,
     },now);
     const written=await compareAndSwap(guestDbId,snapshot,{set:{conversationContext:next}},now);
     if(written.status==='applied') return true;
