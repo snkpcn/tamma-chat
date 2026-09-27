@@ -1,3 +1,12 @@
+import { aiCostPolicy, type AiUsage } from './_ai-cost-policy';
+import {
+  AiBudgetBlockedError,
+  finalizeAiCall,
+  reserveAiCall,
+  type AiCallContext,
+  type AiCallReservation,
+} from './_ai-cost-ledger';
+
 // OpenAI-only model provider for Thongthai Human Conversation Recovery.
 //
 // Architecture contract:
@@ -120,12 +129,45 @@ async function callOpenAIModel(
   systemPrompt: string,
   messages: ChatTurn[],
   callerLabel: string,
+  costContext?: AiCallContext,
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new ProviderNotConfiguredError([
       { provider:'openai', model, outcome:'not_configured', elapsedMs:0 },
     ]);
+  }
+
+  const certificationMode = process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE === '1'
+    && callerLabel.includes('certification');
+  if (!costContext && !certificationMode) {
+    throw new LLMAvailabilityError('OpenAI cost context is required in customer production', [
+      { provider:'openai', model, outcome:'request_error', elapsedMs:0 },
+    ]);
+  }
+
+  const policy = aiCostPolicy();
+  const maxOutputTokens = policy.semanticMaxOutputTokens;
+  let reservation:AiCallReservation | null = null;
+  if (costContext) {
+    const guardedContext:AiCallContext = { ...costContext, callerLabel };
+    try {
+      const guarded = await reserveAiCall(
+        guardedContext,
+        model,
+        [systemPrompt, ...messages.map(message => message.content)],
+        maxOutputTokens,
+      );
+      if (guarded.kind === 'replay') return guarded.output;
+      reservation = guarded;
+    } catch (error) {
+      if (error instanceof AiBudgetBlockedError) {
+        throw new LLMAvailabilityError(`OpenAI blocked by cost guard: ${error.reason}`, [
+          { provider:'openai', model, outcome:'request_error', elapsedMs:0 },
+        ]);
+      }
+      throw error;
+    }
   }
 
   const timing = providerTimingPolicyForCaller(callerLabel);
@@ -163,7 +205,7 @@ async function callOpenAIModel(
           }],
         })),
         reasoning:{ effort:'low' },
-        max_output_tokens:1600,
+        max_output_tokens:maxOutputTokens,
         text:{
           format:{
             type:'json_schema',
@@ -194,6 +236,11 @@ async function callOpenAIModel(
     const data = await response.json() as {
       output_text?: string;
       output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        input_tokens_details?: { cached_tokens?: number };
+      };
     };
     const text = extractResponseText(data);
     const elapsedMs = Date.now() - startedAt;
@@ -203,9 +250,16 @@ async function callOpenAIModel(
       ]);
     }
 
+    const usage:AiUsage | null = data.usage ? {
+      inputTokens:Number(data.usage.input_tokens) || 0,
+      cachedInputTokens:Number(data.usage.input_tokens_details?.cached_tokens) || 0,
+      outputTokens:Number(data.usage.output_tokens) || 0,
+    } : null;
+    if (reservation) await finalizeAiCall(reservation, usage, text, true);
     console.log('THONGTHAI_MODEL_PROVIDER_SUCCESS', callerLabel, model);
     return text;
   } catch (error) {
+    if (reservation) await finalizeAiCall(reservation, null, null, false).catch(() => undefined);
     const elapsedMs = Date.now() - startedAt;
     if ((error as Error).name === 'AbortError') {
       throw new LLMAvailabilityError('OpenAI timeout', [
@@ -229,8 +283,9 @@ export function callSemanticSupervisor(
   systemPrompt:string,
   messages:ChatTurn[],
   callerLabel='semantic-interpreter',
+  costContext?:AiCallContext,
 ):Promise<string> {
-  return callOpenAIModel(OPENAI_SEMANTIC_PRIMARY_MODEL, systemPrompt, messages, callerLabel);
+  return callOpenAIModel(OPENAI_SEMANTIC_PRIMARY_MODEL, systemPrompt, messages, callerLabel, costContext);
 }
 
 /** Expensive second opinion. Call only behind a semantic-review gate. */
@@ -238,8 +293,9 @@ export function callSemanticReviewer(
   systemPrompt:string,
   messages:ChatTurn[],
   callerLabel='semantic-reviewer',
+  costContext?:AiCallContext,
 ):Promise<string> {
-  return callOpenAIModel(OPENAI_SEMANTIC_REVIEW_MODEL, systemPrompt, messages, callerLabel);
+  return callOpenAIModel(OPENAI_SEMANTIC_REVIEW_MODEL, systemPrompt, messages, callerLabel, costContext);
 }
 
 /** Backward-compatible entrypoint. Runtime provider is OpenAI-only now. */
@@ -247,8 +303,9 @@ export function callPreferredModel(
   systemPrompt:string,
   messages:ChatTurn[],
   callerLabel='unknown',
+  costContext?:AiCallContext,
 ):Promise<string> {
-  return callOpenAIModel(OPENAI_SEMANTIC_PRIMARY_MODEL, systemPrompt, messages, callerLabel);
+  return callOpenAIModel(OPENAI_SEMANTIC_PRIMARY_MODEL, systemPrompt, messages, callerLabel, costContext);
 }
 
 export function stripCodeFences(text:string):string {
