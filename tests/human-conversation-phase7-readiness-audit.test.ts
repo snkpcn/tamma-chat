@@ -16,9 +16,9 @@ test('Phase 7 readiness: semantic provider is OpenAI Responses only and Sol rema
   assert.match(provider,/'gpt-5\.6-sol'/u);
 
   assert.equal((semantic.match(/callSemanticReviewer\(/gu)??[]).length,1);
-  const reviewGate=semantic.indexOf('if (!semanticTurnNeedsReview(primary, message, context)) return primary;');
+  const reviewGate=semantic.indexOf('if (!options.certificationMode || !semanticTurnNeedsReview(primary, message, context)) return primary;');
   const reviewerCall=semantic.indexOf('const reviewedRaw = await callSemanticReviewer(');
-  assert.ok(reviewGate>=0&&reviewerCall>reviewGate,'reviewer call must remain after the bounded review gate');
+  assert.ok(reviewGate>=0&&reviewerCall>reviewGate,'reviewer call must remain behind explicit certification mode and the bounded review gate');
 });
 
 test('Phase 7 readiness: customer response composition cannot call a model or provider network',()=>{
