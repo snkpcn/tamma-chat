@@ -466,10 +466,22 @@ function isTrustedConversationalCorrection(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
 ): boolean {
-  return Boolean(
+  const deterministicIsSafeCorrectionBase = Boolean(
     deterministic
-    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
-    && COARSE_READ_ONLY_INTENTS.has(deterministic.intent)
+    && (
+      (LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+        && COARSE_READ_ONLY_INTENTS.has(deterministic.intent))
+      // Generic slot extraction can see only a value ("ทองไทย", a date,
+      // party size) while the language model sees that the HUMAN meaning is
+      // "I changed/corrected the previous choice". Both paths are
+      // non-transactional; allowing correct_previous here prevents stale
+      // task state from overruling the current sentence.
+      || deterministic.action === 'provide_information'
+    )
+  );
+  return Boolean(
+    deterministicIsSafeCorrectionBase
+    && deterministic
     && turn.action === 'correct_previous'
     && turn.speechAct === 'correction'
     && turn.domain === deterministic.domain
