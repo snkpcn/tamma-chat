@@ -480,11 +480,14 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
 
   if (turn.informationNeed === 'availability') {
     const availability = sourcesFor('availability');
+    const requestedDate = typeof turn.entities.date === 'string' ? turn.entities.date.trim() : '';
+    const requestedTime = typeof turn.entities.time === 'string' ? turn.entities.time.trim() : '';
+    const requestedWhen = [requestedDate, requestedTime ? `เวลา ${requestedTime}` : ''].filter(Boolean).join(' ');
     if (availability.some(source => source.status === 'unavailable')) {
-      return { message:'ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ครับ เลยไม่ขอเดาว่าเต็มหรือว่าง และยังไม่ได้ทำรายการจองให้', usedFactKeys:[] };
+      return { message:`${requestedWhen ? `สำหรับ ${requestedWhen} ` : ''}ตอนนี้ทองไทยยังไม่มีข้อมูลโต๊ะว่างแบบสดที่ยืนยันได้ครับ เลยไม่ขอเดาว่าเต็มหรือว่าง และยังไม่ได้ทำรายการจองให้`, usedFactKeys:[] };
     }
     if (availability.length && availability.every(source => source.status === 'empty')) {
-      return { message:'ตอนนี้ยังไม่พบโต๊ะว่างที่ยืนยันได้ตามวันและเวลาที่ถามครับ และยังไม่ได้ทำรายการจองให้', usedFactKeys:[] };
+      return { message:`${requestedWhen ? `สำหรับ ${requestedWhen} ` : ''}ตอนนี้ยังไม่พบโต๊ะว่างที่ยืนยันได้ตามวันและเวลาที่ถามครับ และยังไม่ได้ทำรายการจองให้`, usedFactKeys:[] };
     }
   }
 
