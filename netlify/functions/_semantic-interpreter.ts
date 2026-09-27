@@ -759,7 +759,20 @@ function normalizeCrossDomainJourney(
   if(domain!=='ecosystem') return domain;
   const crossDomainKeys=['stay','activity','restaurant','otop','cafe']
     .filter(key=>entities[key]!==undefined);
-  const isMultiDomainPlan = crossDomainKeys.length >= 2
+  const activities = Array.isArray(entities.activities)
+    ? entities.activities.filter(item=>item && typeof item==='object')
+    : [];
+  const scheduledDays = new Set(
+    activities
+      .map(item=>Number((item as Record<string,unknown>).day))
+      .filter(day=>Number.isFinite(day) && day > 0)
+  );
+  const hasStayStructure = entities.stay !== undefined
+    || entities.stayNights !== undefined
+    || entities.tripDurationDays !== undefined;
+  const hasStructuredMultiStepPlan = activities.length >= 2
+    && (scheduledDays.size >= 2 || hasStayStructure);
+  const isMultiDomainPlan = (crossDomainKeys.length >= 2 || hasStructuredMultiStepPlan)
     && (action==='recommend' || action==='discover' || action==='ask')
     && (informationNeed==='recommendation' || informationNeed==='catalog' || informationNeed==='none');
   if(isMultiDomainPlan) return 'journey';
@@ -943,6 +956,13 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   let references = resolveReferences(normalizeReferences(parsed.references), context);
   const entities = canonicalizeEntityAliases(asRecord(parsed.entities), domain);
   domain = normalizeCrossDomainJourney(domain, action, informationNeed, entities, references, context);
+
+  // A request to summarize the current working state is answered from the
+  // canonical task container itself. It must never become ambiguous merely
+  // because the model also emitted a stale/unresolved prior-context reference.
+  if (parsed.intent === 'summarize_active_task') {
+    references = [];
+  }
 
   const structuredEntityNames = new Set(
     Object.values(entities)
