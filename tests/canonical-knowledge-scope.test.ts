@@ -230,12 +230,12 @@ test('C8.13 a focused entity selection carries no transaction commitment of its 
 
 test('a focused turn in a domain this contract has not canonicalized yet firewalls as a no-op', () => {
   const meaning = deriveSemanticMeaning(turn({
-    domain: 'restaurant', action: 'confirm',
-    references: [{ type: 'entity_selection', refersToPriorContext: false, resolvedEntityId: 'menu:thai-salad' }],
+    domain: 'otop', action: 'confirm',
+    references: [{ type: 'entity_selection', refersToPriorContext: false, resolvedEntityId: 'otop:honey' }],
   }));
   assert.equal(meaning.scopeBreadth, 'focused');
   const scope: CanonicalKnowledgeScope = deriveCanonicalKnowledgeScope(meaning);
   assert.equal(scope.status, 'unresolved');
-  const facts = [fact('menu:thai-salad:name', 'ตำไทย'), fact('menu:shrimp:name', 'กุ้งทอด')];
+  const facts = [fact('otop:honey:name', 'น้ำผึ้ง'), fact('otop:tea:name', 'ชา')];
   assert.deepEqual(filterFactsByCanonicalScope(facts, scope), facts);
 });
