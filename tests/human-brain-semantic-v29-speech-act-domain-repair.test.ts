@@ -134,3 +134,23 @@ test('generic previous-plan reference is backed by bounded conversation evidence
   assert.equal(turn.references[0]?.resolvedFromConversation,true);
   assert.equal(turn.references[0]?.resolvedEntityId,undefined);
 });
+
+
+test('local-area question keeps local domain when the deictic place reference needs clarification', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'asking about animals in the surrounding area',
+    speechAct:'question',
+    domain:'local',
+    intent:'ask_local_conditions',
+    action:'ask',
+    informationNeed:'none',
+    entities:{},
+    references:[{type:'location_reference',value:'around there',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.95,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.domain, 'local');
+  assert.equal(turn.speechAct, 'question');
+  assert.equal(turn.needsClarification, true);
+});
