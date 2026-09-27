@@ -75,7 +75,9 @@ test('Phase 6 E2E restaurant: browse, preferences, availability and just-asking 
   };
   const adapters:KnowledgeSourceAdapters={
     restaurant:{
-      menu:async()=>ok('menu','restaurant_live',[fact('menu:tamthai:name','ตำไทย','restaurant','menu','restaurant_live')]),
+      menu:async()=>ok('menu','restaurant_live',[fact('menu:tamthai:name','ตำไทย','restaurant','menu','restaurant_live'),
+        fact('menu:tamthai:orderable',true,'restaurant','menu','restaurant_live'),
+        fact('menu:tamthai:availableServings',10,'restaurant','menu','restaurant_live')]),
       availability:async()=>({status:'empty',sourceId:'tables',sourceType:'restaurant_live',fetchedAt:NOW.toISOString()}),
     },
   };
@@ -193,6 +195,8 @@ test('Phase 6 metamorphic E2E: explicit restaurant-order paraphrases keep transa
   const adapters:KnowledgeSourceAdapters={
     restaurant:{menu:async()=>ok('menu','restaurant_live',[
       fact('menu:tamthai:name','ตำไทย','restaurant','menu','restaurant_live'),
+        fact('menu:tamthai:orderable',true,'restaurant','menu','restaurant_live'),
+        fact('menu:tamthai:availableServings',10,'restaurant','menu','restaurant_live'),
     ])},
   };
   for(const [index,message] of variants.entries()) {
