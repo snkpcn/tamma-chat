@@ -455,7 +455,6 @@ function deriveForActiveTask(
   const correcting = hasCorrectionMarker(message);
   const committing = hasCommitMarker(message);
   if (!Object.keys(entities).length && !references.length && !committing) return null;
-  const selectingKnownAsset = Boolean(knownActivityAsset);
   return {
     domain: task.domain,
     intent: committing
@@ -464,21 +463,19 @@ function deriveForActiveTask(
         ? 'task_field_correction'
         : entityMatch
           ? 'select_prior_entity'
-          : selectingKnownAsset
-            ? 'select_known_activity_asset'
-            : 'task_slot_update',
+          : 'task_slot_update',
     action: committing
       ? 'book'
       : correcting
         ? 'correct_previous'
-        : (entityMatch || selectingKnownAsset)
+        : entityMatch
           ? 'confirm'
           : 'provide_information',
     speechAct: committing
       ? 'transaction_request'
       : correcting
         ? 'correction'
-        : (entityMatch || selectingKnownAsset)
+        : entityMatch
           ? 'selection'
           : undefined,
     entities,
