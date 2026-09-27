@@ -14,7 +14,7 @@ import {
 } from '../netlify/functions/_response-composer';
 import type { DialogDecision } from '../netlify/functions/_dialog-manager';
 import type { DegradationPlan } from '../netlify/functions/_graceful-degradation';
-import type { KnowledgeBundle } from '../netlify/functions/_knowledge-resolver';
+import type { KnowledgeBundle, KnowledgeNeed, KnowledgeRequest } from '../netlify/functions/_knowledge-resolver';
 import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
 
 const NOW='2026-09-18T12:00:00.000Z';
@@ -57,7 +57,7 @@ function input(overrides: Partial<ResponseComposerInput> = {}): ResponseComposer
 }
 
 test('Response Composer version is explicit', () => {
-  assert.equal(RESPONSE_COMPOSER_VERSION, 'response-composer-v1');
+  assert.equal(RESPONSE_COMPOSER_VERSION, 'response-composer-v2');
 });
 
 test('prompt consumes canonical Bible doctrine and grounded facts, not raw DB implementation', () => {
@@ -122,6 +122,195 @@ test('SOURCE_UNAVAILABLE deterministic copy never says there are no options', ()
   }));
   assert.match(response.message,/ยังเช็กข้อมูลล่าสุด/);
   assert.doesNotMatch(response.message,/ไม่มี(?:ห้อง|โปร|สินค้า|ตัวเลือก)/);
+});
+
+test('PR G selects the actually failed availability request and preserves structured date/time', async () => {
+  const catalogRequest: KnowledgeRequest={
+    domain:'restaurant', intent:'restaurant_catalog', action:'ask',
+    entities:{}, constraints:[], needs:['catalog'],
+  };
+  const availabilityRequest: KnowledgeRequest={
+    domain:'restaurant', intent:'restaurant_table_availability', action:'ask',
+    // Deliberately omit time here: current semantic meaning below must win.
+    entities:{date:'2026-09-29'}, constraints:[], needs:['availability'],
+  };
+  const bundles:KnowledgeBundle[]=[{
+    domain:'restaurant',
+    sources:[
+      {need:'catalog',sourceId:'restaurant_menu_live',sourceType:'restaurant_live',status:'ok'},
+      {need:'availability',sourceId:'restaurant_table_live',sourceType:'restaurant_live',status:'unavailable',reason:'source_unavailable'},
+    ],
+    facts:[
+      {key:'menu:m1:name',value:'ส้มตำไทย',domain:'restaurant',sourceId:'restaurant_menu_live',sourceType:'restaurant_live',authoritative:true,fetchedAt:NOW},
+    ],
+    entities:[], missing:['availability'], warnings:[], freshness:'mixed',
+  }];
+  const response=await composeThongthaiResponse(input({
+    userMessage:'พรุ่งนี้หกโมงโต๊ะเต็มยัง',
+    semanticTurn:{
+      domain:'restaurant', intent:'restaurant_table_availability', action:'ask',
+      informationNeed:'availability', entities:{date:'2026-09-29',time:'18:00'},
+      references:[], constraints:[], confidence:.96, needsClarification:false,
+    },
+    dialogDecision:decision({knowledgeRequests:[catalogRequest,availabilityRequest]}),
+    knowledgeBundles:bundles,
+    degradation:degradation({
+      condition:'source_unavailable',level:'grounded_deterministic',
+      reasonCodes:['authoritative_source_unavailable','partial_grounding_available'],retryable:true,
+      sourceStates:[{sourceId:'restaurant_menu_live',status:'ok'},{sourceId:'restaurant_table_live',status:'unavailable',reason:'source_unavailable'}],
+    }),
+  }));
+  assert.match(response.message,/โต๊ะว่าง/);
+  assert.match(response.message,/2026-09-29/);
+  assert.match(response.message,/18:00/);
+  assert.match(response.message,/ยืนยันไม่ได้|เช็ก.*ไม่ได้/);
+  assert.doesNotMatch(response.message,/รับทราบ|เมนูที่มี|ไม่มีตัวเลือก/);
+  assert.equal(response.mode,'deterministic');
+});
+
+test('PR G fact-unknown price keeps the named stay instead of collapsing to generic copy', async () => {
+  const request:KnowledgeRequest={
+    domain:'stay',intent:'stay_price',action:'ask',
+    entities:{accommodationName:'บ้านชมดาว'},constraints:[],needs:['price'],
+  };
+  const response=await composeThongthaiResponse(input({
+    userMessage:'หลังนี้เท่าไหร่',
+    semanticTurn:{
+      domain:'stay',intent:'stay_price',action:'ask',informationNeed:'price',
+      entities:{accommodationName:'บ้านชมดาว'},references:[],constraints:[],
+      confidence:.95,needsClarification:false,
+    },
+    dialogDecision:decision({knowledgeRequests:[request]}),
+    knowledgeBundles:[{
+      domain:'stay',
+      sources:[{need:'price',sourceId:'stay_price_unwired',sourceType:'stay_live',status:'unavailable',reason:'no_source_registered'}],
+      facts:[],entities:[],missing:['price'],warnings:[],freshness:'live',
+    }],
+    degradation:degradation({
+      condition:'fact_unknown',level:'human_handoff',
+      reasonCodes:['fact_not_verified','human_followup_required'],
+      sourceStates:[{sourceId:'stay_price_unwired',status:'unavailable',reason:'no_source_registered'}],
+    }),
+  }));
+  assert.match(response.message,/บ้านชมดาว/);
+  assert.match(response.message,/ราคา/);
+  assert.match(response.message,/ยังไม่มีข้อมูลที่ยืนยันได้/);
+  assert.doesNotMatch(response.message,/เรื่องนี้ยังไม่มีข้อมูลยืนยัน/);
+});
+
+test('PR G schedule gap preserves the structured activity entity and date', async () => {
+  const request:KnowledgeRequest={
+    domain:'activity',intent:'activity_schedule',action:'ask',
+    entities:{horseName:'ทองไทย'},constraints:[],needs:['schedule'],
+  };
+  const response=await composeThongthaiResponse(input({
+    semanticTurn:{
+      domain:'activity',intent:'activity_schedule',action:'ask',informationNeed:'schedule',
+      entities:{horseName:'ทองไทย',date:'2026-10-01'},references:[],constraints:[],
+      confidence:.94,needsClarification:false,
+    },
+    dialogDecision:decision({knowledgeRequests:[request]}),
+    knowledgeBundles:[{
+      domain:'activity',
+      sources:[{need:'schedule',sourceId:'activity_schedule_live',sourceType:'activity_live',status:'unavailable',reason:'source_unavailable'}],
+      facts:[],entities:[],missing:['schedule'],warnings:[],freshness:'live',
+    }],
+    degradation:degradation({
+      condition:'source_unavailable',level:'human_handoff',
+      reasonCodes:['authoritative_source_unavailable','human_followup_required'],retryable:true,
+      sourceStates:[{sourceId:'activity_schedule_live',status:'unavailable',reason:'source_unavailable'}],
+    }),
+  }));
+  assert.match(response.message,/ทองไทย/);
+  assert.match(response.message,/2026-10-01/);
+  assert.match(response.message,/รอบ|ตารางเวลา/);
+  assert.match(response.message,/ไม่ขอเดา/);
+});
+
+test('PR G inventory gap preserves product identity and never invents stock', async () => {
+  const request:KnowledgeRequest={
+    domain:'otop',intent:'otop_inventory',action:'status',
+    entities:{productName:'ข้าวฮาง'},constraints:[],needs:['inventory'],
+  };
+  const response=await composeThongthaiResponse(input({
+    semanticTurn:{
+      domain:'otop',intent:'otop_inventory',action:'status',informationNeed:'inventory',
+      entities:{productName:'ข้าวฮาง'},references:[],constraints:[],
+      confidence:.93,needsClarification:false,
+    },
+    dialogDecision:decision({knowledgeRequests:[request]}),
+    knowledgeBundles:[{
+      domain:'otop',
+      sources:[{need:'inventory',sourceId:'otop_inventory_live',sourceType:'otop_live',status:'unavailable',reason:'source_unavailable'}],
+      facts:[],entities:[],missing:['inventory'],warnings:[],freshness:'live',
+    }],
+    degradation:degradation({
+      condition:'source_unavailable',level:'human_handoff',
+      reasonCodes:['authoritative_source_unavailable','human_followup_required'],retryable:true,
+      sourceStates:[{sourceId:'otop_inventory_live',status:'unavailable',reason:'source_unavailable'}],
+    }),
+  }));
+  assert.match(response.message,/ข้าวฮาง/);
+  assert.match(response.message,/จำนวน/);
+  assert.match(response.message,/เช็ก.*ไม่ได้/);
+  assert.doesNotMatch(response.message,/เหลือ\s*\d|มี\s*\d/);
+});
+
+test('PR G response depends on structured meaning, not raw customer phrasing', async () => {
+  const request:KnowledgeRequest={
+    domain:'restaurant',intent:'restaurant_table_availability',action:'ask',
+    entities:{date:'2026-09-29',time:'18:00'},constraints:[],needs:['availability'],
+  };
+  const bundle:KnowledgeBundle={
+    domain:'restaurant',
+    sources:[{need:'availability',sourceId:'restaurant_table_live',sourceType:'restaurant_live',status:'unavailable',reason:'source_unavailable'}],
+    facts:[],entities:[],missing:['availability'],warnings:[],freshness:'live',
+  };
+  const base:Partial<ResponseComposerInput>={
+    semanticTurn:{
+      domain:'restaurant',intent:'restaurant_table_availability',action:'ask',
+      informationNeed:'availability',entities:{date:'2026-09-29',time:'18:00'},
+      references:[],constraints:[],confidence:.97,needsClarification:false,
+    },
+    dialogDecision:decision({knowledgeRequests:[request]}),
+    knowledgeBundles:[bundle],
+    degradation:degradation({
+      condition:'source_unavailable',level:'human_handoff',
+      reasonCodes:['authoritative_source_unavailable','human_followup_required'],retryable:true,
+      sourceStates:[{sourceId:'restaurant_table_live',status:'unavailable',reason:'source_unavailable'}],
+    }),
+  };
+  const a=await composeThongthaiResponse(input({...base,userMessage:'พรุ่งนี้หกโมงมีโต๊ะปะ'}));
+  const b=await composeThongthaiResponse(input({...base,userMessage:'ขอทราบ availability ของโต๊ะเวลา 18:00'}));
+  assert.equal(a.message,b.message);
+});
+
+test('PR G semantic policy need correctly bridges to stable_policy knowledge taxonomy', async () => {
+  const request:KnowledgeRequest={
+    domain:'stay',intent:'stay_policy',action:'ask',
+    entities:{accommodationName:'บ้านชมดาว'},constraints:[],needs:['stable_policy'],
+  };
+  const response=await composeThongthaiResponse(input({
+    semanticTurn:{
+      domain:'stay',intent:'stay_policy',action:'ask',informationNeed:'policy',
+      entities:{accommodationName:'บ้านชมดาว'},references:[],constraints:[],
+      confidence:.91,needsClarification:false,
+    },
+    dialogDecision:decision({knowledgeRequests:[request]}),
+    knowledgeBundles:[{
+      domain:'stay',
+      sources:[{need:'stable_policy',sourceId:'policy_unwired',sourceType:'bible',status:'unavailable',reason:'no_source_registered'}],
+      facts:[],entities:[],missing:['stable_policy'],warnings:[],freshness:'stable',
+    }],
+    degradation:degradation({
+      condition:'fact_unknown',level:'human_handoff',
+      reasonCodes:['fact_not_verified','human_followup_required'],
+      sourceStates:[{sourceId:'policy_unwired',status:'unavailable',reason:'no_source_registered'}],
+    }),
+  }));
+  assert.match(response.message,/เงื่อนไข/);
+  assert.match(response.message,/บ้านชมดาว/);
+  assert.match(response.message,/ยืนยันได้/);
 });
 
 test('VERIFIED_EMPTY deterministic promotion copy truthfully says no active promotion', () => {
