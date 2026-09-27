@@ -419,3 +419,30 @@ test('conditional availability renderer preserves preferredAsset and fallbackAss
   assert.match(response.message,/ทองไทย/u);
   assert.match(response.message,/ยังไม่ได้.*จอง|ยังไม่ได้ทำรายการ/u);
 });
+
+
+test('conditional availability renderer preserves generic primary/fallback live aliases',()=>{
+  const availabilityBundle:KnowledgeBundle={
+    domain:'activity',
+    sources:[{need:'availability',sourceId:'availability-test',sourceType:'activity_live',status:'empty'}],
+    facts:[],entities:[],missing:['availability'],warnings:[],freshness:'live',
+  };
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',
+      intent:'conditional_horse_availability_with_fallback',
+      action:'status',
+      informationNeed:'availability',
+      entities:{
+        primary:{type:'activity_asset',id:'activity_asset:horse-paradorn',name:'ภาราดร'},
+        fallback:{type:'activity_asset',id:'activity_asset:horse-thongthai',name:'ทองไทย'},
+      },
+      constraints:['prefer_horse_paradorn','fallback_horse_thongthai_if_paradorn_unavailable','no_booking_if_both_unavailable','no_transaction_now'],
+    }),
+    bundles:[availabilityBundle],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/ภาราดร/u);
+  assert.match(response.message,/ทองไทย/u);
+  assert.match(response.message,/ไม่ได้.*จอง|ไม่ได้ทำรายการ/u);
+});
