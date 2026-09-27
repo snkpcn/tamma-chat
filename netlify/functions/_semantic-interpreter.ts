@@ -198,24 +198,6 @@ export function emptySemanticContext(): SemanticContext {
 
 const PRIOR_REFERENCE_MARKER_RE = /(?:เดิม|เมื่อกี้|ก่อนหน้า|อันนั้น|ตัวนั้น|นั่น|นั่นแหละ|ตัวนี้|อันนี้|เหมือนเดิม|กลับไป|ต่อเรื่อง|same|previous|that one|this one)/iu;
 
-/**
- * Human Brain semantic-v31: choosing between multiple known prior entities is
- * a high-precision language-understanding problem. Route that rare turn to the
- * stronger semantic model as the ONE call for the turn instead of spending a
- * second call after a cheaper model guessed. This preserves the owner's hard
- * maxCallsPerTurn=1 production cost invariant.
- */
-export function shouldUseHighPrecisionReferenceSupervisor(
-  message: string,
-  context: SemanticContext,
-): boolean {
-  if (!PRIOR_REFERENCE_MARKER_RE.test(message)) return false;
-  const candidates = context.activeDomain
-    ? context.recentEntities.filter(entity => entity.domain === context.activeDomain)
-    : context.recentEntities;
-  return candidates.length > 1;
-}
-
 /** A reference the customer made to something outside the literal words of this
  *  turn -- prior context, a previous selection, an implicit "the same one as
  *  before". `resolvedEntityId`/`resolvedEntityIds` are filled in deterministically
@@ -674,25 +656,34 @@ export function buildProductionSemanticInterpreterPrompt(
   // conversation string. This does not interpret the customer's words in
   // deterministic code; it only partitions already-visible recent assistant
   // text at exact known entity-name boundaries.
-  const recentEntityEvidence = compactEntities.flatMap(entity => {
-    const evidence = compactTurns.flatMap(turn => {
-      const start = turn.content.indexOf(entity.name);
-      if (start < 0) return [];
-      const afterName = start + entity.name.length;
-      const laterEntityStarts = compactEntities
-        .filter(other => other.id !== entity.id)
-        .map(other => turn.content.indexOf(other.name, afterName))
-        .filter(position => position >= 0);
-      const end = laterEntityStarts.length
-        ? Math.min(...laterEntityStarts)
-        : Math.min(turn.content.length, afterName + 160);
-      const snippet = turn.content.slice(start, end).trim();
-      return snippet ? [{ role:turn.role, text:snippet }] : [];
-    }).slice(-2);
-    return evidence.length
-      ? [{ id:entity.id, name:entity.name, domain:entity.domain, evidence }]
-      : [];
-  });
+  const recentEntityEvidence = referencesPrior && compactEntities.length > 1
+    ? compactEntities.flatMap(entity => {
+        const evidence = compactTurns.flatMap(turn => {
+          const start = turn.content.indexOf(entity.name);
+          if (start < 0) return [];
+          const afterName = start + entity.name.length;
+          const laterEntityStarts = compactEntities
+            .filter(other => other.id !== entity.id)
+            .map(other => turn.content.indexOf(other.name, afterName))
+            .filter(position => position >= 0);
+          const end = laterEntityStarts.length
+            ? Math.min(...laterEntityStarts)
+            : Math.min(turn.content.length, afterName + 100);
+          const snippet = turn.content.slice(start, end).trim();
+          return snippet ? [{ role:turn.role, text:snippet }] : [];
+        }).slice(-1);
+        return evidence.length
+          ? [{ id:entity.id, name:entity.name, domain:entity.domain, evidence }]
+          : [];
+      })
+    : [];
+
+  // Do not duplicate the same conversation text in both recentTurns and
+  // recentEntityEvidence. Entity-bearing turns are represented by the bounded
+  // evidence above; unrelated recent turns remain available for ellipsis.
+  const compactTurnsForPrompt = recentEntityEvidence.length
+    ? compactTurns.filter(turn => !compactEntities.some(entity => turn.content.includes(entity.name))).slice(-2)
+    : compactTurns;
 
   const compactContext = {
     activeDomain:context.activeDomain,
@@ -701,7 +692,7 @@ export function buildProductionSemanticInterpreterPrompt(
     openQuestion:context.openQuestion?.slice(0, 120),
     recentEntities:compactEntities,
     recentEntityEvidence,
-    recentTurns:compactTurns,
+    recentTurns:compactTurnsForPrompt,
     activeTask:task(context.activeTask),
     suspendedTask:referencesPrior ? task(context.suspendedTask) : null,
     rollingSummary:referencesPrior ? context.rollingSummary?.slice(0, 360) : undefined,
@@ -1481,12 +1472,9 @@ export function semanticTurnNeedsReview(
 /**
  * OpenAI-only semantic supervisor.
  *
- * Terra reads ordinary language turns. Sol is used as the single primary call
- * for the rare bounded case where a prior-context reference must choose among
- * multiple known entities; this avoids a second paid call and keeps the hard
- * one-call-per-turn budget invariant. Certification mode may still ask Sol for
- * a second opinion when a candidate is structurally weak. Neither model is
- * allowed to answer the customer or execute a business action here.
+ * Terra reads every ordinary language turn. Sol is a bounded second opinion
+ * only when the primary result is structurally weak/uncertain. Neither model
+ * is allowed to answer the customer or execute a business action here.
  */
 export type SemanticInterpretOptions = {
   callContext?: AiCallContext;
@@ -1500,20 +1488,12 @@ export async function interpretSemanticTurn(
 ): Promise<SemanticTurn> {
   const prompt = buildProductionSemanticInterpreterPrompt(context, message);
   const messages:ChatTurn[] = [{ role:'user', content:message }];
-  const highPrecisionReference = shouldUseHighPrecisionReferenceSupervisor(message, context);
-  const primaryRaw = highPrecisionReference
-    ? await callSemanticReviewer(
-        prompt,
-        messages,
-        options.certificationMode ? 'semantic-certification-primary-precision' : 'semantic-interpreter-precision',
-        options.callContext,
-      )
-    : await callSemanticSupervisor(
-        prompt,
-        messages,
-        options.certificationMode ? 'semantic-certification-primary' : 'semantic-interpreter',
-        options.callContext,
-      );
+  const primaryRaw = await callSemanticSupervisor(
+    prompt,
+    messages,
+    options.certificationMode ? 'semantic-certification-primary' : 'semantic-interpreter',
+    options.callContext,
+  );
   const primary = parseSemanticTurnResponse(primaryRaw, context);
   if (!options.certificationMode || !semanticTurnNeedsReview(primary, message, context)) return primary;
 
