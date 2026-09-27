@@ -21,6 +21,12 @@ import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-
 import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
 import { extractTime } from './_slot-parsers';
+import {
+  renderActivityRecommendation,
+  renderRestaurantRecommendation,
+  renderPromotionRecommendation,
+  renderJourneyPlan,
+} from './_human-grounded-response';
 
 export const RESPONSE_COMPOSER_VERSION = 'response-composer-v1';
 const MAX_FACTS_IN_PROMPT = 100;
@@ -633,6 +639,22 @@ function groundedIntro(input: ResponseComposerInput): string {
 }
 
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
+  const humanGrounded = renderJourneyPlan(input)
+    ?? renderRestaurantRecommendation(input)
+    ?? renderPromotionRecommendation(input)
+    ?? renderActivityRecommendation(input);
+  if (humanGrounded) {
+    return {
+      message:polishCustomerMessage(humanGrounded.message, input.channel),
+      mode:'deterministic',
+      usedFactKeys:humanGrounded.usedFactKeys,
+      composerVersion:RESPONSE_COMPOSER_VERSION,
+      bibleVersion:THONGTHAI_BIBLE_VERSION,
+      channel:input.channel,
+      language:input.language,
+    };
+  }
+
   const activityPrice = activityPriceAnswer(input);
   if (activityPrice) {
     return {
