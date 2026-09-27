@@ -64,3 +64,43 @@ test('incident_report with unknown domain is repaired to incident without hiding
   assert.equal(turn.speechAct, 'incident_report');
   assert.equal(turn.needsClarification, true);
 });
+
+
+test('self-directed pause with stray suspend directive stays a statement when no task exists', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'partner is tired and customer will pause briefly',
+    speechAct:'request',
+    domain:'general',
+    intent:'pause_briefly',
+    action:'provide_information',
+    informationNeed:'none',
+    taskDirective:'suspend_active',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.96,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.domain, 'general');
+  assert.equal(turn.speechAct, 'statement');
+  assert.equal(turn.taskDirective, undefined);
+});
+
+test('incident domain survives an unresolved deictic reference while clarification remains true', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'pet is missing around there',
+    speechAct:'incident_report',
+    domain:'unknown',
+    intent:'report_missing_pet',
+    action:'provide_information',
+    informationNeed:'none',
+    entities:{},
+    references:[{type:'location_reference',value:'there',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.96,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.domain, 'incident');
+  assert.equal(turn.speechAct, 'incident_report');
+  assert.equal(turn.needsClarification, true);
+});
