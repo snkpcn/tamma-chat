@@ -141,11 +141,13 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
     ?? nameOf(entity.primaryHorse)
     ?? nameOf(entity.preferredAsset)
     ?? nameOf(entity.preferredHorse)
-    ?? nameOf(entity.primaryAsset);
+    ?? nameOf(entity.primaryAsset)
+    ?? nameOf(entity.primary);
   const fallback=
     nameOf(entity.fallbackResource)
     ?? nameOf(entity.fallbackHorse)
-    ?? nameOf(entity.fallbackAsset);
+    ?? nameOf(entity.fallbackAsset)
+    ?? nameOf(entity.fallback);
   const names=[primary,fallback].filter((value):value is string=>Boolean(value));
   const noTransaction=semanticText(input).includes('no_transaction')
     || semanticText(input).includes('no_booking')
