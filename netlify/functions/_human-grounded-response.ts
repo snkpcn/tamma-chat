@@ -85,6 +85,8 @@ function activityAssetRows(input: HumanGroundedRenderInput) {
       'beginnerSuitable:activity_asset:' + code,
       'activity_asset:' + code + ':beginnerSuitable',
     ].find(key => map.has(key));
+    const typeKey = 'activity_asset:' + code + ':type';
+    const type = map.has(typeKey) ? map.get(typeKey) : undefined;
     return {
       code,
       name: name.trim(),
@@ -93,8 +95,42 @@ function activityAssetRows(input: HumanGroundedRenderInput) {
       temperament: temperamentKey ? map.get(temperamentKey) : undefined,
       beginnerKey,
       beginnerSuitable: beginnerKey ? map.get(beginnerKey) : undefined,
+      typeKey,
+      type: typeof type === 'string' ? type : undefined,
     };
   }).filter((row): row is NonNullable<typeof row> => Boolean(row));
+}
+
+// Same three activity types _response-composer.ts's own naturalActivityTopicSummary
+// already labels by activity_asset:<code>:type (horse/atv/archery) -- general
+// across the whole activity catalog, not a one-off for any single activity.
+// Production incident this closes: a plain "which horse do you recommend"
+// request had no matched preference (wantsCalm/wantsBeginner/wantsLight/
+// wantsRain all false), so the final catch-all branch listed EVERY activity
+// asset -- ATVs and archery lanes included -- instead of scoping to the one
+// activity type the customer (and the semantic turn's own entities/message)
+// already identified.
+const ACTIVITY_TYPE_MARKERS: Record<string, RegExp> = {
+  horse: /ม้า|horse/iu,
+  atv: /atv/iu,
+  archery: /ยิงธนู|ธนู|archery/iu,
+};
+
+function requestedActivityType(input: HumanGroundedRenderInput): string | null {
+  const entities = semanticEntities(input);
+  const entityText = JSON.stringify(entities).toLowerCase();
+  const text = semanticText(input) + ' ' + entityText;
+  const matches = Object.entries(ACTIVITY_TYPE_MARKERS).filter(([, pattern]) => pattern.test(text));
+  return matches.length === 1 ? matches[0]![0] : null;
+}
+
+function scopedToRequestedType<T extends { type?: string }>(input: HumanGroundedRenderInput, rows: readonly T[]): T[] {
+  const requested = requestedActivityType(input);
+  if (!requested) return [...rows];
+  const distinctTypes = new Set(rows.map(row => row.type).filter((value): value is string => Boolean(value)));
+  if (distinctTypes.size <= 1) return [...rows];
+  const scoped = rows.filter(row => row.type === requested);
+  return scoped.length ? scoped : [...rows];
 }
 
 function explicitExcludedNames(input: HumanGroundedRenderInput, names: readonly string[]): Set<string> {
@@ -180,7 +216,7 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
   if (!turn || turn.domain !== 'activity' || input.language !== 'th') return null;
 
   const map = factMap(input);
-  const assets = activityAssetRows(input);
+  const assets = scopedToRequestedType(input, activityAssetRows(input));
   const excluded = explicitExcludedNames(input, assets.map(asset => asset.name));
   const wantsCalm = wants(input, ['prefer_calm', 'calm_horse', 'calm_temperament', 'preferred_horse_trait', 'calmer', 'นิ่ง', 'ใจเย็น']);
   const wantsBeginner = wants(input, ['beginner', 'มือใหม่', 'ไม่เคยขี่']);
