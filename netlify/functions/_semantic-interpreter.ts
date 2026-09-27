@@ -783,8 +783,25 @@ function normalizeCrossDomainJourney(
     || entities.stayNights !== undefined
     || entities.stayDurationNights !== undefined
     || entities.tripDurationDays !== undefined;
-  const hasStructuredMultiStepPlan = structuredSteps.length >= 2
-    && (scheduledDays.size >= 2 || hasStayStructure);
+  const hasActivityStructure = structuredSteps.length > 0
+    || entities.activity !== undefined;
+  const hasDiningStructure = entities.dining !== undefined
+    || entities.restaurant !== undefined
+    || entities.meal !== undefined;
+  const hasShoppingStructure = entities.shopping !== undefined
+    || entities.otop !== undefined
+    || entities.souvenir !== undefined;
+  const hasCafeStructure = entities.cafe !== undefined;
+  const structuredDomainFacetCount = [
+    hasStayStructure,
+    hasActivityStructure,
+    hasDiningStructure,
+    hasShoppingStructure,
+    hasCafeStructure,
+  ].filter(Boolean).length;
+  const hasStructuredMultiStepPlan =
+    (structuredSteps.length >= 2 && (scheduledDays.size >= 2 || hasStayStructure))
+    || structuredDomainFacetCount >= 2;
   const isMultiDomainPlan = (crossDomainKeys.length >= 2 || hasStructuredMultiStepPlan)
     && (action==='recommend' || action==='discover' || action==='ask')
     && (informationNeed==='recommendation' || informationNeed==='catalog' || informationNeed==='none');
