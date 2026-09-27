@@ -40,7 +40,7 @@ test('stay flow: availability inquiry is NOT a booking; only an explicit "จอ
   assert.notEqual(decision.mode, 'propose_action');
 
   // "สองคน คืนเดียว" -- provide_information IS task-worthy; creates the task.
-  await step('สองคน คืนเดียว', { domain: 'stay', intent: 'provide_stay_details', action: 'provide_information', entities: { partySize: 2, quantity: 1 }, references: [], constraints: [], confidence: 0.85, needsClarification: false });
+  await step('สองคน คืนเดียว', { domain: 'stay', intent: 'provide_stay_details', action: 'provide_information', entities: { partySize: 2, nights: 1 }, references: [], constraints: [], confidence: 0.85, needsClarification: false });
   assert.ok(taskState.activeTask, 'concrete party size/duration is task-worthy');
   const taskId = taskState.activeTask!.taskId;
   assert.equal(taskState.activeTask!.slots.partySize, 2);
@@ -49,7 +49,8 @@ test('stay flow: availability inquiry is NOT a booking; only an explicit "จอ
   await step('เอาหลังที่แนะนำ', { domain: 'stay', intent: 'select_recommended_room', action: 'confirm', entities: { resourceCode: 'stay:room-a', date: '2026-09-19' }, references: [], constraints: [], confidence: 0.85, needsClarification: false });
   assert.equal(taskState.activeTask!.taskId, taskId);
   assert.equal(taskState.activeTask!.slots.resourceCode, 'stay:room-a');
-  assert.deepEqual(taskState.activeTask!.missingFields, [], 'date is the only real requirement for stay, and it is now present');
+  assert.equal(taskState.activeTask!.slots.endDate, '2026-09-20', 'checkout is derived structurally from ISO check-in + nights');
+  assert.deepEqual(taskState.activeTask!.missingFields, [], 'canonical stay, date range, and party size are all present');
 
   // Even with all fields present, no explicit commit yet -- must not propose.
   const preCommit = await processDialogTurn({ semanticTurn: parseSemanticTurnResponse(JSON.stringify({ domain: 'stay', intent: 'ask_price', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.85, needsClarification: false }), buildSemanticContext(conversationContext, NOW)), conversationContext, taskState, channel: 'web', eventId: 'stay-ask-price' }, adapters, NOW);

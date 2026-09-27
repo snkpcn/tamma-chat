@@ -12,15 +12,15 @@
 //   - serviceType === 'activity' hard-throws activity_resource_required
 //     and activity_duration_required if resourceCode/durationMinutes are
 //     missing.
-//   - Nothing else (time/partySize/quantity/endDate) is actually enforced
-//     there -- defaults apply -- so nothing else is listed as required
-//     here. This is read off real code, not invented.
+//   - Stay execution rejects a missing/invalid endDate and an unresolved
+//     resource cannot be a safe customer selection. Party size is required
+//     by the Stay business flow before a request is submitted.
 import { missingPromotionFields, type PendingPromotionRedemption } from './_promotion-dialog';
 import { missingRestaurantPreorderFields, type RestaurantPreorderDraft } from './_restaurant-preorder-dialog';
 import type { ActiveTask, ActiveTaskType } from './_task-state';
 
 const ACTIVITY_BOOKING_REQUIRED = ['resourceCode', 'date', 'durationMinutes'] as const;
-const STAY_BOOKING_REQUIRED = ['date'] as const;
+const STAY_BOOKING_REQUIRED = ['resourceCode', 'date', 'endDate', 'partySize'] as const;
 const RESTAURANT_BOOKING_REQUIRED = ['date'] as const;
 
 function missingFromStaticList(slots: Record<string, unknown>, required: readonly string[]): string[] {

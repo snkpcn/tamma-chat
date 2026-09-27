@@ -183,7 +183,7 @@ test('M4 activity: explicit booking commit reaches ActionProposal but never exec
 test('M5 stay explicit commit proposes existing create_booking contract only after availability is verified',async()=>{
   const state=memoryState();
   const turn=semantic('stay','book','book_stay',{
-    date:'2026-09-20',resourceCode:'stay-house-1',partySize:2,quantity:1,
+    date:'2026-09-20',endDate:'2026-09-21',resourceCode:'stay-house-1',partySize:2,quantity:1,
   });
   const adapters:KnowledgeSourceAdapters={
     stay:{availability:async()=>ok('stay_schedule','stay_live',[

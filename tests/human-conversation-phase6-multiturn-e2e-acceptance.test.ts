@@ -139,7 +139,7 @@ test('Phase 6 E2E stay: catalog and availability never book; selection/correctio
   const messages={
     'มีบ้านสองห้องนอนไหม':semantic({domain:'stay',intent:'browse_two_bed',action:'discover',informationNeed:'catalog',speechAct:'question'}),
     'พรุ่งนี้ว่างไหม':semantic({domain:'stay',intent:'ask_stay_availability',action:'status',informationNeed:'availability',speechAct:'question',entities:{date:'2026-09-28'}}),
-    'เอาบ้านริมน้ำ วันที่ 28':semantic({domain:'stay',intent:'select_stay',action:'confirm',speechAct:'selection',entities:{resourceCode:'stay:river-house',date:'2026-09-28',partySize:2}}),
+    'เอาบ้านริมน้ำ วันที่ 28':semantic({domain:'stay',intent:'select_stay',action:'confirm',speechAct:'selection',entities:{resourceCode:'stay:river-house',date:'2026-09-28',endDate:'2026-09-29',partySize:2}}),
     'ไม่ใช่สองคน เปลี่ยนเป็นสามคน':semantic({domain:'stay',intent:'correct_party',action:'correct_previous',speechAct:'correction',entities:{partySize:3}}),
     'จองหลังนี้เลย':semantic({domain:'stay',intent:'book_stay',action:'book',speechAct:'transaction_request',entities:{}}),
   };

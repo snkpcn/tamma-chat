@@ -99,7 +99,7 @@ test('Phase 6 frozen holdout 1: activity survives two side topics and resumes ex
 test('Phase 6 frozen holdout 2: stay question, selection, correction and negation do not propose until later explicit commitment',async()=>{
   const meanings={
     'บ้านริมน้ำว่างวันที่ยี่สิบเก้าไหม':turn({domain:'stay',intent:'stay_availability',action:'status',informationNeed:'availability',speechAct:'question',entities:{date:'2026-09-29'}}),
-    'เลือกบ้านริมน้ำไว้ สามคน':turn({domain:'stay',intent:'select_stay',action:'confirm',speechAct:'selection',entities:{resourceCode:'stay:river-house',date:'2026-09-29',partySize:3}}),
+    'เลือกบ้านริมน้ำไว้ สามคน':turn({domain:'stay',intent:'select_stay',action:'confirm',speechAct:'selection',entities:{resourceCode:'stay:river-house',date:'2026-09-29',endDate:'2026-09-30',partySize:3}}),
     'แก้เป็นสี่คน':turn({domain:'stay',intent:'correct_party',action:'correct_previous',speechAct:'correction',entities:{partySize:4}}),
     'ยังไม่ได้จะจองนะ':turn({domain:'stay',intent:'not_booking',action:'correct_previous',speechAct:'correction',entities:{}}),
     'ตกลงจองหลังนี้':turn({domain:'stay',intent:'commit_stay',action:'book',speechAct:'transaction_request',entities:{}}),

@@ -4,9 +4,9 @@
 // customer's turn is focused on (focusKind/focusValue) using only the
 // closed SemanticTurn shape -- no catalog access. CanonicalKnowledgeScope
 // is the next step: turning that into real machine identities/relationships
-// from the activity SOT (activity_offerings.activity_code as the canonical
-// parent id, activity_asset:<code> as the canonical entity id), NEVER a
-// customer-language keyword and NEVER a fabricated id.
+// from the Activity and Stay SOTs (activity asset/type relationships, Stay
+// resource/bedroom-type relationships), NEVER a customer-language keyword
+// and NEVER a fabricated id.
 //
 // Two-stage resolution, because the canonical PARENT of a named entity
 // (e.g. which activity type "ภาราดร" belongs to) is only knowable from the
@@ -74,6 +74,8 @@ export type CanonicalKnowledgeScope = {
 
 const ACTIVITY_ASSET_KIND = 'activity_asset';
 const ACTIVITY_KIND = 'activity';
+const STAY_KIND = 'stay';
+const STAY_TYPE_KIND = 'stay_type';
 
 function emptyScope(
   meaning: Pick<SemanticMeaning, 'domain' | 'scopeBreadth' | 'focusKind'>,
@@ -92,8 +94,8 @@ function emptyScope(
   };
 }
 
-/** Pure, pre-fetch scope derivation from SemanticMeaning alone. Only the
- *  activity domain has real canonical relationships wired today (C3); other
+/** Pure, pre-fetch scope derivation from SemanticMeaning alone. Activity and
+ *  Stay have real canonical relationships wired today; other
  *  domains resolve to domain_wide/unresolved and the firewall is a no-op
  *  for them, exactly like today's unscoped behavior -- this never makes an
  *  un-migrated domain stricter than before. */
@@ -106,12 +108,42 @@ export function deriveCanonicalKnowledgeScope(meaning: SemanticMeaning): Canonic
   }
 
   // breadth === 'focused' from here.
-  if (meaning.domain !== 'activity') {
-    // Focused in a domain this contract doesn't canonicalize yet -- stay
+  if (meaning.domain !== 'activity' && meaning.domain !== 'stay') {
+    // Focused in a domain this contract doesn't canonicalize yet -- remain
     // unresolved rather than guessing, but this is intentionally inert
     // until that domain's own PR wires it (see filterFactsByCanonicalScope,
     // which only firewalls domains it understands).
     return emptyScope(meaning, 'unresolved', 'domain_not_yet_canonicalized');
+  }
+
+  if (meaning.domain === 'stay') {
+    if (meaning.focusKind === 'entity_type' && meaning.focusValue) {
+      return {
+        ...emptyScope(meaning, 'resolved', 'declared_stay_type'),
+        canonicalParentIds: [meaning.focusValue],
+        allowedEntityKinds: [STAY_KIND, STAY_TYPE_KIND],
+      };
+    }
+    if (meaning.focusKind === 'entity' && meaning.focusValue) {
+      if (meaning.focusValue.startsWith(`${STAY_KIND}:`)) {
+        return {
+          ...emptyScope(meaning, 'resolved', 'resolved_stay_entity_reference'),
+          canonicalEntityIds: [meaning.focusValue],
+          allowedEntityKinds: [STAY_KIND, STAY_TYPE_KIND],
+        };
+      }
+      return {
+        ...emptyScope(meaning, 'ambiguous', 'named_stay_pending_sot_lookup'),
+        allowedEntityKinds: [STAY_KIND, STAY_TYPE_KIND],
+        pendingFocusName: meaning.focusValue,
+      };
+    }
+    if (meaning.focusKind === 'prior_reference') {
+      return meaning.focusValue
+        ? { ...emptyScope(meaning, 'ambiguous', 'prior_stay_reference_pending_sot_lookup'), allowedEntityKinds: [STAY_KIND, STAY_TYPE_KIND], pendingFocusName: meaning.focusValue }
+        : emptyScope(meaning, 'unresolved', 'prior_stay_reference_without_evidence');
+    }
+    return emptyScope(meaning, 'unresolved', 'no_stay_focus_signal');
   }
 
   if (meaning.focusKind === 'entity_type' && meaning.focusValue) {
@@ -167,8 +199,43 @@ export function resolveCanonicalScopeAgainstFacts(
   scope: CanonicalKnowledgeScope,
   facts: readonly ScopableFact[],
 ): CanonicalKnowledgeScope {
-  if (scope.domain !== 'activity') return scope;
+  if (scope.domain !== 'activity' && scope.domain !== 'stay') return scope;
   const map = factMapFrom(facts);
+
+  if (scope.domain === 'stay') {
+    if (scope.status === 'ambiguous' && scope.pendingFocusName) {
+      const matches = [...map.keys()]
+        .map(key => key.match(/^stay:([^:]+):name$/)?.[1])
+        .filter((value): value is string => Boolean(value))
+        .filter(code => map.get(`stay:${code}:name`) === scope.pendingFocusName);
+      if (matches.length !== 1) {
+        return { ...scope, status: matches.length > 1 ? 'ambiguous' : 'unresolved', canonicalEntityIds: [], canonicalParentIds: [], provenance: matches.length > 1 ? 'named_stay_not_unique_in_live_catalog' : 'named_stay_not_found_in_live_catalog' };
+      }
+      const code = matches[0]!;
+      const bedrooms = map.get(`stay:${code}:bedrooms`);
+      const roomType = map.get(`stay:${code}:roomType`);
+      const parent = typeof bedrooms === 'number' ? `bedrooms:${bedrooms}`
+        : typeof roomType === 'string' && roomType ? `room_type:${roomType}` : null;
+      return {
+        ...scope,
+        status: 'resolved',
+        canonicalEntityIds: [`stay:${code}`],
+        canonicalParentIds: parent ? [parent] : [],
+        provenance: 'named_stay_resolved_against_live_catalog',
+      };
+    }
+    if (scope.status === 'resolved' && scope.canonicalEntityIds.length && !scope.canonicalParentIds.length) {
+      const parents = scope.canonicalEntityIds.flatMap(entityId => {
+        const bedrooms = map.get(`${entityId}:bedrooms`);
+        const roomType = map.get(`${entityId}:roomType`);
+        if (typeof bedrooms === 'number') return [`bedrooms:${bedrooms}`];
+        if (typeof roomType === 'string' && roomType) return [`room_type:${roomType}`];
+        return [];
+      });
+      if (parents.length) return { ...scope, canonicalParentIds: [...new Set(parents)], provenance: `${scope.provenance}+stay_parent_backfilled_from_live_catalog` };
+    }
+    return scope;
+  }
 
   if (scope.status === 'ambiguous' && scope.pendingFocusName) {
     const matchingCode = [...map.keys()]
@@ -225,7 +292,7 @@ export function filterFactsByCanonicalScope(
   facts: readonly ScopableFact[],
   scope: CanonicalKnowledgeScope,
 ): readonly ScopableFact[] {
-  if (scope.domain !== 'activity') return facts;
+  if (scope.domain !== 'activity' && scope.domain !== 'stay') return facts;
   if (scope.breadth === 'domain_wide' || scope.breadth === 'unknown') return facts;
   // breadth === 'focused'
   if (scope.status !== 'resolved') return [];
@@ -233,6 +300,39 @@ export function filterFactsByCanonicalScope(
   const allowedEntities = new Set(scope.canonicalEntityIds);
   if (!allowedParents.size && !allowedEntities.size) return facts;
   const map = factMapFrom(facts);
+  if (scope.domain === 'stay') {
+    return facts.filter(fact => {
+      // Organization-wide policy remains valid inside every RESOLVED stay
+      // scope, but focused unresolved scopes returned above are already [].
+      if (/^stay:policy:/.test(fact.key)) return true;
+      const stayMatch = fact.key.match(/^stay:([^:]+):/);
+      if (stayMatch) {
+        const code = stayMatch[1]!;
+        if (allowedEntities.has(`stay:${code}`)) return true;
+        const bedrooms = map.get(`stay:${code}:bedrooms`);
+        const roomType = map.get(`stay:${code}:roomType`);
+        return (typeof bedrooms === 'number' && allowedParents.has(`bedrooms:${bedrooms}`))
+          || (typeof roomType === 'string' && allowedParents.has(`room_type:${roomType}`));
+      }
+      const typeMatch = fact.key.match(/^stay_type:([^:]+):/);
+      if (typeMatch) {
+        const typeCode = typeMatch[1]!;
+        const bedroomMatch = typeCode.match(/^bedrooms-(\d+)$/u);
+        const parent = bedroomMatch ? `bedrooms:${bedroomMatch[1]}` : `room_type:${typeCode}`;
+        return allowedParents.has(parent);
+      }
+      const availabilityMatch = fact.key.match(/^availability:([^:]+):/);
+      if (availabilityMatch) {
+        const code = availabilityMatch[1]!;
+        if (allowedEntities.has(`stay:${code}`)) return true;
+        const bedrooms = map.get(`stay:${code}:bedrooms`);
+        const roomType = map.get(`stay:${code}:roomType`);
+        return (typeof bedrooms === 'number' && allowedParents.has(`bedrooms:${bedrooms}`))
+          || (typeof roomType === 'string' && allowedParents.has(`room_type:${roomType}`));
+      }
+      return true;
+    });
+  }
   return facts.filter(fact => {
     const assetMatch = fact.key.match(/^activity_asset:([^:]+):/);
     if (assetMatch) {

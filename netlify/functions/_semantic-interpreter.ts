@@ -107,7 +107,11 @@ export type SemanticInformationNeed =
   // exact wording per resourceCode.
   | 'safety'
   | 'suitability'
-  | 'equipment';
+  | 'equipment'
+  // Human Core PR E: closed Stay knowledge facets. These identify the
+  // requested FACT class; renderers never rediscover them from Thai text.
+  | 'capacity'
+  | 'amenities';
 
 const VALID_DOMAINS: SemanticDomain[] = [
   'ecosystem', 'restaurant', 'stay', 'activity', 'promotion', 'membership',
@@ -131,6 +135,7 @@ const VALID_INFORMATION_NEEDS: SemanticInformationNeed[] = [
   'none', 'availability', 'price', 'schedule', 'inventory', 'catalog',
   'recommendation', 'ingredients', 'policy', 'transaction_status',
   'safety', 'suitability', 'equipment',
+  'capacity', 'amenities',
 ];
 
 /** A single entity Thongthai currently knows about from recent conversation --
@@ -581,7 +586,7 @@ speechAct: one of question | statement | preference_update | correction | select
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | general | local | incident | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
 action: one of ask | discover | recommend | compare | book | order | modify | cancel | confirm | status | provide_information | correct_previous | unknown
-informationNeed: one of none | availability | price | schedule | inventory | catalog | recommendation | ingredients | policy | transaction_status | safety | suitability | equipment
+informationNeed: one of none | availability | price | schedule | inventory | catalog | recommendation | ingredients | policy | transaction_status | safety | suitability | equipment | capacity | amenities
 - informationNeed is a CLOSED machine-facing meaning facet, independent of the free-form intent label.
 - Use availability when the customer asks whether a table/room/activity/time/resource is free, full, open, or available.
 - Use inventory for current physical-product stock/quantity existence (for example an OTOP product or packaged retail item). Do not
@@ -591,6 +596,8 @@ informationNeed: one of none | availability | price | schedule | inventory | cat
 - Use transaction_status only when asking the status of an already-existing booking/order/payment/member transaction.
 - Use none when the turn is conversational or the question is not an information lookup.
 - Activity: safety=is it safe; suitability=does it fit me (beginner/health/age/child); equipment=how gear/controls work.
+- Stay: capacity=how many guests/bedrooms a stay option supports; amenities=whether a named facility/service exists; policy=check-in/check-out/booking rules. For a policy question set entities.policyTopic to one of check_in | check_out | room_service | booking_window | final_confirmation when that exact topic is understood. For a focused bedroom type set entities.bedrooms to a number. For a specific accommodation use an already-known canonical resourceCode when available, otherwise resourceName/accommodationName. For length of stay use entities.nights; for an explicit checkout date use entities.endDate.
+- Stay transaction boundary: selecting a house/room, asking whether it is free, asking a question after selecting it, or saying a bare acknowledgement is planning/read-only, never book. Use action=book and speechAct=transaction_request only when the CURRENT turn explicitly asks to submit a booking. A selection such as "take this one" is speechAct=selection with action=confirm/provide_information, not book.
 taskDirective: OPTIONAL one of cancel_active | suspend_active | resume_suspended, only for the bounded conversational working task as described above
 entities: an object of whatever concrete values the message actually states (e.g. {"partySize":2}, {"date":"พรุ่งนี้"}, {"time":"บ่ายสาม"}, {"horseName":"ภาราดร"}) -- never invent a value that wasn't stated
 references: an array of {"type":string,"value"?:string,"refersToPriorContext":boolean} for anything in the message that points at something from context rather than being fully self-contained (a pronoun/deictic like "ตัวไหน", "อันนั้น", "อันเมื่อกี้", a bare correction, an implicit continuation). Omit entirely if the message is fully self-contained.
@@ -742,6 +749,18 @@ function canonicalizeEntityAliases(
     adultCount:'adults',
     budget_thb:'budgetAmount',
     startDate:'date',
+    checkInDate:'date',
+    check_in:'date',
+    checkOutDate:'endDate',
+    check_out:'endDate',
+    end_date:'endDate',
+    bedroomCount:'bedrooms',
+    bedroom_count:'bedrooms',
+    accommodation_name:'accommodationName',
+    stayName:'accommodationName',
+    stay_name:'accommodationName',
+    resource_code:'resourceCode',
+    policy_topic:'policyTopic',
     selected_activity_asset:'horseName',
     selectedActivityAsset:'horseName',
   };
@@ -776,6 +795,15 @@ function canonicalizeEntityAliases(
     duration_minutes:'durationMinutes',
     quantity:'quantity',
     nights:'nights',
+    endDate:'endDate',
+    end_date:'endDate',
+    checkOut:'endDate',
+    bedrooms:'bedrooms',
+    resourceCode:'resourceCode',
+    resourceName:'resourceName',
+    accommodationName:'accommodationName',
+    roomType:'roomType',
+    policyTopic:'policyTopic',
   };
   for(const containerKey of structuralContainers){
     const nested=entities[containerKey];
@@ -819,6 +847,21 @@ function canonicalizeEntityAliases(
     if (bareActivityCodeSource) entities.activityCode=bareActivityCodeSource.trim().toLowerCase();
   } else if (typeof entities.activityCode==='string') {
     entities.activityCode=entities.activityCode.trim().toLowerCase();
+  }
+
+  // Stay fields are structural model output, not renderer keyword matches.
+  // Normalize aliases/types once so scope, dialog state, and execution all
+  // consume the same closed values.
+  if (domain==='stay') {
+    const bedroomCount=Number(entities.bedrooms);
+    if (Number.isInteger(bedroomCount) && bedroomCount>0 && bedroomCount<=20) entities.bedrooms=bedroomCount;
+    else if (entities.bedrooms!==undefined) delete entities.bedrooms;
+    const nights=Number(entities.nights);
+    if (Number.isInteger(nights) && nights>0 && nights<=30) entities.nights=nights;
+    else if (entities.nights!==undefined) delete entities.nights;
+    for (const key of ['resourceCode','resourceName','accommodationName','roomType','policyTopic','endDate'] as const) {
+      if (typeof entities[key]==='string') entities[key]=entities[key].trim();
+    }
   }
 
   return entities;

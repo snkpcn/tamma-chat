@@ -42,6 +42,7 @@ test('G.1 availability shaping reads validated task slots instead of raw channel
   assert.deepEqual(bookingAvailabilityArgs(request(task)), {
     serviceType: 'activity',
     date: '2026-09-19',
+    endDate: null,
     resourceCode: 'activity-horse',
     durationMinutes: 60,
     partySize: 2,
@@ -51,10 +52,11 @@ test('G.1 availability shaping reads validated task slots instead of raw channel
 test('G.1 stay availability shaping selects stay service type', () => {
   assert.deepEqual(bookingAvailabilityArgs({
     ...request(null, 'stay'),
-    entities: { date: '2026-09-20', partySize: 2 },
+    entities: { date: '2026-09-20', endDate:'2026-09-21', partySize: 2 },
   }), {
     serviceType: 'stay',
     date: '2026-09-20',
+    endDate: '2026-09-21',
     resourceCode: null,
     durationMinutes: null,
     partySize: 2,

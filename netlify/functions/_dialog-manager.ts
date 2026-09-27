@@ -165,7 +165,8 @@ const SIDE_QUESTION_ACTIONS: ReadonlySet<SemanticAction> = new Set(['ask', 'disc
  *  count, so a pure compare/price/how-it-works question still bypasses. */
 const KNOWN_TASK_SLOT_KEYS = new Set([
   'date', 'time', 'partySize', 'durationMinutes', 'resourceCode', 'quantity',
-  'customerName', 'phone', 'checkIn', 'checkOut',
+  'customerName', 'phone', 'checkIn', 'checkOut', 'endDate', 'nights',
+  'bedrooms', 'roomType',
 ]);
 
 function providesTaskSlotValue(entities: Record<string, unknown>): boolean {
@@ -604,9 +605,11 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.informationNeed === 'availability') return [{ ...base, domain: 'stay', needs: ['availability'] }];
       if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'stay', needs: ['schedule'] }];
       if (turn.informationNeed === 'price') return [{ ...base, domain: 'stay', needs: ['price'] }];
+      if (turn.informationNeed === 'capacity' || turn.informationNeed === 'amenities') return [{ ...base, domain:'stay', needs:['entity_details','catalog'] }];
+      if (turn.informationNeed === 'policy') return [];
       if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
       if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
-      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'stay', needs: ['catalog', 'availability'] }];
+      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend' || turn.action === 'compare') return [{ ...base, domain: 'stay', needs: ['catalog'] }];
       if (task && task.missingFields.length === 0) return [{ ...base, domain: 'stay', needs: ['availability'] }];
       return [];
     case 'promotion':
@@ -767,6 +770,26 @@ function hasMatchingVerifiedAvailability(
   const date=typeof task.slots.date==='string' ? task.slots.date : null;
   const time=typeof task.slots.time==='string' ? task.slots.time : null;
 
+  if (task.type === 'stay_booking') {
+    const endDate=typeof task.slots.endDate==='string' ? task.slots.endDate : null;
+    if (!resourceCode || !date || !endDate) return false;
+    const checkIn=new Date(`${date}T00:00:00Z`);
+    const checkOut=new Date(`${endDate}T00:00:00Z`);
+    const nights=Math.round((checkOut.getTime()-checkIn.getTime())/86_400_000);
+    if (!Number.isInteger(nights) || nights<1 || nights>30) return false;
+    const verifiedDates=new Set<string>();
+    for (const bundle of bundles) {
+      for (const fact of bundle.facts) {
+        if (fact.value!==true || fact.authoritative!==true || fact.stale===true) continue;
+        const match=fact.key.match(/^availability:(.+):(\d{4}-\d{2}-\d{2}T.+):available$/u);
+        if (!match || match[1]!==resourceCode) continue;
+        const actual=bangkokDateTimeParts(match[2]!);
+        if (actual?.date && actual.date>=date && actual.date<endDate) verifiedDates.add(actual.date);
+      }
+    }
+    return verifiedDates.size===nights;
+  }
+
   return bundles.some(bundle=>bundle.facts.some(fact=>{
     if (fact.value !== true || fact.authoritative !== true || fact.stale === true) return false;
     const match=fact.key.match(/^availability:(.+):(\d{4}-\d{2}-\d{2}T.+):available$/u);
@@ -918,6 +941,41 @@ function applyActivityCatalogPolicy(
   return applied ? planDialogTurn({ ...input, taskState: container }, now) : null;
 }
 
+/** Pure Stay slot normalization. It consumes only already-understood
+ * SemanticMeaning/task state: a canonical selected stay entity, ISO check-in
+ * date, and either ISO checkout or a numeric night count. No customer text is
+ * accepted here, so booking planning cannot become a second language owner. */
+export function resolveStayStructuredSlots(task: ActiveTask): Record<string, unknown> {
+  if (task.type !== 'stay_booking') return {};
+  const patch: Record<string, unknown> = {};
+  if (typeof task.slots.resourceCode !== 'string' || !task.slots.resourceCode.trim()) {
+    const selected = task.selectedEntities.filter(entity => entity.id.startsWith('stay:'));
+    if (selected.length === 1) patch.resourceCode = selected[0]!.id.replace(/^stay:/u, '');
+  }
+  const date = typeof task.slots.date === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(task.slots.date)
+    ? task.slots.date : null;
+  const endDate = typeof task.slots.endDate === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(task.slots.endDate)
+    ? task.slots.endDate : null;
+  const nights = Number(task.slots.nights);
+  if (date && !endDate && Number.isInteger(nights) && nights >= 1 && nights <= 30) {
+    const value = new Date(`${date}T12:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + nights);
+    patch.endDate = value.toISOString().slice(0, 10);
+  }
+  return patch;
+}
+
+function applyStayStructuredPolicy(plan: DialogPlan, input: DialogInput, now: Date): DialogPlan | null {
+  const task = plan.taskStateContainer.activeTask;
+  if (!task || task.type !== 'stay_booking') return null;
+  const slotPatch = resolveStayStructuredSlots(task);
+  if (!Object.keys(slotPatch).length) return null;
+  const container = applyTaskStateEvent(plan.taskStateContainer, {
+    kind:'update_slots', eventId:`${input.eventId}:stay_structured_autofill`, slotPatch,
+  }, now);
+  return planDialogTurn({ ...input, taskState:container }, now);
+}
+
 /** Detailed form used by the One-Mind orchestrator and, later, the Response
  * Composer. It resolves knowledge exactly once and returns the grounded
  * bundles alongside the final decision so downstream layers never have to
@@ -928,6 +986,8 @@ export async function processDialogTurnDetailed(
   now: Date = new Date(),
 ): Promise<DialogTurnResult> {
   let plan = planDialogTurn(input, now);
+  const stayReplanned = applyStayStructuredPolicy(plan, input, now);
+  if (stayReplanned) plan = stayReplanned;
   let bundles = await resolveBundles(plan, adapters, now);
 
   const replanned = applyActivityCatalogPolicy(plan, bundles, input, now);
