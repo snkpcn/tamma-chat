@@ -45,7 +45,7 @@ if(!process.env.GEMINI_API_KEY&&!process.env.OPENAI_API_KEY){
 
   for(const evalCase of selected){
     try{
-      const turn=await interpretSemanticTurn(evalCase.message,evalCase.context??emptySemanticContext(,{ certificationMode:true }));
+      const turn=await interpretSemanticTurn(evalCase.message,evalCase.context??emptySemanticContext(),{ certificationMode:true });
       const domainOk=turn.domain===evalCase.expected.domain;
       const actionOk=evalCase.expected.action===undefined||turn.action===evalCase.expected.action;
       const clarificationOk=evalCase.expected.needsClarification===undefined
