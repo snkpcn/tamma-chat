@@ -382,3 +382,26 @@ test('live ecosystem itinerary shape canonicalizes to journey', () => {
   assert.equal(turn.intent,'plan_multi_day_itinerary');
   assert.equal(turn.action,'recommend');
 });
+
+
+test('mixed stay activity dining shopping live shape canonicalizes ecosystem plan to journey', () => {
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'two-night mixed ecosystem itinerary',
+    speechAct:'request',
+    domain:'ecosystem',
+    intent:'plan_two_night_itinerary',
+    action:'recommend',
+    informationNeed:'recommendation',
+    entities:{
+      stay:{nights:2},
+      activities:[{name:'horse riding',day:1}],
+      dining:{day:2},
+      shopping:{category:'souvenir',domain:'otop',day:2},
+    },
+    references:[],
+    constraints:['stay_two_nights','horse_riding_day_1','dining_day_2','souvenir_shopping_day_2'],
+    confidence:0.99,
+    needsClarification:false,
+  }), emptySemanticContext());
+  assert.equal(turn.domain,'journey');
+});
