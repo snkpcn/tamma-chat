@@ -1861,6 +1861,35 @@ export function resolvePromotionRedemptionProposalArgs(
   };
 }
 
+/** Human Core PR H terminal Cafe boundary. Cafe has no transaction concept
+ *  and no verified live menu/price/hours source in production at all, so
+ *  once OpenAI supervision owns Cafe meaning there is nothing left for
+ *  deterministicCafeResponse's raw-text keyword gate to do: every such turn
+ *  renders the same honest "no verified source" answer via the response
+ *  composer (renderCafeUnavailableSourceResponse), never re-derived from
+ *  request.message. */
+export function resolveSupervisedCafeCutover(
+  oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel: BrainChannel,
+  language: BrainRequest['language'],
+): { kind:'respond'; response:ComposedResponse } | null {
+  const turn = oneMind.turn;
+  if (turn.semanticTurn.domain !== 'cafe' || turn.semanticTurn.semanticSource !== 'openai_supervisor') return null;
+  if (oneMind.status === 'composed') return { kind:'respond', response:oneMind.response };
+
+  const composerInput = {
+    channel,
+    language,
+    semanticTurn:turn.dialogSemanticTurn,
+    dialogDecision:turn.dialogDecision,
+    knowledgeBundles:turn.groundedKnowledge,
+    degradation:turn.knowledgeDegradation,
+    operationalOutcome:null,
+  };
+  const response = composeGroundedDeterministicResponse(composerInput) ?? composeDeterministicResponse(composerInput);
+  return { kind:'respond', response };
+}
+
 /** Defense-in-depth sanitizer for a proposal already validated by Dialog
  * Manager/domain policy. No customer message enters this function. */
 export function resolveRestaurantTableBookingProposalArgs(
@@ -4680,6 +4709,30 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     return coreResult(200,{
       message:polished.message,intent:polished.intent,
       contextUpdates:polished.contextUpdates,journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  // Human Core PR H: terminal Cafe boundary. Supervised Cafe cannot reach
+  // deterministicCafeResponse's raw-text keyword gate or runThongthaiBrain
+  // below this point.
+  const supervisedCafe = earlyOneMind
+    ? resolveSupervisedCafeCutover(earlyOneMind, channel, request.language)
+    : null;
+  if (supervisedCafe?.kind === 'respond') {
+    const semantic = earlyOneMind!.turn.semanticTurn;
+    const polished = polishedResponse({
+      message:supervisedCafe.response.message,
+      intent:semantic.action === 'discover' || semantic.action === 'recommend' ? 'recommendation' : 'information',
+      contextUpdates:{}, journeyAction:{type:'none',journey:null}, suggestedActions:[],
+      responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+    }, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
       suggestedActions:polished.suggestedActions,
     });
   }

@@ -25,6 +25,7 @@ import {
   renderActivityAvailability,
   renderActivityCareResponse,
   renderActivityRecommendation,
+  renderCafeUnavailableSourceResponse,
   renderStayResponse,
   renderRestaurantRecommendation,
   renderPromotionRecommendation,
@@ -653,7 +654,8 @@ export function composeGroundedDeterministicResponse(input: ResponseComposerInpu
     // falls through to the narrow availability renderer.
     ?? renderActivityRecommendation(input)
     ?? renderActivityAvailability(input)
-    ?? renderActivityCareResponse(input);
+    ?? renderActivityCareResponse(input)
+    ?? renderCafeUnavailableSourceResponse(input);
   if (humanGrounded) {
     return {
       message:polishCustomerMessage(humanGrounded.message, input.channel),

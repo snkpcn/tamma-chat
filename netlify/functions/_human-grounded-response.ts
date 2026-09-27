@@ -315,6 +315,23 @@ export function renderActivityCareResponse(input: HumanGroundedRenderInput): Hum
   return { message, usedFactKeys: [] };
 }
 
+const CAFE_NO_VERIFIED_SOURCE_MESSAGE = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเมนู ราคา หรือเวลาเปิดปิดของคาเฟ่ที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิด แต่ถ้าอยากวางทริปสายชิล ทองไทยช่วยต่อคาเฟ่กับร้านอาหารหรือที่พักให้ได้ครับ';
+
+/** Human Core PR H: cafe has no verified live menu/price/hours source in
+ *  production at all (see thongthai-chat.ts's now-superseded
+ *  deterministicCafeResponse, whose exact wording this reuses verbatim --
+ *  not invented, just moved). Since there is nothing to differentiate by
+ *  informationNeed once the supervisor has classified the domain as
+ *  'cafe', every such turn gets the SAME honest "no verified source"
+ *  answer -- SOURCE UNAVAILABLE, never fabricated catalog/price/hours, and
+ *  never silently reinterpreted from raw text by a keyword gate. */
+export function renderCafeUnavailableSourceResponse(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
+  const turn = input.semanticTurn;
+  if (!turn || turn.domain !== 'cafe' || input.language !== 'th') return null;
+  if (!['ask', 'discover', 'recommend'].includes(turn.action)) return null;
+  return { message: CAFE_NO_VERIFIED_SOURCE_MESSAGE, usedFactKeys: [] };
+}
+
 export function renderActivityAvailability(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
   const turn=input.semanticTurn;
   if(!turn || turn.domain!=='activity' || turn.informationNeed!=='availability' || input.language!=='th') return null;
