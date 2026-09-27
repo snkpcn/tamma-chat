@@ -197,6 +197,68 @@ function normalizeMessage(message: string): string {
   return message.trim().slice(0, 4000);
 }
 
+function normalizedEntityToken(value:string):string {
+  return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
+}
+
+/** Reconcile model-emitted activity asset aliases with the live catalog facts
+ * already fetched for this turn. This is data reconciliation, not language
+ * interpretation: exact canonical names win; otherwise a model alias may bind
+ * only when it uniquely matches a token in the real asset code. */
+export function reconcileActivitySemanticEntityNames(
+  turn:SemanticTurn,
+  bundles:readonly KnowledgeBundle[],
+):SemanticTurn {
+  if(turn.domain!=='activity') return turn;
+  const facts=bundles.filter(bundle=>bundle.domain==='activity').flatMap(bundle=>bundle.facts);
+  const assets=[...new Set(facts.map(fact=>fact.key.match(/^activity_asset:([^:]+):name$/)?.[1]).filter(Boolean) as string[])]
+    .flatMap(code=>{
+      const name=facts.find(fact=>fact.key===`activity_asset:${code}:name`)?.value;
+      return typeof name==='string'&&name.trim() ? [{code,name:name.trim()}] : [];
+    });
+  if(!assets.length) return turn;
+
+  const canonicalName=(raw:string):string|null=>{
+    const trimmed=raw.trim();
+    if(!trimmed) return null;
+    const exact=assets.filter(asset=>normalizedEntityToken(asset.name)===normalizedEntityToken(trimmed));
+    if(exact.length===1) return exact[0]!.name;
+    const token=normalizedEntityToken(trimmed);
+    if(!token) return null;
+    const codeMatches=assets.filter(asset=>
+      asset.code.split(/[^\p{L}\p{N}]+/u)
+        .map(normalizedEntityToken)
+        .filter(Boolean)
+        .includes(token)
+    );
+    return codeMatches.length===1 ? codeMatches[0]!.name : null;
+  };
+
+  const entityKeys=['horseName','excludedHorse','primaryHorse','fallbackHorse','preferredHorse'] as const;
+  const entities={...turn.entities};
+  let changed=false;
+  for(const key of entityKeys){
+    const raw=entities[key];
+    if(typeof raw==='string'){
+      const canonical=canonicalName(raw);
+      if(canonical&&canonical!==raw){
+        entities[key]=canonical;
+        changed=true;
+      }
+    }else if(raw&&typeof raw==='object'&&!Array.isArray(raw)){
+      const record=raw as Record<string,unknown>;
+      if(typeof record.name==='string'){
+        const canonical=canonicalName(record.name);
+        if(canonical&&canonical!==record.name){
+          entities[key]={...record,name:canonical};
+          changed=true;
+        }
+      }
+    }
+  }
+  return changed ? {...turn,entities} : turn;
+}
+
 // Only customer-facing, non-secret working values are exposed to the language
 // understanding layer. Contact/payment/internal routing slots remain in task
 // state but never enter the semantic prompt.
@@ -866,13 +928,16 @@ async function computeOneMindTurnFromState(
   }, adapters, now);
   const dialogAndKnowledgeMs = Date.now() - dialogStartedAt;
 
-  const stateTrusted = semanticTurnTrustedForState(semanticTurn);
+  const reconciledSemanticTurn = reconcileActivitySemanticEntityNames(semanticTurn, dialog.bundles);
+  const reconciledDialogSemanticTurn = reconcileActivitySemanticEntityNames(dialogSemanticTurn, dialog.bundles);
+
+  const stateTrusted = semanticTurnTrustedForState(reconciledSemanticTurn);
   const taskStateAfter = stateTrusted ? dialog.decision.taskStateContainer : taskStateBefore;
   const conversationContextAfter = stateTrusted
     ? nextConversationContext(
         conversationContextBefore,
         input,
-        semanticTurn,
+        reconciledSemanticTurn,
         dialog.decision,
         dialog.bundles,
         now,
@@ -881,9 +946,9 @@ async function computeOneMindTurnFromState(
 
   return {
     identity,
-    semanticTurn,
-    dialogSemanticTurn,
-    semanticMeaning: deriveSemanticMeaning(dialogSemanticTurn),
+    semanticTurn:reconciledSemanticTurn,
+    dialogSemanticTurn:reconciledDialogSemanticTurn,
+    semanticMeaning: deriveSemanticMeaning(reconciledDialogSemanticTurn),
     dialogPlan: dialog.plan,
     dialogDecision: dialog.decision,
     groundedKnowledge: dialog.bundles,
@@ -897,7 +962,7 @@ async function computeOneMindTurnFromState(
       orchestratorVersion: ONE_MIND_ORCHESTRATOR_VERSION,
       channel: input.channel,
       eventId: input.eventId,
-      semantic: toSemanticInterpretationMeta(semanticTurn),
+      semantic: toSemanticInterpretationMeta(reconciledSemanticTurn),
       dialogMode: dialog.decision.mode,
       responseIntent: dialog.decision.responseIntent,
       reasonCodes: dialog.decision.reasons,
