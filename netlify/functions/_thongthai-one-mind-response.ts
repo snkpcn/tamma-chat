@@ -39,12 +39,14 @@ const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','statu
 // Phase P closure: 'ecosystem' joins the cutover set here -- unlike every
 // other domain, it has no entry in _dialog-manager.ts's
 // DEFAULT_TASK_TYPE_FOR_DOMAIN, so a turn classified into it can NEVER
-// create an ActiveTask and therefore can never reach an ActionProposal;
-// including it carries none of the transaction-executor risk the remaining
-// exclusions (membership/cafe/journey/payment/support) still do, so those
-// stay on legacy until their own equivalence is proven -- "do not force
-// unfinished transactional cutover".
-const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe','general','local','incident']);
+// create an ActiveTask and therefore can never reach an ActionProposal.
+// Journey is also cut over now for read-only itinerary composition: legacy
+// keyword routing demonstrably misrouted multi-day plans into unrelated
+// weather/activity handlers. Journey has no transaction executor mapping, so
+// read-only composition/task-state continuation remains inside One-Mind while
+// any future real transaction proposal would still be rejected by the gate.
+// Payment/support remain on legacy until their own equivalence is proven.
+const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe','journey','general','local','incident']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
 // Task-worthy modes that only ever COLLECT/CLARIFY information -- they never
 // execute or even propose a transaction (see DialogMode/COMMIT_ACTIONS in
