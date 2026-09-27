@@ -656,13 +656,17 @@ export function buildProductionSemanticInterpreterPrompt(
   // conversation string. This does not interpret the customer's words in
   // deterministic code; it only partitions already-visible recent assistant
   // text at exact known entity-name boundaries.
-  const recentEntityEvidence = referencesPrior && compactEntities.length > 1
-    ? compactEntities.flatMap(entity => {
+  const activeDomainEntities = context.activeDomain
+    ? compactEntities.filter(entity => entity.domain === context.activeDomain)
+    : compactEntities;
+  const evidenceCandidates = activeDomainEntities.length > 1 ? activeDomainEntities : [];
+  const recentEntityEvidence = referencesPrior && evidenceCandidates.length > 1
+    ? evidenceCandidates.flatMap(entity => {
         const evidence = compactTurns.flatMap(turn => {
           const start = turn.content.indexOf(entity.name);
           if (start < 0) return [];
           const afterName = start + entity.name.length;
-          const laterEntityStarts = compactEntities
+          const laterEntityStarts = evidenceCandidates
             .filter(other => other.id !== entity.id)
             .map(other => turn.content.indexOf(other.name, afterName))
             .filter(position => position >= 0);
@@ -682,7 +686,7 @@ export function buildProductionSemanticInterpreterPrompt(
   // recentEntityEvidence. Entity-bearing turns are represented by the bounded
   // evidence above; unrelated recent turns remain available for ellipsis.
   const compactTurnsForPrompt = recentEntityEvidence.length
-    ? compactTurns.filter(turn => !compactEntities.some(entity => turn.content.includes(entity.name))).slice(-2)
+    ? compactTurns.filter(turn => !evidenceCandidates.some(entity => turn.content.includes(entity.name))).slice(-2)
     : compactTurns;
 
   const compactContext = {
@@ -739,8 +743,7 @@ Core rules:
 - A customer merely reporting their own plan, pause, state, or situation is speechAct=statement. Use request/request_help only when they ask the assistant or organization to do something.
 - If the customer explicitly retracts/corrects a previously inferred intent (for example clarifying that they were only asking and were NOT requesting a booking/order/confirmation), use speechAct=correction. This is a correction of conversational meaning even when no slot value changes; keep it read-only and never infer a transaction.
 - A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
-- For a descriptive prior-context reference, inspect bounded recentEntityEvidence first. If the description uniquely identifies one listed entity, references MUST use that entity's exact name as reference.value (never the descriptor phrase itself) so the deterministic resolver can bind it. If several entities fit, keep it unresolved and request clarification.
-- For a selection among multiple recent entities, returning all candidate IDs is NOT a resolved selection. Resolve one exact entity from bounded evidence or ask one clarification question.
+- Descriptive prior references: use recentEntityEvidence; if one entity uniquely fits, set reference.value to that exact listed name. Multiple plausible entities require clarification; multiple candidate IDs are not a resolved selection.
 - IDs may only come from canonical context below. Otherwise leave unresolved.
 - Activity TYPE (not one named asset) named: set entities.activityCode to horse|atv|archery. Not for a whole-domain browse or a named asset (use horseName).
 
