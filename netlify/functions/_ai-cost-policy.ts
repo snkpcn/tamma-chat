@@ -45,15 +45,27 @@ const DEFAULT_PRICING: Record<string, ModelPricing> = {
   },
 };
 
+// Unknown production models fail closed: these deliberately conservative rates
+// make one worst-case guarded request exceed the conversation ceiling. A new
+// production model must first be added here with reviewed pricing rather than
+// silently inheriting a cheap guess.
 const UNKNOWN_MODEL_PRICING: ModelPricing = {
-  inputUsdPerMillion: 5,
-  cachedInputUsdPerMillion: 5,
-  outputUsdPerMillion: 20,
+  inputUsdPerMillion: 100,
+  cachedInputUsdPerMillion: 100,
+  outputUsdPerMillion: 500,
 };
 
 function finiteNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function conservativeRate(value: string | undefined, fallback: number): number {
+  // Environment configuration may raise a known rate immediately if OpenAI
+  // pricing increases, but it may not lower the baked-in reviewed rate. A
+  // lower vendor price is safe to overestimate until the canonical table is
+  // deliberately updated in code.
+  return Math.max(finiteNumber(value, fallback), fallback);
 }
 
 function boundedInteger(value: string | undefined, fallback: number, min: number, max: number): number {
@@ -69,15 +81,15 @@ export function pricingForModel(model: string): ModelPricing {
   const defaults = DEFAULT_PRICING[model] ?? UNKNOWN_MODEL_PRICING;
   const key = modelEnvKey(model);
   return {
-    inputUsdPerMillion: finiteNumber(
+    inputUsdPerMillion: conservativeRate(
       process.env[`THONGTHAI_AI_PRICE_${key}_INPUT_PER_MILLION`],
       defaults.inputUsdPerMillion,
     ),
-    cachedInputUsdPerMillion: finiteNumber(
+    cachedInputUsdPerMillion: conservativeRate(
       process.env[`THONGTHAI_AI_PRICE_${key}_CACHED_INPUT_PER_MILLION`],
       defaults.cachedInputUsdPerMillion,
     ),
-    outputUsdPerMillion: finiteNumber(
+    outputUsdPerMillion: conservativeRate(
       process.env[`THONGTHAI_AI_PRICE_${key}_OUTPUT_PER_MILLION`],
       defaults.outputUsdPerMillion,
     ),
@@ -86,27 +98,32 @@ export function pricingForModel(model: string): ModelPricing {
 
 export function aiCostPolicy(): AiCostPolicy {
   return {
-    maxConversationCostUsd: finiteNumber(
-      process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD,
+    // Owner hard caps are one-way configurable: environment values may make
+    // production stricter, never more expensive than the reviewed ceiling.
+    maxConversationCostUsd: Math.min(
+      finiteNumber(
+        process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD,
+        DEFAULT_MAX_CONVERSATION_AI_COST_USD,
+      ),
       DEFAULT_MAX_CONVERSATION_AI_COST_USD,
     ),
     maxCallsPerTurn: boundedInteger(
       process.env.THONGTHAI_MAX_AI_CALLS_PER_TURN,
       DEFAULT_MAX_AI_CALLS_PER_TURN,
       0,
-      4,
+      DEFAULT_MAX_AI_CALLS_PER_TURN,
     ),
     maxCallsPerConversation: boundedInteger(
       process.env.THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION,
       DEFAULT_MAX_AI_CALLS_PER_CONVERSATION,
       0,
-      100,
+      DEFAULT_MAX_AI_CALLS_PER_CONVERSATION,
     ),
     semanticMaxOutputTokens: boundedInteger(
       process.env.THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS,
       DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS,
       64,
-      800,
+      500,
     ),
     absoluteInputTokens: boundedInteger(
       process.env.THONGTHAI_MAX_SEMANTIC_INPUT_TOKENS,
