@@ -290,3 +290,35 @@ test('camelCase counts and selected_activity_asset canonicalize to downstream ta
   assert.equal(turn.entities.children,1);
   assert.equal(turn.entities.adults,3);
 });
+
+
+test('descriptive prior recommendation selection resolves the unique recommended entity across topic switches', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'ecosystem' as const,
+    recentEntities:[
+      {id:'activity_asset:horse-paradorn',type:'horse',name:'ภาราดร',domain:'activity' as const,source:'catalog' as const,canonical:true},
+      {id:'activity_asset:horse-thongthai',type:'horse',name:'ทองไทย',domain:'activity' as const,source:'catalog' as const,canonical:true},
+    ],
+    lastRecommendationReference:'ถ้าเอาตามเงื่อนไขที่บอก ตอนนี้ ภาราดร ตรงกว่าครับ ข้อมูลที่มีระบุลักษณะว่า calm',
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'select the horse previously recommended as calmer',
+    speechAct:'selection',
+    domain:'ecosystem',
+    intent:'select_previous_recommendation',
+    action:'provide_information',
+    informationNeed:'none',
+    entities:{},
+    references:[{type:'previous_selection',value:'the calmer one',refersToPriorContext:true}],
+    constraints:[],
+    confidence:0.96,
+    needsClarification:true,
+    clarificationReason:'reference_uncertain',
+  }), context);
+  assert.equal(turn.domain,'activity');
+  assert.equal(turn.action,'confirm');
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.references[0]?.resolvedEntityId,'activity_asset:horse-paradorn');
+  assert.equal(turn.references[0]?.resolvedFromRecommendation,true);
+});
