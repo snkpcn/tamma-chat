@@ -162,7 +162,13 @@ test('Human Brain Phase 1 guard: weak model refinement cannot overwrite the matu
   }, NOW);
 
   assert.equal(semanticCalls, 1);
-  assert.equal(result.semanticTurn.intent, 'restaurant_topic_switch',
+  // A dedicated table-availability classification (restaurant_availability_
+  // check) was added after this test was written -- it is a MORE precise
+  // deterministic candidate for this exact message than the old generic
+  // restaurant_topic_switch bucket, but the invariant under test (a weak
+  // model result must not erase deterministic's own known restaurant
+  // classification) still holds under the new, more specific intent name.
+  assert.equal(result.semanticTurn.intent, 'restaurant_availability_check',
     'a weak/ambiguous model result must not erase the old system\'s known restaurant topic');
   assert.equal(result.semanticTurn.domain, 'restaurant');
 });

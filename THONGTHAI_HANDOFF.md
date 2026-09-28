@@ -9949,3 +9949,103 @@ production-smoke mechanism (#199). Full detail, citations, and arithmetic:
    path, no separate LINE brain, no channel-local transaction
    interpretation, 16/16 real LINE live acceptance still green) remains
    certified independently of that live outcome.
+
+## Final conversation-perfection pass: three root-caused production fixes (2026-09-28)
+
+Real LINE HTTPS transport certified PASS after the owner added
+`LINE_CHANNEL_SECRET` (invalid signature -> 401, valid -> 200, both against
+the real deployed webhook). This closeout root-caused and fixed the three
+concrete production failures observed in post-merge smoke, per the owner's
+explicit "fix the general semantic class, never patch the exact sentence"
+instruction:
+
+1. **Restaurant table-status questions had zero deterministic classification
+   at all.** "พรุ่งนี้หกโมงโต๊ะเต็มยัง" matched neither the existing
+   `RESTAURANT_TOPIC_MARKER` (no กิน/อาหาร/เมนู word) nor any other pattern
+   in `_deterministic-semantic-turn.ts`, so a transient real provider
+   failure on that turn collapsed to the generic "ระบบตอบช้า" apology
+   instead of the honest "no live table source" answer
+   `_response-composer.ts`'s existing `humanKnowledgeUnknownCopy` already
+   knows how to give (that function was already correct and already wired --
+   it simply never received a classified turn to act on). Fix: a new
+   structural marker (`RESTAURANT_TABLE_STATUS_MARKER`, "โต๊ะ" co-occurring
+   with เต็ม/ว่าง/เหลือ or a status question particle) classifies
+   `domain:'restaurant', informationNeed:'availability'`, added to both the
+   cold-start and active-task-switch cascades. Registered in
+   `COARSE_READ_ONLY_INTENTS` so it remains a provider-outage fallback only
+   and never preempts the real model when it's available (a real regression
+   caught by `tests/human-brain-phase1-semantic-first.test.ts`'s existing
+   dietary-memory/table-availability test, fixed by requiring language
+   refinement for this intent like every other coarse deterministic bucket).
+
+2. **A conditional activity continuation ("ถ้าตัวนั้นไม่ว่าง เอาอีกตัว
+   แทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร") had no deterministic
+   classification either**, so with an active task already selecting a
+   horse, a transient provider failure produced the same generic booking
+   apology instead of preserving the selection. Fix: a structural
+   "conditional unavailability + explicit non-commit consequence" marker
+   pair in `deriveForActiveTask`, which reads the task's own
+   `assetSelection` slot (the real production key -- not `horseName`, which
+   only a test helper used) and produces a non-transactional availability
+   check that keeps the selected horse as the subject and sets an explicit
+   `no_transaction` constraint, which `renderActivityAvailability` already
+   consumes.
+
+3. **A promotion follow-up reference was misrouted into the broad ecosystem
+   catalog.** Root cause: `_experience-discovery.ts`'s
+   `isExperienceDiscoveryIntent` bag-of-words heuristic
+   (`/(กิจกรรม|ประสบการณ์)/`) fires on ANY message merely containing
+   "กิจกรรม" -- including "อันเมื่อกี้ใช้กับกิจกรรมได้ไหม" (does the
+   promotion just discussed apply to activities), discarding the promotion
+   referent entirely. Fix: a `PRIOR_REFERENCE_MARKER` (เมื่อกี้/อันนั้น/
+   ตัวเดิม/etc.) now excludes the bag-of-words check -- a narrow legacy
+   matcher with no conversation context has no business confidently
+   claiming a reference-bearing turn. Also added a `promotion` branch to
+   `detectNonActivitySideQuestion` (previously the only domain among stay/
+   otop/cafe/membership/promotion with no follow-up branch at all), so a
+   genuine promotion follow-up routes back to the existing
+   `renderPromotionRecommendation`.
+
+All three are covered by new offline regression tests driving the real
+`processThongthaiChatCore` end-to-end under the genuine "model unavailable"
+condition each one actually failed under:
+`tests/final-perfection-pass-conversational-fixes.test.ts`. A companion
+`tests/final-perfection-pass-holdout.test.ts` adds 12 new, non-copied
+multi-turn scenarios (reference continuation, correction, two-intervening-
+side-topic resume, negative constraint, availability-unknown vs verified-
+empty, comparison, non-transactional selection, cancellation, colloquial/
+typo Thai, short-fragment continuation, conditional weather) -- an honest
+robustness set, not a blind independently-authored holdout (one session
+cannot be both). `scripts/run-production-smoke.ts` was upgraded with real
+semantic assertions (required/forbidden markers per case, not just HTTP 200)
+and `activity-03-conditional` was given the same prior-turn context its
+sibling `activity-02-reference` already had -- it was previously a
+genuine cold start with no antecedent at all for "ตัวนั้น"/"อีกตัว".
+
+**Two genuine issues were found and deliberately NOT fixed in this pass,
+documented here for follow-up rather than rushed:**
+
+- **`conversationContext` (activeDomain/activeTopic) is never persisted for
+  a `legacy_required` turn** (`processThongthaiOneMindTurnAuthoritative`'s
+  persist gate short-circuits on `persistPredicate`/cutover eligibility,
+  which bundles the read-only domain-tracking signal together with
+  taskState's stricter transactional-safety gate). This is the deeper
+  reason the promotion-follow-up and a stay-correction holdout scenario
+  still fall back to a generic clarification (not a wrong answer, just a
+  less-than-ideal one) when the model is ALSO transiently unavailable on
+  that exact turn. A fix was attempted (persisting conversationContext
+  independently of taskState, best-effort, single-attempt) and reverted
+  after it caused 9 real regressions across restaurant/promotion/membership
+  side-question and preorder tests -- the blast radius of touching this
+  exact CAS loop, used by every customer turn in production, needs a much
+  more careful, isolated change than fits safely in this pass.
+- **A benign room-availability question ("วันนี้มีห้องว่างไหมคะ") is
+  misclassified as a service-feedback/complaint** by
+  `_service-mind-feedback-intent.ts`'s `classifyServiceFeedback`, creating
+  an unnecessary internal team-escalation attempt for an ordinary question.
+  The customer-facing reply itself is not wrong ("let me double-check with
+  the team, I don't want to guess"), but the internal feedback-notification
+  side effect is a real, separate defect, discovered via holdout testing,
+  outside this pass's three named targets.
+
+Full suite: **1608/1608 passing**.
