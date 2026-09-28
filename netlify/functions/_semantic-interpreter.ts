@@ -1060,7 +1060,12 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       const remaining = domainEntities.filter(entity =>
         entity.name !== value && !entity.name.includes(value) && !value.includes(entity.name));
       if (remaining.length === 1) {
-        return { ...reference, resolvedEntityId: remaining[0]!.id };
+        // `value` must become the RESOLVED (kept) entity's own name, not
+        // stay as the rejected one -- downstream consumers (working-memory
+        // considered-selection tracking in _conversation-context.ts) read
+        // reference.value as the selection's display name, and would
+        // otherwise silently record the REJECTED horse as "considered".
+        return { ...reference, value: remaining[0]!.name, resolvedEntityId: remaining[0]!.id };
       }
       if (remaining.length > 1) {
         return { ...reference, resolvedEntityIds: remaining.map(entity => entity.id) };
@@ -1132,7 +1137,12 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       // was answered with a generic disambiguation prompt instead of
       // acknowledging the just-discussed horse as considered-only.
       if (value && GENERIC_DEMONSTRATIVE_RE.test(value)) {
-        return { ...reference, resolvedEntityId: inDomain[0]!.id };
+        // Same reasoning as the exclusion branch above: value must become
+        // the resolved entity's real name, not stay as the content-free
+        // demonstrative text, or working-memory considered-selection
+        // tracking would record "ตัวนั้น" as the selection's name instead
+        // of the actual horse.
+        return { ...reference, value: inDomain[0]!.name, resolvedEntityId: inDomain[0]!.id };
       }
       return {
         ...reference,

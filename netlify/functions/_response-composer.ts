@@ -353,7 +353,17 @@ function safeModelConversationReply(input: ResponseComposerInput): ComposedRespo
   }
   const need = input.semanticTurn?.informationNeed ?? 'none';
   if (BUSINESS_TRUTH_NEEDS.has(need)) return null;
-  if (input.dialogDecision.knowledgeRequests.length > 0) return null;
+  // NOTE: a planned knowledgeRequest does NOT by itself veto the model's
+  // reply. A knowledgeRequest can exist merely because the turn's domain/
+  // action combination is one _dialog-manager.ts's planKnowledgeNeeds
+  // conservatively fetches for (e.g. any activity-domain "ask"), even when
+  // the customer's actual question needs no catalog/availability truth at
+  // all (informationNeed='none') -- for example "ตัวที่เลือกไว้ชื่ออะไรนะ"
+  // (which horse did I pick) triggers an activity knowledge fetch but is
+  // really a working-memory recall question. composeThongthaiResponse
+  // (below) always tries composeGroundedDeterministicResponse FIRST, so
+  // real fetched facts still win whenever they actually answer the turn;
+  // this function only runs when grounded composition produced nothing.
   const task = input.dialogDecision.taskStateContainer.activeTask;
   if (task?.commitmentIntent === true) return null;
 
@@ -1179,13 +1189,18 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
 }
 
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
-  // Intelligence-first cutover: the same open-world model call that owns
-  // current-turn meaning may also supply the customer-facing wording for
-  // conversation-only turns. Business truth still wins whenever the reply
-  // needs verified facts or an operational outcome.
-  const modelConversation = safeModelConversationReply(input);
-  if (modelConversation) return modelConversation;
+  // Model-first conversation, grounded-truth-first business facts: verified
+  // facts are checked FIRST and win whenever they actually answer the turn
+  // (real price/availability/catalog/etc.) -- this is what lets
+  // safeModelConversationReply stop vetoing itself merely because a
+  // knowledgeRequest was PLANNED (see its own comment): if that request
+  // came back with nothing usable, or was never really about business
+  // truth to begin with, the model's own safe conversational reply is the
+  // right answer, not a robotic generic fallback. Business truth still wins
+  // whenever real facts exist; the model may never override them.
   const grounded = composeGroundedDeterministicResponse(input);
   if (grounded) return grounded;
+  const modelConversation = safeModelConversationReply(input);
+  if (modelConversation) return modelConversation;
   return composeDeterministicResponse(input);
 }

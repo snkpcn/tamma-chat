@@ -571,7 +571,26 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     return { message:['ส่วนผสมที่ตรวจได้จากข้อมูลเมนูครับ',...lines].join('\n'), usedFactKeys:[...new Set(used)] };
   }
 
-  if (turn.action === 'discover' || (turn.action === 'ask' && turn.informationNeed === 'catalog')) {
+  const noShrimp = hasFoodSafetyConstraint(input, ['no_shrimp', 'avoid_shrimp', 'shrimp_allergy', 'กุ้ง']);
+  const noPork = hasFoodSafetyConstraint(input, ['no_pork', 'avoid_pork', 'หมู']);
+  const lowSpice = wants(input, ['no_spicy', 'low_spicy', 'mild', 'ไม่เผ็ด', 'เผ็ดน้อย']);
+  const hasDietaryConstraint = noShrimp || noPork || lowSpice;
+
+  // A plain "what's there to eat" browse question is safe to answer with a
+  // bare catalog dump ONLY when no dietary/safety constraint is in play.
+  // Production failure this closes: "แล้วมีอะไรกินบ้าง แฟนกินเผ็ดไม่ค่อยได้"
+  // (what's there to eat -- my partner can't eat spicy) is phrased as a
+  // browse/discover question, not an explicit "recommend", so it used to
+  // fall into this unfiltered branch and dump the full menu including
+  // spicy/shrimp items -- completely ignoring the constraint stated in the
+  // SAME sentence. Any stated dietary constraint routes to the
+  // constraint-aware branch below regardless of the exact discover/
+  // recommend action label; the customer's safety doesn't depend on which
+  // of two near-synonymous verbs the classifier picked.
+  if (
+    !hasDietaryConstraint
+    && (turn.action === 'discover' || (turn.action === 'ask' && turn.informationNeed === 'catalog'))
+  ) {
     const visible=rows.filter(row=>row.orderable).slice(0,10);
     if(!visible.length) return { message:'ตอนนี้ยังไม่พบเมนูที่ยืนยันว่าพร้อมสั่งในข้อมูลล่าสุดครับ', usedFactKeys:[] };
     const used:string[]=[];
@@ -584,11 +603,7 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     return { message:['เมนูที่ยืนยันว่าพร้อมสั่งตอนนี้มีประมาณนี้ครับ',...lines].join('\n'), usedFactKeys:[...new Set(used)] };
   }
 
-  if (turn.action !== 'recommend') return null;
-
-  const noShrimp = hasFoodSafetyConstraint(input, ['no_shrimp', 'avoid_shrimp', 'shrimp_allergy', 'กุ้ง']);
-  const noPork = hasFoodSafetyConstraint(input, ['no_pork', 'avoid_pork', 'หมู']);
-  const lowSpice = wants(input, ['no_spicy', 'low_spicy', 'mild', 'ไม่เผ็ด', 'เผ็ดน้อย']);
+  if (turn.action !== 'recommend' && !hasDietaryConstraint) return null;
   const budget = numericEntity(input, ['budget', 'budgetMax', 'maxBudget', 'budgetThb']);
   const accepted: typeof rows = [];
   let spiceUnknown = false;

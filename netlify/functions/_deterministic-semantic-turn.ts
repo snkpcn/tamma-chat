@@ -44,8 +44,24 @@ export const ACTIVITY_ASSET_SELECTIONS: ReadonlyArray<{ pattern: RegExp; name: s
   { pattern: /ทองไทย/u, name: 'ทองไทย', resourceCode: 'activity-horse', entityId: 'activity_asset:horse-thongthai' },
 ];
 
+// Shared negation guard: a known name immediately preceded by an explicit
+// rejection marker ("ไม่เอา", "ไม่ใช่", ...) is being ruled OUT, not chosen.
+// Structural (checks the text immediately before any match), not a table of
+// specific names or sentences -- applies to every entity-name matcher in
+// this file, not just the activity-asset lexicon it was originally written
+// for. See findKnownActivityAssetSelection's own doc comment for the
+// original production bug this closes for that lexicon; findEntityByName
+// below had the exact same gap for the general (any-domain) case.
+const NEGATION_BEFORE_NAME_RE = /(?:ไม่เอา|ไม่ใช่|ไม่รับ|ไม่ได้เอา)\s*$/u;
+
 function findEntityByName(message: string, entities: readonly SemanticContextEntity[]): SemanticContextEntity | null {
-  const candidates = entities.filter(entity => entity.name && message.includes(entity.name));
+  const candidates = entities.filter(entity => {
+    if (!entity.name) return false;
+    const index = message.indexOf(entity.name);
+    if (index < 0) return false;
+    const before = message.slice(Math.max(0, index - 12), index);
+    return !NEGATION_BEFORE_NAME_RE.test(before);
+  });
   return candidates.length === 1 ? candidates[0]! : null;
 }
 
@@ -87,11 +103,8 @@ function hasStandaloneTransactionRequest(message:string):boolean {
   return true;
 }
 
-// A small, closed set of negation markers, not a growing phrase table --
-// this is the same "correction marker" grammatical category
-// hasCorrectionMarker (_slot-parsers.ts) already recognizes, applied here
-// specifically to exclude a NAME immediately preceded by one of them.
-const ASSET_NEGATION_BEFORE_NAME_RE = /(?:ไม่เอา|ไม่ใช่|ไม่รับ|ไม่ได้เอา)\s*$/u;
+// Same negation guard findEntityByName above uses -- see NEGATION_BEFORE_NAME_RE.
+const ASSET_NEGATION_BEFORE_NAME_RE = NEGATION_BEFORE_NAME_RE;
 
 /**
  * A correction that mentions BOTH the old and new choice in one message

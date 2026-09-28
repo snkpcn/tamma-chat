@@ -140,9 +140,8 @@ export function readOnlyCutoverEligibility(
       && turn.semanticTurn.semanticSource !== 'openai_supervisor') {
     return { eligible:false, reason:'transactional_or_task_turn' };
   }
-  if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
-    return { eligible:false, reason:'domain_not_cut_over' };
-  }
+  // The transaction-safety gate always runs first, regardless of domain:
+  // an ActionProposal can never be composed by One-Mind's read-only path.
   if (Boolean(turn.dialogDecision.actionProposal)) {
     return { eligible:false, reason:'transactional_or_task_turn' };
   }
@@ -152,11 +151,32 @@ export function readOnlyCutoverEligibility(
     return { eligible:false, reason:'transactional_or_task_turn' };
   }
   const meaning = deriveSemanticMeaning(turn.dialogSemanticTurn ?? turn.semanticTurn);
-  if (meaning.conversationalMode === 'CHAT'
-      || meaning.conversationalMode === 'ASK'
-      || meaning.conversationalMode === 'DISCOVER'
-      || meaning.conversationalMode === 'CONSIDER'
-      || meaning.conversationalMode === 'INCIDENT') {
+  const isSafeConversationalMode = meaning.conversationalMode === 'CHAT'
+    || meaning.conversationalMode === 'ASK'
+    || meaning.conversationalMode === 'DISCOVER'
+    || meaning.conversationalMode === 'CONSIDER'
+    || meaning.conversationalMode === 'INCIDENT';
+  // Narrow exception, checked BEFORE the domain-cutover gate: a turn whose
+  // domain came back 'unknown' (the untrusted-semantics/modelRefinement
+  // rejection fallback synthesizes exactly that -- see
+  // _thongthai-one-mind-orchestrator.ts's resolveSemanticTurn) is still
+  // worth composing through One-Mind IF it carries an actual customer-
+  // facing reply (preserved by that same fallback whenever the model wrote
+  // one -- see its own comment). A safe, on-topic reply beats a robotic
+  // "domain not cut over" bounce to legacy. But when NO reply survived
+  // (a genuine provider outage, or a real zero-confidence model failure),
+  // legacy's own domain-specific deterministic fallback logic is not
+  // necessarily worse than One-Mind's generic clarify text, so this
+  // exception does NOT widen eligibility for that case -- the domain gate
+  // below still applies exactly as before.
+  const hasReplyToShow = Boolean((turn.dialogSemanticTurn ?? turn.semanticTurn).reply?.trim());
+  if (turn.semanticTurn.domain === 'unknown' && isSafeConversationalMode && hasReplyToShow) {
+    return { eligible:true };
+  }
+  if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
+    return { eligible:false, reason:'domain_not_cut_over' };
+  }
+  if (isSafeConversationalMode) {
     return { eligible:true };
   }
   if (READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
