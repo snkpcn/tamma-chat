@@ -1,6 +1,6 @@
 # Thongthai Kernel V2 Handoff
 
-Updated: 2026-09-28 15:47 Asia/Bangkok
+Updated: 2026-09-28 15:54 Asia/Bangkok
 
 ## Current State
 
@@ -8,6 +8,7 @@ Updated: 2026-09-28 15:47 Asia/Bangkok
 - Branch: `kernel-v2/phase1-single-language-brain`
 - Base main SHA before Phase 1: `74fda2b41cba900e8e30eefc37f63a1fe73da263`
 - Phase 1 implementation commit: `3c87cdf6edf6f26f00ad6c2833be0c48df54f9bc`
+- Remote Phase 1 PR head before PR-number handoff update: `429205065f6a5bf88efccceff026aa33012c7a75`
 - Handoff update commit: see branch HEAD after committing this file
 - Production URL: https://tamma-chat.netlify.app
 - Production public status: reachable; reports `semantic-v30`, `one-mind-g1-v1`, `response-composer-v1`
@@ -17,6 +18,9 @@ Open PRs observed through GitHub API before this branch:
 - `#213` Final perfection: eliminate remaining generic production fallbacks, head `fix/final-grounded-fallback-gaps@8248dc6`, base `main@74fda2b`
 - `#201` Post-merge final certification for PR #200, head `ops/post-merge-final-cert-200@0f95914`, stale base `92843d7`
 - `#146`, `#113`, `#87`, `#49`, `#10` remain open from older branches/checkpoints
+
+Phase 1 PR:
+- `#215` Kernel V2 Phase 1: Single Language Brain, head `kernel-v2/phase1-single-language-brain`
 
 ## Current Phase
 
@@ -98,12 +102,10 @@ Note: full suite needed escalated execution because `tests/model-provider-no-cyc
 
 ## Next Required Step
 
-1. Push branch `kernel-v2/phase1-single-language-brain`.
-2. Open Phase 1 PR against `main`.
-3. Review diff and CI.
-4. Merge only if green.
-5. Verify `main`.
-6. Continue to Phase 2: Conversation State V2.
+1. Review PR `#215` diff and CI.
+2. Merge only if green.
+3. Verify `main`.
+4. Continue to Phase 2: Conversation State V2.
 
 ## Commands To Rerun
 
