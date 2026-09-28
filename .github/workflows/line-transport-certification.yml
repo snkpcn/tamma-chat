@@ -1,0 +1,78 @@
+name: LINE Transport Certification (real deployed webhook)
+
+# Human Core final certification: proves the REAL deployed LINE webhook
+# transport boundary (live HTTPS + live HMAC-SHA256 signature verification)
+# against the actual production endpoint. This is deliberately separate
+# from the existing 16-turn LINE acceptance suite, which only exercises the
+# in-process brain logic, never a real HTTP request to the deployed
+# function.
+#
+# Step 1 checks ONLY whether the LINE_CHANNEL_SECRET repository secret is
+# configured -- it never echoes the value. If the secret is absent, the job
+# records LINE_TRANSPORT_SECRET_NOT_CONFIGURED and stops there rather than
+# fabricating a pass; every other LINE boundary (signature verification
+# exists in code, shared processThongthaiChatCore path, no separate LINE
+# brain) remains certified separately via the static test suite and source
+# review, documented in the final certification report.
+#
+# Manual trigger only -- this is a certification gate, not a per-commit
+# check, and must never run automatically on every push. See
+# scripts/run-line-transport-certification.ts for the full safety contract:
+# it never sends a LINE `message` event, so it can never trigger a real
+# outbound LINE reply or touch any customer-visible state.
+on:
+  workflow_dispatch:
+    inputs:
+      line_webhook_url:
+        description: 'Deployed LINE webhook endpoint to test (defaults to the real deployed URL)'
+        required: false
+        default: 'https://tamma-chat.netlify.app/.netlify/functions/line-webhook'
+
+permissions:
+  contents: read
+
+jobs:
+  check-secret-presence:
+    runs-on: ubuntu-latest
+    outputs:
+      line_secret_present: ${{ steps.check.outputs.line_secret_present }}
+    steps:
+      - id: check
+        name: Check LINE_CHANNEL_SECRET presence (never echoes the value)
+        env:
+          LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
+        run: |
+          if [ -z "$LINE_CHANNEL_SECRET" ]; then
+            echo "LINE_TRANSPORT_SECRET_NOT_CONFIGURED: repository LINE_CHANNEL_SECRET is not configured."
+            echo "line_secret_present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "LINE_CHANNEL_SECRET is configured (value not shown)."
+            echo "line_secret_present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  line-transport-certification:
+    needs: check-secret-presence
+    if: needs.check-secret-presence.outputs.line_secret_present == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run real LINE transport certification (follow event only, no reply/transaction possible)
+        env:
+          LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
+          LINE_WEBHOOK_URL: ${{ inputs.line_webhook_url }}
+        run: npx tsx scripts/run-line-transport-certification.ts
+
+  record-blocked-result:
+    needs: check-secret-presence
+    if: needs.check-secret-presence.outputs.line_secret_present != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record exact blocked result (never fabricate a pass)
+        run: |
+          echo "REAL LINE HTTPS TRANSPORT: BLOCKED ONLY BY MISSING CI SIGNING SECRET (LINE_CHANNEL_SECRET not configured in this repository's GitHub Actions secrets)."
