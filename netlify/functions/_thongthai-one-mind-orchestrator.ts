@@ -366,6 +366,30 @@ function entitiesFromGroundedFacts(bundles: readonly KnowledgeBundle[]): Semanti
   return entities;
 }
 
+function entitiesFromSemanticSelection(
+  context: ConversationContextState,
+  turn: SemanticTurn,
+): SemanticContextEntity[] {
+  const byId = new Map(context.recentEntities.map(entity => [entity.id, entity] as const));
+  const ids = turn.references.flatMap(reference =>
+    reference.resolvedEntityId ? [reference.resolvedEntityId] : (reference.resolvedEntityIds ?? []));
+  const byReference = ids
+    .map(id => byId.get(id))
+    .filter((entity): entity is SemanticContextEntity => Boolean(entity))
+    .map(({ observedAt: _observedAt, ...entity }) => entity);
+  if (byReference.length) return [...new Map(byReference.map(entity => [entity.id, entity] as const)).values()];
+
+  const names = ['horseName','resourceName','roomType','itemName','productName','promotionName','name']
+    .map(key => turn.entities[key])
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map(value => value.trim());
+  if (!names.length) return [];
+  const byName = context.recentEntities
+    .filter(entity => names.includes(entity.name))
+    .map(({ observedAt: _observedAt, ...entity }) => entity);
+  return [...new Map(byName.map(entity => [entity.id, entity] as const)).values()];
+}
+
 function nextConversationContext(
   before: ConversationContextState,
   input: OneMindTurnInput,
@@ -383,7 +407,9 @@ function nextConversationContext(
 
   // A selection the customer just made takes priority over (and is kept
   // alongside) whatever the catalog returned this same turn.
-  const selected = activeTask?.selectedEntities ?? [];
+  const selected = activeTask?.selectedEntities?.length
+    ? activeTask.selectedEntities
+    : entitiesFromSemanticSelection(before, semanticTurn);
   const selectedIds = new Set(selected.map(entity => entity.id));
   const discovered = entitiesFromGroundedFacts(bundles).filter(entity => !selectedIds.has(entity.id));
 
@@ -393,6 +419,7 @@ function nextConversationContext(
     userMessage: normalizeMessage(input.message),
     activeDomain: semanticTurn.domain === 'unknown' ? undefined : semanticTurn.domain,
     activeTopic: semanticTurn.intent || undefined,
+    semanticTurn,
     openQuestion,
     newEntities: [...selected, ...discovered],
     lastAction: semanticTurn.action,

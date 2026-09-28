@@ -66,57 +66,47 @@ test('canonical horse-booking scenario, all 7 turns, through the REAL Dialog Man
   assert.equal(step3Decision.responseIntent, 'cannot_verify_comparison');
   assert.equal(step3Decision.actionProposal, undefined);
 
-  // Turn 4: เอาภาราดร -- creates the task, selects the canonical horse.
+  // Turn 4: เอาภาราดร -- remembers the selection for consideration, but
+  // Phase 2 must not create a booking task until an explicit booking turn.
   const step4 = HORSE_BOOKING_SCENARIO[3]!;
   const context4 = buildSemanticContext(conversationContext, NOW);
-  const turn4 = parseSemanticTurnResponse(JSON.stringify({ ...step4.simulatedModelOutput, entities: { resourceCode: 'activity-horse', horseName: 'ภาราดร' } }), context4);
+  const turn4 = parseSemanticTurnResponse(JSON.stringify({ ...step4.simulatedModelOutput, entities: { resourceCode: 'activity-horse', horseName: 'ภาราดร' }, constraints: ['not_yet_booking'] }), context4);
   let decision = await processDialogTurn({ semanticTurn: turn4, conversationContext, taskState, channel: step4.channel, eventId: step4.eventId }, adapters, NOW);
   taskState = decision.taskStateContainer;
-  assert.ok(taskState.activeTask, 'the task must exist after the horse is selected');
-  assert.equal(taskState.activeTask!.slots.horseName, 'ภาราดร');
-  assert.equal(taskState.activeTask!.selectedEntities.some(e => e.name === 'ภาราดร'), true);
-  const taskId = taskState.activeTask!.taskId;
+  assert.equal(taskState.activeTask, null, 'selection is not a booking task');
   assert.notEqual(decision.mode, 'propose_action', 'selecting a horse is NOT a booking commitment');
-  conversationContext = applyConversationContextUpdate(conversationContext, { ...step4.contextUpdate, channel: step4.channel, eventId: step4.eventId, userMessage: step4.message }, NOW);
+  conversationContext = applyConversationContextUpdate(conversationContext, { ...step4.contextUpdate, channel: step4.channel, eventId: step4.eventId, userMessage: step4.message, semanticTurn: turn4 }, NOW);
+  assert.ok(conversationContext.workingMemory.consideredSelections.some(selection => selection.name === 'ภาราดร'));
 
-  // Turn 5: พรุ่งนี้สองคน -- same task, date+partySize merged.
+  // Turn 5: พรุ่งนี้สองคน -- working memory updates party size; no booking.
   const step5 = HORSE_BOOKING_SCENARIO[4]!;
   const context5 = buildSemanticContext(conversationContext, NOW);
   const turn5 = parseSemanticTurnResponse(JSON.stringify({ ...step5.simulatedModelOutput, entities: { ...step5.simulatedModelOutput.entities, date: '2026-09-19', partySize: 2 } }), context5);
   decision = await processDialogTurn({ semanticTurn: turn5, conversationContext, taskState, channel: step5.channel, eventId: step5.eventId }, adapters, NOW);
   taskState = decision.taskStateContainer;
-  assert.equal(taskState.activeTask!.taskId, taskId);
-  assert.equal(taskState.activeTask!.slots.date, '2026-09-19');
-  assert.equal(taskState.activeTask!.slots.partySize, 2);
-  conversationContext = applyConversationContextUpdate(conversationContext, { ...step5.contextUpdate, channel: step5.channel, eventId: step5.eventId, userMessage: step5.message }, NOW);
+  assert.equal(taskState.activeTask, null);
+  conversationContext = applyConversationContextUpdate(conversationContext, { ...step5.contextUpdate, channel: step5.channel, eventId: step5.eventId, userMessage: step5.message, semanticTurn: turn5 }, NOW);
+  assert.equal(conversationContext.workingMemory.partySize, 2);
 
-  // Turn 6: บ่ายสามได้ปะ -- durationMinutes still missing per real policy,
-  // so the Dialog Manager must ask for it rather than silently proceeding,
-  // AND no booking is created merely because most fields are present.
+  // Turn 6: บ่ายสามได้ปะ -- availability-shaped browsing still does not
+  // manufacture a transaction task.
   const step6 = HORSE_BOOKING_SCENARIO[5]!;
   const context6 = buildSemanticContext(conversationContext, NOW);
   const turn6 = parseSemanticTurnResponse(JSON.stringify({ ...step6.simulatedModelOutput, entities: { ...step6.simulatedModelOutput.entities, time: '15:00' } }), context6);
   decision = await processDialogTurn({ semanticTurn: turn6, conversationContext, taskState, channel: step6.channel, eventId: step6.eventId }, adapters, NOW);
   taskState = decision.taskStateContainer;
-  assert.equal(taskState.activeTask!.taskId, taskId);
-  assert.equal(taskState.activeTask!.slots.time, '15:00');
-  assert.deepEqual(taskState.activeTask!.missingFields, ['durationMinutes']);
-  assert.equal(decision.mode, 'collect_field', 'duration is still missing -- must collect it, not book');
+  assert.equal(taskState.activeTask, null);
   assert.notEqual(decision.mode, 'propose_action');
-  conversationContext = applyConversationContextUpdate(conversationContext, { ...step6.contextUpdate, channel: step6.channel, eventId: step6.eventId, userMessage: step6.message }, NOW);
+  conversationContext = applyConversationContextUpdate(conversationContext, { ...step6.contextUpdate, channel: step6.channel, eventId: step6.eventId, userMessage: step6.message, semanticTurn: turn6 }, NOW);
 
-  // Fill the duration (a realistic follow-up the customer would give when
-  // asked), THEN turn 7: "จองเลย" -- only NOW may a proposal be produced.
-  const durationTurn = parseSemanticTurnResponse(JSON.stringify({ domain: 'activity', intent: 'provide_duration', action: 'provide_information', entities: { durationMinutes: 60 }, references: [], constraints: [], confidence: 0.9, needsClarification: false }), buildSemanticContext(conversationContext, NOW));
-  decision = await processDialogTurn({ semanticTurn: durationTurn, conversationContext, taskState, channel: 'line', eventId: 'horse-scenario-6b' }, adapters, NOW);
-  taskState = decision.taskStateContainer;
-  assert.deepEqual(taskState.activeTask!.missingFields, []);
-  assert.notEqual(decision.mode, 'propose_action', 'all fields present is still not the same as an explicit commit');
-
-  const bookTurn = parseSemanticTurnResponse(JSON.stringify({ domain: 'activity', intent: 'confirm_booking', action: 'book', entities: {}, references: [], constraints: [], confidence: 0.92, needsClarification: false }), buildSemanticContext(conversationContext, NOW));
+  const bookTurn = parseSemanticTurnResponse(JSON.stringify({
+    domain: 'activity', intent: 'confirm_booking', action: 'book', speechAct:'transaction_request',
+    entities: { resourceCode:'activity-horse', date:'2026-09-19', time:'15:00', partySize:2, durationMinutes:60 },
+    references: [], constraints: [], confidence: 0.92, needsClarification: false,
+  }), buildSemanticContext(conversationContext, NOW));
   decision = await processDialogTurn({ semanticTurn: bookTurn, conversationContext, taskState, channel: 'line', eventId: 'horse-scenario-7' }, adapters, NOW);
   assert.equal(decision.mode, 'propose_action', 'only an explicit "จองเลย" with all fields present and verified availability may propose an action');
   assert.equal(decision.actionProposal?.toolName, 'create_booking');
   assert.equal(decision.actionProposal?.customerCommitPresent, true);
-  assert.equal(decision.taskStateContainer.activeTask!.taskId, taskId, 'still the SAME task from turn 4, never recreated');
+  assert.equal(decision.taskStateContainer.activeTask!.slots.resourceCode, 'activity-horse');
 });

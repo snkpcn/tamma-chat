@@ -28,7 +28,8 @@
 // buildSemanticContext -> interpretSemanticTurn(message, context) -> (later
 // phases use the SemanticTurn). Layers stay separated.
 
-import type { SemanticAction, SemanticContext, SemanticContextEntity, SemanticDomain } from './_semantic-interpreter';
+import type { SemanticAction, SemanticContext, SemanticContextEntity, SemanticDomain, SemanticTurn } from './_semantic-interpreter';
+import { deriveSemanticMeaning } from './_semantic-meaning';
 import { patchGuestAgentState } from './_guest-agent-state-store';
 
 export const CONVERSATION_CONTEXT_SCHEMA_VERSION = 'conversation-context-v1';
@@ -36,6 +37,9 @@ export const CONVERSATION_CONTEXT_SCHEMA_VERSION = 'conversation-context-v1';
 export const MAX_RECENT_TURNS = 8;
 export const MAX_TURN_CHARS = 400;
 export const MAX_RECENT_ENTITIES = 6;
+export const MAX_CONSIDERED_SELECTIONS = 6;
+export const MAX_WORKING_CONSTRAINTS = 12;
+export const MAX_SUSPENDED_TOPICS = 4;
 export const MAX_RECENT_EVENT_IDS = 5;
 export const MAX_SUMMARY_CHARS = 600;
 export const CONTEXT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours of inactivity -- a stale context is treated as absent, never as a permanent transcript
@@ -53,10 +57,37 @@ export type ConversationEntityRecord = SemanticContextEntity & {
   observedAt: string;
 };
 
+export type ConversationWorkingSelection = {
+  domain: SemanticDomain;
+  name: string;
+  entityId?: string;
+  entityType?: string;
+  status: 'considering' | 'rejected';
+  observedAt: string;
+};
+
+export type ConversationWorkingConstraint = {
+  domain: SemanticDomain;
+  code: string;
+  observedAt: string;
+};
+
+export type ConversationWorkingMemory = {
+  currentTopic: string | null;
+  suspendedTopics: string[];
+  partySize: number | null;
+  companion: string | null;
+  pace: string | null;
+  consideredSelections: ConversationWorkingSelection[];
+  constraints: ConversationWorkingConstraint[];
+  transactionCommitment: 'none' | 'explicit';
+};
+
 export type ConversationContextState = {
   schemaVersion: string;
   recentTurns: ConversationTurn[];
   rollingSummary: string;
+  workingMemory: ConversationWorkingMemory;
   activeDomain: SemanticDomain | null;
   activeTopic: string | null;
   openQuestion: string | null;
@@ -75,6 +106,7 @@ export function emptyConversationContextState(now: Date = new Date()): Conversat
     schemaVersion: CONVERSATION_CONTEXT_SCHEMA_VERSION,
     recentTurns: [],
     rollingSummary: '',
+    workingMemory: emptyConversationWorkingMemory(),
     activeDomain: null,
     activeTopic: null,
     openQuestion: null,
@@ -86,6 +118,19 @@ export function emptyConversationContextState(now: Date = new Date()): Conversat
     recentEventIds: [],
     updatedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + CONTEXT_TTL_MS).toISOString(),
+  };
+}
+
+export function emptyConversationWorkingMemory(): ConversationWorkingMemory {
+  return {
+    currentTopic: null,
+    suspendedTopics: [],
+    partySize: null,
+    companion: null,
+    pace: null,
+    consideredSelections: [],
+    constraints: [],
+    transactionCommitment: 'none',
   };
 }
 
@@ -148,6 +193,124 @@ function truncateSummary(summary: string): string {
   return summary.length > MAX_SUMMARY_CHARS ? summary.slice(summary.length - MAX_SUMMARY_CHARS) : summary;
 }
 
+function shortMemoryString(value: unknown, max = 80): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text ? text.slice(0, max) : null;
+}
+
+function memoryTopicForTurn(turn: SemanticTurn): string | null {
+  if (turn.domain === 'unknown') return null;
+  const meaning = deriveSemanticMeaning(turn);
+  return `${meaning.domain}:${meaning.focusKind}:${meaning.focusValue ?? meaning.informationNeed}`;
+}
+
+function boundedSuspendedTopics(previous: string | null, next: string | null, existing: string[]): string[] {
+  if (!previous || !next || previous === next) return existing;
+  return [previous, ...existing.filter(topic => topic !== previous)].slice(0, MAX_SUSPENDED_TOPICS);
+}
+
+function selectionNamesFromTurn(turn: SemanticTurn): Array<{ name: string; entityType?: string; status: 'considering' | 'rejected' }> {
+  const candidates: Array<{ key: string; entityType?: string; status?: 'considering' | 'rejected' }> = [
+    { key: 'horseName', entityType: 'horse' },
+    { key: 'resourceName' },
+    { key: 'roomType', entityType: 'room' },
+    { key: 'itemName', entityType: 'menu_item' },
+    { key: 'productName', entityType: 'product' },
+    { key: 'promotionName', entityType: 'promotion' },
+    { key: 'name' },
+    { key: 'excludedHorse', entityType: 'horse', status: 'rejected' },
+  ];
+  const names: Array<{ name: string; entityType?: string; status: 'considering' | 'rejected' }> = [];
+  for (const candidate of candidates) {
+    const value = shortMemoryString(turn.entities[candidate.key]);
+    if (value) names.push({ name: value, ...(candidate.entityType ? { entityType: candidate.entityType } : {}), status: candidate.status ?? 'considering' });
+  }
+  return names;
+}
+
+function mergeWorkingSelections(
+  existing: ConversationWorkingSelection[],
+  additions: ConversationWorkingSelection[],
+): ConversationWorkingSelection[] {
+  const byKey = new Map<string, ConversationWorkingSelection>();
+  for (const selection of [...additions, ...existing]) {
+    const key = `${selection.domain}:${selection.entityId ?? selection.name}:${selection.status}`;
+    if (!byKey.has(key)) byKey.set(key, selection);
+  }
+  return [...byKey.values()].slice(0, MAX_CONSIDERED_SELECTIONS);
+}
+
+function mergeWorkingConstraints(
+  existing: ConversationWorkingConstraint[],
+  additions: ConversationWorkingConstraint[],
+): ConversationWorkingConstraint[] {
+  const byKey = new Map<string, ConversationWorkingConstraint>();
+  for (const constraint of [...additions, ...existing]) {
+    const key = `${constraint.domain}:${constraint.code}`;
+    if (!byKey.has(key)) byKey.set(key, constraint);
+  }
+  return [...byKey.values()].slice(0, MAX_WORKING_CONSTRAINTS);
+}
+
+export function applySemanticTurnToWorkingMemory(
+  current: ConversationWorkingMemory,
+  turn: SemanticTurn,
+  now: Date = new Date(),
+): ConversationWorkingMemory {
+  const meaning = deriveSemanticMeaning(turn);
+  const observedAt = now.toISOString();
+  const currentTopic = memoryTopicForTurn(turn) ?? current.currentTopic;
+  const partySize = Number(turn.entities.partySize);
+  const companion = shortMemoryString(turn.entities.companion)
+    ?? shortMemoryString(turn.entities.companionType)
+    ?? shortMemoryString(turn.entities.relationship)
+    ?? current.companion;
+  const pace = shortMemoryString(turn.entities.pace)
+    ?? shortMemoryString(turn.entities.exertionPreference)
+    ?? (turn.constraints.some(constraint => /(?:low_exertion|relaxed|not_tiring|ชิล|ไม่เหนื่อย)/iu.test(constraint)) ? 'relaxed' : current.pace);
+
+  const selectionStatusAllowed = meaning.conversationalMode === 'CONSIDER'
+    || turn.speechAct === 'selection'
+    || turn.action === 'confirm'
+    || turn.action === 'correct_previous'
+    || turn.action === 'modify';
+  const explicitSelections = selectionStatusAllowed
+    ? selectionNamesFromTurn(turn).map(selection => ({
+        domain: turn.domain,
+        name: selection.name,
+        ...(selection.entityType ? { entityType: selection.entityType } : {}),
+        status: selection.status,
+        observedAt,
+      }))
+    : [];
+  const referencedSelections = selectionStatusAllowed
+    ? turn.references.flatMap(reference => {
+        const entityId = reference.resolvedEntityId ?? reference.resolvedEntityIds?.[0];
+        if (!entityId) return [];
+        return [{
+          domain: turn.domain,
+          name: reference.value ?? entityId,
+          entityId,
+          status: 'considering' as const,
+          observedAt,
+        }];
+      })
+    : [];
+  const constraints = turn.constraints.map(code => ({ domain: turn.domain, code: code.slice(0, 120), observedAt }));
+
+  return {
+    currentTopic,
+    suspendedTopics: boundedSuspendedTopics(current.currentTopic, currentTopic, current.suspendedTopics),
+    partySize: Number.isInteger(partySize) && partySize >= 1 && partySize <= 50 ? partySize : current.partySize,
+    companion,
+    pace,
+    consideredSelections: mergeWorkingSelections(current.consideredSelections, [...explicitSelections, ...referencedSelections]),
+    constraints: mergeWorkingConstraints(current.constraints, constraints),
+    transactionCommitment: meaning.conversationalMode === 'COMMIT' ? 'explicit' : current.transactionCommitment,
+  };
+}
+
 export type ConversationContextUpdate = {
   /** Idempotence key for this turn (e.g. a LINE webhook event id, or a
    *  request-scoped id for web). If this id was already applied, the update
@@ -166,6 +329,7 @@ export type ConversationContextUpdate = {
   currentTaskReference?: string | null;
   lastRecommendationReference?: string | null;
   lastToolResultSummary?: string | null;
+  semanticTurn?: SemanticTurn;
   /** A short, factual addition to the rolling summary -- what the customer is
    *  trying to do, a stated preference/constraint, a selection already made,
    *  an unresolved question. Never model reasoning. */
@@ -207,11 +371,15 @@ export function applyConversationContextUpdate(
   const rollingSummary = update.summaryFact
     ? truncateSummary(base.rollingSummary ? `${base.rollingSummary} ${update.summaryFact}` : update.summaryFact)
     : base.rollingSummary;
+  const workingMemory = update.semanticTurn
+    ? applySemanticTurnToWorkingMemory(base.workingMemory ?? emptyConversationWorkingMemory(), update.semanticTurn, now)
+    : (base.workingMemory ?? emptyConversationWorkingMemory());
 
   return {
     schemaVersion: CONVERSATION_CONTEXT_SCHEMA_VERSION,
     recentTurns: boundTurns(newTurns),
     rollingSummary,
+    workingMemory,
     activeDomain: update.activeDomain ?? base.activeDomain,
     activeTopic: update.activeTopic ?? base.activeTopic,
     openQuestion: update.openQuestion === null ? null : (update.openQuestion ?? base.openQuestion),
@@ -235,13 +403,27 @@ export function applyConversationContextUpdate(
  */
 export function buildSemanticContext(state: ConversationContextState, now: Date = new Date()): SemanticContext {
   const live = pruneExpired(state, now);
+  const memory = live.workingMemory ?? emptyConversationWorkingMemory();
+  const memorySummaryParts = [
+    memory.partySize ? `partySize=${memory.partySize}` : '',
+    memory.companion ? `companion=${memory.companion}` : '',
+    memory.pace ? `pace=${memory.pace}` : '',
+    memory.consideredSelections.length
+      ? `considered=${memory.consideredSelections.map(selection => `${selection.status}:${selection.name}`).join('|')}`
+      : '',
+    memory.constraints.length
+      ? `constraints=${memory.constraints.map(constraint => `${constraint.domain}:${constraint.code}`).join('|')}`
+      : '',
+  ].filter(Boolean);
+  const workingMemorySummary = memorySummaryParts.length ? `working memory: ${memorySummaryParts.join('; ')}.` : '';
+  const rollingSummary = [live.rollingSummary || '', workingMemorySummary].filter(Boolean).join(' ').trim();
   return {
     activeDomain: live.activeDomain,
     recentEntities: live.recentEntities.map(({ observedAt: _observedAt, ...entity }) => entity),
     lastAction: live.lastAction ?? undefined,
     openQuestion: live.openQuestion ?? undefined,
     activeTopic: live.activeTopic ?? undefined,
-    rollingSummary: live.rollingSummary || undefined,
+    rollingSummary: rollingSummary || undefined,
     lastRecommendationReference: live.lastRecommendationReference || undefined,
     // recentTurns are already redacted and bounded at write time by this
     // module. Passing that same bounded evidence to the semantic layer gives
@@ -276,7 +458,12 @@ function isConversationContextState(value: unknown): value is ConversationContex
 }
 
 export function parseConversationContextState(value: unknown, now: Date = new Date()): ConversationContextState {
-  return isConversationContextState(value) ? pruneExpired(value, now) : emptyConversationContextState(now);
+  if (!isConversationContextState(value)) return emptyConversationContextState(now);
+  const live = pruneExpired(value, now);
+  return {
+    ...live,
+    workingMemory: live.workingMemory ?? emptyConversationWorkingMemory(),
+  };
 }
 
 export async function loadConversationContext(guestDbId: string | null, now: Date = new Date()): Promise<ConversationContextState> {

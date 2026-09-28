@@ -1,83 +1,89 @@
 # Thongthai Kernel V2 Handoff
 
-Updated: 2026-09-28 15:59 Asia/Bangkok
+Updated: 2026-09-28 16:18 Asia/Bangkok
 
 ## Current State
 
 - Repo: `snkpcn/tamma-chat`
-- Branch: `main`
-- Base main SHA before Phase 1: `74fda2b41cba900e8e30eefc37f63a1fe73da263`
-- Phase 1 implementation commit: `3c87cdf6edf6f26f00ad6c2833be0c48df54f9bc`
-- Remote Phase 1 PR head before PR-number handoff update: `429205065f6a5bf88efccceff026aa33012c7a75`
-- Phase 1 PR head at merge: `962ffe61157b11a992b861a7715970130ad83615`
-- Phase 1 squash merge commit on `main`: `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
-- Handoff finalization commit: see `main` HEAD after committing this file
+- Local branch: `kernel-v2/phase2-conversation-state-v2`
+- Current remote `main` SHA verified through GitHub API: `59aba3a971191ed702fc3c7e6aca1f198fd3c66d`
+- Current production Netlify deploy ID: `6aba2cb31f169b0009a18435`
+- Current production Netlify commit_ref: `59aba3a971191ed702fc3c7e6aca1f198fd3c66d`
 - Production URL: https://tamma-chat.netlify.app
-- Production public status: reachable; reports `semantic-v30`, `one-mind-g1-v1`, `response-composer-v1`
-- Production deploy SHA verified through Netlify deploy detail: `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
-- Production deploy ID verified ready: `6aba2bb4b6f5b100096a0eaf`
+- Phase 1 PR: `#215`, merged
+- Phase 1 squash merge commit: `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
+- Phase 1 handoff finalization commit on `main`: `59aba3a971191ed702fc3c7e6aca1f198fd3c66d`
 
-Open PRs observed through GitHub API before this branch:
-- `#213` Final perfection: eliminate remaining generic production fallbacks, head `fix/final-grounded-fallback-gaps@8248dc6`, base `main@74fda2b`
-- `#201` Post-merge final certification for PR #200, head `ops/post-merge-final-cert-200@0f95914`, stale base `92843d7`
+Open PRs observed through GitHub API before Phase 2 PR creation:
+
+- `#213` Final perfection: eliminate remaining generic production fallbacks
+- `#201` [run live] Post-merge final certification for PR #200
 - `#146`, `#113`, `#87`, `#49`, `#10` remain open from older branches/checkpoints
-
-Phase 1 PR:
-- `#215` Kernel V2 Phase 1: Single Language Brain, merged at `2026-09-28T08:56:18Z`
 
 ## Current Phase
 
-Kernel V2 Phase 1: Single Language Brain foundation.
+Kernel V2 Phase 2: Conversation State V2.
 
-This phase is complete and merged. This is not project completion. Phases 2-7 remain.
+Phase 2 implementation is complete locally and fully tested. It is not yet pushed/opened as a PR in this handoff checkpoint.
 
-## Completed In This Checkpoint
+This is not project completion. Phases 3-7 remain.
 
-- Added `SemanticMeaning.conversationalMode` as a closed contract:
-  - `CHAT`
-  - `ASK`
-  - `DISCOVER`
-  - `CONSIDER`
-  - `COMMIT`
-  - `INCIDENT`
-- Updated One-Mind response eligibility to use the closed conversational mode for non-executing turns.
-- Preserved transaction safety:
-  - `ActionProposal` still blocks One-Mind response cutover and stays on existing transaction executor path.
-  - Explicit commit that is only collecting fields can still persist canonical working task state.
-- Fixed preference/context-only turns so they do not open booking/preorder task state merely because they contain party size or constraints.
-  - Example protected: `มากับแฟนสองคน ไม่อยากทำอะไรเหนื่อยมาก`
-  - Budget planning remains allowed as bounded planning state, preserving existing restaurant planning tests.
-- Raised default `THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION` reviewed ceiling from `6` to `256`.
-  - Hard monetary cap remains `<= 0.05 USD` per conversation.
-  - Per-turn cap remains `1` paid semantic call.
-  - This removes the arbitrary 6-call intelligence cliff without increasing the money ceiling.
+## Completed Phases
+
+- Phase 1: Single Language Brain foundation, merged in PR `#215`.
+- Phase 2: Conversation State V2, complete locally on `kernel-v2/phase2-conversation-state-v2`, pending PR/CI/merge.
+
+## Current Architecture
+
+Phase 2 keeps the Phase 1 single meaning authority intact and adds bounded working conversation memory downstream of the Language Brain:
+
+- `SemanticTurn` remains the current-turn meaning input.
+- `ConversationContextState.workingMemory` now stores short-lived state:
+  - current topic
+  - suspended topics
+  - party size
+  - companion
+  - pace
+  - considered selections
+  - rejected selections
+  - constraints
+  - transaction commitment marker
+- Working memory is stored inside the existing bounded `conversationContext` state, not business tables.
+- `buildSemanticContext` exposes a compact working-memory summary to the semantic layer for reference resolution.
+- Dialog task creation now respects explicit non-transaction evidence:
+  - `not_yet_booking`
+  - `no_transaction`
+  - `not_booking`
+  - `consider_only`
+- A turn after "remember this / not yet booking" stays in working memory unless the current turn is an explicit commit.
+- Normal slot continuation without a no-transaction memory marker still preserves existing draft-task behavior.
+- Business executors, booking/payment tables, and production operational tables were not changed.
 
 ## Files Changed
 
-- `netlify/functions/_semantic-meaning.ts`
-- `netlify/functions/_thongthai-one-mind-response.ts`
+- `netlify/functions/_conversation-context.ts`
 - `netlify/functions/_dialog-manager.ts`
-- `netlify/functions/_ai-cost-policy.ts`
-- `tests/semantic-meaning.test.ts`
-- `tests/thongthai-ai-cost-guard.test.ts`
+- `netlify/functions/_thongthai-one-mind-orchestrator.ts`
+- `tests/dialog-manager-horse-scenario.test.ts`
 - `tests/human-brain-real-line-failure-regression.test.ts`
+- `tests/kernel-v2-phase2-conversation-state.test.ts`
 - `THONGTHAI_KERNEL_V2_HANDOFF.md`
 
 ## Migrations
 
 None.
 
-No business database tables were modified.
+No business database tables were modified. No production migration is needed. Rollback is code-only.
 
 ## Test Evidence
 
-Focused tests:
+Focused Phase 2/regression suite:
 
 ```bash
-node --import tsx --test tests/semantic-meaning.test.ts tests/thongthai-ai-cost-guard.test.ts tests/human-brain-real-line-failure-regression.test.ts
+node --import tsx --test tests/dialog-manager-cross-channel.test.ts tests/dialog-manager-shadow-comparison.test.ts tests/dialog-manager-stay-scenario.test.ts tests/kernel-v2-phase2-conversation-state.test.ts tests/human-brain-real-line-failure-regression.test.ts tests/dialog-manager-horse-scenario.test.ts tests/conversation-context.test.ts tests/final-certification-cross-domain-sequence.test.ts
 ```
 
-Result: passed.
+Result: `8/8` files passed.
 
 Full suite:
 
@@ -85,34 +91,49 @@ Full suite:
 npm test
 ```
 
-Result: `1615/1615` passed, `0` failed.
+Result: `1616/1616` passed, `0` failed.
 
-Note: full suite needed escalated execution because `tests/model-provider-no-cycle.test.ts` spawns `npx esbuild`; sandboxed execution produced `spawnSync npx EPERM`.
+Note: full suite needed escalated execution because some `tsx`/`esbuild` subprocess tests create IPC pipes under `/tmp`; sandboxed execution produced EPERM false failures for those wrapper tests.
 
 ## Cost Measurements
 
-- Policy hard cap remains `DEFAULT_MAX_CONVERSATION_AI_COST_USD = 0.05`.
-- `DEFAULT_MAX_AI_CALLS_PER_TURN = 1`.
-- `DEFAULT_MAX_AI_CALLS_PER_CONVERSATION = 256`.
-- Cost guard tests verify long 20/50/100-turn simulations remain under the monetary cap.
+No Phase 2 cost-policy constants changed.
+
+Relevant existing Phase 1 cost contract remains:
+
+- Hard monetary cap: `DEFAULT_MAX_CONVERSATION_AI_COST_USD = 0.05`
+- Max paid semantic calls per turn: `1`
+- Conversation call ceiling is no longer the arbitrary production IQ cliff from the old max-6 behavior.
+
+Phase 2 tests are local deterministic/structured semantic tests and do not add paid semantic calls.
 
 ## Known Failures / Gaps
 
-- No customer-message production smoke was performed in this checkpoint.
-- Phase 1 does not implement semantic learning memory; that belongs to Phase 3.
-- Incident routing/backoffice case creation is not completed here; Phase 1 only preserves INCIDENT as authoritative conversation meaning and prevents legacy transaction routing.
+- Phase 2 is implemented locally but not yet pushed/opened as a GitHub PR.
+- No production deploy has been made for Phase 2.
+- Phase 3 semantic learning and cost reuse are not implemented here.
+- Phase 5 incident case creation/staff routing is not implemented here.
+- Phase 6 natural response brain is not implemented here.
+- Phase 7 shadow cutover/certification is not implemented here.
 
 ## Next Required Step
 
-1. Start Phase 2 on a new dedicated branch: Conversation State V2.
-2. Preserve the Phase 1 Language Brain authority contract.
-3. Add 30-50 turn topic-switch/resume/reference tests before modifying transaction executors.
+1. Create/update remote branch `kernel-v2/phase2-conversation-state-v2` from remote `main@59aba3a971191ed702fc3c7e6aca1f198fd3c66d`.
+2. Push these Phase 2 file changes through GitHub connector or authenticated git.
+3. Open PR: `Kernel V2 Phase 2: Conversation State V2`.
+4. Let CI run and verify green.
+5. Review full diff carefully.
+6. Merge only if green.
+7. Verify remote `main`.
+8. Verify Netlify production deploy SHA after merge.
+9. Update this handoff again with PR number, merge commit, production deploy, and final Phase 2 status.
+10. Continue to Phase 3 if session capacity remains.
 
 ## Commands To Rerun
 
 ```bash
 git status --short --branch
-node --import tsx --test tests/semantic-meaning.test.ts tests/thongthai-ai-cost-guard.test.ts tests/human-brain-real-line-failure-regression.test.ts
+node --import tsx --test tests/dialog-manager-cross-channel.test.ts tests/dialog-manager-shadow-comparison.test.ts tests/dialog-manager-stay-scenario.test.ts tests/kernel-v2-phase2-conversation-state.test.ts tests/human-brain-real-line-failure-regression.test.ts tests/dialog-manager-horse-scenario.test.ts tests/conversation-context.test.ts tests/final-certification-cross-domain-sequence.test.ts
 npm test
 ```
 
@@ -120,6 +141,7 @@ npm test
 
 Rollback is code-only:
 
-- Revert the Phase 1 commit.
-- No migration rollback is needed.
+- Revert the Phase 2 PR/commit after it is merged.
+- No schema rollback is needed.
 - No production DB cleanup is needed.
+

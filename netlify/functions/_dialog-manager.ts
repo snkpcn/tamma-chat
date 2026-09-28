@@ -63,7 +63,7 @@ export type DialogReasonCode =
   | 'task_suspended_for_topic_switch' | 'task_resumed' | 'cannot_verify_comparison'
   | 'known_unconfigured_price' | 'duplicate_event_ignored' | 'no_active_task'
   | 'task_side_question_preserved' | 'task_unrelated_turn_preserved' | 'task_cancelled'
-  | 'task_summary_requested';
+  | 'task_summary_requested' | 'nontransactional_state_update_preserved';
 
 export type ResponseIntent =
   | 'discovery_response' | 'grounded_answer' | 'clarify_ambiguous_entity' | 'ask_missing_field'
@@ -455,6 +455,26 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   // SAME hasOpenTask pattern already established elsewhere in this file.
   const hasOpenActiveTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
   if (!hasOpenActiveTask) {
+    const hasPlanningBudgetSignal = turn.constraints.some(constraint => /^budget(?::|_|$)/iu.test(constraint))
+      || typeof turn.entities.budget === 'number'
+      || typeof turn.entities.budgetAmount === 'number';
+    const meaning = deriveSemanticMeaning(turn);
+    const explicitNoTransaction = turn.constraints.some(constraint =>
+      /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint)
+    );
+    const considerOnlyWithoutTask =
+      meaning.conversationalMode === 'CONSIDER'
+      && !isExplicitTransaction(turn)
+      && !hasPlanningBudgetSignal
+      && (
+        explicitNoTransaction
+        || turn.speechAct === 'preference_update'
+      );
+    if (considerOnlyWithoutTask) {
+      reasons.push('nontransactional_state_update_preserved');
+      return { container, reasons };
+    }
+
     // A correction only has meaning against existing working state unless it
     // carries a concrete slot/reference to establish what is being corrected.
     // "just asking, I did not ask you to book" must suppress progression,
@@ -479,13 +499,26 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       }
     }
 
+    const noTransactionMemory = conversationContext.workingMemory.constraints.some(constraint =>
+      constraint.domain === turn.domain
+      && /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint.code)
+    );
+    const hasConsideredSelectionInDomain = conversationContext.workingMemory.consideredSelections.some(selection =>
+      selection.domain === turn.domain && selection.status === 'considering'
+    );
+    if (
+      noTransactionMemory
+      && !isExplicitTransaction(turn)
+      && (hasConsideredSelectionInDomain || meaning.conversationalMode === 'CONSIDER')
+    ) {
+      reasons.push('nontransactional_state_update_preserved');
+      return { container, reasons };
+    }
+
     // Human Conversation Recovery: a preference/constraint declaration is
     // conversational state, not evidence that the customer wants to start an
     // order/booking task. Example: "หมูก็ไม่เอาด้วย" must update meaning and
     // continuity without silently opening a restaurant preorder.
-    const hasPlanningBudgetSignal = turn.constraints.some(constraint => /^budget(?::|_|$)/iu.test(constraint))
-      || typeof turn.entities.budget === 'number'
-      || typeof turn.entities.budgetAmount === 'number';
     const nonTransactionalContextUpdate =
       turn.action === 'provide_information'
       && turn.speechAct !== 'selection'
