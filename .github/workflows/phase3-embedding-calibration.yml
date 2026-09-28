@@ -1,0 +1,40 @@
+name: Phase 3 Embedding Calibration (read-only, no schema change)
+
+# Kernel V2 Phase 3 completion -- semantic generalization architecture
+# decision. Calls the REAL OpenAI embeddings endpoint for a small fixed set
+# of Thai phrase pairs (see scripts/run-embedding-calibration.ts) to
+# empirically calibrate whether embedding similarity actually bridges the
+# cross-vocabulary gap surface-form matching cannot (e.g. "แฟน" vs
+# "คนรู้ใจ" -- see THONGTHAI_KERNEL_V2_HANDOFF.md). This workflow does NOT
+# touch any table, migration, or production data -- it is a manual,
+# opt-in-only calibration run, mirroring phase1-live-language-acceptance.yml's
+# own safety pattern (paid OpenAI usage is never automatic on a normal push).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  embedding-calibration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Require OpenAI acceptance credential
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "EMBEDDING_CALIBRATION_NOT_RUN: repository OPENAI_API_KEY secret is not configured."
+            exit 2
+          fi
+      - name: Run embedding calibration (read-only, ~a few hundred tokens)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx tsx scripts/run-embedding-calibration.ts

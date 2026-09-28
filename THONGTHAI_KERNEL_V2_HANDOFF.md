@@ -419,6 +419,110 @@ generalization is not yet built) and the still-pending formal 20/50/100-turn
 cost-stress evidence (acceptance criterion F). Do not describe Phase 3, or
 this project, as complete on the strength of this merge alone.
 
+## Phase 3 completion: semantic generalization architecture decision
+
+**Status: decision made (embeddings), NOT yet implemented.** This is a
+separate, explicit decision from increment 1's migration -- it introduces a
+new Supabase extension (pgvector) and a new OpenAI cost line item
+(embeddings calls), neither of which increment 1's owner authorization
+covered. It requires its own explicit owner approval before any schema or
+cost-policy change, exactly like increment 1's migration did.
+
+**Options compared, per the mandate's own instruction not to choose
+embeddings merely because they are fashionable, nor reject them just to
+avoid an architectural change:**
+
+- **A. Extend the current surface/edit-distance signature matching.**
+  Ruled out for TRUE cross-vocabulary generalization, not by preference but
+  by construction: `conceptSimilarity` is a character-level metric (bounded
+  Levenshtein distance + bigram Jaccard overlap). "แฟน" and "คนรู้ใจ" share
+  **zero characters**. No threshold, weighting, or tuning of a character-level
+  metric can ever score two strings with a disjoint character set as
+  similar -- this is a mathematical property of the metric, not a
+  calibration gap the way `MIN_SIMILARITY` was. Tier A/Tier B stay exactly
+  as they are for what they're honestly good at (exact replay and
+  near-identical surface variants); they are not being replaced.
+- **B. A hand-built synonym/keyword table** (e.g. a lexicon mapping "แฟน" /
+  "คนรู้ใจ" / "คู่รัก" / etc. to one canonical concept). Explicitly forbidden
+  by the mandate ("DO NOT implement a giant phrase table," "Fix GENERAL
+  SEMANTIC CLASSES"). Also brittle in the same way increment 1's own honesty
+  notes warn about: it only ever covers phrasings someone thought to add.
+- **C. Embedding/vector similarity (pgvector).** The standard, non-lexicon
+  solution to a lexical gap: a multilingual embedding model places
+  semantically related phrases close in vector space independent of shared
+  characters. This is the only option that can close the gap options A and
+  B cannot, without inventing a hand-written synonym table.
+
+**Decision: C (embeddings), conditional on empirical calibration.** Per this
+repo's own established discipline (`MIN_SIMILARITY` and the negation veto in
+`_semantic-concept-memory.ts` were both calibrated empirically, not
+asserted), this decision is backed by a real calibration run, not just the
+argument above:
+
+- `scripts/run-embedding-calibration.ts` (new, read-only, no schema/table
+  touched) calls the real OpenAI embeddings endpoint
+  (`text-embedding-3-small`) for 8 fixed Thai phrase pairs covering the
+  companion concept's own worked example, a consider-only worked example,
+  cross-concept negative controls (must score LOW, e.g. partner vs family),
+  the known negation hard case (must be checked against embeddings too --
+  it is NOT assumed safe just because it worked as a structural veto for
+  surface matching), and a totally unrelated-sentence control.
+- `.github/workflows/phase3-embedding-calibration.yml` (new, manual
+  `workflow_dispatch` only, mirrors `phase1-live-language-acceptance.yml`'s
+  safety pattern exactly -- paid OpenAI usage is never automatic) dispatches
+  it using the repository's existing `OPENAI_API_KEY` secret. Cost is a
+  small fraction of a cent (roughly a dozen short phrases, well under 200
+  tokens total, at ~$0.02/1M tokens).
+- **Results: [PENDING -- fill in after the workflow is dispatched and
+  results are read back].** Until this line is replaced with real numbers,
+  treat option C as a reasoned-but-not-yet-empirically-confirmed decision.
+  If calibration shows embeddings do NOT cleanly separate
+  same-concept-different-vocabulary pairs (high similarity) from
+  different-concept pairs (low similarity) with a workable margin, the
+  decision above must be revisited, not forced through anyway.
+
+**If calibration confirms embeddings work, the smallest safe increment is
+(NOT YET IMPLEMENTED, requires its own owner approval):**
+
+1. A new, additive-only migration enabling the `pgvector` extension and
+   adding an `embedding vector(1536)` column (or a separate table, TBD by
+   whichever keeps the migration smallest) to `semantic_concept_memory` (or
+   a new table if mixing concerns is worse than a new table -- this needs
+   its own design-first pass, same as increment 1 got, before being
+   written).
+2. A new cost line item in `_ai-cost-policy.ts` for the embeddings model,
+   folded into the existing per-conversation USD ceiling (embeddings are
+   roughly 100x cheaper per token than the chat completion model already in
+   use, so this should not meaningfully threaten the <=2 THB budget, but
+   must still be accounted for explicitly, not assumed free).
+3. Embedding generation happens ONLY for a message that already cleared
+   `isShortStandaloneConceptCandidate` and was confirmed by the real
+   semantic supervisor with high confidence -- same trigger discipline as
+   the write path today, never a new source of paid calls beyond what
+   already exists.
+4. Matching becomes: try Tier A (exact replay) first as today (free,
+   no embedding call needed for an exact string match); if no exact
+   replay, try embedding cosine similarity against stored concept
+   embeddings above a calibrated threshold (a NEW tier, "Tier C" or a
+   renamed "Tier B", TBD) before falling through to a fresh OpenAI call.
+5. The SAME privacy boundary (`containsUnrecognizedPersonalDetail` /
+   `containsDirectIdentifier`) applies before anything is embedded and
+   stored -- an embedding of a personal-name-bearing sentence is just as
+   much a privacy leak as storing the raw text (arguably harder to audit
+   later), so the reject-on-any-doubt policy must gate embedding generation
+   too, not just raw-text storage.
+6. The SAME transaction-authority closure (`safeConceptEntities`, no
+   action/domain field) applies -- an embedding-matched concept is no more
+   able to create a transaction than a surface-matched one, by the same
+   construction argument.
+7. New tests proving: a genuine unseen cross-vocabulary paraphrase (the
+   "แฟน"/"คนรู้ใจ" pair itself, not the calibration's own fixture) resolves
+   without a full semantic call; a different-concept phrase does NOT
+   falsely match via embedding similarity; the negation hard case still
+   fails safe (whether via a structural veto like today's or via the
+   embedding space naturally separating it -- calibration determines
+   which); a personal-name-bearing sentence is never embedded-and-stored.
+
 ## Current Architecture (Phase 2)
 
 Phase 2 keeps the Phase 1 single meaning authority intact and adds bounded working conversation memory downstream of the Language Brain:
@@ -563,27 +667,33 @@ number of concept keys to measure hit-rate against.
 
 ## Next Required Step
 
-1. Merge the Phase 3 production-smoke extension PR (branch
-   `kernel-v2/phase3-production-smoke-companion`) once CI is green.
-2. Design and compare the smallest safe architecture for TRUE
-   cross-vocabulary semantic generalization ("มากับแฟน" vs "มากับคนรู้ใจ" --
-   no shared characters, same meaning) -- embedding/vector retrieval
-   (pgvector) is one candidate but must not be chosen merely because it is
-   fashionable; compare against the smallest safe alternative first, exactly
-   as increment 1's own design-first audit did.
-3. Extend Phase 3 to the pace/consider-only concept keys the mandate also
+1. ~~Merge the Phase 3 production-smoke extension PR~~ -- **done**: PR #219
+   merged (squash `497b5099b5155356f145eb06b2ae963fe3e63e9c`).
+2. Dispatch `phase3-embedding-calibration.yml` (workflow_dispatch, requires
+   the repo's `OPENAI_API_KEY` secret) and read back real results into the
+   "Phase 3 completion: semantic generalization architecture decision"
+   section above, replacing the `[PENDING]` placeholder. This is a
+   read-only calibration -- no schema/cost decision is final until this
+   data exists.
+3. If calibration confirms embeddings cleanly separate
+   same-concept-different-vocabulary from different-concept pairs: design
+   the smallest safe embedding-column migration (own design-first pass,
+   same discipline as increment 1), get explicit owner approval in chat
+   (this is a NEW decision -- a new extension and a new cost line item --
+   NOT covered by increment 1's authorization), implement, test, PR, merge,
+   apply, verify production -- same full cycle increment 1 went through.
+   If calibration does NOT confirm this, revisit the architecture decision
+   rather than forcing it through.
+4. Extend Phase 3 to the pace/consider-only concept keys the mandate also
    names, using the same closed-vocabulary, safety-by-construction pattern.
-4. Run the mandate's own formal 20/50/100-turn cost-stress conversations
+5. Run the mandate's own formal 20/50/100-turn cost-stress conversations
    (multiple independent samples per length, covering casual chat/known
    language/unseen language/unseen paraphrase/references/correction/topic
    changes/resume/consideration/explicit transaction wording/incident
    language) and report the full required metric set (paid-call counts,
    zero-call rate, hit rate by tier, token/cost percentiles, cap violations,
    intelligence-cliff check, accidental-transaction count). Only once this
-   evidence exists, plus item 2 above, may Phase 3 be declared complete.
-5. Real embedding-based matching (pgvector), if chosen in step 2, is applied
-   through its own reviewed migration with explicit owner approval in chat
-   before application -- same discipline as increment 1's own migration.
+   evidence exists, plus item 3 above, may Phase 3 be declared complete.
 6. Phases 4-7 (commercial-intent boundary, incident/backoffice routing,
    natural-response layer, brutal end-to-end certification) remain
    unstarted. Each is large enough to warrant its own design-first pass
