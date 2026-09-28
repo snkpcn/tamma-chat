@@ -364,6 +364,7 @@ export async function processOneMindCustomerTurn(
     // allergy be present in state but silently absent from the recommendation
     // copy the customer actually reads.
     semanticTurn:turn.dialogSemanticTurn,
+    conversationContext:turn.conversationContextAfter,
     dialogDecision:turn.dialogDecision,
     knowledgeBundles:turn.groundedKnowledge,
     degradation:turn.knowledgeDegradation,
