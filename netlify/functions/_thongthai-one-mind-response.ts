@@ -71,10 +71,12 @@ export function shouldPreferGroundedDeterministicResponse(
   turn: OneMindTurnResult,
   elapsedMs: number,
 ): boolean {
-  const hasGroundedFacts = turn.groundedKnowledge.some(bundle => bundle.facts.length > 0);
-  return turn.semanticTurn.action === 'discover'
-    || (hasGroundedFacts && READ_ONLY_ACTIONS.has(turn.semanticTurn.action))
-    || elapsedMs >= COMPOSER_MODEL_BUDGET_CUTOFF_MS;
+  void turn;
+  // Quality-first cutover: grounded deterministic copy is now a latency
+  // emergency fallback, not the ordinary authority for discovery/read-only
+  // turns with facts. Otherwise we pay for OpenAI understanding and then
+  // silently discard the customer-facing reply/composer.
+  return elapsedMs >= COMPOSER_MODEL_BUDGET_CUTOFF_MS;
 }
 
 /** True for a task-active turn whose DialogDecision only collects/clarifies
@@ -385,13 +387,10 @@ export async function processOneMindCustomerTurn(
     } : null,
     allowModelComposition: (composerStartedAt - totalStartedAt) < COMPOSER_MODEL_BUDGET_CUTOFF_MS,
   };
-  // Netlify's customer gateway has a finite request budget. Semantic
-  // interpretation already used the model once; a second LLM call for simple
-  // catalog discovery can push an otherwise-correct turn past the gateway
-  // timeout. Prefer the centralized grounded deterministic renderer for
-  // discovery, and whenever the orchestration phase has already consumed most
-  // of the request budget. This preserves One-Mind truth/wording ownership
-  // without falling back to channel-local business logic.
+  // Netlify's customer gateway has a finite request budget. In this
+  // quality-first phase, latency pressure is the only reason a normal
+  // grounded read-only turn may skip the model composer. Facts/discovery
+  // alone are not a valid override reason anymore.
   // Zero-cost architecture (Phase P): a collect_field/clarify decision is
   // already-correct, already-tested centralized copy (see
   // composeDeterministicResponse in _response-composer.ts) -- asking the
