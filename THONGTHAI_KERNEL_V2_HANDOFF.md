@@ -1,18 +1,21 @@
 # Thongthai Kernel V2 Handoff
 
-Updated: 2026-09-28 15:54 Asia/Bangkok
+Updated: 2026-09-28 15:59 Asia/Bangkok
 
 ## Current State
 
 - Repo: `snkpcn/tamma-chat`
-- Branch: `kernel-v2/phase1-single-language-brain`
+- Branch: `main`
 - Base main SHA before Phase 1: `74fda2b41cba900e8e30eefc37f63a1fe73da263`
 - Phase 1 implementation commit: `3c87cdf6edf6f26f00ad6c2833be0c48df54f9bc`
 - Remote Phase 1 PR head before PR-number handoff update: `429205065f6a5bf88efccceff026aa33012c7a75`
-- Handoff update commit: see branch HEAD after committing this file
+- Phase 1 PR head at merge: `962ffe61157b11a992b861a7715970130ad83615`
+- Phase 1 squash merge commit on `main`: `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
+- Handoff finalization commit: see `main` HEAD after committing this file
 - Production URL: https://tamma-chat.netlify.app
 - Production public status: reachable; reports `semantic-v30`, `one-mind-g1-v1`, `response-composer-v1`
-- Production deploy SHA: not exposed by public headers/status endpoint in this session
+- Production deploy SHA verified through Netlify deploy detail: `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
+- Production deploy ID verified ready: `6aba2bb4b6f5b100096a0eaf`
 
 Open PRs observed through GitHub API before this branch:
 - `#213` Final perfection: eliminate remaining generic production fallbacks, head `fix/final-grounded-fallback-gaps@8248dc6`, base `main@74fda2b`
@@ -20,13 +23,13 @@ Open PRs observed through GitHub API before this branch:
 - `#146`, `#113`, `#87`, `#49`, `#10` remain open from older branches/checkpoints
 
 Phase 1 PR:
-- `#215` Kernel V2 Phase 1: Single Language Brain, head `kernel-v2/phase1-single-language-brain`
+- `#215` Kernel V2 Phase 1: Single Language Brain, merged at `2026-09-28T08:56:18Z`
 
 ## Current Phase
 
 Kernel V2 Phase 1: Single Language Brain foundation.
 
-This is not project completion. Phases 2-7 remain.
+This phase is complete and merged. This is not project completion. Phases 2-7 remain.
 
 ## Completed In This Checkpoint
 
@@ -95,17 +98,15 @@ Note: full suite needed escalated execution because `tests/model-provider-no-cyc
 
 ## Known Failures / Gaps
 
-- Production deploy SHA could not be verified from public endpoint/headers.
-- No production deploy or production smoke was performed in this checkpoint.
+- No customer-message production smoke was performed in this checkpoint.
 - Phase 1 does not implement semantic learning memory; that belongs to Phase 3.
 - Incident routing/backoffice case creation is not completed here; Phase 1 only preserves INCIDENT as authoritative conversation meaning and prevents legacy transaction routing.
 
 ## Next Required Step
 
-1. Review PR `#215` diff and CI.
-2. Merge only if green.
-3. Verify `main`.
-4. Continue to Phase 2: Conversation State V2.
+1. Start Phase 2 on a new dedicated branch: Conversation State V2.
+2. Preserve the Phase 1 Language Brain authority contract.
+3. Add 30-50 turn topic-switch/resume/reference tests before modifying transaction executors.
 
 ## Commands To Rerun
 
