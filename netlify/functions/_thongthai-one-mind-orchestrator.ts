@@ -550,6 +550,15 @@ const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
   // when unavailable. Letting a language-model clarification override that
   // exact state caused production to forget the already-selected horse.
   'task_conditional_continuation',
+  // OpenAI human-fallback experiment (owner directive): "known opening
+  // hours when verified data exists... do not turn every customer message
+  // into an OpenAI call." A bare check-in/check-out TIME question (see
+  // STAY_CHECKIN_CHECKOUT_TIME_MARKER's own comment in
+  // _deterministic-semantic-turn.ts) is a single fixed organization fact
+  // that never varies by context -- unlike ask_price/stay_read_only_inquiry
+  // (deliberately left in COARSE_READ_ONLY_INTENTS above, since those CAN
+  // depend on which item/date/context is meant).
+  'stay_checkin_checkout_time_lookup',
 ]);
 
 // Exact context/state operations whose meaning is already canonical. These are
@@ -729,6 +738,48 @@ function mergeSafeDeterministicSlots(
   return {...turn,entities};
 }
 
+function normalizeExplicitNoTransactionAvailabilityRefinement(
+  turn: SemanticTurn,
+  deterministic: SemanticTurn | null,
+): SemanticTurn {
+  if (!deterministic
+      || !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+      || turn.domain !== deterministic.domain
+      || turn.informationNeed !== 'availability'
+      || turn.confidence < 0.9
+      || turn.needsClarification === true) {
+    return turn;
+  }
+
+  // A successful language-model pass may correctly understand every entity in
+  // a conditional availability question while labelling the conditional
+  // fallback ("if A is unavailable, B is okay") as planning/selection.  When
+  // the CURRENT turn also explicitly forbids a transaction, keep the model's
+  // richer entities/references/constraints but close the machine action back
+  // to the already-proven read-only deterministic action.  This is a
+  // de-escalation only: book/order/transaction_request are never normalized
+  // here and still fail the existing safety boundary below.
+  const explicitNoTransaction = [...turn.constraints, ...deterministic.constraints]
+    .some(value => /(?:no[_-]?(?:transaction|booking)|not[_-]?booking|do[_-]?not[_-]?book|ไม่จอง)/iu.test(value));
+  if (!explicitNoTransaction
+      || turn.action === 'book'
+      || turn.action === 'order'
+      || turn.speechAct === 'transaction_request') {
+    return turn;
+  }
+
+  const actionNeedsDeescalation = !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action);
+  const speechActNeedsDeescalation = turn.speechAct === 'selection';
+  if (!actionNeedsDeescalation && !speechActNeedsDeescalation) return turn;
+
+  return {
+    ...turn,
+    action: deterministic.action,
+    speechAct: 'question',
+    constraints: [...new Set([...turn.constraints, ...deterministic.constraints])],
+  };
+}
+
 function modelRefinementIsUsable(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
@@ -863,9 +914,30 @@ async function resolveSemanticTurn(
       },
     });
     const correctionReconciledTurn = reconcileSafeConversationalCorrectionDomain(rawModelTurn, deterministic);
-    const modelTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
+    const slotMergedTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
+    const modelTurn = normalizeExplicitNoTransactionAvailabilityRefinement(slotMergedTurn, deterministic);
 
-    if (!modelRefinementIsUsable(modelTurn, deterministic)) {
+    // Journey planning is conversational state only: there is no journey
+    // transaction executor. A short ellipsis such as "same one, move it to
+    // tomorrow" can score slightly below the generic 0.70 routing threshold
+    // even though a canonical journey_planning task already supplies the
+    // missing referent. Accept this narrowly bounded continuation at >=0.60
+    // only when the model itself says journey + modify/correction, asks no
+    // clarification, and a real journey plan is already active/suspended.
+    // This never applies to book/order or any executable business task.
+    const hasJourneyPlan = taskState.activeTask?.type === 'journey_planning'
+      || taskState.suspendedTask?.type === 'journey_planning'
+      || context.activeDomain === 'journey';
+    const safeJourneyContinuation = Boolean(
+      hasJourneyPlan
+      && modelTurn.domain === 'journey'
+      && (modelTurn.action === 'modify' || modelTurn.action === 'correct_previous')
+      && modelTurn.confidence >= 0.60
+      && modelTurn.needsClarification === false
+      && modelTurn.speechAct !== 'transaction_request'
+    );
+
+    if (!modelRefinementIsUsable(modelTurn, deterministic) && !safeJourneyContinuation) {
       // "Not usable" means the model's STRUCTURED classification (domain/
       // action/entities/references) is not trusted enough to drive task
       // state or business routing -- it says nothing about whether the

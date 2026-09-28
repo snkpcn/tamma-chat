@@ -37,13 +37,17 @@ test('cost calculator handles cached and uncached input from one canonical modul
   assert.equal(reserveWorstCaseCostUsd('gpt-5.6-terra',1_000,100),0.0032);
 });
 
-test('production defaults enforce the owner hard cap and compact semantic output',()=>{
+test('production defaults enforce the owner-configured ceiling (experiment phase: generous runaway-bug guard, not a budget target) and compact semantic output',()=>{
   const policy=aiCostPolicy();
-  assert.ok(policy.maxConversationCostUsd<=0.05);
-  assert.equal(policy.maxCallsPerTurn,1);
+  // OpenAI human-fallback experiment (owner directive): quality first, no
+  // arbitrary THB cap/call quota/gap while measuring real conversation cost
+  // -- see _ai-cost-policy.ts's own header comment. These ceilings are a
+  // generous runaway-bug guard, not the old $0.05 budget target.
+  assert.ok(policy.maxConversationCostUsd<=5);
+  assert.ok(policy.maxCallsPerTurn>=1&&policy.maxCallsPerTurn<=3);
   assert.ok(policy.maxCallsPerConversation>6);
-  assert.ok(policy.semanticMaxOutputTokens>=300&&policy.semanticMaxOutputTokens<=500);
-  assert.ok(policy.absoluteInputTokens<=5_000);
+  assert.ok(policy.semanticMaxOutputTokens>=300&&policy.semanticMaxOutputTokens<=900);
+  assert.ok(policy.absoluteInputTokens<=16_000);
 });
 
 
@@ -78,10 +82,13 @@ test('reviewed OpenAI rates and owner caps fail closed against unsafe configurat
     process.env.THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION='99';
     process.env.THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS='800';
     const policy=aiCostPolicy();
-    assert.equal(policy.maxConversationCostUsd,0.05);
-    assert.equal(policy.maxCallsPerTurn,1);
+    // Owner caps are one-way configurable: env may make production STRICTER
+    // (0.50 < the 5 default, so it is honored) but never looser (4 > the 3
+    // default turn-call ceiling, so it fails closed back to the default).
+    assert.equal(policy.maxConversationCostUsd,0.50);
+    assert.equal(policy.maxCallsPerTurn,3);
     assert.equal(policy.maxCallsPerConversation,99);
-    assert.ok(policy.semanticMaxOutputTokens<=500);
+    assert.ok(policy.semanticMaxOutputTokens<=900);
   }finally{
     for(const key of keys){
       const value=before[key];
@@ -200,7 +207,7 @@ test('at least thirty genuinely semantic natural-language turns allow no more th
   }
 });
 
-test('20/50/100-turn simulations cannot reserve beyond $0.05 per conversation',()=>{
+test('20/50/100-turn simulations never exceed the configured per-conversation ceiling',()=>{
   const policy=aiCostPolicy();
   const scenarios=[20,50,100];
   for(const turns of scenarios){
@@ -213,7 +220,7 @@ test('20/50/100-turn simulations cannot reserve beyond $0.05 per conversation',(
       cost+=reservation;
       calls+=1;
     }
-    assert.ok(cost<=0.05,`${turns} turns cost ${cost}`);
+    assert.ok(cost<=policy.maxConversationCostUsd,`${turns} turns cost ${cost}`);
     assert.ok(calls<=policy.maxCallsPerConversation);
   }
 });

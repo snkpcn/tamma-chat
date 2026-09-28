@@ -735,6 +735,39 @@ function asStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 }
 
+
+/** Normalize model-written preference codes into the small canonical
+ * machine vocabulary downstream renderers/memory already understand.
+ * This is NOT language routing: it runs only after the language model has
+ * understood the turn and only canonicalizes structured constraint labels.
+ */
+function canonicalizeSemanticConstraints(
+  value: unknown,
+  entities: Record<string,unknown>,
+): string[] {
+  const raw=asStringArray(value);
+  const out:string[]=[];
+  for(const item of raw){
+    const normalized=item.trim().toLowerCase();
+    if(!normalized) continue;
+    if (
+      /(?:mild|low)[_-]?spic(?:e|y)/u.test(normalized)
+      || /spic(?:e|y)[_-]?(?:mild|low)/u.test(normalized)
+    ) {
+      out.push('low_spicy');
+      continue;
+    }
+    out.push(item);
+  }
+  const spicePreference=typeof entities.spicePreference==='string'
+    ? entities.spicePreference.trim().toLowerCase()
+    : '';
+  if (['mild','low','low_spice','low_spicy'].includes(spicePreference)) {
+    out.push('low_spicy');
+  }
+  return [...new Set(out)];
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -976,19 +1009,41 @@ function normalizeCrossDomainJourney(
       .map(item=>Number((item as Record<string,unknown>).day))
       .filter(day=>Number.isFinite(day) && day > 0)
   );
+
+  // Models legitimately encode a multi-day plan in more than one structured
+  // shape. Besides arrays such as activities/itinerary, a common JSON shape
+  // is dayOne:{...}, dayTwo:{...}. Treat those DAY OBJECTS as structure, not
+  // as language: this only canonicalizes already-parsed model entities and
+  // never looks at the customer's raw Thai text.
+  const dayPlanObjects = Object.entries(entities)
+    .filter(([key,value]) =>
+      /^day(?:[a-z]+|\d+)$/iu.test(key)
+      && Boolean(value)
+      && typeof value === 'object'
+      && !Array.isArray(value))
+    .map(([,value])=>value as Record<string,unknown>);
+  const dayPlanKeys = new Set(dayPlanObjects.flatMap(value=>Object.keys(value).map(key=>key.toLowerCase())));
+  const dayPlanHas = (pattern:RegExp):boolean =>
+    [...dayPlanKeys].some(key=>pattern.test(key));
+
   const hasStayStructure = entities.stay !== undefined
     || entities.stayNights !== undefined
     || entities.stayDurationNights !== undefined
-    || entities.tripDurationDays !== undefined;
+    || entities.tripDurationDays !== undefined
+    || dayPlanHas(/(?:stay|room|accommodation|night)/u);
   const hasActivityStructure = structuredSteps.length > 0
-    || entities.activity !== undefined;
+    || entities.activity !== undefined
+    || dayPlanHas(/(?:activity|horse|archery|atv)/u);
   const hasDiningStructure = entities.dining !== undefined
     || entities.restaurant !== undefined
-    || entities.meal !== undefined;
+    || entities.meal !== undefined
+    || dayPlanHas(/(?:dining|restaurant|meal|food)/u);
   const hasShoppingStructure = entities.shopping !== undefined
     || entities.otop !== undefined
-    || entities.souvenir !== undefined;
-  const hasCafeStructure = entities.cafe !== undefined;
+    || entities.souvenir !== undefined
+    || dayPlanHas(/(?:shopping|otop|souvenir|gift)/u);
+  const hasCafeStructure = entities.cafe !== undefined
+    || dayPlanHas(/(?:cafe|coffee)/u);
   const structuredDomainFacetCount = [
     hasStayStructure,
     hasActivityStructure,
@@ -998,6 +1053,7 @@ function normalizeCrossDomainJourney(
   ].filter(Boolean).length;
   const hasStructuredMultiStepPlan =
     (structuredSteps.length >= 2 && (scheduledDays.size >= 2 || hasStayStructure))
+    || (dayPlanObjects.length >= 2 && structuredDomainFacetCount >= 2)
     || structuredDomainFacetCount >= 2;
   const isMultiDomainPlan = (crossDomainKeys.length >= 2 || hasStructuredMultiStepPlan)
     && (action==='recommend' || action==='discover' || action==='ask')
@@ -1410,6 +1466,18 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && !hasUnresolvedReference
     && !hasAmbiguousReference;
 
+  const conversationContinuationConfidenceEnough =
+    confidence >= 0.7
+    || (
+      // Journey planning has no transaction executor. Once a prior-plan
+      // reference has been deterministically backed by bounded conversation
+      // evidence, medium-confidence (>=0.60) ellipsis is safe to continue
+      // rather than asking which of the single immediately active plan was
+      // meant. This exception does not apply to transactional domains.
+      context.activeDomain === 'journey'
+      && (domain === 'journey' || domain === 'general' || domain === 'unknown')
+      && confidence >= 0.60
+    );
   const resolvedConversationContinuation =
     references.some(reference => reference.refersToPriorContext && reference.resolvedFromConversation === true)
     && references.filter(reference => reference.refersToPriorContext).every(reference =>
@@ -1421,7 +1489,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && Boolean(context.activeDomain)
     && context.activeDomain !== 'unknown'
     && ['ask','modify','recommend','provide_information','correct_previous'].includes(action)
-    && confidence >= 0.7;
+    && conversationContinuationConfidenceEnough;
 
   // A generic "same plan / previous request" reference is backed by bounded
   // conversation evidence, not a canonical entity id. When that reference is
@@ -1462,7 +1530,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     informationNeed,
     entities,
     references,
-    constraints: asStringArray(parsed.constraints),
+    constraints: canonicalizeSemanticConstraints(parsed.constraints, entities),
     confidence,
     // An unresolved prior-context reference (the model thinks this points at
     // something, but nothing in the real context matches) forces clarification

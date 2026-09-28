@@ -4,6 +4,7 @@ import {
   estimateInputTokens,
   reserveWorstCaseCostUsd,
   roundUsd,
+  usdToThb,
   type AiUsage,
 } from './_ai-cost-policy';
 import {
@@ -192,8 +193,10 @@ export async function reserveAiCall(
     if (existing?.status === 'completed' && existing.semanticOutput) {
       emitCostMetric({
         conversation_id:context.conversationId, event_id:context.eventId, model,
-        ai_duplicate_call_prevented:1, call_cost_usd:0,
+        call_purpose:context.callerLabel,
+        ai_duplicate_call_prevented:1, call_cost_usd:0, call_cost_thb:0,
         conversation_cost_usd:ledger.cumulativeCostUsd,
+        conversation_cost_thb:usdToThb(ledger.cumulativeCostUsd),
       });
       return { kind:'replay', output:existing.semanticOutput, event:existing };
     }
@@ -207,9 +210,13 @@ export async function reserveAiCall(
     if (projected > policy.maxConversationCostUsd + Number.EPSILON) {
       emitCostMetric({
         conversation_id:context.conversationId, event_id:context.eventId, model,
-        ai_budget_block:1, reason:'budget', reserved_cost_usd:reservedCostUsd,
+        call_purpose:context.callerLabel,
+        ai_budget_block:1, reason:'budget',
+        reserved_cost_usd:reservedCostUsd, reserved_cost_thb:usdToThb(reservedCostUsd),
         conversation_cost_usd:ledger.cumulativeCostUsd,
+        conversation_cost_thb:usdToThb(ledger.cumulativeCostUsd),
         budget_remaining_usd:roundUsd(policy.maxConversationCostUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd),
+        budget_remaining_thb:usdToThb(policy.maxConversationCostUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd),
       });
       throw new AiBudgetBlockedError('budget');
     }
@@ -302,11 +309,15 @@ export async function finalizeAiCall(
         cached_input_tokens:updated.cachedInputTokens,
         output_tokens:updated.outputTokens,
         call_cost_usd:updated.actualCostUsd,
+        call_cost_thb:usdToThb(updated.actualCostUsd),
         conversation_cost_usd:next.cumulativeCostUsd,
+        conversation_cost_thb:usdToThb(next.cumulativeCostUsd),
         call_index_turn:updated.callIndexTurn,
         call_index_conversation:updated.callIndexConversation,
+        call_purpose:context.callerLabel,
         semantic_supervisor_caller_label:context.callerLabel,
         budget_remaining_usd:roundUsd(policy.maxConversationCostUsd - next.cumulativeCostUsd - next.reservedCostUsd),
+        budget_remaining_thb:usdToThb(policy.maxConversationCostUsd - next.cumulativeCostUsd - next.reservedCostUsd),
         deterministic_turn:false,
         paid_call_used:true,
         ai_paid_call:1,

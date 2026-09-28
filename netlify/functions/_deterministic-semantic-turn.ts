@@ -187,6 +187,19 @@ function findRestaurantTableStatusQuestion(message: string): boolean {
 }
 
 const STAY_TOPIC_MARKER = /ห้อง|ที่พัก|เฮือน|บ้านพัก|เช[็็]?คอิน|เช็คอิน|เช็คเอาท์|เช็กเอาต์|room\s*service|รูม\s*เซอร์วิส/iu;
+// A bare "what time is check-in/check-out" question is a single fixed
+// organization fact (see canonical-core-harness's worldFacts:
+// stay_checkin_time/stay_checkout_time) -- it never varies by context, date,
+// party size, or any other qualifier, unlike a price or general stay
+// question. Kept intentionally narrow (no date/partySize signal, no other
+// clause) so this never steals a genuinely context-dependent stay question
+// away from the language brain -- see stay_checkin_checkout_time_lookup's
+// own comment in _thongthai-one-mind-orchestrator.ts's
+// EXACT_READ_ONLY_DETERMINISTIC_INTENTS for why this specific shape is safe
+// to answer zero-cost (owner: "known opening hours when verified data
+// exists... do not turn every customer message into an OpenAI call").
+const STAY_CHECKIN_CHECKOUT_TIME_MARKER =
+  /(?:เช[็็]?คอิน|เช็คอิน|เช็คเอาท์|เช็กเอาต์)[^\n]{0,10}(?:กี่โมง|เวลาไหน|ตอนไหน)|(?:กี่โมง|เวลาไหน)[^\n]{0,10}(?:เช[็็]?คอิน|เช็คอิน|เช็คเอาท์|เช็กเอาต์)/u;
 const OTOP_TOPIC_MARKER = /otop|โอทอป|ของฝาก|สินค้าชุมชน/iu;
 const CAFE_TOPIC_MARKER = /กาแฟ|คาเฟ่|อินทนิน|inthanin|ลาเต้|latte|เครื่องดื่ม/iu;
 const MEMBERSHIP_TOPIC_MARKER = /สมาชิก|member|membership/iu;
@@ -901,6 +914,25 @@ export function deriveDeterministicSemanticTurn(
     return {
       domain: 'restaurant', intent: 'restaurant_topic_switch', action: 'discover',
       entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+
+  // Checked BEFORE the broader stay-topic fallback below: a bare check-in/
+  // check-out TIME question with no date/party-size/other qualifier is a
+  // single fixed fact, never context-dependent -- see
+  // STAY_CHECKIN_CHECKOUT_TIME_MARKER's own comment.
+  if (STAY_CHECKIN_CHECKOUT_TIME_MARKER.test(trimmed)
+      && !extractDate(trimmed, now)
+      && !extractPartySize(trimmed)) {
+    return {
+      domain: 'stay',
+      intent: 'stay_checkin_checkout_time_lookup',
+      action: 'ask',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.95,
+      needsClarification: false,
     };
   }
 

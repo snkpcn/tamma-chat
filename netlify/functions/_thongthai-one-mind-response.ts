@@ -352,6 +352,7 @@ export async function processOneMindCustomerTurn(
   }
 
   const composerStartedAt = Date.now();
+  const conversationId = input.canonicalAnonymousId ?? input.providerUserKey ?? input.guestDbId ?? 'unknown';
   const composerInput: ResponseComposerInput = {
     channel:input.channel as BrainChannel,
     language:input.language,
@@ -363,10 +364,25 @@ export async function processOneMindCustomerTurn(
     // allergy be present in state but silently absent from the recommendation
     // copy the customer actually reads.
     semanticTurn:turn.dialogSemanticTurn,
+    conversationContext:turn.conversationContextAfter,
     dialogDecision:turn.dialogDecision,
     knowledgeBundles:turn.groundedKnowledge,
     degradation:turn.knowledgeDegradation,
     operationalOutcome:null,
+    // Authorizes composeGroundedModelResponse's real OpenAI call (see
+    // _response-composer.ts). Mirrors the exact same AiCallContext shape the
+    // semantic-interpreter call already builds in
+    // _thongthai-one-mind-orchestrator.ts's resolveSemanticTurn. Without a
+    // real guestDbId there is no ledger key to guard/meter a paid call
+    // against, so this stays null and the composer stage is skipped.
+    aiCallContext: turn.identity.guestDbId ? {
+      conversationId,
+      guestDbId: turn.identity.guestDbId,
+      channel: input.channel,
+      eventId: input.eventId,
+      callerLabel: 'grounded-response-composition',
+    } : null,
+    allowModelComposition: (composerStartedAt - totalStartedAt) < COMPOSER_MODEL_BUDGET_CUTOFF_MS,
   };
   // Netlify's customer gateway has a finite request budget. Semantic
   // interpretation already used the model once; a second LLM call for simple

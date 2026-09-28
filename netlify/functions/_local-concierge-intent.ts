@@ -41,7 +41,22 @@ const LOCATION_MARKER = /โลเคชั่น|โลเคชัน|อย�
 // _deterministic-semantic-turn.ts). อีสาน/อิสาน are both real, common
 // spellings of the same region name -- not a typo to "fix", both are
 // structural anchors here.
-const WEATHER_CONDITION_MARKER = /ฝนตก|ฝน|แดด(?:แรง|ออก)?|ร้อน(?:มาก|ไหม)?|หนาว(?:ไหม)?|ลมแรง|อากาศ|ทางลื่น|โคลน/u;
+// Genuinely unconditional weather anchors -- they cannot plausibly mean
+// anything else, even inside a horse/activity message ("ฝนตกขี่ม้าได้ไหม" is
+// correctly handled by activity_suitability above, checked first).
+const WEATHER_UNCONDITIONAL_MARKER = /ฝนตก|ฝน|แดด(?:แรง|ออก)?|ลมแรง|อากาศ|ทางลื่น|โคลน/u;
+// "ร้อน"/"หนาว" alone are ordinary Thai adjectives that ALSO describe a
+// horse's temperament/condition ("ม้าตัวนี้ร้อนไหม" -- is this horse
+// spirited/does it run hot), not just the weather. Mirrors
+// _top-level-intent.ts's own HORSE_CONTEXT_MARKER-before-WEATHER_MARKER
+// ordering (see its comment for the identical class of bug): checked
+// against HORSE_MENTION_MARKER below so a horse-named message never gets
+// hijacked into a weather_condition classification by these alone.
+const WEATHER_TEMPERATURE_ADJECTIVE_RE = /ร้อน(?:มาก|ไหม)?|หนาว(?:ไหม)?/u;
+const WEATHER_CONDITION_MARKER = new RegExp(
+  `${WEATHER_UNCONDITIONAL_MARKER.source}|${WEATHER_TEMPERATURE_ADJECTIVE_RE.source}`,
+  'u',
+);
 const QUESTION_SHAPE_MARKER = /ไหม|ปะ(?:\s|$)|หรือเปล่า|รึเปล่า|รึยัง|หรือยัง|ดีไหม|ยังไง|ทำอะไร|เตรียมอะไร|ควรทำ/u;
 
 const REGION_MARKER = /อีสาน|อิสาน|ชัยภูมิ|แถวนี้|ที่นี่|ทำมา-ชาติ/u;
@@ -204,8 +219,17 @@ export function classifyLocalConciergeQuestion(message: string): LocalConciergeM
   }
 
   // Weather/condition: a condition marker with a question shape, not
-  // attached to a named activity (that's activity_suitability above).
-  if (WEATHER_CONDITION_MARKER.test(text) && QUESTION_SHAPE_MARKER.test(text)) {
+  // attached to a named activity (that's activity_suitability above). A
+  // horse/activity mention paired with ONLY the ambiguous temperature
+  // adjectives (ร้อน/หนาว) is not weather -- see WEATHER_TEMPERATURE_ADJECTIVE_RE's
+  // comment. An unconditional weather anchor still wins even in a horse
+  // message ("ฝนตกไหม ม้ายังขี่ได้ไหม" genuinely is weather-relevant).
+  const isAmbiguousTemperatureOnlyHorseMention =
+    HORSE_MENTION_MARKER.test(text)
+    && !WEATHER_UNCONDITIONAL_MARKER.test(text)
+    && WEATHER_TEMPERATURE_ADJECTIVE_RE.test(text);
+  if (!isAmbiguousTemperatureOnlyHorseMention
+      && WEATHER_CONDITION_MARKER.test(text) && QUESTION_SHAPE_MARKER.test(text)) {
     return { category: 'weather_condition' };
   }
 
