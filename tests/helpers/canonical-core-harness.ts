@@ -461,11 +461,12 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
         };
         const entityType = body.entity_type ?? null;
         const validEntityType = entityType === null || [
-          'booking', 'cafe_inquiry', 'otop_order', 'restaurant_preorder', 'daily_schedule', 'payment_request', 'team_settlement', 'feedback_event',
+          'booking', 'cafe_inquiry', 'otop_order', 'restaurant_preorder', 'daily_schedule', 'payment_request', 'team_settlement', 'feedback_event', 'ai_cost',
         ].includes(entityType);
         const deliveryType = body.delivery_type ?? '';
         const validDeliveryType = [
           'booking_created', 'cafe_inquiry_created', 'otop_order_created', 'restaurant_preorder_created', 'daily_schedule', 'daily_summary', 'manual_test',
+          'ai_cost_conversation', 'ai_cost_daily',
         ].includes(deliveryType) || deliveryType.startsWith('payment_') || deliveryType.startsWith('settlement_') || deliveryType.startsWith('feedback_');
         if (!validEntityType || !validDeliveryType) {
           return new Response(JSON.stringify({ code: '23514', message: `check_violation: entity_type=${entityType} delivery_type=${deliveryType}` }), { status: 400 });
