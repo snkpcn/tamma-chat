@@ -640,8 +640,12 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     ? chosen.reduce((sum,row)=>sum+(row.price??0),0)
     : null;
   const availabilityVerified=chosen.every(row=>row.orderable===true);
+  const safetyLabels=[
+    ...(noShrimp ? ['ไม่มีกุ้ง'] : []),
+    ...(noPork ? ['ไม่มีหมู'] : []),
+  ];
   const intro=noShrimp||noPork
-    ? 'จากส่วนผสมและข้อมูลเมนูที่ตรวจยืนยันได้ ตัวเลือกที่ไม่ชนข้อจำกัดที่บอกมีครับ'
+    ? `จากส่วนผสมและข้อมูลเมนูที่ตรวจยืนยันได้ ตัวเลือกที่${safetyLabels.join(' และ ')}ตามข้อจำกัดที่บอกมีครับ`
     : availabilityVerified
       ? 'จากเมนูที่ยืนยันว่าพร้อมสั่ง ลองดูชุดนี้ได้ครับ'
       : 'จากข้อมูลเมนูที่ยืนยันได้ ลองดูชุดนี้ได้ครับ';
