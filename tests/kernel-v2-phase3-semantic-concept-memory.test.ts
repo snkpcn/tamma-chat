@@ -22,7 +22,8 @@ import assert from 'node:assert/strict';
 import {
   normalizeForConceptMatching, conceptSimilarity, matchLearnedConcept,
   safeConceptEntities, companionConceptKeyForValue, isCompanionConceptKey,
-  MIN_SIMILARITY, SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS, type StoredSemanticConcept,
+  MIN_SIMILARITY, MIN_TIER_A_EVIDENCE_COUNT, SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS,
+  type StoredSemanticConcept,
 } from '../netlify/functions/_semantic-concept-memory';
 import { withHarness, guestId, brainRequest, type Harness } from './helpers/canonical-core-harness';
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
@@ -72,13 +73,25 @@ test('unit: conceptSimilarity honestly does NOT bridge a different vocabulary ch
   );
 });
 
-test('unit: matchLearnedConcept ignores concepts below the confidence/evidence bar', () => {
+test('unit: matchLearnedConcept ignores concepts below the confidence/evidence bar (Tier B, fuzzy match)', () => {
+  // These use a FUZZY (non-exact) variant of the seeded signature, so Tier
+  // B's higher bar applies -- Tier A's lower bar (see the two-tier test
+  // below) is reserved for a genuine exact replay only.
+  const fuzzyVariant = 'มากับแฟนสองคน';
   const lowConfidence = seededConcept({ confidence: 0.5 });
   const lowEvidence = seededConcept({ evidenceCount: 1 });
   const superseded = seededConcept({ status: 'superseded' });
-  assert.equal(matchLearnedConcept('มากับแฟน', [lowConfidence]), null);
-  assert.equal(matchLearnedConcept('มากับแฟน', [lowEvidence]), null);
-  assert.equal(matchLearnedConcept('มากับแฟน', [superseded]), null);
+  assert.equal(matchLearnedConcept(fuzzyVariant, [lowConfidence]), null);
+  assert.equal(matchLearnedConcept(fuzzyVariant, [lowEvidence]), null);
+  assert.equal(matchLearnedConcept(fuzzyVariant, [superseded]), null);
+});
+
+test('unit: matchLearnedConcept still rejects an exact replay below even Tier A\'s lower confidence bar', () => {
+  const lowConfidence = seededConcept({ confidence: 0.5, evidenceCount: 1 });
+  assert.equal(
+    matchLearnedConcept('มากับแฟน', [lowConfidence]), null,
+    'Tier A lowers the EVIDENCE bar for an exact replay, never the confidence bar below 0.7',
+  );
 });
 
 test('acceptance D (unit): a negated/contradictory phrase never matches a superficially similar confirmed concept', () => {
@@ -322,14 +335,14 @@ test('acceptance D (integration): a negated companion statement never reuses the
 
 test('acceptance D (integration): a confirmed contradiction against a DIFFERENT concept retracts the stale row', async () => {
   await withHarness(async harness => {
-    // Seed companion_partner from "มากับแฟน" with LOW evidence (below
-    // MIN_TRUSTED_EVIDENCE_COUNT) -- deliberately: a not-yet-trusted row is
-    // exactly what the contradiction check protects. A row that already
-    // cleared the trust bar would have been caught (correctly, harmlessly)
-    // by the READ path's own exact match before the model was ever called
-    // at all, which would make this test about the read path, not
-    // contradiction detection.
-    const { patches } = installConceptMemoryMock(harness, [seededConcept({ evidenceCount: 1 })]);
+    // Seed companion_partner from "มากับแฟน" with LOW evidence AND LOW
+    // confidence (below Tier A's own 0.7 bar) -- deliberately: a
+    // not-yet-trusted row is exactly what the contradiction check protects.
+    // A row that already cleared EITHER tier's trust bar would have been
+    // caught (correctly, harmlessly) by the READ path's own exact-replay
+    // match before the model was ever called at all, which would make this
+    // test about the read path, not contradiction detection.
+    const { patches } = installConceptMemoryMock(harness, [seededConcept({ evidenceCount: 1, confidence: 0.6 })]);
     const gid = guestId('phase3-companion-cross-concept-contradiction');
     const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
     assert.equal(turn1.statusCode, 200);
@@ -427,8 +440,12 @@ test('review fix 2 (integration): reinforcing a weak exemplar advances confidenc
       confidence: 0.95, evidenceCount: 10,
     });
     const weakExemplarB = seededConcept({
+      // Confidence deliberately BELOW Tier A's 0.7 bar: the triggering
+      // message below normalizes to an EXACT replay of this row's own
+      // signature, and this test is about write-path reinforcement, not the
+      // read path's (correct, separately-tested) Tier A fast path.
       id: 'concept-weak-b', normalizedSignature: normalizeForConceptMatching('พาแฟนไปด้วย'),
-      confidence: 0.72, evidenceCount: 2,
+      confidence: 0.65, evidenceCount: 2,
     });
     const { patches } = installConceptMemoryMock(harness, [strongExemplarA, weakExemplarB]);
     const gid = guestId('phase3-review-confidence-cross-leak');
@@ -532,6 +549,168 @@ test('review fix 4 (integration): a message carrying a direct identifier is neve
   });
 });
 
+// ---------------------------------------------------------------------------
+// Fixes from the SECOND PR #218 review round (two-tier trust policy +
+// stronger privacy boundary), found before merge/migration.
+// ---------------------------------------------------------------------------
+
+test('two-tier (unit): a high-confidence safe phrase learned ONCE is immediately trusted for an exact replay (Tier A)', () => {
+  // The DEFAULT values a freshly-promoted row is written with (see
+  // recordSemanticConceptEvidence: confidence 0.7, evidence_count 1) must
+  // already clear Tier A's bar -- this is the actual "ask once, reuse next
+  // time" fix, applied only to the safest possible case: an exact replay of
+  // the confirmed sentence itself (here, only a politeness particle
+  // differs -- normalizes identically).
+  const freshlyLearned = seededConcept({ confidence: 0.7, evidenceCount: 1 });
+  const match = matchLearnedConcept('มากับแฟนค่ะ', [freshlyLearned]);
+  assert.ok(match, 'a single confirmation must be enough to trust an exact (post-normalization) replay');
+  assert.equal(match!.tier, 'exact_replay');
+});
+
+test('two-tier (integration): a safe repeat of a once-confirmed exact phrase does not pay for a full semantic call again', async () => {
+  await withHarness(async harness => {
+    // Seed with the SAME low evidence/confidence a fresh write produces --
+    // proving this is Tier A doing the work, not pre-accumulated trust.
+    installConceptMemoryMock(harness, [seededConcept({ confidence: 0.7, evidenceCount: 1 })]);
+    const gid = guestId('phase3-two-tier-exact-repeat');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+    const callsAfterTurn1 = harness.modelCallCount();
+
+    // Same underlying sentence as the seeded exemplar, only a trailing
+    // politeness particle differs -- normalizes to an EXACT replay.
+    const turn2 = await processThongthaiChatCore(brainRequest('มากับแฟนนะครับ', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+    assert.equal(turn2.statusCode, 200);
+    assert.equal(
+      harness.modelCallCount(), callsAfterTurn1,
+      'an exact replay of a once-confirmed phrase must resolve at zero cost, without waiting for accumulated evidence',
+    );
+  });
+});
+
+test('two-tier (unit): a fuzzy (non-exact) variant still requires the stronger Tier B trust bar, even against the same low-evidence row', () => {
+  const freshlyLearned = seededConcept({ confidence: 0.7, evidenceCount: 1 });
+  // "มากับแฟนสองคน" is a genuinely different sentence from the seeded
+  // "มากับแฟน" (an appended detail) -- not an exact replay, so it must NOT
+  // benefit from Tier A's fast path.
+  const match = matchLearnedConcept('มากับแฟนสองคน', [freshlyLearned]);
+  assert.equal(
+    match, null,
+    'a fuzzy variant must still require Tier B\'s higher confidence/evidence bar, never Tier A\'s',
+  );
+});
+
+test('two-tier (unit): one wrong/low-evidence inference can never gain transaction authority, even under Tier A\'s fast path', () => {
+  // Even a Tier-A-eligible row (immediately trusted after one confirmation)
+  // can only ever resolve to entities.companion -- there is no code path
+  // from a match, of either tier, to an action/domain/transaction field.
+  const tierAEligible = seededConcept({ confidence: 0.7, evidenceCount: MIN_TIER_A_EVIDENCE_COUNT });
+  const match = matchLearnedConcept('มากับแฟน', [tierAEligible]);
+  assert.ok(match, 'setup: this row must be Tier-A-eligible for the assertion below to be meaningful');
+  assert.equal(match!.tier, 'exact_replay');
+  const entities = safeConceptEntities(match!.conceptKey);
+  assert.deepEqual(
+    Object.keys(entities), ['companion'],
+    'a Tier A match can only ever produce entities.companion -- never an action, domain, or transaction field',
+  );
+});
+
+test('privacy (integration): a personal name attached to an otherwise-clean companion statement is never persisted', async () => {
+  await withHarness(async harness => {
+    const { posts, patches } = installConceptMemoryMock(harness, []);
+    const gid = guestId('phase3-privacy-personal-name');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'partner' }, references: [], constraints: [],
+      confidence: 0.95, needsClarification: false,
+    });
+    // "มากับแฟนชื่อหนิง" -- comes with my partner named Ning. No phone/email/
+    // URL/handle, so containsDirectIdentifier alone would miss this.
+    await processThongthaiChatCore(brainRequest('มากับแฟนชื่อหนิง', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+
+    assert.equal(posts.length, 0, 'a message carrying a personal name must never be persisted as a learned exemplar');
+    assert.equal(patches.length, 0, 'a rejected candidate must not reinforce any existing row either');
+  });
+});
+
+test('privacy (integration): an address/location detail attached to a companion statement is never persisted', async () => {
+  await withHarness(async harness => {
+    const { posts, patches } = installConceptMemoryMock(harness, []);
+    const gid = guestId('phase3-privacy-address');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'partner' }, references: [], constraints: [],
+      confidence: 0.95, needsClarification: false,
+    });
+    await processThongthaiChatCore(brainRequest('มากับแฟนบ้านเลขที่55', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+
+    assert.equal(posts.length, 0, 'a message carrying an address/house-number detail must never be persisted');
+    assert.equal(patches.length, 0, 'a rejected candidate must not reinforce any existing row either');
+  });
+});
+
+test('privacy (integration): mixed personal detail + companion statement is never persisted, despite containing recognized companion vocabulary', async () => {
+  await withHarness(async harness => {
+    const { posts, patches } = installConceptMemoryMock(harness, []);
+    const gid = guestId('phase3-privacy-mixed');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'family' }, references: [], constraints: [],
+      confidence: 0.95, needsClarification: false,
+    });
+    // Contains recognized companion tokens ("แฟน", "ลูก", "สองคน") AND an
+    // unrecognized personal detail ("ชื่อหนิงและ") -- the recognized tokens
+    // must not "dilute" the reject; any residual at all is a reject.
+    await processThongthaiChatCore(brainRequest('มากับแฟนชื่อหนิงและลูกสองคน', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+
+    assert.equal(posts.length, 0, 'recognized companion vocabulary must not offset unrecognized personal content');
+    assert.equal(patches.length, 0, 'a rejected candidate must not reinforce any existing row either');
+  });
+});
+
+test('privacy (integration): re-verify phone/email/handle is still rejected under the combined boundary', async () => {
+  await withHarness(async harness => {
+    const { posts, patches } = installConceptMemoryMock(harness, []);
+    const gid = guestId('phase3-privacy-reverify-identifier');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'partner' }, references: [], constraints: [],
+      confidence: 0.95, needsClarification: false,
+    });
+    await processThongthaiChatCore(brainRequest('มากับแฟน @nong123', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+
+    assert.equal(posts.length, 0, 'a handle must still be rejected under the combined direct-identifier + residual boundary');
+    assert.equal(patches.length, 0, 'a rejected candidate must not reinforce any existing row either');
+  });
+});
+
 test('review verification: a retracted concept never matches (not just superseded)', () => {
   const retracted = seededConcept({ status: 'retracted' });
   assert.equal(matchLearnedConcept('มากับแฟน', [retracted]), null);
@@ -539,7 +718,12 @@ test('review verification: a retracted concept never matches (not just supersede
 
 test('review verification: after a confirmed contradiction retracts a row, a later similar message correctly fails safe to the real model, never to the stale answer', async () => {
   await withHarness(async harness => {
-    const { patches } = installConceptMemoryMock(harness, [seededConcept({ evidenceCount: 1 })]);
+    // Confidence deliberately BELOW Tier A's 0.7 bar -- see the identical
+    // note in the "cross-concept contradiction retracts the stale row" test
+    // above: otherwise the READ path's own exact-replay fast path would
+    // resolve this turn before the model (and thus the contradiction check)
+    // ever ran, which would make this test about the read path instead.
+    const { patches } = installConceptMemoryMock(harness, [seededConcept({ evidenceCount: 1, confidence: 0.6 })]);
     const gid = guestId('phase3-review-failsafe-after-retraction');
     const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
     assert.equal(turn1.statusCode, 200);

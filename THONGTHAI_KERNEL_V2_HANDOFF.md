@@ -198,8 +198,14 @@ row's stored signature, that existing row is immediately retracted.
   only against a fresh real call, never a `cachedSemantic` reuse); a
   write-path hook right before the model-owned turn is returned, gated on
   high confidence (>=0.85), a short standalone (non-multi-clause) message,
-  and a non-mutating action -- fires best-effort, never awaited, never
-  blocking the customer-facing turn.
+  and a non-mutating action -- the write is `await`ed, raced against a
+  `SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS = 1500ms` bound so a stuck
+  Supabase round trip can never add unbounded latency to the customer
+  response, with the outcome (`write_awaited` / `write_timeout`) always
+  logged. (Corrected from an earlier draft of this document that described
+  this write as "fire-and-forget / never awaited" -- that was true only
+  before the durability fix in the second structural review round below; see
+  structural issue 3 there for what replaced it.)
 - The write is naturally idempotent even under the ai-cost-ledger's own
   same-eventId replay (see point 8 of the audit): the migration's
   `unique(source_signal_key)` + `on_conflict=ignore-duplicates` makes a
@@ -255,17 +261,90 @@ a contradiction can never create transaction authority (true by
 construction -- `safeConceptEntities` has no action/domain field to escalate
 through in the first place).
 
-**Tests:** `tests/kernel-v2-phase3-semantic-concept-memory.test.ts`, 24/24
-passing (8 new from this review pass). Full suite: 1640/1640 (1616 baseline
-+ 24 new), 0 failed.
+**Tests:** `tests/kernel-v2-phase3-semantic-concept-memory.test.ts`, 33/33
+passing (9 new from the second review pass below). Full suite: 1649/1649
+(1640 baseline + 9 new), 0 failed.
+
+**Structural issues found and fixed in a SECOND PR review round, before any
+merge/migration decision** (independent review after the first round's four
+fixes above were already verified present and CI green):
+
+1. **"Ask once, reuse next time" was not actually met.** The single trust
+   bar (confidence >= 0.85 AND evidence_count >= 3, +0.02 confidence per
+   reinforcement, starting from 0.70/1) meant a newly learned phrasing needed
+   roughly 9 confirmed occurrences before becoming zero-call -- too slow for
+   the owner's actual cost goal. Fixed with a **two-tier trust policy**,
+   NOT by lowering every threshold (that would have let the riskier fuzzy
+   path reach zero-cost just as fast as a true exact repeat):
+   - **Tier A ("exact replay"):** the current message's normalized form is
+     CHARACTER-FOR-CHARACTER IDENTICAL to a stored exemplar's own signature
+     (decided by exact string equality, never a similarity score close to
+     1). A genuine exact replay carries essentially no interpretation risk,
+     so the DEFAULT values a freshly-promoted row is written with
+     (confidence 0.7, evidence_count 1) already clear this bar --
+     `MIN_TIER_A_CONFIDENCE = 0.7`, `MIN_TIER_A_EVIDENCE_COUNT = 1`. This
+     closes the actual gap: politeness-variant repeats of the SAME
+     underlying sentence (which normalize identically) become free after
+     just one confirmation.
+   - **Tier B ("fuzzy generalized"):** any match that is not an exact
+     replay keeps today's unchanged, slower bar (`MIN_TRUSTED_CONFIDENCE =
+     0.85`, `MIN_TRUSTED_EVIDENCE_COUNT = 3`).
+   - Critical intents still can never gain transaction authority under
+     either tier -- unaffected by this change, since `safeConceptEntities`
+     has no action/domain field regardless of which tier matched.
+2. **Privacy boundary was still incomplete.** `containsDirectIdentifier`
+   only covers phone/email/URL/handle -- a personal name (worked example:
+   "มากับแฟนชื่อหนิง", "comes with my partner named Ning") carries none of
+   those and would have been persisted verbatim into a table with no
+   guest_id at all. Fixed by adding a SECOND, independent check,
+   `containsUnrecognizedPersonalDetail`: it strips every recognized
+   companion-domain structural word (`SAFE_COMPANION_TOKENS` -- a small
+   closed set of prepositions/verbs, the counting vocabulary, and the
+   concept's own closed relationship vocabulary plus a few near-synonyms
+   this module's own tests already exercise) and rejects outright if
+   ANYTHING is left over. This is fail-safe, not fail-open: it never removes
+   text it does not recognize, so a non-empty residual always means "this
+   carries something beyond the closed companion vocabulary" -- a name, an
+   address, a number, anything -- and a genuine companion phrase using an
+   unlisted synonym is merely under-learned (falls through to OpenAI again),
+   never persisted with personal content attached. Both checks (direct
+   identifier + unrecognized residual) must pass for a write to proceed.
+3. **Handoff document contradiction (this document).** An earlier draft of
+   the "what increment 1 actually does" section above still described the
+   learning write as "fire-and-forget / never awaited" from before the first
+   review round's durability fix. Corrected in place above; the write has
+   been `await`ed with a bounded timeout and per-event dedup since the first
+   review round (see structural issue 3 above), and this document's own
+   contradiction was the bug, not the code.
+
+Also explicitly re-verified per the second review round: a Tier-A-eligible
+(fast-path) match still can only ever produce `entities.companion`, never an
+action/domain/transaction field (true by construction, independent of tier);
+a fuzzy (non-exact) variant of a low-evidence row still requires Tier B's
+higher bar, never inheriting Tier A's fast path; all four first-round fixes
+(multi-clause gate, confidence isolation, awaited+bounded write, direct-
+identifier reject) remain intact and covered by their original tests.
+
+**STANDING REMINDER, not resolved by this round, must not be forgotten:**
+increment 1's surface-similarity matching still cannot bridge a genuine
+vocabulary substitution with no shared characters (e.g. "มากับแฟน" vs
+"มากับคนรู้ใจ" -- both mean "with a partner," share no text). This is
+acceptable for increment 1 (see the honesty note on `conceptSimilarity`) but
+is NOT acceptable as a claim of Phase 3 *completion*. Before Phase 3 can be
+declared complete, the true unseen cross-vocabulary generalization question
+must be resolved with an architecture that actually understands semantic
+similarity -- embedding/vector retrieval (pgvector) is one candidate, but
+must not be adopted merely because it is fashionable; the smallest safe
+approach must be compared first, exactly as this increment itself was
+designed. Not started yet.
 
 **Required acceptance criteria (owner-specified), each mapped to a passing test:**
 
 | # | Criterion | Test |
 |---|---|---|
 | A | Unseen phrase: MISS -> OpenAI -> canonical meaning -> learning candidate | "the write path accumulates a genuinely new confirmed exemplar as its own row" |
-| B | Safe repeated concept: HIT -> 0 paid call | "an UNSEEN near-identical variant ... resolves at zero cost" |
-| C | Unseen paraphrase generalizes without exact-string matching | same test as B (a genuinely different sentence, not the seeded literal string) -- honestly bounded to near-identical surface variants, not cross-vocabulary synonyms (see the honesty note) |
+| B | Safe repeated concept: HIT -> 0 paid call | "an UNSEEN near-identical variant ... resolves at zero cost" (Tier B path) and "a safe repeat of a once-confirmed exact phrase does not pay for a full semantic call again" (Tier A path, added second review round) |
+| C | Unseen paraphrase generalizes without exact-string matching | same Tier B test as B (a genuinely different sentence, not the seeded literal string) -- honestly bounded to near-identical surface variants, not cross-vocabulary synonyms (see the honesty note and the standing reminder above) |
 | D | Contradictory phrase must NOT incorrectly reuse a prior concept -> supervisor/clarification | 4 tests: two unit (`conceptSimilarity`/`matchLearnedConcept` negation + contradiction-count veto), two integration (a negated phrase still pays for the real model; a confirmed cross-concept contradiction retracts the stale row) |
 | E | Critical intent: learned fuzzy match must NOT directly create a transaction | "negative control: a real commit/booking message is never routed through the fuzzy concept matcher" -- also true by construction (`safeConceptEntities` is a closed map with no action/domain field to escalate through) |
 | F | Cost: paid-call reduction without an IQ cliff | demonstrated qualitatively (a matched turn costs exactly zero calls, an unmatched one behaves exactly as before); no formal 20/50/100-turn stress numbers yet -- explicitly deferred below, more meaningful once pace/consider-only add real concept variety |
@@ -287,9 +366,17 @@ passing (8 new from this review pass). Full suite: 1640/1640 (1616 baseline
 **Owner action needed before this reaches production:** review PR (branch
 `kernel-v2/phase3-semantic-concept-memory`) and explicitly confirm applying
 `20260928120000_semantic_concept_memory_v1.sql` to the live Supabase
-project. Until then this table does not exist in production and the read
-path (`loadActiveSemanticConcepts`) degrades to "no learned memory available"
-exactly as it does today with zero concepts learned.
+project. The privacy/storage decision that previously gated this migration
+(second review round, structural issue 2 above) is now closed with the
+`containsUnrecognizedPersonalDetail` fix, but the migration remains
+**NOT APPLIED** and awaits explicit owner approval regardless -- this is not
+an automatic unblock. Until applied, this table does not exist in production
+and the read path (`loadActiveSemanticConcepts`) degrades to "no learned
+memory available" exactly as it does today with zero concepts learned. Do
+not merge or apply without that explicit confirmation, and Phase 3 must not
+be described as complete even after merge/migration -- see the standing
+reminder above (true cross-vocabulary generalization) and the still-pending
+formal 20/50/100-turn cost-stress evidence (acceptance criterion F).
 
 ## Current Architecture (Phase 2)
 
@@ -362,7 +449,8 @@ Phase 3 increment 1 focused suite:
 npx tsx --test tests/kernel-v2-phase3-semantic-concept-memory.test.ts
 ```
 
-Result: `24/24` passed.
+Result (first review round): `24/24` passed. Result (after the second review
+round's two-tier trust policy + privacy fixes): `33/33` passed (9 new tests).
 
 Full suite (after Phase 3 increment 1, on top of Phase 2's `main`):
 
@@ -370,7 +458,9 @@ Full suite (after Phase 3 increment 1, on top of Phase 2's `main`):
 npm test
 ```
 
-Result: `1640/1640` passed, `0` failed (1616 Phase-2 baseline + 24 new Phase 3 tests).
+Result (first review round): `1640/1640` passed, `0` failed (1616 Phase-2
+baseline + 24 Phase 3 tests). Result (after the second review round):
+`1649/1649` passed, `0` failed (1640 + 9 new).
 
 ## Cost Measurements
 

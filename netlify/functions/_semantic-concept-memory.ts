@@ -43,16 +43,33 @@
 //   already confirmed with high confidence (see the write-path hook in
 //   resolveSemanticTurn, _thongthai-one-mind-orchestrator.ts) -- this module
 //   itself never invents a concept from its own fuzzy match.
-// - PRIVACY BOUNDARY (found in review -- no guest_id alone does not prove no
-//   personal data): a candidate exemplar is REJECTED outright, never
-//   persisted in any form, if it contains a phone/email/URL/handle (the
-//   same closed set _direct-identifier-redaction.ts already detects for
-//   customer_intelligence_events). This is deliberately a reject, not a
-//   redact-and-store: a message carrying a direct identifier is not a clean
-//   companion statement in the first place, and partially-redacted text
-//   would still add match-corpus noise for no learning benefit. This is NOT
-//   a general NER pass -- it is the same small, closed, deterministic
-//   identifier set already proven safe elsewhere in this codebase.
+// - PRIVACY BOUNDARY (two independent, both-must-pass checks -- found
+//   insufficient in review when it was identifier-detection alone: a
+//   personal name like "หนิง" in "มากับแฟนชื่อหนิง" carries no phone/email/
+//   URL/handle, so a detector limited to those would let it through
+//   verbatim into a cross-customer table with no guest_id):
+//   1. containsDirectIdentifier -- REJECTS outright if the message contains
+//      a phone/email/URL/handle (the same closed set
+//      _direct-identifier-redaction.ts already detects for
+//      customer_intelligence_events).
+//   2. containsUnrecognizedPersonalDetail -- REJECTS outright if the
+//      normalized text contains ANYTHING beyond a small closed set of
+//      companion-domain structural words (SAFE_COMPANION_TOKENS). A name,
+//      an address, a house number, or any other detail riding along with an
+//      otherwise-clean companion statement leaves a non-empty residual after
+//      every recognized token is stripped, and any non-empty residual is a
+//      reject, never a partial store. This is fail-SAFE, not fail-open: an
+//      unrecognized SAFE companion phrasing is merely under-learned (falls
+//      through to OpenAI again next time), never persisted with personal
+//      content attached.
+//   Both are deliberately reject, not redact-and-store: a message carrying
+//   a direct identifier or unrecognized content is not a clean companion
+//   statement in the first place, and partially-redacted text would still
+//   add match-corpus noise for no learning benefit. Neither is a general
+//   NER pass -- both are small, closed, deterministic sets, and "no personal
+//   payload may become reusable cross-customer semantic memory" is enforced
+//   by rejecting on any doubt, not by trying to detect every possible
+//   personal-data shape.
 import { createHash } from 'node:crypto';
 import { redactDirectIdentifiers } from './_direct-identifier-redaction';
 
@@ -210,20 +227,47 @@ export type StoredSemanticConcept = {
   status: 'active' | 'superseded' | 'retracted';
 };
 
+export type SemanticConceptTrustTier = 'exact_replay' | 'fuzzy_generalized';
+
 export type SemanticConceptMatch = {
   conceptKey: CompanionConceptKey;
   matchedId: string;
   confidence: number;
   evidenceCount: number;
   similarity: number;
+  tier: SemanticConceptTrustTier;
 };
 
-// A match may only be trusted to skip the paid model call when BOTH the
-// stored concept's own confidence/evidence bar is met AND the current
-// message is close enough to a real, previously-confirmed example. Neither
-// alone is sufficient -- Phase 3's confidence policy explicitly requires
-// evidence to accumulate before a learned pattern is trusted, exactly like
-// the pre-existing guest_semantic_memory shape this table's columns mirror.
+// TWO-TIER TRUST POLICY (found in review: a single evidence-accumulating bar
+// meant a newly learned phrasing needed ~9 confirmed occurrences before
+// becoming zero-call -- too slow for the owner's actual goal, "ask once,
+// reuse next time"). The fix is NOT to lower every threshold (that would
+// make the RISKIER fuzzy-matching path reach zero-cost just as fast as a
+// true exact repeat, which is exactly the failure mode a two-tier design
+// exists to avoid). Instead:
+//
+// TIER A ("exact replay") -- the current message's normalized form is
+// CHARACTER-FOR-CHARACTER IDENTICAL to a stored exemplar's own normalized
+// signature (not merely a high similarity score -- see matchLearnedConcept).
+// An exact replay of an already-confirmed sentence carries essentially no
+// interpretation risk, so ONE real OpenAI confirmation is enough: the
+// DEFAULT values a freshly-promoted row is written with (confidence 0.7,
+// evidence_count 1, see recordSemanticConceptEvidence) already clear this
+// bar. This closes the actual gap: two different customers typing politeness
+// variants of the SAME underlying sentence ("มากับแฟน" / "มากับแฟนค่ะ" /
+// "มากับแฟนนะครับ" all normalize identically) become free after just one
+// confirmation, which is the bulk of real repeat traffic for a single
+// confirmed phrasing.
+export const MIN_TIER_A_CONFIDENCE = 0.7;
+export const MIN_TIER_A_EVIDENCE_COUNT = 1;
+
+// TIER B ("fuzzy generalized") -- ANY match that is not an exact replay (an
+// appended detail, a typo, a reordering) is a genuinely different sentence
+// with residual interpretation risk, and keeps today's slower,
+// evidence-accumulating trust bar UNCHANGED. This is the pre-existing policy
+// this table's columns mirror from guest_semantic_memory's own
+// confidence/evidence shape -- deliberately left conservative rather than
+// loosened.
 export const MIN_TRUSTED_CONFIDENCE = 0.85;
 export const MIN_TRUSTED_EVIDENCE_COUNT = 3;
 // Calibrated empirically against real near-identical variants (an appended
@@ -256,10 +300,17 @@ export function matchLearnedConcept(
     // concept is never matched, even if something upstream failed to flip
     // its status to 'retracted'.
     if (concept.contradictionCount >= CONTRADICTION_RETRACT_THRESHOLD) continue;
-    if (concept.confidence < MIN_TRUSTED_CONFIDENCE) continue;
-    if (concept.evidenceCount < MIN_TRUSTED_EVIDENCE_COUNT) continue;
     const similarity = conceptSimilarity(normalized, concept.normalizedSignature);
     if (similarity < MIN_SIMILARITY) continue;
+    // Tier is decided by EXACT normalized equality, never by a similarity
+    // score close to 1 -- a 0.97 fuzzy score is still a different sentence
+    // and must not borrow Tier A's fast-promotion bar.
+    const isExactReplay = normalized === concept.normalizedSignature;
+    const tier: SemanticConceptTrustTier = isExactReplay ? 'exact_replay' : 'fuzzy_generalized';
+    const requiredConfidence = isExactReplay ? MIN_TIER_A_CONFIDENCE : MIN_TRUSTED_CONFIDENCE;
+    const requiredEvidenceCount = isExactReplay ? MIN_TIER_A_EVIDENCE_COUNT : MIN_TRUSTED_EVIDENCE_COUNT;
+    if (concept.confidence < requiredConfidence) continue;
+    if (concept.evidenceCount < requiredEvidenceCount) continue;
     if (!best || similarity > best.similarity) {
       best = {
         conceptKey: concept.conceptKey,
@@ -267,6 +318,7 @@ export function matchLearnedConcept(
         confidence: concept.confidence,
         evidenceCount: concept.evidenceCount,
         similarity,
+        tier,
       };
     }
   }
@@ -440,6 +492,42 @@ function containsDirectIdentifier(message: string): boolean {
   return /\[(?:url|email|phone|handle)\]/u.test(redactDirectIdentifiers(message));
 }
 
+// A CLOSED, deliberately small set of companion-domain structural words
+// (prepositions/verbs, the closed counting vocabulary, and the concept's own
+// closed relationship vocabulary plus a handful of near-synonyms this
+// module's own tests already exercise, e.g. "คนรู้ใจ"). This is NOT a
+// semantic classifier and NOT a general Thai tokenizer -- OpenAI has ALREADY
+// told the caller what the confirmed concept means; this list exists purely
+// to decide whether the confirmed sentence is composed ENTIRELY of generic
+// companion-domain words, or whether it ALSO carries something else (a name,
+// an address, any other personal detail) that must never enter a table with
+// no guest_id column at all (found in review: "มากับแฟนชื่อหนิง" carries no
+// phone/email/URL/handle, so containsDirectIdentifier alone would let the
+// name "หนิง" through verbatim).
+const SAFE_COMPANION_TOKENS = new RegExp(
+  [
+    'มากับ', 'พามา', 'ไปด้วย', 'อยู่ด้วย', 'มาด้วย',
+    'สองคน', 'สามคน', 'สี่คน', 'ห้าคน', 'หกคน', 'กี่คน', 'หลายคน', 'คนเดียว', 'ทั้งครอบครัว',
+    'แฟนสาว', 'แฟนหนุ่ม', 'แฟน', 'คนรัก', 'คนรู้ใจ', 'กิ๊ก',
+    'ครอบครัว', 'พ่อแม่', 'พ่อ', 'แม่', 'ลูก', 'ญาติ', 'พี่น้อง', 'เพื่อนๆ', 'เพื่อน', 'สามี', 'ภรรยา',
+    'มา', 'กับ', 'พา', 'ด้วย', 'ไป', 'อยู่',
+  ].join('|'),
+  'gu',
+);
+
+/** FAIL-SAFE, NOT FAIL-OPEN: strips every recognized companion-domain token
+ *  and returns whatever is left. It never removes text it does not
+ *  recognize, so a non-empty residual reliably means "this sentence carries
+ *  something beyond the closed companion vocabulary" -- a name, an address,
+ *  a number, anything. A genuine companion phrase using an unlisted synonym
+ *  is merely under-learned (falls through to a fresh OpenAI call every time,
+ *  the correct conservative failure direction); it can never cause a
+ *  personal detail to be persisted, because unrecognized text is always the
+ *  reason to reject, never the thing that gets stored. */
+function containsUnrecognizedPersonalDetail(normalizedSignature: string): boolean {
+  return normalizedSignature.replace(SAFE_COMPANION_TOKENS, '').length > 0;
+}
+
 export async function recordSemanticConceptEvidence(
   conceptKey: CompanionConceptKey,
   message: string,
@@ -458,6 +546,16 @@ export async function recordSemanticConceptEvidence(
 
     const normalizedSignature = normalizeForConceptMatching(message);
     if (!normalizedSignature || normalizedSignature.length > MAX_MATCHABLE_MESSAGE_LENGTH) return;
+
+    if (containsUnrecognizedPersonalDetail(normalizedSignature)) {
+      // Reject outright -- same policy as containsDirectIdentifier above.
+      // Whatever this unrecognized content is (a name, an address, anything
+      // else), it must never enter a cross-customer table with no guest_id.
+      console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+        event: 'rejected_unrecognized_content', concept_key: conceptKey,
+      }));
+      return;
+    }
 
     // One read covers both checks below: reinforce-or-add for THIS concept,
     // and contradiction detection against every OTHER concept key. A single
