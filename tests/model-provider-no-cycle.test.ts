@@ -9,7 +9,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 async function importsOf(relativePath: string): Promise<string[]> {
   const source = await readFile(new URL(`../netlify/functions/${relativePath}`, import.meta.url), 'utf8');
@@ -45,18 +47,38 @@ test('both brain-v3 and the semantic interpreter import the SAME neutral provide
   assert.ok(semanticImports.some(specifier => specifier.includes('_thongthai-model-provider')));
 });
 
+function bundleWithEsbuild(entrypoint: string, outfile: string): void {
+  try {
+    execFileSync('./node_modules/esbuild/bin/esbuild', [
+      entrypoint,
+      '--bundle', '--platform=node', '--format=esm',
+      `--outfile=${outfile}`, '--external:@netlify/functions',
+    ], { cwd: fileURLToPath(new URL('../', import.meta.url)), stdio: 'pipe' });
+  } catch (error) {
+    const status = typeof (error as { status?: unknown }).status === 'number'
+      ? (error as { status: number }).status
+      : null;
+    const code = typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : '';
+    // Some managed sandboxes report EPERM from spawnSync even though the
+    // native esbuild process completed successfully (status 0) and wrote the
+    // bundle. Preserve the real build assertion while avoiding an environment
+    // false negative.
+    if (!(code === 'EPERM' && status === 0 && existsSync(outfile))) throw error;
+  }
+}
+
 test('esbuild successfully bundles _semantic-interpreter.ts standalone (would fail on an actual runtime cycle through brain-v3)', () => {
-  execFileSync('npx', [
-    'esbuild', 'netlify/functions/_semantic-interpreter.ts',
-    '--bundle', '--platform=node', '--format=esm',
-    '--outfile=/tmp/no-cycle-check-semantic-interpreter.js', '--external:@netlify/functions',
-  ], { cwd: new URL('../', import.meta.url), stdio: 'pipe' });
+  bundleWithEsbuild(
+    'netlify/functions/_semantic-interpreter.ts',
+    '/tmp/no-cycle-check-semantic-interpreter.js',
+  );
 });
 
 test('esbuild successfully bundles _thongthai-brain-v3.ts standalone', () => {
-  execFileSync('npx', [
-    'esbuild', 'netlify/functions/_thongthai-brain-v3.ts',
-    '--bundle', '--platform=node', '--format=esm',
-    '--outfile=/tmp/no-cycle-check-brain-v3.js', '--external:@netlify/functions',
-  ], { cwd: new URL('../', import.meta.url), stdio: 'pipe' });
+  bundleWithEsbuild(
+    'netlify/functions/_thongthai-brain-v3.ts',
+    '/tmp/no-cycle-check-brain-v3.js',
+  );
 });
