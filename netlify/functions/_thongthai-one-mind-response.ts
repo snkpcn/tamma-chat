@@ -384,9 +384,12 @@ export async function processOneMindCustomerTurn(
       || turn.semanticTurn.action === 'modify'
       || explicitNamedActivitySelection
     );
-  const deterministicFastPath = (turn.dialogDecision.mode === 'collect_field' || turn.dialogDecision.mode === 'clarify'
+  const hasModelConversationReply = Boolean(turn.dialogSemanticTurn.reply?.trim() || turn.semanticTurn.reply?.trim());
+  const deterministicFastPath = (
+      turn.dialogDecision.mode === 'collect_field'
       || turn.dialogDecision.responseIntent === 'cannot_verify_comparison'
-      || conversationalStateUpdate)
+      || (!hasModelConversationReply && (turn.dialogDecision.mode === 'clarify' || conversationalStateUpdate))
+    )
     ? composeDeterministicResponse(composerInput)
     : null;
   const membershipFastPath = !deterministicFastPath

@@ -1,5 +1,219 @@
 # Thongthai Kernel V2 Handoff
 
+## CURRENT AUTHORITATIVE UPDATE — 2026-09-28 FINAL HUMAN BRAIN CUTOVER
+
+This section supersedes the older Phase-3/cost-focused narrative below for
+the current mission. Keep the historical notes, but do **not** resume the
+embedding/cost optimization track until live human conversation quality is
+accepted.
+
+### Owner Decision
+
+- Priority is now **intelligence first / open-world human conversation first**.
+- Stop treating Phase 3 cost efficiency, embeddings, and semantic-learning
+  expansion as the current priority.
+- The model-first conversation path must own both current-turn meaning and
+  normal customer-facing wording for conversation-only turns.
+- Business truth remains downstream and authoritative. The model reply must
+  never invent price, availability, inventory, booking/order/payment state,
+  promotion eligibility, membership state, staff dispatch, incident status,
+  refund, or compensation.
+- Cost logging/guards remain, but do not reintroduce an IQ cliff or reduce
+  understanding to save money during certification.
+
+### Verified Baseline For This Pass
+
+- Repo: `snkpcn/tamma-chat`
+- Local clean worktree for this pass:
+  `/workspace/scratch/71f662a5fc19/tamma-chat-main`
+- Current `HEAD` and local `origin/main`:
+  `9234ba70e0081947c7607272e936539f00954b17`
+- Last verified production deploy at mission start:
+  `6aba5680503cfd0008f4386f`, commit
+  `9234ba70e0081947c7607272e936539f00954b17`
+- Open PRs observed at mission start:
+  `#213`, `#201`, `#146`, `#113`, `#87`, `#49`, `#10`
+- Do **not** merge stale historical PRs for this mission.
+
+### Current Branch / PR State
+
+- Local branch:
+  `human-brain/final-open-chat-cutover`
+- Local implementation checkpoint commit:
+  `a010182070bbf9290e0115f544b8abf1b8f3988e`
+  (`Cut over open-chat replies to the language brain`)
+- A same-named remote branch was created from main through the GitHub
+  connector, but the local commit was **not pushed** because this execution
+  environment has no GitHub git credential (`git push` failed with
+  `could not read Username for 'https://github.com': No such device or address`;
+  `gh` CLI is not installed; no `GITHUB_TOKEN`/`GH_TOKEN` env var is present).
+  Treat the local branch as the source of truth until a credentialed agent
+  pushes it. If this file has a later handoff-only commit, the implementation
+  checkpoint above is its parent and contains the code/test changes.
+- No production deployment has been made in this pass.
+- No database migration or business-table/schema change has been made.
+
+### Live-Path Audit Result
+
+The actual production cutover path is:
+
+`processThongthaiChatCore` → One-Mind orchestration → semantic interpreter →
+dialog/state/knowledge → response composer → `oneMind.response.message`.
+
+The structural bug found here was not that the model could not understand the
+turn. In the real failure class, the model/semantic layer often understood the
+meaning and stored useful state, but the final customer response path still
+discarded model-owned natural wording and fell into deterministic/generic
+legacy copy.
+
+Concrete audited blockers fixed in this pass:
+
+- `_response-composer.ts` explicitly treated OpenAI as "not the
+  customer-facing voice" and could return generic fallback even when semantic
+  understanding was correct.
+- `thongthai-chat.ts` had an early One-Mind branch for `general`, `local`, and
+  `incident` that used `supervisedOpenWorldResponse(...)`, bypassing the
+  One-Mind response composer and causing casual chat to get canned/generic
+  wording.
+- `_thongthai-one-mind-response.ts` let clarify/state-update deterministic
+  fast paths preempt the model's conversation reply even when the turn was
+  non-transactional and the model supplied safe customer wording.
+
+### Implemented Cutover Increment
+
+- `SemanticTurn` now has optional `reply`.
+- The same open-world semantic model pass now returns both:
+  - strict canonical meaning/control fields
+  - a short Thai customer-facing reply draft for conversation-only turns
+- Response composer now accepts that model reply only through
+  `safeModelConversationReply(...)`, which rejects it when:
+  - an action proposal/tool execution exists
+  - the dialog is collecting/proposing/executing
+  - verified business truth is required
+  - knowledge requests are present
+  - an active task has commitment intent
+  - operational claim safety fails
+- Business/knowledge-grounded deterministic responses still own verified facts.
+- The `general/local/incident` early bypass in `thongthai-chat.ts` was removed
+  so the One-Mind response message remains authoritative.
+- Deterministic clarify/state-update fast path no longer preempts safe
+  conversation model replies.
+- The production prompt was compacted slightly after adding `reply` so the
+  existing cost guard still passes without reducing the intelligence contract.
+
+### Files Changed In This Pass
+
+- `netlify/functions/_semantic-interpreter.ts`
+- `netlify/functions/_response-composer.ts`
+- `netlify/functions/_thongthai-one-mind-response.ts`
+- `netlify/functions/thongthai-chat.ts`
+- `tests/helpers/canonical-core-harness.ts`
+- `tests/final-human-brain-cutover-open-chat.test.ts`
+- `THONGTHAI_KERNEL_V2_HANDOFF.md`
+
+### Tests / Exact Totals
+
+Dependency note: this clean worktree does not have its own `node_modules`.
+Tests were run with the existing loader from the sibling worktree:
+
+```bash
+node --import /workspace/scratch/71f662a5fc19/tamma-chat/node_modules/tsx/dist/loader.mjs --test tests/final-human-brain-cutover-open-chat.test.ts
+```
+
+Result: `4/4` passed.
+
+```bash
+node --import /workspace/scratch/71f662a5fc19/tamma-chat/node_modules/tsx/dist/loader.mjs --test \
+  tests/final-human-brain-cutover-open-chat.test.ts \
+  tests/one-mind-orchestrator.test.ts \
+  tests/one-mind-response.test.ts \
+  tests/conversation-context.test.ts \
+  tests/human-brain-real-line-failure-regression.test.ts \
+  tests/kernel-v2-phase2-conversation-state.test.ts \
+  tests/kernel-v2-phase3-semantic-concept-memory.test.ts \
+  tests/final-perfection-pass-conversational-fixes.test.ts
+```
+
+Result: `100/100` passed.
+
+```bash
+node --import /workspace/scratch/71f662a5fc19/tamma-chat/node_modules/tsx/dist/loader.mjs --test tests/*.test.ts
+```
+
+Result after compact prompt adjustment: `1653/1653` passed, `0` failed,
+duration `41201.6698ms`.
+
+`npm test` in this clean worktree fails before tests run because `tsx` is not
+installed in this worktree; this is a dependency/worktree setup issue, not a
+test regression.
+
+### Cost / Token Measurements
+
+Cost optimization is paused, but the existing guard remains green.
+
+- `buildProductionSemanticInterpreterPrompt(emptyContext)` estimate:
+  `2209` input tokens for the normal probe.
+- Complex bounded-context prompt estimate:
+  `3974` input tokens, under the existing `<= 4000` test guard and under the
+  `absoluteInputTokens <= 5000` policy.
+- Full-suite OpenAI semantic logs show typical scripted input token counts
+  around `2190-2500` after this pass.
+
+### Known Remaining Work / Failures Not Claimed Fixed
+
+- This is **not** live certification and **not** production-ready proof.
+- No real 50-turn or 100-turn LINE/Web conversation has been run in this pass.
+- Owner must still live-test LINE after a reviewed PR/CI/deploy.
+- Business-truth/tool-required turns still correctly route to grounded
+  deterministic/business helpers; this pass intentionally did not make the
+  model invent availability, catalog, price, policy, membership, payment,
+  incident, or dispatch facts.
+- Some older tests still exercise legacy fallback paths under provider outage
+  or deterministic fixtures. Those are not removed yet; the current fix is the
+  safe authoritative path for model-understood, conversation-only turns.
+
+### Next Required Step If Interrupted
+
+1. Push local branch `human-brain/final-open-chat-cutover` from this worktree,
+   including implementation commit `a010182070bbf9290e0115f544b8abf1b8f3988e`, from
+   an environment with GitHub git credentials. If needed, first reset/update
+   the remote branch of the same name, which currently only points at main.
+2. Review full diff carefully.
+3. Open a PR explicitly scoped to "final human brain open-chat cutover,
+   model-owned conversation reply".
+4. Run CI. Merge only if green.
+5. After merge/deploy, run real LINE/Web acceptance conversations using real
+   model calls:
+   - one 50-turn open-world conversation
+   - one 100-turn open-world conversation
+   - multiple hidden 20-30 turn conversations
+   - include casual Thai, slang, typos, topic switches, references, corrections,
+     considering without buying, explicit not-booking, food constraints,
+     activity/restaurant/stay/promo/non-business chat
+6. Keep handoff updated with branch, PR, SHA, production deploy, and live
+   failures. Do not resume embedding/cost Phase 3 until human conversation
+   quality is accepted.
+
+### Copy-Ready Continuation Prompt If This Agent Stops
+
+Continue from `/workspace/scratch/71f662a5fc19/tamma-chat-main` on current
+local changes for "FINAL HUMAN BRAIN CUTOVER". Owner decision: intelligence
+first, cost optimization later. Do not restart Phase 3 embeddings/cost work.
+The current local change adds model-owned natural replies to the single
+semantic model output and lets the response composer use those replies only
+for safe conversation-only turns, while business truth remains downstream.
+Full suite passed with:
+
+`node --import /workspace/scratch/71f662a5fc19/tamma-chat/node_modules/tsx/dist/loader.mjs --test tests/*.test.ts`
+
+Result: `1653/1653` passed. Local implementation checkpoint commit:
+`a010182070bbf9290e0115f544b8abf1b8f3988e` on
+`human-brain/final-open-chat-cutover`. This environment could create a remote
+branch but could not push the local branch because git credentials are absent.
+Next: push this branch from a credentialed environment, open PR, run CI, then
+live LINE/Web acceptance. Do not claim production-ready until real long
+conversations pass.
+
 Updated: 2026-09-28 (this pass records PR #218 merged, its migration applied
 to production, and production re-verified via a real dispatched smoke run --
 see "Current State" and "Phase 3 increment 1" below).

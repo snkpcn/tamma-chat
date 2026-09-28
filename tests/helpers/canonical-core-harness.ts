@@ -130,8 +130,8 @@ export function defaultCatalog(): Required<HarnessCatalog> {
   };
 }
 
-export type HarnessGeminiReply = {
-  message: string; intent?: string; toolCalls?: unknown[]; contextUpdates?: Record<string, unknown>;
+export type HarnessGeminiReply = Record<string, unknown> & {
+  message?: string; intent?: string; toolCalls?: unknown[]; contextUpdates?: Record<string, unknown>;
   /** Passed straight through into the raw completion JSON -- lets a test
    *  script a proposal-generation turn (e.g. the brain proposing a
    *  restaurant set, or clearing an unresolved need) the same way the
