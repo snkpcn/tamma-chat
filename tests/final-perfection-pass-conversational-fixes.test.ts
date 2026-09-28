@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { withHarness, guestId, brainRequest } from './helpers/canonical-core-harness';
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
+import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
 
 function msg(payload: unknown): string {
   return String((payload as { message: string }).message);
@@ -58,6 +59,43 @@ test('Perfection pass 2: a conditional activity continuation preserves the alrea
       { activeTask?: { slots?: Record<string, unknown> } } | undefined;
     assert.equal(state?.activeTask?.slots?.assetSelection, 'ภาราดร',
       'the conditional check must never mutate or clear the existing selection');
+  });
+});
+
+test('Perfection pass 2b: the SAME conditional continuation resolves from a prior RECOMMENDATION (no task ever opened), not only from an active task\'s own slot', async () => {
+  await withHarness(async harness => {
+    const gid = guestId('perfection-activity-conditional-no-task');
+    await processThongthaiChatCore(brainRequest('สวัสดี', gid, 'web'), 'evt-seed');
+    const guestDbId = harness.guestDbId(gid)!;
+    // Models the real production shape this case actually failed under: a
+    // prior turn resolved by the REAL model as a plain recommendation
+    // ("เอาตัวที่นิสัยนิ่งกว่า" -> "ภาราดร ตรงกว่าครับ") never opens a
+    // booking task -- see deriveDeterministicSemanticTurn's new no-active-
+    // task branch in _deterministic-semantic-turn.ts. Seeding
+    // conversationContext directly (rather than a first real turn) isolates
+    // this exact branch instead of depending on how turn 1 was classified.
+    const context = {
+      ...emptyConversationContextState(),
+      activeDomain: 'activity' as const,
+      recentEntities: [{
+        id: 'activity_asset:horse-pharadon', type: 'activity_asset', name: 'ภาราดร',
+        domain: 'activity' as const, source: 'conversation' as const, canonical: true,
+        observedAt: new Date().toISOString(),
+      }],
+    };
+    const existing = harness.getState(guestDbId);
+    harness.setState(guestDbId, { ...(existing?.state ?? {}), conversationContext: context });
+
+    const r = await processThongthaiChatCore(
+      brainRequest('ถ้าตัวนั้นไม่ว่าง เอาอีกตัวแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร', gid, 'web'),
+      'evt-0',
+    );
+    assert.equal(r.statusCode, 200);
+    const reply = msg(r.payload);
+    assert.doesNotMatch(reply, /ระบบจองของทองไทยตอบช้ากว่าปกติ/u,
+      'no active task existed, but the entity was still uniquely resolvable from recentEntities -- must never collapse to the generic outage apology');
+    assert.match(reply, /ภาราดร/u, 'the recently-recommended horse must remain the resolved subject');
+    assert.match(reply, /ยังไม่ได้ทำรายการ|ยังไม่ได้จอง/u, 'must explicitly confirm no transaction happened');
   });
 });
 
