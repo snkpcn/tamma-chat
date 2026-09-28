@@ -7,6 +7,7 @@ import {
 } from '../netlify/functions/_thongthai-one-mind-orchestrator';
 import {
   processOneMindCustomerTurn,
+  readOnlyCutoverEligibility,
 } from '../netlify/functions/_thongthai-one-mind-response';
 import type { GuestAgentStateSnapshot } from '../netlify/functions/_guest-agent-state-store';
 import type { GroundedFact, KnowledgeSourceAdapters, SourceResult } from '../netlify/functions/_knowledge-resolver';
@@ -267,6 +268,78 @@ test('REAL LINE: explicit horse correction replaces stale selected entity instea
   assert.equal(result.taskStateAfter.activeTask?.slots.time,'17:00');
   assert.equal(result.taskStateAfter.activeTask?.selectedEntities[0]?.name,'ทองไทย');
   assert.equal(result.dialogDecision.actionProposal,undefined);
+});
+
+test('KERNEL V2 PHASE 1: companion and low-exertion preference is consideration context, not an activity booking', async()=>{
+  const message='มากับแฟนสองคน ไม่อยากทำอะไรเหนื่อยมาก';
+  const run=scriptedConversation({
+    [message]:semantic({
+      domain:'activity',
+      intent:'share_visit_context_low_exertion',
+      action:'provide_information',
+      speechAct:'preference_update',
+      entities:{partySize:2,companion:'partner'},
+      constraints:['low_exertion'],
+    }),
+  });
+  const result=await run(message);
+  assert.equal(result.semanticMeaning.conversationalMode,'CONSIDER');
+  assert.equal(result.semanticMeaning.commitmentLevel,'planning');
+  assert.equal(result.taskStateAfter.activeTask,null);
+  assert.equal(result.dialogDecision.actionProposal,undefined);
+});
+
+test('KERNEL V2 PHASE 1: restaurant availability question outranks stale horse task state', async()=>{
+  const select='เอาภาราดรไว้ก่อน แต่ยังไม่จองนะ';
+  const restaurant='แล้วโต๊ะร้านอาหารพรุ่งนี้หกโมงเต็มหรือยัง';
+  const run=scriptedConversation({
+    [select]:semantic({
+      domain:'activity',
+      intent:'consider_horse_selection',
+      action:'confirm',
+      speechAct:'selection',
+      entities:{resourceCode:'activity-horse',horseName:'ภาราดร'},
+      constraints:['not_yet_booking'],
+    }),
+    [restaurant]:semantic({
+      domain:'restaurant',
+      intent:'check_table_availability',
+      action:'status',
+      informationNeed:'availability',
+      speechAct:'question',
+      entities:{date:'2026-09-28',time:'18:00'},
+    }),
+  },{
+    restaurant:{availability:async()=>emptyResult('restaurant-table-schedule','restaurant_live')},
+  });
+  const selected=await run(select);
+  assert.equal(selected.taskStateAfter.activeTask?.domain,'activity');
+  assert.equal(selected.dialogDecision.actionProposal,undefined);
+  const asked=await run(restaurant);
+  assert.equal(asked.semanticMeaning.conversationalMode,'ASK');
+  assert.equal(asked.semanticTurn.domain,'restaurant');
+  assert.ok(asked.dialogDecision.knowledgeRequests.some(request=>request.domain==='restaurant'&&request.needs.includes('availability')));
+  assert.equal(asked.dialogDecision.actionProposal,undefined);
+  assert.notEqual(asked.dialogDecision.mode,'collect_field');
+});
+
+test('KERNEL V2 PHASE 1: lost-property report is INCIDENT and eligible for One-Mind response, not legacy transaction routing', async()=>{
+  const message='ลูกค้าลืม Apple Watch ไว้ พนักงานหาแล้วยังไม่เจอ รออัปเดตอยู่';
+  const run=scriptedConversation({
+    [message]:semantic({
+      domain:'incident',
+      intent:'lost_property_followup',
+      action:'provide_information',
+      speechAct:'incident_report',
+      entities:{item:'Apple Watch',status:'staff_searched_not_found'},
+      constraints:['customer_waiting_for_update'],
+    }),
+  });
+  const result=await run(message);
+  assert.equal(result.semanticMeaning.conversationalMode,'INCIDENT');
+  assert.equal(result.taskStateAfter.activeTask,null);
+  assert.equal(result.dialogDecision.actionProposal,undefined);
+  assert.equal(readOnlyCutoverEligibility(result).eligible,true);
 });
 
 

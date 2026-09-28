@@ -69,6 +69,18 @@ export type SemanticUserGoal =
   | 'get_help'
   | 'unknown';
 
+/** The closed owner-facing conversation class for the CURRENT turn.
+ *  This is intentionally coarser than action/speechAct: downstream code
+ *  should decide "may this transact?" from COMMIT, not by re-reading Thai
+ *  text, free-form intent labels, or stale task state. */
+export type SemanticConversationalMode =
+  | 'CHAT'
+  | 'ASK'
+  | 'DISCOVER'
+  | 'CONSIDER'
+  | 'COMMIT'
+  | 'INCIDENT';
+
 /** The customer's own stated date/time for THIS turn, if any -- lifted
  *  structurally from entities.date/entities.time (never parsed from
  *  normalizedMeaning). null when the turn states neither. */
@@ -77,6 +89,7 @@ export type SemanticTemporalMeaning = { date?: string; time?: string } | null;
 export type SemanticMeaning = {
   domain: SemanticDomain;
   speechAct: SemanticSpeechAct;
+  conversationalMode: SemanticConversationalMode;
   userGoal: SemanticUserGoal;
   action: SemanticAction;
   informationNeed: SemanticInformationNeed;
@@ -227,6 +240,19 @@ function deriveUserGoal(turn: SemanticTurn, commitmentLevel: SemanticCommitmentL
   return 'unknown';
 }
 
+function deriveConversationalMode(turn: SemanticTurn, commitmentLevel: SemanticCommitmentLevel): SemanticConversationalMode {
+  if (turn.domain === 'incident' || turn.speechAct === 'incident_report' || turn.speechAct === 'complaint' || turn.speechAct === 'request_help') {
+    return 'INCIDENT';
+  }
+  if (commitmentLevel === 'explicit_transaction') return 'COMMIT';
+  if (commitmentLevel === 'planning' || turn.speechAct === 'preference_update' || turn.action === 'provide_information') {
+    return 'CONSIDER';
+  }
+  if (turn.action === 'discover' || turn.action === 'recommend' || turn.action === 'compare') return 'DISCOVER';
+  if (turn.action === 'ask' || turn.action === 'status') return 'ASK';
+  return 'CHAT';
+}
+
 function deriveSemanticFocus(turn: SemanticTurn): string {
   const resolvedId = turn.references.find(reference => reference.resolvedEntityId)?.resolvedEntityId;
   if (resolvedId) return resolvedId;
@@ -256,6 +282,7 @@ export function deriveSemanticMeaning(turn: SemanticTurn): SemanticMeaning {
   return {
     domain: turn.domain,
     speechAct: turn.speechAct ?? 'unknown',
+    conversationalMode: deriveConversationalMode(turn, commitmentLevel),
     userGoal: deriveUserGoal(turn, commitmentLevel),
     action: turn.action,
     informationNeed: turn.informationNeed ?? 'none',

@@ -483,12 +483,16 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     // conversational state, not evidence that the customer wants to start an
     // order/booking task. Example: "หมูก็ไม่เอาด้วย" must update meaning and
     // continuity without silently opening a restaurant preorder.
-    const constraintOnlyInformation =
+    const hasPlanningBudgetSignal = turn.constraints.some(constraint => /^budget(?::|_|$)/iu.test(constraint))
+      || typeof turn.entities.budget === 'number'
+      || typeof turn.entities.budgetAmount === 'number';
+    const nonTransactionalContextUpdate =
       turn.action === 'provide_information'
-      && turn.constraints.length > 0
-      && Object.keys(taskSlotPatch(turn.entities)).length === 0
+      && turn.speechAct !== 'selection'
+      && !hasPlanningBudgetSignal
+      && (turn.speechAct === 'preference_update' || turn.constraints.length > 0)
       && !hasResolvedTaskReference(turn);
-    if (constraintOnlyInformation) {
+    if (nonTransactionalContextUpdate) {
       reasons.push('discovery_only');
       return { container, reasons };
     }
