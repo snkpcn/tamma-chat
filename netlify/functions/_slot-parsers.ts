@@ -143,8 +143,23 @@ export function hasCorrectionMarker(message: string): boolean {
  *  zero-LLM slot-fill parser can recognize "this message is trying to do
  *  more than I can safely interpret" and defer (return null) instead of
  *  silently dropping the commit intent by only extracting the slot value. */
+const COMMIT_MARKER_RE = /จองเลย|ยืนยันจอง|สั่งเลย|ยืนยันการจอง|ยืนยันการสั่ง/gu;
+// A commit phrase immediately preceded by a negation ("ไม่ต้องจองเลย", "ยัง
+// ไม่ยืนยันจอง") is being explicitly DECLINED, not requested -- the bare
+// substring match above alone would misread "don't book it at all" as an
+// explicit commit, exactly inverted from what the customer said. Same
+// structural before-the-match negation check the asset/entity name
+// matchers in _deterministic-semantic-turn.ts already use.
+const NEGATED_BEFORE_COMMIT_RE = /(?:ไม่ต้อง|ไม่ได้|ไม่เอา|ไม่)\s*$/u;
+
 export function hasCommitMarker(message: string): boolean {
-  return /จองเลย|ยืนยันจอง|สั่งเลย|ยืนยันการจอง|ยืนยันการสั่ง/u.test(message);
+  let match: RegExpExecArray | null;
+  COMMIT_MARKER_RE.lastIndex = 0;
+  while ((match = COMMIT_MARKER_RE.exec(message))) {
+    const before = message.slice(Math.max(0, match.index - 12), match.index);
+    if (!NEGATED_BEFORE_COMMIT_RE.test(before)) return true;
+  }
+  return false;
 }
 
 /** A customer explicitly asking to cancel/abandon whatever is in progress

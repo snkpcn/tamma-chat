@@ -32,6 +32,7 @@ import {
 } from './_thongthai-runtime-v3';
 import { activityAssetFromText, formatActivityAssetNote } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
+import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
@@ -666,31 +667,50 @@ function formatMoney(value: unknown): string {
 }
 
 // RESTAURANT_CONSTRAINT_COPY_FIX_V1
-function formatRestaurantConstraintAck(advisor: any): string {
+//
+// advisor.parsed reflects the WHOLE rolling recentMessages window (needed
+// so menu filtering still respects a constraint stated several turns ago),
+// but this function claims to say what was "just" confirmed -- restating a
+// stale, unrelated constraint from earlier in that window (e.g. a shrimp
+// exclusion from several turns back) as freshly confirmed on a turn that
+// never mentioned it reads as a fabricated/irrelevant answer. Real
+// production incident this closes: a spice-only question ("ไม่ค่อยเผ็ด...
+// ทานเผ็ดไม่เก่ง") got back "✅ ...ไม่มีกุ้ง" because an earlier, unrelated
+// turn in the window had mentioned shrimp. Re-parses the CURRENT message
+// alone and only labels a constraint that's present in BOTH the full
+// rolling parse (so it's still real/still filtering) AND this turn's own
+// text (so it's honestly "just said", not "remembered from before").
+function formatRestaurantConstraintAck(advisor: any, message: string): string {
   const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
   if (!parsed) return '';
+  const mentionedNow = parseRestaurantConstraintSignals({ query: message, recentMessages: [] }, []);
 
   const labels: string[] = [];
-  const avoidProteins = Array.isArray(parsed.avoidProteins) ? parsed.avoidProteins.map(String) : [];
+  const avoidProteins = (Array.isArray(parsed.avoidProteins) ? parsed.avoidProteins.map(String) : [])
+    .filter(protein => mentionedNow.avoidProteins.includes(protein as any));
   const proteinLabels: Record<string, string> = {
     pork:'ไม่มีหมู', beef:'ไม่มีเนื้อวัว', chicken:'ไม่มีไก่', fish:'ไม่มีปลา', egg:'ไม่มีไข่',
   };
   for (const protein of avoidProteins) if (proteinLabels[protein]) labels.push(proteinLabels[protein]);
 
-  if (parsed.vegetarian === true) labels.push('มังสวิรัติ');
+  if (parsed.vegetarian === true && mentionedNow.vegetarian) labels.push('มังสวิรัติ');
 
-  const avoidIngredients = Array.isArray(parsed.avoidIngredients) ? parsed.avoidIngredients.map(String) : [];
+  const avoidIngredients = (Array.isArray(parsed.avoidIngredients) ? parsed.avoidIngredients.map(String) : [])
+    .filter(ingredient => mentionedNow.avoidIngredients.some(nowIngredient => ingredient.includes(nowIngredient) || nowIngredient.includes(ingredient)));
   if (avoidIngredients.some(value => value.includes('ปลาร้า'))) labels.push('ไม่มีปลาร้า');
   if (avoidIngredients.some(value => value.includes('กุ้ง'))) labels.push('ไม่มีกุ้ง');
   if (avoidIngredients.some(value => value.includes('ถั่ว'))) labels.push('ไม่มีถั่วลิสง');
 
-  const allergens = Array.isArray(parsed.allergenFlags) ? parsed.allergenFlags.map(String) : [];
+  const allergens = (Array.isArray(parsed.allergenFlags) ? parsed.allergenFlags.map(String) : [])
+    .filter(allergen => mentionedNow.allergenFlags.includes(allergen));
   const allergenLabels: Record<string, string> = { peanut:'เลี่ยงถั่ว', shrimp:'เลี่ยงกุ้ง', fish:'เลี่ยงปลา', egg:'เลี่ยงไข่' };
   for (const allergen of allergens) if (allergenLabels[allergen]) labels.push(allergenLabels[allergen]);
 
-  if (parsed.spice === 'none') labels.push('ไม่เผ็ด');
-  else if (parsed.spice === 'mild') labels.push('ไม่เผ็ดจัด');
-  else if (parsed.spice === 'medium') labels.push('เผ็ดกลาง');
+  if (mentionedNow.spice != null) {
+    if (parsed.spice === 'none') labels.push('ไม่เผ็ด');
+    else if (parsed.spice === 'mild') labels.push('ไม่เผ็ดจัด');
+    else if (parsed.spice === 'medium') labels.push('เผ็ดกลาง');
+  }
 
   const unique = [...new Set(labels)];
   return unique.length ? `✅ คัดเมนูตามที่บอกให้แล้วครับ: ${unique.join(' · ')}` : '';
@@ -799,8 +819,16 @@ function restaurantConstraintAvoidLabels(advisor: any): string[] {
 // shows should NOT happen on a follow-up constraint update.
 function formatConstraintDeclarationAck(advisor: any, message: string): string {
   const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
-  const avoidLabels = restaurantConstraintAvoidLabels(advisor);
-  const spice = parsed?.spice;
+  // Same current-turn-only filtering formatRestaurantConstraintAck applies
+  // (see its own comment): a bare constraint declaration must only
+  // acknowledge what THIS message actually stated, never a stale
+  // avoid/spice signal carried over from earlier in the rolling window.
+  const mentionedNow = parseRestaurantConstraintSignals({ query: message, recentMessages: [] }, []);
+  const avoidLabels = restaurantConstraintAvoidLabels(advisor).filter(label =>
+    mentionedNow.avoidIngredients.some(now => label.includes(now) || now.includes(label))
+    || mentionedNow.avoidProteins.some(protein => ({ pork:'หมู', beef:'เนื้อวัว', chicken:'ไก่', fish:'ปลา', egg:'ไข่' } as Record<string,string>)[protein] === label)
+    || mentionedNow.allergenFlags.some(allergen => ({ shrimp:'กุ้ง/กุ้งแห้ง', peanut:'ถั่ว', fish:'ปลา', egg:'ไข่' } as Record<string,string>)[allergen] === label));
+  const spice = mentionedNow.spice != null ? parsed?.spice : null;
   const spicePart = spice === 'none' ? 'เลือกแบบไม่เผ็ด' : spice === 'mild' ? 'เลือกแบบเผ็ดน้อย' : '';
   const avoidPart = avoidLabels.length ? `เลี่ยง${avoidLabels.join('/')}` : '';
   const actionParts = [avoidPart, spicePart].filter(Boolean);
@@ -915,7 +943,7 @@ function formatAdvisorMessage(
     const set = advisor.set;
     const lines = set.items.map((line: any) =>
       `• ${line.name} ×${line.quantity} — ${formatMoney(line.lineTotal)}`);
-    const constraintAck = formatRestaurantConstraintAck(advisor);
+    const constraintAck = formatRestaurantConstraintAck(advisor, currentMessage);
     return [
       constraintAck,
       '🍽️ ชุดที่ทองไทยแนะนำ',
@@ -953,7 +981,7 @@ function formatAdvisorMessage(
     // a short "ถ้ายัง...อยู่" phrase below -- otherwise every follow-up
     // recommendation request re-dumps the exact same long block the
     // customer already saw (the owner's own retest catch).
-    const constraintAck = constraintMentionedNow ? formatRestaurantConstraintAck(advisor) : '';
+    const constraintAck = constraintMentionedNow ? formatRestaurantConstraintAck(advisor, currentMessage) : '';
     const allergyNotice = constraintMentionedNow
       ? notices.find((notice: string) => /สารก่อภูมิแพ้/u.test(notice))
       : undefined;
@@ -2164,9 +2192,16 @@ export async function bareHorseSelectionClarification(request: BrainRequest, gue
   const everDiscussedActivity = await hasEverDiscussedActivityDomain(guestDbId).catch(() => false);
   if (everDiscussedActivity) return null;
 
-  const message = ambiguous.name === 'ทองไทย'
-    ? 'หมายถึงอยากเลือก “ทองไทย” เป็นม้าสำหรับขี่ หรือเรียกทองไทยผู้ช่วยแชทครับ 😊'
-    : `หมายถึงม้า “${ambiguous.name}” ใช่ไหมครับ ถ้าอยากขี่ม้า พิมพ์ว่า “อยากขี่ม้า” ได้เลยครับ`;
+  // Customer-facing text always shows the owner-required display name
+  // (HORSE_FACTS.name, "น้องทองไทย"/"น้องภาราดร"), never ambiguous.name's
+  // bare internal form -- that bare form is still what gets persisted
+  // below (persistHorseSelectionWithContextResponse etc.), display and
+  // storage deliberately kept separate (see HORSE_FACTS's own comment).
+  const isThongthai = ambiguous.name === 'ทองไทย';
+  const displayName = isThongthai ? HORSE_FACTS.thongthai.name : HORSE_FACTS.pharadon.name;
+  const message = isThongthai
+    ? `หมายถึงอยากเลือก “${displayName}” เป็นม้าสำหรับขี่ หรือเรียกทองไทยผู้ช่วยแชทครับ 😊`
+    : `หมายถึงม้า “${displayName}” ใช่ไหมครับ ถ้าอยากขี่ม้า พิมพ์ว่า “อยากขี่ม้า” ได้เลยครับ`;
   return {
     message,
     intent: 'information',
@@ -2261,8 +2296,8 @@ export async function horseSelectionWithContextResponse(
         : HORSE_DETAIL_CLARIFICATION_QUESTION;
 
   const message = [
-    `ได้ครับ เลือก${ambiguous.name}นะครับ 😊`,
-    `${ambiguous.name}จะ${facts.rideFeelTh} คาแรกเตอร์${facts.personalityTh}ครับ`,
+    `ได้ครับ เลือก${facts.name}นะครับ 😊`,
+    `${facts.name}จะ${facts.rideFeelTh} คาแรกเตอร์${facts.personalityTh}ครับ`,
     nextQuestion,
   ].join('\n');
 
@@ -2748,13 +2783,16 @@ export async function horseScenarioSignalResponse(
 
   const firmness = interpretFirmnessPreference(request.message);
   if (firmness) {
-    const horseName = firmness === 'softer' ? 'ภาราดร' : 'ทองไทย';
+    // Bare internal name persists to task state (the real storage
+    // contract); facts.name is the owner-required display name shown to
+    // the customer -- see HORSE_FACTS's own comment.
+    const bareHorseName = firmness === 'softer' ? 'ภาราดร' : 'ทองไทย';
     const facts = firmness === 'softer' ? HORSE_FACTS.pharadon : HORSE_FACTS.thongthai;
-    await persistHorseSelection(guestDbId, channel, horseName);
+    await persistHorseSelection(guestDbId, channel, bareHorseName);
     return {
       message: [
-        `ได้ครับ เลือก${horseName}นะครับ 😊`,
-        `${horseName}จะ${facts.rideFeelTh} คาแรกเตอร์${facts.personalityTh}ครับ`,
+        `ได้ครับ เลือก${facts.name}นะครับ 😊`,
+        `${facts.name}จะ${facts.rideFeelTh} คาแรกเตอร์${facts.personalityTh}ครับ`,
         'เคยขี่ม้ามาก่อนไหมครับ แล้วมากี่คนครับ?',
       ].join('\n'),
       intent: 'information', contextUpdates: {}, journeyAction: { type: 'none', journey: null },

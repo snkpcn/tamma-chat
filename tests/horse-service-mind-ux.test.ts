@@ -128,7 +128,7 @@ test('A2. "อยากขี่ม้า" then "เอาทองไทย" se
     await callLineWebhook([privateEvent('เอาทองไทย', userId)]);
     assert.equal(replies.length, 2);
     const secondText = replies[1].messages.map(m => m.text ?? '').join(' ');
-    assert.match(secondText, /เลือกทองไทย/u, 'must visibly confirm the selected horse');
+    assert.match(secondText, /เลือกน้องทองไทย/u, 'must visibly confirm the selected horse');
     assert.doesNotMatch(secondText, /หรือเรียกทองไทยผู้ช่วยแชท/u, 'must never re-ask horse-or-assistant once context is established');
     assert.match(secondText, /เคยขี่ม้ามาก่อนไหม|กี่คน/u, 'should ask a care question next');
   });
@@ -140,7 +140,7 @@ test('A3. "อยากขี่ม้า" then "เอาภาราดร" se
     await callLineWebhook([privateEvent('อยากขี่ม้า', userId)]);
     await callLineWebhook([privateEvent('เอาภาราดร', userId)]);
     const secondText = replies[1].messages.map(m => m.text ?? '').join(' ');
-    assert.match(secondText, /เลือกภาราดร/u);
+    assert.match(secondText, /เลือกน้องภาราดร/u);
     assert.match(secondText, /นิ่มกว่า/u);
   });
 });
@@ -172,7 +172,7 @@ test('A6. "อยากขี่ม้า" then a comparison question stays in h
     const comparisonText = replies[1].messages.map(m => m.text ?? '').join(' ');
     assert.doesNotMatch(comparisonText, /เลือกม้า/u);
     const selectionText = replies[2].messages.map(m => m.text ?? '').join(' ');
-    assert.match(selectionText, /เลือกทองไทย/u);
+    assert.match(selectionText, /เลือกน้องทองไทย/u);
   });
 });
 

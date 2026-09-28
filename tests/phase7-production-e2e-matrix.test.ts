@@ -131,8 +131,8 @@ test('Phase 7 matrix: LINE horse selection remains ภาราดร, then loca
     await callLine('อยากขี่ม้า', userId);
     await callLine('เอาภาราดร', userId);
     const selected = replyText(replies, 1);
-    assert.match(selected, /เลือกภาราดร/u);
-    assert.doesNotMatch(selected, /เลือกทองไทย/u);
+    assert.match(selected, /เลือกน้องภาราดร/u);
+    assert.doesNotMatch(selected, /เลือกน้องทองไทย/u);
 
     await callLine('ทำมา-ชาติอยู่ที่ไหน', userId);
     const location = replyText(replies, 2);

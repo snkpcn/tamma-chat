@@ -147,7 +147,7 @@ test('2. "อยากขี่ม้า" then "เอาทองไทย" sel
     await callLineWebhook([privateEvent('อยากขี่ม้า', userId)]);
     await callLineWebhook([privateEvent('เอาทองไทย', userId)]);
     const text = replies[1].messages.map(m => m.text ?? '').join(' ');
-    assert.match(text, /เลือกทองไทย/u);
+    assert.match(text, /เลือกน้องทองไทย/u);
     assert.doesNotMatch(text, /หรือเรียกทองไทยผู้ช่วยแชท/u);
   });
 });
@@ -158,7 +158,7 @@ test('3. "อยากขี่ม้า" then "จะขี่ทองไท�
     await callLineWebhook([privateEvent('อยากขี่ม้า', userId)]);
     await callLineWebhook([privateEvent('จะขี่ทองไทย', userId)]);
     const text = replies[1].messages.map(m => m.text ?? '').join(' ');
-    assert.match(text, /เลือกทองไทย/u);
+    assert.match(text, /เลือกน้องทองไทย/u);
     assert.doesNotMatch(text, /หรือเรียกทองไทยผู้ช่วยแชท/u);
   });
 });
@@ -174,7 +174,7 @@ test('5. "จะขี่ทองไทย" with NO prior context: explicit rid
   await withHarnessAndLine(async (_harness, replies) => {
     await callLineWebhook([privateEvent('จะขี่ทองไทย', 'prod-gap-user-5')]);
     const text = replies[0].messages.map(m => m.text ?? '').join(' ');
-    assert.match(text, /เลือกทองไทย/u);
+    assert.match(text, /เลือกน้องทองไทย/u);
     assert.doesNotMatch(text, /หรือเรียกทองไทยผู้ช่วยแชท/u);
   });
 });

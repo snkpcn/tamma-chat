@@ -98,7 +98,13 @@ function hasStandaloneTransactionRequest(message:string):boolean {
   // Conversational task control ("กลับมาจอง...ต่อ") resumes state; it is not
   // a new commitment. Questions and explicit negation remain read-only.
   if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
-  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้)?\s*(?:จอง|สั่ง)|ยกเลิก/u.test(message)) return false;
+  // "ไม่ต้องจอง"/"ยังไม่ต้องจอง" (don't need to book yet) is a real, common
+  // production phrasing distinct from "ไม่จอง"/"ไม่ได้จอง" -- the "ต้อง" in
+  // the middle previously fell outside this alternation's fixed word set
+  // and this whole message was silently treated as a real commit request.
+  // "ไว้ก่อน" ("hold off for now") is the other real production phrasing
+  // for the exact same "preference only, not a commitment yet" meaning.
+  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้|ต้อง)?\s*(?:จอง|สั่ง)|ยกเลิก|ไว้ก่อน/u.test(message)) return false;
   if (QUESTION_MARKER_RE.test(message)) return false;
   return true;
 }
@@ -126,16 +132,51 @@ const ASSET_NEGATION_BEFORE_NAME_RE = NEGATION_BEFORE_NAME_RE;
 // hasStandaloneTransactionRequest above already uses, not a phrase specific
 // to this one name -- so it protects both listed assets and any future one
 // added to the same lexicon.
+// "Reject X, give me the other one" ("ไม่เอาทองไทยนะครับ เอาอีกตัว", "ไม่เอา
+// ภาราดร ขออีกตัว"). Safe to resolve deterministically ONLY because the
+// activity-asset catalog is a small, exhaustively enumerable set (exactly
+// 2 named horses today) -- "the other one" is unambiguous purely because
+// there is exactly one other member left once the named one is excluded.
+// The resolution below re-checks that count at match time (siblings.length
+// === 1), so it automatically declines rather than guessing the moment a
+// 3rd asset is ever added to the same resourceCode group.
+const OTHER_KNOWN_ASSET_REFERENCE_RE = /อีกตัว|ตัวอื่น|ตัวที่เหลือ|ตัวที่ไม่ใช่/u;
+
 export function findKnownActivityAssetSelection(message: string): typeof ACTIVITY_ASSET_SELECTIONS[number] | null {
   if (QUESTION_MARKER_RE.test(message)) return null;
+  const negated: { item: typeof ACTIVITY_ASSET_SELECTIONS[number]; index: number }[] = [];
   const accepted = ACTIVITY_ASSET_SELECTIONS.flatMap(item => {
     const match = item.pattern.exec(message);
     if (!match) return [];
     const before = message.slice(Math.max(0, match.index - 12), match.index);
-    if (ASSET_NEGATION_BEFORE_NAME_RE.test(before)) return [];
+    if (ASSET_NEGATION_BEFORE_NAME_RE.test(before)) { negated.push({ item, index: match.index }); return []; }
     return [{ item, index:match.index }];
   });
-  if (!accepted.length) return null;
+  if (!accepted.length) {
+    // Callers (e.g. thongthai-chat.ts's activityBookingFallbackDraft) can
+    // pass a MULTI-TURN joined history blob, not just the current single
+    // message. Without a proximity check, a negation from one turn and an
+    // unrelated "the other one" mention from a LATER, separate turn could
+    // combine into a selection neither turn actually stated together --
+    // real regression this guards against: turn 1 rejects ทองไทย for an
+    // unrelated reason, turn 2 (a totally different conditional statement)
+    // happens to contain "อีกตัว", and the two get glued into a false
+    // "resolve to ภาราดร". Requiring the reference to sit in the SAME
+    // clause (no newline between them, a short character window) keeps
+    // this to the genuine single-utterance case the fallback exists for.
+    const otherMatch = negated.length === 1 ? OTHER_KNOWN_ASSET_REFERENCE_RE.exec(message) : null;
+    if (otherMatch) {
+      const start = Math.min(negated[0]!.index, otherMatch.index);
+      const end = Math.max(negated[0]!.index, otherMatch.index);
+      const between = message.slice(start, end);
+      if (!between.includes('\n') && between.length <= 30) {
+        const siblings = ACTIVITY_ASSET_SELECTIONS.filter(item =>
+          item.resourceCode === negated[0]!.item.resourceCode && item !== negated[0]!.item);
+        if (siblings.length === 1) return siblings[0]!;
+      }
+    }
+    return null;
+  }
 
   // In a correction the human often states OLD choice first and NEW choice
   // after the correction clause ("had A, changed to B"). The last accepted

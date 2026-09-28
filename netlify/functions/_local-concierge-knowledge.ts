@@ -111,7 +111,18 @@ export type HorseFact = {
   personalityTh: string;
 };
 
+// Owner-required customer-facing display names ("น้องทองไทย"/"น้องภาราดร") --
+// this is the ONLY place that decides how a horse's name is shown to a
+// customer. The bare forms ('ทองไทย'/'ภาราดร') remain the internal
+// identifier used everywhere else (ACTIVITY_ASSET_SELECTIONS in
+// _deterministic-semantic-turn.ts, task.slots.horseName/assetSelection,
+// booking tool args, and the large existing test surface asserting those
+// exact values) -- deliberately NOT renamed here, since that key is a real
+// transactional/storage contract, not display text. Every caller of
+// HORSE_FACTS composes customer-visible text only, so changing `.name`
+// here is the single edit that fixes "horse names are confused" at the
+// source instead of patching each response string separately.
 export const HORSE_FACTS: Record<'thongthai' | 'pharadon', HorseFact> = {
-  thongthai: { name: 'ทองไทย', rideFeelTh: 'ขี่กระด้างกว่านิดนึง', personalityTh: 'ขี้เล่นน่ารัก' },
-  pharadon: { name: 'ภาราดร', rideFeelTh: 'ขี่นิ่มกว่านิดหน่อย', personalityTh: 'ขี้เล่นน่ารัก' },
+  thongthai: { name: 'น้องทองไทย', rideFeelTh: 'ขี่กระด้างกว่านิดนึง', personalityTh: 'ขี้เล่นน่ารัก' },
+  pharadon: { name: 'น้องภาราดร', rideFeelTh: 'ขี่นิ่มกว่านิดหน่อย', personalityTh: 'ขี้เล่นน่ารัก' },
 };

@@ -20,6 +20,7 @@ export type CareContextCategory =
   | 'low_walking'
   | 'child_activity'
   | 'elderly_activity_suitability'
+  | 'elderly_stay_practical_care'
   | 'child_food_constraint';
 
 export type CareContextMatch = {
@@ -44,6 +45,13 @@ const MOBILITY_MARKER = /ไม่อยากเดินเยอะ|เดิ
 const ACTIVITY_INTEREST_MARKER = /อยากทำกิจกรรม|อยากเล่น|อยากลอง/u;
 const SUITABILITY_QUESTION_MARKER = /ได้ไหม|เหมาะไหม|เหมาะกับ/u;
 const FOOD_CONSTRAINT_MARKER = /ไม่กินเผ็ด|ไม่ทานเผ็ด|แพ้อาหาร|ไม่กินปลาร้า/u;
+// "พาผู้สูงอายุมาพักด้วย" -- a STAY (not activity) context, so
+// elderly_activity_suitability's own named-activity requirement never
+// fires here. GENERAL_CARE_QUESTION_MARKER catches the open "is there
+// anything I should know/watch for" phrasing on its own, even with no
+// explicit stay word, since that's still a real, answerable care question.
+const ELDERLY_STAY_CONTEXT_MARKER = /พัก|ที่พัก|เฮือน|ห้องพัก|มาพัก|มานอน/u;
+const GENERAL_CARE_QUESTION_MARKER = /ควรรู้|ควรระวัง|ต้องระวัง|ข้อควรระวัง|เป็นพิเศษ/u;
 
 const ACTIVITY_LABELS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
   { pattern: /ขี่ม้า|ม้า/u, label: 'ขี่ม้า' },
@@ -84,6 +92,18 @@ export function classifyCareContext(message: string): CareContextMatch | null {
     if (activityLabel) {
       return { category: 'elderly_activity_suitability', elderlyCompanionLabel, activityLabel };
     }
+  }
+
+  // Elderly + staying, or a general "should I know/watch for anything"
+  // question with no named activity -- e.g. "ถ้าพาผู้สูงอายุมาพักด้วย มีอะไร
+  // ที่ควรรู้หรือควรระวังเป็นพิเศษไหมครับ". Real production incident this
+  // closes: this fell through every category above (no named activity, no
+  // mobility statement, no family word) all the way to the generic "no
+  // confirmed policy data" fallback -- honest about missing a formal
+  // policy document, but useless as the WHOLE answer to a genuine care
+  // question the team can actually help with.
+  if (hasElderlyCompanion && (ELDERLY_STAY_CONTEXT_MARKER.test(text) || GENERAL_CARE_QUESTION_MARKER.test(text))) {
+    return { category: 'elderly_stay_practical_care', elderlyCompanionLabel, activityLabel: null };
   }
 
   // Child + wanting to do an activity -- e.g. "มากับเด็ก อยากทำกิจกรรม".
@@ -155,6 +175,24 @@ export function composeElderlyActivitySuitabilityResponse(match: CareContextMatc
   ].join('\n');
 }
 
+// No per-facility accessibility fields (parking distance, step counts,
+// etc.) are actually verified in any backoffice source today -- inventing
+// specific claims like that would violate this codebase's own no-
+// fabrication rule. This stays useful without them: it names the REAL
+// concrete things a host would flag (uneven ground, stairs, heat, pacing),
+// offers to relay the concern to staff ahead of arrival, and asks one
+// targeted follow-up -- honest AND helpful, instead of a dead-end
+// disclaimer.
+export function composeElderlyStayPracticalCareResponse(match: CareContextMatch): string {
+  const who = match.elderlyCompanionLabel ?? 'ผู้สูงอายุ';
+  return [
+    `ดูแล${who}ได้แน่นอนครับ 😊 พื้นที่บางจุดเป็นทางเดินธรรมชาติ/มีบันไดบ้าง และช่วงกลางวันอากาศค่อนข้างร้อน ทองไทยแนะนำเดินช้า ๆ พักเป็นระยะ`,
+    'บอกทีมงานล่วงหน้าได้เลยครับ ทีมจะช่วยเตรียมจุดพัก/เส้นทางที่เดินสบายที่สุดให้ก่อนถึงหน้างาน',
+    '',
+    `${who}เดินขึ้นลงบันไดสะดวกไหมครับ หรือมีเรื่องสุขภาพที่อยากให้ทีมงานรู้ไว้ก่อนไหม`,
+  ].join('\n');
+}
+
 export function composeChildFoodConstraintResponse(): string {
   return [
     'ได้เลยครับ 😊 มีเด็กมาด้วย ทองไทยแนะนำเมนูรสอ่อน ไม่เผ็ด ให้เด็กทานได้สบายครับ',
@@ -169,6 +207,7 @@ export function composeCareContextResponse(match: CareContextMatch): string {
     case 'low_walking': return composeLowWalkingResponse(match);
     case 'child_activity': return composeChildActivityResponse();
     case 'elderly_activity_suitability': return composeElderlyActivitySuitabilityResponse(match);
+    case 'elderly_stay_practical_care': return composeElderlyStayPracticalCareResponse(match);
     case 'child_food_constraint': return composeChildFoodConstraintResponse();
   }
 }
