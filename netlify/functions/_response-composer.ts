@@ -35,7 +35,7 @@ import {
   renderJourneyPlan,
 } from './_human-grounded-response';
 
-export const RESPONSE_COMPOSER_VERSION = 'response-composer-v1';
+export const RESPONSE_COMPOSER_VERSION = 'response-composer-v2';
 const MAX_FACTS_IN_PROMPT = 100;
 const PRICE_QUESTION_RE = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/iu;
 const HOW_IT_WORKS_RE = /(?:ยังไง|อย่างไร|ไง|วิธี|ทำยังไง|เล่นยังไง|ขี่.*ไง)/iu;
