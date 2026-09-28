@@ -676,6 +676,29 @@ function mergeSafeDeterministicSlots(
   return {...turn,entities};
 }
 
+function taskGroundedReadOnlyClarificationCanResolve(
+  modelTurn: SemanticTurn,
+  deterministic: SemanticTurn | null,
+  taskState: TaskStateContainer,
+): boolean {
+  const task = taskState.activeTask;
+  if (!task || !deterministic) return false;
+  if (!modelTurn.needsClarification || deterministic.needsClarification) return false;
+  if (modelTurn.domain !== task.domain || deterministic.domain !== task.domain) return false;
+  if (!LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(modelTurn.action)
+      || !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)) return false;
+  if (!deterministic.constraints.includes('no_transaction')) return false;
+
+  // Evidence must come from the live working task itself. Comparing values,
+  // rather than raw slot names, keeps this generic across domains while
+  // refusing to invent a referent that is absent from task state.
+  const taskValues = Object.values(task.slots)
+    .filter(value => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
+  const deterministicValues = Object.values(deterministic.entities)
+    .filter(value => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean');
+  return deterministicValues.some(value => taskValues.includes(value));
+}
+
 function modelRefinementIsUsable(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
@@ -758,6 +781,22 @@ async function resolveSemanticTurn(
     });
     const correctionReconciledTurn = reconcileSafeConversationalCorrectionDomain(rawModelTurn, deterministic);
     const modelTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
+
+    // A language model may correctly understand the conditional structure yet
+    // ask to clarify "ตัวนั้น" because it cannot see a legacy task slot under
+    // the same lexical name. If the deterministic candidate is READ-ONLY,
+    // explicitly no-transaction, and contains a value that is literally
+    // present in the live ActiveTask, the working state is stronger evidence
+    // than a redundant clarification. This never upgrades a mutation.
+    if (taskGroundedReadOnlyClarificationCanResolve(modelTurn, deterministic, taskState)) {
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'task_grounded_read_only_reference_resolution',
+        deterministic_turn: true,
+        model_call_used: true,
+        deterministic_intent: deterministic!.intent,
+      }));
+      return { ...deterministic!, semanticSource:'deterministic_fallback' };
+    }
 
     if (!modelRefinementIsUsable(modelTurn, deterministic)) {
       if (deterministic) {
