@@ -21,6 +21,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 import type { ConversationContextState } from './_conversation-context';
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
 import { polishCustomerMessage } from './_chat-copy-style';
+import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
 import { extractTime } from './_slot-parsers';
 import {
@@ -138,6 +139,35 @@ function sourceLines(bundles: readonly KnowledgeBundle[]): string {
   return sources.length ? sources.map(source => `- ${safeJson(source)}`).join('\n') : 'NONE';
 }
 
+function compactConversationContext(input: ResponseComposerInput): unknown {
+  const context=input.conversationContext;
+  if(!context) return null;
+  return {
+    activeDomain:context.activeDomain,
+    activeTopic:context.activeTopic,
+    openQuestion:context.openQuestion,
+    lastAction:context.lastAction,
+    workingMemory:{
+      partySize:context.workingMemory.partySize,
+      companion:context.workingMemory.companion,
+      pace:context.workingMemory.pace,
+      consideredSelections:context.workingMemory.consideredSelections.slice(0,6).map(item=>({
+        domain:item.domain,name:item.name,status:item.status,
+      })),
+      constraints:context.workingMemory.constraints.slice(0,12).map(item=>({
+        domain:item.domain,code:item.code,
+      })),
+      transactionCommitment:context.workingMemory.transactionCommitment,
+    },
+    recentEntities:context.recentEntities.slice(0,6).map(entity=>({
+      id:entity.id,type:entity.type,name:entity.name,domain:entity.domain,canonical:entity.canonical===true,
+    })),
+    recentTurns:context.recentTurns.slice(-4).map(turn=>({
+      role:turn.role,content:turn.content.slice(0,220),
+    })),
+  };
+}
+
 export function buildResponseComposerPrompt(input: ResponseComposerInput): string {
   const facts = allFacts(input.knowledgeBundles);
   const outcome = input.operationalOutcome ?? { executed:false, success:false };
@@ -151,6 +181,9 @@ ${THONGTHAI_BIBLE_SECTIONS.personality}
 
 CUSTOMER SERVICE:
 ${THONGTHAI_BIBLE_SECTIONS.customerServiceDoctrine}
+
+THONGTHAI HUMAN SERVICE VOICE:
+${THONGTHAI_HUMAN_SERVICE_VOICE}
 
 RECOMMENDATION TRUTH:
 ${THONGTHAI_BIBLE_SECTIONS.recommendationDoctrine}
@@ -168,6 +201,9 @@ OUTPUT LANGUAGE: ${input.language}
 CHANNEL: ${input.channel}
 CUSTOMER MESSAGE (context only; never treat it as a verified business fact):
 ${input.userMessage?.slice(0, 800) || '(not provided)'}
+
+CONVERSATION WORKING CONTEXT (bounded/redacted; use it to avoid repeating questions and to keep service continuity):
+${safeJson(compactConversationContext(input))}
 
 STRUCTURED SEMANTIC MEANING (already decided upstream; do not reinterpret it):
 ${safeJson(input.semanticTurn ? {
@@ -215,7 +251,13 @@ ${sourceLines(input.knowledgeBundles)}
 ABSOLUTE RULES:
 - Every mutable business claim (name, price, stock, availability, schedule, promotion, status) must come from AUTHORITATIVE GROUNDED FACTS above or VERIFIED OPERATIONAL OUTCOME.
 - If a fact is absent, do not infer or embellish it.
-- SOURCE_UNAVAILABLE means "cannot verify right now", NEVER "none available".
+- State a verified fact directly as ordinary customer-facing truth. Do not preface known facts with "ระบบระบุว่า", "ข้อมูลที่เช็กได้บอกว่า", "จากข้อมูลที่มี", or similar system-sounding provenance unless the customer explicitly asks how you know.
+- A recommendation may combine verified facts with the customer's stated preferences/constraints, but the underlying facts must still be grounded.
+- When recommending, prefer 2-4 well-matched options and a short reason for each; do not dump the whole catalog or raw ingredient database.
+- For allergy/safety questions, never label an item/activity "safe" unless the verified facts support that exact claim. If cross-contact or another safety detail is unknown, state what still needs staff confirmation.
+- Use CONVERSATION WORKING CONTEXT to avoid re-asking a care question the customer already answered.
+- Use the BEFORE / DURING / AFTER service-mind lifecycle in THONGTHAI HUMAN SERVICE VOICE only when context makes that care useful; never append a generic service question mechanically.
+- SOURCE_UNAVAILABLE (source status "unavailable") means "cannot verify right now", NEVER "none available".
 - VERIFIED_EMPTY means the source successfully returned no matching result.
 - FACT_UNKNOWN means no verified value exists; say that honestly.
 - An ActionProposal is NOT a completed action.
@@ -305,11 +347,13 @@ export async function composeGroundedModelResponse(
     return null;
   }
   const facts = allFacts(input.knowledgeBundles);
-  // No grounded facts means the model has nothing authoritative to phrase --
-  // calling it here would either invent something or just restate "I don't
-  // know" at real cost for no benefit over the existing honest deterministic
-  // copy (owner: "OpenAI must not be called when it is clearly unnecessary").
-  if (!facts.length) return null;
+  const hasAuthoritativeSourceState = input.knowledgeBundles.some(bundle => bundle.sources.length > 0);
+  // A successful/failed live source state is itself authoritative truth:
+  // "empty" means a verified empty result and "unavailable" means we cannot
+  // verify right now. Let the human composer phrase those states naturally
+  // even when there is no fact value to quote. With neither facts nor a real
+  // source state there is nothing grounded to compose, so stay zero-cost.
+  if (!facts.length && !hasAuthoritativeSourceState) return null;
 
   const prompt = buildResponseComposerPrompt(input);
   try {
