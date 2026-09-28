@@ -29,6 +29,17 @@ test('commitmentLevel is explicit_transaction only for book/order or an explicit
   assert.equal(deriveSemanticMeaning(turn({ action: 'cancel' })).commitmentLevel, 'none');
 });
 
+test('conversationalMode is the closed CHAT/ASK/DISCOVER/CONSIDER/COMMIT/INCIDENT contract', () => {
+  assert.equal(deriveSemanticMeaning(turn({ domain: 'general', action: 'unknown', speechAct: 'social' })).conversationalMode, 'CHAT');
+  assert.equal(deriveSemanticMeaning(turn({ action: 'ask' })).conversationalMode, 'ASK');
+  assert.equal(deriveSemanticMeaning(turn({ action: 'status', informationNeed: 'availability' })).conversationalMode, 'ASK');
+  assert.equal(deriveSemanticMeaning(turn({ action: 'recommend' })).conversationalMode, 'DISCOVER');
+  assert.equal(deriveSemanticMeaning(turn({ action: 'provide_information', speechAct: 'preference_update', constraints: ['low_exertion'] })).conversationalMode, 'CONSIDER');
+  assert.equal(deriveSemanticMeaning(turn({ action: 'confirm', speechAct: 'selection' })).conversationalMode, 'CONSIDER');
+  assert.equal(deriveSemanticMeaning(turn({ action: 'book', speechAct: 'transaction_request' })).conversationalMode, 'COMMIT');
+  assert.equal(deriveSemanticMeaning(turn({ domain: 'incident', action: 'provide_information', speechAct: 'incident_report' })).conversationalMode, 'INCIDENT');
+});
+
 // Human Core PR C1: real semantic scope understanding, using the exact
 // example utterances from the mandate. Each is expressed here as the
 // SemanticTurn shape the real model/deterministic layer would already

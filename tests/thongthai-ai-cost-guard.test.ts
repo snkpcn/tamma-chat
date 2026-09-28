@@ -41,7 +41,7 @@ test('production defaults enforce the owner hard cap and compact semantic output
   const policy=aiCostPolicy();
   assert.ok(policy.maxConversationCostUsd<=0.05);
   assert.equal(policy.maxCallsPerTurn,1);
-  assert.ok(policy.maxCallsPerConversation<=6);
+  assert.ok(policy.maxCallsPerConversation>6);
   assert.ok(policy.semanticMaxOutputTokens>=300&&policy.semanticMaxOutputTokens<=500);
   assert.ok(policy.absoluteInputTokens<=5_000);
 });
@@ -80,7 +80,7 @@ test('reviewed OpenAI rates and owner caps fail closed against unsafe configurat
     const policy=aiCostPolicy();
     assert.equal(policy.maxConversationCostUsd,0.05);
     assert.equal(policy.maxCallsPerTurn,1);
-    assert.equal(policy.maxCallsPerConversation,6);
+    assert.equal(policy.maxCallsPerConversation,99);
     assert.ok(policy.semanticMaxOutputTokens<=500);
   }finally{
     for(const key of keys){

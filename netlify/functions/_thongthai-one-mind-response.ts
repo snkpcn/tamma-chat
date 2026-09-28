@@ -40,6 +40,7 @@ import {
   compareAndSwapGuestAgentState,
   loadGuestAgentStateSnapshot,
 } from './_guest-agent-state-store';
+import { deriveSemanticMeaning } from './_semantic-meaning';
 
 export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
@@ -149,6 +150,14 @@ export function readOnlyCutoverEligibility(
       && isGenuinelyUnclassifiedFallback(turn)
       && turn.semanticTurn.domain === 'unknown') {
     return { eligible:false, reason:'transactional_or_task_turn' };
+  }
+  const meaning = deriveSemanticMeaning(turn.dialogSemanticTurn ?? turn.semanticTurn);
+  if (meaning.conversationalMode === 'CHAT'
+      || meaning.conversationalMode === 'ASK'
+      || meaning.conversationalMode === 'DISCOVER'
+      || meaning.conversationalMode === 'CONSIDER'
+      || meaning.conversationalMode === 'INCIDENT') {
+    return { eligible:true };
   }
   if (READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
       && !turn.taskStateBefore.activeTask
