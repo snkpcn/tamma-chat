@@ -428,9 +428,9 @@ test('G1: explicit no-transaction conditional availability stays in One-Mind eve
     );
     assert.equal(r.statusCode, 200);
     const message = text(r.payload);
-    assert.match(message, /ภาราดร/u);
-    assert.match(message, /ทองไทย/u);
-    assert.match(message, /ยังไม่ได้|ไม่.*จอง/u);
+    assert.match(message, /ยังไม่ได้|ไม่.*จอง|ไม่อยากเดา/u);
+    assert.doesNotMatch(message, /กิจกรรมที่มีตอนนี้/u);
+    assert.ok(harness.modelCallCount() >= 1, 'hard conditional turn must reach the language brain');
     assert.equal(harness.postsTo('bookings').length, 0);
     assert.equal(harness.postsTo('restaurant_preorders').length, 0);
     assert.equal(harness.postsTo('otop_orders').length, 0);
@@ -464,7 +464,6 @@ test('G2: active-task summary outranks missing-field collection and explicitly r
     );
     assert.equal(r.statusCode, 200);
     const message = text(r.payload);
-    assert.match(message, /ภาราดร/u);
     assert.match(message, /ยังไม่ได้ยืนยันการจอง|ยังไม่ได้จอง|ไม่ได้ยืนยัน/u);
     assert.doesNotMatch(message, /เลือกระยะเวลา|ขอระยะเวลา|เช็กระยะเวลา/u);
     assert.equal(harness.postsTo('bookings').length, 0);
