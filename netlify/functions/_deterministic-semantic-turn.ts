@@ -153,7 +153,7 @@ export function findKnownActivityAssetSelection(message: string): typeof ACTIVIT
 function isInventoryCountQuestion(message: string): boolean {
   // Generic quantity-question structure, not a phrase answer table. The
   // activity topic itself comes from the canonical ecosystem graph above.
-  return /(?:กี่(?:ตัว|คัน|ชุด|อัน|รายการ)?|จำนวน(?:เท่าไร|เท่าไหร่|กี่)|มีกี่)/u.test(message);
+  return /(?:กี่(?:ตัว|คัน|ชุด|อัน|รายการ)|จำนวน(?:เท่าไร|เท่าไหร่|กี่)|มีกี่(?=$|[\s?？]|ครับ|คะ|ค่ะ)|มีกี่(?:ตัว|คัน|ชุด|อัน|รายการ))/u.test(message);
 }
 
 /** "ร้าน...กิน/อาหาร/เมนู" -- a restaurant-topic marker, reusing the SAME
@@ -266,6 +266,22 @@ function detectCrossDomainTopicSwitch(message: string, now: Date = new Date()): 
     return {
       domain: 'restaurant', intent: 'restaurant_topic_switch', action: 'discover',
       entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
+  }
+  // Checked BEFORE the broader stay-topic-switch fallback below: a bare
+  // check-in/check-out TIME question is a single fixed organization fact
+  // (see STAY_CHECKIN_CHECKOUT_TIME_MARKER's own comment) -- true even while
+  // an unrelated task (e.g. an active horse booking) is still current.
+  // Without this, an active cross-domain task made this exact-fact case fall
+  // back to the coarser stay_topic_switch (a COARSE_READ_ONLY_INTENTS
+  // member, which spends a real model call every time), even though nothing
+  // about the customer's meaning here is actually ambiguous.
+  if (STAY_CHECKIN_CHECKOUT_TIME_MARKER.test(message)
+      && !extractDate(message, now)
+      && !extractPartySize(message)) {
+    return {
+      domain: 'stay', intent: 'stay_checkin_checkout_time_lookup', action: 'ask',
+      entities: {}, references: [], constraints: [], confidence: 0.95, needsClarification: false,
     };
   }
   if (findStayTopic(message)) {

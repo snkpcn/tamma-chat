@@ -809,7 +809,11 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   const isTaskUnrelatedTurn = hasOpenTask
     && !contributesToTask
     && !isTaskSideQuestion
-    && !customerCommitPresent
+    // Only the CURRENT utterance can make an otherwise-unrelated turn belong
+    // to the task. A historical commitmentIntent may keep the task alive for
+    // transaction lifecycle purposes, but it must never hijack a new general
+    // preference/care statement into stale missing-field collection.
+    && !currentTurnCommit
     && turn.action !== 'cancel';
 
   const namedActivitySelectionUpdate =

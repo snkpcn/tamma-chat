@@ -795,7 +795,20 @@ function modelRefinementIsUsable(
       && turn.confidence >= 0.6;
   }
 
-  if (turn.domain === 'unknown' || turn.action === 'unknown' || turn.confidence < 0.7) {
+  // A genuinely read-only action (ask/discover/recommend/compare/status)
+  // carries none of the risk a write-capable guess does -- the safety
+  // boundary below already independently blocks any escalation into a
+  // mutating action regardless of confidence. Real production evidence
+  // (live-openai-language CI): a correctly-understood compound turn
+  // (interest + an embedded exclusion + a conditional fallback, all in one
+  // sentence) legitimately scores the model's own confidence lower than a
+  // single-clause turn, even when the classification is right -- rejecting
+  // it here fell back to the coarse keyword-only deterministic layer, which
+  // has no negation/exclusion handling at all and silently dropped the
+  // customer's stated exclusion. Do not require read-only understanding to
+  // clear the same bar a write-capable guess must.
+  const confidenceFloor = LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action) ? 0.5 : 0.7;
+  if (turn.domain === 'unknown' || turn.action === 'unknown' || turn.confidence < confidenceFloor) {
     return false;
   }
 

@@ -100,7 +100,10 @@ test('reviewed OpenAI rates and owner caps fail closed against unsafe configurat
 
 test('semantic prompt is relevance-based and stays inside normal/complex token targets',()=>{
   const normal=buildProductionSemanticInterpreterPrompt(emptySemanticContext(),'แถวนี้มีอะไรน่าสนใจบ้าง');
-  assert.ok(estimateInputTokens([normal,'แถวนี้มีอะไรน่าสนใจบ้าง'])<=2_500);
+  // Target raised alongside the shared Thongthai human-service voice
+  // contract (owner-required persona block on every call, not bloat) --
+  // see DEFAULT_NORMAL_SEMANTIC_INPUT_TOKENS's own comment.
+  assert.ok(estimateInputTokens([normal,'แถวนี้มีอะไรน่าสนใจบ้าง'])<=4_200);
 
   const context:SemanticContext={
     activeDomain:'activity',
@@ -128,7 +131,7 @@ test('semantic prompt is relevance-based and stays inside normal/complex token t
     },
   };
   const complex=buildProductionSemanticInterpreterPrompt(context,'กลับไปเรื่องเดิม แต่ขอเปลี่ยนเป็นพรุ่งนี้ช่วงเย็นนะ');
-  assert.ok(estimateInputTokens([complex,'กลับไปเรื่องเดิม แต่ขอเปลี่ยนเป็นพรุ่งนี้ช่วงเย็นนะ'])<=4_000);
+  assert.ok(estimateInputTokens([complex,'กลับไปเรื่องเดิม แต่ขอเปลี่ยนเป็นพรุ่งนี้ช่วงเย็นนะ'])<=6_200);
 });
 
 test('at least twenty deterministic/context-safe customer turns use zero paid calls',()=>{

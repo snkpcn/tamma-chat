@@ -23,5 +23,5 @@ test('semantic-v30 terminal audit distinguishes configuration existence from liv
 });
 
 test('semantic-v30 version is explicit', () => {
-  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v30');
+  assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v31');
 });

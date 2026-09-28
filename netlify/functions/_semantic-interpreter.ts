@@ -30,8 +30,9 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // is a plain generated data module with zero imports of its own, so importing
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
+import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v30';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
@@ -704,6 +705,11 @@ Core rules:
 - When the customer explicitly contrasts two or more known alternatives against a criterion, action=compare (informationNeed may be recommendation). Use action=recommend for open-ended suggestions without a fixed comparison set.
 - Domain nouns identify subject; preserve the actual predicate, dates, times, party size, constraints, negation, and stated preferences.
 - Preserve all meaningful clauses in compound turns; do not drop later constraints, corrections, or fallback questions.
+- A negated entity ("ไม่เอา X", "ไม่ใช่ X") stated ANYWHERE in the turn, even as one clause of a longer compound request, must still surface: emit a references entry {type:"excluded_entity", value:X, refersToPriorContext:false} and never let X be treated as chosen or recommended.
+- If the customer names an entity while explicitly retracting it ("เมื่อกี้บอกว่าเอา X เปลี่ยนใจ...", "ไม่เอา X แล้ว") and also states a different, later choice in the SAME turn, only the later choice is the current selection; the retracted name is context, never entities/references' resolved value.
+- "the one you said was Y" (e.g. "ตัวที่บอกว่านิ่งกว่า", "อันที่แนะนำว่า Y") refers to Thongthai's OWN prior recommendation. Check recentTurns (assistant messages) and lastRecommendationReference for which entity was described as Y; if exactly one recentEntity matches that description, resolve and name it directly as the entity value -- do not leave entities empty and force a re-ask when the recent assistant turns already contain the answer.
+- A multi-day/multi-stop plan that mentions several business areas in one turn (stay + activity + food + shopping, e.g. "พักสองคืน...วันแรกขี่ม้า...วันที่สองกินข้าว...") is domain=journey, not whichever single area is named first in the sentence.
+- A broad new request (e.g. "มีอะไรทำได้บ้าง", a general recommendation/discovery ask) is its own current topic. A specific entity discussed earlier (even the same conversation's own name, e.g. a horse called "ทองไทย") does NOT make this ambiguous or require clarification -- only clarify when the CURRENT wording itself contains an unresolvable reference (e.g. "ตัวนั้น", "เหมือนเดิม").
 - A customer merely reporting their own plan, pause, state, or situation is speechAct=statement. Use request/request_help only when they ask the assistant or organization to do something.
 - If the customer retracts/corrects inferred intent (e.g. only asking, NOT booking/order/confirming), use speechAct=correction; keep it read-only.
 - A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
@@ -715,8 +721,12 @@ Today in Bangkok: ${currentBangkok}
 Relevant organization vocabulary: ${vocabulary.length ? vocabulary.join('; ') : 'none needed'}
 Bounded context: ${JSON.stringify(compactContext)}
 
+THONGTHAI CUSTOMER VOICE:
+${THONGTHAI_HUMAN_SERVICE_VOICE}
+
 reply:
 - Thai customer-facing draft in Thongthai's voice.
+- Follow THONGTHAI CUSTOMER VOICE for acknowledgements, preferences, corrections, consideration, and clarification. Do not sound like a classifier or policy bot.
 - Use it for casual chat, preferences, consideration, corrections, acknowledgements, and one natural clarification.
 - Leave reply="" when verified truth is needed: price, availability, inventory, booking/order/payment status, promotion eligibility, membership state, staff/owner dispatch, or incident case status.
 - Never claim notification, found item, refund/compensation, availability, booking/order submission without downstream verification.
