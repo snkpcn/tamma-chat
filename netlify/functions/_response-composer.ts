@@ -1065,7 +1065,12 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
     const considered = input.conversationContext?.workingMemory?.consideredSelections
       ?.filter(selection => selection.status === 'considering')
       .sort((a,b) => b.observedAt.localeCompare(a.observedAt))[0];
+    const contextDomain = input.conversationContext?.activeDomain
+      ?? (input.semanticTurn?.domain && input.semanticTurn.domain !== 'general' ? input.semanticTurn.domain : null);
+    const recentEntity = input.conversationContext?.recentEntities
+      ?.find(entity => !contextDomain || entity.domain === contextDomain);
     const entityName = considered?.name
+      ?? recentEntity?.name
       ?? firstCustomerFacingEntity(input.semanticTurn?.entities ?? {});
     if (input.language === 'th') {
       return entityName
