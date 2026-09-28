@@ -738,6 +738,48 @@ function mergeSafeDeterministicSlots(
   return {...turn,entities};
 }
 
+function normalizeExplicitNoTransactionAvailabilityRefinement(
+  turn: SemanticTurn,
+  deterministic: SemanticTurn | null,
+): SemanticTurn {
+  if (!deterministic
+      || !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+      || turn.domain !== deterministic.domain
+      || turn.informationNeed !== 'availability'
+      || turn.confidence < 0.9
+      || turn.needsClarification === true) {
+    return turn;
+  }
+
+  // A successful language-model pass may correctly understand every entity in
+  // a conditional availability question while labelling the conditional
+  // fallback ("if A is unavailable, B is okay") as planning/selection.  When
+  // the CURRENT turn also explicitly forbids a transaction, keep the model's
+  // richer entities/references/constraints but close the machine action back
+  // to the already-proven read-only deterministic action.  This is a
+  // de-escalation only: book/order/transaction_request are never normalized
+  // here and still fail the existing safety boundary below.
+  const explicitNoTransaction = [...turn.constraints, ...deterministic.constraints]
+    .some(value => /(?:no[_-]?(?:transaction|booking)|not[_-]?booking|do[_-]?not[_-]?book|ไม่จอง)/iu.test(value));
+  if (!explicitNoTransaction
+      || turn.action === 'book'
+      || turn.action === 'order'
+      || turn.speechAct === 'transaction_request') {
+    return turn;
+  }
+
+  const actionNeedsDeescalation = !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action);
+  const speechActNeedsDeescalation = turn.speechAct === 'selection';
+  if (!actionNeedsDeescalation && !speechActNeedsDeescalation) return turn;
+
+  return {
+    ...turn,
+    action: deterministic.action,
+    speechAct: 'question',
+    constraints: [...new Set([...turn.constraints, ...deterministic.constraints])],
+  };
+}
+
 function modelRefinementIsUsable(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
@@ -872,7 +914,8 @@ async function resolveSemanticTurn(
       },
     });
     const correctionReconciledTurn = reconcileSafeConversationalCorrectionDomain(rawModelTurn, deterministic);
-    const modelTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
+    const slotMergedTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
+    const modelTurn = normalizeExplicitNoTransactionAvailabilityRefinement(slotMergedTurn, deterministic);
 
     if (!modelRefinementIsUsable(modelTurn, deterministic)) {
       // "Not usable" means the model's STRUCTURED classification (domain/
