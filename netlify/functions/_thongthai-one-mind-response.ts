@@ -41,6 +41,7 @@ import {
   loadGuestAgentStateSnapshot,
 } from './_guest-agent-state-store';
 import { deriveSemanticMeaning } from './_semantic-meaning';
+import { persistAiResponseTurn } from './_ai-cost-store';
 
 export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
@@ -441,6 +442,23 @@ export async function processOneMindCustomerTurn(
     : null;
   const response = deterministicFastPath ?? membershipFastPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
   const composerMs = Date.now() - composerStartedAt;
+  await persistAiResponseTurn({
+    conversationId,
+    eventId:input.eventId,
+    channel:input.channel,
+    finalResponseSource:response.mode === 'model_grounded'
+      ? 'openai_grounded_response'
+      : response.mode === 'model'
+        ? 'openai_direct_response'
+        : 'deterministic_or_grounded_local',
+    modelReplyUsed:response.mode === 'model' || response.mode === 'model_grounded',
+    groundedKnowledgeSupplied:turn.groundedKnowledge.some(bundle=>bundle.facts.length>0),
+    zeroCostTurn:response.mode === 'deterministic' && turn.semanticTurn.semanticSource !== 'openai_supervisor',
+    environment:input.environment,
+    occurredAt:new Date().toISOString(),
+  }).catch(error=>{
+    console.error('AI_RESPONSE_TURN_PERSIST_ERROR',error instanceof Error?error.message.slice(0,180):'unknown');
+  });
   const assistantContextPersisted=await persistAssistantConversationTurn(
     input,turn,response,stateDependencies,new Date(now.getTime()+1),
   ).catch(error=>{
