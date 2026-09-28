@@ -705,7 +705,16 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.informationNeed === 'inventory' || turn.intent === 'activity_inventory_count') return [{ ...base, domain: 'activity', needs: ['inventory'] }];
       if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
       if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'activity', needs: ['booking_status'] }];
-      if (turn.action === 'compare' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
+      // A recommendation is about the CURRENT criteria, not the mere
+      // existence of a same-domain unfinished task. A stale horse task must
+      // never narrow "what light activities can my group do?" into horse
+      // entity details only. Fetch the verified activity catalog plus entity
+      // details for recommendation turns; the canonical scope firewall still
+      // limits which returned facts may be used.
+      if (turn.action === 'recommend' || turn.informationNeed === 'recommendation') {
+        return [{ ...base, domain:'activity', needs:['entity_details','catalog'] }];
+      }
+      if (turn.action === 'compare' || turn.action === 'ask') return [{ ...base, domain: 'activity', needs: task ? ['entity_details'] : ['entity_details', 'catalog'] }];
       if (turn.action === 'discover') return [{ ...base, domain: 'activity', needs: ['catalog'] }];
       // Authoritative resourceCode/duration resolution (see
       // _activity-catalog-policy.ts, applied in processDialogTurnDetailed
