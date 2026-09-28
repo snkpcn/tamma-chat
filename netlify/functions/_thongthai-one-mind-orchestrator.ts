@@ -866,6 +866,25 @@ async function resolveSemanticTurn(
     const modelTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
 
     if (!modelRefinementIsUsable(modelTurn, deterministic)) {
+      // "Not usable" means the model's STRUCTURED classification (domain/
+      // action/entities/references) is not trusted enough to drive task
+      // state or business routing -- it says nothing about whether the
+      // model's own natural-language `reply` is safe to show the customer.
+      // The model's prompt already constrains `reply` to never claim price,
+      // availability, booking/order/payment status, promotion eligibility,
+      // membership state, or incident status, and leaves it empty whenever
+      // verified business truth is required (see buildProductionSemantic-
+      // InterpreterPrompt's "reply:" section) -- so a non-empty reply is
+      // itself the model's own signal that this turn was conversation-safe.
+      // Discarding it here and manufacturing a robotic "clarification
+      // needed" instead was the single biggest source of the Language Brain
+      // going silent on casual chat, summaries, and state-recall questions:
+      // exactly the turns most likely to trip the classification-confidence
+      // checks in modelRefinementIsUsable while still having a perfectly
+      // good, safe reply already generated in the same call. Routing/task
+      // fields remain exactly as conservative as before this change -- only
+      // the customer-facing text is preserved when it exists.
+      const preservedReply = modelTurn.reply?.trim() || undefined;
       if (deterministic) {
         console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
           semantic_owner: 'deterministic_unusable_model_fallback',
@@ -873,24 +892,28 @@ async function resolveSemanticTurn(
           model_call_used: true,
           model_confidence: modelTurn.confidence,
           deterministic_intent: deterministic.intent,
+          model_reply_preserved: Boolean(preservedReply),
         }));
-        return { ...deterministic, semanticSource:'deterministic_fallback' };
+        return { ...deterministic, semanticSource:'deterministic_fallback', reply:preservedReply };
       }
 
       // No deterministic interpretation exists and the model result is not
       // strong enough to own state. Convert it to a read-only clarification:
-      // low confidence can never start/update/cancel a working task.
+      // low confidence can never start/update/cancel a working task. Its
+      // reply, if present, still rides along (see comment above).
       console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
         semantic_owner: 'clarification_untrusted_model',
         deterministic_turn: false,
         model_call_used: true,
         model_confidence: modelTurn.confidence,
+        model_reply_preserved: Boolean(preservedReply),
       }));
       return {
         semanticSource:'openai_supervisor',
         domain:taskState.activeTask?.domain ?? context.activeDomain ?? 'unknown',
         intent:'clarification_needed_untrusted_semantics',
         action:'ask',
+        reply:preservedReply,
         entities:{},
         references:[],
         constraints:[],
