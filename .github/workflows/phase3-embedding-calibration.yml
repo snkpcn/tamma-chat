@@ -11,6 +11,11 @@ name: Phase 3 Embedding Calibration (read-only, no schema change)
 # own safety pattern (paid OpenAI usage is never automatic on a normal push).
 on:
   workflow_dispatch:
+    inputs:
+      embedding_model:
+        description: 'OpenAI embedding model to calibrate (see THONGTHAI_EMBEDDING_MODEL)'
+        required: false
+        default: 'text-embedding-3-small'
 
 permissions:
   contents: read
@@ -37,4 +42,5 @@ jobs:
       - name: Run embedding calibration (read-only, ~a few hundred tokens)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THONGTHAI_EMBEDDING_MODEL: ${{ inputs.embedding_model }}
         run: npx tsx scripts/run-embedding-calibration.ts
