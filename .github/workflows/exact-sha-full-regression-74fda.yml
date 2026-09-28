@@ -1,0 +1,28 @@
+name: Exact SHA Full Regression 74fda
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/exact-sha-full-regression-74fda.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  full-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 74fda2b41cba900e8e30eefc37f63a1fe73da263
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Verify exact production SHA
+        run: test "$(git rev-parse HEAD)" = "74fda2b41cba900e8e30eefc37f63a1fe73da263"
+      - name: Run complete regression suite
+        run: npm test
