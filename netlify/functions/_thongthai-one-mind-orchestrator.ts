@@ -48,8 +48,8 @@ import {
 import { deriveDeterministicSemanticTurn } from './_deterministic-semantic-turn';
 import {
   matchLearnedConcept, loadActiveSemanticConcepts, recordSemanticConceptEvidence,
-  safeConceptEntities, companionConceptKeyForValue, MAX_MATCHABLE_MESSAGE_LENGTH,
-  SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS, claimWriteAttemptForEvent,
+  safeConceptEntities, companionConceptKeyForValue, paceConceptKeyForValue, MAX_MATCHABLE_MESSAGE_LENGTH,
+  SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS, claimWriteAttemptForEvent, type SemanticConceptKey,
 } from './_semantic-concept-memory';
 import { deriveSemanticMeaning, type SemanticMeaning } from './_semantic-meaning';
 import {
@@ -994,8 +994,23 @@ async function resolveSemanticTurn(
       && modelTurn.needsClarification !== true
       && !mutatingActions.has(modelTurn.action)
     ) {
+      // DIRECT SEMANTIC SUPERVISOR LEARNING: every concept class extracts
+      // its evidence from this SAME confirmed modelTurn -- never a second
+      // paid call, never a value outside each class's own closed vocabulary
+      // (companionConceptKeyForValue / paceConceptKeyForValue return null,
+      // and nothing is learned, for anything the supervisor did not commit
+      // to as one of the reviewed closed values). This is also the
+      // ambiguity-preserving behavior the mandate requires: if the
+      // supervisor's own answer for entities.companion was something like
+      // "close_person" (not one of partner/family/friends/solo) because the
+      // input was genuinely ambiguous, conceptKey is null here and nothing
+      // is over-canonicalized into the learning store.
       const companionValue = modelTurn.entities.companion ?? modelTurn.entities.companionType;
-      const conceptKey = typeof companionValue === 'string' ? companionConceptKeyForValue(companionValue) : null;
+      const companionConceptKey = typeof companionValue === 'string' ? companionConceptKeyForValue(companionValue) : null;
+      const paceValue = modelTurn.entities.pace ?? modelTurn.entities.exertionPreference;
+      const paceConceptKey = typeof paceValue === 'string' ? paceConceptKeyForValue(paceValue) : null;
+      const conceptKeysToLearn = [companionConceptKey, paceConceptKey]
+        .filter((key): key is SemanticConceptKey => key !== null);
       // Fix (found in review): without this claim, the SAME customer turn's
       // second resolveSemanticTurn invocation (see the comment above) would
       // start a SECOND independent timeout race, so a genuinely stuck write
@@ -1003,17 +1018,23 @@ async function resolveSemanticTurn(
       // response instead of a single bounded wait. Claiming by eventId here
       // means at most one write ATTEMPT (and therefore at most one timeout
       // wait) ever happens per real transport event, however many times the
-      // understanding itself gets recomputed for it.
-      if (conceptKey && claimWriteAttemptForEvent(`${conversationId}:${input.eventId}`)) {
+      // understanding itself gets recomputed for it -- and however many
+      // concept classes this one turn happens to carry evidence for, they
+      // all share the SAME single bounded wait below, never one wait per
+      // concept class.
+      if (conceptKeysToLearn.length > 0 && claimWriteAttemptForEvent(`${conversationId}:${input.eventId}`)) {
         const writeStartedAt = Date.now();
         let timedOut = false;
         const timeoutGuard = new Promise<void>(resolve => {
           setTimeout(() => { timedOut = true; resolve(); }, SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS);
         });
-        await Promise.race([recordSemanticConceptEvidence(conceptKey, message), timeoutGuard]);
+        await Promise.race([
+          Promise.all(conceptKeysToLearn.map(conceptKey => recordSemanticConceptEvidence(conceptKey, message))),
+          timeoutGuard,
+        ]);
         console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
           event: timedOut ? 'write_timeout' : 'write_awaited',
-          concept_key: conceptKey,
+          concept_keys: conceptKeysToLearn,
           elapsed_ms: Date.now() - writeStartedAt,
         }));
       }

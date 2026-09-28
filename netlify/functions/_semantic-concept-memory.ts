@@ -1,4 +1,4 @@
-// Kernel V2 Phase 3 increment 1 -- Semantic Learning + Cost Efficiency.
+// Kernel V2 Phase 3 -- Semantic Learning + Cost Efficiency.
 //
 // Owner goal: "If Thongthai does not confidently understand a human-language
 // pattern, ask OpenAI once when needed, obtain canonical meaning, then safely
@@ -6,13 +6,32 @@
 // understood without paying again. But never create a brittle exact-sentence
 // dictionary, and never let self-learning make Thongthai confidently wrong."
 //
-// SCOPE OF THIS INCREMENT (deliberately narrow -- see
-// THONGTHAI_KERNEL_V2_HANDOFF.md for what remains):
+// ARCHITECTURE: DIRECT SEMANTIC SUPERVISOR LEARNING, not a second paid call
+// and not embedding similarity (three real embedding calibrations were tried
+// and disconfirmed -- see THONGTHAI_KERNEL_V2_HANDOFF.md). The ONLY existing
+// OpenAI semantic supervisor call the orchestrator already makes is the
+// source of truth: this module never invents a concept from its own fuzzy
+// match, never calls a model itself, and never re-derives meaning -- it only
+// records, as a reusable exemplar, what that SAME call already confirmed
+// (see the write-path hook in resolveSemanticTurn,
+// _thongthai-one-mind-orchestrator.ts).
 //
-// This module only learns COMPANION context ("มากับแฟน" -> companion:
-// 'partner'), the worked example from the owner's own mandate. Pace and
-// consider-only markers are explicitly deferred to a later increment rather
-// than bundled in here unreviewed.
+// CONCEPT CLASSES (each its own closed vocabulary, each independently
+// reviewed before being added here -- never a free-form label):
+// - companion (increment 1): "มากับแฟน" -> companion: 'partner'.
+// - pace (increment 2): "ไม่อยากเหนื่อย" -> pace: 'relaxed'.
+// Consider-only and further classes remain deferred until reviewed.
+//
+// AMBIGUITY DISCIPLINE (the owner's explicit correction after increment 1's
+// own calibration work): a word like "คนรู้ใจ" does NOT always mean
+// "romantic partner" in Thai -- it can mean a close friend or a trusted,
+// understanding person depending on context. This module never forces the
+// real supervisor's OWN judgement into a narrower label than it actually
+// gave. It records exactly the closed-vocabulary value the supervisor
+// returned for a SPECIFIC confirmed sentence (companionConceptKeyForValue /
+// paceConceptKeyForValue below return null, and nothing is learned, for any
+// value outside the closed set) -- it never infers, widens, or guesses a
+// stronger label than the supervisor itself committed to for that turn.
 //
 // SAFETY BY CONSTRUCTION, not by runtime checking alone:
 // - SAFE_CONCEPT_OUTCOMES is a CLOSED map. A matched concept can only ever
@@ -90,17 +109,55 @@ export function isCompanionConceptKey(value: string): value is CompanionConceptK
   return Object.prototype.hasOwnProperty.call(COMPANION_VALUE_BY_CONCEPT_KEY, value);
 }
 
-/** The ONLY outcome a matched concept may ever produce. Closed by
- *  construction: there is no action/domain field here for a bad match to
- *  escalate into. */
-export function safeConceptEntities(conceptKey: CompanionConceptKey): Record<string, string> {
-  return { companion: COMPANION_VALUE_BY_CONCEPT_KEY[conceptKey] };
-}
-
 export function companionConceptKeyForValue(value: string): CompanionConceptKey | null {
   const entry = (Object.entries(COMPANION_VALUE_BY_CONCEPT_KEY) as Array<[CompanionConceptKey, string]>)
     .find(([, mapped]) => mapped === value);
   return entry ? entry[0] : null;
+}
+
+// Increment 2: pace / exertion preference. Reuses the exact fields
+// _conversation-context.ts's applySemanticTurnToWorkingMemory already reads
+// from a confirmed turn (entities.pace / entities.exertionPreference) --
+// this module does not invent a new field the supervisor has to be told
+// about, it reuses what the orchestrator already extracts today.
+export type PaceConceptKey =
+  | 'pace_relaxed'
+  | 'pace_moderate'
+  | 'pace_intense';
+
+const PACE_VALUE_BY_CONCEPT_KEY: Readonly<Record<PaceConceptKey, string>> = {
+  pace_relaxed: 'relaxed',
+  pace_moderate: 'moderate',
+  pace_intense: 'intense',
+};
+
+export function isPaceConceptKey(value: string): value is PaceConceptKey {
+  return Object.prototype.hasOwnProperty.call(PACE_VALUE_BY_CONCEPT_KEY, value);
+}
+
+export function paceConceptKeyForValue(value: string): PaceConceptKey | null {
+  const entry = (Object.entries(PACE_VALUE_BY_CONCEPT_KEY) as Array<[PaceConceptKey, string]>)
+    .find(([, mapped]) => mapped === value);
+  return entry ? entry[0] : null;
+}
+
+/** Every concept key this module knows how to store/match, across every
+ *  reviewed concept class. Extend this union (and add a class below) only
+ *  after the same design-first review companion/pace each got -- never by
+ *  just widening a string type. */
+export type SemanticConceptKey = CompanionConceptKey | PaceConceptKey;
+
+export function isSemanticConceptKey(value: string): value is SemanticConceptKey {
+  return isCompanionConceptKey(value) || isPaceConceptKey(value);
+}
+
+/** The ONLY outcome a matched concept may ever produce. Closed by
+ *  construction: there is no action/domain field here for a bad match to
+ *  escalate into -- every concept class contributes exactly one entity key,
+ *  never a second field, an action, or a domain. */
+export function safeConceptEntities(conceptKey: SemanticConceptKey): Record<string, string> {
+  if (isCompanionConceptKey(conceptKey)) return { companion: COMPANION_VALUE_BY_CONCEPT_KEY[conceptKey] };
+  return { pace: PACE_VALUE_BY_CONCEPT_KEY[conceptKey] };
 }
 
 // A short, closed set of Thai politeness/filler particles this module strips
@@ -108,7 +165,10 @@ export function companionConceptKeyForValue(value: string): CompanionConceptKey 
 // _experience-discovery.ts's normalizeThaiDiscoveryText already does for its
 // own matcher, not a phrase table for any one sentence.
 const POLITENESS_SUFFIX = /(?:ครับ|คับ|ค่ะ|คะ|จ้า|จ๊ะ|นะครับ|นะคะ|นะ|ด้วย|น่ะ)$/gu;
-const PUNCTUATION_AND_SPACE = /[!?！？….,，。/\\|()[\]{}"'"''：:_\-\s]+/gu;
+// ๆ (mai yamok) is a pure repetition/emphasis mark ("ชิล ๆ" = "ชิล" said
+// twice for emphasis) -- never content-bearing, safe to strip alongside
+// punctuation for every concept class.
+const PUNCTUATION_AND_SPACE = /[!?！？….,，。/\\|()[\]{}"'"''：:_\-\sๆ]+/gu;
 
 export function normalizeForConceptMatching(message: string): string {
   let text = String(message ?? '').normalize('NFC').trim();
@@ -219,7 +279,7 @@ export function conceptSimilarity(normalizedA: string, normalizedB: string): num
 
 export type StoredSemanticConcept = {
   id: string;
-  conceptKey: CompanionConceptKey;
+  conceptKey: SemanticConceptKey;
   normalizedSignature: string;
   confidence: number;
   evidenceCount: number;
@@ -230,7 +290,7 @@ export type StoredSemanticConcept = {
 export type SemanticConceptTrustTier = 'exact_replay' | 'fuzzy_generalized';
 
 export type SemanticConceptMatch = {
-  conceptKey: CompanionConceptKey;
+  conceptKey: SemanticConceptKey;
   matchedId: string;
   confidence: number;
   evidenceCount: number;
@@ -384,7 +444,7 @@ type SemanticConceptRow = {
 };
 
 function parseRow(row: SemanticConceptRow): StoredSemanticConcept | null {
-  if (!isCompanionConceptKey(row.concept_key)) return null;
+  if (!isSemanticConceptKey(row.concept_key)) return null;
   if (row.status !== 'active' && row.status !== 'superseded' && row.status !== 'retracted') return null;
   return {
     id: row.id,
@@ -515,29 +575,50 @@ const SAFE_COMPANION_TOKENS = new RegExp(
   'gu',
 );
 
-/** FAIL-SAFE, NOT FAIL-OPEN: strips every recognized companion-domain token
- *  and returns whatever is left. It never removes text it does not
- *  recognize, so a non-empty residual reliably means "this sentence carries
- *  something beyond the closed companion vocabulary" -- a name, an address,
- *  a number, anything. A genuine companion phrase using an unlisted synonym
- *  is merely under-learned (falls through to a fresh OpenAI call every time,
- *  the correct conservative failure direction); it can never cause a
- *  personal detail to be persisted, because unrecognized text is always the
- *  reason to reject, never the thing that gets stored. */
-function containsUnrecognizedPersonalDetail(normalizedSignature: string): boolean {
-  return normalizedSignature.replace(SAFE_COMPANION_TOKENS, '').length > 0;
+// Increment 2: the SAME fail-safe pattern as SAFE_COMPANION_TOKENS above,
+// for the pace/exertion-preference concept class. Pace statements are
+// generically low personal-data risk (they describe an activity preference,
+// not a person), but the SAME reject-on-any-doubt policy still applies --
+// this is not a weaker check for a "safer" domain, it is the same policy
+// applied to a different closed vocabulary.
+const SAFE_PACE_TOKENS = new RegExp(
+  [
+    'ไม่อยาก', 'อยาก', 'ไม่เอา', 'เอา', 'ขอ',
+    'เหนื่อย', 'หนัก', 'เบา', 'ชิล', 'โหด', 'แรง', 'สบาย', 'ง่าย', 'พอดี', 'ปานกลาง', 'เข้มข้น', 'ผ่อนคลาย',
+    'วันนี้', 'หน่อย', 'นิดหน่อย', 'มาก', 'เกินไป', 'นะ', 'จัง',
+    'ไม่',
+  ].join('|'),
+  'gu',
+);
+
+function safeTokensForConceptKey(conceptKey: SemanticConceptKey): RegExp {
+  return isPaceConceptKey(conceptKey) ? SAFE_PACE_TOKENS : SAFE_COMPANION_TOKENS;
+}
+
+/** FAIL-SAFE, NOT FAIL-OPEN: strips every recognized token for the concept
+ *  class being recorded and returns whatever is left. It never removes text
+ *  it does not recognize, so a non-empty residual reliably means "this
+ *  sentence carries something beyond the closed vocabulary for this
+ *  concept" -- a name, an address, a number, anything. A genuine phrase
+ *  using an unlisted synonym is merely under-learned (falls through to a
+ *  fresh OpenAI call every time, the correct conservative failure
+ *  direction); it can never cause a personal detail to be persisted,
+ *  because unrecognized text is always the reason to reject, never the
+ *  thing that gets stored. */
+function containsUnrecognizedPersonalDetail(normalizedSignature: string, conceptKey: SemanticConceptKey): boolean {
+  return normalizedSignature.replace(safeTokensForConceptKey(conceptKey), '').length > 0;
 }
 
 export async function recordSemanticConceptEvidence(
-  conceptKey: CompanionConceptKey,
+  conceptKey: SemanticConceptKey,
   message: string,
 ): Promise<void> {
   try {
     if (containsDirectIdentifier(message)) {
       // Reject outright -- never persisted in any form, redacted or not.
-      // A message carrying a direct identifier is not a clean companion
-      // statement to learn from, and this table has no legitimate reason
-      // to ever store one.
+      // A message carrying a direct identifier is not a clean statement to
+      // learn from, and this table has no legitimate reason to ever store
+      // one.
       console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
         event: 'rejected_direct_identifier', concept_key: conceptKey,
       }));
@@ -547,7 +628,7 @@ export async function recordSemanticConceptEvidence(
     const normalizedSignature = normalizeForConceptMatching(message);
     if (!normalizedSignature || normalizedSignature.length > MAX_MATCHABLE_MESSAGE_LENGTH) return;
 
-    if (containsUnrecognizedPersonalDetail(normalizedSignature)) {
+    if (containsUnrecognizedPersonalDetail(normalizedSignature, conceptKey)) {
       // Reject outright -- same policy as containsDirectIdentifier above.
       // Whatever this unrecognized content is (a name, an address, anything
       // else), it must never enter a cross-customer table with no guest_id.
