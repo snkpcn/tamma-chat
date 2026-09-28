@@ -42,14 +42,17 @@ accepted.
 - Local implementation checkpoint commit:
   `a010182070bbf9290e0115f544b8abf1b8f3988e`
   (`Cut over open-chat replies to the language brain`)
-- A same-named remote branch was created from main through the GitHub
-  connector, but the local commit was **not pushed** because this execution
-  environment has no GitHub git credential (`git push` failed with
-  `could not read Username for 'https://github.com': No such device or address`;
-  `gh` CLI is not installed; no `GITHUB_TOKEN`/`GH_TOKEN` env var is present).
-  Treat the local branch as the source of truth until a credentialed agent
-  pushes it. If this file has a later handoff-only commit, the implementation
-  checkpoint above is its parent and contains the code/test changes.
+- Remote branch content was persisted through the GitHub connector because
+  this execution environment has no GitHub git credential (`git push` failed
+  with `could not read Username for 'https://github.com': No such device or
+  address`; `gh` CLI is not installed; no `GITHUB_TOKEN`/`GH_TOKEN` env var is
+  present).
+- Remote implementation commit created by connector:
+  `28573c6455aea65fe43d29e847b61a160ca9e8ed`
+  (`Cut over open-world human brain live path`)
+- Connector verification after write:
+  `main...human-brain/final-open-chat-cutover` = `ahead_by: 1`,
+  `behind_by: 0`, `changed files: 7`.
 - No production deployment has been made in this pass.
 - No database migration or business-table/schema change has been made.
 
@@ -174,15 +177,11 @@ Cost optimization is paused, but the existing guard remains green.
 
 ### Next Required Step If Interrupted
 
-1. Push local branch `human-brain/final-open-chat-cutover` from this worktree,
-   including implementation commit `a010182070bbf9290e0115f544b8abf1b8f3988e`, from
-   an environment with GitHub git credentials. If needed, first reset/update
-   the remote branch of the same name, which currently only points at main.
+1. Open a PR from `human-brain/final-open-chat-cutover` to `main` if it is not
+   already open.
 2. Review full diff carefully.
-3. Open a PR explicitly scoped to "final human brain open-chat cutover,
-   model-owned conversation reply".
-4. Run CI. Merge only if green.
-5. After merge/deploy, run real LINE/Web acceptance conversations using real
+3. Run CI. Merge only if green.
+4. After merge/deploy, run real LINE/Web acceptance conversations using real
    model calls:
    - one 50-turn open-world conversation
    - one 100-turn open-world conversation
@@ -190,7 +189,7 @@ Cost optimization is paused, but the existing guard remains green.
    - include casual Thai, slang, typos, topic switches, references, corrections,
      considering without buying, explicit not-booking, food constraints,
      activity/restaurant/stay/promo/non-business chat
-6. Keep handoff updated with branch, PR, SHA, production deploy, and live
+5. Keep handoff updated with branch, PR, SHA, production deploy, and live
    failures. Do not resume embedding/cost Phase 3 until human conversation
    quality is accepted.
 
@@ -208,11 +207,11 @@ Full suite passed with:
 
 Result: `1653/1653` passed. Local implementation checkpoint commit:
 `a010182070bbf9290e0115f544b8abf1b8f3988e` on
-`human-brain/final-open-chat-cutover`. This environment could create a remote
-branch but could not push the local branch because git credentials are absent.
-Next: push this branch from a credentialed environment, open PR, run CI, then
-live LINE/Web acceptance. Do not claim production-ready until real long
-conversations pass.
+`human-brain/final-open-chat-cutover`. Remote branch has been populated via
+GitHub connector at commit `28573c6455aea65fe43d29e847b61a160ca9e8ed`;
+compare against main reported `ahead_by: 1`, `changed files: 7`. Next: open
+PR, run CI, then live LINE/Web acceptance. Do not claim production-ready until
+real long conversations pass.
 
 Updated: 2026-09-28 (this pass records PR #218 merged, its migration applied
 to production, and production re-verified via a real dispatched smoke run --
