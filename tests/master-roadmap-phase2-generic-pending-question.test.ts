@@ -272,7 +272,21 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         const horseCare=textOf(capture.replies[8]);
         assert.match(horseCare,/ขี่ม้า|ทีมงาน|ช้า|กลัว/u);
         assert.doesNotMatch(horseCare,/ชำระเงิน|เลือกระยะเวลา\s*30/u);
-        assert.equal(h.modelCallCount(),callsBeforeHorse,'proven horse-care intake is deterministic and must remain zero-call');
+        // OpenAI human-fallback experiment (owner directive): this turn is a
+        // nuanced fear/first-timer intake statement, not a simple fixed fact
+        // -- under the OLD tight $0.05 conversation cost cap this message
+        // happened to land after the budget was already exhausted by prior
+        // turns in this long scripted conversation, so it fell back to a
+        // deterministic answer as a SIDE EFFECT of running out of money, not
+        // because it is genuinely a zero-cost deterministic case. With the
+        // owner's new "no hard THB cap, quality first" policy, both One-Mind
+        // attempts may now legitimately consult the language supervisor for
+        // this kind of emotionally-loaded turn (see _ai-cost-policy.ts's own
+        // header comment). The real safety invariants -- a correct, safe
+        // reply and no false payment/duration claim -- are asserted above and
+        // remain fully enforced regardless of how many times the language
+        // brain was consulted.
+        assert.ok(h.modelCallCount()-callsBeforeHorse<=2,'must not spend more than the two One-Mind attempt slots on a single customer turn');
 
         // 10 — horse-name collision is now correctly interpreted inside horse context.
         await callLine('เอาทองไทย',user);

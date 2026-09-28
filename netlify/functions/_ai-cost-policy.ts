@@ -1,13 +1,32 @@
 // Canonical OpenAI pricing and hard-budget policy for customer production.
 // No other module may contain model-rate or conversation-cap arithmetic.
-
-export const DEFAULT_MAX_CONVERSATION_AI_COST_USD = 0.05;
-export const DEFAULT_MAX_AI_CALLS_PER_TURN = 1;
-export const DEFAULT_MAX_AI_CALLS_PER_CONVERSATION = 256;
-export const DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS = 500;
+//
+// OpenAI human-fallback experiment (owner directive): quality comes first
+// during this phase. There is deliberately NO hard THB cap, NO fallback-call
+// quota, and NO semantic-call gap tight enough to block a genuinely needed
+// intelligence call -- see THONGTHAI_AI_COST telemetry (_ai-cost-ledger.ts)
+// for the real per-call/per-conversation cost measurement this phase exists
+// to produce. The ceilings below are intentionally generous runaway-bug
+// guards, not budget targets; raise them (never below the reviewed default)
+// via the matching THONGTHAI_* env var if a real conversation ever needs
+// more.
+export const DEFAULT_MAX_CONVERSATION_AI_COST_USD = 5;
+export const DEFAULT_MAX_AI_CALLS_PER_TURN = 3;
+export const DEFAULT_MAX_AI_CALLS_PER_CONVERSATION = 2_000;
+export const DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS = 900;
 export const DEFAULT_NORMAL_SEMANTIC_INPUT_TOKENS = 2_500;
 export const DEFAULT_COMPLEX_SEMANTIC_INPUT_TOKENS = 4_000;
-export const ABSOLUTE_SEMANTIC_INPUT_TOKENS = 5_000;
+// Grounded response composition (_response-composer.ts) prompts carry the
+// full Bible voice contract plus authoritative facts -- structurally larger
+// than a semantic-interpretation prompt. Raised well past the ~26-token
+// headroom the pre-experiment ceiling left on production's own "complex"
+// scenario (see PR #227's investigation), so a real facts+voice+context
+// payload is never blocked by prompt size when cost is no longer the
+// limiting concern this phase.
+export const ABSOLUTE_SEMANTIC_INPUT_TOKENS = 16_000;
+// THB conversion for cost telemetry only (see emitCostMetric in
+// _ai-cost-ledger.ts). Not a limiter -- a display/reporting rate.
+export const DEFAULT_USD_TO_THB_RATE = 36;
 
 export type ModelPricing = {
   inputUsdPerMillion: number;
@@ -123,7 +142,7 @@ export function aiCostPolicy(): AiCostPolicy {
       process.env.THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS,
       DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS,
       64,
-      500,
+      DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS,
     ),
     absoluteInputTokens: boundedInteger(
       process.env.THONGTHAI_MAX_SEMANTIC_INPUT_TOKENS,
@@ -177,4 +196,12 @@ export function reserveWorstCaseCostUsd(
 
 export function roundUsd(value: number): number {
   return Math.round(Math.max(0, value) * 1_000_000_000) / 1_000_000_000;
+}
+
+export function usdToThbRate(): number {
+  return finiteNumber(process.env.THONGTHAI_USD_TO_THB_RATE, DEFAULT_USD_TO_THB_RATE);
+}
+
+export function usdToThb(usd: number): number {
+  return Math.round(Math.max(0, usd) * usdToThbRate() * 10_000) / 10_000;
 }

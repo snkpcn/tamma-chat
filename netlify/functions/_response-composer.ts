@@ -16,7 +16,8 @@ import {
   planModelDegradation,
   type DegradationPlan,
 } from './_graceful-degradation';
-import { stripCodeFences } from './_thongthai-model-provider';
+import { stripCodeFences, callResponseComposer } from './_thongthai-model-provider';
+import type { AiCallContext } from './_ai-cost-ledger';
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
@@ -58,11 +59,29 @@ export type ResponseComposerInput = {
   knowledgeBundles: KnowledgeBundle[];
   degradation: DegradationPlan;
   operationalOutcome?: VerifiedOperationalOutcome | null;
+  /** Present only when a real OpenAI call is possible/authorized for this
+   *  turn (production request with a usable guest ledger key). Required for
+   *  composeGroundedModelResponse -- without it, that stage is skipped
+   *  entirely rather than attempting an uncosted/unguarded call. */
+  aiCallContext?: AiCallContext | null;
+  /** False when the orchestration phase has already consumed most of the
+   *  Netlify gateway's request-time budget (see
+   *  shouldPreferGroundedDeterministicResponse's own elapsed-time branch in
+   *  _thongthai-one-mind-response.ts) -- a SECOND model call here would
+   *  defeat the exact timeout protection that check exists for. Omitted /
+   *  true means composeGroundedModelResponse may attempt a real call. */
+  allowModelComposition?: boolean;
 };
 
 export type ComposedResponse = {
   message: string;
-  mode: 'model' | 'deterministic';
+  /** Traceable final-response authority for this turn (owner mandate:
+   *  "every final answer has a traceable source"):
+   *  - deterministic: centralized template/grounded-fact rendering, no model call.
+   *  - model: the semantic interpreter's own direct conversational reply, reused.
+   *  - model_grounded: a SEPARATE model call phrased AUTHORITATIVE GROUNDED
+   *    FACTS naturally (see composeGroundedModelResponse below). */
+  mode: 'model' | 'model_grounded' | 'deterministic';
   usedFactKeys: string[];
   composerVersion: string;
   bibleVersion: string;
@@ -255,6 +274,65 @@ export function assertOperationalClaimSafety(
     if (!['confirmed', 'completed', 'paid', 'settled'].includes(status)) {
       throw new ResponseCompositionError('composer_false_confirmation_claim');
     }
+  }
+}
+
+/** DB -> OpenAI natural-language composer -> customer (owner's Critical
+ *  Principle #3): phrases AUTHORITATIVE GROUNDED FACTS naturally instead of
+ *  a robotic template, for a business-truth question the centralized
+ *  deterministic renderer (composeGroundedDeterministicResponse) has no
+ *  specific template for. Never invents a fact -- parseComposedResponse
+ *  rejects any usedFactKeys entry not present in the supplied bundles, and
+ *  assertOperationalClaimSafety still blocks a false transaction claim.
+ *  Returns null (never throws) on ANY failure -- missing cost context,
+ *  provider unavailable, budget-blocked, invalid JSON, or an unverified
+ *  fact key -- so a broken model call always falls through to the existing
+ *  honest deterministic decline, never to a broken/empty customer reply. */
+export async function composeGroundedModelResponse(
+  input: ResponseComposerInput,
+): Promise<ComposedResponse | null> {
+  if (!input.aiCallContext) return null;
+  if (input.allowModelComposition === false) return null;
+  // A real verifiable business fact must actually have been ASKED for --
+  // reusing safeModelConversationReply's own BUSINESS_TRUTH_NEEDS set. This
+  // is what stops a zero-cost deterministic turn with no answerable fact
+  // request (e.g. a horse-care/fear intake statement, informationNeed=
+  // 'none') from spending a paid call merely because SOME unrelated fact
+  // happened to be present in the resolved knowledge bundle -- owner:
+  // "OpenAI must not be called when it is clearly unnecessary".
+  const need = input.semanticTurn?.informationNeed ?? 'none';
+  if (!BUSINESS_TRUTH_NEEDS.has(need)) return null;
+  const facts = allFacts(input.knowledgeBundles);
+  // No grounded facts means the model has nothing authoritative to phrase --
+  // calling it here would either invent something or just restate "I don't
+  // know" at real cost for no benefit over the existing honest deterministic
+  // copy (owner: "OpenAI must not be called when it is clearly unnecessary").
+  if (!facts.length) return null;
+
+  const prompt = buildResponseComposerPrompt(input);
+  try {
+    const raw = await callResponseComposer(
+      prompt,
+      [{ role:'user', content: input.userMessage?.slice(0, 800) || '(not provided)' }],
+      'grounded-response-composition',
+      input.aiCallContext,
+    );
+    const { message, usedFactKeys } = parseComposedResponse(raw, input);
+    return {
+      message: polishCustomerMessage(message, input.channel),
+      mode:'model_grounded',
+      usedFactKeys,
+      composerVersion:RESPONSE_COMPOSER_VERSION,
+      bibleVersion:THONGTHAI_BIBLE_VERSION,
+      channel:input.channel,
+      language:input.language,
+    };
+  } catch (error) {
+    console.error(
+      'THONGTHAI_GROUNDED_MODEL_COMPOSER_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+    return null;
   }
 }
 
@@ -1202,5 +1280,16 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
   if (grounded) return grounded;
   const modelConversation = safeModelConversationReply(input);
   if (modelConversation) return modelConversation;
+  // Gap this closes (owner Critical Principle #3): the centralized
+  // deterministic renderer has no specific template for this business-truth
+  // question, AND safeModelConversationReply declined (informationNeed IS a
+  // business truth need -- see BUSINESS_TRUTH_NEEDS). Rather than falling
+  // straight to a robotic "I can't verify that" canned line, let OpenAI
+  // phrase the actual verified facts naturally -- but ONLY when real facts
+  // exist to ground it in; composeGroundedModelResponse itself declines
+  // (returns null) when there is nothing authoritative to phrase, or when
+  // no cost context authorizes a real call, or on any provider failure.
+  const groundedModel = await composeGroundedModelResponse(input);
+  if (groundedModel) return groundedModel;
   return composeDeterministicResponse(input);
 }

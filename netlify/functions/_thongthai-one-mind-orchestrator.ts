@@ -550,6 +550,15 @@ const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
   // when unavailable. Letting a language-model clarification override that
   // exact state caused production to forget the already-selected horse.
   'task_conditional_continuation',
+  // OpenAI human-fallback experiment (owner directive): "known opening
+  // hours when verified data exists... do not turn every customer message
+  // into an OpenAI call." A bare check-in/check-out TIME question (see
+  // STAY_CHECKIN_CHECKOUT_TIME_MARKER's own comment in
+  // _deterministic-semantic-turn.ts) is a single fixed organization fact
+  // that never varies by context -- unlike ask_price/stay_read_only_inquiry
+  // (deliberately left in COARSE_READ_ONLY_INTENTS above, since those CAN
+  // depend on which item/date/context is meant).
+  'stay_checkin_checkout_time_lookup',
 ]);
 
 // Exact context/state operations whose meaning is already canonical. These are

@@ -124,12 +124,69 @@ function extractResponseText(data: {
   return text;
 }
 
+export type ModelResponseSchema = {
+  name: string;
+  schema: Record<string, unknown>;
+};
+
+const SEMANTIC_SUPERVISOR_RESPONSE_SCHEMA: ModelResponseSchema = {
+  name:'thongthai_semantic_supervisor',
+  schema:{
+    type:'object',
+    properties:{
+      normalizedMeaning:{type:'string',maxLength:360},
+      speechAct:{type:'string',enum:['question','statement','preference_update','correction','selection','request','transaction_request','incident_report','complaint','request_help','social','unknown']},
+      domain:{type:'string',enum:['ecosystem','restaurant','stay','activity','promotion','membership','otop','cafe','journey','payment','support','general','local','incident','unknown']},
+      intent:{type:'string',maxLength:80},
+      action:{type:'string',enum:['ask','discover','recommend','compare','book','order','modify','cancel','confirm','status','provide_information','correct_previous','unknown']},
+      informationNeed:{type:'string',enum:['none','availability','price','schedule','inventory','catalog','recommendation','ingredients','policy','transaction_status']},
+      taskDirective:{type:['string','null'],enum:['cancel_active','suspend_active','resume_suspended',null]},
+      entities:{type:'object'},
+      references:{
+        type:'array',maxItems:10,
+        items:{
+          type:'object',
+          properties:{
+            type:{type:'string',maxLength:80},
+            value:{type:['string','null'],maxLength:180},
+            refersToPriorContext:{type:'boolean'},
+          },
+          required:['type','refersToPriorContext'],
+        },
+      },
+      constraints:{type:'array',maxItems:12,items:{type:'string',maxLength:100}},
+      confidence:{type:'number',minimum:0,maximum:1},
+      needsClarification:{type:'boolean'},
+      clarificationReason:{type:['string','null'],maxLength:180},
+    },
+    required:['domain','intent','action','entities','references','constraints','confidence','needsClarification'],
+  },
+};
+
+// Grounded response composition (see _response-composer.ts's
+// buildResponseComposerPrompt): a SEPARATE, much smaller output shape --
+// only a customer-facing message plus which supplied fact keys it actually
+// used. Never reuses the semantic supervisor's structured-understanding
+// schema, which has nothing to do with this call's job.
+export const RESPONSE_COMPOSER_RESPONSE_SCHEMA: ModelResponseSchema = {
+  name:'thongthai_response_composer',
+  schema:{
+    type:'object',
+    properties:{
+      message:{type:'string',maxLength:4000},
+      usedFactKeys:{type:'array',maxItems:100,items:{type:'string',maxLength:200}},
+    },
+    required:['message','usedFactKeys'],
+  },
+};
+
 async function callOpenAIModel(
   model: string,
   systemPrompt: string,
   messages: ChatTurn[],
   callerLabel: string,
   costContext?: AiCallContext,
+  responseSchema: ModelResponseSchema = SEMANTIC_SUPERVISOR_RESPONSE_SCHEMA,
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -210,38 +267,9 @@ async function callOpenAIModel(
         text:{
           format:{
             type:'json_schema',
-            name:'thongthai_semantic_supervisor',
+            name:responseSchema.name,
             strict:false,
-            schema:{
-              type:'object',
-              properties:{
-                normalizedMeaning:{type:'string',maxLength:360},
-                speechAct:{type:'string',enum:['question','statement','preference_update','correction','selection','request','transaction_request','incident_report','complaint','request_help','social','unknown']},
-                domain:{type:'string',enum:['ecosystem','restaurant','stay','activity','promotion','membership','otop','cafe','journey','payment','support','general','local','incident','unknown']},
-                intent:{type:'string',maxLength:80},
-                action:{type:'string',enum:['ask','discover','recommend','compare','book','order','modify','cancel','confirm','status','provide_information','correct_previous','unknown']},
-                informationNeed:{type:'string',enum:['none','availability','price','schedule','inventory','catalog','recommendation','ingredients','policy','transaction_status']},
-                taskDirective:{type:['string','null'],enum:['cancel_active','suspend_active','resume_suspended',null]},
-                entities:{type:'object'},
-                references:{
-                  type:'array',maxItems:10,
-                  items:{
-                    type:'object',
-                    properties:{
-                      type:{type:'string',maxLength:80},
-                      value:{type:['string','null'],maxLength:180},
-                      refersToPriorContext:{type:'boolean'},
-                    },
-                    required:['type','refersToPriorContext'],
-                  },
-                },
-                constraints:{type:'array',maxItems:12,items:{type:'string',maxLength:100}},
-                confidence:{type:'number',minimum:0,maximum:1},
-                needsClarification:{type:'boolean'},
-                clarificationReason:{type:['string','null'],maxLength:180},
-              },
-              required:['domain','intent','action','entities','references','constraints','confidence','needsClarification'],
-            },
+            schema:responseSchema.schema,
           },
         },
       }),
@@ -336,6 +364,27 @@ export function callPreferredModel(
   costContext?:AiCallContext,
 ):Promise<string> {
   return callOpenAIModel(OPENAI_SEMANTIC_PRIMARY_MODEL, systemPrompt, messages, callerLabel, costContext);
+}
+
+/** Grounded response composition: phrases ALREADY-VERIFIED facts naturally
+ *  in Thongthai's voice. Never used for understanding/classification -- see
+ *  _response-composer.ts's buildResponseComposerPrompt for the prompt and
+ *  its safety contract (usedFactKeys restricted to supplied facts, no
+ *  unverified operational-success claims allowed through). */
+export function callResponseComposer(
+  systemPrompt:string,
+  messages:ChatTurn[],
+  callerLabel='grounded-response-composer',
+  costContext?:AiCallContext,
+):Promise<string> {
+  return callOpenAIModel(
+    OPENAI_SEMANTIC_PRIMARY_MODEL,
+    systemPrompt,
+    messages,
+    callerLabel,
+    costContext,
+    RESPONSE_COMPOSER_RESPONSE_SCHEMA,
+  );
 }
 
 export function stripCodeFences(text:string):string {
