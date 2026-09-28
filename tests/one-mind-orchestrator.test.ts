@@ -12,6 +12,7 @@ import {
   type ConversationContextState,
 } from '../netlify/functions/_conversation-context';
 import {
+  createActiveTask,
   emptyTaskStateContainer,
   type TaskStateContainer,
 } from '../netlify/functions/_task-state';
@@ -76,6 +77,55 @@ test('G.1 defaults to shadow state: no persistence and no transaction execution'
   assert.equal(persistedConversation, 0);
   assert.equal(persistedTask, 0);
   assert.equal(result.dialogDecision.actionProposal, undefined, 'selection must never execute a booking');
+});
+
+test('task-grounded read-only conditional reference outranks a redundant model clarification without enabling a transaction', async () => {
+  const task = createActiveTask({
+    type:'activity_booking',
+    sourceChannel:'web',
+    initialSlots:{resourceCode:'activity-horse',assetSelection:'ภาราดร'},
+    requiredFields:['resourceCode','assetSelection','date','time','partySize'],
+    now:NOW,
+  });
+  const taskState:TaskStateContainer={...emptyTaskStateContainer(),activeTask:task};
+  const deps: Partial<OneMindDependencies> = {
+    resolveCanonicalGuestId: async () => CANONICAL,
+    guestDbIdFromAnonymousId: async () => GUEST_DB,
+    loadConversationContext: async () => emptyConversationContextState(NOW),
+    persistConversationContext: async () => {},
+    loadTaskState: async () => taskState,
+    persistTaskState: async () => {},
+    interpretSemanticTurn: async () => semantic({
+      domain:'activity',
+      intent:'check_availability_with_fallback',
+      action:'status',
+      informationNeed:'availability',
+      entities:{},
+      references:[
+        {type:'primary_activity_resource',refersToPriorContext:true},
+        {type:'fallback_activity_resource',refersToPriorContext:true},
+      ],
+      constraints:['fallback_if_primary_unavailable','no_booking_if_all_unavailable'],
+      confidence:.86,
+      needsClarification:true,
+      clarificationReason:'primary resource not identified',
+    }),
+    buildKnowledgeAdapters: () => ({}),
+  };
+
+  const result=await processThongthaiOneMindTurn({
+    channel:'web',
+    message:'ถ้าตัวนั้นไม่ว่าง เอาอีกตัวแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร',
+    eventId:'conditional-task-ref',
+    providerUserKey:'web-key',
+  },deps,NOW);
+
+  assert.equal(result.semanticTurn.intent,'task_conditional_continuation');
+  assert.equal(result.semanticTurn.needsClarification,false);
+  assert.equal(result.semanticTurn.entities.horseName,'ภาราดร');
+  assert.equal(result.semanticTurn.constraints.includes('no_transaction'),true);
+  assert.equal(result.dialogDecision.actionProposal,undefined);
+  assert.equal(result.taskStateAfter.activeTask?.slots.assetSelection,'ภาราดร');
 });
 
 test('server continuity survives web -> LINE with no client chat history field at all', async () => {
