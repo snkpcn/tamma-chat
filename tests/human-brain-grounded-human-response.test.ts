@@ -120,6 +120,8 @@ test('restaurant recommendation filters verified shrimp constraint and does not 
   assert.doesNotMatch(response.message,/กุ้งทอด/u);
   assert.match(response.message,/เผ็ด.*ไม่มีข้อมูลยืนยัน|ไม่มีข้อมูลยืนยัน.*เผ็ด/u);
   assert.match(response.message,/อยู่ในงบ 1000 บาท/u);
+  assert.match(response.message,/กุ้ง/u,
+    'customer-facing safety copy must explicitly acknowledge the shrimp constraint, not hide it behind a generic "ข้อจำกัด" phrase');
 });
 
 // PR A item 3: a remembered "shrimp_allergy" (the durable-memory canonical
@@ -148,6 +150,49 @@ test('restaurant recommendation filters a REMEMBERED "shrimp_allergy" constraint
   assert.match(response.message,/ตำไทย/u);
   assert.doesNotMatch(response.message,/กุ้งทอด/u,
     'a remembered shrimp allergy must never surface a shrimp dish, even though the CURRENT turn never said "no_shrimp" itself');
+});
+
+test('ecosystem recommendation renders only owner-verified static paths instead of a generic model fallback',()=>{
+  const ecosystem:KnowledgeBundle={
+    domain:'ecosystem',
+    sources:[{need:'recommendations_input',sourceId:'owner_verified_ecosystem_paths_v1',sourceType:'bible',status:'ok'}],
+    facts:[
+      fact('ecosystem:path:chill:name','สายชิล','ecosystem','bible'),
+      fact('ecosystem:path:chill:description','คาเฟ่ + ถ่ายรูป + อาหาร','ecosystem','bible'),
+      fact('ecosystem:path:activity:name','สายกิจกรรม','ecosystem','bible'),
+      fact('ecosystem:path:activity:description','ขี่ม้า / ATV / ยิงธนู','ecosystem','bible'),
+      fact('ecosystem:path:stay:name','สายพัก','ecosystem','bible'),
+      fact('ecosystem:path:stay:description','เฮือนสเตย์ + ธรรมชาติ','ecosystem','bible'),
+    ],
+    entities:[],missing:[],warnings:[],freshness:'stable',
+  };
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'ecosystem',intent:'recommend_relaxed_visit',action:'recommend',informationNeed:'recommendation',
+      entities:{visitStyle:'relaxed'},constraints:['relaxed'],
+    }),
+    bundles:[ecosystem],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/สายชิล/u);
+  assert.match(response.message,/คาเฟ่/u);
+  assert.match(response.message,/ขี่ม้า/u);
+  assert.match(response.message,/เฮือนสเตย์/u);
+  assert.doesNotMatch(response.message,/ยังตอบเรื่องนี้ให้แม่นไม่ได้/u);
+});
+
+test('activity availability with no live source still answers the understood question honestly and never generic-fallbacks',()=>{
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',intent:'horse_availability_inquiry',action:'status',informationNeed:'availability',
+      entities:{activityCode:'horse',date:'2026-09-29'},constraints:['non_committal_preview'],
+    }),
+    bundles:[],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/คิวสด|ว่าง/u);
+  assert.match(response.message,/ยังไม่ได้ทำรายการ|ยังไม่ได้.*จอง/u);
+  assert.doesNotMatch(response.message,/ยังตอบเรื่องนี้ให้แม่นไม่ได้|ลองอีกครั้งสักครู่/u);
 });
 
 test('journey renderer composes verified cross-domain options instead of dumping one catalog or generic fallback',()=>{
