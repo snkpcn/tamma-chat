@@ -812,6 +812,16 @@ async function resolveSemanticTurn(
         needsClarification: false,
       };
     }
+    if (concepts.length) {
+      // A genuine "miss" -- learned concepts exist, this turn's text was a
+      // real candidate for one, but none matched confidently enough. Only
+      // logged when there was something to miss against, so this stays a
+      // meaningful signal rather than noise on every turn before any
+      // concept has ever been learned.
+      console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+        event: 'miss', candidate_concept_count: concepts.length,
+      }));
+    }
   }
 
   // Human Conversation Recovery: LANGUAGE SUPERVISOR WHEN NEEDED.

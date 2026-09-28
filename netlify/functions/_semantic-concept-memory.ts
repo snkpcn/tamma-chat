@@ -136,6 +136,20 @@ function bigramJaccard(a: string, b: string): number {
   return union === 0 ? 0 : intersection / union;
 }
 
+// A negated/reversed phrase can still score HIGH on pure surface similarity
+// ("ไม่มากับแฟน" -- NOT coming with a partner -- shares almost every
+// character with "มากับแฟน" and scored 0.73 in calibration, well above
+// MIN_SIMILARITY). Surface-form matching cannot tell "X" from "not X" by
+// construction, so this is a deliberate STRUCTURAL veto, not a similarity
+// tweak: if exactly one side carries a negation/reversal marker, the two can
+// never be treated as the same confirmed concept, however close their
+// characters are. This is the acceptance-criterion-D safety boundary
+// ("a contradictory phrase must not incorrectly reuse a prior concept").
+const NEGATION_MARKER = /ไม่|เลิก|ยกเลิก|งด|แยกทาง|หย่า/u;
+function hasNegationMismatch(normalizedA: string, normalizedB: string): boolean {
+  return NEGATION_MARKER.test(normalizedA) !== NEGATION_MARKER.test(normalizedB);
+}
+
 /**
  * 0..1 similarity between two ALREADY-normalized strings.
  *
@@ -156,9 +170,16 @@ function bigramJaccard(a: string, b: string): number {
  * and each genuinely new phrasing OpenAI confirms accumulates as its own
  * exemplar (bounded per concept), so coverage grows organically from real
  * usage instead of from a hand-written synonym list.
+ *
+ * A negation/reversal mismatch (see hasNegationMismatch) always returns 0
+ * here, before either surface-form score is even computed -- this must hold
+ * for EVERY caller (matching AND the write path's own "reinforce an
+ * existing exemplar" check), so it lives in the shared primitive rather than
+ * being duplicated at each call site.
  */
 export function conceptSimilarity(normalizedA: string, normalizedB: string): number {
   if (!normalizedA || !normalizedB) return 0;
+  if (hasNegationMismatch(normalizedA, normalizedB)) return 0;
   if (normalizedA === normalizedB) return 1;
   const longer = Math.max(normalizedA.length, normalizedB.length);
   const maxDistance = Math.max(2, Math.ceil(longer * 0.5));
@@ -174,6 +195,7 @@ export type StoredSemanticConcept = {
   normalizedSignature: string;
   confidence: number;
   evidenceCount: number;
+  contradictionCount: number;
   status: 'active' | 'superseded' | 'retracted';
 };
 
@@ -218,6 +240,11 @@ export function matchLearnedConcept(
   let best: SemanticConceptMatch | null = null;
   for (const concept of concepts) {
     if (concept.status !== 'active') continue;
+    // Defense in depth alongside the write path's own retract-on-contradiction
+    // logic: a row that has ever been confirmed to contradict another
+    // concept is never matched, even if something upstream failed to flip
+    // its status to 'retracted'.
+    if (concept.contradictionCount >= CONTRADICTION_RETRACT_THRESHOLD) continue;
     if (concept.confidence < MIN_TRUSTED_CONFIDENCE) continue;
     if (concept.evidenceCount < MIN_TRUSTED_EVIDENCE_COUNT) continue;
     const similarity = conceptSimilarity(normalized, concept.normalizedSignature);
@@ -269,12 +296,27 @@ async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> 
   return response;
 }
 
+// Bumped only if a future migration changes this table's meaning in a way
+// old rows can't be read compatibly under -- lets a later reader distinguish
+// "no rows yet" from "rows written under an incompatible shape" without
+// inspecting column existence at runtime.
+export const SEMANTIC_CONCEPT_MEMORY_SCHEMA_VERSION = 'semantic-concept-memory-v1';
+
+// A single confirmed contradiction is enough to retract a row rather than
+// requiring several: "never let self-learning make Thongthai confidently
+// wrong" argues for conservatism over patience here. A genuinely correct
+// concept that got unlucky once can always reappear as a fresh exemplar the
+// next time OpenAI confirms it -- retracting is never destructive (the row
+// stays, auditable, via status + superseded_by, see the migration).
+export const CONTRADICTION_RETRACT_THRESHOLD = 1;
+
 type SemanticConceptRow = {
   id: string;
   concept_key: string;
   normalized_signature: string;
   confidence: number;
   evidence_count: number;
+  contradiction_count: number;
   status: string;
 };
 
@@ -287,16 +329,19 @@ function parseRow(row: SemanticConceptRow): StoredSemanticConcept | null {
     normalizedSignature: row.normalized_signature,
     confidence: Number(row.confidence),
     evidenceCount: Number(row.evidence_count),
+    contradictionCount: Number(row.contradiction_count ?? 0),
     status: row.status,
   };
 }
+
+const CONCEPT_ROW_SELECT = 'id,concept_key,normalized_signature,confidence,evidence_count,contradiction_count,status';
 
 /** Never throws. A schema/config/network problem here must fall through to
  *  the real semantic supervisor exactly as if no learned memory existed. */
 export async function loadActiveSemanticConcepts(): Promise<StoredSemanticConcept[]> {
   try {
     const response = await dbFetch(
-      'semantic_concept_memory?status=eq.active&select=id,concept_key,normalized_signature,confidence,evidence_count,status&limit=500',
+      `semantic_concept_memory?status=eq.active&select=${CONCEPT_ROW_SELECT}&limit=500`,
     );
     const rows = await response.json() as SemanticConceptRow[];
     return rows.map(parseRow).filter((row): row is StoredSemanticConcept => row !== null);
@@ -335,13 +380,50 @@ export async function recordSemanticConceptEvidence(
     const normalizedSignature = normalizeForConceptMatching(message);
     if (!normalizedSignature || normalizedSignature.length > MAX_MATCHABLE_MESSAGE_LENGTH) return;
 
-    const existingResponse = await dbFetch(
-      `semantic_concept_memory?concept_key=eq.${encodeURIComponent(conceptKey)}&status=eq.active`
-      + '&select=id,concept_key,normalized_signature,confidence,evidence_count,status&limit=500',
+    // One read covers both checks below: reinforce-or-add for THIS concept,
+    // and contradiction detection against every OTHER concept key. A single
+    // query keeps this best-effort write cheap (this module never queries
+    // per-concept-key in a loop).
+    const allActiveResponse = await dbFetch(
+      `semantic_concept_memory?status=eq.active&select=${CONCEPT_ROW_SELECT}&limit=500`,
     );
-    const existingRows = (await existingResponse.json() as SemanticConceptRow[])
+    const allActiveRows = (await allActiveResponse.json() as SemanticConceptRow[])
       .map(parseRow)
       .filter((row): row is StoredSemanticConcept => row !== null);
+    const existingRows = allActiveRows.filter(row => row.conceptKey === conceptKey);
+
+    // Acceptance criterion D: a phrase OpenAI just confirmed as concept X
+    // that ALSO closely resembles an existing exemplar stored under a
+    // DIFFERENT concept key Y is a genuine contradiction -- Y's own
+    // surface-form signature is not, after all, uniquely predictive of Y.
+    // Retract Y rather than let it keep answering confidently. This can
+    // never fire from X's own accumulated evidence (only cross-concept
+    // matches count), and never touches the row being written for X itself.
+    for (const other of allActiveRows) {
+      if (other.conceptKey === conceptKey) continue;
+      if (conceptSimilarity(normalizedSignature, other.normalizedSignature) < MIN_SIMILARITY) continue;
+      const nextContradictionCount = other.contradictionCount + 1;
+      const shouldRetract = nextContradictionCount >= CONTRADICTION_RETRACT_THRESHOLD;
+      await dbFetch(`semantic_concept_memory?id=eq.${encodeURIComponent(other.id)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          contradiction_count: nextContradictionCount,
+          ...(shouldRetract ? { status: 'retracted' } : {}),
+          updated_at: new Date().toISOString(),
+        }),
+      }).catch(error => console.error(
+        'THONGTHAI_SEMANTIC_CONCEPT_MEMORY_CONTRADICTION_ERROR',
+        error instanceof Error ? error.message.slice(0, 200) : 'unknown',
+      ));
+      console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+        event: 'conflict',
+        conflicting_concept_key: other.conceptKey,
+        confirmed_concept_key: conceptKey,
+        contradiction_count: nextContradictionCount,
+        retracted: shouldRetract,
+      }));
+    }
 
     let bestMatch: { id: string; similarity: number } | null = null;
     for (const row of existingRows) {
@@ -356,15 +438,20 @@ export async function recordSemanticConceptEvidence(
       // this IS the generalization mechanism: repeated confirmed paraphrases
       // raise confidence/evidence for the SAME stored signature instead of
       // creating one row per literal sentence.
+      const newEvidenceCount = existingRows.find(row => row.id === bestMatch!.id)!.evidenceCount + 1;
       await dbFetch(`semantic_concept_memory?id=eq.${encodeURIComponent(bestMatch.id)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({
-          evidence_count: existingRows.find(row => row.id === bestMatch!.id)!.evidenceCount + 1,
+          evidence_count: newEvidenceCount,
           confidence: Math.min(0.99, Math.max(...existingRows.map(row => row.confidence), 0.7) + 0.02),
           updated_at: new Date().toISOString(),
         }),
       });
+      console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+        event: 'reinforce', concept_key: conceptKey, matched_id: bestMatch.id,
+        similarity: bestMatch.similarity, evidence_count: newEvidenceCount,
+      }));
       return;
     }
 
@@ -373,6 +460,9 @@ export async function recordSemanticConceptEvidence(
       // exemplars, a further genuinely-new phrasing is observationally
       // interesting but not written -- prevents unbounded table growth from
       // becoming an unreviewed phrase dictionary by another name.
+      console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+        event: 'promotion_skipped_at_cap', concept_key: conceptKey, existing_signature_count: existingRows.length,
+      }));
       return;
     }
 
@@ -385,10 +475,15 @@ export async function recordSemanticConceptEvidence(
         source_signal_key: conceptRowKey(conceptKey, normalizedSignature),
         confidence: 0.7,
         evidence_count: 1,
+        contradiction_count: 0,
         source: 'openai_confirmed',
         status: 'active',
+        schema_version: SEMANTIC_CONCEPT_MEMORY_SCHEMA_VERSION,
       }),
     });
+    console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+      event: 'promotion', concept_key: conceptKey,
+    }));
   } catch (error) {
     console.error(
       'THONGTHAI_SEMANTIC_CONCEPT_MEMORY_WRITE_ERROR',

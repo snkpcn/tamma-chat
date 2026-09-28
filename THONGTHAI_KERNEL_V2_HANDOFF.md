@@ -94,6 +94,65 @@ infrastructure can support this cleanly" instruction:
    needs this and is explicitly NOT part of increment 1 -- flagged below as
    its own future decision, never silently bundled in.
 
+**Schema proposal** (written and reviewed before the migration was finalized,
+per the mandate's own "write the schema proposal, explain each column, prove
+why existing tables are unsuitable, define rollback, retention/invalidation,
+promotion, conflict-demotion" requirement):
+
+| Column | Purpose |
+|---|---|
+| `id` | Versioned concept-instance identity (one row = one confirmed exemplar of one concept). |
+| `schema_version` | Schema/version marker -- lets a future migration tell "no rows" apart from "rows written under an incompatible earlier shape" without inspecting column existence. |
+| `concept_key` | Canonical semantic meaning signature -- a CLOSED enum (`companion_partner`/`_family`/`_friends`/`_solo`) matching the application's own `SAFE_CONCEPT_OUTCOMES` map. Never a free-form label. |
+| `normalized_signature` | The generalized pattern/evidence record: one confirmed exemplar's normalized text, used only for fuzzy matching (see `conceptSimilarity`), never as a literal-sentence key. |
+| `evidence_count` | How many confirmed real-world instances have reinforced this exact signature. Gates trust (`MIN_TRUSTED_EVIDENCE_COUNT`). |
+| `confidence` | Blended trust score, nudged up on each reinforcement, gates trust (`MIN_TRUSTED_CONFIDENCE`). |
+| `contradiction_count` | Counts a confirmed disagreement (a DIFFERENT concept's exemplar closely resembling this row's signature) -- the conflict/demotion signal. |
+| `source` | Provenance -- restricted to `openai_confirmed`/`human_reviewed`; a row can never claim to be self-learned from the fuzzy matcher's own inference. |
+| `status` / `superseded_by` | Invalidation/supersede state -- `active`/`superseded`/`retracted`, never a physical delete. |
+| `created_at` / `updated_at` | Standard lifecycle timestamps. |
+| `source_signal_key` | SHA-256(concept_key + signature); the unique constraint that makes a repeat write for the same exemplar a harmless no-op (also closes the ai-cost-ledger replay duplicate-write case found during testing). |
+
+Why existing tables are unsuitable (full reasoning in the design-first audit
+above): `guest_agent_state`/`guest_memory`/`guest_semantic_memory` are all
+per-guest (two have a `NOT NULL guest_id` FK) -- reusing them would either
+fake a shared guest identity or duplicate the same learned concept once per
+customer, defeating the "pay once" goal, and would blur personal
+preferences with generic language understanding. `world_facts` is
+owner-verified business truth (`verified boolean`, `source='owner_verified'`
+in every seed row) -- mixing in self-learned, probabilistic language
+inference would blur exactly the trust boundary the mandate protects.
+`customer_intelligence_events` has the right cross-customer/RLS/redaction
+shape but is a closed-enum COUNTER table with no confidence/evidence/
+matchable-signature design at all.
+
+**Rollback:** `drop table public.semantic_concept_memory;` -- nothing else
+reads or writes it, so this is a clean, data-loss-only-of-learned-language
+(never business or customer data) rollback.
+
+**Retention/invalidation:** a row is retracted (not deleted) the first time
+a confirmed contradiction is found against it (`CONTRADICTION_RETRACT_
+THRESHOLD = 1`); the read path additionally treats any row with
+`contradiction_count >= 1` as untrustworthy even if its `status` somehow
+didn't flip (defense in depth). There is no time-based expiry in increment
+1 -- a stale-but-uncontradicted concept simply keeps being confirmed
+correct indefinitely, which is the intended behavior for something like
+"companion" that doesn't go stale the way a price or an availability fact
+would.
+
+**Promotion:** a new confirmed exemplar is written as `status='active'`,
+`confidence=0.7`, `evidence_count=1` -- NOT yet trusted for matching
+(`MIN_TRUSTED_CONFIDENCE=0.85`, `MIN_TRUSTED_EVIDENCE_COUNT=3`). It is
+"promoted" to trusted only by accumulating reinforcements from further
+independent confirmed instances (each reinforcement nudges confidence up
+and increments evidence_count) -- there is no single-shot promotion path,
+by design: one confirmation is evidence, not proof.
+
+**Conflict/demotion:** see `contradiction_count` above and
+`recordSemanticConceptEvidence`'s cross-concept check -- when OpenAI
+confirms a DIFFERENT concept for text that closely resembles an existing
+row's stored signature, that existing row is immediately retracted.
+
 **What increment 1 actually does:**
 
 - New module `netlify/functions/_semantic-concept-memory.ts`: a CLOSED
@@ -112,6 +171,18 @@ infrastructure can support this cleanly" instruction:
   exemplar via the write path. Coverage grows from real confirmed usage, not
   from a hand-written synonym table -- true single-example paraphrase
   bridging needs embedding similarity (see "Deferred" below).
+- **Safety fix found during testing:** pure surface similarity cannot tell
+  "X" from "not X" -- calibration showed "ไม่มากับแฟน" (NOT coming with a
+  partner) scoring 0.73 against the seeded "มากับแฟน" exemplar, well above
+  the 0.6 trust threshold. Fixed with a structural negation-marker veto
+  (`hasNegationMismatch`) inside `conceptSimilarity` itself, so every caller
+  (matching AND the write path's own reinforcement check) is covered by
+  construction. This is acceptance criterion D.
+- **Contradiction/demotion:** the write path also checks the newly confirmed
+  exemplar against every OTHER concept key's stored signatures; a close
+  match to a DIFFERENT concept is a confirmed contradiction and immediately
+  retracts the stale row (`contradiction_count`, `CONTRADICTION_RETRACT_
+  THRESHOLD = 1`) -- see the schema proposal above.
 - Wired into `resolveSemanticTurn` (`_thongthai-one-mind-orchestrator.ts`):
   a read-path lookup between the exact-deterministic zero-cost check and the
   real model call (only when nothing else already classified the turn, and
@@ -132,14 +203,19 @@ infrastructure can support this cleanly" instruction:
   file is committed and reviewable, but nothing in this codebase runs it
   against the live Supabase project without that explicit step.
 
-**Tests:** `tests/kernel-v2-phase3-semantic-concept-memory.test.ts`, 12/12
-passing -- unit coverage of the matching/safety primitives, an end-to-end
-integration proving an unseen near-identical variant resolves at zero paid
-calls, an integration proving a genuinely different-vocabulary phrasing
-correctly still pays for the real model (no false positive), a write-path
-test proving a new confirmed exemplar is stored as its own row, and a
-negative control proving a commit/booking message is never routed through
-the fuzzy matcher. Full suite: 1628/1628 (1616 + 12), 0 failed.
+**Tests:** `tests/kernel-v2-phase3-semantic-concept-memory.test.ts`, 16/16
+passing. Full suite: 1632/1632 (1616 baseline + 16 new), 0 failed.
+
+**Required acceptance criteria (owner-specified), each mapped to a passing test:**
+
+| # | Criterion | Test |
+|---|---|---|
+| A | Unseen phrase: MISS -> OpenAI -> canonical meaning -> learning candidate | "the write path accumulates a genuinely new confirmed exemplar as its own row" |
+| B | Safe repeated concept: HIT -> 0 paid call | "an UNSEEN near-identical variant ... resolves at zero cost" |
+| C | Unseen paraphrase generalizes without exact-string matching | same test as B (a genuinely different sentence, not the seeded literal string) -- honestly bounded to near-identical surface variants, not cross-vocabulary synonyms (see the honesty note) |
+| D | Contradictory phrase must NOT incorrectly reuse a prior concept -> supervisor/clarification | 4 tests: two unit (`conceptSimilarity`/`matchLearnedConcept` negation + contradiction-count veto), two integration (a negated phrase still pays for the real model; a confirmed cross-concept contradiction retracts the stale row) |
+| E | Critical intent: learned fuzzy match must NOT directly create a transaction | "negative control: a real commit/booking message is never routed through the fuzzy concept matcher" -- also true by construction (`safeConceptEntities` is a closed map with no action/domain field to escalate through) |
+| F | Cost: paid-call reduction without an IQ cliff | demonstrated qualitatively (a matched turn costs exactly zero calls, an unmatched one behaves exactly as before); no formal 20/50/100-turn stress numbers yet -- explicitly deferred below, more meaningful once pace/consider-only add real concept variety |
 
 **Explicitly deferred, not bundled into increment 1:**
 
@@ -233,7 +309,7 @@ Phase 3 increment 1 focused suite:
 npx tsx --test tests/kernel-v2-phase3-semantic-concept-memory.test.ts
 ```
 
-Result: `12/12` passed.
+Result: `16/16` passed.
 
 Full suite (after Phase 3 increment 1, on top of Phase 2's `main`):
 
@@ -241,7 +317,7 @@ Full suite (after Phase 3 increment 1, on top of Phase 2's `main`):
 npm test
 ```
 
-Result: `1628/1628` passed, `0` failed (1616 Phase-2 baseline + 12 new Phase 3 tests).
+Result: `1632/1632` passed, `0` failed (1616 Phase-2 baseline + 16 new Phase 3 tests).
 
 ## Cost Measurements
 

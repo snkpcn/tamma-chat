@@ -34,6 +34,7 @@ function seededConcept(overrides: Partial<StoredSemanticConcept> = {}): StoredSe
     normalizedSignature: normalizeForConceptMatching('มากับแฟน'),
     confidence: 0.9,
     evidenceCount: 5,
+    contradictionCount: 0,
     status: 'active',
     ...overrides,
   };
@@ -80,6 +81,28 @@ test('unit: matchLearnedConcept ignores concepts below the confidence/evidence b
   assert.equal(matchLearnedConcept('มากับแฟน', [superseded]), null);
 });
 
+test('acceptance D (unit): a negated/contradictory phrase never matches a superficially similar confirmed concept', () => {
+  const concept = seededConcept();
+  // "ไม่มากับแฟน" (NOT coming with a partner) scores 0.73 on pure surface
+  // similarity against "มากับแฟน" in calibration -- well above MIN_SIMILARITY
+  // -- so this specifically exercises the negation-mismatch veto in
+  // conceptSimilarity, not merely low similarity.
+  assert.equal(matchLearnedConcept('ไม่มากับแฟน', [concept]), null);
+  assert.equal(matchLearnedConcept('เลิกกับแฟนแล้ว', [concept]), null);
+  assert.ok(
+    conceptSimilarity(normalizeForConceptMatching('มากับแฟน'), normalizeForConceptMatching('ไม่มากับแฟน')) === 0,
+    'negation mismatch must zero out similarity regardless of surface character overlap',
+  );
+});
+
+test('acceptance D (unit): a concept with a recorded contradiction is never matched even if still marked active', () => {
+  const contradicted = seededConcept({ contradictionCount: 1 });
+  assert.equal(
+    matchLearnedConcept('มากับแฟน', [contradicted]), null,
+    'a contradicted row must be excluded as defense in depth, independent of its status field',
+  );
+});
+
 test('unit: matchLearnedConcept never fires on a long or unrelated message', () => {
   const concept = seededConcept();
   assert.equal(
@@ -121,6 +144,7 @@ function installConceptMemoryMock(harness: Harness, seedRows: StoredSemanticConc
     normalized_signature: row.normalizedSignature,
     confidence: row.confidence,
     evidence_count: row.evidenceCount,
+    contradiction_count: row.contradictionCount,
     status: row.status,
   }));
   const baseFetch = harness.fetchMock;
@@ -135,7 +159,17 @@ function installConceptMemoryMock(harness: Harness, seedRows: StoredSemanticConc
         });
       }
       if (method === 'PATCH') {
-        patches.push(JSON.parse(String(init.body ?? '{}')));
+        const body = JSON.parse(String(init.body ?? '{}')) as { status?: string; contradiction_count?: number };
+        patches.push(body);
+        // Mirrors real Postgres: the same in-memory rows this mock's GET
+        // reads from must reflect a PATCH, so a subsequent read in the SAME
+        // test sees the retraction/reinforcement, matching production.
+        const idMatch = u.match(/id=eq\.([^&]+)/);
+        const row = idMatch ? rows.find(candidate => candidate.id === decodeURIComponent(idMatch[1]!)) : undefined;
+        if (row) {
+          if (typeof body.status === 'string') row.status = body.status;
+          if (typeof body.contradiction_count === 'number') row.contradiction_count = body.contradiction_count;
+        }
         return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (method === 'POST') {
@@ -244,6 +278,67 @@ test('integration: the write path accumulates a genuinely new confirmed exemplar
       posts[0]!.normalized_signature, seededConcept().normalizedSignature,
       'the new exemplar must be stored as its OWN signature, never silently merged into the old one it does not resemble',
     );
+  });
+});
+
+test('acceptance D (integration): a negated companion statement never reuses the prior concept and still requires the real model', async () => {
+  await withHarness(async harness => {
+    installConceptMemoryMock(harness, [seededConcept()]);
+    const gid = guestId('phase3-companion-negation-contradiction');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+    const callsAfterTurn1 = harness.modelCallCount();
+
+    // "ไม่ได้มากับแฟนนะ" (I did NOT come with a partner) is the exact
+    // opposite meaning of the seeded "มากับแฟน" exemplar despite very high
+    // surface-character overlap -- it must never be silently reused.
+    const turn2 = await processThongthaiChatCore(brainRequest('ไม่ได้มากับแฟนนะ', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+    assert.equal(turn2.statusCode, 200);
+    assert.ok(
+      harness.modelCallCount() > callsAfterTurn1,
+      'a contradictory phrase must fall through to the real model rather than reusing the prior concept',
+    );
+  });
+});
+
+test('acceptance D (integration): a confirmed contradiction against a DIFFERENT concept retracts the stale row', async () => {
+  await withHarness(async harness => {
+    // Seed companion_partner from "มากับแฟน" with LOW evidence (below
+    // MIN_TRUSTED_EVIDENCE_COUNT) -- deliberately: a not-yet-trusted row is
+    // exactly what the contradiction check protects. A row that already
+    // cleared the trust bar would have been caught (correctly, harmlessly)
+    // by the READ path's own exact match before the model was ever called
+    // at all, which would make this test about the read path, not
+    // contradiction detection.
+    const { patches } = installConceptMemoryMock(harness, [seededConcept({ evidenceCount: 1 })]);
+    const gid = guestId('phase3-companion-cross-concept-contradiction');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity',
+      intent: 'companion_statement',
+      action: 'provide_information',
+      entities: { companion: 'solo' },
+      references: [],
+      constraints: [],
+      confidence: 0.93,
+      needsClarification: false,
+    });
+    // Deliberately the SAME text as the seeded companion_partner exemplar --
+    // a real-world equivalent would be a near-duplicate signature OpenAI
+    // confirms means something else. This isolates the contradiction
+    // mechanism itself from the similarity threshold.
+    await processThongthaiChatCore(brainRequest('มากับแฟน', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+
+    const retraction = patches.find(patch => patch.status === 'retracted');
+    assert.ok(retraction, 'the contradicted companion_partner row must be retracted, not left silently trustworthy');
   });
 });
 

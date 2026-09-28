@@ -77,6 +77,14 @@ create table if not exists public.semantic_concept_memory (
   confidence numeric(4,3) not null default 0.700 check (confidence >= 0 and confidence <= 1),
   evidence_count integer not null default 1 check (evidence_count >= 1),
 
+  -- Counts a CONFIRMED contradiction: a later, different confirmed concept
+  -- whose own exemplar closely resembles THIS row's signature (see
+  -- recordSemanticConceptEvidence's cross-concept check). One confirmed
+  -- contradiction is enough to retract a row (CONTRADICTION_RETRACT_
+  -- THRESHOLD = 1 in the application) -- "never let self-learning make
+  -- Thongthai confidently wrong" argues for conservatism over patience.
+  contradiction_count integer not null default 0 check (contradiction_count >= 0),
+
   source text not null check (
     source in ('openai_confirmed', 'human_reviewed')
   ),
@@ -88,6 +96,12 @@ create table if not exists public.semantic_concept_memory (
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+
+  -- Lets a future migration distinguish "no rows yet" from "rows written
+  -- under an incompatible earlier shape" without inspecting column
+  -- existence at runtime (see SEMANTIC_CONCEPT_MEMORY_SCHEMA_VERSION in the
+  -- application module).
+  schema_version text not null default 'semantic-concept-memory-v1',
 
   constraint semantic_concept_memory_source_signal_key unique (source_signal_key)
 );
