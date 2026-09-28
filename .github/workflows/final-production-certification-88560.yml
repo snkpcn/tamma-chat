@@ -1,0 +1,50 @@
+name: Final Production Certification 88560
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/final-production-certification-88560.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  production-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 88560fb6980ff234117dd74318ffc5816a9c2f35
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Verify exact target SHA
+        run: test "$(git rev-parse HEAD)" = "88560fb6980ff234117dd74318ffc5816a9c2f35"
+      - name: Run semantic production smoke
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: npx tsx scripts/run-production-smoke.ts
+
+  line-transport-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 88560fb6980ff234117dd74318ffc5816a9c2f35
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Verify exact target SHA
+        run: test "$(git rev-parse HEAD)" = "88560fb6980ff234117dd74318ffc5816a9c2f35"
+      - name: Run real LINE HTTPS transport certification
+        env:
+          LINE_CHANNEL_SECRET: ${{ secrets.LINE_CHANNEL_SECRET }}
+          LINE_WEBHOOK_URL: https://tamma-chat.netlify.app/.netlify/functions/line-webhook
+        run: npx tsx scripts/run-line-transport-certification.ts
