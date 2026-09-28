@@ -378,7 +378,7 @@ export function callResponseComposer(
   costContext?:AiCallContext,
 ):Promise<string> {
   return callOpenAIModel(
-    OPENAI_SEMANTIC_PRIMARY_MODEL,
+    OPENAI_SEMANTIC_REVIEW_MODEL,
     systemPrompt,
     messages,
     callerLabel,
