@@ -12,6 +12,7 @@ import {
   loadGuestAgentStateSnapshot,
   type GuestAgentStateSnapshot,
 } from './_guest-agent-state-store';
+import { persistAiCallCost } from './_ai-cost-store';
 
 export const AI_COST_LEDGER_VERSION = 'ai-cost-ledger-v1';
 const STATE_KEY = 'aiCostLedger';
@@ -299,6 +300,27 @@ export async function finalizeAiCall(
     };
     if (await casLedger(context.guestDbId, snapshot, next, now)) {
       const policy = aiCostPolicy();
+      const latencyMs = Math.max(0, now.getTime() - Date.parse(previous.at || now.toISOString()));
+      await persistAiCallCost({
+        conversationId:context.conversationId,
+        eventId:context.eventId,
+        channel:context.channel,
+        model:reservation.model,
+        callPurpose:context.callerLabel,
+        inputTokens:updated.inputTokens,
+        cachedInputTokens:updated.cachedInputTokens,
+        outputTokens:updated.outputTokens,
+        costUsd:updated.actualCostUsd,
+        costThb:usdToThb(updated.actualCostUsd),
+        callIndexTurn:updated.callIndexTurn,
+        callIndexConversation:updated.callIndexConversation,
+        status:updated.status === 'failed' ? 'failed' : 'completed',
+        latencyMs,
+        certificationMode:context.certificationMode,
+        occurredAt:now.toISOString(),
+      }).catch(error=>{
+        console.error('AI_COST_PERSIST_ERROR', error instanceof Error ? error.message.slice(0,180) : 'unknown');
+      });
       emitCostMetric({
         conversation_id:context.conversationId,
         event_id:context.eventId,

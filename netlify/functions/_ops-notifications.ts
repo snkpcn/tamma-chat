@@ -1,8 +1,8 @@
 import { handleBookingOpsCommand } from './_ops-booking-actions';
 import { decryptPii, encryptPii, piiHash } from './_operations-db';
 
-export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all' | 'owner_general';
-export type OpsNotificationEntity = 'booking' | 'cafe_inquiry' | 'otop_order' | 'feedback_event';
+export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all' | 'owner_general' | 'ai_cost';
+export type OpsNotificationEntity = 'booking' | 'cafe_inquiry' | 'otop_order' | 'feedback_event' | 'ai_cost';
 
 type TargetType = 'group' | 'room';
 
@@ -50,6 +50,7 @@ const TEAM_LABELS: Record<OpsTeamCode, string> = {
   otop: 'OTOP / สินค้าชุมชน',
   all: 'ทุกทีม',
   owner_general: 'เจ้าของ/ทั่วไป',
+  ai_cost: 'ค่าใช้จ่าย AI / API',
 };
 
 function dbConfig(): { url: string; key: string } {
@@ -157,6 +158,7 @@ function parseTeamCode(raw: string): OpsTeamCode | null {
     // via this command (checked below), but 'owner_general' is a real,
     // bindable team like restaurant/stay/activity/cafe/otop.
     [/^(owner|general|admin|เจ้าของ|ทั่วไป|แอดมิน|ผู้ดูแล)$/u, 'owner_general'],
+    [/^(ai\s*cost|api\s*cost|gpt\s*cost|ค่า\s*ai|ค่า\s*api|ค่าใช้จ่าย\s*(?:ai|api|gpt))$/iu, 'ai_cost'],
   ];
   return aliases.find(([pattern]) => pattern.test(value))?.[1] ?? null;
 }
@@ -215,7 +217,7 @@ export async function bindLineTeamChannel(input: {
   // describe. team_code is the column with an owner_general-specific
   // migration (see supabase/migrations); service_type deliberately stays
   // untouched.
-  const NON_SERVICE_TEAM_CODES: OpsTeamCode[] = ['all', 'owner_general'];
+  const NON_SERVICE_TEAM_CODES: OpsTeamCode[] = ['all', 'owner_general', 'ai_cost'];
   const payload = {
     team_code: input.teamCode,
     service_type: NON_SERVICE_TEAM_CODES.includes(input.teamCode) ? null : input.teamCode,
@@ -789,6 +791,7 @@ export async function sendDailyOpsSummaries(localDate = isoLocalDate()): Promise
   const results: Array<{ team: OpsTeamCode; status: string }> = [];
   for (const channel of channels) {
     const teamCode = channel.team_code;
+    if (teamCode === 'ai_cost') continue;
     const text = await buildTeamScheduleSummary(teamCode, localDate);
     const status = await sendTeamMessage({
       teamCode,
@@ -803,6 +806,22 @@ export async function sendDailyOpsSummaries(localDate = isoLocalDate()): Promise
   return results;
 }
 
+
+export async function sendAiCostLineNotification(input:{
+  idempotencyKey:string;
+  deliveryType:'ai_cost_conversation'|'ai_cost_daily';
+  text:string;
+  payload?:Record<string,unknown>;
+}):Promise<'sent'|'duplicate'|'not_bound'>{
+  return sendTeamMessage({
+    teamCode:'ai_cost',
+    entityType:'ai_cost',
+    deliveryType:input.deliveryType,
+    idempotencyKey:input.idempotencyKey,
+    text:input.text,
+    payload:input.payload,
+  });
+}
 
 async function customerLineTarget(customerId: string | null): Promise<string | null> {
   if (!customerId) return null;
@@ -916,7 +935,7 @@ export async function handleLineOpsGroupMessage(input: {
     }
     if (!teamCode || teamCode === 'all') {
       logBindAttempt(true, 'invalid_team');
-      return 'ยังไม่รู้จักชื่อนี้ครับ ใช้: restaurant / stay / activity / cafe / otop / เจ้าของ (owner)';
+      return 'ยังไม่รู้จักชื่อนี้ครับ ใช้: restaurant / stay / activity / cafe / otop / เจ้าของ (owner) / ai cost';
     }
     try {
       await bindLineTeamChannel({
@@ -938,6 +957,9 @@ export async function handleLineOpsGroupMessage(input: {
       return 'ผูกทีมไม่สำเร็จครับ ระบบฐานข้อมูลยังไม่รองรับทีมนี้ ทีมงานกำลังแก้ไขครับ ลองใหม่อีกครั้งในภายหลัง';
     }
     logBindAttempt(true, 'success');
+    if (teamCode === 'ai_cost') {
+      return '✅ ผูกกลุ่มนี้กับค่าใช้จ่าย AI / API แล้วครับ\nจากนี้สรุปค่า OpenAI ต่อแชทและสรุปรายวันจะส่งเข้ากลุ่มนี้';
+    }
     return `✅ ผูกกลุ่มนี้กับทีม ${TEAM_LABELS[teamCode]} แล้วครับ\nจากนี้งานใหม่และสรุปตารางงานของทีมนี้จะส่งเข้ากลุ่มนี้`;
   }
 
@@ -952,6 +974,9 @@ export async function handleLineOpsGroupMessage(input: {
   if (scheduleMatch) {
     const binding = await currentBindingForTarget(input.targetId);
     if (!binding) return 'กลุ่มนี้ยังไม่ได้ผูกทีมครับ พิมพ์ เช่น “ผูกทีม activity” ก่อน';
+    if (binding.team_code === 'ai_cost') {
+      return 'กลุ่มนี้ใช้สำหรับแจ้งค่าใช้จ่าย AI / API ครับ ไม่มีตารางงานบริการ';
+    }
     const localDate = isoLocalDate(new Date(), scheduleMatch[1] === 'พรุ่งนี้' ? 1 : 0);
     return buildTeamScheduleSummary(binding.team_code, localDate);
   }
