@@ -531,16 +531,37 @@ on the argument alone -- and the numbers below changed the plan:
     picked the wrong concept for the primary worked example (0.381 same-
     concept vs 0.428 wrong-concept), so this alone is unlikely to be
     sufficient without also addressing point 1 above.
-  - A different embedding model (this used `text-embedding-3-small`; a
-    larger/differently-tuned model might separate better -- would need its
-    own calibration run, not an assumption).
+  - ~~A different embedding model~~ -- **tried and also disconfirmed.** Same
+    8 pairs re-run against `text-embedding-3-large` (workflow run
+    `36417327219`, `2026-09-28T11:43Z`, dispatched via the model input added
+    in PR #222):
+
+    | pair | 3-small | 3-large |
+    |---|---|---|
+    | "แฟน"/"คนรู้ใจ" (same concept) | 0.382 | 0.565 |
+    | "แฟน"/"คู่รัก" (same concept) | 0.381 | 0.470 |
+    | "แฟน"/"ครอบครัว" (different concept) | 0.426 | 0.632 |
+    | "แฟน"/"เพื่อนกลุ่มใหญ่" (different concept) | 0.428 | 0.558 |
+    | negation | 0.791 | 0.714 |
+    | unrelated | 0.187 | 0.167 |
+
+    All scores shifted up with the larger model (expected -- absolute
+    cosine similarity is not comparable across models), but the SAME
+    overlap persists: same-concept minimum (0.470) is still below
+    different-concept maximum (0.632). Negation (0.714) is now even further
+    from the "should be dissimilar" end relative to the same-concept band.
+    **A larger model does not fix this on its own** -- consistent with the
+    working hypothesis (point 3 below) that the problem is short shared
+    sentence scaffolding diluting the signal, not raw model capacity. This
+    makes the content-span-extraction option above the most likely next
+    thing worth calibrating, not model size.
   - Revisit whether OpenAI's own semantic supervisor should instead be asked
     to output a canonical concept-identity label directly (already
     confirming a concept today) as the generalization signal, rather than
     adding a second, separate embedding-similarity system.
   Regardless of which path, negation must still be handled by an explicit
   structural veto (as increment 1 already has), never assumed solved by
-  switching to embeddings.
+  switching to embeddings or a larger embedding model.
 
 **The originally-planned smallest safe increment (NOT adopted, kept here
 only as a record of what was considered and why it needs revision before
@@ -726,27 +747,33 @@ number of concept keys to measure hit-rate against.
    vs. different-concept pairs (0.381 same-concept overlaps below 0.428
    different-concept), and does not handle negation (0.791, higher than any
    genuine same-concept pair).
-3. Before any embedding-based implementation: run a follow-up calibration
-   on the two most promising fixes identified above -- (a) embed just the
-   extracted content span (the companion-type noun alone) instead of the
-   full templated sentence, and (b) re-test with a different embedding
-   model -- using the same `scripts/run-embedding-calibration.ts` pattern
-   (add new fixture variants, dispatch, read back real numbers). Only once
-   a design demonstrably separates same-concept from different-concept
-   pairs with a real margin should a migration be designed. Do not
-   implement the embedding-column migration on the current, disconfirmed
-   design.
-4. Extend Phase 3 to the pace/consider-only concept keys the mandate also
+3. ~~Re-test with `text-embedding-3-large`~~ -- **done, also disconfirmed**:
+   workflow run `36417327219`, results recorded above. Same overlap persists
+   at a larger model size, so model choice alone is not the fix.
+4. Before any embedding-based implementation: run a follow-up calibration on
+   embedding just the extracted content span (the companion-type noun
+   alone, e.g. "แฟน" vs "คนรู้ใจ" vs "ครอบครัว") instead of the full
+   templated sentence, using the same `scripts/run-embedding-calibration.ts`
+   pattern (add new fixture variants -- the script already supports a model
+   override via `THONGTHAI_EMBEDDING_MODEL`/the workflow's `embedding_model`
+   input; add bare-noun pairs alongside or instead of the current
+   full-sentence ones, dispatch, read back real numbers). This is now the
+   best-supported remaining hypothesis (two other paths already tried and
+   disconfirmed). Only once a design demonstrably separates same-concept
+   from different-concept pairs with a real margin should a migration be
+   designed. Do not implement the embedding-column migration on the
+   current, twice-disconfirmed design.
+5. Extend Phase 3 to the pace/consider-only concept keys the mandate also
    names, using the same closed-vocabulary, safety-by-construction pattern.
-5. Run the mandate's own formal 20/50/100-turn cost-stress conversations
+6. Run the mandate's own formal 20/50/100-turn cost-stress conversations
    (multiple independent samples per length, covering casual chat/known
    language/unseen language/unseen paraphrase/references/correction/topic
    changes/resume/consideration/explicit transaction wording/incident
    language) and report the full required metric set (paid-call counts,
    zero-call rate, hit rate by tier, token/cost percentiles, cap violations,
    intelligence-cliff check, accidental-transaction count). Only once this
-   evidence exists, plus item 3 above, may Phase 3 be declared complete.
-6. Phases 4-7 (commercial-intent boundary, incident/backoffice routing,
+   evidence exists, plus item 4 above, may Phase 3 be declared complete.
+7. Phases 4-7 (commercial-intent boundary, incident/backoffice routing,
    natural-response layer, brutal end-to-end certification) remain
    unstarted. Each is large enough to warrant its own design-first pass
    before implementation, following the same discipline used for Phase 3
