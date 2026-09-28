@@ -735,6 +735,39 @@ function asStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 }
 
+
+/** Normalize model-written preference codes into the small canonical
+ * machine vocabulary downstream renderers/memory already understand.
+ * This is NOT language routing: it runs only after the language model has
+ * understood the turn and only canonicalizes structured constraint labels.
+ */
+function canonicalizeSemanticConstraints(
+  value: unknown,
+  entities: Record<string,unknown>,
+): string[] {
+  const raw=asStringArray(value);
+  const out:string[]=[];
+  for(const item of raw){
+    const normalized=item.trim().toLowerCase();
+    if(!normalized) continue;
+    if (
+      /(?:mild|low)[_-]?spic(?:e|y)/u.test(normalized)
+      || /spic(?:e|y)[_-]?(?:mild|low)/u.test(normalized)
+    ) {
+      out.push('low_spicy');
+      continue;
+    }
+    out.push(item);
+  }
+  const spicePreference=typeof entities.spicePreference==='string'
+    ? entities.spicePreference.trim().toLowerCase()
+    : '';
+  if (['mild','low','low_spice','low_spicy'].includes(spicePreference)) {
+    out.push('low_spicy');
+  }
+  return [...new Set(out)];
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -1474,7 +1507,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     informationNeed,
     entities,
     references,
-    constraints: asStringArray(parsed.constraints),
+    constraints: canonicalizeSemanticConstraints(parsed.constraints, entities),
     confidence,
     // An unresolved prior-context reference (the model thinks this points at
     // something, but nothing in the real context matches) forces clarification
