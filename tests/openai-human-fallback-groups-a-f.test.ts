@@ -380,3 +380,93 @@ test('F1: a 20+ turn mixed conversation stays coherent and creates zero unintend
     assert.equal(harness.postsTo('otop_orders').length, 0);
   });
 });
+
+
+// ============================================================
+// PR #229 live-acceptance regressions -- structural classes found only by
+// the real-provider 16-turn certification.  These stay on the real core path
+// so future refactors cannot make the intermediate SemanticTurn look right
+// while the customer-visible response falls back to legacy.
+// ============================================================
+
+test('G1: explicit no-transaction conditional availability stays in One-Mind even when model labels the fallback as planning', async () => {
+  await withHarness(async harness => {
+    const gid = guestId('groupG-conditional-availability');
+
+    // Establish an in-progress activity working state without committing a
+    // booking.  The exact wording is not the behavior under test.
+    harness.programGeminiReply(turn({
+      domain: 'activity', intent: 'consider_horse', action: 'confirm',
+      speechAct: 'selection', entities: { horseName: 'ภาราดร' },
+      constraints: ['not_booking'], reply: 'เก็บภาราดรไว้ก่อนครับ ยังไม่จอง',
+    }));
+    const seed = await processThongthaiChatCore(
+      brainRequest('เก็บภาราดรไว้ก่อน ยังไม่จอง', gid, 'line'),
+      'g1-seed',
+    );
+    assert.equal(seed.statusCode, 200);
+
+    // The model correctly extracts both options and the availability need,
+    // but conservatively simulate the live failure where it calls the
+    // conditional fallback a planning/modify action.  Explicit no_transaction
+    // means the machine action must be de-escalated to the safe read-only
+    // deterministic interpretation while retaining the model's richer
+    // entities -- never bounced to legacy and never executed.
+    harness.programGeminiReply(turn({
+      domain: 'activity', intent: 'conditional_horse_fallback',
+      action: 'modify', informationNeed: 'availability', speechAct: 'request',
+      entities: {
+        primaryHorse: 'ภาราดร',
+        fallbackHorse: 'ทองไทย',
+        resourceCode: 'activity-horse',
+      },
+      constraints: ['no_transaction'], reply: '',
+    }));
+    const r = await processThongthaiChatCore(
+      brainRequest('ถ้าภาราดรไม่ว่าง เอาทองไทยแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร', gid, 'line'),
+      'g1-conditional',
+    );
+    assert.equal(r.statusCode, 200);
+    const message = text(r.payload);
+    assert.match(message, /ภาราดร/u);
+    assert.match(message, /ทองไทย/u);
+    assert.match(message, /ยังไม่ได้|ไม่.*จอง/u);
+    assert.equal(harness.postsTo('bookings').length, 0);
+    assert.equal(harness.postsTo('restaurant_preorders').length, 0);
+    assert.equal(harness.postsTo('otop_orders').length, 0);
+  });
+});
+
+test('G2: active-task summary outranks missing-field collection and explicitly reports no transaction', async () => {
+  await withHarness(async harness => {
+    const gid = guestId('groupG-summary-readback');
+
+    // Leave a deliberately incomplete activity task in working state.
+    harness.programGeminiReply(turn({
+      domain: 'activity', intent: 'consider_horse', action: 'confirm',
+      speechAct: 'selection', entities: { horseName: 'ภาราดร' },
+      constraints: ['not_booking'], reply: 'เก็บภาราดรไว้ก่อนครับ ยังไม่จอง',
+    }));
+    const seed = await processThongthaiChatCore(
+      brainRequest('เก็บภาราดรไว้ก่อน ยังไม่จอง', gid, 'line'),
+      'g2-seed',
+    );
+    assert.equal(seed.statusCode, 200);
+
+    harness.programGeminiReply(turn({
+      domain: 'activity', intent: 'summarize_active_task', action: 'ask',
+      informationNeed: 'none', speechAct: 'question',
+      constraints: ['not_booking_now'], reply: '',
+    }));
+    const r = await processThongthaiChatCore(
+      brainRequest('สรุปสิ่งที่เลือกไว้ตอนนี้ให้หน่อย แต่ยังไม่ต้องจอง', gid, 'line'),
+      'g2-summary',
+    );
+    assert.equal(r.statusCode, 200);
+    const message = text(r.payload);
+    assert.match(message, /ภาราดร/u);
+    assert.match(message, /ยังไม่ได้ยืนยันการจอง|ยังไม่ได้จอง|ไม่ได้ยืนยัน/u);
+    assert.doesNotMatch(message, /เลือกระยะเวลา|ขอระยะเวลา|เช็กระยะเวลา/u);
+    assert.equal(harness.postsTo('bookings').length, 0);
+  });
+});
