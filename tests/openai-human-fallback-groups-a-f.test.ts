@@ -441,14 +441,18 @@ test('G2: active-task summary outranks missing-field collection and explicitly r
   await withHarness(async harness => {
     const gid = guestId('groupG-summary-readback');
 
-    // Leave a deliberately incomplete activity task in working state.
+    // Leave a deliberately incomplete activity task in canonical working
+    // state.  This is intentionally ordinary slot-provision (no explicit
+    // no-booking constraint), because a consider-only declaration is designed
+    // NOT to manufacture a task when none exists.
     harness.programGeminiReply(turn({
-      domain: 'activity', intent: 'consider_horse', action: 'confirm',
-      speechAct: 'selection', entities: { horseName: 'ภาราดร' },
-      constraints: ['not_booking'], reply: 'เก็บภาราดรไว้ก่อนครับ ยังไม่จอง',
+      domain: 'activity', intent: 'provide_activity_plan_details', action: 'provide_information',
+      speechAct: 'statement',
+      entities: { activityCode: 'horse', date: '2026-09-30', partySize: 4 },
+      constraints: [], reply: 'รับข้อมูลไว้ครับ',
     }));
     const seed = await processThongthaiChatCore(
-      brainRequest('เก็บภาราดรไว้ก่อน ยังไม่จอง', gid, 'line'),
+      brainRequest('ขี่ม้าพรุ่งนี้ 4 คน', gid, 'line'),
       'g2-seed',
     );
     assert.equal(seed.statusCode, 200);
