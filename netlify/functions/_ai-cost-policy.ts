@@ -14,8 +14,14 @@ export const DEFAULT_MAX_CONVERSATION_AI_COST_USD = 5;
 export const DEFAULT_MAX_AI_CALLS_PER_TURN = 3;
 export const DEFAULT_MAX_AI_CALLS_PER_CONVERSATION = 2_000;
 export const DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS = 900;
-export const DEFAULT_NORMAL_SEMANTIC_INPUT_TOKENS = 2_500;
-export const DEFAULT_COMPLEX_SEMANTIC_INPUT_TOKENS = 4_000;
+// Raised alongside the shared Thongthai human-service voice contract and
+// the reference-resolution rules added to the semantic-interpreter prompt
+// (see _thongthai-service-voice.ts) -- an owner-required persona block plus
+// comprehension rules, not prompt bloat. Real measured sizes: ~3.7k
+// (normal), ~5.5k (complex); these targets keep ~10-13% headroom above
+// that, well inside the real enforced ceiling (ABSOLUTE_SEMANTIC_INPUT_TOKENS).
+export const DEFAULT_NORMAL_SEMANTIC_INPUT_TOKENS = 4_200;
+export const DEFAULT_COMPLEX_SEMANTIC_INPUT_TOKENS = 6_200;
 // Grounded response composition (_response-composer.ts) prompts carry the
 // full Bible voice contract plus authoritative facts -- structurally larger
 // than a semantic-interpretation prompt. Raised well past the ~26-token

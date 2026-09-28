@@ -57,7 +57,7 @@ function input(overrides: Partial<ResponseComposerInput> = {}): ResponseComposer
 }
 
 test('Response Composer version is explicit', () => {
-  assert.equal(RESPONSE_COMPOSER_VERSION, 'response-composer-v1');
+  assert.equal(RESPONSE_COMPOSER_VERSION, 'response-composer-v2');
 });
 
 test('prompt consumes canonical Bible doctrine and grounded facts, not raw DB implementation', () => {
@@ -72,7 +72,7 @@ test('prompt consumes canonical Bible doctrine and grounded facts, not raw DB im
 
 test('prompt explicitly separates unavailable, empty and unknown truth states', () => {
   const prompt=buildResponseComposerPrompt(input());
-  assert.match(prompt,/SOURCE_UNAVAILABLE means/i);
+  assert.match(prompt,/SOURCE_UNAVAILABLE[^\n]*means/i);
   assert.match(prompt,/VERIFIED_EMPTY means/i);
   assert.match(prompt,/FACT_UNKNOWN means/i);
 });
