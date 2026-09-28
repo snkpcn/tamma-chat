@@ -46,6 +46,10 @@ import {
   type SemanticTurn,
 } from './_semantic-interpreter';
 import { deriveDeterministicSemanticTurn } from './_deterministic-semantic-turn';
+import {
+  matchLearnedConcept, loadActiveSemanticConcepts, recordSemanticConceptEvidence,
+  safeConceptEntities, companionConceptKeyForValue, MAX_MATCHABLE_MESSAGE_LENGTH,
+} from './_semantic-concept-memory';
 import { deriveSemanticMeaning, type SemanticMeaning } from './_semantic-meaning';
 import {
   LLMAvailabilityError,
@@ -766,6 +770,50 @@ async function resolveSemanticTurn(
     return { ...deterministic!, semanticSource:'deterministic_fallback' };
   }
 
+  // Kernel V2 Phase 3 increment 1: semantic concept memory.
+  //
+  // Only attempted when NOTHING else already understood this turn
+  // (deterministic is null) and only against a REAL fresh decision (never
+  // when a caller is reusing an already-known cached semantic turn via a
+  // mocked interpretSemanticTurn -- that path must keep its own
+  // one-paid-call-per-customer-turn invariant undisturbed). A matched
+  // concept can only ever contribute entities.companion (see
+  // safeConceptEntities' closed map) -- there is no way for this branch to
+  // produce a domain, an action, or anything that could become a
+  // transaction, so it is safe to treat as zero-cost exactly like the
+  // deterministic layer above.
+  if (
+    deps.interpretSemanticTurn === REAL_DEPENDENCIES.interpretSemanticTurn
+    && !deterministic
+    && message.trim().length > 0
+    && message.trim().length <= MAX_MATCHABLE_MESSAGE_LENGTH
+  ) {
+    const concepts = await loadActiveSemanticConcepts();
+    const match = concepts.length ? matchLearnedConcept(message, concepts) : null;
+    if (match) {
+      emitZeroCallTurn({ conversationId, eventId:input.eventId, channel:input.channel });
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'semantic_concept_memory',
+        deterministic_turn: false,
+        model_call_used: false,
+        concept_key: match.conceptKey,
+        concept_similarity: match.similarity,
+        concept_evidence_count: match.evidenceCount,
+      }));
+      return {
+        semanticSource: 'semantic_concept_memory',
+        domain: taskState.activeTask?.domain ?? context.activeDomain ?? 'general',
+        intent: 'semantic_concept_match',
+        action: 'provide_information',
+        entities: safeConceptEntities(match.conceptKey),
+        references: [],
+        constraints: [],
+        confidence: match.confidence,
+        needsClarification: false,
+      };
+    }
+  }
+
   // Human Conversation Recovery: LANGUAGE SUPERVISOR WHEN NEEDED.
   //
   // Every ordinary customer utterance is read by the semantic model first.
@@ -877,6 +925,47 @@ async function resolveSemanticTurn(
       model_call_used: true,
       model_confidence: modelTurn.confidence,
     }));
+
+    // Kernel V2 Phase 3 increment 1: learn ONLY from a turn nothing else
+    // (not even the deterministic layer) already classified, that the real
+    // model itself confirmed with high confidence, was a short standalone
+    // statement (never a compound sentence -- attributing a multi-clause
+    // turn's meaning to one fragment would be unsafe overgeneralization),
+    // and whose companion value is already in the closed, safe vocabulary
+    // this module can ever reproduce. Excludes a cachedSemantic-mocked
+    // interpretSemanticTurn (deterministicActivityResponse and others reuse
+    // an already-confirmed turn this way to avoid a second paid call).
+    //
+    // This branch CAN still legitimately run more than once for the exact
+    // same customer turn: the early "understand-first" gate and the later
+    // main cutover attempt both call the REAL interpreter for the same
+    // eventId, and _ai-cost-ledger.ts's own idempotency replays the FIRST
+    // call's result for the second rather than paying twice (see
+    // ai_duplicate_call_prevented in its cost log) -- from here that still
+    // looks like "deps is real and the call succeeded". This is safe, not
+    // just tolerated: recordSemanticConceptEvidence's write is idempotent on
+    // (concept_key, normalized_signature) via the migration's own unique
+    // source_signal_key + on_conflict=ignore-duplicates, so a repeat write
+    // for the same confirmed exemplar is a harmless no-op, never a second
+    // row. Never awaited: learning is strictly best-effort and must add zero
+    // latency to the customer-facing turn.
+    if (
+      deps.interpretSemanticTurn === REAL_DEPENDENCIES.interpretSemanticTurn
+      && !deterministic
+      && !mayContainMultipleClauses(message)
+      && message.trim().length > 0
+      && message.trim().length <= MAX_MATCHABLE_MESSAGE_LENGTH
+      && modelTurn.confidence >= 0.85
+      && modelTurn.needsClarification !== true
+      && !mutatingActions.has(modelTurn.action)
+    ) {
+      const companionValue = modelTurn.entities.companion ?? modelTurn.entities.companionType;
+      const conceptKey = typeof companionValue === 'string' ? companionConceptKeyForValue(companionValue) : null;
+      if (conceptKey) {
+        recordSemanticConceptEvidence(conceptKey, message).catch(() => undefined);
+      }
+    }
+
     return { ...modelTurn, semanticSource:'openai_supervisor' };
   } catch (error) {
     if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
