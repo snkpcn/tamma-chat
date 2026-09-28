@@ -1267,6 +1267,15 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
 }
 
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
+  // A task summary is a readback of canonical working state, not an
+  // open-ended prose-generation problem. It must outrank generic grounded
+  // rendering and the semantic model's conversational draft so stale/missing
+  // booking fields cannot replace the summary, and the customer always sees
+  // the real no-transaction status from ActiveTask state.
+  if (input.dialogDecision.responseIntent === 'active_task_summary') {
+    return composeDeterministicResponse(input);
+  }
+
   // Model-first conversation, grounded-truth-first business facts: verified
   // facts are checked FIRST and win whenever they actually answer the turn
   // (real price/availability/catalog/etc.) -- this is what lets
