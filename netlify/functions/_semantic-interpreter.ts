@@ -32,7 +32,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 
-export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v30';
+export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
 
 /**
  * Explicit, mechanically-checkable distinction between what the golden eval
