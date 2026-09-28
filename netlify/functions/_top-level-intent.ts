@@ -29,11 +29,20 @@ export type TopLevelSemanticIntent =
 const LOCATION_MARKER =
   /(?:โลเค(?:ชั่น|ชัน)|location|พิกัด|แผนที่|อยู่ที่ไหน|อยู่ไหน|ไปยังไง|ไปอย่างไร|นำทาง|ทางไป|ส่ง(?:โลเค|พิกัด)|ขอ(?:โลเค|พิกัด|แผนที่))/iu;
 
+// "ร้อน"/"หนาว" alone are ordinary Thai adjectives that show up in
+// completely unrelated sentences (a horse's temperament, a food question,
+// casual small talk about the day). They only mean a WEATHER REQUEST when
+// paired with an actual weather-question anchor (today/tomorrow/outside/
+// the sky/a yes-no weather question particle). The unconditional forms
+// (ฝน/อากาศ/พยากรณ์/อุณหภูมิ/กี่องศา/weather) remain sufficient on their own
+// since they cannot mean anything else. Production failure this closes: a
+// horse-suitability question containing "ร้อน" was classified WEATHER_REQUEST
+// and answered with OpenWeatherMap data instead of horse information.
 const WEATHER_MARKER =
-  /(?:ฝน(?:ตก)?|อากาศ|พยากรณ์|อุณหภูมิ|กี่องศา|ร้อน(?:ไหม|มั้ย)?|หนาว(?:ไหม|มั้ย)?|weather)/iu;
+  /(?:ฝน(?:ตก)?|อากาศ|พยากรณ์|อุณหภูมิ|กี่องศา|weather|(?:วันนี้|พรุ่งนี้|ข้างนอก|ข้างบ้าน|ตอนนี้)[^\n]{0,12}(?:ร้อน|หนาว)|(?:ร้อน|หนาว)[^\n]{0,12}(?:ไหม|มั้ย|จัง|ชิบหาย|มาก)?[^\n]{0,8}(?:วันนี้|พรุ่งนี้|ข้างนอก))/iu;
 
 const HORSE_CONTEXT_MARKER =
-  /(?:ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า(?:ทองไทย|ภาราดร)|ขี่(?:ทองไทย|ภาราดร)|เลือก(?:ม้า\s*)?(?:ทองไทย|ภาราดร)|เอา(?:ม้า\s*)?(?:ทองไทย|ภาราดร)|ภาราดร)/u;
+  /(?:ขี่ม้า|จองม้า|อยาก.*ม้า|ม้า(?:ทองไทย|ภาราดร|ตัวนี้|ตัวนั้น|ขี้ร้อน|ขี้หนาว)|ขี่(?:ทองไทย|ภาราดร)|เลือก(?:ม้า\s*)?(?:ทองไทย|ภาราดร)|เอา(?:ม้า\s*)?(?:ทองไทย|ภาราดร)|ภาราดร)/u;
 
 // "ทองไทย" by itself is NOT horse context because it is also the assistant's
 // own name. These markers describe talking TO the assistant/about its answer.
@@ -50,10 +59,13 @@ export function classifyTopLevelSemanticIntent(message: string): TopLevelSemanti
   // Whole-sentence intent outranks name/entity tokens. This ordering is the
   // central product rule this gate exists to enforce.
   if (LOCATION_MARKER.test(text)) return 'LOCATION_REQUEST';
-  if (WEATHER_MARKER.test(text)) return 'WEATHER_REQUEST';
 
-  // Explicit horse/riding language can legitimately use "ทองไทย" as a horse.
+  // Explicit horse/riding language wins over a bare weather-adjective hit.
+  // "ม้าตัวนี้ขี้ร้อนไหม" (does this horse run hot / overheat) must stay a
+  // horse question, not get hijacked into a forecast lookup merely because
+  // it contains "ร้อน".
   if (HORSE_CONTEXT_MARKER.test(text)) return 'HORSE_RELATED';
+  if (WEATHER_MARKER.test(text)) return 'WEATHER_REQUEST';
 
   // Otherwise, assistant-address language wins over the lexical horse-name hit.
   if (text.includes('ทองไทย') && BOT_ADDRESS_MARKER.test(text)) return 'BOT_ADDRESS';

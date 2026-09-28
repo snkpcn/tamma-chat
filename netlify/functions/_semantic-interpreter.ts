@@ -1033,11 +1033,39 @@ function normalizeReferences(value: unknown): SemanticReference[] {
  * context plausibly matches, the reference stays unresolved rather than
  * being filled with a fabricated id.
  */
+/** Bare, content-free demonstratives -- "that one", "the same one", "the
+ *  previous one" -- name nothing specific themselves. When several entities
+ *  are in play, a human hearing this always means the one most recently
+ *  under discussion, never "please pick one of these at random" or "I need
+ *  to ask which". `recentEntities` is documented as most-relevant-first, so
+ *  the head of that list IS the correct antecedent. */
+const GENERIC_DEMONSTRATIVE_RE = /^(?:เดิม|อันนั้น|ตัวนั้น|ที่คุยไว้|ที่คุยกัน|same|previous|that one)$/iu;
+
 export function resolveReferences(references: SemanticReference[], context: SemanticContext): SemanticReference[] {
   return references.map(reference => {
     if (!reference.refersToPriorContext) return reference;
 
     const value = (reference.value ?? '').trim();
+
+    // Explicit exclusion: the customer named ONE entity to rule out and
+    // wants "the other one". Production failure this closes: "ไม่เอาทองไทยนะ
+    // ขออีกตัว" (reject ทองไทย, give me the other one) fell through to the
+    // generic multi-candidate branch below and was marked ambiguous even
+    // though exactly one candidate remains once the rejected name is
+    // excluded.
+    if (reference.type === 'excluded_entity' && value) {
+      const domainEntities = context.activeDomain
+        ? context.recentEntities.filter(entity => entity.domain === context.activeDomain)
+        : context.recentEntities;
+      const remaining = domainEntities.filter(entity =>
+        entity.name !== value && !entity.name.includes(value) && !value.includes(entity.name));
+      if (remaining.length === 1) {
+        return { ...reference, resolvedEntityId: remaining[0]!.id };
+      }
+      if (remaining.length > 1) {
+        return { ...reference, resolvedEntityIds: remaining.map(entity => entity.id) };
+      }
+    }
 
     // Task-slot references are resolved against the privacy-safe, canonical
     // task evidence supplied by the orchestrator. The model names ONLY the
@@ -1095,10 +1123,22 @@ export function resolveReferences(references: SemanticReference[], context: Sema
       ? context.recentEntities.filter(entity => entity.domain === context.activeDomain)
       : context.recentEntities;
     if (inDomain.length === 1) return { ...reference, resolvedEntityId: inDomain[0]!.id };
-    if (inDomain.length > 1) return {
-      ...reference,
-      resolvedEntityIds:inDomain.map(entity => entity.id),
-    };
+    if (inDomain.length > 1) {
+      // A content-free demonstrative ("ตัวนั้น", "เดิม") is not a genuine
+      // multi-way question like "ตัวไหนนิสัยดีกว่า" -- it names nothing
+      // because it doesn't need to. Resolve it to the single most recently
+      // discussed entity instead of forcing a "which one?" clarification.
+      // Production failure this closes: "เอาตัวนั้นไว้ก่อนนะ แต่ยังไม่จอง"
+      // was answered with a generic disambiguation prompt instead of
+      // acknowledging the just-discussed horse as considered-only.
+      if (value && GENERIC_DEMONSTRATIVE_RE.test(value)) {
+        return { ...reference, resolvedEntityId: inDomain[0]!.id };
+      }
+      return {
+        ...reference,
+        resolvedEntityIds:inDomain.map(entity => entity.id),
+      };
+    }
 
     // No named business entity matched even though context HAS tracked
     // entities (e.g. an activity-domain horse list exists but this
