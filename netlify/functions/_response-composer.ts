@@ -298,15 +298,12 @@ export async function composeGroundedModelResponse(
 ): Promise<ComposedResponse | null> {
   if (!input.aiCallContext) return null;
   if (input.allowModelComposition === false) return null;
-  // A real verifiable business fact must actually have been ASKED for --
-  // reusing safeModelConversationReply's own BUSINESS_TRUTH_NEEDS set. This
-  // is what stops a zero-cost deterministic turn with no answerable fact
-  // request (e.g. a horse-care/fear intake statement, informationNeed=
-  // 'none') from spending a paid call merely because SOME unrelated fact
-  // happened to be present in the resolved knowledge bundle -- owner:
-  // "OpenAI must not be called when it is clearly unnecessary".
-  const need = input.semanticTurn?.informationNeed ?? 'none';
-  if (!BUSINESS_TRUTH_NEEDS.has(need)) return null;
+  if (input.dialogDecision.actionProposal) return null;
+  if (input.dialogDecision.mode === 'collect_field'
+      || input.dialogDecision.mode === 'propose_action'
+      || input.dialogDecision.mode === 'execute_tool') {
+    return null;
+  }
   const facts = allFacts(input.knowledgeBundles);
   // No grounded facts means the model has nothing authoritative to phrase --
   // calling it here would either invent something or just restate "I don't
@@ -1316,32 +1313,23 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
   // booking fields cannot replace the summary, and the customer always sees
   // the real no-transaction status from ActiveTask state.
   if (input.dialogDecision.responseIntent === 'active_task_summary') {
+    const modelConversation = safeModelConversationReply(input);
+    if (modelConversation) return modelConversation;
     return composeDeterministicResponse(input);
   }
 
-  // Model-first conversation, grounded-truth-first business facts: verified
-  // facts are checked FIRST and win whenever they actually answer the turn
-  // (real price/availability/catalog/etc.) -- this is what lets
-  // safeModelConversationReply stop vetoing itself merely because a
-  // knowledgeRequest was PLANNED (see its own comment): if that request
-  // came back with nothing usable, or was never really about business
-  // truth to begin with, the model's own safe conversational reply is the
-  // right answer, not a robotic generic fallback. Business truth still wins
-  // whenever real facts exist; the model may never override them.
-  const grounded = composeGroundedDeterministicResponse(input);
-  if (grounded) return grounded;
-  const modelConversation = safeModelConversationReply(input);
-  if (modelConversation) return modelConversation;
-  // Gap this closes (owner Critical Principle #3): the centralized
-  // deterministic renderer has no specific template for this business-truth
-  // question, AND safeModelConversationReply declined (informationNeed IS a
-  // business truth need -- see BUSINESS_TRUTH_NEEDS). Rather than falling
-  // straight to a robotic "I can't verify that" canned line, let OpenAI
-  // phrase the actual verified facts naturally -- but ONLY when real facts
-  // exist to ground it in; composeGroundedModelResponse itself declines
-  // (returns null) when there is nothing authoritative to phrase, or when
-  // no cost context authorizes a real call, or on any provider failure.
+  // Quality-first human cutover: when real organization knowledge was
+  // retrieved, OpenAI is the final conversational brain that phrases those
+  // facts naturally. Deterministic renderers remain fallbacks and safety
+  // rails; they no longer get first refusal merely because a fact bundle
+  // exists or the turn is a broad discovery/recommendation.
   const groundedModel = await composeGroundedModelResponse(input);
   if (groundedModel) return groundedModel;
+
+  const modelConversation = safeModelConversationReply(input);
+  if (modelConversation) return modelConversation;
+
+  const grounded = composeGroundedDeterministicResponse(input);
+  if (grounded) return grounded;
   return composeDeterministicResponse(input);
 }

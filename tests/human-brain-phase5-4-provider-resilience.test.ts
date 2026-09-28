@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   callPreferredModel,
+  callResponseComposer,
   callSemanticSupervisor,
   callSemanticReviewer,
   OPENAI_SEMANTIC_PRIMARY_MODEL,
@@ -50,6 +51,27 @@ test('Human Conversation Recovery: bounded reviewer uses Sol only when explicitl
 
   try {
     await callSemanticReviewer('system', [{role:'user',content:'review'}]);
+    assert.deepEqual(models, [OPENAI_SEMANTIC_REVIEW_MODEL]);
+    assert.equal(OPENAI_SEMANTIC_REVIEW_MODEL, 'gpt-5.6-sol');
+  } finally {
+    global.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalKey;
+  }
+});
+
+test('Quality-first final response composer uses Sol for customer-facing grounded replies', async () => {
+  const originalFetch = global.fetch;
+  const originalKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-openai-key';
+
+  const models:string[] = [];
+  global.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    models.push(JSON.parse(String(init?.body ?? '{}')).model);
+    return jsonResponse({ output_text:'{"message":"ตอบแบบมนุษย์ครับ","usedFactKeys":[]}' }, 200);
+  }) as typeof fetch;
+
+  try {
+    await callResponseComposer('system', [{role:'user',content:'compose'}], 'grounded-response-composition');
     assert.deepEqual(models, [OPENAI_SEMANTIC_REVIEW_MODEL]);
     assert.equal(OPENAI_SEMANTIC_REVIEW_MODEL, 'gpt-5.6-sol');
   } finally {
