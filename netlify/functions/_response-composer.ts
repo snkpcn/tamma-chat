@@ -26,6 +26,7 @@ import {
   renderActivityCareResponse,
   renderActivityRecommendation,
   renderCafeUnavailableSourceResponse,
+  renderEcosystemRecommendation,
   renderStayResponse,
   renderRestaurantRecommendation,
   renderPromotionRecommendation,
@@ -645,7 +646,8 @@ function groundedIntro(input: ResponseComposerInput): string {
 }
 
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
-  const humanGrounded = renderJourneyPlan(input)
+  const humanGrounded = renderEcosystemRecommendation(input)
+    ?? renderJourneyPlan(input)
     ?? renderStayResponse(input)
     ?? renderRestaurantRecommendation(input)
     ?? renderPromotionRecommendation(input)
