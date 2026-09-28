@@ -108,3 +108,5 @@ test('dedicated AI cost LINE group binds and receives through the existing encry
     assert.equal(deliveries.at(-1)?.status,'sent');
   });
 });
+
+// Cost checkpoint live certification is exercised by the PR's existing real-provider workflow.
