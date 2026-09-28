@@ -46,6 +46,11 @@ import {
   type SemanticTurn,
 } from './_semantic-interpreter';
 import { deriveDeterministicSemanticTurn } from './_deterministic-semantic-turn';
+import {
+  matchLearnedConcept, loadActiveSemanticConcepts, recordSemanticConceptEvidence,
+  safeConceptEntities, companionConceptKeyForValue, MAX_MATCHABLE_MESSAGE_LENGTH,
+  SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS, claimWriteAttemptForEvent,
+} from './_semantic-concept-memory';
 import { deriveSemanticMeaning, type SemanticMeaning } from './_semantic-meaning';
 import {
   LLMAvailabilityError,
@@ -487,6 +492,21 @@ function mayContainMultipleClauses(message: string): boolean {
     || /[;,]\s*\S/u.test(normalized);
 }
 
+/** Single shared structural gate for BOTH semantic-concept-memory call
+ *  sites (the read-path lookup and the write-path learning hook). Fixes a
+ *  real gap found in review: the read path previously checked only length,
+ *  not clause shape, so a SHORT but multi-clause message ("ไปม้า แต่ไม่จอง")
+ *  could still reach matchLearnedConcept even though the write path already
+ *  refused to learn from exactly that shape. One predicate, not two
+ *  divergent length/clause checks, so the two paths can never disagree
+ *  again about what counts as a safe standalone candidate. */
+function isShortStandaloneConceptCandidate(message: string): boolean {
+  const trimmed = message.trim();
+  return trimmed.length > 0
+    && trimmed.length <= MAX_MATCHABLE_MESSAGE_LENGTH
+    && !mayContainMultipleClauses(message);
+}
+
 const LANGUAGE_BRAIN_READ_ONLY_ACTIONS: ReadonlySet<SemanticTurn['action']> = new Set([
   'ask', 'discover', 'recommend', 'compare', 'status',
 ]);
@@ -766,6 +786,59 @@ async function resolveSemanticTurn(
     return { ...deterministic!, semanticSource:'deterministic_fallback' };
   }
 
+  // Kernel V2 Phase 3 increment 1: semantic concept memory.
+  //
+  // Only attempted when NOTHING else already understood this turn
+  // (deterministic is null) and only against a REAL fresh decision (never
+  // when a caller is reusing an already-known cached semantic turn via a
+  // mocked interpretSemanticTurn -- that path must keep its own
+  // one-paid-call-per-customer-turn invariant undisturbed). A matched
+  // concept can only ever contribute entities.companion (see
+  // safeConceptEntities' closed map) -- there is no way for this branch to
+  // produce a domain, an action, or anything that could become a
+  // transaction, so it is safe to treat as zero-cost exactly like the
+  // deterministic layer above.
+  if (
+    deps.interpretSemanticTurn === REAL_DEPENDENCIES.interpretSemanticTurn
+    && !deterministic
+    && isShortStandaloneConceptCandidate(message)
+  ) {
+    const concepts = await loadActiveSemanticConcepts();
+    const match = concepts.length ? matchLearnedConcept(message, concepts) : null;
+    if (match) {
+      emitZeroCallTurn({ conversationId, eventId:input.eventId, channel:input.channel });
+      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+        semantic_owner: 'semantic_concept_memory',
+        deterministic_turn: false,
+        model_call_used: false,
+        concept_key: match.conceptKey,
+        concept_similarity: match.similarity,
+        concept_evidence_count: match.evidenceCount,
+      }));
+      return {
+        semanticSource: 'semantic_concept_memory',
+        domain: taskState.activeTask?.domain ?? context.activeDomain ?? 'general',
+        intent: 'semantic_concept_match',
+        action: 'provide_information',
+        entities: safeConceptEntities(match.conceptKey),
+        references: [],
+        constraints: [],
+        confidence: match.confidence,
+        needsClarification: false,
+      };
+    }
+    if (concepts.length) {
+      // A genuine "miss" -- learned concepts exist, this turn's text was a
+      // real candidate for one, but none matched confidently enough. Only
+      // logged when there was something to miss against, so this stays a
+      // meaningful signal rather than noise on every turn before any
+      // concept has ever been learned.
+      console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+        event: 'miss', candidate_concept_count: concepts.length,
+      }));
+    }
+  }
+
   // Human Conversation Recovery: LANGUAGE SUPERVISOR WHEN NEEDED.
   //
   // Every ordinary customer utterance is read by the semantic model first.
@@ -877,6 +950,75 @@ async function resolveSemanticTurn(
       model_call_used: true,
       model_confidence: modelTurn.confidence,
     }));
+
+    // Kernel V2 Phase 3 increment 1: learn ONLY from a turn nothing else
+    // (not even the deterministic layer) already classified, that the real
+    // model itself confirmed with high confidence, was a short standalone
+    // statement (never a compound sentence -- attributing a multi-clause
+    // turn's meaning to one fragment would be unsafe overgeneralization),
+    // and whose companion value is already in the closed, safe vocabulary
+    // this module can ever reproduce. Excludes a cachedSemantic-mocked
+    // interpretSemanticTurn (deterministicActivityResponse and others reuse
+    // an already-confirmed turn this way to avoid a second paid call).
+    //
+    // This branch CAN still legitimately run more than once for the exact
+    // same customer turn: the early "understand-first" gate and the later
+    // main cutover attempt both call the REAL interpreter for the same
+    // eventId, and _ai-cost-ledger.ts's own idempotency replays the FIRST
+    // call's result for the second rather than paying twice (see
+    // ai_duplicate_call_prevented in its cost log) -- from here that still
+    // looks like "deps is real and the call succeeded". This is safe, not
+    // just tolerated: recordSemanticConceptEvidence's write is idempotent on
+    // (concept_key, normalized_signature) via the migration's own unique
+    // source_signal_key + on_conflict=ignore-duplicates, so a repeat write
+    // for the same confirmed exemplar is a harmless no-op, never a second
+    // row.
+    //
+    // Durability fix (found in review): this used to be a fire-and-forget
+    // `.catch(() => undefined)` with no await. In a serverless runtime,
+    // nothing guarantees an unawaited promise keeps running once the
+    // customer response has been sent -- the process can be frozen or
+    // recycled first, silently losing the learning write with no signal
+    // that it ever happened. It is now awaited, bounded by a short timeout
+    // so a slow/stuck write can never add unbounded latency to the
+    // customer-facing turn, and its outcome (completed/timed-out) is always
+    // logged. recordSemanticConceptEvidence itself never throws (it has its
+    // own internal try/catch), so awaiting it cannot fail the customer
+    // response; only its OWN write failures are swallowed, exactly as
+    // before.
+    if (
+      deps.interpretSemanticTurn === REAL_DEPENDENCIES.interpretSemanticTurn
+      && !deterministic
+      && isShortStandaloneConceptCandidate(message)
+      && modelTurn.confidence >= 0.85
+      && modelTurn.needsClarification !== true
+      && !mutatingActions.has(modelTurn.action)
+    ) {
+      const companionValue = modelTurn.entities.companion ?? modelTurn.entities.companionType;
+      const conceptKey = typeof companionValue === 'string' ? companionConceptKeyForValue(companionValue) : null;
+      // Fix (found in review): without this claim, the SAME customer turn's
+      // second resolveSemanticTurn invocation (see the comment above) would
+      // start a SECOND independent timeout race, so a genuinely stuck write
+      // could add up to 2x SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS to one
+      // response instead of a single bounded wait. Claiming by eventId here
+      // means at most one write ATTEMPT (and therefore at most one timeout
+      // wait) ever happens per real transport event, however many times the
+      // understanding itself gets recomputed for it.
+      if (conceptKey && claimWriteAttemptForEvent(`${conversationId}:${input.eventId}`)) {
+        const writeStartedAt = Date.now();
+        let timedOut = false;
+        const timeoutGuard = new Promise<void>(resolve => {
+          setTimeout(() => { timedOut = true; resolve(); }, SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS);
+        });
+        await Promise.race([recordSemanticConceptEvidence(conceptKey, message), timeoutGuard]);
+        console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+          event: timedOut ? 'write_timeout' : 'write_awaited',
+          concept_key: conceptKey,
+          elapsed_ms: Date.now() - writeStartedAt,
+        }));
+      }
+    }
+
     return { ...modelTurn, semanticSource:'openai_supervisor' };
   } catch (error) {
     if (!(error instanceof LLMAvailabilityError) && !(error instanceof ProviderNotConfiguredError)) throw error;
