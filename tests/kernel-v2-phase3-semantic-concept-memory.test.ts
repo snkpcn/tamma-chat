@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeForConceptMatching, conceptSimilarity, matchLearnedConcept,
   safeConceptEntities, companionConceptKeyForValue, isCompanionConceptKey,
-  MIN_SIMILARITY, type StoredSemanticConcept,
+  MIN_SIMILARITY, SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS, type StoredSemanticConcept,
 } from '../netlify/functions/_semantic-concept-memory';
 import { withHarness, guestId, brainRequest, type Harness } from './helpers/canonical-core-harness';
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
@@ -133,8 +133,16 @@ function msg(payload: unknown): string {
 
 /** Wraps the harness's own fetch mock to additionally serve
  *  semantic_concept_memory reads/writes, without modifying the shared
- *  harness file (which many other tests depend on staying unchanged). */
-function installConceptMemoryMock(harness: Harness, seedRows: StoredSemanticConcept[]) {
+ *  harness file (which many other tests depend on staying unchanged).
+ *  `writeDelayMs` (ms, or `Infinity` to never resolve) simulates a
+ *  slow/stuck Supabase round trip on PATCH/POST, for proving the write is
+ *  genuinely awaited (durability) and bounded by a timeout (no unbounded
+ *  latency) -- see acceptance items 3 below. */
+function installConceptMemoryMock(
+  harness: Harness,
+  seedRows: StoredSemanticConcept[],
+  options: { writeDelayMs?: number } = {},
+) {
   const patches: Array<Record<string, unknown>> = [];
   const posts: Array<Record<string, unknown>> = [];
   const seenSignalKeys = new Set<string>();
@@ -147,6 +155,12 @@ function installConceptMemoryMock(harness: Harness, seedRows: StoredSemanticConc
     contradiction_count: row.contradictionCount,
     status: row.status,
   }));
+  const delay = () => options.writeDelayMs
+    ? new Promise<void>(resolve => {
+      if (options.writeDelayMs === Infinity) return; // never resolves -- simulates a stuck request
+      setTimeout(resolve, options.writeDelayMs);
+    })
+    : Promise.resolve();
   const baseFetch = harness.fetchMock;
   global.fetch = (async (url: string | URL, init: RequestInit = {}) => {
     const u = String(url);
@@ -159,6 +173,7 @@ function installConceptMemoryMock(harness: Harness, seedRows: StoredSemanticConc
         });
       }
       if (method === 'PATCH') {
+        await delay();
         const body = JSON.parse(String(init.body ?? '{}')) as { status?: string; contradiction_count?: number };
         patches.push(body);
         // Mirrors real Postgres: the same in-memory rows this mock's GET
@@ -173,6 +188,7 @@ function installConceptMemoryMock(harness: Harness, seedRows: StoredSemanticConc
         return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (method === 'POST') {
+        await delay();
         // Mirrors the real migration's unique(source_signal_key) +
         // on_conflict=ignore-duplicates: a repeat insert for the SAME
         // confirmed exemplar (e.g. the ai-cost-ledger replaying an
@@ -365,5 +381,194 @@ test('negative control: a real commit/booking message is never routed through th
     const r = await processThongthaiChatCore(brainRequest('จองเลยครับ ยืนยันการจอง', gid, 'web'), 'evt-0');
     assert.equal(r.statusCode, 200);
     assert.doesNotMatch(msg(r.payload), /จองสำเร็จ|เลขที่จอง/u, 'a fuzzy-matched concept must never be able to execute or confirm a transaction by itself');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixes from PR #218 review (structural blockers found before merge/migration).
+// ---------------------------------------------------------------------------
+
+test('review fix 1 (unit): the read-path gate rejects a multi-clause message the same way the write path already did', () => {
+  // Before the fix, only message length gated the read path -- a SHORT but
+  // multi-clause message could still reach matchLearnedConcept even though
+  // isShortStandaloneConceptCandidate (used by the write path) already
+  // refused this exact shape. This is exercised end-to-end below; this unit
+  // test locks the underlying claim that such a message's own normalized
+  // form would otherwise score a real match if the gate were missing.
+  const shortMultiClause = 'มากับแฟน แต่ไม่จอง';
+  assert.ok(shortMultiClause.length <= 40, 'fixture must stay within MAX_MATCHABLE_MESSAGE_LENGTH to isolate the clause-shape gate');
+  const concept = seededConcept({ normalizedSignature: normalizeForConceptMatching(shortMultiClause) });
+  // matchLearnedConcept itself has no clause-shape awareness (that lives in
+  // the orchestrator's shared isShortStandaloneConceptCandidate gate) --
+  // this confirms the underlying similarity WOULD match, so the
+  // integration test below is proving the gate, not an accidental miss.
+  assert.ok(matchLearnedConcept(shortMultiClause, [concept]) !== null);
+});
+
+test('review fix 1 (integration): a short multi-clause message never resolves via semantic concept memory, even when its own text was seeded as the exemplar', async () => {
+  await withHarness(async harness => {
+    const shortMultiClause = 'มากับแฟน แต่ไม่จอง';
+    installConceptMemoryMock(harness, [seededConcept({ normalizedSignature: normalizeForConceptMatching(shortMultiClause) })]);
+    const gid = guestId('phase3-review-multiclause-read-gate');
+    const before = harness.modelCallCount();
+    const r = await processThongthaiChatCore(brainRequest(shortMultiClause, gid, 'web'), 'evt-0');
+    assert.equal(r.statusCode, 200);
+    assert.ok(
+      harness.modelCallCount() > before,
+      'a short but multi-clause message must still reach the real model, never be silently owned by semantic concept memory',
+    );
+  });
+});
+
+test('review fix 2 (integration): reinforcing a weak exemplar advances confidence from ITS OWN value, never a stronger sibling exemplar\'s', async () => {
+  await withHarness(async harness => {
+    const strongExemplarA = seededConcept({
+      id: 'concept-strong-a', normalizedSignature: normalizeForConceptMatching('มากับแฟน'),
+      confidence: 0.95, evidenceCount: 10,
+    });
+    const weakExemplarB = seededConcept({
+      id: 'concept-weak-b', normalizedSignature: normalizeForConceptMatching('พาแฟนไปด้วย'),
+      confidence: 0.72, evidenceCount: 2,
+    });
+    const { patches } = installConceptMemoryMock(harness, [strongExemplarA, weakExemplarB]);
+    const gid = guestId('phase3-review-confidence-cross-leak');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'partner' }, references: [], constraints: [],
+      confidence: 0.9, needsClarification: false,
+    });
+    // A near-identical variant of weakExemplarB's own signature only.
+    await processThongthaiChatCore(brainRequest('พาแฟนไปด้วยนะ', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+
+    const reinforcement = patches.find(patch => typeof patch.confidence === 'number');
+    assert.ok(reinforcement, 'a reinforcement PATCH must have been issued');
+    assert.equal(
+      reinforcement!.confidence, Math.min(0.99, weakExemplarB.confidence + 0.02),
+      'confidence must advance from the MATCHED row\'s own prior value, never the stronger sibling\'s',
+    );
+  });
+});
+
+test('review fix 3a (integration): the learning write is genuinely awaited, not fire-and-forget', async () => {
+  await withHarness(async harness => {
+    const writeDelayMs = 200;
+    installConceptMemoryMock(harness, [], { writeDelayMs });
+    const gid = guestId('phase3-review-durability-awaited');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'partner' }, references: [], constraints: [],
+      confidence: 0.9, needsClarification: false,
+    });
+    const startedAt = Date.now();
+    await processThongthaiChatCore(brainRequest('มากับแฟน', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+    const elapsedMs = Date.now() - startedAt;
+    assert.ok(
+      elapsedMs >= writeDelayMs * 0.8,
+      `a genuinely awaited write must delay the response by roughly its own duration (got ${elapsedMs}ms, expected >= ~${writeDelayMs}ms) -- a fire-and-forget write would return almost instantly`,
+    );
+  });
+});
+
+test('review fix 3b (integration): a stuck learning write is bounded by a timeout, never hangs the customer response', async () => {
+  await withHarness(async harness => {
+    installConceptMemoryMock(harness, [], { writeDelayMs: Infinity });
+    const gid = guestId('phase3-review-durability-bounded');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'partner' }, references: [], constraints: [],
+      confidence: 0.9, needsClarification: false,
+    });
+    const startedAt = Date.now();
+    const r = await processThongthaiChatCore(brainRequest('มากับแฟน', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+    const elapsedMs = Date.now() - startedAt;
+    assert.equal(r.statusCode, 200, 'the customer response must still succeed even when the learning write never resolves');
+    assert.ok(
+      elapsedMs < SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS + 1000,
+      `a stuck write must never add unbounded latency (got ${elapsedMs}ms, timeout is ${SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS}ms)`,
+    );
+  });
+});
+
+test('review fix 4 (integration): a message carrying a direct identifier is never persisted, even if otherwise a clean high-confidence candidate', async () => {
+  await withHarness(async harness => {
+    const { posts, patches } = installConceptMemoryMock(harness, []);
+    const gid = guestId('phase3-review-privacy-reject');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'partner' }, references: [], constraints: [],
+      confidence: 0.95, needsClarification: false,
+    });
+    // A phone number riding along with an otherwise clean companion
+    // statement -- short, standalone, high confidence, exactly the shape
+    // that would otherwise be learned.
+    await processThongthaiChatCore(brainRequest('มากับแฟน 0812345678', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+
+    assert.equal(posts.length, 0, 'a message carrying a phone number must never be persisted as a learned exemplar');
+    assert.equal(patches.length, 0, 'a rejected candidate must not reinforce any existing row either');
+  });
+});
+
+test('review verification: a retracted concept never matches (not just superseded)', () => {
+  const retracted = seededConcept({ status: 'retracted' });
+  assert.equal(matchLearnedConcept('มากับแฟน', [retracted]), null);
+});
+
+test('review verification: after a confirmed contradiction retracts a row, a later similar message correctly fails safe to the real model, never to the stale answer', async () => {
+  await withHarness(async harness => {
+    const { patches } = installConceptMemoryMock(harness, [seededConcept({ evidenceCount: 1 })]);
+    const gid = guestId('phase3-review-failsafe-after-retraction');
+    const turn1 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-0');
+    assert.equal(turn1.statusCode, 200);
+
+    (harness.programGeminiReply as unknown as (reply: Record<string, unknown>) => void)({
+      domain: 'activity', intent: 'companion_statement', action: 'provide_information',
+      entities: { companion: 'solo' }, references: [], constraints: [],
+      confidence: 0.93, needsClarification: false,
+    });
+    await processThongthaiChatCore(brainRequest('มากับแฟน', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn1.payload) },
+    ]), 'evt-1');
+    assert.ok(patches.some(patch => patch.status === 'retracted'), 'setup: the companion_partner row must have been retracted');
+
+    // A THIRD customer's turn, textually close to the now-retracted
+    // exemplar. It must never be answered from the stale (retracted) row --
+    // it must fail safe to a fresh real model attempt.
+    const turn2 = await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ เอาภาราดร', gid, 'web'), 'evt-2');
+    assert.equal(turn2.statusCode, 200);
+    const callsAfterTurn2 = harness.modelCallCount();
+    const turn3 = await processThongthaiChatCore(brainRequest('มากับแฟน', gid, 'web', [
+      { role: 'user', content: 'อยากขี่ม้าพรุ่งนี้ เอาภาราดร' },
+      { role: 'assistant', content: msg(turn2.payload) },
+    ]), 'evt-3');
+    assert.equal(turn3.statusCode, 200);
+    assert.ok(
+      harness.modelCallCount() > callsAfterTurn2,
+      'a retracted concept must never answer a matching message -- it must fail safe to the real semantic supervisor',
+    );
   });
 });

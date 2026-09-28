@@ -43,7 +43,18 @@
 //   already confirmed with high confidence (see the write-path hook in
 //   resolveSemanticTurn, _thongthai-one-mind-orchestrator.ts) -- this module
 //   itself never invents a concept from its own fuzzy match.
+// - PRIVACY BOUNDARY (found in review -- no guest_id alone does not prove no
+//   personal data): a candidate exemplar is REJECTED outright, never
+//   persisted in any form, if it contains a phone/email/URL/handle (the
+//   same closed set _direct-identifier-redaction.ts already detects for
+//   customer_intelligence_events). This is deliberately a reject, not a
+//   redact-and-store: a message carrying a direct identifier is not a clean
+//   companion statement in the first place, and partially-redacted text
+//   would still add match-corpus noise for no learning benefit. This is NOT
+//   a general NER pass -- it is the same small, closed, deterministic
+//   identifier set already proven safe elsewhere in this codebase.
 import { createHash } from 'node:crypto';
+import { redactDirectIdentifiers } from './_direct-identifier-redaction';
 
 export type CompanionConceptKey =
   | 'companion_partner'
@@ -363,6 +374,53 @@ function conceptRowKey(conceptKey: string, normalizedSignature: string): string 
 
 const MAX_ACTIVE_SIGNATURES_PER_CONCEPT = 20;
 
+// The caller (resolveSemanticTurn's write-path hook) awaits this write with
+// a race against this timeout, so a slow/stuck Supabase round trip can never
+// add unbounded latency to the customer-facing turn. This is a caller-side
+// bound, not a fetch abort -- the underlying request may keep running in the
+// background, but the customer's own response is never held up past this.
+export const SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS = 1_500;
+
+// resolveSemanticTurn's write-path hook can genuinely run more than once for
+// the SAME customer turn: the early "understand-first" gate and the later
+// main cutover attempt both call the real interpreter for the same eventId,
+// and _ai-cost-ledger.ts's own idempotency replays the first call's result
+// for the second rather than paying twice -- from the write-path hook's own
+// point of view that still looks like "a fresh, usable model confirmation"
+// each time (found in review: a stuck write timing out on BOTH attempts
+// sequentially added ~2x SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS to one
+// customer's response, not a single bounded wait). Deduping by eventId here
+// caps the number of write ATTEMPTS at one per real transport event,
+// independent of how many times the orchestrator recomputes the same
+// understanding for it. Bounded FIFO eviction keeps this a small, constant
+// amount of memory for a long-lived warm serverless instance, never an
+// unbounded per-request leak.
+const MAX_TRACKED_WRITE_EVENT_IDS = 500;
+const attemptedWriteEventIds: string[] = [];
+const attemptedWriteEventIdSet = new Set<string>();
+
+/** True the FIRST time called for a given eventId; false every time after,
+ *  for as long as that eventId is still tracked. Exported so the
+ *  orchestrator's write-path hook can skip a redundant attempt entirely
+ *  (never even starting the timeout race a second time) rather than relying
+ *  on this module to silently swallow it after the fact.
+ *
+ *  Callers should pass a key scoped by BOTH conversation and eventId (e.g.
+ *  `${conversationId}:${eventId}`), not a bare eventId -- real transport
+ *  event ids are unique on their own, but scoping by conversation too costs
+ *  nothing and removes any dependence on that uniqueness holding perfectly
+ *  across every caller. */
+export function claimWriteAttemptForEvent(key: string): boolean {
+  if (attemptedWriteEventIdSet.has(key)) return false;
+  attemptedWriteEventIdSet.add(key);
+  attemptedWriteEventIds.push(key);
+  if (attemptedWriteEventIds.length > MAX_TRACKED_WRITE_EVENT_IDS) {
+    const oldest = attemptedWriteEventIds.shift();
+    if (oldest) attemptedWriteEventIdSet.delete(oldest);
+  }
+  return true;
+}
+
 /**
  * Best-effort evidence accumulation for one already-confirmed example.
  * Never called for a message the deterministic layer or the fuzzy matcher
@@ -372,11 +430,32 @@ const MAX_ACTIVE_SIGNATURES_PER_CONCEPT = 20;
  * re-derive or trust its own judgement about what the concept means; it only
  * records that this exact wording was one more confirmed instance of it.
  */
+// A closed, deterministic check for the same identifier classes
+// _direct-identifier-redaction.ts already detects (phone/email/URL/handle)
+// -- checked on the RAW message, before normalization strips the
+// punctuation those patterns rely on. This is intentionally narrow: it is
+// not a general PII/NER classifier, only the small set this codebase
+// already trusts elsewhere for exactly this purpose.
+function containsDirectIdentifier(message: string): boolean {
+  return /\[(?:url|email|phone|handle)\]/u.test(redactDirectIdentifiers(message));
+}
+
 export async function recordSemanticConceptEvidence(
   conceptKey: CompanionConceptKey,
   message: string,
 ): Promise<void> {
   try {
+    if (containsDirectIdentifier(message)) {
+      // Reject outright -- never persisted in any form, redacted or not.
+      // A message carrying a direct identifier is not a clean companion
+      // statement to learn from, and this table has no legitimate reason
+      // to ever store one.
+      console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+        event: 'rejected_direct_identifier', concept_key: conceptKey,
+      }));
+      return;
+    }
+
     const normalizedSignature = normalizeForConceptMatching(message);
     if (!normalizedSignature || normalizedSignature.length > MAX_MATCHABLE_MESSAGE_LENGTH) return;
 
@@ -438,19 +517,28 @@ export async function recordSemanticConceptEvidence(
       // this IS the generalization mechanism: repeated confirmed paraphrases
       // raise confidence/evidence for the SAME stored signature instead of
       // creating one row per literal sentence.
-      const newEvidenceCount = existingRows.find(row => row.id === bestMatch!.id)!.evidenceCount + 1;
+      //
+      // Fix (found in review): confidence must advance from the MATCHED
+      // row's OWN prior confidence, never the max across every row this
+      // concept key happens to have. A weak, rarely-confirmed exemplar must
+      // never borrow trust from an unrelated strong exemplar of the same
+      // concept just because they share a concept_key -- each stored
+      // signature earns its own confidence independently.
+      const matchedRow = existingRows.find(row => row.id === bestMatch!.id)!;
+      const newEvidenceCount = matchedRow.evidenceCount + 1;
+      const newConfidence = Math.min(0.99, matchedRow.confidence + 0.02);
       await dbFetch(`semantic_concept_memory?id=eq.${encodeURIComponent(bestMatch.id)}`, {
         method: 'PATCH',
         headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({
           evidence_count: newEvidenceCount,
-          confidence: Math.min(0.99, Math.max(...existingRows.map(row => row.confidence), 0.7) + 0.02),
+          confidence: newConfidence,
           updated_at: new Date().toISOString(),
         }),
       });
       console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
         event: 'reinforce', concept_key: conceptKey, matched_id: bestMatch.id,
-        similarity: bestMatch.similarity, evidence_count: newEvidenceCount,
+        similarity: bestMatch.similarity, evidence_count: newEvidenceCount, confidence: newConfidence,
       }));
       return;
     }

@@ -49,6 +49,7 @@ import { deriveDeterministicSemanticTurn } from './_deterministic-semantic-turn'
 import {
   matchLearnedConcept, loadActiveSemanticConcepts, recordSemanticConceptEvidence,
   safeConceptEntities, companionConceptKeyForValue, MAX_MATCHABLE_MESSAGE_LENGTH,
+  SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS, claimWriteAttemptForEvent,
 } from './_semantic-concept-memory';
 import { deriveSemanticMeaning, type SemanticMeaning } from './_semantic-meaning';
 import {
@@ -491,6 +492,21 @@ function mayContainMultipleClauses(message: string): boolean {
     || /[;,]\s*\S/u.test(normalized);
 }
 
+/** Single shared structural gate for BOTH semantic-concept-memory call
+ *  sites (the read-path lookup and the write-path learning hook). Fixes a
+ *  real gap found in review: the read path previously checked only length,
+ *  not clause shape, so a SHORT but multi-clause message ("ไปม้า แต่ไม่จอง")
+ *  could still reach matchLearnedConcept even though the write path already
+ *  refused to learn from exactly that shape. One predicate, not two
+ *  divergent length/clause checks, so the two paths can never disagree
+ *  again about what counts as a safe standalone candidate. */
+function isShortStandaloneConceptCandidate(message: string): boolean {
+  const trimmed = message.trim();
+  return trimmed.length > 0
+    && trimmed.length <= MAX_MATCHABLE_MESSAGE_LENGTH
+    && !mayContainMultipleClauses(message);
+}
+
 const LANGUAGE_BRAIN_READ_ONLY_ACTIONS: ReadonlySet<SemanticTurn['action']> = new Set([
   'ask', 'discover', 'recommend', 'compare', 'status',
 ]);
@@ -785,8 +801,7 @@ async function resolveSemanticTurn(
   if (
     deps.interpretSemanticTurn === REAL_DEPENDENCIES.interpretSemanticTurn
     && !deterministic
-    && message.trim().length > 0
-    && message.trim().length <= MAX_MATCHABLE_MESSAGE_LENGTH
+    && isShortStandaloneConceptCandidate(message)
   ) {
     const concepts = await loadActiveSemanticConcepts();
     const match = concepts.length ? matchLearnedConcept(message, concepts) : null;
@@ -957,22 +972,50 @@ async function resolveSemanticTurn(
     // (concept_key, normalized_signature) via the migration's own unique
     // source_signal_key + on_conflict=ignore-duplicates, so a repeat write
     // for the same confirmed exemplar is a harmless no-op, never a second
-    // row. Never awaited: learning is strictly best-effort and must add zero
-    // latency to the customer-facing turn.
+    // row.
+    //
+    // Durability fix (found in review): this used to be a fire-and-forget
+    // `.catch(() => undefined)` with no await. In a serverless runtime,
+    // nothing guarantees an unawaited promise keeps running once the
+    // customer response has been sent -- the process can be frozen or
+    // recycled first, silently losing the learning write with no signal
+    // that it ever happened. It is now awaited, bounded by a short timeout
+    // so a slow/stuck write can never add unbounded latency to the
+    // customer-facing turn, and its outcome (completed/timed-out) is always
+    // logged. recordSemanticConceptEvidence itself never throws (it has its
+    // own internal try/catch), so awaiting it cannot fail the customer
+    // response; only its OWN write failures are swallowed, exactly as
+    // before.
     if (
       deps.interpretSemanticTurn === REAL_DEPENDENCIES.interpretSemanticTurn
       && !deterministic
-      && !mayContainMultipleClauses(message)
-      && message.trim().length > 0
-      && message.trim().length <= MAX_MATCHABLE_MESSAGE_LENGTH
+      && isShortStandaloneConceptCandidate(message)
       && modelTurn.confidence >= 0.85
       && modelTurn.needsClarification !== true
       && !mutatingActions.has(modelTurn.action)
     ) {
       const companionValue = modelTurn.entities.companion ?? modelTurn.entities.companionType;
       const conceptKey = typeof companionValue === 'string' ? companionConceptKeyForValue(companionValue) : null;
-      if (conceptKey) {
-        recordSemanticConceptEvidence(conceptKey, message).catch(() => undefined);
+      // Fix (found in review): without this claim, the SAME customer turn's
+      // second resolveSemanticTurn invocation (see the comment above) would
+      // start a SECOND independent timeout race, so a genuinely stuck write
+      // could add up to 2x SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS to one
+      // response instead of a single bounded wait. Claiming by eventId here
+      // means at most one write ATTEMPT (and therefore at most one timeout
+      // wait) ever happens per real transport event, however many times the
+      // understanding itself gets recomputed for it.
+      if (conceptKey && claimWriteAttemptForEvent(`${conversationId}:${input.eventId}`)) {
+        const writeStartedAt = Date.now();
+        let timedOut = false;
+        const timeoutGuard = new Promise<void>(resolve => {
+          setTimeout(() => { timedOut = true; resolve(); }, SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS);
+        });
+        await Promise.race([recordSemanticConceptEvidence(conceptKey, message), timeoutGuard]);
+        console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+          event: timedOut ? 'write_timeout' : 'write_awaited',
+          concept_key: conceptKey,
+          elapsed_ms: Date.now() - writeStartedAt,
+        }));
       }
     }
 

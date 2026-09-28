@@ -51,9 +51,18 @@ Kernel V2 Phase 3: Semantic Learning + Cost Efficiency -- **increment 1
 (companion-concept memory) implemented, tested, PR open, NOT merged. Its
 migration is NOT applied to production -- see "Phase 3 increment 1" below.**
 
-This is not project completion. Phase 3 has more scope beyond increment 1
-(pace, consider-only markers, a real embedding-based v2), and Phases 4-7
-remain after Phase 3.
+**This is PR #218 = Phase 3 increment 1, NOT Phase 3 completion.** The
+original Phase 3 completion gate is untouched and still requires (none of
+this is done yet): formal 20/50/100-turn cost stress runs; paid-call counts;
+zero-call rate; learned-memory hit rate; average and p95 semantic input
+tokens; average/p95/max conversation cost; count of conversations exceeding
+the cap; proof of no arbitrary intelligence cliff; proof of no unsafe
+transaction from learned semantics at scale. Increment 1's tests prove the
+MECHANISM is safe (acceptance criteria A-F, each mapped to a test below);
+they are not a substitute for that formal stress-test evidence, which is
+more meaningful once there is more than one concept family to measure
+against. Phase 3 also has more scope beyond increment 1 (pace/consider-only
+concept keys, a real embedding-based v2), and Phases 4-7 remain after Phase 3.
 
 ## Completed Phases
 
@@ -203,8 +212,52 @@ row's stored signature, that existing row is immediately retracted.
   file is committed and reviewable, but nothing in this codebase runs it
   against the live Supabase project without that explicit step.
 
-**Tests:** `tests/kernel-v2-phase3-semantic-concept-memory.test.ts`, 16/16
-passing. Full suite: 1632/1632 (1616 baseline + 16 new), 0 failed.
+**Structural issues found and fixed in PR review, before any merge/migration
+decision** (all four confirmed against the actual implementation, not just
+argued about):
+
+1. **Multi-clause read-path gap.** The write path already refused to learn
+   from a multi-clause message; the read path only checked length, so a
+   SHORT but multi-clause message could still reach `matchLearnedConcept`.
+   Fixed with one shared predicate (`isShortStandaloneConceptCandidate`) used
+   by both call sites, so they can never diverge again.
+2. **Confidence cross-exemplar leak.** Reinforcing a matched exemplar
+   computed its new confidence from `Math.max` across every row the concept
+   key had, so a weak, rarely-confirmed exemplar could inherit trust from an
+   unrelated strong sibling. Fixed to advance strictly from the MATCHED
+   row's own prior confidence.
+3. **Fire-and-forget write was not durable.** The learning write used to be
+   `.catch(() => undefined)` with no `await` -- nothing guarantees an
+   unawaited promise survives a serverless process being frozen right after
+   the customer response is sent. Fixed to `await` the write, raced against
+   a `SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS = 1500ms` bound (so a
+   stuck write can never add unbounded latency), with the outcome always
+   logged. A second, related bug this surfaced: the SAME customer turn can
+   trigger the write-path hook twice (the early gate and the later cutover
+   attempt both call the real interpreter for the same event; the AI
+   cost-ledger replays the first result for the second rather than paying
+   twice) -- without deduping, a stuck write could time out TWICE
+   sequentially, adding ~2x the bound to one response. Fixed with
+   `claimWriteAttemptForEvent`, keyed by conversation+event, so at most one
+   write attempt (and one timeout wait) ever happens per real customer turn.
+4. **Cross-customer privacy boundary.** No `guest_id` column is necessary
+   but not sufficient -- nothing previously stopped a phone/email/URL/handle
+   riding along in an otherwise-clean companion statement from being
+   persisted into the cross-customer store. Fixed: `recordSemanticConceptEvidence`
+   now rejects (never redacts-and-stores) any candidate containing one of
+   these, reusing the exact same closed detector `_direct-identifier-redaction.ts`
+   already uses for `customer_intelligence_events` -- not a new NER project.
+
+Also explicitly re-verified per the review: a retracted concept never
+matches (not just superseded); a confirmed contradiction still lets the
+turn resolve correctly via the real model, never a wrong zero-call answer;
+a contradiction can never create transaction authority (true by
+construction -- `safeConceptEntities` has no action/domain field to escalate
+through in the first place).
+
+**Tests:** `tests/kernel-v2-phase3-semantic-concept-memory.test.ts`, 24/24
+passing (8 new from this review pass). Full suite: 1640/1640 (1616 baseline
++ 24 new), 0 failed.
 
 **Required acceptance criteria (owner-specified), each mapped to a passing test:**
 
@@ -309,7 +362,7 @@ Phase 3 increment 1 focused suite:
 npx tsx --test tests/kernel-v2-phase3-semantic-concept-memory.test.ts
 ```
 
-Result: `16/16` passed.
+Result: `24/24` passed.
 
 Full suite (after Phase 3 increment 1, on top of Phase 2's `main`):
 
@@ -317,7 +370,7 @@ Full suite (after Phase 3 increment 1, on top of Phase 2's `main`):
 npm test
 ```
 
-Result: `1632/1632` passed, `0` failed (1616 Phase-2 baseline + 16 new Phase 3 tests).
+Result: `1640/1640` passed, `0` failed (1616 Phase-2 baseline + 24 new Phase 3 tests).
 
 ## Cost Measurements
 
