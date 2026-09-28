@@ -90,6 +90,23 @@ function editDistanceWithin(a: string, b: string, maxDistance: number): boolean 
   return previous[b.length]! <= maxDistance;
 }
 
+// A demonstrative/anaphoric reference to something already established
+// earlier in the conversation ("that one", "the one from before", "can THAT
+// be used for X"). This narrow legacy matcher receives only the raw message
+// string -- it has no conversation context to resolve such a reference
+// against, so it must never confidently claim ownership of a reference-
+// bearing turn merely because the turn also happens to contain a bare topic
+// word like "กิจกรรม" (see hasDiscoveryShape below). Production incident
+// this closes: "อันเมื่อกี้ใช้กับกิจกรรมได้ไหม" (a promotion follow-up
+// asking whether the promotion just discussed applies to activities)
+// contains "กิจกรรม" and so matched hasDiscoveryShape's bag-of-words check,
+// resetting the promotion context to a broad, unrelated ecosystem catalog
+// dump instead of preserving the referent. Returning false here is the
+// architecturally honest answer for a matcher that cannot resolve context:
+// it lets the request proceed to the real semantic supervisor (or, if that
+// is genuinely unavailable, an honest clarification) instead of guessing.
+export const PRIOR_REFERENCE_MARKER = /เมื่อกี้|อันนั้น|ตัวนั้น|ตัวเดิม|อันเดิม|ที่บอกไปแล้ว|ที่พูดไปแล้ว|อันที่แนะนำ|กลับมาเรื่องเดิม|อันนี้ล่ะ/u;
+
 export function isExperienceDiscoveryIntent(message: string): boolean {
   const text = normalizeThaiDiscoveryText(message);
   if (!text) return false;
@@ -99,6 +116,8 @@ export function isExperienceDiscoveryIntent(message: string): boolean {
   if (/(?:ที่ร้าน|ร้านอาหาร|เมนู|อาหารแนะนำ|กินอะไร|อะไรกิน)/u.test(text)) return false;
 
   if (DISCOVERY_PATTERNS.some(pattern => pattern.test(text))) return true;
+
+  if (PRIOR_REFERENCE_MARKER.test(text)) return false;
 
   const compact = compactThai(text);
   const hasDiscoveryShape =

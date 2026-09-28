@@ -486,6 +486,9 @@ const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
   'stay_read_only_inquiry',
   'otop_product_discovery',
   'cafe_read_only_inquiry',
+  'restaurant_availability_check',
+  'task_conditional_continuation',
+  'promotion_follow_up',
 ]);
 
 // A tiny set of read-only deterministic results are already exact machine

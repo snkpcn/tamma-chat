@@ -14,7 +14,7 @@ import {
   extractDate, extractDurationMinutes, extractPartySize, extractTime,
   hasCancelMarker, hasCommitMarker, hasCorrectionMarker,
 } from './_slot-parsers';
-import { isExperienceDiscoveryIntent } from './_experience-discovery';
+import { isExperienceDiscoveryIntent, PRIOR_REFERENCE_MARKER } from './_experience-discovery';
 import { isPromotionDiscoveryIntent } from './_promotion-dialog';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 
@@ -155,6 +155,24 @@ function findRestaurantTopicNarrow(message: string): boolean {
   return RESTAURANT_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('thamma-chat-restaurant'));
 }
 
+/** "โต๊ะ...เต็ม/ว่าง" -- a live TABLE STATUS question, structurally distinct
+ *  from RESTAURANT_TOPIC_MARKER above (which is about the menu/catalog, not
+ *  seating capacity). Production incident this closes: "พรุ่งนี้หกโมงโต๊ะ
+ *  เต็มยัง" matched neither RESTAURANT_TOPIC_MARKER (no กิน/อาหาร/เมนู word)
+ *  nor any other deterministic pattern, so a genuine transient provider
+ *  failure on this turn collapsed all the way to the generic "ระบบตอบช้า"
+ *  apology instead of the honest "no live table source" answer. Must carry
+ *  informationNeed:'availability' (not a bare 'discover') so the Dialog
+ *  Manager routes it to the restaurant availability knowledge need (see
+ *  planKnowledgeNeeds's restaurant case), which resolves to a real "cannot
+ *  confirm" answer when -- as today -- no live table-capacity source is
+ *  wired, never a guessed full/free status. */
+const RESTAURANT_TABLE_STATUS_MARKER = /โต๊ะ.*(?:เต็ม|ว่าง|เหลือ)|(?:เต็ม|ว่าง|เหลือ).*โต๊ะ|โต๊ะ(?:ไหม|มั้ย|รึเปล่า|หรือเปล่า|หรือยัง|รึยัง)/u;
+
+function findRestaurantTableStatusQuestion(message: string): boolean {
+  return RESTAURANT_TABLE_STATUS_MARKER.test(message) && Boolean(findEcosystemNode('thamma-chat-restaurant'));
+}
+
 const STAY_TOPIC_MARKER = /ห้อง|ที่พัก|เฮือน|บ้านพัก|เช[็็]?คอิน|เช็คอิน|เช็คเอาท์|เช็กเอาต์|room\s*service|รูม\s*เซอร์วิส/iu;
 const OTOP_TOPIC_MARKER = /otop|โอทอป|ของฝาก|สินค้าชุมชน/iu;
 const CAFE_TOPIC_MARKER = /กาแฟ|คาเฟ่|อินทนิน|inthanin|ลาเต้|latte|เครื่องดื่ม/iu;
@@ -194,7 +212,7 @@ function findMembershipTopic(message: string): boolean {
  *  mechanism (detectTopicTransition in _dialog-manager.ts) once its domain
  *  differs from the active task's. Reuses the SAME topic-narrow markers
  *  already used for the no-task case, never a new phrase table. */
-function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
+function detectCrossDomainTopicSwitch(message: string, now: Date = new Date()): SemanticTurn | null {
   // Promotion questions are cross-cutting by design. A current membership,
   // restaurant, stay, or activity context must never absorb a clear request
   // to browse promotions. Reuse the existing promotion dialog classifier so
@@ -204,6 +222,18 @@ function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
       domain: 'promotion', intent: 'promotion_discovery', action: 'discover',
       informationNeed: 'catalog',
       entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false,
+    };
+  }
+  if (findRestaurantTableStatusQuestion(message)) {
+    const entities: Record<string, unknown> = {};
+    const date = extractDate(message, now);
+    const time = extractTime(message);
+    if (date) entities.date = date;
+    if (time) entities.time = time;
+    return {
+      domain: 'restaurant', intent: 'restaurant_availability_check', action: 'ask',
+      informationNeed: 'availability',
+      entities, references: [], constraints: [], confidence: 0.85, needsClarification: false,
     };
   }
   if (findRestaurantTopicNarrow(message)) {
@@ -264,6 +294,14 @@ function detectCrossDomainTopicSwitch(message: string): SemanticTurn | null {
 /** "ตัวไหน" / "อันไหน" -- a classifier-based interrogative ("which [counted
  *  item]"), structural across any counted noun, not a specific phrase. */
 const COMPARE_MARKER = /ตัวไหน|อันไหน|ชิ้นไหน/u;
+
+/** The two structural halves of a conditional non-commit continuation (see
+ *  deriveForActiveTask's own comment): an unavailability condition, and an
+ *  explicit "so don't transact" consequence. Each is deliberately broad on
+ *  its own (many real sentences say "ไม่ว่าง" without this pattern applying)
+ *  -- only their CO-OCCURRENCE is treated as this structural class. */
+const CONDITIONAL_UNAVAILABLE_MARKER = /ไม่ว่าง/u;
+const NO_COMMIT_CONSEQUENCE_MARKER = /ไม่ต้อง(?:จอง|เลือก|ทำ|สั่ง)/u;
 
 /** A small, closed attribute vocabulary -- the SAME attributes the
  *  authoritative activity/asset source-of-truth is being asked to support
@@ -415,6 +453,22 @@ function detectNonActivitySideQuestion(message: string, domain: SemanticDomain |
   if (domain === 'membership' && /สถานะ|สิทธิ|สมัคร|เช็ค|ตรวจ|ดู/u.test(message)) {
     return { domain, intent:'membership_follow_up', action: MEMBERSHIP_STATUS_ACTION_MARKER.test(message) ? 'status' : 'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
   }
+  // Promotion incident: no follow-up branch existed here at all, so a
+  // genuine follow-up question about a promotion just discussed ("อันเมื่อกี้
+  // ใช้กับกิจกรรมได้ไหม") had no path back to the already-established
+  // promotion domain and fell through to 'unknown' whenever the model was
+  // unavailable. An applicability question ("ใช้...ได้ไหม") or a reference
+  // back to what was just said both belong to the domain the conversation is
+  // ALREADY anchored in (this function only runs when `domain` is already
+  // the established effectiveDomain) -- routing it back to
+  // renderPromotionRecommendation's existing action:'ask' handling answers
+  // from the SAME real promotion_eligibility source turn 1 used, never a
+  // new guess.
+  if (domain === 'promotion'
+    && (/ใช้.*ได้(?:ไหม|มั้ย|รึเปล่า|หรือเปล่า)|แลก.*ได้(?:ไหม|มั้ย)/u.test(message)
+      || PRIOR_REFERENCE_MARKER.test(message))) {
+    return { domain, intent:'promotion_follow_up', action:'ask', entities, references:[], constraints:[], confidence:0.75, needsClarification:false };
+  }
   return null;
 }
 
@@ -430,6 +484,34 @@ function deriveForActiveTask(
     return {
       domain: task.domain, intent: 'task_cancel', action: 'cancel',
       entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false,
+    };
+  }
+
+  // A CONDITIONAL continuation of the already-selected task entity ("ถ้าตัว
+  // นั้นไม่ว่าง เอาอีกตัวแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจอง"): structurally,
+  // an unavailability condition PLUS an explicit "so don't transact"
+  // consequence, never a phrase table for this one sentence. With an active
+  // task's already-selected entity as the sole candidate, "ตัวนั้น" has a
+  // unique, bounded referent -- the task itself -- so this must preserve
+  // that selection and check availability, never guess a booking or ask an
+  // unnecessary "which one" clarification. Production incident this closes:
+  // this had no deterministic classification at all, so a genuine transient
+  // provider failure on this exact turn collapsed to the generic "ระบบจอง
+  // ตอบช้า" apology instead of an honest availability check that never
+  // transacts without further confirmation.
+  if (!hasCommitMarker(message)
+    && CONDITIONAL_UNAVAILABLE_MARKER.test(message)
+    && NO_COMMIT_CONSEQUENCE_MARKER.test(message)) {
+    const entities: Record<string, unknown> = {};
+    if (typeof task.slots.resourceCode === 'string') entities.resourceCode = task.slots.resourceCode;
+    // The task's own slot key is `assetSelection` (see ACTIVITY_BOOKING_
+    // REQUIRED_FIELDS in thongthai-chat.ts); renderActivityAvailability
+    // reads the customer-facing name back under `entities.horseName`.
+    if (typeof task.slots.assetSelection === 'string') entities.horseName = task.slots.assetSelection;
+    return {
+      domain: task.domain, intent: 'task_conditional_continuation', action: 'ask',
+      informationNeed: 'availability',
+      entities, references: [], constraints: ['no_transaction'], confidence: 0.8, needsClarification: false,
     };
   }
 
@@ -574,7 +656,7 @@ export function deriveDeterministicSemanticTurn(
     // while mid-activity-booking). A genuine switch must still surface as a
     // real turn (so the Dialog Manager's existing suspend mechanism fires),
     // not silently fall through to "genuinely unclassifiable".
-    const topicSwitch = detectCrossDomainTopicSwitch(trimmed);
+    const topicSwitch = detectCrossDomainTopicSwitch(trimmed, now);
     if (topicSwitch && topicSwitch.domain !== activeTask.domain) return topicSwitch;
     if (topicSwitch && topicSwitch.domain === activeTask.domain) {
       const entities: Record<string, unknown> = {};
@@ -612,7 +694,7 @@ export function deriveDeterministicSemanticTurn(
   // first and detectNonActivitySideQuestion never checked for a different
   // domain's marker before claiming the turn.
   if (effectiveDomain) {
-    const crossDomainSwitch = detectCrossDomainTopicSwitch(trimmed);
+    const crossDomainSwitch = detectCrossDomainTopicSwitch(trimmed, now);
     if (crossDomainSwitch && crossDomainSwitch.domain !== effectiveDomain) return crossDomainSwitch;
   }
 
@@ -721,6 +803,25 @@ export function deriveDeterministicSemanticTurn(
       constraints: [],
       confidence: 0.9,
       needsClarification: false,
+    };
+  }
+
+  // A live table-status question on a genuine cold start (no active task,
+  // no prior domain at all) -- same structural marker as
+  // detectCrossDomainTopicSwitch's own check above, checked here too since
+  // that function is only reached when an active task or an established
+  // effectiveDomain already exists. Without this, a first-message table
+  // question had no classification path whatsoever.
+  if (findRestaurantTableStatusQuestion(trimmed)) {
+    const entities: Record<string, unknown> = {};
+    const date = extractDate(trimmed, now);
+    const time = extractTime(trimmed);
+    if (date) entities.date = date;
+    if (time) entities.time = time;
+    return {
+      domain: 'restaurant', intent: 'restaurant_availability_check', action: 'ask',
+      informationNeed: 'availability',
+      entities, references: [], constraints: [], confidence: 0.85, needsClarification: false,
     };
   }
 
