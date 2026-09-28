@@ -7,6 +7,7 @@
 // Reuses parseRestaurantPreorderTurn/mergeRestaurantPreorderDraft from the
 // restaurant preorder dialog for date/time/name/phone/email extraction --
 // same shape, same rules, never re-implemented here.
+import { PRIOR_REFERENCE_MARKER } from './_experience-discovery';
 import {
   mergeRestaurantPreorderDraft, parseRestaurantPreorderTurn,
   type RestaurantPreorderDraft,
@@ -59,6 +60,19 @@ export function isPromotionDiscoveryIntent(message: string): boolean {
 }
 export function isPromotionAcceptIntent(message: string): boolean {
   return ACCEPT_RE.test(message);
+}
+
+// Contextual promotion follow-up: bounded anaphora + an applicability
+// question. This intentionally does NOT treat a bare activity/restaurant
+// mention as promotion context; the user must actually point back to the
+// immediately active promotion topic. That prevents stale promotion state
+// from hijacking a genuine domain switch.
+const PROMOTION_APPLICABILITY_RE = /(?:ใช้|แลก|ใช้สิทธิ์).*ได้(?:ไหม|มั้ย|รึเปล่า|หรือเปล่า)/u;
+
+export function isPromotionContextualFollowUp(message: string, activeTopic: unknown): boolean {
+  return activeTopic === 'promotion'
+    && PRIOR_REFERENCE_MARKER.test(message)
+    && PROMOTION_APPLICABILITY_RE.test(message);
 }
 
 // matchPromotionByText matches a promo by TITLE OR ITEM NAME substring alone
@@ -180,6 +194,7 @@ export type PromotionFallbackDecision =
   | { kind: 'no_promotions' }
   | { kind: 'list'; promotions: PromotionListItem[] }
   | { kind: 'clarify'; promotions: PromotionListItem[] }
+  | { kind: 'context_followup'; promotions: PromotionListItem[] }
   | { kind: 'start_redemption'; pending: PendingPromotionRedemption };
 
 /**
@@ -189,8 +204,25 @@ export type PromotionFallbackDecision =
  * promotion, price, or item: every field in the returned pending redemption
  * traces back to a `promotions` entry the caller supplied.
  */
-export function decidePromotionFallback(message: string, promotions: PromotionListItem[]): PromotionFallbackDecision {
-  if (!isPromotionMention(message)) return { kind: 'not_promo_related' };
+export function decidePromotionFallback(
+  message: string,
+  promotions: PromotionListItem[],
+  context: { activeTopic?: unknown } = {},
+): PromotionFallbackDecision {
+  const explicitPromotion = isPromotionMention(message);
+  const contextualFollowUp = isPromotionContextualFollowUp(message, context.activeTopic);
+  if (!explicitPromotion && !contextualFollowUp) return { kind: 'not_promo_related' };
+
+  // A contextual applicability question is read-only. If nothing is active,
+  // "that one" cannot refer to a usable promotion. If one or more promotions
+  // are active, the caller answers from those verified rows without guessing
+  // cross-business applicability that the source does not explicitly state.
+  if (contextualFollowUp && !explicitPromotion) {
+    return promotions.length
+      ? { kind: 'context_followup', promotions }
+      : { kind: 'no_promotions' };
+  }
+
   const matched = matchPromotionByText(message, promotions);
   const wantsToAccept = isGenuinePromotionAcceptance(message, matched);
 
