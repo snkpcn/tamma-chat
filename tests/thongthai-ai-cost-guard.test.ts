@@ -284,7 +284,9 @@ test('persistent ledger replays a completed semantic result for the same event w
   process.env.SUPABASE_SERVICE_ROLE_KEY='test-service-role';
   let row:{state:Record<string,unknown>;updated_at:string}|null=null;
   global.fetch=(async(_url:RequestInfo|URL,init?:RequestInit)=>{
+    const url=String(_url);
     const method=String(init?.method??'GET').toUpperCase();
+    if(url.includes('/rest/v1/ai_api_cost_events')) return new Response('',{status:201});
     if(method==='GET') return new Response(JSON.stringify(row?[row]:[]),{status:200});
     const body=JSON.parse(String(init?.body??'{}')) as {state:Record<string,unknown>;updated_at:string};
     row={state:body.state,updated_at:body.updated_at};
