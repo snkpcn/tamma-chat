@@ -453,11 +453,14 @@ avoid an architectural change:**
   characters. This is the only option that can close the gap options A and
   B cannot, without inventing a hand-written synonym table.
 
-**Decision: C (embeddings), conditional on empirical calibration.** Per this
-repo's own established discipline (`MIN_SIMILARITY` and the negation veto in
+**Decision: C (embeddings as a category) remains the right direction -- A
+and B are still ruled out for the reasons above -- but the SPECIFIC design
+(whole-sentence embedding + fixed similarity threshold) is NOT confirmed and
+must NOT be implemented as originally planned.** Per this repo's own
+established discipline (`MIN_SIMILARITY` and the negation veto in
 `_semantic-concept-memory.ts` were both calibrated empirically, not
-asserted), this decision is backed by a real calibration run, not just the
-argument above:
+asserted), this was checked with a real calibration run rather than shipped
+on the argument alone -- and the numbers below changed the plan:
 
 - `scripts/run-embedding-calibration.ts` (new, read-only, no schema/table
   touched) calls the real OpenAI embeddings endpoint
@@ -473,55 +476,101 @@ argument above:
   it using the repository's existing `OPENAI_API_KEY` secret. Cost is a
   small fraction of a cent (roughly a dozen short phrases, well under 200
   tokens total, at ~$0.02/1M tokens).
-- **Results: [PENDING -- fill in after the workflow is dispatched and
-  results are read back].** Until this line is replaced with real numbers,
-  treat option C as a reasoned-but-not-yet-empirically-confirmed decision.
-  If calibration shows embeddings do NOT cleanly separate
-  same-concept-different-vocabulary pairs (high similarity) from
-  different-concept pairs (low similarity) with a workable margin, the
-  decision above must be revisited, not forced through anyway.
+- **Results (real, dispatched run, `text-embedding-3-small`,
+  `2026-09-28T11:28Z`, workflow run `36415861451`):**
 
-**If calibration confirms embeddings work, the smallest safe increment is
-(NOT YET IMPLEMENTED, requires its own owner approval):**
+  | pair | similarity | expectation |
+  |---|---|---|
+  | "มากับแฟน" / "มากับคนรู้ใจ" | 0.382 | same concept, different vocabulary |
+  | "มากับแฟน" / "มาด้วยกันกับคู่รัก" | 0.381 | same concept, different vocabulary |
+  | "เอาอันนี้ไว้ก่อน" / "สนใจอันนี้อยู่ ขอจำไว้ก่อน" | 0.624 | same concept, different vocabulary |
+  | "มากับแฟน" / "มากับครอบครัว" | 0.426 | **different** concept (family) |
+  | "มากับแฟน" / "มากับเพื่อนกลุ่มใหญ่" | 0.428 | **different** concept (friends) |
+  | "เอาอันนี้ไว้ก่อน" / "ไม่อยากเหนื่อย ขอชิลๆ" | 0.266 | different concept |
+  | "มากับแฟน" / "ไม่ได้มากับแฟน" | **0.791** | negation (should score LOW -- opposite meaning) |
+  | "มากับแฟน" / "พรุ่งนี้มีห้องว่างไหม" | 0.187 | unrelated sentence (correctly lowest) |
+
+  **This does NOT cleanly confirm the embeddings-as-designed decision.**
+  Two concrete problems, not a marginal calibration nudge:
+  1. **No separating threshold exists for the companion concept's own
+     worked example.** The lowest same-concept score (0.381, "แฟน" vs
+     "คู่รัก") is BELOW the highest different-concept score (0.428, "แฟน" vs
+     "เพื่อนกลุ่มใหญ่"). A same-concept pair and a wrong-concept pair
+     overlap in the same similarity band -- a fixed-threshold (or even a
+     naive nearest-neighbor) classifier built on raw full-sentence cosine
+     similarity would sometimes prefer the WRONG concept. This is exactly
+     the "confidently wrong" failure mode the whole mandate exists to
+     prevent, so this specific design must NOT ship as-is.
+  2. **Negation is not handled.** "มากับแฟน" vs "ไม่ได้มากับแฟน" (opposite
+     meanings) scored 0.791 -- higher than every genuine same-concept pair.
+     Sentence embeddings evidently do not inherently distinguish "X" from
+     "not X" here any better than surface matching did; the same structural
+     negation veto increment 1 already has would still be required on top
+     of embeddings, not replaced by them.
+  3. The one case that DID separate reasonably (consider-only: 0.624 vs its
+     own different-concept control at 0.266) suggests the approach is not
+     hopeless in general -- the companion concept specifically is the
+     problem case here, likely because these are short, template-heavy
+     sentences ("มากับ..." / "...ไว้ก่อน") where the shared scaffolding
+     dominates a whole-sentence embedding more than the one differing
+     content word does. This is a known failure mode of sentence-level
+     embedding similarity on short, syntactically-templated inputs, not a
+     sign that embeddings can never work here.
+
+  **Conclusion: the plan below (whole-sentence embedding + fixed threshold)
+  is NOT adopted as designed.** Do not implement it. Before Phase 3
+  completion can rely on embeddings, at least one of the following needs
+  its own follow-up calibration (same discipline, not guessed):
+  - Embed just the extracted content span (e.g. the companion-type noun
+    phrase alone: "แฟน" vs "คนรู้ใจ" vs "ครอบครัว", not the full templated
+    sentence) rather than the whole message, to reduce the shared-scaffolding
+    dilution effect.
+  - A margin/ranking approach (nearest concept must beat the SECOND-nearest
+    by a calibrated margin, not merely clear an absolute threshold) --
+    though note this calibration's own numbers show even ranking would have
+    picked the wrong concept for the primary worked example (0.381 same-
+    concept vs 0.428 wrong-concept), so this alone is unlikely to be
+    sufficient without also addressing point 1 above.
+  - A different embedding model (this used `text-embedding-3-small`; a
+    larger/differently-tuned model might separate better -- would need its
+    own calibration run, not an assumption).
+  - Revisit whether OpenAI's own semantic supervisor should instead be asked
+    to output a canonical concept-identity label directly (already
+    confirming a concept today) as the generalization signal, rather than
+    adding a second, separate embedding-similarity system.
+  Regardless of which path, negation must still be handled by an explicit
+  structural veto (as increment 1 already has), never assumed solved by
+  switching to embeddings.
+
+**The originally-planned smallest safe increment (NOT adopted, kept here
+only as a record of what was considered and why it needs revision before
+being built):**
 
 1. A new, additive-only migration enabling the `pgvector` extension and
    adding an `embedding vector(1536)` column (or a separate table, TBD by
    whichever keeps the migration smallest) to `semantic_concept_memory` (or
-   a new table if mixing concerns is worse than a new table -- this needs
-   its own design-first pass, same as increment 1 got, before being
-   written).
-2. A new cost line item in `_ai-cost-policy.ts` for the embeddings model,
-   folded into the existing per-conversation USD ceiling (embeddings are
-   roughly 100x cheaper per token than the chat completion model already in
-   use, so this should not meaningfully threaten the <=2 THB budget, but
-   must still be accounted for explicitly, not assumed free).
-3. Embedding generation happens ONLY for a message that already cleared
-   `isShortStandaloneConceptCandidate` and was confirmed by the real
-   semantic supervisor with high confidence -- same trigger discipline as
-   the write path today, never a new source of paid calls beyond what
-   already exists.
-4. Matching becomes: try Tier A (exact replay) first as today (free,
-   no embedding call needed for an exact string match); if no exact
-   replay, try embedding cosine similarity against stored concept
-   embeddings above a calibrated threshold (a NEW tier, "Tier C" or a
-   renamed "Tier B", TBD) before falling through to a fresh OpenAI call.
-5. The SAME privacy boundary (`containsUnrecognizedPersonalDetail` /
-   `containsDirectIdentifier`) applies before anything is embedded and
-   stored -- an embedding of a personal-name-bearing sentence is just as
-   much a privacy leak as storing the raw text (arguably harder to audit
-   later), so the reject-on-any-doubt policy must gate embedding generation
-   too, not just raw-text storage.
-6. The SAME transaction-authority closure (`safeConceptEntities`, no
-   action/domain field) applies -- an embedding-matched concept is no more
-   able to create a transaction than a surface-matched one, by the same
-   construction argument.
-7. New tests proving: a genuine unseen cross-vocabulary paraphrase (the
-   "แฟน"/"คนรู้ใจ" pair itself, not the calibration's own fixture) resolves
-   without a full semantic call; a different-concept phrase does NOT
-   falsely match via embedding similarity; the negation hard case still
-   fails safe (whether via a structural veto like today's or via the
-   embedding space naturally separating it -- calibration determines
-   which); a personal-name-bearing sentence is never embedded-and-stored.
+   a new table if mixing concerns is worse than a new table).
+2. A new cost line item in `_ai-cost-policy.ts` for the embeddings model
+   (roughly 100x cheaper per token than the chat completion model already
+   in use, so not a real budget threat, but must be accounted for
+   explicitly).
+3. Embedding generation gated behind the same trigger discipline as the
+   write path today (`isShortStandaloneConceptCandidate` + high-confidence
+   real-model confirmation), never a new source of paid calls.
+4. Matching: Tier A (exact replay, free) first, then embedding similarity
+   as a new tier before falling through to a fresh OpenAI call -- **this
+   step specifically is what the calibration above shows is unsafe with a
+   naive threshold on whole-sentence embeddings of this concept's own
+   worked example.**
+5. The SAME privacy boundary must gate embedding generation, not just raw
+   text storage (an embedding of a personal-name-bearing sentence is just
+   as much a leak, arguably harder to audit later).
+6. The SAME transaction-authority closure applies regardless of matching
+   mechanism.
+7. Required tests unchanged in spirit (unseen cross-vocabulary paraphrase
+   resolves safely; different-concept never falsely matches; negation
+   fails safe; personal-name-bearing sentence never stored) -- but item 4's
+   mechanism needs to change before these tests could pass honestly.
 
 ## Current Architecture (Phase 2)
 
@@ -669,21 +718,24 @@ number of concept keys to measure hit-rate against.
 
 1. ~~Merge the Phase 3 production-smoke extension PR~~ -- **done**: PR #219
    merged (squash `497b5099b5155356f145eb06b2ae963fe3e63e9c`).
-2. Dispatch `phase3-embedding-calibration.yml` (workflow_dispatch, requires
-   the repo's `OPENAI_API_KEY` secret) and read back real results into the
-   "Phase 3 completion: semantic generalization architecture decision"
-   section above, replacing the `[PENDING]` placeholder. This is a
-   read-only calibration -- no schema/cost decision is final until this
-   data exists.
-3. If calibration confirms embeddings cleanly separate
-   same-concept-different-vocabulary from different-concept pairs: design
-   the smallest safe embedding-column migration (own design-first pass,
-   same discipline as increment 1), get explicit owner approval in chat
-   (this is a NEW decision -- a new extension and a new cost line item --
-   NOT covered by increment 1's authorization), implement, test, PR, merge,
-   apply, verify production -- same full cycle increment 1 went through.
-   If calibration does NOT confirm this, revisit the architecture decision
-   rather than forcing it through.
+2. ~~Dispatch the embedding calibration~~ -- **done**: workflow run
+   `36415861451`, results recorded in "Phase 3 completion: semantic
+   generalization architecture decision" above. **Outcome: the calibration
+   did NOT confirm the planned design.** Whole-sentence embedding similarity
+   does not cleanly separate the companion concept's own same-vocabulary
+   vs. different-concept pairs (0.381 same-concept overlaps below 0.428
+   different-concept), and does not handle negation (0.791, higher than any
+   genuine same-concept pair).
+3. Before any embedding-based implementation: run a follow-up calibration
+   on the two most promising fixes identified above -- (a) embed just the
+   extracted content span (the companion-type noun alone) instead of the
+   full templated sentence, and (b) re-test with a different embedding
+   model -- using the same `scripts/run-embedding-calibration.ts` pattern
+   (add new fixture variants, dispatch, read back real numbers). Only once
+   a design demonstrably separates same-concept from different-concept
+   pairs with a real margin should a migration be designed. Do not
+   implement the embedding-column migration on the current, disconfirmed
+   design.
 4. Extend Phase 3 to the pace/consider-only concept keys the mandate also
    names, using the same closed-vocabulary, safety-by-construction pattern.
 5. Run the mandate's own formal 20/50/100-turn cost-stress conversations
