@@ -1034,16 +1034,24 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
   const suspendedItems = taskSummaryItems(container.suspendedTask, input.language);
 
   if (!activeItems.length && !suspendedItems.length) {
-    return input.language === 'th'
-      ? 'ตอนนี้ยังไม่มีรายการที่กำลังเลือกหรือกรอกค้างอยู่ครับ และยังไม่ได้ยืนยันการจองหรือส่งรายการ'
-      : 'There is no active or suspended selection right now, and nothing has been confirmed or submitted.';
+    const entityName = firstText(input.semanticTurn?.entities ?? {}, [
+      'horseName','resourceName','roomType','itemName','productName','promotionName','name',
+    ]);
+    if (input.language === 'th') {
+      return entityName
+        ? `ตอนนี้เลือกไว้เป็น ${entityName} ครับ แต่ยังไม่ได้จองหรือส่งรายการ`
+        : 'ตอนนี้ยังไม่มีรายการที่กำลังเลือกหรือกรอกค้างอยู่ครับ และยังไม่ได้จองหรือส่งรายการ';
+    }
+    return entityName
+      ? `The current selection is ${entityName}, but nothing has been booked or submitted.`
+      : 'There is no active or suspended selection right now, and nothing has been booked or submitted.';
   }
 
   if (input.language === 'th') {
     const sections: string[] = [];
     if (activeItems.length) sections.push(`รายการที่กำลังคุยอยู่:\n• ${activeItems.join('\n• ')}`);
     if (suspendedItems.length) sections.push(`รายการที่พักไว้ก่อน:\n• ${suspendedItems.join('\n• ')}`);
-    return `${sections.join('\n\n')}\n\nทั้งหมดนี้ยังเป็นข้อมูลที่คุยกันอยู่ ยังไม่ได้ยืนยันการจองหรือส่งรายการครับ`;
+    return `${sections.join('\n\n')}\n\nทั้งหมดนี้ยังเป็นข้อมูลที่คุยกันอยู่ ยังไม่ได้จองหรือส่งรายการครับ`;
   }
 
   const sections: string[] = [];
