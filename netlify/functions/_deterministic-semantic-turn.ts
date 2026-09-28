@@ -153,7 +153,7 @@ export function findKnownActivityAssetSelection(message: string): typeof ACTIVIT
 function isInventoryCountQuestion(message: string): boolean {
   // Generic quantity-question structure, not a phrase answer table. The
   // activity topic itself comes from the canonical ecosystem graph above.
-  return /(?:กี่(?:ตัว|คัน|ชุด|อัน|รายการ)?|จำนวน(?:เท่าไร|เท่าไหร่|กี่)|มีกี่)/u.test(message);
+  return /(?:กี่(?:ตัว|คัน|ชุด|อัน|รายการ)|จำนวน(?:เท่าไร|เท่าไหร่|กี่)|มีกี่(?=$|[\s?？]|ครับ|คะ|ค่ะ)|มีกี่(?:ตัว|คัน|ชุด|อัน|รายการ))/u.test(message);
 }
 
 /** "ร้าน...กิน/อาหาร/เมนู" -- a restaurant-topic marker, reusing the SAME
