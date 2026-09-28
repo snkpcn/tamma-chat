@@ -724,9 +724,24 @@ export function deriveDeterministicSemanticTurn(
     && CONDITIONAL_UNAVAILABLE_MARKER.test(trimmed)
     && NO_COMMIT_CONSEQUENCE_MARKER.test(trimmed)) {
     const candidates = context.recentEntities.filter(entity => entity.domain === effectiveDomain);
-    if (candidates.length === 1) {
-      const entities: Record<string, unknown> = { horseName: candidates[0]!.name };
-      const resourceCode = directResourceCode(candidates[0]!);
+    // Discovery/recommendation turns can legitimately place several catalog
+    // entities in recentEntities (for horse riding, both horses are grounded
+    // facts). In that shape, "ตัวนั้น" is still uniquely resolvable when the
+    // bounded assistant recommendation evidence names exactly one of them.
+    // lastRecommendationReference is populated from the assistant's actual
+    // composed recommendation, so this follows conversation evidence rather
+    // than guessing from catalog order or customer keywords.
+    const recommendationMatches = context.lastRecommendationReference
+      ? candidates.filter(entity => context.lastRecommendationReference!.includes(entity.name))
+      : [];
+    const resolvedCandidate = recommendationMatches.length === 1
+      ? recommendationMatches[0]!
+      : candidates.length === 1
+        ? candidates[0]!
+        : null;
+    if (resolvedCandidate) {
+      const entities: Record<string, unknown> = { horseName: resolvedCandidate.name };
+      const resourceCode = directResourceCode(resolvedCandidate);
       if (resourceCode) entities.resourceCode = resourceCode;
       return {
         domain: effectiveDomain, intent: 'task_conditional_continuation', action: 'ask',
