@@ -1,20 +1,45 @@
 # Thongthai Kernel V2 Handoff
 
-Updated: 2026-09-28 16:18 Asia/Bangkok
+Updated: 2026-09-28 (this pass corrects the Phase 2 checkpoint below to
+post-merge reality; the prior "Current State" section was written just
+before PR #216 finished merging).
 
 ## Current State
 
 - Repo: `snkpcn/tamma-chat`
-- Local branch: `kernel-v2/phase2-conversation-state-v2`
-- Current remote `main` SHA verified through GitHub API: `59aba3a971191ed702fc3c7e6aca1f198fd3c66d`
-- Current production Netlify deploy ID: `6aba2cb31f169b0009a18435`
-- Current production Netlify commit_ref: `59aba3a971191ed702fc3c7e6aca1f198fd3c66d`
-- Production URL: https://tamma-chat.netlify.app
-- Phase 1 PR: `#215`, merged
-- Phase 1 squash merge commit: `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
-- Phase 1 handoff finalization commit on `main`: `59aba3a971191ed702fc3c7e6aca1f198fd3c66d`
+- Local branch: `main` (working tree clean, fast-forwarded to `origin/main`)
+- Current remote `main` SHA, verified directly via `git fetch origin main` in
+  this session: `ce4ceb0cb7a359c793d837f41c40de831be5eae0`
+- Phase 1 PR: `#215`, verified merged via GitHub API (`merged: true`,
+  `merged_by: snkpcn`), squash commit `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
+- Phase 2 PR: `#216`, verified merged via GitHub API (`merged: true`,
+  `merged_by: snkpcn`), merge commit `ce4ceb0cb7a359c793d837f41c40de831be5eae0`
+  (this is the current `main` tip)
+- Full suite on this exact `main` SHA, run directly in this session:
+  `1616/1616` passed, `0` failed (matches the number PR #216 reported)
+- Production Netlify deploy: **VERIFIED**, by the owner directly through
+  Netlify (not by this Claude session, which has no egress path to
+  `tamma-chat.netlify.app` -- see the environment-limitation note below):
+  - Deploy ID: `6aba32fd5c75940008e8c0e5`
+  - Deploy state: `READY`
+  - Production `commit_ref`: `ce4ceb0cb7a359c793d837f41c40de831be5eae0`
+    (matches `main` above)
+  - Branch: `main`
+  - Netlify secret scan: `0` matches
+- Environment limitation (distinct from the verification above, not a
+  substitute for it): this Claude session's own outbound network egress to
+  `tamma-chat.netlify.app` returns HTTP 403 at the proxy layer
+  (`recentRelayFailures` logs a policy-level `connect_rejected`, not an
+  application error -- confirmed by a uniform 403 across every request,
+  including a bare unrelated probe). Per this environment's own operating
+  rule for a 403/407 egress denial, this is reported rather than retried or
+  routed around. It means THIS session cannot itself run production smoke or
+  re-run the Real LINE HTTPS certification against the live endpoint; it does
+  not mean production is unverified -- the owner's direct Netlify check above
+  is authoritative.
 
-Open PRs observed through GitHub API before Phase 2 PR creation:
+Open PRs observed through GitHub API before Phase 2 PR creation (not
+re-verified this pass -- carried over from the prior checkpoint):
 
 - `#213` Final perfection: eliminate remaining generic production fallbacks
 - `#201` [run live] Post-merge final certification for PR #200
@@ -22,16 +47,19 @@ Open PRs observed through GitHub API before Phase 2 PR creation:
 
 ## Current Phase
 
-Kernel V2 Phase 2: Conversation State V2.
+Kernel V2 Phase 2: Conversation State V2 -- **COMPLETE, merged, verified on
+`main`.**
 
-Phase 2 implementation is pushed in PR `#216` and fully tested locally. CI/merge are pending in this handoff checkpoint.
+Starting Phase 3: Semantic Learning + Cost Efficiency (see below).
 
-This is not project completion. Phases 3-7 remain.
+This is not project completion. Phases 4-7 remain after Phase 3.
 
 ## Completed Phases
 
 - Phase 1: Single Language Brain foundation, merged in PR `#215`.
-- Phase 2: Conversation State V2, pushed in PR `#216` from `kernel-v2/phase2-conversation-state-v2`, pending CI/merge.
+- Phase 2: Conversation State V2, merged in PR `#216`. Verified on `main` at
+  `ce4ceb0cb7a359c793d837f41c40de831be5eae0` with a clean 1616/1616 suite run
+  in this session.
 
 ## Current Architecture
 
@@ -109,28 +137,37 @@ Phase 2 tests are local deterministic/structured semantic tests and do not add p
 
 ## PRs
 
-- Phase 1 PR: `#215`, merged.
-- Phase 2 PR: `#216`, open.
-- Phase 2 PR head SHA: `257995f4dd37e61acb594c7408848abe45bfcd46`
+- Phase 1 PR: `#215`, merged (squash `a8bbcb3`).
+- Phase 2 PR: `#216`, merged (merge commit `ce4ceb0`, now `main` tip).
 
 ## Known Failures / Gaps
 
-- Phase 2 PR `#216` is open but not yet merged.
-- No production deploy has been made for Phase 2.
+- Production deploy for Phase 2 is owner-verified (deploy `6aba32fd...`,
+  `READY`, `commit_ref` matches `main`) but no Claude session in this
+  engagement has been able to independently re-run production smoke or the
+  Real LINE HTTPS certification against it, since every session so far has
+  had its egress to `tamma-chat.netlify.app` blocked at the proxy layer.
 - Phase 3 semantic learning and cost reuse are not implemented here.
+- Phase 4 Human Intent / Commercial Boundary is not implemented here.
 - Phase 5 incident case creation/staff routing is not implemented here.
 - Phase 6 natural response brain is not implemented here.
 - Phase 7 shadow cutover/certification is not implemented here.
 
 ## Next Required Step
 
-1. Let PR `#216` CI run and verify green.
-2. Review full diff carefully.
-3. Merge only if green.
-4. Verify remote `main`.
-5. Verify Netlify production deploy SHA after merge.
-6. Update this handoff again with merge commit, production deploy, and final Phase 2 status.
-7. Continue to Phase 3 if session capacity remains.
+1. Whichever session/environment has live egress to `tamma-chat.netlify.app`
+   should re-run production smoke and the Real LINE HTTPS certification
+   against the owner-verified Phase 2 deploy (`6aba32fd...`), since no Claude
+   session has been able to do this directly yet.
+2. Begin Phase 3 (Semantic Learning + Cost Efficiency) design-first audit:
+   current semantic interpreter prompt size, which turns use OpenAI today,
+   existing customer-phrase/intelligence-event infrastructure, existing
+   guest/customer memory stores, whether existing state can host semantic
+   learning without contaminating business/customer memory, current AI cost
+   ledger, call caching/duplicate-event replay, and any existing
+   embedding/vector capability -- before creating any new schema.
+3. Implement Phase 3 incrementally behind its own PR(s), each with full
+   regression + cost-stress evidence, per this file's own completion gate.
 
 ## Commands To Rerun
 
