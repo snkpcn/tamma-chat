@@ -17,15 +17,26 @@ before PR #216 finished merging).
   (this is the current `main` tip)
 - Full suite on this exact `main` SHA, run directly in this session:
   `1616/1616` passed, `0` failed (matches the number PR #216 reported)
-- Production Netlify deploy: **not independently verified in this session.**
-  This session's outbound network egress to `tamma-chat.netlify.app` returns
-  HTTP 403 at the proxy layer (`recentRelayFailures` logs a policy-level
-  `connect_rejected`, not an application error -- confirmed by a uniform 403
-  across every request, including a bare unrelated probe). Per this
-  environment's own operating rule for a 403/407 egress denial, this is
-  reported rather than retried or routed around. A deploy ID/commit_ref for
-  Phase 2 should be captured by whichever session/environment next has live
-  access to that host, and this line updated then.
+- Production Netlify deploy: **VERIFIED**, by the owner directly through
+  Netlify (not by this Claude session, which has no egress path to
+  `tamma-chat.netlify.app` -- see the environment-limitation note below):
+  - Deploy ID: `6aba32fd5c75940008e8c0e5`
+  - Deploy state: `READY`
+  - Production `commit_ref`: `ce4ceb0cb7a359c793d837f41c40de831be5eae0`
+    (matches `main` above)
+  - Branch: `main`
+  - Netlify secret scan: `0` matches
+- Environment limitation (distinct from the verification above, not a
+  substitute for it): this Claude session's own outbound network egress to
+  `tamma-chat.netlify.app` returns HTTP 403 at the proxy layer
+  (`recentRelayFailures` logs a policy-level `connect_rejected`, not an
+  application error -- confirmed by a uniform 403 across every request,
+  including a bare unrelated probe). Per this environment's own operating
+  rule for a 403/407 egress denial, this is reported rather than retried or
+  routed around. It means THIS session cannot itself run production smoke or
+  re-run the Real LINE HTTPS certification against the live endpoint; it does
+  not mean production is unverified -- the owner's direct Netlify check above
+  is authoritative.
 
 Open PRs observed through GitHub API before Phase 2 PR creation (not
 re-verified this pass -- carried over from the prior checkpoint):
@@ -131,8 +142,11 @@ Phase 2 tests are local deterministic/structured semantic tests and do not add p
 
 ## Known Failures / Gaps
 
-- Production deploy SHA for Phase 2 has not been independently verified from
-  any session with live egress to `tamma-chat.netlify.app` since the merge.
+- Production deploy for Phase 2 is owner-verified (deploy `6aba32fd...`,
+  `READY`, `commit_ref` matches `main`) but no Claude session in this
+  engagement has been able to independently re-run production smoke or the
+  Real LINE HTTPS certification against it, since every session so far has
+  had its egress to `tamma-chat.netlify.app` blocked at the proxy layer.
 - Phase 3 semantic learning and cost reuse are not implemented here.
 - Phase 4 Human Intent / Commercial Boundary is not implemented here.
 - Phase 5 incident case creation/staff routing is not implemented here.
@@ -142,7 +156,9 @@ Phase 2 tests are local deterministic/structured semantic tests and do not add p
 ## Next Required Step
 
 1. Whichever session/environment has live egress to `tamma-chat.netlify.app`
-   should confirm the post-#216 production deploy SHA and record it above.
+   should re-run production smoke and the Real LINE HTTPS certification
+   against the owner-verified Phase 2 deploy (`6aba32fd...`), since no Claude
+   session has been able to do this directly yet.
 2. Begin Phase 3 (Semantic Learning + Cost Efficiency) design-first audit:
    current semantic interpreter prompt size, which turns use OpenAI today,
    existing customer-phrase/intelligence-event infrastructure, existing
