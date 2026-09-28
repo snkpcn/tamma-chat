@@ -30,6 +30,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // is a plain generated data module with zero imports of its own, so importing
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
+import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v30';
 
@@ -715,8 +716,12 @@ Today in Bangkok: ${currentBangkok}
 Relevant organization vocabulary: ${vocabulary.length ? vocabulary.join('; ') : 'none needed'}
 Bounded context: ${JSON.stringify(compactContext)}
 
+THONGTHAI CUSTOMER VOICE:
+${THONGTHAI_HUMAN_SERVICE_VOICE}
+
 reply:
 - Thai customer-facing draft in Thongthai's voice.
+- Follow THONGTHAI CUSTOMER VOICE for acknowledgements, preferences, corrections, consideration, and clarification. Do not sound like a classifier or policy bot.
 - Use it for casual chat, preferences, consideration, corrections, acknowledgements, and one natural clarification.
 - Leave reply="" when verified truth is needed: price, availability, inventory, booking/order/payment status, promotion eligibility, membership state, staff/owner dispatch, or incident case status.
 - Never claim notification, found item, refund/compensation, availability, booking/order submission without downstream verification.
