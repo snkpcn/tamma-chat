@@ -450,9 +450,27 @@ function safeModelConversationReply(input: ResponseComposerInput): ComposedRespo
   const task = input.dialogDecision.taskStateContainer.activeTask;
   if (task?.commitmentIntent === true) return null;
 
-  assertOperationalClaimSafety(reply, input.operationalOutcome);
+  let customerReply = reply;
+  if (input.dialogDecision.responseIntent === 'active_task_summary') {
+    // A model can summarize cross-domain conversational state more naturally
+    // than the bounded ActiveTask renderer, but the owner/test contract
+    // requires the CURRENT transaction status to be explicit.  A conditional
+    // sentence such as "if both are unavailable, don't book" is an instruction,
+    // not proof that nothing has been booked.  Append one canonical status
+    // sentence from the verified operational outcome instead of asking the
+    // model to infer transaction state from prose/history.
+    const outcome = input.operationalOutcome;
+    const hasExecuted = outcome?.executed === true && outcome.success === true;
+    if (!hasExecuted) {
+      customerReply = input.language === 'th'
+        ? customerReply.replace(/\s+$/u, '') + '\n\nตอนนี้ยังไม่ได้ยืนยันหรือจองรายการใดให้ครับ'
+        : customerReply.replace(/\s+$/u, '') + '\n\nNothing in this working summary has been confirmed or booked.';
+    }
+  }
+
+  assertOperationalClaimSafety(customerReply, input.operationalOutcome);
   return {
-    message: polishCustomerMessage(reply, input.channel),
+    message: polishCustomerMessage(customerReply, input.channel),
     mode:'model',
     usedFactKeys:[],
     composerVersion:RESPONSE_COMPOSER_VERSION,
