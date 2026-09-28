@@ -140,3 +140,31 @@ test('Perfection pass 3: a promotion follow-up reference is never misrouted into
       'the reply must stay anchored to the promotion topic');
   });
 });
+
+
+test('Perfection pass 4: active-task conditional fallback is exact and must keep the selected horse without model clarification', async () => {
+  await withHarness(async harness => {
+    const gid = guestId('conditional-active-task-exact');
+    await processThongthaiChatCore(brainRequest('อยากขี่ม้าพรุ่งนี้ช่วงเย็น แต่ไม่เอาทองไทยนะ เอาตัวที่นิสัยนิ่งกว่า', gid, 'web'), 'evt-1');
+    const r = await processThongthaiChatCore(
+      brainRequest('ถ้าตัวนั้นไม่ว่าง เอาอีกตัวแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร', gid, 'web'),
+      'evt-2',
+    );
+    const reply = String((r.payload as { message:string }).message);
+    assert.match(reply, /ภาราดร/u);
+    assert.doesNotMatch(reply, /หมายถึงกิจกรรมหรือม้าตัวที่คุยไว้ก่อนหน้านี้/u);
+    assert.equal(harness.postsTo('bookings').length, 0);
+  });
+});
+
+test('Perfection pass 5: restaurant allergy recommendation explicitly echoes the verified excluded allergen', async () => {
+  await withHarness(async () => {
+    const gid = guestId('restaurant-explicit-allergen-echo');
+    const r = await processThongthaiChatCore(
+      brainRequest('ถ้ามากัน 4 คน มีเด็ก 1 คน แล้วมีคนแพ้กุ้ง ควรกินอะไรดี', gid, 'web'),
+      'evt-1',
+    );
+    const reply = String((r.payload as { message:string }).message);
+    assert.match(reply, /ไม่มีกุ้ง/u);
+  });
+});
