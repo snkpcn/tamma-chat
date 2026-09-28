@@ -183,6 +183,10 @@ export type Harness = {
    *  LINE group, for proving _ops-notifications.ts's own "never double-
    *  send to the same physical group" dedup. */
   programOpsChannel: (teamCode: string, sharedTargetId?: string) => void;
+  programAiCostRows: (
+    costRows: Array<Record<string, unknown>>,
+    responseTurns?: Array<Record<string, unknown>>,
+  ) => void;
   /** Directly inspect/seed a guest's persisted state row -- useful for
    *  stale-state tests that need to start from an already-existing task. */
   getState: (guestDbId: string) => GuestAgentStateSnapshot | undefined;
@@ -255,6 +259,8 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   const guestMemory = new Map<string, { guest_id: string; memory_key: string; memory_value: unknown }>();
   const customerAccounts = new Map<string, { id: string; guest_id: string }>();
   const posts = new Map<string, Array<Record<string, unknown>>>();
+  let aiCostRows: Array<Record<string, unknown>> = [];
+  let aiResponseTurns: Array<Record<string, unknown>> = [];
   const customerIntelligence = new Map<string, Record<string, unknown>>();
   const modelQueue: HarnessGeminiReply[] = [];
   let modelCalls = 0;
@@ -440,6 +446,28 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     }
     if (path.startsWith('ops_notification_channels') && method === 'DELETE') {
       return jsonResponse([]);
+    }
+
+    // --- AI/API cost observability (read-only ops command + notifier tests) ---
+    if (path.startsWith('ai_api_cost_events') && method === 'GET') {
+      const conversation = query.get('conversation_id')?.replace('eq.', '') ?? null;
+      let rows = conversation ? aiCostRows.filter(row => row.conversation_id === conversation) : aiCostRows;
+      if (query.get('order')?.includes('occurred_at.desc')) {
+        rows = [...rows].sort((a, b) => String(b.occurred_at ?? '').localeCompare(String(a.occurred_at ?? '')));
+      } else if (query.get('order')?.includes('occurred_at.asc')) {
+        rows = [...rows].sort((a, b) => String(a.occurred_at ?? '').localeCompare(String(b.occurred_at ?? '')));
+      }
+      const limit = Number(query.get('limit') ?? 0);
+      return jsonResponse(limit > 0 ? rows.slice(0, limit) : rows);
+    }
+    if (path.startsWith('ai_response_turns') && method === 'GET') {
+      const conversation = query.get('conversation_id')?.replace('eq.', '') ?? null;
+      let rows = conversation ? aiResponseTurns.filter(row => row.conversation_id === conversation) : aiResponseTurns;
+      if (query.get('order')?.includes('occurred_at.asc')) {
+        rows = [...rows].sort((a, b) => String(a.occurred_at ?? '').localeCompare(String(b.occurred_at ?? '')));
+      }
+      const limit = Number(query.get('limit') ?? 0);
+      return jsonResponse(limit > 0 ? rows.slice(0, limit) : rows);
     }
 
     // --- ops_notification_deliveries (_ops-notifications.ts's
@@ -792,6 +820,10 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
       const targetHash = piiHash(targetId);
       if (!targetEnc || !targetHash) throw new Error('programOpsChannel: encryption not configured (call inside withHarness)');
       opsChannels.set(teamCode, { id: `ops-channel-${teamCode}`, team_code: teamCode, target_id_enc: targetEnc, target_id_hash: targetHash, enabled: true });
+    },
+    programAiCostRows: (costRows, responseTurns = []) => {
+      aiCostRows = [...costRows];
+      aiResponseTurns = [...responseTurns];
     },
     getState: guestDbId => agentState.get(guestDbId),
     setState: (guestDbId, state, updatedAt) => { agentState.set(guestDbId, { exists: true, state, updatedAt: updatedAt ?? new Date().toISOString() }); },
