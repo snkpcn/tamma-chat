@@ -1009,19 +1009,41 @@ function normalizeCrossDomainJourney(
       .map(item=>Number((item as Record<string,unknown>).day))
       .filter(day=>Number.isFinite(day) && day > 0)
   );
+
+  // Models legitimately encode a multi-day plan in more than one structured
+  // shape. Besides arrays such as activities/itinerary, a common JSON shape
+  // is dayOne:{...}, dayTwo:{...}. Treat those DAY OBJECTS as structure, not
+  // as language: this only canonicalizes already-parsed model entities and
+  // never looks at the customer's raw Thai text.
+  const dayPlanObjects = Object.entries(entities)
+    .filter(([key,value]) =>
+      /^day(?:[a-z]+|\d+)$/iu.test(key)
+      && Boolean(value)
+      && typeof value === 'object'
+      && !Array.isArray(value))
+    .map(([,value])=>value as Record<string,unknown>);
+  const dayPlanKeys = new Set(dayPlanObjects.flatMap(value=>Object.keys(value).map(key=>key.toLowerCase())));
+  const dayPlanHas = (pattern:RegExp):boolean =>
+    [...dayPlanKeys].some(key=>pattern.test(key));
+
   const hasStayStructure = entities.stay !== undefined
     || entities.stayNights !== undefined
     || entities.stayDurationNights !== undefined
-    || entities.tripDurationDays !== undefined;
+    || entities.tripDurationDays !== undefined
+    || dayPlanHas(/(?:stay|room|accommodation|night)/u);
   const hasActivityStructure = structuredSteps.length > 0
-    || entities.activity !== undefined;
+    || entities.activity !== undefined
+    || dayPlanHas(/(?:activity|horse|archery|atv)/u);
   const hasDiningStructure = entities.dining !== undefined
     || entities.restaurant !== undefined
-    || entities.meal !== undefined;
+    || entities.meal !== undefined
+    || dayPlanHas(/(?:dining|restaurant|meal|food)/u);
   const hasShoppingStructure = entities.shopping !== undefined
     || entities.otop !== undefined
-    || entities.souvenir !== undefined;
-  const hasCafeStructure = entities.cafe !== undefined;
+    || entities.souvenir !== undefined
+    || dayPlanHas(/(?:shopping|otop|souvenir|gift)/u);
+  const hasCafeStructure = entities.cafe !== undefined
+    || dayPlanHas(/(?:cafe|coffee)/u);
   const structuredDomainFacetCount = [
     hasStayStructure,
     hasActivityStructure,
@@ -1031,6 +1053,7 @@ function normalizeCrossDomainJourney(
   ].filter(Boolean).length;
   const hasStructuredMultiStepPlan =
     (structuredSteps.length >= 2 && (scheduledDays.size >= 2 || hasStayStructure))
+    || (dayPlanObjects.length >= 2 && structuredDomainFacetCount >= 2)
     || structuredDomainFacetCount >= 2;
   const isMultiDomainPlan = (crossDomainKeys.length >= 2 || hasStructuredMultiStepPlan)
     && (action==='recommend' || action==='discover' || action==='ask')
