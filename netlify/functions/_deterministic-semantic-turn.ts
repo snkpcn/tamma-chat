@@ -703,6 +703,39 @@ export function deriveDeterministicSemanticTurn(
   const sideQuestion = detectActivitySideQuestion(trimmed, effectiveDomain, null, now);
   if (sideQuestion) return sideQuestion;
 
+  // A CONDITIONAL continuation of a just-discussed entity ("ถ้าตัวนั้นไม่ว่าง
+  // เอาอีกตัวแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจอง") can arise with NO open task
+  // at all -- a prior turn may have only RECOMMENDED an entity (a real model
+  // answering "เอาตัวที่นิสัยนิ่งกว่า" with a suggestion) without that
+  // recommendation ever becoming a booking task. "ตัวนั้น" still has a
+  // unique, bounded referent here: whichever single entity of this domain
+  // the conversation most recently discussed. Mirrors the identically-
+  // shaped active-task branch in deriveForActiveTask above -- same
+  // structural markers, same "never guess, only resolve when unique"
+  // discipline, just reading the entity from recentEntities instead of an
+  // active task's own slots. Production incident this closes: this exact
+  // shape was covered for the active-task case, but a prior turn resolved
+  // by the real model as a plain recommendation (no task opened) left
+  // nothing for deriveForActiveTask to ever reach, so a genuine transient
+  // provider failure on this follow-up still collapsed to the generic
+  // "ระบบจองตอบช้า" apology.
+  if (effectiveDomain
+    && !hasCommitMarker(trimmed)
+    && CONDITIONAL_UNAVAILABLE_MARKER.test(trimmed)
+    && NO_COMMIT_CONSEQUENCE_MARKER.test(trimmed)) {
+    const candidates = context.recentEntities.filter(entity => entity.domain === effectiveDomain);
+    if (candidates.length === 1) {
+      const entities: Record<string, unknown> = { horseName: candidates[0]!.name };
+      const resourceCode = directResourceCode(candidates[0]!);
+      if (resourceCode) entities.resourceCode = resourceCode;
+      return {
+        domain: effectiveDomain, intent: 'task_conditional_continuation', action: 'ask',
+        informationNeed: 'availability',
+        entities, references: [], constraints: ['no_transaction'], confidence: 0.75, needsClarification: false,
+      };
+    }
+  }
+
   // No active task: a selection among entities the customer already saw
   // this conversation ("เอาภาราดร" after being shown horse options).
   const entityMatch = findEntityByName(trimmed, context.recentEntities);
