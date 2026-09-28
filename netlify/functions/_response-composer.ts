@@ -489,7 +489,12 @@ function safeModelConversationReply(input: ResponseComposerInput): ComposedRespo
   // real fetched facts still win whenever they actually answer the turn;
   // this function only runs when grounded composition produced nothing.
   const task = input.dialogDecision.taskStateContainer.activeTask;
-  if (task?.commitmentIntent === true) return null;
+  // A historical task commitment must not mute a clearly unrelated CURRENT
+  // conversational turn. Dialog Manager marks that shape explicitly after
+  // proving the turn contributes nothing to the task. Transactional/task-
+  // continuing turns still keep the conservative veto below.
+  const unrelatedCurrentTurn = input.dialogDecision.reasons.includes('task_unrelated_turn_preserved');
+  if (task?.commitmentIntent === true && !unrelatedCurrentTurn) return null;
 
   let customerReply = reply;
   if (input.dialogDecision.responseIntent === 'active_task_summary') {
