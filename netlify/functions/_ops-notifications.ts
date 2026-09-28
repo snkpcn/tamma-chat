@@ -32,6 +32,29 @@ type DeliveryRow = {
   status: string;
 };
 
+type AiCostRow = {
+  conversation_id: string;
+  event_id?: string | null;
+  channel?: string | null;
+  model?: string | null;
+  call_purpose?: string | null;
+  input_tokens?: number | string | null;
+  cached_input_tokens?: number | string | null;
+  output_tokens?: number | string | null;
+  cost_thb?: number | string | null;
+  latency_ms?: number | string | null;
+  occurred_at?: string | null;
+};
+
+type AiResponseTurnRow = {
+  conversation_id: string;
+  model_reply_used?: boolean | null;
+  grounded_knowledge_supplied?: boolean | null;
+  zero_cost_turn?: boolean | null;
+  final_response_source?: string | null;
+  occurred_at?: string | null;
+};
+
 type CustomerRow = {
   full_name_enc: string | null;
   phone_enc: string | null;
@@ -80,6 +103,15 @@ async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> 
 
 function cleanText(value: unknown, max = 300): string {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : '';
+}
+
+function numberValue(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function formatBaht(value: number): string {
+  return value.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
 function thaiDateTime(value: string): string {
@@ -261,6 +293,67 @@ async function channelForTeam(teamCode: OpsTeamCode): Promise<NotificationChanne
   );
   const rows = await response.json() as NotificationChannel[];
   return rows[0] ?? null;
+}
+
+async function getJsonRows<T>(path: string): Promise<T[]> {
+  const response = await dbFetch(path);
+  return await response.json() as T[];
+}
+
+async function buildLatestAiCostSummaryText(): Promise<string> {
+  const latestRows = await getJsonRows<AiCostRow>(
+    'ai_api_cost_events?environment=eq.live'
+    + '&select=conversation_id,occurred_at'
+    + '&order=occurred_at.desc&limit=1',
+  );
+  const latest = latestRows[0];
+  if (!latest?.conversation_id) {
+    return 'ยังไม่มีข้อมูลค่าใช้จ่าย AI / API แบบ live ในระบบครับ';
+  }
+
+  const conversationId = latest.conversation_id;
+  const encodedConversation = encodeURIComponent(conversationId);
+  const [calls, turns] = await Promise.all([
+    getJsonRows<AiCostRow>(
+      'ai_api_cost_events?environment=eq.live&conversation_id=eq.' + encodedConversation
+      + '&select=conversation_id,event_id,channel,model,call_purpose,input_tokens,cached_input_tokens,output_tokens,cost_thb,latency_ms,occurred_at'
+      + '&order=occurred_at.asc&limit=500',
+    ),
+    getJsonRows<AiResponseTurnRow>(
+      'ai_response_turns?environment=eq.live&conversation_id=eq.' + encodedConversation
+      + '&select=conversation_id,model_reply_used,grounded_knowledge_supplied,zero_cost_turn,final_response_source,occurred_at'
+      + '&order=occurred_at.asc&limit=500',
+    ),
+  ]);
+
+  const inputTokens = calls.reduce((sum, row) => sum + numberValue(row.input_tokens), 0);
+  const cachedTokens = calls.reduce((sum, row) => sum + numberValue(row.cached_input_tokens), 0);
+  const outputTokens = calls.reduce((sum, row) => sum + numberValue(row.output_tokens), 0);
+  const totalThb = calls.reduce((sum, row) => sum + numberValue(row.cost_thb), 0);
+  const finalRepliesProduced = turns.length;
+  const finalRepliesUsed = turns.filter(row => row.model_reply_used).length;
+  const discarded = Math.max(0, finalRepliesProduced - finalRepliesUsed);
+  const models = [...new Set(calls.map(row => cleanText(row.model, 80)).filter(Boolean))].join(', ');
+  const purposes = [...new Set(calls.map(row => cleanText(row.call_purpose, 80)).filter(Boolean))].slice(0, 6).join(', ');
+  const latestAt = calls.at(-1)?.occurred_at ?? latest.occurred_at ?? '';
+
+  return [
+    '💰 สรุปค่า AI ล่าสุด',
+    '',
+    `Conversation: ${conversationId.slice(0, 22)}${conversationId.length > 22 ? '…' : ''}`,
+    latestAt ? `ล่าสุด: ${thaiDateTime(latestAt)}` : '',
+    `OpenAI calls: ${calls.length}`,
+    models ? `Model: ${models}` : '',
+    purposes ? `Purpose: ${purposes}` : '',
+    '',
+    `Input: ${inputTokens.toLocaleString('th-TH')} tokens`,
+    `Cached: ${cachedTokens.toLocaleString('th-TH')} tokens`,
+    `Output: ${outputTokens.toLocaleString('th-TH')} tokens`,
+    `Total: ${formatBaht(totalThb)} THB`,
+    '',
+    `Model reply utilization: ${finalRepliesUsed}/${finalRepliesProduced}`,
+    `Discarded/overridden: ${discarded}`,
+  ].filter(Boolean).join('\n');
 }
 
 async function linePush(targetId: string, text: string): Promise<void> {
@@ -968,6 +1061,20 @@ export async function handleLineOpsGroupMessage(input: {
     return binding
       ? `✅ กลุ่มนี้เชื่อมกับทีม ${TEAM_LABELS[binding.team_code]} อยู่ครับ`
       : 'กลุ่มนี้ยังไม่ได้ผูกทีมครับ พิมพ์ เช่น “ผูกทีม activity”';
+  }
+
+  if (/^(?:สรุปค่า\s*AI\s*ล่าสุด|สรุปค่า\s*เอไอ\s*ล่าสุด|ai\s*cost\s*ล่าสุด)$/iu.test(text)) {
+    const binding = await currentBindingForTarget(input.targetId);
+    if (!binding) return 'กลุ่มนี้ยังไม่ได้ผูกทีมครับ พิมพ์ “ผูกทีม ai cost” ก่อน';
+    if (binding.team_code !== 'ai_cost') {
+      return 'คำสั่งนี้ใช้ในกลุ่มค่าใช้จ่าย AI / API เท่านั้นครับ';
+    }
+    try {
+      return await buildLatestAiCostSummaryText();
+    } catch (error) {
+      console.error('AI_COST_LATEST_COMMAND_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+      return 'ดึงสรุปค่า AI ล่าสุดไม่สำเร็จครับ ระบบแจ้งเตือนลูกค้ายังทำงานต่อได้ตามปกติ';
+    }
   }
 
   const scheduleMatch = text.match(/^ตาราง(วันนี้|พรุ่งนี้)$/u);

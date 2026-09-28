@@ -109,4 +109,49 @@ test('dedicated AI cost LINE group binds and receives through the existing encry
   });
 });
 
+test('AI cost LINE group can request the latest live conversation summary immediately', async()=>{
+  await withHarness(async harness=>{
+    harness.programOpsChannel('ai_cost','ai-cost-group-1');
+    harness.programAiCostRows([
+      {
+        conversation_id:'conv-old',event_id:'evt-old',channel:'line',model:'gpt-5.6-terra',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,
+        output_tokens:20,cost_thb:0.1,latency_ms:100,occurred_at:'2026-09-28T00:00:00.000Z',
+      },
+      {
+        conversation_id:'conv-live-15-calls',event_id:'evt-1',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'grounded-response-composition',input_tokens:28499,cached_input_tokens:0,
+        output_tokens:2266,cost_thb:3.0308,latency_ms:812,occurred_at:'2026-09-29T01:00:00.000Z',
+      },
+    ],[
+      {
+        conversation_id:'conv-live-15-calls',model_reply_used:true,grounded_knowledge_supplied:true,
+        zero_cost_turn:false,final_response_source:'openai_grounded_response',
+        occurred_at:'2026-09-29T01:00:01.000Z',
+      },
+      {
+        conversation_id:'conv-live-15-calls',model_reply_used:false,grounded_knowledge_supplied:true,
+        zero_cost_turn:false,final_response_source:'grounded_deterministic_fallback',
+        occurred_at:'2026-09-29T01:00:02.000Z',
+      },
+    ]);
+
+    const reply=await handleLineOpsGroupMessage({
+      targetType:'group',
+      targetId:'ai-cost-group-1',
+      userId:'owner-1',
+      text:'สรุปค่า AI ล่าสุด',
+    });
+
+    assert.match(reply??'',/สรุปค่า AI ล่าสุด/u);
+    assert.match(reply??'',/conv-live-15-calls/u);
+    assert.match(reply??'',/OpenAI calls: 1/u);
+    assert.match(reply??'',/Input: 28,499 tokens/u);
+    assert.match(reply??'',/Output: 2,266 tokens/u);
+    assert.match(reply??'',/Total: 3\.0308 THB/u);
+    assert.match(reply??'',/Model reply utilization: 1\/2/u);
+    assert.match(reply??'',/Discarded\/overridden: 1/u);
+  });
+});
+
 // Cost checkpoint live certification is exercised by the PR's existing real-provider workflow.
