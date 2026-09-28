@@ -14,6 +14,7 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { listRestaurantMenu } from './_restaurant-sot';
 import { loadActivityWorldFacts } from './_activity-sot';
 import { ACTIVITY_ASSET_ATTRIBUTE_KEYS } from './_activity-catalog-policy';
+import { ECOSYSTEM_PATHS } from './_tamma-domain-knowledge';
 import { loadActivePromotionsWorldFact } from './_promotions-runtime';
 import {
   listBookingOptions,
@@ -123,6 +124,35 @@ async function activityCatalogAdapter(request: KnowledgeRequest, now: Date = new
   } catch (error) { return unavailable('activity_catalog_live', 'activity_live', error, now); }
 }
 
+
+/** Owner-verified, static ecosystem framing. This is stable organization
+ * knowledge only -- never price, availability, schedule, or inventory. The
+ * Knowledge Resolver still decides when Bible/static knowledge is eligible. */
+async function ecosystemStablePolicyAdapter(now: Date = new Date()): Promise<SourceResult> {
+  const sourceId = 'owner_verified_ecosystem_paths_v1';
+  const fetchedAt = now.toISOString();
+  const facts: GroundedFact[] = ECOSYSTEM_PATHS.flatMap(path => [
+    {
+      key: `ecosystem:path:${path.id}:name`,
+      value: path.labelTh,
+      domain: 'ecosystem' as const,
+      sourceId,
+      sourceType: 'bible' as const,
+      authoritative: true,
+      fetchedAt,
+    },
+    {
+      key: `ecosystem:path:${path.id}:description`,
+      value: path.descriptionTh,
+      domain: 'ecosystem' as const,
+      sourceId,
+      sourceType: 'bible' as const,
+      authoritative: true,
+      fetchedAt,
+    },
+  ]);
+  return ok(sourceId, 'bible', facts, now);
+}
 
 /** Reuses loadActivePromotionsWorldFact(channel) exactly -- the real
  *  eligibility filtering (active window, channel scope, redemption limits)
@@ -345,5 +375,6 @@ export function buildRealKnowledgeSourceAdapters(
     bookingStatus: { lookup: request => bookingStatusAdapter(options.guestDbId)(request) },
     membership: { status: request => membershipStatusAdapter(options.guestDbId)(request) },
     otop: { catalog: request => otopCatalogAdapter() },
+    bible: { stablePolicy: request => ecosystemStablePolicyAdapter() },
   };
 }
