@@ -1,42 +1,72 @@
 # Thongthai Kernel V2 Handoff
 
-Updated: 2026-09-28 (this pass corrects the Phase 2 checkpoint below to
-post-merge reality; the prior "Current State" section was written just
-before PR #216 finished merging).
+Updated: 2026-09-28 (this pass records PR #218 merged, its migration applied
+to production, and production re-verified via a real dispatched smoke run --
+see "Current State" and "Phase 3 increment 1" below).
 
 ## Current State
 
 - Repo: `snkpcn/tamma-chat`
-- Local branch: `main` (working tree clean, fast-forwarded to `origin/main`)
 - Current remote `main` SHA, verified directly via `git fetch origin main` in
-  this session: `ce4ceb0cb7a359c793d837f41c40de831be5eae0`
-- Phase 1 PR: `#215`, verified merged via GitHub API (`merged: true`,
-  `merged_by: snkpcn`), squash commit `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
-- Phase 2 PR: `#216`, verified merged via GitHub API (`merged: true`,
-  `merged_by: snkpcn`), merge commit `ce4ceb0cb7a359c793d837f41c40de831be5eae0`
-  (this is the current `main` tip)
+  this session: `98fa91307b258a5a54465636f36f0b21e1834dd0`
+  (squash-merge of PR #218, "Kernel V2 Phase 3 increment 1: companion
+  semantic concept memory")
+- Phase 1 PR: `#215`, merged, squash commit `a8bbcb3ad620fd8c9a88e02cb820b40df14ab092`
+- Phase 2 PR: `#216`, merged, merge commit `ce4ceb0cb7a359c793d837f41c40de831be5eae0`
+- Phase 3 increment 1 PR: `#218`, verified merged via GitHub API
+  (`merged: true`, `merged_by: snkpcn`, squash method), squash commit
+  `98fa91307b258a5a54465636f36f0b21e1834dd0` (this is the current `main` tip)
 - Full suite on this exact `main` SHA, run directly in this session:
-  `1616/1616` passed, `0` failed (matches the number PR #216 reported)
-- Production Netlify deploy: **VERIFIED**, by the owner directly through
-  Netlify (not by this Claude session, which has no egress path to
-  `tamma-chat.netlify.app` -- see the environment-limitation note below):
-  - Deploy ID: `6aba32fd5c75940008e8c0e5`
-  - Deploy state: `READY`
-  - Production `commit_ref`: `ce4ceb0cb7a359c793d837f41c40de831be5eae0`
-    (matches `main` above)
-  - Branch: `main`
-  - Netlify secret scan: `0` matches
-- Environment limitation (distinct from the verification above, not a
-  substitute for it): this Claude session's own outbound network egress to
-  `tamma-chat.netlify.app` returns HTTP 403 at the proxy layer
-  (`recentRelayFailures` logs a policy-level `connect_rejected`, not an
-  application error -- confirmed by a uniform 403 across every request,
-  including a bare unrelated probe). Per this environment's own operating
-  rule for a 403/407 egress denial, this is reported rather than retried or
-  routed around. It means THIS session cannot itself run production smoke or
-  re-run the Real LINE HTTPS certification against the live endpoint; it does
-  not mean production is unverified -- the owner's direct Netlify check above
-  is authoritative.
+  `1649/1649` passed, `0` failed
+- Migration `20260928120000_semantic_concept_memory_v1.sql`: **APPLIED to
+  production** in this session via the Supabase MCP tool against project
+  `upaokrprawzhgzeqsdke` (`tamma-customer-data`), with explicit owner
+  authorization given in chat for this specific, reviewed, additive
+  migration. Verified directly afterward (not assumed):
+  - `information_schema.columns` matches the migration exactly (13 columns,
+    correct types/defaults)
+  - `pg_class.relrowsecurity = true` (RLS enabled)
+  - All 8 CHECK constraints, the PK, the unique `source_signal_key`, and the
+    `superseded_by` self-FK are present exactly as written
+  - 3 indexes present: PK, unique `source_signal_key`, partial
+    `(concept_key, status) where status='active'`
+  - Grants: `service_role` has exactly `SELECT, INSERT, UPDATE` (no
+    `DELETE`, matching the migration's "no delete" design); `anon` and
+    `authenticated` have **no grants at all** on this table
+  - `get_advisors(type: security)`: the only finding naming this table is
+    the INFO-level "RLS enabled, no policy" lint -- the SAME pattern shared
+    by 63 other pre-existing service-role-only tables in this schema
+    (`world_facts`, `guest_semantic_memory`, `customer_intelligence_events`,
+    etc.), not a new issue. No ERROR/WARN-level finding names this table.
+  - No existing table, trigger, function, or policy was touched (confirmed
+    both by reading the migration itself and by the PR's file list: exactly
+    6 files changed, none of them a business-truth/booking/payment/
+    membership/inventory table or migration)
+- Production Netlify deploy: **VERIFIED in this session** via a real
+  dispatched GitHub Actions run (this session has no direct egress to
+  `tamma-chat.netlify.app` -- see the note below -- so verification goes
+  through the repo's own `production-smoke.yml`, which runs on a
+  GitHub-hosted runner with real network access):
+  - Workflow run `36413592601`, dispatched against `main` after the merge,
+    `head_sha: 98fa91307b258a5a54465636f36f0b21e1834dd0`
+  - Result: **14/14 cases passed**, `0` false transactions detected,
+    including the two new Phase-3-specific companion cases added in this
+    session (`phase3-companion-01`, `phase3-companion-privacy-01`) -- see
+    "Phase 3 increment 1" below for what this smoke can and cannot assert
+  - For contrast: the two immediately PRIOR dispatches of this same
+    workflow (runs `36385755550` and `36386332056`, on unrelated older
+    commits before this session began) each failed on ONE case
+    (`activity-03-conditional`, a generic-fallback/latency flake unrelated
+    to Phase 3) -- confirming this is a pre-existing, commit-independent
+    flake, not something this change introduced, and that this session's
+    run on the new SHA is a genuine improvement (0 failures), not a fluke
+- Environment limitation (unchanged from before, and now worked around
+  rather than blocking verification): this Claude session's own outbound
+  network egress to `tamma-chat.netlify.app` returns HTTP 403 at the proxy
+  layer. This session cannot hit the production endpoint directly, so
+  production verification in this session goes through the repo's own
+  GitHub Actions `production-smoke.yml` dispatch (which has real network
+  access) rather than a direct HTTP call from this session.
 
 Open PRs observed through GitHub API before Phase 2 PR creation (not
 re-verified this pass -- carried over from the prior checkpoint):
@@ -48,10 +78,11 @@ re-verified this pass -- carried over from the prior checkpoint):
 ## Current Phase
 
 Kernel V2 Phase 3: Semantic Learning + Cost Efficiency -- **increment 1
-(companion-concept memory) implemented, tested, PR open, NOT merged. Its
-migration is NOT applied to production -- see "Phase 3 increment 1" below.**
+(companion-concept memory) implemented, tested, PR #218 MERGED, migration
+APPLIED to production, production re-verified (14/14 smoke). See "Phase 3
+increment 1" below for full evidence.**
 
-**This is PR #218 = Phase 3 increment 1, NOT Phase 3 completion.** The
+**PR #218 = Phase 3 increment 1, NOT Phase 3 completion.** The
 original Phase 3 completion gate is untouched and still requires (none of
 this is done yet): formal 20/50/100-turn cost stress runs; paid-call counts;
 zero-call rate; learned-memory hit rate; average and p95 semantic input
@@ -70,6 +101,10 @@ concept keys, a real embedding-based v2), and Phases 4-7 remain after Phase 3.
 - Phase 2: Conversation State V2, merged in PR `#216`. Verified on `main` at
   `ce4ceb0cb7a359c793d837f41c40de831be5eae0` with a clean 1616/1616 suite run
   in this session.
+- Phase 3 increment 1: companion semantic concept memory, merged in PR
+  `#218` (squash commit `98fa91307b258a5a54465636f36f0b21e1834dd0`),
+  migration applied to production, production re-verified 14/14. NOT Phase
+  3 completion -- see "Current Phase" and "Phase 3 increment 1" below.
 
 ## Phase 3 increment 1: semantic concept memory (companion only)
 
@@ -211,12 +246,17 @@ row's stored signature, that existing row is immediately retracted.
   `unique(source_signal_key)` + `on_conflict=ignore-duplicates` makes a
   repeat write for the same confirmed exemplar a harmless no-op, never a
   duplicate row.
-- New migration `supabase/migrations/20260928120000_semantic_concept_memory_v1.sql`
-  -- **NOT YET APPLIED to production.** Matches this repo's own established
-  convention (see `20260923142552_customer_intelligence_events_v1.sql`'s own
-  "Owner explicitly approved ... in chat before application" precedent): the
-  file is committed and reviewable, but nothing in this codebase runs it
-  against the live Supabase project without that explicit step.
+- Migration `supabase/migrations/20260928120000_semantic_concept_memory_v1.sql`
+  -- **APPLIED to production** in this session, per this repo's own
+  established convention (see `20260923142552_customer_intelligence_events_v1.sql`'s
+  own "Owner explicitly approved ... in chat before application" precedent):
+  the owner gave explicit authorization in chat for this specific, reviewed,
+  additive migration, and it was applied only after the full pre-flight
+  safety checklist (additive-only, no business table touched, RLS on,
+  anon/authenticated have zero grants, service-role scoped to
+  SELECT/INSERT/UPDATE, clean rollback) was re-verified against the live
+  schema afterward. See "Current State" above for the full verification
+  evidence.
 
 **Structural issues found and fixed in PR review, before any merge/migration
 decision** (all four confirmed against the actual implementation, not just
@@ -363,20 +403,21 @@ designed. Not started yet.
   beyond the cap are currently just not written, rather than superseding a
   weaker existing exemplar).
 
-**Owner action needed before this reaches production:** review PR (branch
-`kernel-v2/phase3-semantic-concept-memory`) and explicitly confirm applying
-`20260928120000_semantic_concept_memory_v1.sql` to the live Supabase
-project. The privacy/storage decision that previously gated this migration
-(second review round, structural issue 2 above) is now closed with the
-`containsUnrecognizedPersonalDetail` fix, but the migration remains
-**NOT APPLIED** and awaits explicit owner approval regardless -- this is not
-an automatic unblock. Until applied, this table does not exist in production
-and the read path (`loadActiveSemanticConcepts`) degrades to "no learned
-memory available" exactly as it does today with zero concepts learned. Do
-not merge or apply without that explicit confirmation, and Phase 3 must not
-be described as complete even after merge/migration -- see the standing
-reminder above (true cross-vocabulary generalization) and the still-pending
-formal 20/50/100-turn cost-stress evidence (acceptance criterion F).
+**PR #218 merged, migration applied, production re-verified (this session).**
+The owner explicitly authorized applying this specific, reviewed, additive
+migration in chat. PR #218 (branch `kernel-v2/phase3-semantic-concept-memory`)
+was merged via squash to `main` at `98fa91307b258a5a54465636f36f0b21e1834dd0`
+after re-confirming CI green/mergeable-clean/no open review threads;
+`20260928120000_semantic_concept_memory_v1.sql` was then applied to the live
+Supabase project (`upaokrprawzhgzeqsdke`) and its schema/RLS/grants/indexes
+verified directly against the live database (see "Current State" above);
+production was re-verified via a dispatched `production-smoke.yml` run
+(14/14 passed, 0 false transactions, `head_sha` matching the new `main`).
+**Phase 3 is still NOT complete** even though increment 1 is merged and
+live -- see the standing reminder above (true cross-vocabulary
+generalization is not yet built) and the still-pending formal 20/50/100-turn
+cost-stress evidence (acceptance criterion F). Do not describe Phase 3, or
+this project, as complete on the strength of this merge alone.
 
 ## Current Architecture (Phase 2)
 
@@ -419,7 +460,7 @@ Phase 3 increment 1 (branch `kernel-v2/phase3-semantic-concept-memory`, PR open,
 - `netlify/functions/_semantic-concept-memory.ts` (new)
 - `netlify/functions/_thongthai-one-mind-orchestrator.ts` (read/write-path hooks)
 - `netlify/functions/_semantic-interpreter.ts` (`semanticSource` union extended)
-- `supabase/migrations/20260928120000_semantic_concept_memory_v1.sql` (new, NOT applied)
+- `supabase/migrations/20260928120000_semantic_concept_memory_v1.sql` (new, APPLIED to production this session)
 - `tests/kernel-v2-phase3-semantic-concept-memory.test.ts` (new)
 - `THONGTHAI_KERNEL_V2_HANDOFF.md`
 
@@ -427,10 +468,12 @@ Phase 3 increment 1 (branch `kernel-v2/phase3-semantic-concept-memory`, PR open,
 
 Phase 2: none.
 
-Phase 3 increment 1: `20260928120000_semantic_concept_memory_v1.sql` -- written,
-committed, reviewable, **NOT APPLIED to production**. Additive only (a new
-table, no existing table/trigger/function/policy touched). Rollback if ever
-applied and reverted: `drop table public.semantic_concept_memory;` -- no
+Phase 3 increment 1: `20260928120000_semantic_concept_memory_v1.sql` --
+**APPLIED to production** (project `upaokrprawzhgzeqsdke`) in this session
+with explicit owner authorization. Additive only (a new table, no existing
+table/trigger/function/policy touched -- confirmed both by reading the
+migration and by re-checking the live schema afterward). Rollback if ever
+reverted: `drop table public.semantic_concept_memory;` -- no
 data migration needed since nothing else reads or writes it.
 
 ## Test Evidence
@@ -485,21 +528,34 @@ number of concept keys to measure hit-rate against.
 
 - Phase 1 PR: `#215`, merged (squash `a8bbcb3`).
 - Phase 2 PR: `#216`, merged (merge commit `ce4ceb0`, now `main` tip).
-- Phase 3 increment 1 PR: branch `kernel-v2/phase3-semantic-concept-memory`,
-  open, NOT merged -- pending review of the companion-memory migration
-  before it goes to production.
+- Phase 3 increment 1 PR: `#218` (branch `kernel-v2/phase3-semantic-concept-memory`),
+  merged via squash (`98fa91307b258a5a54465636f36f0b21e1834dd0`). Migration
+  applied to production; see "Current State" and "Migrations" above.
+- Phase 3 production-smoke extension: branch
+  `kernel-v2/phase3-production-smoke-companion` (2 new read-only companion
+  cases added to `scripts/run-production-smoke.ts`; see "Test Evidence").
 
 ## Known Failures / Gaps
 
 - Production deploy for Phase 2 is owner-verified (deploy `6aba32fd...`,
   `READY`, `commit_ref` matches `main`) but no Claude session in this
   engagement has been able to independently re-run production smoke or the
-  Real LINE HTTPS certification against it, since every session so far has
-  had its egress to `tamma-chat.netlify.app` blocked at the proxy layer.
-- Phase 3 increment 1 (companion concept memory) is implemented and tested
-  but NOT merged and its migration is NOT applied -- see above.
+  Real LINE HTTPS certification DIRECTLY (proxy-layer egress block to
+  `tamma-chat.netlify.app`). **This session worked around that** for Phase 3
+  increment 1's own verification by dispatching the repo's own
+  `production-smoke.yml` via the GitHub API (runs on a GitHub-hosted runner
+  with real egress) rather than calling production directly -- see "Current
+  State" above. The Real LINE HTTPS certification specifically has still not
+  been re-run by any Claude session; it could be dispatched the same way
+  (`.github/workflows/line-transport-certification.yml`) if needed.
+- Phase 3 increment 1 (companion concept memory) is merged and its migration
+  is applied to production -- see above. Its own honest limitation (surface
+  matching only, no true cross-vocabulary generalization) remains, by
+  design, for this increment.
 - Phase 3's own remaining scope (pace/consider-only concepts, a real
-  embedding-based v2, cost-stress evidence at 20/50/100 turns) is not done.
+  embedding-based v2 or equivalent for true semantic generalization,
+  cost-stress evidence at 20/50/100 turns) is NOT done -- Phase 3 is not
+  complete.
 - Phase 4 Human Intent / Commercial Boundary is not implemented here.
 - Phase 5 incident case creation/staff routing is not implemented here.
 - Phase 6 natural response brain is not implemented here.
@@ -507,20 +563,34 @@ number of concept keys to measure hit-rate against.
 
 ## Next Required Step
 
-1. Whichever session/environment has live egress to `tamma-chat.netlify.app`
-   should re-run production smoke and the Real LINE HTTPS certification
-   against the owner-verified Phase 2 deploy (`6aba32fd...`), since no Claude
-   session has been able to do this directly yet.
-2. Owner reviews the Phase 3 increment 1 PR (branch
-   `kernel-v2/phase3-semantic-concept-memory`) and explicitly confirms
-   applying `20260928120000_semantic_concept_memory_v1.sql` before merge --
-   this is a genuine production-schema decision, not something to wave
-   through automatically.
-3. After merge + migration apply + production deploy verification, extend
-   Phase 3 to pace/consider-only concepts and run the mandate's own
-   20/50/100-turn cost-stress conversations.
-4. Real embedding-based matching (pgvector) is a SEPARATE decision for
-   explicit owner review, not bundled into increment 1 or its extensions.
+1. Merge the Phase 3 production-smoke extension PR (branch
+   `kernel-v2/phase3-production-smoke-companion`) once CI is green.
+2. Design and compare the smallest safe architecture for TRUE
+   cross-vocabulary semantic generalization ("มากับแฟน" vs "มากับคนรู้ใจ" --
+   no shared characters, same meaning) -- embedding/vector retrieval
+   (pgvector) is one candidate but must not be chosen merely because it is
+   fashionable; compare against the smallest safe alternative first, exactly
+   as increment 1's own design-first audit did.
+3. Extend Phase 3 to the pace/consider-only concept keys the mandate also
+   names, using the same closed-vocabulary, safety-by-construction pattern.
+4. Run the mandate's own formal 20/50/100-turn cost-stress conversations
+   (multiple independent samples per length, covering casual chat/known
+   language/unseen language/unseen paraphrase/references/correction/topic
+   changes/resume/consideration/explicit transaction wording/incident
+   language) and report the full required metric set (paid-call counts,
+   zero-call rate, hit rate by tier, token/cost percentiles, cap violations,
+   intelligence-cliff check, accidental-transaction count). Only once this
+   evidence exists, plus item 2 above, may Phase 3 be declared complete.
+5. Real embedding-based matching (pgvector), if chosen in step 2, is applied
+   through its own reviewed migration with explicit owner approval in chat
+   before application -- same discipline as increment 1's own migration.
+6. Phases 4-7 (commercial-intent boundary, incident/backoffice routing,
+   natural-response layer, brutal end-to-end certification) remain
+   unstarted. Each is large enough to warrant its own design-first pass
+   before implementation, following the same discipline used for Phase 3
+   increment 1 (audit existing tables/mechanisms first, smallest safe
+   change, explicit acceptance criteria, no giant keyword table, real tests
+   before claiming done).
 
 ## Commands To Rerun
 

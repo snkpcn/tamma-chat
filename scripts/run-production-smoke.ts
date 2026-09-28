@@ -150,6 +150,31 @@ const CASES: SmokeCase[] = [
     id: 'transaction-boundary-01', domain: 'activity',
     message: 'ม้าที่ว่างพรุ่งนี้เย็นมีตัวไหนบ้าง เดี๋ยวขอดูก่อนว่าจะเอาไหม',
   },
+  // Kernel V2 Phase 3 increment 1 (semantic concept memory, PR #218):
+  // this script has no Supabase access (by design -- it only ever talks to
+  // the public customer HTTP endpoint, never a service-role key), so it
+  // cannot itself assert a row was written or rejected. What it CAN and
+  // does assert against the real deployed endpoint: a short standalone
+  // companion statement is handled coherently (no crash, no false
+  // transaction claim) whether or not it happens to be a fresh concept-
+  // memory MISS or a HIT, and a companion statement carrying a personal
+  // name is handled exactly the same way from the customer's point of
+  // view -- the privacy boundary lives entirely in the write path
+  // (recordSemanticConceptEvidence silently declines to persist it), never
+  // in the customer-facing response. See
+  // tests/kernel-v2-phase3-semantic-concept-memory.test.ts for the
+  // Supabase-backed assertions this script cannot make (MISS->write,
+  // exact-replay zero-call, privacy rejection).
+  {
+    id: 'phase3-companion-01', domain: 'activity',
+    message: 'มากับภรรยาครับ ไม่อยากทำอะไรเหนื่อยมาก',
+    chainFrom: 'activity-01',
+  },
+  {
+    id: 'phase3-companion-privacy-01', domain: 'activity',
+    message: 'มากับแฟนชื่อหนิงครับ',
+    chainFrom: 'activity-01',
+  },
 ];
 
 type CaseResult = {
