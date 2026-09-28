@@ -831,16 +831,25 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   // must not trigger catalog/availability work merely because the preserved
   // task still needs data (e.g. a greeting must not fetch horse durations).
   const knowledgeRequests = isTaskUnrelatedTurn ? [] : planKnowledgeNeeds(turn, container);
-  if (turn.intent === 'summarize_active_task') reasons.push('task_summary_requested');
+  const isTaskSummary = turn.intent === 'summarize_active_task';
+  if (isTaskSummary) reasons.push('task_summary_requested');
 
   // Missing fields still live on the preserved task, but they are NOT
   // response-facing on a turn that merely selects/corrects conversational
   // state without a booking/order commitment. A human "เอาตัวนั้น" should
   // be acknowledged first, not immediately converted into a slot interview.
-  const responseMissingFields = (isTaskSideQuestion || isTaskUnrelatedTurn || isNonTransactionalStateUpdate) ? [] : missingFields;
+  const responseMissingFields = (isTaskSummary || isTaskSideQuestion || isTaskUnrelatedTurn || isNonTransactionalStateUpdate) ? [] : missingFields;
 
   let mode: DialogMode;
-  if (!hasOpenTask || isTaskSideQuestion || isTaskUnrelatedTurn || isNonTransactionalStateUpdate) {
+  // A state-summary turn reads the canonical working state.  It must never be
+  // hijacked by an unfinished task's missing-field interview: asking "what
+  // have I selected so far?" is read-only even when that task still lacks a
+  // duration/date/etc.  resolveDialogDecision will map the reason below to
+  // active_task_summary and the Response Composer will explicitly state that
+  // nothing has been confirmed/submitted when that is the real task state.
+  if (isTaskSummary) {
+    mode = 'answer';
+  } else if (!hasOpenTask || isTaskSideQuestion || isTaskUnrelatedTurn || isNonTransactionalStateUpdate) {
     mode = knowledgeRequests.length ? 'query_knowledge' : 'answer';
   } else if (missingFields.length > 0) {
     mode = 'collect_field';
