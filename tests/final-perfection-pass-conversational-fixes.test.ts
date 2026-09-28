@@ -77,11 +77,22 @@ test('Perfection pass 2b: the SAME conditional continuation resolves from a prio
     const context = {
       ...emptyConversationContextState(),
       activeDomain: 'activity' as const,
-      recentEntities: [{
-        id: 'activity_asset:horse-pharadon', type: 'activity_asset', name: 'ภาราดร',
-        domain: 'activity' as const, source: 'conversation' as const, canonical: true,
-        observedAt: new Date().toISOString(),
-      }],
+      // Mirrors the real production shape: the recommendation turn grounded
+      // BOTH horse catalog rows, while the assistant's bounded recommendation
+      // evidence uniquely named ภาราดร.
+      recentEntities: [
+        {
+          id: 'activity_asset:horse-pharadon', type: 'activity_asset', name: 'ภาราดร',
+          domain: 'activity' as const, source: 'conversation' as const, canonical: true,
+          observedAt: new Date().toISOString(),
+        },
+        {
+          id: 'activity_asset:horse-thongthai', type: 'activity_asset', name: 'ทองไทย',
+          domain: 'activity' as const, source: 'conversation' as const, canonical: true,
+          observedAt: new Date().toISOString(),
+        },
+      ],
+      lastRecommendationReference: 'ถ้าเอาตามเงื่อนไขที่บอก ตอนนี้ ภาราดร ตรงกว่าครับ',
     };
     const existing = harness.getState(guestDbId);
     harness.setState(guestDbId, { ...(existing?.state ?? {}), conversationContext: context });
@@ -123,5 +134,9 @@ test('Perfection pass 3: a promotion follow-up reference is never misrouted into
     // different, unrelated question.
     assert.doesNotMatch(reply, /🍽️ กิน|🌿 กิจกรรม|🏡 พัก|☕ แวะพัก/u,
       'a promotion follow-up must never silently reset to the broad ecosystem catalog dump');
+    assert.doesNotMatch(reply, /คิดช้ากว่าปกติ|ตอบช้ากว่าปกติ|ระบบตอบช้า/u,
+      'an already-established promotion follow-up must not collapse to a generic provider apology');
+    assert.match(reply, /โปร/u,
+      'the reply must stay anchored to the promotion topic');
   });
 });
