@@ -926,7 +926,8 @@ async function resolveSemanticTurn(
     // clarification, and a real journey plan is already active/suspended.
     // This never applies to book/order or any executable business task.
     const hasJourneyPlan = taskState.activeTask?.type === 'journey_planning'
-      || taskState.suspendedTask?.type === 'journey_planning';
+      || taskState.suspendedTask?.type === 'journey_planning'
+      || context.activeDomain === 'journey';
     const safeJourneyContinuation = Boolean(
       hasJourneyPlan
       && modelTurn.domain === 'journey'
