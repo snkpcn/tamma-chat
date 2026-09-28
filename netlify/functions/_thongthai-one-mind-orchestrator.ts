@@ -497,6 +497,12 @@ const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
 // customer meaning.
 const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
   'activity_inventory_count',
+  // This intent is emitted only when the deterministic layer has already
+  // resolved a unique activity resource from ActiveTask or bounded
+  // recommendation evidence AND the customer explicitly says not to transact
+  // when unavailable. Letting a language-model clarification override that
+  // exact state caused production to forget the already-selected horse.
+  'task_conditional_continuation',
 ]);
 
 // Exact context/state operations whose meaning is already canonical. These are
