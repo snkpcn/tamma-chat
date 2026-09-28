@@ -8,10 +8,12 @@
 // - Every message is read-only/discovery/status/correction -- never an
 //   explicit commit marker ("จองเลย"/"ยืนยันจอง"/etc). No real booking,
 //   order, payment, or redemption is ever created by this script.
-// - Each conversation uses a synthetic, clearly-labeled guestId
-//   (ci-smoke-<runId>-<n>) so any created guest/session record is
-//   trivially identifiable as a CI smoke run, never confused with a real
-//   customer.
+// - Each conversation uses a synthetic UUID accepted by the real customer
+//   memory layer. The fixed c1c1c1c1 / 4c1c / 8c1c marker pattern makes CI
+//   guests recognizable in production while still satisfying UUID_RE. This
+//   matters: arbitrary strings such as "ci-smoke-..." are intentionally
+//   rejected by loadCustomerMemory and therefore CANNOT certify multi-turn
+//   persisted context.
 // - Every request + the safe (non-secret) parts of the response are
 //   logged to stdout for audit. No secret/token is ever read or printed.
 // - The workflow calling this script fails (non-zero exit) on the first
@@ -206,6 +208,15 @@ async function runCase(runId: string, index: number, testCase: SmokeCase, guestI
   }
 }
 
+function ciGuestUuid(runId: string, index: number): string {
+  // UUID v4-shaped and variant-correct so _customer-db.ts accepts it.
+  // "c1c1c1c1" / "4c1c" / "8c1c" are deliberate CI markers, while the
+  // final 12 hex chars retain the run timestamp for uniqueness/auditability.
+  const runHex = BigInt(runId).toString(16).slice(-12).padStart(12, '0');
+  const indexHex = index.toString(16).padStart(4, '0').slice(-4);
+  return `c1c1c1c1-${indexHex}-4c1c-8c1c-${runHex}`;
+}
+
 async function main() {
   const runId = `${Date.now()}`;
   const results: CaseResult[] = [];
@@ -213,8 +224,8 @@ async function main() {
   for (let i = 0; i < CASES.length; i += 1) {
     const testCase = CASES[i]!;
     const guestId = testCase.chainFrom
-      ? guestIdByCaseId.get(testCase.chainFrom) ?? `ci-smoke-${runId}-${i}`
-      : `ci-smoke-${runId}-${i}`;
+      ? guestIdByCaseId.get(testCase.chainFrom) ?? ciGuestUuid(runId, i)
+      : ciGuestUuid(runId, i);
     guestIdByCaseId.set(testCase.id, guestId);
     // Sequential, not parallel: this hits the real production endpoint and
     // must behave like one careful human tester, not a burst load test.
