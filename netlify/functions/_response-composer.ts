@@ -18,6 +18,7 @@ import {
 } from './_graceful-degradation';
 import { stripCodeFences, callResponseComposer } from './_thongthai-model-provider';
 import type { AiCallContext } from './_ai-cost-ledger';
+import type { ConversationContextState } from './_conversation-context';
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
 import { polishCustomerMessage } from './_chat-copy-style';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
@@ -55,6 +56,10 @@ export type ResponseComposerInput = {
   /** Already-decided machine meaning. Rendering may consume this structured
    *  object, but must never reinterpret raw customer language. */
   semanticTurn?: SemanticTurn;
+  /** Bounded/redacted canonical conversation working memory. Used only for
+   * state readback (for example a considered selection) when no transactional
+   * ActiveTask exists; never a raw transcript source. */
+  conversationContext?: ConversationContextState;
   dialogDecision: DialogDecision;
   knowledgeBundles: KnowledgeBundle[];
   degradation: DegradationPlan;
@@ -1034,7 +1039,16 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
   const suspendedItems = taskSummaryItems(container.suspendedTask, input.language);
 
   if (!activeItems.length && !suspendedItems.length) {
-    const entityName = firstCustomerFacingEntity(input.semanticTurn?.entities ?? {});
+    // Consider-only selections deliberately live in ConversationContext
+    // rather than ActiveTask (a selection is not a booking). Summary/readback
+    // must therefore consult the bounded working-memory contract before
+    // claiming "nothing selected". Most-recent considering selection wins;
+    // rejected choices are never resurfaced as current.
+    const considered = input.conversationContext?.workingMemory?.consideredSelections
+      ?.filter(selection => selection.status === 'considering')
+      .sort((a,b) => b.observedAt.localeCompare(a.observedAt))[0];
+    const entityName = considered?.name
+      ?? firstCustomerFacingEntity(input.semanticTurn?.entities ?? {});
     if (input.language === 'th') {
       return entityName
         ? `ตอนนี้เลือกไว้เป็น ${entityName} ครับ แต่ยังไม่ได้ยืนยันการจอง และยังไม่ได้จองหรือส่งรายการ`
