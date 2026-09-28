@@ -1321,13 +1321,16 @@ export async function promotionDiscoveryFallbackResponse(
   channel: BrainChannel,
 ): Promise<BrainResponse | null> {
   const promotions = activePromotionsFromRuntime(runtime);
-  const decision = decidePromotionFallback(request.message, promotions);
+  const decision = decidePromotionFallback(request.message, promotions, {
+    activeTopic: runtime.agentState.active_topic,
+  });
 
   if (decision.kind === 'not_promo_related') return null;
   if (decision.kind === 'no_promotions') {
     return {
       message: formatPromotionListMessage([]), intent:'information', contextUpdates:{},
       journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
+      agentStateUpdate:{ activeTopic:'promotion' },
       semanticMemoryUpdates:[], toolCalls:[],
     };
   }
@@ -1335,6 +1338,19 @@ export async function promotionDiscoveryFallbackResponse(
     return {
       message: formatPromotionClarificationMessage(decision.promotions), intent:'information', contextUpdates:{},
       journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
+      agentStateUpdate:{ activeTopic:'promotion' },
+      semanticMemoryUpdates:[], toolCalls:[],
+    };
+  }
+  if (decision.kind === 'context_followup') {
+    const titles = decision.promotions.map(promo => promo.title).filter(Boolean);
+    const message = titles.length === 1
+      ? `โปรที่คุยไว้คือ “${titles[0]}” ครับ แต่ข้อมูลที่ยืนยันได้ตอนนี้ยังไม่ได้ระบุว่าโปรนี้ใช้กับกิจกรรมได้หรือไม่ ทองไทยเลยไม่ขอเดาให้ผิดครับ`
+      : `ตอนนี้มีหลายโปรโมชั่นที่เปิดใช้อยู่ครับ (${titles.join(' / ')}) แต่ “อันเมื่อกี้” ยังชี้ไม่ชัดว่าเป็นโปรไหน และข้อมูลที่ยืนยันได้ยังไม่ได้ระบุการใช้กับกิจกรรมครับ บอกชื่อโปรได้เลยครับ`;
+    return {
+      message, intent:'information', contextUpdates:{},
+      journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
+      agentStateUpdate:{ activeTopic:'promotion' },
       semanticMemoryUpdates:[], toolCalls:[],
     };
   }
@@ -1347,7 +1363,7 @@ export async function promotionDiscoveryFallbackResponse(
     return {
       message: formatPromotionListMessage(decision.promotions), intent:'recommendation', contextUpdates:{},
       journeyAction:{type:'none',journey:null}, suggestedActions:[], responseStyle:'direct',
-      agentStateUpdate: {},
+      agentStateUpdate: { activeTopic:'promotion' },
       semanticMemoryUpdates:[], toolCalls:[],
     };
   }
