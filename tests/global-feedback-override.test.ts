@@ -156,7 +156,7 @@ test('E1. mixed system+staff complaint sent mid-horse-flow interrupts immediatel
     await callLineWebhook([privateEvent('ไม่เคยครับมาคนเดียว', userId)]);
     await callLineWebhook([privateEvent('ทองไทยอธิบายไม่รู้เรื่อง เจิดนิสัยไม่ดี', userId)]);
     const t = text(replies, 3);
-    assert.doesNotMatch(t, /เลือกทองไทย|เคยขี่ม้ามาก่อนไหม|แล้วมากี่คนครับ/u, 'must NOT continue horse selection/care flow');
+    assert.doesNotMatch(t, /เลือกน้องทองไทย|เคยขี่ม้ามาก่อนไหม|แล้วมากี่คนครับ/u, 'must NOT continue horse selection/care flow');
     const events = harness.postsTo('ops_feedback_events');
     assert.ok(events.length >= 1, 'the complaint must be persisted');
     const latest = events[events.length - 1];
@@ -205,14 +205,14 @@ test('R1. "อยากขี่ม้า" -> "เอาทองไทย" stil
     const userId = 'gfo-user-r1';
     await callLineWebhook([privateEvent('อยากขี่ม้า', userId)]);
     await callLineWebhook([privateEvent('เอาทองไทย', userId)]);
-    assert.match(text(replies, 1), /เลือกทองไทย/u);
+    assert.match(text(replies, 1), /เลือกน้องทองไทย/u);
   });
 });
 
 test('R2. "จะขี่ทองไทย" with no context still selects immediately', async () => {
   await withHarnessAndLine(async (_harness, replies) => {
     await callLineWebhook([privateEvent('จะขี่ทองไทย', 'gfo-user-r2')]);
-    assert.match(text(replies, 0), /เลือกทองไทย/u);
+    assert.match(text(replies, 0), /เลือกน้องทองไทย/u);
   });
 });
 

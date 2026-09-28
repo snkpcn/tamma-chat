@@ -253,7 +253,7 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         await callLine('ขอโลเคชั่นหน่อยทองไทย',user);
         const location=textOf(capture.replies[6]);
         assert.match(location,/maps\.app\.goo\.gl|พิกัด|แผนที่|นำทาง/u);
-        assert.doesNotMatch(location,/เลือกทองไทย|เคยขี่ม้ามาก่อนไหม/u);
+        assert.doesNotMatch(location,/เลือกน้องทองไทย|เคยขี่ม้ามาก่อนไหม/u);
 
         // 8 — weather is explicit current intent, not stale restaurant context.
         h.programWeatherFetch({ok:true,body:{
@@ -264,7 +264,7 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         await callLine('ตอนนี้ฝนตกไหม',user);
         const weather=textOf(capture.replies[7]);
         assert.match(weather,/ฝน|อากาศ|28/u);
-        assert.doesNotMatch(weather,/เมนู|เลือกทองไทย|ขอรายละเอียดเพิ่มอีกนิด/u);
+        assert.doesNotMatch(weather,/เมนู|เลือกน้องทองไทย|ขอรายละเอียดเพิ่มอีกนิด/u);
 
         // 9 — explicit new horse intent cleanly switches domain.
         const callsBeforeHorse=h.modelCallCount();
@@ -291,7 +291,7 @@ test('PHASE 2 CLOSEOUT full signed LINE matrix: memory, own-question follow-up, 
         // 10 — horse-name collision is now correctly interpreted inside horse context.
         await callLine('เอาทองไทย',user);
         const horseChoice=textOf(capture.replies[9]);
-        assert.match(horseChoice,/^ได้ครับ เลือกทองไทย/u);
+        assert.match(horseChoice,/^ได้ครับ เลือกน้องทองไทย/u);
         assert.doesNotMatch(horseChoice,/หมายถึงอยากเลือก|ผู้ช่วยแชท|โลเคชั่น|แผนที่/u);
 
         // 11 — authority boundary overrides the active horse task.
@@ -390,7 +390,7 @@ test('full signed LINE regression: explicit horse intent suspends stale unrelate
         await callLine('เอาทองไทย',user);
         const selection=textOf(capture.replies[2]);
 
-        assert.match(selection,/^ได้ครับ เลือกทองไทย/u);
+        assert.match(selection,/^ได้ครับ เลือกน้องทองไทย/u);
         assert.doesNotMatch(selection,/หมายถึงอยากเลือก|เรียกทองไทยผู้ช่วยแชท/u);
         assert.equal(h.modelCallCount(),callsBeforeHorse+1,'horse care is language-supervised; canonical contextual selection is zero-call');
 
@@ -433,7 +433,7 @@ test('full signed LINE regression: horse-care opener persists beginner experienc
         await callLine('เอาทองไทย',user);
         const selection=textOf(capture.replies[1]);
 
-        assert.match(selection,/^ได้ครับ เลือกทองไทย/u);
+        assert.match(selection,/^ได้ครับ เลือกน้องทองไทย/u);
         assert.doesNotMatch(selection,/เคยขี่ม้ามาก่อนไหม/u,'must not ask an already answered experience question again');
         assert.match(selection,/มากี่คนครับ/u,'only the genuinely missing party-size question should remain');
         assert.equal(h.modelCallCount(),calls,'canonical selection continuation must remain zero-call and keep the deterministic business flow');

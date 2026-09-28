@@ -39,7 +39,7 @@ export type RestaurantAdvisorInput = {
   recentMessages?: string[];
 };
 
-type ParsedPreferences = {
+export type ParsedPreferences = {
   partySize: number | null;
   budget: number | null;
   spice: 'none' | 'mild' | 'medium' | 'hot' | null;
@@ -126,7 +126,14 @@ function hasAffirmative(current: string, word: string): boolean {
   return new RegExp(`(?:อยากกิน|ชอบ|เอา|ขอ)\\s*${word}`, 'u').test(current);
 }
 
-function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdvisorItem[]): ParsedPreferences {
+// Exported so a caller can parse constraint signals (spice/allergen/avoid-
+// protein/avoid-ingredient) from a SINGLE message in isolation -- e.g. to
+// tell "the customer just said this" apart from "this is only known
+// because it's remembered from the rolling recentMessages window" (see
+// thongthai-chat.ts's formatRestaurantConstraintAck). `items` only affects
+// `selectedNames` (matching a menu item's name against the text), so an
+// empty items array is always safe for constraint-only parsing.
+export function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdvisorItem[]): ParsedPreferences {
   const history = [...(input.recentMessages ?? []).slice(-6), input.query].join(' ');
   const text = norm(history);
   const current = norm(input.query);
@@ -138,7 +145,16 @@ function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdviso
   let spice: ParsedPreferences['spice'] = null;
   if (includesAny(text, [/ไม่เผ็ด/u,/เผ็ดไม่ได้/u,/ไม่กินเผ็ด/u,/no spicy/i])) spice = 'none';
 // RESTAURANT_CONSTRAINT_COPY_FIX_V1
-  else if (includesAny(text, [/เผ็ดน้อย/u,/เผ็ดนิด/u,/ไม่ค่อยเผ็ด/u,/ไม่อยากเผ็ดมาก/u,/ไม่เอาเผ็ดมาก/u,/ขอไม่เผ็ดมาก/u,/เผ็ดไม่มาก/u,/mild/i])) spice = 'mild';
+  else if (includesAny(text, [
+    /เผ็ดน้อย/u,/เผ็ดนิด/u,/ไม่ค่อยเผ็ด/u,/ไม่อยากเผ็ดมาก/u,/ไม่เอาเผ็ดมาก/u,/ขอไม่เผ็ดมาก/u,/เผ็ดไม่มาก/u,
+    // "ทานเผ็ดไม่เก่ง"/"กินเผ็ดไม่เก่ง" ("not good at eating spicy") is a
+    // real production phrasing for a mild-spice-tolerance statement -- it
+    // was missing here even though the literal "เผ็ด" alone still tripped
+    // RESTAURANT_CONSTRAINT_MENTION_MARKER elsewhere (thongthai-chat.ts),
+    // so the turn correctly reached this parser but `spice` stayed null,
+    // meaning no spice preference was ever actually applied.
+    /(?:ทาน|กิน)เผ็ดไม่เก่ง/u,/mild/i,
+  ])) spice = 'mild';
   else if (includesAny(text, [/เผ็ดกลาง/u,/medium spicy/i])) spice = 'medium';
   else if (includesAny(text, [/เผ็ดมาก/u,/เอาแซ่บ/u,/แซ่บๆ/u,/spicy/i])) spice = 'hot';
 
