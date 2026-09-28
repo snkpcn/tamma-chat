@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { persistAiCallCost, persistAiResponseTurn } from '../netlify/functions/_ai-cost-store';
 import { handler as idleHandler } from '../netlify/functions/ai-cost-notify-idle';
 import { handler as dailyHandler } from '../netlify/functions/ai-cost-notify-daily';
+import { handleLineOpsGroupMessage, sendAiCostLineNotification } from '../netlify/functions/_ops-notifications';
+import { withHarness } from './helpers/canonical-core-harness';
 
 const originalFetch=globalThis.fetch;
 const originalUrl=process.env.SUPABASE_URL;
@@ -78,4 +80,31 @@ test('AI cost migration is RLS-protected and LINE binding is dedicated',()=>{
   assert.match(toml,/schedule = "\*\/15 \* \* \* \*"/);
   assert.match(toml,/\[functions\."ai-cost-notify-daily"\]/);
   assert.match(toml,/schedule = "5 17 \* \* \*"/);
+});
+
+
+test('dedicated AI cost LINE group binds and receives through the existing encrypted ops channel path', async()=>{
+  await withHarness(async harness=>{
+    const reply=await handleLineOpsGroupMessage({
+      targetType:'group',
+      targetId:'ai-cost-group-1',
+      userId:'owner-1',
+      text:'ผูกทีม ai cost',
+    });
+    assert.match(reply??'',/ผูกกลุ่มนี้กับค่าใช้จ่าย AI \/ API แล้วครับ/u);
+    const bindings=harness.postsTo('ops_notification_channels');
+    assert.equal(bindings.at(-1)?.team_code,'ai_cost');
+    assert.equal(bindings.at(-1)?.service_type,null);
+
+    const status=await sendAiCostLineNotification({
+      idempotencyKey:'ai-cost-test:conversation-1',
+      deliveryType:'ai_cost_conversation',
+      text:'AI cost test only',
+      payload:{cost_thb:0.25},
+    });
+    assert.equal(status,'sent');
+    const deliveries=harness.notificationDeliveries();
+    assert.equal(deliveries.at(-1)?.teamCode,'ai_cost');
+    assert.equal(deliveries.at(-1)?.status,'sent');
+  });
 });
