@@ -24,14 +24,14 @@ Open PRs observed through GitHub API before Phase 2 PR creation:
 
 Kernel V2 Phase 2: Conversation State V2.
 
-Phase 2 implementation is complete locally and fully tested. It is not yet pushed/opened as a PR in this handoff checkpoint.
+Phase 2 implementation is pushed in PR `#216` and fully tested locally. CI/merge are pending in this handoff checkpoint.
 
 This is not project completion. Phases 3-7 remain.
 
 ## Completed Phases
 
 - Phase 1: Single Language Brain foundation, merged in PR `#215`.
-- Phase 2: Conversation State V2, complete locally on `kernel-v2/phase2-conversation-state-v2`, pending PR/CI/merge.
+- Phase 2: Conversation State V2, pushed in PR `#216` from `kernel-v2/phase2-conversation-state-v2`, pending CI/merge.
 
 ## Current Architecture
 
@@ -107,9 +107,15 @@ Relevant existing Phase 1 cost contract remains:
 
 Phase 2 tests are local deterministic/structured semantic tests and do not add paid semantic calls.
 
+## PRs
+
+- Phase 1 PR: `#215`, merged.
+- Phase 2 PR: `#216`, open.
+- Phase 2 PR head SHA: `257995f4dd37e61acb594c7408848abe45bfcd46`
+
 ## Known Failures / Gaps
 
-- Phase 2 is implemented locally but not yet pushed/opened as a GitHub PR.
+- Phase 2 PR `#216` is open but not yet merged.
 - No production deploy has been made for Phase 2.
 - Phase 3 semantic learning and cost reuse are not implemented here.
 - Phase 5 incident case creation/staff routing is not implemented here.
@@ -118,16 +124,13 @@ Phase 2 tests are local deterministic/structured semantic tests and do not add p
 
 ## Next Required Step
 
-1. Create/update remote branch `kernel-v2/phase2-conversation-state-v2` from remote `main@59aba3a971191ed702fc3c7e6aca1f198fd3c66d`.
-2. Push these Phase 2 file changes through GitHub connector or authenticated git.
-3. Open PR: `Kernel V2 Phase 2: Conversation State V2`.
-4. Let CI run and verify green.
-5. Review full diff carefully.
-6. Merge only if green.
-7. Verify remote `main`.
-8. Verify Netlify production deploy SHA after merge.
-9. Update this handoff again with PR number, merge commit, production deploy, and final Phase 2 status.
-10. Continue to Phase 3 if session capacity remains.
+1. Let PR `#216` CI run and verify green.
+2. Review full diff carefully.
+3. Merge only if green.
+4. Verify remote `main`.
+5. Verify Netlify production deploy SHA after merge.
+6. Update this handoff again with merge commit, production deploy, and final Phase 2 status.
+7. Continue to Phase 3 if session capacity remains.
 
 ## Commands To Rerun
 
@@ -144,4 +147,3 @@ Rollback is code-only:
 - Revert the Phase 2 PR/commit after it is merged.
 - No schema rollback is needed.
 - No production DB cleanup is needed.
-
