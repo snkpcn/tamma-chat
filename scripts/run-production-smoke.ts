@@ -130,14 +130,16 @@ const CASES: SmokeCase[] = [
   { id: 'promotion-01', domain: 'promotion', message: 'ตอนนี้มีโปรอะไรใช้ได้บ้าง' },
   {
     id: 'promotion-02-followup', domain: 'promotion', message: 'อันเมื่อกี้ใช้กับกิจกรรมได้ไหม',
-    chatHistory: [
-      { role: 'user', content: 'ตอนนี้มีโปรอะไรใช้ได้บ้าง' },
-      { role: 'assistant', content: 'โปรที่ระบบยืนยันว่าเปิดใช้อยู่ตอนนี้ครับ' },
-    ],
+    // This is a REAL continuation: reuse promotion-01's persisted guest state.
+    // Fabricated chatHistory does not prove server-side context continuity.
+    chainFrom: 'promotion-01',
+    requiredMarkers: [/โปร/u],
     // The real, reported defect: this exact follow-up used to reset to the
-    // broad "here's everything we offer" ecosystem catalog message,
-    // discarding the promotion referent entirely.
-    forbiddenMarkers: [/🍽️ กิน|🌿 กิจกรรม|🏡 พัก|☕ แวะพัก/u],
+    // broad ecosystem catalog or collapse to a generic provider apology.
+    forbiddenMarkers: [
+      /🍽️ กิน|🌿 กิจกรรม|🏡 พัก|☕ แวะพัก/u,
+      ...GENERIC_FALLBACK_MARKERS.map(text => new RegExp(text, 'u')),
+    ],
   },
   { id: 'cafe-01', domain: 'cafe', message: 'คาเฟ่ที่นี่เปิดกี่โมงถึงกี่โมง' },
   { id: 'correction-01', domain: 'activity', message: 'ไม่ใช่ เมื่อกี้หมายถึงภาราดร' },
