@@ -325,6 +325,39 @@ const CAFE_NO_VERIFIED_SOURCE_MESSAGE = 'ตอนนี้ทองไทยย
  *  'cafe', every such turn gets the SAME honest "no verified source"
  *  answer -- SOURCE UNAVAILABLE, never fabricated catalog/price/hours, and
  *  never silently reinterpreted from raw text by a keyword gate. */
+export function renderEcosystemRecommendation(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
+  const turn = input.semanticTurn;
+  if (!turn || turn.domain !== 'ecosystem' || input.language !== 'th') return null;
+  if (!['recommend', 'discover', 'ask'].includes(turn.action)) return null;
+
+  const map = factMap(input);
+  const ids = [...new Set([...map.keys()]
+    .map(key => key.match(/^ecosystem:path:([^:]+):name$/u)?.[1])
+    .filter((value): value is string => Boolean(value)))];
+  if (!ids.length) return null;
+
+  const used: string[] = [];
+  const lines = ids.flatMap(id => {
+    const nameKey = `ecosystem:path:${id}:name`;
+    const descriptionKey = `ecosystem:path:${id}:description`;
+    const name = map.get(nameKey);
+    const description = map.get(descriptionKey);
+    if (typeof name !== 'string' || !name.trim()) return [];
+    used.push(nameKey);
+    if (typeof description === 'string' && description.trim()) {
+      used.push(descriptionKey);
+      return [`• ${name.trim()} — ${description.trim()}`];
+    }
+    return [`• ${name.trim()}`];
+  });
+  if (!lines.length) return null;
+
+  return {
+    message: ['ได้ครับ 😊 ถ้าอยากมาเที่ยวแบบสบาย ๆ เลือกแนวได้ประมาณนี้ครับ', ...lines].join('\n'),
+    usedFactKeys: [...new Set(used)],
+  };
+}
+
 export function renderCafeUnavailableSourceResponse(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
   const turn = input.semanticTurn;
   if (!turn || turn.domain !== 'cafe' || input.language !== 'th') return null;
@@ -339,7 +372,20 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
   const availabilitySources=input.knowledgeBundles
     .flatMap(bundle=>bundle.sources)
     .filter(source=>source.need==='availability');
-  if(!availabilitySources.length) return null;
+  if(!availabilitySources.length) {
+    const entity=semanticEntities(input);
+    const subject=typeof entity.horseName==='string' && entity.horseName.trim()
+      ? entity.horseName.trim()
+      : 'ม้าที่ถาม';
+    const noTransaction=semanticText(input).includes('no_transaction')
+      || semanticText(input).includes('no_booking')
+      || semanticText(input).includes('non_committal')
+      || semanticText(input).includes('ไม่จอง');
+    return {
+      message:`ตอนนี้ทองไทยยังไม่มีข้อมูลคิวสดของ ${subject} ที่ยืนยันได้ครับ เลยไม่ขอเดาว่าว่างหรือไม่ว่าง${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''}`,
+      usedFactKeys:[],
+    };
+  }
 
   const entity=semanticEntities(input);
   const nameOf=(value:unknown):string|null=>{
@@ -640,8 +686,15 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     ? chosen.reduce((sum,row)=>sum+(row.price??0),0)
     : null;
   const availabilityVerified=chosen.every(row=>row.orderable===true);
+  const safetyLabel = noShrimp && noPork
+    ? 'เลี่ยงกุ้งและหมู'
+    : noShrimp
+      ? 'เลี่ยงกุ้ง'
+      : noPork
+        ? 'เลี่ยงหมู'
+        : null;
   const intro=noShrimp||noPork
-    ? 'จากส่วนผสมและข้อมูลเมนูที่ตรวจยืนยันได้ ตัวเลือกที่ไม่ชนข้อจำกัดที่บอกมีครับ'
+    ? `จากส่วนผสมและข้อมูลเมนูที่ตรวจยืนยันได้ คัดตัวเลือกที่${safetyLabel}ให้แล้วครับ`
     : availabilityVerified
       ? 'จากเมนูที่ยืนยันว่าพร้อมสั่ง ลองดูชุดนี้ได้ครับ'
       : 'จากข้อมูลเมนูที่ยืนยันได้ ลองดูชุดนี้ได้ครับ';
