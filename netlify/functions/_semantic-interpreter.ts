@@ -1410,6 +1410,18 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && !hasUnresolvedReference
     && !hasAmbiguousReference;
 
+  const conversationContinuationConfidenceEnough =
+    confidence >= 0.7
+    || (
+      // Journey planning has no transaction executor. Once a prior-plan
+      // reference has been deterministically backed by bounded conversation
+      // evidence, medium-confidence (>=0.60) ellipsis is safe to continue
+      // rather than asking which of the single immediately active plan was
+      // meant. This exception does not apply to transactional domains.
+      context.activeDomain === 'journey'
+      && (domain === 'journey' || domain === 'general' || domain === 'unknown')
+      && confidence >= 0.60
+    );
   const resolvedConversationContinuation =
     references.some(reference => reference.refersToPriorContext && reference.resolvedFromConversation === true)
     && references.filter(reference => reference.refersToPriorContext).every(reference =>
@@ -1421,7 +1433,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     && Boolean(context.activeDomain)
     && context.activeDomain !== 'unknown'
     && ['ask','modify','recommend','provide_information','correct_previous'].includes(action)
-    && confidence >= 0.7;
+    && conversationContinuationConfidenceEnough;
 
   // A generic "same plan / previous request" reference is backed by bounded
   // conversation evidence, not a canonical entity id. When that reference is
