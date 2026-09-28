@@ -116,11 +116,9 @@ function isGenuinelyUnclassifiedFallback(turn: OneMindTurnResult): boolean {
 
 export type ReadOnlyCutoverEligibilityOptions = {
   /** Recovery-mode gate: require the real OpenAI semantic supervisor to own
-   * the meaning before this candidate may ANSWER early. A trusted deterministic
-   * read-only candidate may still persist bounded conversation context when it
-   * cannot mutate task state (see deterministicReadOnlyContextPersistenceEligible).
-   * That preserves human continuity across a transient provider outage without
-   * letting fallback semantics pre-empt legacy response/transaction ownership. */
+   * the meaning before this candidate may persist state or answer early.
+   * Deterministic/provider-outage candidates then remain pure fallbacks and
+   * cannot pre-mutate legacy state. */
   requireSemanticSupervisor?: boolean;
   /** Set only by a caller that is ITSELF the last resort (e.g. the legacy
    *  handler's own LLMAvailabilityError catch, invoked only after legacy's
@@ -216,33 +214,6 @@ function taskStateChanged(turn: OneMindTurnResult): boolean {
   return JSON.stringify(turn.taskStateBefore) !== JSON.stringify(turn.taskStateAfter);
 }
 
-/**
- * Recovery-mode continuity bridge.
- *
- * The primary customer path deliberately requires OpenAI-owned semantics before
- * it may answer early. That response-ownership rule must remain intact. But a
- * provider outage must not erase an already-safe, deterministic READ-ONLY
- * interpretation such as "browse promotions": if we throw that bounded domain
- * context away, the very next "อันเมื่อกี้..." turn has no antecedent and
- * collapses to a generic outage apology.
- *
- * Persist only when the candidate is structurally incapable of changing a
- * working task or proposing a transaction. processThongthaiOneMindTurnAuthoritative
- * still performs the write through the same snapshot/CAS path, and the normal
- * readOnlyCutoverEligibility check below still returns legacy_required when
- * requireSemanticSupervisor=true. So this preserves context only; it does NOT
- * promote deterministic fallback into response or transaction authority.
- */
-function deterministicReadOnlyContextPersistenceEligible(turn: OneMindTurnResult): boolean {
-  return turn.semanticTurn.semanticSource === 'deterministic_fallback'
-    && INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)
-    && READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
-    && !turn.dialogDecision.actionProposal
-    && !turn.taskStateBefore.activeTask
-    && !turn.taskStateAfter.activeTask
-    && !taskStateChanged(turn);
-}
-
 async function persistAssistantConversationTurn(
   input:OneMindCustomerTurnInput,
   turn:OneMindTurnResult,
@@ -312,9 +283,7 @@ export async function processOneMindCustomerTurn(
     stateDependencies,
     now,
     4,
-    candidate => readOnlyCutoverEligibility(candidate, eligibilityOptions).eligible
-      || (eligibilityOptions.requireSemanticSupervisor === true
-        && deterministicReadOnlyContextPersistenceEligible(candidate)),
+    candidate => readOnlyCutoverEligibility(candidate, eligibilityOptions).eligible,
   );
   const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptions);
 
