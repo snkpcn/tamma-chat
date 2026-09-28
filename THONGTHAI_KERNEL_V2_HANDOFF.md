@@ -518,50 +518,86 @@ on the argument alone -- and the numbers below changed the plan:
      sign that embeddings can never work here.
 
   **Conclusion: the plan below (whole-sentence embedding + fixed threshold)
-  is NOT adopted as designed.** Do not implement it. Before Phase 3
-  completion can rely on embeddings, at least one of the following needs
-  its own follow-up calibration (same discipline, not guessed):
-  - Embed just the extracted content span (e.g. the companion-type noun
-    phrase alone: "แฟน" vs "คนรู้ใจ" vs "ครอบครัว", not the full templated
-    sentence) rather than the whole message, to reduce the shared-scaffolding
-    dilution effect.
+  is NOT adopted as designed.** Do not implement it.
+
+  **Three independent follow-up hypotheses were then calibrated with real
+  data, in order, and ALL THREE disconfirmed the same way** (same-concept
+  minimum similarity below different-concept maximum similarity -- no
+  threshold or ranking rule separates them correctly):
+
+  1. ~~A different embedding model~~ -- **disconfirmed.** Same 8 pairs
+     re-run against `text-embedding-3-large` (workflow run `36417327219`,
+     `2026-09-28T11:43Z`, PR #223):
+
+     | pair | 3-small | 3-large |
+     |---|---|---|
+     | "แฟน"/"คนรู้ใจ" (same concept) | 0.382 | 0.565 |
+     | "แฟน"/"คู่รัก" (same concept) | 0.381 | 0.470 |
+     | "แฟน"/"ครอบครัว" (different concept) | 0.426 | 0.632 |
+     | "แฟน"/"เพื่อนกลุ่มใหญ่" (different concept) | 0.428 | 0.558 |
+     | negation | 0.791 | 0.714 |
+     | unrelated | 0.187 | 0.167 |
+
+     All scores shifted up with the larger model (absolute cosine
+     similarity is not comparable across models), but the same overlap
+     persisted: same-concept minimum (0.470) below different-concept
+     maximum (0.632). Model capacity is not the cause.
+  2. ~~Embed just the extracted content span (bare noun, no sentence
+     scaffolding)~~ -- **also disconfirmed.** 4 new pairs added
+     ("แฟน"/"คนรู้ใจ", "แฟน"/"คู่รัก", "แฟน"/"ครอบครัว", "แฟน"/"เพื่อนกลุ่มใหญ่",
+     all as bare nouns), re-run against `text-embedding-3-small` (workflow
+     run `36418230291`, `2026-09-28T11:52Z`, PR #224):
+
+     | pair (bare noun) | similarity | expectation |
+     |---|---|---|
+     | "แฟน"/"คนรู้ใจ" | **0.224** | same concept |
+     | "แฟน"/"คู่รัก" | 0.349 | same concept |
+     | "แฟน"/"ครอบครัว" | 0.254 | different concept |
+     | "แฟน"/"เพื่อนกลุ่มใหญ่" | 0.189 | different concept |
+
+     Stripping the sentence scaffolding did NOT fix separability either --
+     if anything it is worse in relative terms: "แฟน"/"คนรู้ใจ" (same
+     concept, should score HIGH) scored 0.224, BELOW "แฟน"/"ครอบครัว"
+     (different concept, should score LOW) at 0.254. Shared scaffolding
+     dilution was the wrong hypothesis, or at least not the whole story.
+  3. **The deeper, more likely explanation, surfaced by result 2 above:**
+     "แฟน" (partner, the common colloquial word) and "คนรู้ใจ" (literally
+     "person who understands the heart" -- soulmate/kindred-spirit) may
+     simply not be as close a semantic pair as the owner's own worked
+     example assumes. "คนรู้ใจ" is a broader, more abstract Thai expression
+     that can describe a deeply understanding friend as much as a romantic
+     partner -- general-purpose embedding models correctly reflect that
+     looser real-world relationship, rather than the tighter
+     "same-companion-concept" equivalence this system specifically needs in
+     context. This is a genuine semantic ambiguity in the source language,
+     not a tooling failure -- no embedding model recalibration fixes a case
+     where the two phrases are not, in fact, reliably synonymous outside
+     the specific conversational context that makes them so here.
+
+  **Given three independent, real, negative results, further embedding-model
+  or preprocessing tweaks are not recommended as the next step.** Two
+  directions remain honestly open, neither yet attempted:
   - A margin/ranking approach (nearest concept must beat the SECOND-nearest
-    by a calibrated margin, not merely clear an absolute threshold) --
-    though note this calibration's own numbers show even ranking would have
-    picked the wrong concept for the primary worked example (0.381 same-
-    concept vs 0.428 wrong-concept), so this alone is unlikely to be
-    sufficient without also addressing point 1 above.
-  - ~~A different embedding model~~ -- **tried and also disconfirmed.** Same
-    8 pairs re-run against `text-embedding-3-large` (workflow run
-    `36417327219`, `2026-09-28T11:43Z`, dispatched via the model input added
-    in PR #222):
-
-    | pair | 3-small | 3-large |
-    |---|---|---|
-    | "แฟน"/"คนรู้ใจ" (same concept) | 0.382 | 0.565 |
-    | "แฟน"/"คู่รัก" (same concept) | 0.381 | 0.470 |
-    | "แฟน"/"ครอบครัว" (different concept) | 0.426 | 0.632 |
-    | "แฟน"/"เพื่อนกลุ่มใหญ่" (different concept) | 0.428 | 0.558 |
-    | negation | 0.791 | 0.714 |
-    | unrelated | 0.187 | 0.167 |
-
-    All scores shifted up with the larger model (expected -- absolute
-    cosine similarity is not comparable across models), but the SAME
-    overlap persists: same-concept minimum (0.470) is still below
-    different-concept maximum (0.632). Negation (0.714) is now even further
-    from the "should be dissimilar" end relative to the same-concept band.
-    **A larger model does not fix this on its own** -- consistent with the
-    working hypothesis (point 3 below) that the problem is short shared
-    sentence scaffolding diluting the signal, not raw model capacity. This
-    makes the content-span-extraction option above the most likely next
-    thing worth calibrating, not model size.
-  - Revisit whether OpenAI's own semantic supervisor should instead be asked
-    to output a canonical concept-identity label directly (already
-    confirming a concept today) as the generalization signal, rather than
-    adding a second, separate embedding-similarity system.
-  Regardless of which path, negation must still be handled by an explicit
-  structural veto (as increment 1 already has), never assumed solved by
-  switching to embeddings or a larger embedding model.
+    by a calibrated margin) -- but note even this would still have picked
+    the wrong concept on multiple pairs above, so it does not rescue the
+    approach on its own.
+  - Ask OpenAI's own semantic supervisor to output a canonical
+    concept-identity judgment directly when given BOTH the new phrase and
+    the stored concept's own confirmed exemplar(s) as context (a real
+    language-understanding judgment, not a raw embedding-cosine proxy for
+    one) -- fundamentally different from everything tried above, and not
+    yet calibrated.
+  - Alternatively: accept, honestly, that reliable unseen cross-vocabulary
+    generalization is not currently achievable within the "smallest safe"
+    constraint with the tools tried so far, and that increment 1's honest
+    limitation (near-identical-variant generalization only, real
+    cross-vocabulary paraphrase requires a fresh paid call every time) may
+    need to stand as Phase 3's answer for longer than hoped, rather than
+    force an approach the data does not support.
+  Regardless of which path (if any) is pursued next, negation must still be
+  handled by an explicit structural veto (as increment 1 already has),
+  never assumed solved by any embedding-based mechanism -- negation
+  similarity was high (0.71-0.79) in every sentence-level test run.
 
 **The originally-planned smallest safe increment (NOT adopted, kept here
 only as a record of what was considered and why it needs revision before
@@ -750,30 +786,48 @@ number of concept keys to measure hit-rate against.
 3. ~~Re-test with `text-embedding-3-large`~~ -- **done, also disconfirmed**:
    workflow run `36417327219`, results recorded above. Same overlap persists
    at a larger model size, so model choice alone is not the fix.
-4. Before any embedding-based implementation: run a follow-up calibration on
-   embedding just the extracted content span (the companion-type noun
-   alone, e.g. "แฟน" vs "คนรู้ใจ" vs "ครอบครัว") instead of the full
-   templated sentence, using the same `scripts/run-embedding-calibration.ts`
-   pattern (add new fixture variants -- the script already supports a model
-   override via `THONGTHAI_EMBEDDING_MODEL`/the workflow's `embedding_model`
-   input; add bare-noun pairs alongside or instead of the current
-   full-sentence ones, dispatch, read back real numbers). This is now the
-   best-supported remaining hypothesis (two other paths already tried and
-   disconfirmed). Only once a design demonstrably separates same-concept
-   from different-concept pairs with a real margin should a migration be
-   designed. Do not implement the embedding-column migration on the
-   current, twice-disconfirmed design.
-5. Extend Phase 3 to the pace/consider-only concept keys the mandate also
-   names, using the same closed-vocabulary, safety-by-construction pattern.
-6. Run the mandate's own formal 20/50/100-turn cost-stress conversations
+4. ~~Run a follow-up calibration on content-span (bare noun) embedding~~ --
+   **done, also disconfirmed**: workflow run `36418230291`, results
+   recorded above (PR #224/#225). "แฟน"/"คนรู้ใจ" scored 0.224, BELOW
+   "แฟน"/"ครอบครัว" (different concept) at 0.254 -- stripping sentence
+   scaffolding did not fix separability, and the likely deeper reason is
+   documented above (point 3: the two Thai words may genuinely not be as
+   synonymous as the worked example assumes, outside conversational
+   context). **Three independent embedding-based hypotheses have now been
+   tried and disconfirmed with real data** (small model/full sentence,
+   large model/full sentence, small model/content-span). Do not attempt a
+   fourth embedding-model or preprocessing variant without a genuinely new
+   idea -- the pattern is now well-established, not a coincidence of one
+   bad run.
+5. The two remaining honestly-open directions (neither yet attempted, see
+   "Phase 3 completion" section above): (a) ask OpenAI's own semantic
+   supervisor for a direct concept-identity judgment given both the new
+   phrase and a stored exemplar as context (a real language-understanding
+   call, not an embedding-cosine proxy), or (b) accept that reliable unseen
+   cross-vocabulary generalization is not currently achievable within the
+   "smallest safe" constraint and let increment 1's honest, narrower
+   capability (near-identical-variant generalization, not true
+   cross-vocabulary paraphrase) stand as Phase 3's answer for now. This is
+   a genuine open decision point, not a default -- whichever is chosen,
+   document the reasoning with the same rigor as this whole investigation,
+   and if (a) is chosen, calibrate it with real data (e.g. does the
+   supervisor correctly judge "แฟน" vs "คนรู้ใจ" as same/different depending
+   on context) before implementing any schema or cost-policy change.
+6. Extend Phase 3 to the pace/consider-only concept keys the mandate also
+   names, using the same closed-vocabulary, safety-by-construction pattern
+   (independent of the semantic-generalization architecture question above
+   -- this can proceed with increment 1's existing surface-matching
+   mechanism, honestly scoped the same way).
+7. Run the mandate's own formal 20/50/100-turn cost-stress conversations
    (multiple independent samples per length, covering casual chat/known
    language/unseen language/unseen paraphrase/references/correction/topic
    changes/resume/consideration/explicit transaction wording/incident
    language) and report the full required metric set (paid-call counts,
    zero-call rate, hit rate by tier, token/cost percentiles, cap violations,
    intelligence-cliff check, accidental-transaction count). Only once this
-   evidence exists, plus item 4 above, may Phase 3 be declared complete.
-7. Phases 4-7 (commercial-intent boundary, incident/backoffice routing,
+   evidence exists, plus item 5 above being resolved one way or the other,
+   may Phase 3 be declared complete.
+8. Phases 4-7 (commercial-intent boundary, incident/backoffice routing,
    natural-response layer, brutal end-to-end certification) remain
    unstarted. Each is large enough to warrant its own design-first pass
    before implementation, following the same discipline used for Phase 3
