@@ -917,7 +917,26 @@ async function resolveSemanticTurn(
     const slotMergedTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
     const modelTurn = normalizeExplicitNoTransactionAvailabilityRefinement(slotMergedTurn, deterministic);
 
-    if (!modelRefinementIsUsable(modelTurn, deterministic)) {
+    // Journey planning is conversational state only: there is no journey
+    // transaction executor. A short ellipsis such as "same one, move it to
+    // tomorrow" can score slightly below the generic 0.70 routing threshold
+    // even though a canonical journey_planning task already supplies the
+    // missing referent. Accept this narrowly bounded continuation at >=0.60
+    // only when the model itself says journey + modify/correction, asks no
+    // clarification, and a real journey plan is already active/suspended.
+    // This never applies to book/order or any executable business task.
+    const hasJourneyPlan = taskState.activeTask?.type === 'journey_planning'
+      || taskState.suspendedTask?.type === 'journey_planning';
+    const safeJourneyContinuation = Boolean(
+      hasJourneyPlan
+      && modelTurn.domain === 'journey'
+      && (modelTurn.action === 'modify' || modelTurn.action === 'correct_previous')
+      && modelTurn.confidence >= 0.60
+      && modelTurn.needsClarification === false
+      && modelTurn.speechAct !== 'transaction_request'
+    );
+
+    if (!modelRefinementIsUsable(modelTurn, deterministic) && !safeJourneyContinuation) {
       // "Not usable" means the model's STRUCTURED classification (domain/
       // action/entities/references) is not trusted enough to drive task
       // state or business routing -- it says nothing about whether the
