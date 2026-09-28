@@ -47,7 +47,11 @@ const FALSE_TRANSACTION_MARKERS = [
 // NOT try to distinguish from a real regression, so a hit here should be
 // investigated, not reflexively re-run as a flake.
 const GENERIC_FALLBACK_MARKERS = [
-  'คิดช้ากว่าปกติ', 'ตอบช้ากว่าปกติ', 'ระบบตอบช้า',
+  'คิดช้ากว่าปกติ',
+  'ตอบช้ากว่าปกติ',
+  'ระบบตอบช้า',
+  'ยังตอบเรื่องนี้ให้แม่นไม่ได้',
+  'ลองอีกครั้งสักครู่',
 ];
 
 type SmokeCase = {
@@ -180,7 +184,9 @@ async function runCase(runId: string, index: number, testCase: SmokeCase, guestI
     const messageText = typeof body?.message === 'string' ? body.message : '';
     const falseTransactionMarker = FALSE_TRANSACTION_MARKERS.find(marker => messageText.includes(marker)) ?? null;
     const missingRequired = (testCase.requiredMarkers ?? []).find(pattern => !pattern.test(messageText));
-    const hitForbidden = (testCase.forbiddenMarkers ?? []).find(pattern => pattern.test(messageText));
+    const universalForbidden = GENERIC_FALLBACK_MARKERS.map(text => new RegExp(text, 'u'));
+    const hitForbidden = [...universalForbidden, ...(testCase.forbiddenMarkers ?? [])]
+      .find(pattern => pattern.test(messageText));
     const hasMessage = messageText.trim().length > 0;
     const pass = res.status === 200 && hasMessage && !falseTransactionMarker && !missingRequired && !hitForbidden;
     console.log(JSON.stringify({
