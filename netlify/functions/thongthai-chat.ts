@@ -4507,21 +4507,19 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           composerMode:oneMind.response.mode,
           stateConflictRetries:oneMind.turn.trace.stateConflictRetries ?? 0,
         }));
-        const responseFromSystem = ['general','local','incident'].includes(oneMind.turn.semanticTurn.domain)
-          ? supervisedOpenWorldResponse(oneMind.turn.semanticTurn, request)
-          : {
-              message:oneMind.response.message,
-              intent:oneMind.turn.semanticTurn.action === 'recommend'
-                || oneMind.turn.semanticTurn.action === 'discover'
-                ? 'recommendation'
-                : 'information',
-              contextUpdates:{},
-              journeyAction:{type:'none' as const, journey:null},
-              suggestedActions:[],
-              responseStyle:'direct' as const,
-              semanticMemoryUpdates:[],
-              toolCalls:[],
-            };
+        const responseFromSystem = {
+          message:oneMind.response.message,
+          intent:oneMind.turn.semanticTurn.action === 'recommend'
+            || oneMind.turn.semanticTurn.action === 'discover'
+            ? 'recommendation'
+            : 'information',
+          contextUpdates:{},
+          journeyAction:{type:'none' as const, journey:null},
+          suggestedActions:[],
+          responseStyle:'direct' as const,
+          semanticMemoryUpdates:[],
+          toolCalls:[],
+        };
         const supervisedResponse = polishedResponse(responseFromSystem, channel);
         await persistBrainRuntime(guestDbId, channel, supervisedResponse);
         return coreResult(200, {

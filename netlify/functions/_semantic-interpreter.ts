@@ -225,6 +225,11 @@ export type SemanticTurn = {
   /** Short paraphrase of what the customer means, for machine state and
    * observability only. It is never sent to the customer as the answer. */
   normalizedMeaning?: string;
+  /** Natural customer-facing draft from the same language-model pass that
+   *  understood the turn. It may be used only when no business truth/tool result
+   *  is required and never as authority for price, availability, booking,
+   *  payment, inventory, promotion, membership, or incident status. */
+  reply?: string;
   speechAct?: SemanticSpeechAct;
   domain: SemanticDomain;
   /** Free-form descriptive label for observability/evaluation only.
@@ -582,6 +587,7 @@ Before emitting JSON, re-check the CURRENT utterance against these high-priority
 - Viewing one existing customer profile/record/artifact is ask unless the customer asks for its current transaction state. Do not use transaction_status merely because the record is a membership profile.
 
 normalizedMeaning: a short neutral paraphrase of the customer's CURRENT meaning, never an answer
+reply: a short natural Thai customer-facing response draft for open conversation, preferences, casual chat, consideration, corrections, or one clarification; leave "" when verified business data/tool results are needed. Never invent price, availability, inventory, booking/payment/order status, promotion eligibility, membership state, staff action, or incident status.
 speechAct: one of question | statement | preference_update | correction | selection | request | transaction_request | incident_report | complaint | request_help | social | unknown
 domain: one of ecosystem | restaurant | stay | activity | promotion | membership | otop | cafe | journey | payment | support | general | local | incident | unknown
 intent: a short snake_case label naming the specific thing being asked (e.g. "broad_experience_discovery", "menu_recommendation_request", "select_prior_entity", "booking_time_confirmation")
@@ -620,7 +626,7 @@ MANDATORY TERMINAL DECISION CHECKLIST — apply this after all doctrine above an
 8. FIELD COHERENCE: informationNeed must mirror the action already chosen and must never reverse it. recommend pairs with recommendation; true browse/list pairs with catalog; transaction commitment stays order/book and is never changed to discover merely because details are missing.
 
 Return ONLY this JSON object, nothing else:
-{"normalizedMeaning":string,"speechAct":string,"domain":string,"intent":string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}`;
+{"normalizedMeaning":string,"reply":string,"speechAct":string,"domain":string,"intent":string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":array,"constraints":array,"confidence":number,"needsClarification":boolean,"clarificationReason"?:string}`;
 }
 
 
@@ -677,19 +683,19 @@ export function buildProductionSemanticInterpreterPrompt(
       ? 'promotion=offers/discounts' : null,
   ].filter(Boolean);
 
-  return `You are Thongthai's semantic supervisor. Understand the CURRENT customer message and return compact JSON. Never answer the customer, invent business facts, decide availability/price/policy, call tools, or execute/mutate booking/order/payment.
+  return `You are Thongthai's open-world conversation brain. Understand the CURRENT customer message and return compact JSON with BOTH a natural reply draft and strict control fields. Never invent business facts, decide availability/price/policy, call tools, or execute/mutate booking/order/payment.
 
 Core rules:
 - Understand natural/colloquial Thai, typos, ellipsis, corrections, topic shifts, and multi-intent sentences by meaning.
 - Current message outranks stale context. Use context only to resolve real references or continuation.
 - Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
-- Current no-transaction wording keeps the turn read-only. Conditional "if A unavailable use B; if neither, do nothing" = status/availability, never immediate confirm/book/order.
+- Current no-transaction wording keeps the turn read-only. Conditional fallback choices are status/availability, never immediate confirm/book/order.
 - Current corrections/replacements outrank stale selections and task values.
 - lastRecommendationReference is bounded evidence of what Thongthai previously recommended. Use it to resolve descriptive follow-ups across topic switches; if it uniquely identifies a recent entity, follow that entity's domain rather than stale activeDomain.
 - Asking what is selected/provided so far => intent=summarize_active_task, action=ask, informationNeed=none; never transaction_status.
 - Conversation task directives cancel_active/suspend_active/resume_suspended affect working state only, never a real transaction.
 - Catalog existence differs from live availability. recommendation differs from neutral discovery. correction differs from a new modification.
-- For reservable hospitality resources (room/house/table/activity slot), a bare existence-at-use question such as whether one "is available/มีไหม" is availability, not stock inventory. Use inventory only for explicit on-hand stock/count questions.
+- Reservable resources (room/house/table/activity slot) use availability, not stock inventory. Inventory is only explicit on-hand stock/count.
 - A constraint/preference-only declaration is speechAct=preference_update and action=provide_information, never modify. Emit only newly stated constraints as short canonical snake_case values such as no_pork/no_shrimp/no_spicy.
 - Unknown or ambiguous references require clarification; never guess an entity or fact. Missing business data does NOT make the customer's meaning ambiguous.
 - Open world: general=ordinary non-business conversation; local=surrounding area; incident=loss/damage/injury/adverse event; support=service help not owned by a narrower domain.
@@ -699,9 +705,9 @@ Core rules:
 - Domain nouns identify subject; preserve the actual predicate, dates, times, party size, constraints, negation, and stated preferences.
 - Preserve all meaningful clauses in compound turns; do not drop later constraints, corrections, or fallback questions.
 - A customer merely reporting their own plan, pause, state, or situation is speechAct=statement. Use request/request_help only when they ask the assistant or organization to do something.
-- If the customer explicitly retracts/corrects a previously inferred intent (for example clarifying that they were only asking and were NOT requesting a booking/order/confirmation), use speechAct=correction. This is a correction of conversational meaning even when no slot value changes; keep it read-only and never infer a transaction.
+- If the customer retracts/corrects inferred intent (e.g. only asking, NOT booking/order/confirming), use speechAct=correction; keep it read-only.
 - A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
-- For a descriptive reference, use bounded context evidence: when prior context uniquely links the description to a named entity, emit that canonical entity name as the reference value so the deterministic resolver can bind it. If several entities fit, keep it unresolved and request clarification.
+- For descriptive references, if bounded context uniquely links the description to a named entity, emit that canonical name as reference value; if several fit, clarify.
 - IDs may only come from canonical context below. Otherwise leave unresolved.
 - Activity TYPE (not one named asset) named: set entities.activityCode to horse|atv|archery. Not for a whole-domain browse or a named asset (use horseName).
 
@@ -709,13 +715,19 @@ Today in Bangkok: ${currentBangkok}
 Relevant organization vocabulary: ${vocabulary.length ? vocabulary.join('; ') : 'none needed'}
 Bounded context: ${JSON.stringify(compactContext)}
 
+reply:
+- Thai customer-facing draft in Thongthai's voice.
+- Use it for casual chat, preferences, consideration, corrections, acknowledgements, and one natural clarification.
+- Leave reply="" when verified truth is needed: price, availability, inventory, booking/order/payment status, promotion eligibility, membership state, staff/owner dispatch, or incident case status.
+- Never claim notification, found item, refund/compensation, availability, booking/order submission without downstream verification.
+
 Closed domains: ecosystem, restaurant, stay, activity, promotion, membership, otop, cafe, journey, payment, support, general, local, incident, unknown.
 Closed actions: ask, discover, recommend, compare, book, order, modify, cancel, confirm, status, provide_information, correct_previous, unknown.
 Information needs: none, availability, price, schedule, inventory, catalog, recommendation, ingredients, policy, transaction_status.
 Speech acts: question, statement, preference_update, correction, selection, request, transaction_request, incident_report, complaint, request_help, social, unknown.
 
 Return ONLY:
-{"normalizedMeaning":string,"speechAct":string,"domain":string,"intent":snake_case_string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":[{"type":string,"value"?:string,"refersToPriorContext":boolean}],"constraints":string[],"confidence":number_0_to_1,"needsClarification":boolean,"clarificationReason"?:string}`;
+{"normalizedMeaning":string,"reply":string,"speechAct":string,"domain":string,"intent":snake_case_string,"action":string,"informationNeed":string,"taskDirective"?:string,"entities":object,"references":[{"type":string,"value"?:string,"refersToPriorContext":boolean}],"constraints":string[],"confidence":number_0_to_1,"needsClarification":boolean,"clarificationReason"?:string}`;
 }
 
 function asStringArray(value: unknown): string[] {
@@ -1153,6 +1165,9 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const normalizedMeaning = typeof parsed.normalizedMeaning === 'string'
     ? parsed.normalizedMeaning.trim().slice(0, 360)
     : '';
+  const reply = typeof parsed.reply === 'string'
+    ? parsed.reply.trim().slice(0, 700)
+    : '';
   let speechAct = VALID_SPEECH_ACTS.includes(parsed.speechAct as SemanticSpeechAct)
     ? parsed.speechAct as SemanticSpeechAct
     : 'unknown';
@@ -1389,6 +1404,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
 
   return {
     normalizedMeaning: normalizedMeaning || undefined,
+    reply: reply || undefined,
     speechAct,
     domain:validatedDomain,
     intent,

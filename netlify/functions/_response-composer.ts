@@ -339,6 +339,36 @@ function deterministicMessages(language: ResponseLanguage) {
   };
 }
 
+const BUSINESS_TRUTH_NEEDS = new Set([
+  'availability', 'price', 'schedule', 'inventory', 'catalog', 'recommendation',
+  'ingredients', 'policy', 'transaction_status', 'capacity', 'amenities',
+]);
+
+function safeModelConversationReply(input: ResponseComposerInput): ComposedResponse | null {
+  const reply = input.semanticTurn?.reply?.trim();
+  if (!reply) return null;
+  if (input.dialogDecision.actionProposal) return null;
+  if (input.dialogDecision.mode === 'collect_field' || input.dialogDecision.mode === 'propose_action' || input.dialogDecision.mode === 'execute_tool') {
+    return null;
+  }
+  const need = input.semanticTurn?.informationNeed ?? 'none';
+  if (BUSINESS_TRUTH_NEEDS.has(need)) return null;
+  if (input.dialogDecision.knowledgeRequests.length > 0) return null;
+  const task = input.dialogDecision.taskStateContainer.activeTask;
+  if (task?.commitmentIntent === true) return null;
+
+  assertOperationalClaimSafety(reply, input.operationalOutcome);
+  return {
+    message: polishCustomerMessage(reply, input.channel),
+    mode:'model',
+    usedFactKeys:[],
+    composerVersion:RESPONSE_COMPOSER_VERSION,
+    bibleVersion:THONGTHAI_BIBLE_VERSION,
+    channel:input.channel,
+    language:input.language,
+  };
+}
+
 /** Re-derives the duration policy result purely for RENDERING the
  *  collect_field question -- the actual auto-fill decision already happened
  *  upstream in the Dialog Manager (see _activity-catalog-policy.ts /
@@ -1149,10 +1179,12 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
 }
 
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
-  // Human Conversation Recovery contract:
-  // OpenAI is a semantic supervisor, not the customer-facing voice.
-  // Customer wording is therefore rendered only from already-decided,
-  // already-grounded state. No model call is permitted in this layer.
+  // Intelligence-first cutover: the same open-world model call that owns
+  // current-turn meaning may also supply the customer-facing wording for
+  // conversation-only turns. Business truth still wins whenever the reply
+  // needs verified facts or an operational outcome.
+  const modelConversation = safeModelConversationReply(input);
+  if (modelConversation) return modelConversation;
   const grounded = composeGroundedDeterministicResponse(input);
   if (grounded) return grounded;
   return composeDeterministicResponse(input);
