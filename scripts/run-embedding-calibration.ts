@@ -42,6 +42,15 @@ const PAIRS: Pair[] = [
   { id: 'companion-partner-vs-family', a: 'มากับแฟน', b: 'มากับครอบครัว', expectation: 'different_concept' },
   { id: 'companion-partner-vs-friends', a: 'มากับแฟน', b: 'มากับเพื่อนกลุ่มใหญ่', expectation: 'different_concept' },
   { id: 'companion-negation', a: 'มากับแฟน', b: 'ไม่ได้มากับแฟน', expectation: 'negation_mismatch' },
+  // Content-span variants: the SAME companion pairs above, but with the
+  // shared "มากับ..." sentence scaffolding stripped, embedding just the
+  // content-bearing noun/noun-phrase. Tests the working hypothesis (see
+  // THONGTHAI_KERNEL_V2_HANDOFF.md, PR #221/#223) that the full-sentence
+  // template dominates the embedding more than the one differing word does.
+  { id: 'content-span-partner-synonym', a: 'แฟน', b: 'คนรู้ใจ', expectation: 'same_concept_different_vocabulary' },
+  { id: 'content-span-partner-synonym-2', a: 'แฟน', b: 'คู่รัก', expectation: 'same_concept_different_vocabulary' },
+  { id: 'content-span-partner-vs-family', a: 'แฟน', b: 'ครอบครัว', expectation: 'different_concept' },
+  { id: 'content-span-partner-vs-friends', a: 'แฟน', b: 'เพื่อนกลุ่มใหญ่', expectation: 'different_concept' },
   { id: 'consider-only-synonym', a: 'เอาอันนี้ไว้ก่อน', b: 'สนใจอันนี้อยู่ ขอจำไว้ก่อน', expectation: 'same_concept_different_vocabulary' },
   { id: 'consider-vs-relaxed-pace', a: 'เอาอันนี้ไว้ก่อน', b: 'ไม่อยากเหนื่อย ขอชิลๆ', expectation: 'different_concept' },
   { id: 'companion-vs-unrelated', a: 'มากับแฟน', b: 'พรุ่งนี้มีห้องว่างไหม', expectation: 'unrelated_sentence' },
