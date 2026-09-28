@@ -271,6 +271,21 @@ export const TOOL_NAME_FOR_TASK_TYPE: Partial<Record<ActiveTaskType, string>> = 
 };
 
 function isAmbiguous(turn: SemanticTurn): boolean {
+  // A request to summarize/confirm existing conversational task state never
+  // requires resolving an ambiguous ENTITY reference -- it answers entirely
+  // from already-known task state. Production failure this closes:
+  // "เมื่อกี้บอกว่ายังไม่จองใช่ไหม" and a plain summary request were both
+  // forced into the generic ambiguous-entity clarification (see
+  // planDialogTurn's early isAmbiguous short-circuit) instead of reading
+  // back task state, merely because the turn also carried an unrelated
+  // unresolved "เมื่อกี้"-style reference.
+  if (turn.intent === 'summarize_active_task') return false;
+  // Ordinary social/casual conversation is never a business-entity
+  // clarification question. Production failure: "วันนี้อากาศร้อนชิบหาย 555"
+  // was forced into "หมายถึงกิจกรรมหรือม้าตัวที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ"
+  // purely because needsClarification/an unrelated reference happened to be
+  // set on a casual remark.
+  if (turn.speechAct === 'social') return false;
   return turn.needsClarification || turn.references.some(reference => reference.ambiguous === true);
 }
 
@@ -616,8 +631,23 @@ function hasRecommendationCriteria(turn:SemanticTurn):boolean {
  *  every source every turn. Returns at most one KnowledgeRequest per domain
  *  actually implicated by this turn. */
 function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): KnowledgeRequest[] {
-  const task = container.activeTask && !isTerminalTaskStatus(container.activeTask.status)
+  // A task from a DIFFERENT domain than the current turn must never scope
+  // this turn's knowledge request -- same stale-cross-domain-task guard
+  // already applied in _response-composer.ts's specificClarificationMessage
+  // (see its own comment: "Never use a stale task from another domain to
+  // phrase clarification for the current question"). Production failure
+  // this closes: returning to a previously-discussed horse after a food
+  // digression fetched the FULL activity catalog (listing every horse)
+  // instead of the one previously selected/considered, because `task` here
+  // still pointed at the (wrong-domain) active task rather than the
+  // matching suspended one.
+  const domainMatchedTask = container.activeTask?.domain === turn.domain
     ? container.activeTask
+    : container.suspendedTask?.domain === turn.domain
+      ? container.suspendedTask
+      : null;
+  const task = domainMatchedTask && !isTerminalTaskStatus(domainMatchedTask.status)
+    ? domainMatchedTask
     : null;
   // Human Core PR C: every KnowledgeRequest this function builds carries the
   // ONE authoritative CanonicalKnowledgeScope for the turn (derived once,

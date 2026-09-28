@@ -74,10 +74,19 @@ test('final human brain cutover: consider-only horse selection reply is natural 
     const guestDbId = harness.guestDbId(gid);
     assert.ok(guestDbId);
     const existing = harness.getState(guestDbId)?.state ?? {};
+    // A hardcoded absolute timestamp here is a ticking time bomb: conversation
+    // context expires 2 hours after its own `now` (see CONTEXT_TTL_MS in
+    // _conversation-context.ts), so a fixed literal silently starts failing
+    // the instant the real wall clock passes that literal + 2h -- pruneExpired
+    // then discards the whole injected context (recentEntities, activeDomain,
+    // lastRecommendationReference all reset to empty) and the turn falls back
+    // to an unresolved/untrusted-semantics path. Anchor to actual "now"
+    // instead so the fixture never depends on when the suite happens to run.
+    const seedNow = new Date();
     harness.setState(guestDbId, {
       ...existing,
       conversationContext: {
-        ...emptyConversationContextState(new Date('2026-09-28T13:00:00Z')),
+        ...emptyConversationContextState(seedNow),
         activeDomain: 'activity',
         activeTopic: 'horse_recommendation',
         recentEntities: [
@@ -88,7 +97,7 @@ test('final human brain cutover: consider-only horse selection reply is natural 
             domain: 'activity',
             source: 'catalog',
             canonical: true,
-            observedAt: '2026-09-28T13:00:00.000Z',
+            observedAt: seedNow.toISOString(),
           },
         ],
         lastRecommendationReference: 'ภาราดรเหมาะกับมือใหม่และเป็นตัวที่คุยกันล่าสุด',
