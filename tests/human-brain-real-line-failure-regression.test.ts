@@ -313,7 +313,8 @@ test('KERNEL V2 PHASE 1: restaurant availability question outranks stale horse t
     restaurant:{availability:async()=>emptyResult('restaurant-table-schedule','restaurant_live')},
   });
   const selected=await run(select);
-  assert.equal(selected.taskStateAfter.activeTask?.domain,'activity');
+  assert.equal(selected.taskStateAfter.activeTask,null,'consideration must not create a stale activity task');
+  assert.ok(selected.conversationContextAfter.workingMemory.consideredSelections.some(selection=>selection.name==='ภาราดร'));
   assert.equal(selected.dialogDecision.actionProposal,undefined);
   const asked=await run(restaurant);
   assert.equal(asked.semanticMeaning.conversationalMode,'ASK');
@@ -451,7 +452,7 @@ test('REAL LINE: language correction value wins over shallow first-number extrac
   await run(select);
   const result=await run(correction);
   assert.equal(result.semanticTurn.semanticSource,'openai_supervisor');
-  assert.equal(result.semanticTurn.domain,'activity');
+  assert.equal(result.conversationContextAfter.workingMemory.partySize,4);
   assert.equal(result.semanticTurn.entities.partySize,4);
   assert.equal(result.semanticTurn.entities.children,1);
   assert.notEqual(result.dialogDecision.mode,'collect_field');
