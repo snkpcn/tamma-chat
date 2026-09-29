@@ -63,7 +63,8 @@ export type DialogReasonCode =
   | 'task_suspended_for_topic_switch' | 'task_resumed' | 'cannot_verify_comparison'
   | 'known_unconfigured_price' | 'duplicate_event_ignored' | 'no_active_task'
   | 'task_side_question_preserved' | 'task_unrelated_turn_preserved' | 'task_cancelled'
-  | 'task_summary_requested' | 'nontransactional_state_update_preserved';
+  | 'task_summary_requested' | 'nontransactional_state_update_preserved'
+  | 'transaction_commitment_revoked';
 
 export type ResponseIntent =
   | 'discovery_response' | 'grounded_answer' | 'clarify_ambiguous_entity' | 'ask_missing_field'
