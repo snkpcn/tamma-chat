@@ -16,6 +16,31 @@ export type RestaurantMenuProfile = {
   kidFriendly: boolean;
   occasionTags: string[];
   pairingTags: string[];
+  safety: RestaurantMenuSafetyProfile;
+  customization: RestaurantMenuCustomizationProfile;
+};
+
+export type AllergenKnowledgeState = 'contains' | 'does_not_contain' | 'may_contain' | 'unknown';
+
+export type RestaurantMenuSafetyProfile = {
+  allergens: Record<string, AllergenKnowledgeState>;
+  contains: string[];
+  mayContain: string[];
+  crossContaminationRisk: AllergenKnowledgeState;
+  dietaryTags: string[];
+};
+
+export type RestaurantMenuCustomizationProfile = {
+  spiceAdjustable: boolean | null;
+  allowedSpiceLevels: string[];
+  canRemoveChili: boolean | null;
+  canRemoveFermentedFish: boolean | null;
+  canRemoveMsg: boolean | null;
+  canReduceOrRemoveSugar: boolean | null;
+  removableIngredients: string[];
+  addableIngredients: string[];
+  substitutions: string[];
+  kitchenNote: string | null;
 };
 
 export type RestaurantAdvisorItem = {
@@ -61,6 +86,45 @@ function bounded(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? Math.max(0, Math.min(5, n)) : fallback;
 }
+function nullableBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+function allergenState(value: unknown): AllergenKnowledgeState {
+  return value === 'contains' || value === 'does_not_contain' || value === 'may_contain'
+    ? value
+    : 'unknown';
+}
+function normalizeAllergenMap(value: unknown): Record<string, AllergenKnowledgeState> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => key.trim().length > 0)
+    .map(([key, state]) => [key, allergenState(state)]));
+}
+export function normalizeRestaurantMenuSafetyProfile(value: unknown): RestaurantMenuSafetyProfile {
+  const p = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    allergens: normalizeAllergenMap(p.allergens),
+    contains: textList(p.contains),
+    mayContain: textList(p.mayContain ?? p.may_contain),
+    crossContaminationRisk: allergenState(p.crossContaminationRisk ?? p.cross_contamination_risk),
+    dietaryTags: textList(p.dietaryTags ?? p.dietary_tags),
+  };
+}
+export function normalizeRestaurantMenuCustomizationProfile(value: unknown): RestaurantMenuCustomizationProfile {
+  const p = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return {
+    spiceAdjustable: nullableBoolean(p.spiceAdjustable ?? p.spice_adjustable),
+    allowedSpiceLevels: textList(p.allowedSpiceLevels ?? p.allowed_spice_levels),
+    canRemoveChili: nullableBoolean(p.canRemoveChili ?? p.can_remove_chili),
+    canRemoveFermentedFish: nullableBoolean(p.canRemoveFermentedFish ?? p.can_remove_fermented_fish ?? p.can_remove_pla_ra),
+    canRemoveMsg: nullableBoolean(p.canRemoveMsg ?? p.can_remove_msg),
+    canReduceOrRemoveSugar: nullableBoolean(p.canReduceOrRemoveSugar ?? p.can_reduce_or_remove_sugar),
+    removableIngredients: textList(p.removableIngredients ?? p.customizable_remove),
+    addableIngredients: textList(p.addableIngredients ?? p.customizable_add),
+    substitutions: textList(p.substitutions ?? p.substitution_options),
+    kitchenNote: typeof (p.kitchenNote ?? p.kitchen_note) === 'string' ? String(p.kitchenNote ?? p.kitchen_note) : null,
+  };
+}
 export function normalizeRestaurantProfile(value: unknown): RestaurantMenuProfile {
   const p = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   return {
@@ -71,6 +135,8 @@ export function normalizeRestaurantProfile(value: unknown): RestaurantMenuProfil
     richnessLevel: bounded(p.richnessLevel), isanIntensity: bounded(p.isanIntensity), heaviness: bounded(p.heaviness),
     shareability: bounded(p.shareability, 3), beginnerFriendly: p.beginnerFriendly === true, kidFriendly: p.kidFriendly === true,
     occasionTags: textList(p.occasionTags), pairingTags: textList(p.pairingTags),
+    safety: normalizeRestaurantMenuSafetyProfile(p.safety),
+    customization: normalizeRestaurantMenuCustomizationProfile(p.customization),
   };
 }
 
@@ -343,6 +409,7 @@ function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): b
   if (pref.vegetarian && item.profile.proteinTags.some(tag => ['pork','beef','chicken','fish','shrimp'].includes(tag))) return true;
   if (item.profile.proteinTags.some(tag => pref.avoidProteins.includes(tag))) return true;
   if (item.profile.allergenFlags.some(tag => pref.allergenFlags.includes(tag))) return true;
+  if (pref.allergenFlags.some(tag => item.profile.safety.allergens[tag] === 'contains' || item.profile.safety.allergens[tag] === 'may_contain')) return true;
   const ingredients = item.ingredients.map(norm);
   if (pref.avoidIngredients.some(avoid => ingredients.some(ingredient => ingredient.includes(norm(avoid))))) return true;
   if (ingredients.some(ingredient => rawIngredientHasAvoidedProtein(ingredient, pref.avoidProteins))) return true;
