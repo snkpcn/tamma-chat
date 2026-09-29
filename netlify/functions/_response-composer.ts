@@ -1286,11 +1286,42 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
   return `${sections.join('\n\n')}\n\nThese are conversation-state details only; nothing has been confirmed or submitted.`;
 }
 
+function isExplicitTaskResumeReadback(input: ResponseComposerInput): boolean {
+  if (!input.semanticTurn) return false;
+  const turn = input.semanticTurn;
+  const task = input.dialogDecision.taskStateContainer.activeTask;
+  const explicitlyResumesPriorTask =
+    turn.intent === 'resume_active_task'
+    || turn.taskDirective === 'resume_suspended'
+    || /(?:กลับมา|กลับไป|ย้อนกลับ).{0,40}(?:เรื่อง|ม้า|กิจกรรม)|(?:เรื่อง|ม้า|กิจกรรม).{0,40}(?:คุยต่อ|ต่อ|ค้างไว้)/u.test(input.userMessage ?? '');
+  return Boolean(
+    !task?.commitmentIntent
+    && task
+    && task.domain === turn.domain
+    && input.dialogDecision.reasons.includes('task_resumed')
+    && explicitlyResumesPriorTask
+  );
+}
+
 function conversationalStateUpdateMessage(input: ResponseComposerInput): string | null {
   if (input.language !== 'th' || !input.semanticTurn) return null;
   const turn = input.semanticTurn;
   const task = input.dialogDecision.taskStateContainer.activeTask;
   const noCommitment = !task?.commitmentIntent;
+
+  // An explicit return to a suspended task is a working-memory readback, not
+  // a fresh discovery question. Render the complete restored task state so a
+  // correct slot cannot disappear from the customer-facing answer merely
+  // because the model acknowledged only the selected entity. Production
+  // failure this closes: after selecting ภาราดร for 45 minutes, discussing
+  // food, and saying "กลับมาเรื่องม้าที่เลือกไว้เมื่อกี้", persisted state
+  // still contained both values but the response mentioned only ภาราดร.
+  if (isExplicitTaskResumeReadback(input) && task) {
+    const items = taskSummaryItems(task, input.language);
+    if (items.length) {
+      return `ได้ครับ กลับมาเรื่องที่คุยไว้กันต่อครับ\n${items.join(' • ')}\nตอนนี้ยังเป็นข้อมูลที่คุยกันอยู่ ยังไม่ได้จองหรือส่งรายการครับ`;
+    }
+  }
 
   const namedActivitySelection =
     turn.domain === 'activity'
@@ -1538,6 +1569,15 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
   // customer always sees the real no-transaction status from ActiveTask
   // state.
   if (input.dialogDecision.responseIntent === 'active_task_summary') {
+    return composeDeterministicResponse(input);
+  }
+
+  // Returning to a paused task is also a canonical-state readback. It must
+  // outrank both the grounded catalog renderer (which can restart discovery)
+  // and a conversational model acknowledgement (which can omit restored
+  // slots). The deterministic branch below renders every persisted slot and
+  // keeps the explicit no-transaction status visible.
+  if (isExplicitTaskResumeReadback(input)) {
     return composeDeterministicResponse(input);
   }
 
