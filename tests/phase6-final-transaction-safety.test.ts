@@ -15,6 +15,11 @@ import {
 } from '../netlify/functions/_semantic-interpreter';
 import type { KnowledgeBundle } from '../netlify/functions/_knowledge-resolver';
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
+import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
+import {
+  hasExplicitNoTransactionMarker,
+  hasStandaloneTransactionRequest,
+} from '../netlify/functions/_slot-parsers';
 import { brainRequest, guestId, withHarness } from './helpers/canonical-core-harness';
 
 const NOW = new Date('2026-09-30T00:30:00+07:00');
@@ -73,6 +78,53 @@ function activityAvailable(): KnowledgeBundle {
     freshness: 'live',
   };
 }
+
+test('Phase 6 final: shared current-turn boundary rejects questions, resume language and explicit withholding', () => {
+  for (const message of [
+    'ยังไม่ต้องจอง',
+    'เอาไว้ก่อน ยังไม่จอง',
+    'ถามเรื่องจองเฉย ๆ ยังไม่ได้ให้จอง',
+    'กลับมาจองม้าต่อ',
+    'จองได้ไหม',
+  ]) {
+    assert.equal(hasStandaloneTransactionRequest(message), false, message);
+  }
+  assert.equal(hasStandaloneTransactionRequest('จองเลย'), true);
+  assert.equal(hasStandaloneTransactionRequest('ยืนยันจอง'), true);
+  assert.equal(hasExplicitNoTransactionMarker('เอาไว้ก่อน ยังไม่ต้องจอง'), true);
+});
+
+test('Phase 6 final: provider-outage deterministic fallback emits canonical no_transaction for an open task', () => {
+  const committed = plan(semantic({
+    action: 'book',
+    speechAct: 'transaction_request',
+    entities: { resourceCode: 'activity-horse', date: '2026-10-06' },
+  }), emptyTaskStateContainer(), 'phase6-provider-outage-start');
+
+  const context: SemanticContext = {
+    ...emptySemanticContext(),
+    activeDomain: 'activity',
+    activeTask: committed.taskStateContainer.activeTask ? {
+      type: committed.taskStateContainer.activeTask.type,
+      domain: committed.taskStateContainer.activeTask.domain,
+      status: committed.taskStateContainer.activeTask.status,
+      knownSlots: committed.taskStateContainer.activeTask.slots,
+      missingFields: committed.taskStateContainer.activeTask.missingFields,
+      selectedEntities: committed.taskStateContainer.activeTask.selectedEntities,
+      constraints: committed.taskStateContainer.activeTask.constraints,
+    } : null,
+  };
+  const turn = deriveDeterministicSemanticTurn(
+    'เอาไว้ก่อนนะ ยังไม่ต้องจอง',
+    context,
+    committed.taskStateContainer,
+    NOW,
+  );
+  assert.ok(turn);
+  assert.notEqual(turn!.action, 'book');
+  assert.notEqual(turn!.action, 'order');
+  assert.ok(turn!.constraints.includes('no_transaction'));
+});
 
 test('Phase 6 final: CURRENT no-transaction revokes historical commitment and later slot-fill cannot resurrect it', () => {
   const committed = plan(semantic({
