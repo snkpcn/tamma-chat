@@ -1512,18 +1512,25 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
     return composeDeterministicResponse(input);
   }
 
-  // Quality-first human cutover: when real organization knowledge was
-  // retrieved, OpenAI is the final conversational brain that phrases those
-  // facts naturally. Deterministic renderers remain fallbacks and safety
-  // rails; they no longer get first refusal merely because a fact bundle
-  // exists or the turn is a broad discovery/recommendation.
-  const groundedModel = await composeGroundedModelResponse(input);
-  if (groundedModel) return groundedModel;
-
+  // Cost-first response authority under the owner's hard <=5 THB/customer
+  // conversation rule:
+  // 1) reuse the semantic model's already-paid conversational draft when it
+  //    is safe and no business-truth lookup is needed;
+  // 2) render verified organization facts with the centralized grounded
+  //    deterministic renderer at zero extra OpenAI cost;
+  // 3) only if neither can answer naturally, allow ONE separately metered
+  //    grounded model composition as the last-resort phrasing layer.
+  //
+  // This preserves OpenAI for language understanding while avoiding the old
+  // semantic-call + second Sol composer call on most ordinary customer turns.
   const modelConversation = safeModelConversationReply(input);
   if (modelConversation) return modelConversation;
 
   const grounded = composeGroundedDeterministicResponse(input);
   if (grounded) return grounded;
+
+  const groundedModel = await composeGroundedModelResponse(input);
+  if (groundedModel) return groundedModel;
+
   return composeDeterministicResponse(input);
 }
