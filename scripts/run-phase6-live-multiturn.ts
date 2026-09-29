@@ -6,6 +6,10 @@ import {
   type SemanticContext,
   type SemanticTurn,
 } from '../netlify/functions/_semantic-interpreter';
+import { planDialogTurn, resolveDialogDecision } from '../netlify/functions/_dialog-manager';
+import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
+import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
+import type { KnowledgeBundle } from '../netlify/functions/_knowledge-resolver';
 const interpretSemanticTurnForCertification = (
   message:string,
   context:Parameters<typeof interpretSemanticTurn>[1],
@@ -117,6 +121,106 @@ async function main():Promise<void>{
     assert.equal(committed.speechAct,'transaction_request');
   });
 
+  await check('live-revocation-clears-historical-commitment',async()=>{
+    const initialTurn:SemanticTurn={
+      semanticSource:'openai_supervisor',
+      domain:'activity',
+      intent:'book_activity',
+      action:'book',
+      speechAct:'transaction_request',
+      informationNeed:'none',
+      entities:{resourceCode:'activity-horse',date:'2026-10-06',time:'10:00'},
+      references:[],
+      constraints:[],
+      confidence:0.99,
+      needsClarification:false,
+    };
+    const initialPlan=planDialogTurn({
+      semanticTurn:initialTurn,
+      conversationContext:emptyConversationContextState(new Date()),
+      taskState:emptyTaskStateContainer(),
+      channel:'line',
+      eventId:'phase6-live-revoke-start',
+    });
+    assert.equal(initialPlan.taskStateContainer.activeTask?.commitmentIntent,true);
+
+    const active=initialPlan.taskStateContainer.activeTask!;
+    const revokeContext:SemanticContext={
+      ...emptySemanticContext(),
+      activeDomain:'activity',
+      recentEntities:horseEntities,
+      activeTask:{
+        type:active.type,
+        domain:active.domain,
+        status:active.status,
+        knownSlots:active.slots,
+        missingFields:active.missingFields,
+        selectedEntities:active.selectedEntities,
+        constraints:active.constraints,
+      },
+    };
+    const revokedTurn=await interpretSemanticTurnForCertification(
+      'เดี๋ยวก่อน เอาไว้ก่อน ยังไม่จองนะ',
+      revokeContext,
+    );
+    assert.notEqual(revokedTurn.action,'book');
+    assert.notEqual(revokedTurn.action,'order');
+    assert.notEqual(revokedTurn.speechAct,'transaction_request');
+    assert.ok(revokedTurn.constraints.includes('no_transaction'),
+      'explicit CURRENT withholding must surface canonical no_transaction');
+
+    const revokedPlan=planDialogTurn({
+      semanticTurn:revokedTurn,
+      conversationContext:emptyConversationContextState(new Date()),
+      taskState:initialPlan.taskStateContainer,
+      channel:'line',
+      eventId:'phase6-live-revoke-now',
+    });
+    assert.equal(revokedPlan.taskStateContainer.activeTask?.commitmentIntent,false);
+    assert.equal(revokedPlan.customerCommitPresent,false);
+
+    const filledPlan=planDialogTurn({
+      semanticTurn:{
+        semanticSource:'openai_supervisor',
+        domain:'activity',
+        intent:'provide_duration',
+        action:'provide_information',
+        speechAct:'statement',
+        informationNeed:'none',
+        entities:{durationMinutes:60},
+        references:[],
+        constraints:[],
+        confidence:0.99,
+        needsClarification:false,
+      },
+      conversationContext:emptyConversationContextState(new Date()),
+      taskState:revokedPlan.taskStateContainer,
+      channel:'line',
+      eventId:'phase6-live-revoke-fill',
+    });
+    assert.equal(filledPlan.customerCommitPresent,false);
+
+    const available:KnowledgeBundle={
+      domain:'activity',
+      sources:[{need:'availability',sourceId:'phase6-live',sourceType:'activity_live',status:'ok'}],
+      facts:[{
+        key:'availability:activity-horse:2026-10-06T10:00:00+07:00:available',
+        value:true,
+        domain:'activity',
+        sourceId:'phase6-live',
+        sourceType:'activity_live',
+        authoritative:true,
+        fetchedAt:new Date().toISOString(),
+      }],
+      entities:[],
+      missing:[],
+      warnings:[],
+      freshness:'live',
+    };
+    assert.equal(resolveDialogDecision(filledPlan,[available]).actionProposal,undefined,
+      'slot completion after revocation must never resurrect a write proposal');
+  });
+
   // Root-cause note (2026-09-27): this canary used to rely on
   // 'bounded-sol-review-unresolved-reference' leaving its reference
   // genuinely unresolved to force a review call. Once resolveReferences was
@@ -141,7 +245,7 @@ async function main():Promise<void>{
     assert.ok(counts.review<counts.primary,'Sol must remain bounded and must not run on every Terra turn');
   });
 
-  const total=8;
+  const total=9;
   originalLog(JSON.stringify({
     kind:'PHASE6_LIVE_MULTITURN_SEMANTIC_ACCEPTANCE',
     total,pass:passed,failed:failures.length,
