@@ -1126,6 +1126,16 @@ const CONVERSATION_EVIDENCE_REFERENCE_TYPES = new Set([
   'previous_topic',
 ]);
 
+function isConversationEvidenceReferenceType(type:string):boolean {
+  const normalized=type.trim().toLowerCase().replace(/[\s-]+/gu,'_');
+  return CONVERSATION_EVIDENCE_REFERENCE_TYPES.has(normalized)
+    // Reference type is free-form model output. Constraints, restrictions and
+    // allergies are customer evidence, never catalog entities. Keep that
+    // semantic class out of the entity resolver even when the provider calls
+    // it `dietary_constraint` rather than the example `prior_constraint`.
+    || /(?:^|_)(?:constraint|constraints|restriction|restrictions|allergy|allergen)(?:_|$)/u.test(normalized);
+}
+
 export function resolveReferences(references: SemanticReference[], context: SemanticContext): SemanticReference[] {
   return references.map(reference => {
     if (!reference.refersToPriorContext) return reference;
@@ -1175,7 +1185,7 @@ export function resolveReferences(references: SemanticReference[], context: Sema
     // reach the bounded-evidence fallback below rather than bailing out here.
     const hasBoundedConversationEvidence =
       (context.recentTurns?.length ?? 0) > 0 || Boolean(context.rollingSummary) || Boolean(context.lastRecommendationReference);
-    if (CONVERSATION_EVIDENCE_REFERENCE_TYPES.has(reference.type)) {
+    if (isConversationEvidenceReferenceType(reference.type)) {
       return hasBoundedConversationEvidence
         ? {
             ...reference,
