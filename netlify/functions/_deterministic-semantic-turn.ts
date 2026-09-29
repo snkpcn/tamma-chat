@@ -422,7 +422,7 @@ const NO_COMMIT_CONSEQUENCE_MARKER = /ไม่ต้อง(?:จอง|เล�
  *  never falls back to a coarse "any fact exists" hallucination risk. */
 const COMPARE_ATTRIBUTE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; attribute: string }> = [
   { pattern: /นิสัย|อารมณ์/u, attribute: 'temperament' },
-  { pattern: /มือใหม่|เริ่มต้น|หัดขี่/u, attribute: 'beginnerSuitability' },
+  { pattern: /มือใหม่|เริ่มต้น|หัดขี่|ไม่เคยขี่(?:ม้า)?(?:มาก่อน)?/u, attribute: 'beginnerSuitability' },
   { pattern: /อายุ/u, attribute: 'age' },
   { pattern: /เพศ/u, attribute: 'sex' },
   { pattern: /ขนาด|ตัวใหญ่|ตัวเล็ก/u, attribute: 'size' },
@@ -920,6 +920,48 @@ export function deriveDeterministicSemanticTurn(
         domain: effectiveDomain, intent: 'task_conditional_continuation', action: 'ask',
         informationNeed: 'availability',
         entities, references: [], constraints: ['no_transaction'], confidence: 0.75, needsClarification: false,
+      };
+    }
+  }
+
+  // A slot-only continuation can arrive after a non-transactional concrete
+  // selection that intentionally lived in conversation memory rather than a
+  // booking task ("เอาภาราดรไว้ก่อน แต่ยังไม่จอง" -> "เอา 60 นาที").
+  // Bind it only when the immediately preceding semantic action was a concrete
+  // selection/correction and the current active domain is activity. The most
+  // recent activity entity is ordered first by ConversationContext, so this
+  // resumes bounded working state without interpreting a random standalone
+  // number as a booking.
+  const durationOnly = extractDurationMinutes(trimmed);
+  if (
+    durationOnly
+    && effectiveDomain === 'activity'
+    && !hasCommitMarker(trimmed)
+    && ['confirm','correct_previous','modify'].includes(context.lastAction ?? '')
+  ) {
+    const recentActivityAsset = context.recentEntities.find(entity =>
+      entity.domain === 'activity' && entity.id.startsWith('activity_asset:'));
+    if (recentActivityAsset) {
+      const resourceCode = directResourceCode(recentActivityAsset) ?? 'activity-horse';
+      return {
+        domain:'activity',
+        intent:'continue_considered_activity',
+        action:'provide_information',
+        speechAct:'statement',
+        entities:{
+          resourceCode,
+          horseName:recentActivityAsset.name,
+          durationMinutes:durationOnly,
+        },
+        references:[{
+          type:'previous_selection',
+          value:recentActivityAsset.name,
+          refersToPriorContext:true,
+          resolvedEntityId:recentActivityAsset.id,
+        }],
+        constraints:['no_transaction'],
+        confidence:0.88,
+        needsClarification:false,
       };
     }
   }
