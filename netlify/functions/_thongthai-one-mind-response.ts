@@ -43,6 +43,7 @@ import {
 } from './_guest-agent-state-store';
 import { deriveSemanticMeaning } from './_semantic-meaning';
 import { persistAiResponseTurn } from './_ai-cost-store';
+import { isPromotionMention } from './_promotion-dialog';
 
 export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
@@ -117,6 +118,29 @@ export type OneMindCustomerTurnResult =
  *  hardening pass exists to close. */
 function isGenuinelyUnclassifiedFallback(turn: OneMindTurnResult): boolean {
   return turn.semanticTurn.clarificationReason === 'provider_unavailable';
+}
+
+function isTrustedGroundedPromotionProviderFallback(
+  turn: OneMindTurnResult,
+  message: string,
+): boolean {
+  const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
+  if (semantic.semanticSource !== 'deterministic_fallback') return false;
+  if (semantic.domain !== 'promotion') return false;
+  if (!['discover','recommend','ask'].includes(semantic.action)) return false;
+  if (!isPromotionMention(message)) return false;
+  if (turn.dialogDecision.actionProposal) return false;
+
+  // The language model may be unavailable, but promotion facts still must
+  // come from the canonical runtime source. This exception only authorizes
+  // response composition when that source answered; it never authorizes a
+  // redemption/write and the authoritative persistence predicate keeps this
+  // fallback response-only under requireSemanticSupervisor.
+  return turn.groundedKnowledge.some(bundle =>
+    bundle.domain === 'promotion'
+    && bundle.sources.some(source =>
+      source.need === 'promotion_eligibility'
+      && (source.status === 'ok' || source.status === 'empty')));
 }
 
 export type ReadOnlyCutoverEligibilityOptions = {
