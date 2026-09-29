@@ -16,7 +16,7 @@ import {
   hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest,
 } from './_slot-parsers';
 import { isExperienceDiscoveryIntent, PRIOR_REFERENCE_MARKER } from './_experience-discovery';
-import { isPromotionDiscoveryIntent } from './_promotion-dialog';
+import { isPromotionAcceptIntent, isPromotionDiscoveryIntent, isPromotionMention } from './_promotion-dialog';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 
 export const DETERMINISTIC_SEMANTIC_TURN_VERSION = 'deterministic-semantic-turn-v1';
@@ -273,6 +273,43 @@ function findMembershipTopic(message: string): boolean {
   return MEMBERSHIP_TOPIC_MARKER.test(message);
 }
 
+const PROMOTION_RECOMMENDATION_MARKER =
+  /คุ้ม|ดีที่สุด|ดีกว่า|เหมาะ(?:สุด|กว่า)?|แนะนำ|น่าใช้|น่าสนใจ|เลือก.*ให้/u;
+const NO_NEW_MEMBERSHIP_MARKER =
+  /(?:ไม่(?:เอา|ต้อง|อยาก)|ไม่ขอ)[^\n]{0,32}(?:สมัคร|สมาชิกเพิ่ม)|(?:สมัคร|สมาชิกเพิ่ม)[^\n]{0,32}(?:ไม่(?:เอา|ต้อง|อยาก)|ไม่ขอ)/u;
+
+function promotionReadOnlyTurn(message: string): SemanticTurn | null {
+  if (!isPromotionMention(message) || isPromotionAcceptIntent(message)) return null;
+
+  const action: SemanticTurn['action'] = PROMOTION_RECOMMENDATION_MARKER.test(message)
+    ? 'recommend'
+    : 'discover';
+  const constraints = NO_NEW_MEMBERSHIP_MARKER.test(message)
+    ? ['no_new_membership']
+    : [];
+  const entities: Record<string, unknown> = {};
+  if (/ร้านอาหาร|กินข้าว|อาหาร/u.test(message)) entities.businessUnit = 'restaurant';
+  else if (findCafeTopic(message)) entities.businessUnit = 'cafe';
+  else if (findStayTopic(message)) entities.businessUnit = 'stay';
+  else if (findOtopTopic(message)) entities.businessUnit = 'otop';
+  else {
+    const activity = findActivityTopic(message);
+    if (activity) entities.businessUnit = 'activity';
+  }
+
+  return {
+    domain:'promotion',
+    intent:action === 'recommend' ? 'promotion_recommendation' : 'promotion_discovery',
+    action,
+    informationNeed:action === 'recommend' ? 'recommendation' : 'catalog',
+    entities,
+    references:[],
+    constraints,
+    confidence:0.9,
+    needsClarification:false,
+  };
+}
+
 /** A structural fallback, tried only once nothing task-specific matches
  *  (see deriveDeterministicSemanticTurn below): does this message name a
  *  DIFFERENT supported topic than whatever is currently active? If so, it's
@@ -282,17 +319,10 @@ function findMembershipTopic(message: string): boolean {
  *  differs from the active task's. Reuses the SAME topic-narrow markers
  *  already used for the no-task case, never a new phrase table. */
 function detectCrossDomainTopicSwitch(message: string, now: Date = new Date()): SemanticTurn | null {
-  // Promotion questions are cross-cutting by design. A current membership,
-  // restaurant, stay, or activity context must never absorb a clear request
-  // to browse promotions. Reuse the existing promotion dialog classifier so
-  // this remains one shared intent class rather than a new phrase patch.
-  if (isPromotionDiscoveryIntent(message)) {
-    return {
-      domain: 'promotion', intent: 'promotion_discovery', action: 'discover',
-      informationNeed: 'catalog',
-      entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false,
-    };
-  }
+  // Promotion is cross-cutting and remains the PRIMARY subject even when the
+  // message also names the business unit the promotion applies to.
+  const promotionTurn = promotionReadOnlyTurn(message);
+  if (promotionTurn) return promotionTurn;
   if (findRestaurantTableStatusQuestion(message)) {
     const entities: Record<string, unknown> = {};
     const date = extractDate(message, now);
@@ -1001,6 +1031,11 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  // Promotion is cross-cutting: "best restaurant promotion" is still a
+  // promotion recommendation, not a restaurant catalog request.
+  const promotionTurn = promotionReadOnlyTurn(trimmed);
+  if (promotionTurn) return promotionTurn;
+
   // A live table-status question on a genuine cold start (no active task,
   // no prior domain at all) -- same structural marker as
   // detectCrossDomainTopicSwitch's own check above, checked here too since
@@ -1097,20 +1132,6 @@ export function deriveDeterministicSemanticTurn(
       references: [],
       constraints: [],
       confidence: 0.82,
-      needsClarification: false,
-    };
-  }
-
-  if (isPromotionDiscoveryIntent(trimmed)) {
-    return {
-      domain: 'promotion',
-      intent: 'promotion_discovery',
-      action: 'discover',
-      informationNeed: 'catalog',
-      entities: {},
-      references: [],
-      constraints: [],
-      confidence: 0.9,
       needsClarification: false,
     };
   }
