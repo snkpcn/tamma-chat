@@ -34,6 +34,7 @@ import { activityAssetFromText, formatActivityAssetNote } from './_operations-db
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import { persistConversationContext, emptyConversationContextState } from './_conversation-context';
+import { persistAiResponseTurn } from './_ai-cost-store';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
@@ -4510,6 +4511,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   if (earlyConversationReset) {
     const polished = polishedResponse(earlyConversationReset, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
+    // Cost guard hotfix: this branch returns before One-Mind/semantic-
+    // interpreter is ever reached, so it never spends a paid call -- but
+    // without an explicit row here, ai_response_turns had no record of the
+    // turn at all, making "was this genuinely zero-cost" unverifiable from
+    // production telemetry. Truthful by construction: this call site never
+    // has a model reply or a paid grounded-response-composition call.
+    if (guestDbId) {
+      await persistAiResponseTurn({
+        conversationId: request.guestId ?? guestDbId,
+        eventId: transportEventId,
+        channel,
+        finalResponseSource: 'deterministic_or_grounded_local',
+        modelReplyUsed: false,
+        groundedKnowledgeSupplied: false,
+        zeroCostTurn: true,
+        occurredAt: new Date().toISOString(),
+      }).catch(error => {
+        console.error('AI_RESPONSE_TURN_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 180) : 'unknown');
+      });
+    }
     return coreResult(200, {
       message: polished.message,
       intent: polished.intent,

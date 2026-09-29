@@ -445,7 +445,7 @@ function detectCompareEntities(message: string, context: SemanticContext, domain
   };
 }
 
-const PRICE_MARKER = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/u;
+export const PRICE_MARKER = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/u;
 const AVAILABILITY_STATUS_MARKER = /ว่างไหม|ว่างมั้ย|ว่างรึเปล่า|ว่างหรือเปล่า/u;
 /** An informal or formal "how does this work" question -- "ยังไง"/
  *  "อย่างไร" (formal), or a bare sentence-final "ไง" (a common informal
@@ -501,7 +501,21 @@ function detectActivitySideQuestion(
     };
   }
   if (PRICE_MARKER.test(message)) {
-    return { domain, intent: 'ask_price', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.8, needsClarification: false };
+    // Cost hotfix: only ever from THIS message's own text (never the
+    // active-task fallback used for the inventory-count branch above) --
+    // an item resolved from stale task context is exactly the "which item
+    // did they mean" ambiguity that still needs the language supervisor.
+    // A price question that explicitly names its own activity in the same
+    // sentence has no such ambiguity left, so downstream cost routing
+    // (deterministicNeedsLanguageRefinement in
+    // _thongthai-one-mind-orchestrator.ts) can trust this field to skip the
+    // paid semantic call entirely -- see isTrustedZeroCostFactLookup there.
+    const explicitTopic = findActivityTopic(message);
+    return {
+      domain, intent: 'ask_price', action: 'ask',
+      entities: explicitTopic ? { activityCode: explicitTopic.activityCode } : {},
+      references: [], constraints: [], confidence: 0.8, needsClarification: false,
+    };
   }
   if (AVAILABILITY_STATUS_MARKER.test(message)) {
     const entities: Record<string, unknown> = {};
