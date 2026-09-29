@@ -207,7 +207,15 @@ export function readOnlyCutoverEligibility(
   if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
     return { eligible:false, reason:'domain_not_cut_over' };
   }
-  if (isSafeConversationalMode) {
+  const suspendedTask = turn.taskStateAfter.suspendedTask ?? turn.taskStateBefore.suspendedTask;
+  const hasOnlySuspendedTask = Boolean(suspendedTask)
+    && !turn.taskStateBefore.activeTask
+    && !turn.taskStateAfter.activeTask;
+  const unrelatedSuspendedMutationShape = hasOnlySuspendedTask
+    && suspendedTask!.domain !== turn.semanticTurn.domain
+    && !READ_ONLY_ACTIONS.has(turn.semanticTurn.action);
+
+  if (isSafeConversationalMode && !unrelatedSuspendedMutationShape) {
     return { eligible:true };
   }
   if (READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
@@ -351,7 +359,22 @@ export async function processOneMindCustomerTurn(
     stateDependencies,
     now,
     4,
-    candidate => readOnlyCutoverEligibility(candidate, eligibilityOptionsWithMessage).eligible,
+    candidate => {
+      const eligible = readOnlyCutoverEligibility(candidate, eligibilityOptionsWithMessage).eligible;
+      if (!eligible) return false;
+      // A grounded promotion fallback is safe to SHOW during a provider outage,
+      // but requireSemanticSupervisor explicitly means deterministic meaning is
+      // not authoritative enough to mutate canonical working state. Keep this
+      // response-only so a temporary outage cannot steal ownership from the
+      // existing promotion redemption/continuation state machine.
+      if (
+        eligibilityOptionsWithMessage.requireSemanticSupervisor
+        && isTrustedGroundedPromotionProviderFallback(candidate, eligibilityOptionsWithMessage.message ?? input.message)
+      ) {
+        return false;
+      }
+      return true;
+    },
   );
   const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptionsWithMessage);
 
