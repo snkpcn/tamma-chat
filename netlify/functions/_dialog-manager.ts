@@ -1065,7 +1065,13 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
   // live availability check was requested this turn, it came back verified
   // (not merely "no source configured for it").
   let actionProposal: ActionProposal | undefined;
-  if (plan.customerCommitPresent && plan.missingFields.length === 0 && plan.taskStateContainer.activeTask && !unavailable) {
+  if (
+    plan.customerCommitPresent
+    && plan.missingFields.length === 0
+    && plan.taskStateContainer.activeTask
+    && !isTerminalTaskStatus(plan.taskStateContainer.activeTask.status)
+    && !unavailable
+  ) {
     const task = plan.taskStateContainer.activeTask;
     const availabilityRequested = plan.knowledgeRequests.some(request => request.needs.includes('availability'));
     const availabilityVerified = !availabilityRequested
