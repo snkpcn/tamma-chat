@@ -150,6 +150,26 @@ test('restaurant recommendation filters a REMEMBERED "shrimp_allergy" constraint
     'a remembered shrimp allergy must never surface a shrimp dish, even though the CURRENT turn never said "no_shrimp" itself');
 });
 
+test('restaurant recommendation applies allergy safety before mild-spice customization for a named menu',()=>{
+  const restaurant=bundle('restaurant','restaurant_live',[
+    fact('menu:lao-salad:name','ตำลาว','restaurant','restaurant_live'),
+    fact('menu:lao-salad:allergen:shrimp','does_not_contain','restaurant','restaurant_live'),
+    fact('menu:lao-salad:customization:canRemoveChili',true,'restaurant','restaurant_live'),
+    fact('menu:lao-salad:customization:spiceAdjustable',true,'restaurant','restaurant_live'),
+  ]);
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'restaurant',intent:'recommend_menu_for_constraint',action:'recommend',informationNeed:'recommendation',
+      entities:{menuName:'ตำลาว'},constraints:['no_shrimp','no_spicy'],
+    }),
+    bundles:[restaurant],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/กุ้ง/u);
+  assert.match(response.message,/ไม่ใส่พริก|เผ็ดน้อย/u);
+  assert.doesNotMatch(response.message,/เดี๋ยวแจ้งครัว/u);
+});
+
 test('journey renderer composes verified cross-domain options instead of dumping one catalog or generic fallback',()=>{
   const restaurant=bundle('restaurant','restaurant_live',[fact('menu:chicken:name','ไก่ย่าง','restaurant','restaurant_live')]);
   const stay=bundle('stay','stay_live',[fact('stay:two-bedroom:name','บ้านสองห้องนอน','stay','stay_live')]);
