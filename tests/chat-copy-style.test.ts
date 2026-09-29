@@ -18,14 +18,14 @@ test('customer copy removes raw markdown but preserves readable spacing', () => 
   );
 });
 
-test('LINE copy fixes observed Thongthai service-voice feminine particles without rewriting words or web copy', () => {
+test('LINE copy fixes Thongthai service-voice feminine particles without rewriting content words or web copy', () => {
   assert.equal(
     polishCustomerMessage('เรื่องม้าอยากทราบด้านไหนเป็นพิเศษคะ—อยากขี่ม้าไหมคะ', 'line'),
     'เรื่องม้าอยากทราบด้านไหนเป็นพิเศษครับ—อยากขี่ม้าไหมครับ',
   );
   assert.equal(
     polishCustomerMessage('ผัดคะน้าพร้อมเสิร์ฟค่ะ', 'line'),
-    'ผัดคะน้าพร้อมเสิร์ฟค่ะ',
+    'ผัดคะน้าพร้อมเสิร์ฟครับ',
   );
   assert.equal(
     polishCustomerMessage('ผัดคะน้าพร้อมเสิร์ฟค่ะ', 'web'),
