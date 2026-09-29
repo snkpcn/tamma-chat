@@ -89,6 +89,9 @@ test('Phase 6 final: shared transaction boundary rejects questions, deferrals an
   }
   assert.equal(hasStandaloneTransactionRequest('จองเลย'), true);
   assert.equal(hasStandaloneTransactionRequest('ยืนยันจอง'), true);
+  assert.equal(hasStandaloneTransactionRequest('จองไว้ก่อน'), true,
+    '"book it for now" is a real transaction, unlike a bare conversational hold');
+  assert.equal(hasExplicitNoTransactionMarker('จองไว้ก่อน'), false);
   assert.equal(hasExplicitNoTransactionMarker('เอาไว้ก่อน ยังไม่ต้องจอง'), true);
 });
 
