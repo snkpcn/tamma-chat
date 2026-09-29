@@ -18,14 +18,18 @@ test('customer copy removes raw markdown but preserves readable spacing', () => 
   );
 });
 
-test('customer-facing copy enforces Thongthai male-neutral polite particle without rewriting words', () => {
+test('LINE copy fixes observed Thongthai service-voice feminine particles without rewriting words or web copy', () => {
   assert.equal(
     polishCustomerMessage('เรื่องม้าอยากทราบด้านไหนเป็นพิเศษคะ—อยากขี่ม้าไหมคะ', 'line'),
     'เรื่องม้าอยากทราบด้านไหนเป็นพิเศษครับ—อยากขี่ม้าไหมครับ',
   );
   assert.equal(
+    polishCustomerMessage('ผัดคะน้าพร้อมเสิร์ฟค่ะ', 'line'),
+    'ผัดคะน้าพร้อมเสิร์ฟค่ะ',
+  );
+  assert.equal(
     polishCustomerMessage('ผัดคะน้าพร้อมเสิร์ฟค่ะ', 'web'),
-    'ผัดคะน้าพร้อมเสิร์ฟครับ',
+    'ผัดคะน้าพร้อมเสิร์ฟค่ะ',
   );
 });
 
