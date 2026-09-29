@@ -77,15 +77,15 @@ test('reviewed OpenAI rates and owner caps fail closed against unsafe configurat
   ] as const;
   const before=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
   try{
-    process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD='0.50';
+    process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD='0.10';
     process.env.THONGTHAI_MAX_AI_CALLS_PER_TURN='4';
     process.env.THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION='99';
     process.env.THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS='800';
     const policy=aiCostPolicy();
     // Owner caps are one-way configurable: env may make production STRICTER
-    // (0.50 < the 5 default, so it is honored) but never looser (4 > the 3
-    // default turn-call ceiling, so it fails closed back to the default).
-    assert.equal(policy.maxConversationCostUsd,0.50);
+    // (0.10 USD is stricter than the 5 THB default, so it is honored) but never looser
+    // for the separate turn-call ceiling.
+    assert.equal(policy.maxConversationCostUsd,0.10);
     assert.equal(policy.maxCallsPerTurn,3);
     assert.equal(policy.maxCallsPerConversation,99);
     assert.ok(policy.semanticMaxOutputTokens<=900);
