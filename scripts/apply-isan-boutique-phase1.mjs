@@ -58,6 +58,10 @@ replaceImageByAlt(
   '<img src="assets/brand/backgrounds/adventure-garden-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ทำมา-ชาติ ผจญภัย พื้นที่กลางแจ้งและสวนอีสาน">',
 );
 replaceImageByAlt(
+  'ร้านอินทนิลคอฟฟี่ ณ ทำมา-ชาติ ยามพลบค่ำ',
+  '<img src="assets/brand/backgrounds/inthanin-tadtone-real-1536.webp" width="1536" height="1152" loading="lazy" decoding="async" alt="ร้านอินทนิล สาขาตาดโตน ณ ทำมา-ชาติ">',
+);
+replaceImageByAlt(
   'ผังพื้นที่ทำมา-ชาติจากมุมสูง แสดงจุดเชื่อมโยงประสบการณ์ต่าง ๆ',
   '<img src="assets/brand/backgrounds/ecosystem-aerial-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ภาพมุมสูงของพื้นที่ทำมา-ชาติและเส้นทางรอบบึง">',
 );
@@ -92,7 +96,6 @@ const communityBlock = `    <div class="community-grid fade-up" id="communityGri
       <div class="community-card community-empty-state community-feature" id="communityEmptyState">
         <div class="community-feature-media" aria-hidden="true">
           <img class="community-feature-bg" src="assets/brand/backgrounds/otop-craft-shop-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="">
-          <img class="community-feature-character" src="assets/brand/characters/thongthai-otop-2048.webp" width="2048" height="2048" loading="lazy" decoding="async" alt="">
         </div>
         <div class="community-feature-copy">
           <img class="community-feature-logo" src="assets/brand/logos/otop-logo-brown-1024.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="OTOP">
@@ -105,4 +108,46 @@ const communityBlock = `    <div class="community-grid fade-up" id="communityGri
 `;
 
 html = html.slice(0, communityStart) + communityBlock + html.slice(communityActions);
+
+const chessArt = `      <div class="tt-chess-home-art" aria-hidden="true">
+        <img class="tt-chess-home-character" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" loading="lazy" decoding="async" alt="">
+      </div>
+      <div class="tt-chess-winner-pass">
+        <img src="assets/chess/derived/A10_winner_pass_frame.webp" alt="Winner Pass">
+      </div>`;
+if (!html.includes('tt-chess-home-character')) {
+  html = html.replace(
+    /      <div class="tt-chess-home-art">\s*<img src="assets\/chess\/derived\/A10_winner_pass_frame\.webp" alt="Winner Pass">\s*<\/div>/u,
+    chessArt,
+  );
+}
+
+const journalIcon = `<div class="jf-icon-wrap" data-step="remember"><span class="jf-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22V5.5Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5A2.5 2.5 0 0 1 20 22V5.5Z"/><path d="m15.2 14.8 3.9-3.9 1.4 1.4-3.9 3.9-2 .6.6-2Z"/></svg></span><span class="jf-num-badge"><span class="jf-num-digit">4</span><svg class="jf-num-mark" viewBox="0 0 24 24" fill="none" stroke="#F7F1E4" stroke-width="2.6" stroke-linecap="round"><path d="M7 5v6a5 5 0 0 0 10 0V5"/></svg></span></div>`;
+html = html.replace(/<div class="jf-icon-wrap" data-step="remember">[^\n]+<\/div>/u, journalIcon);
+
+const hotspotLabels = new Map([
+  ['Inthanin', 'กาแฟ Inthanin'],
+  ['Reception', 'ต้อนรับ'],
+  ['Dining', 'ร้านอาหาร'],
+  ['Stay', 'บ้านพัก'],
+  ['Adventure', 'กิจกรรม'],
+  ['Journal', 'สมุด Journey'],
+  ['Rewards', 'สิทธิพิเศษ'],
+]);
+for (const [oldLabel, newLabel] of hotspotLabels) {
+  html = html.replace(`<span class="hotspot-label">${oldLabel}</span>`, `<span class="hotspot-label">${newLabel}</span>`);
+}
+
+html = html.replace(
+  /<img id="fabAvatarImg"[^>]*>/u,
+  '<img id="fabAvatarImg" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" alt="ทองไทย">',
+);
+html = html.replace(
+  /<img id="headerAvatarImg"[^>]*>/u,
+  '<img id="headerAvatarImg" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" alt="ทองไทย">',
+);
+html = html.replace(
+  /function avatarSrc\(state\)\{ return THONGTHAI_CHAT_ICONS\[state\] \|\| THONGTHAI_CHAT_ICONS\.default; \}/u,
+  "function avatarSrc(){ return 'assets/brand/characters/thongthai-portrait-master-4k.webp'; }",
+);
 fs.writeFileSync(file, html);
