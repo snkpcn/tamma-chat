@@ -80,14 +80,29 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
       'ai_api_cost_events?environment=eq.live&conversation_id=eq.'+enc(conversationId)
       +'&occurred_at=gt.'+enc(latest.occurred_at)+'&select=id&limit=1',
     );
-    if(newer.length)continue;
+    if(newer.length){
+      console.log('AI_COST_IDLE_NOTIFY_SKIP',JSON.stringify({conversationId,reason:'newer_cost_event_pending'}));
+      continue;
+    }
+    // Real production bug this closes: a long-lived, multi-session
+    // conversation_id (the same customer testing across many hours/days) can
+    // accumulate MANY turns. Fetching turns ascending with a bounded limit and
+    // reading the LAST array entry silently returns the OLDEST turn within
+    // that limit once the conversation exceeds it -- never the actual most
+    // recent one -- which can make a genuinely idle conversation look
+    // permanently "still active" (or the reverse) depending on where the
+    // stale cutoff happens to land. Fetch only the single latest turn,
+    // descending, directly.
     const turns=await get<TurnRow>(
       'ai_response_turns?environment=eq.live&conversation_id=eq.'+enc(conversationId)
-      +'&select=conversation_id,model_reply_used,grounded_knowledge_supplied,zero_cost_turn,occurred_at&order=occurred_at.asc&limit=500',
+      +'&select=conversation_id,model_reply_used,grounded_knowledge_supplied,zero_cost_turn,occurred_at&order=occurred_at.desc&limit=1',
     );
-    const lastTurnAt=turns.length ? turns[turns.length-1]!.occurred_at : latest.occurred_at;
+    const lastTurnAt=turns.length ? turns[0]!.occurred_at : latest.occurred_at;
     const lastActivityAt=lastTurnAt > latest.occurred_at ? lastTurnAt : latest.occurred_at;
-    if(lastActivityAt>newest)continue;
+    if(lastActivityAt>newest){
+      console.log('AI_COST_IDLE_NOTIFY_SKIP',JSON.stringify({conversationId,reason:'recent_turn_activity',lastActivityAt}));
+      continue;
+    }
     const s=summarize(calls,turns);
     const models=[...new Set(calls.map(x=>x.model))].join(', ');
     const text=[
@@ -114,6 +129,14 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
       text,
       payload:{conversation_id:conversationId,cost_thb:s.cost,calls:s.calls},
     });
+    if(status==='not_bound'){
+      // No error is thrown here (sendTeamMessage returns a status, not a
+      // rejection), so a lost/never-configured LINE binding for the ai_cost
+      // team would otherwise fail completely silently -- the cron still
+      // reports 200 OK every 15 minutes forever. This is the one place that
+      // fact becomes visible without a DB query.
+      console.error('AI_COST_IDLE_NOTIFY_NOT_BOUND',JSON.stringify({conversationId,costThb:s.cost}));
+    }
     results.push({conversationId,status,costThb:s.cost});
   }
   return results;

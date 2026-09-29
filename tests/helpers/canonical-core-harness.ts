@@ -47,6 +47,31 @@ function decodeQuery(url: string): URLSearchParams {
   return new URLSearchParams(qIndex >= 0 ? url.slice(qIndex + 1) : '');
 }
 
+/** PostgREST allows repeating the same column as a query param for a range
+ *  filter (occurred_at=gte.X&occurred_at=lte.Y) -- URLSearchParams.get only
+ *  returns the first match, so this reads every occurred_at param via
+ *  getAll and applies each operator. Used by _ai-cost-notifier.ts's idle
+ *  scan (its own oldest/newest window and its "is anything newer than the
+ *  batch I already have" existence check) -- without this the mock ignored
+ *  occurred_at entirely and returned every row regardless of the caller's
+ *  requested window. */
+function applyOccurredAtFilters<T extends { occurred_at?: unknown }>(rows: T[], query: URLSearchParams): T[] {
+  const filters = query.getAll('occurred_at');
+  if (!filters.length) return rows;
+  return rows.filter(row => {
+    const at = String(row.occurred_at ?? '');
+    return filters.every(filter => {
+      const [op, ...rest] = filter.split('.');
+      const value = rest.join('.');
+      if (op === 'gte') return at >= value;
+      if (op === 'gt') return at > value;
+      if (op === 'lte') return at <= value;
+      if (op === 'lt') return at < value;
+      return true;
+    });
+  });
+}
+
 /** Real PostgREST only returns the columns actually listed in `select=` --
  *  a query that forgets to select a column it later reads gets `undefined`
  *  back, not a value the mock happened to have lying around. A real
@@ -452,6 +477,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     if (path.startsWith('ai_api_cost_events') && method === 'GET') {
       const conversation = query.get('conversation_id')?.replace('eq.', '') ?? null;
       let rows = conversation ? aiCostRows.filter(row => row.conversation_id === conversation) : aiCostRows;
+      rows = applyOccurredAtFilters(rows, query);
       if (query.get('order')?.includes('occurred_at.desc')) {
         rows = [...rows].sort((a, b) => String(b.occurred_at ?? '').localeCompare(String(a.occurred_at ?? '')));
       } else if (query.get('order')?.includes('occurred_at.asc')) {
@@ -463,7 +489,10 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     if (path.startsWith('ai_response_turns') && method === 'GET') {
       const conversation = query.get('conversation_id')?.replace('eq.', '') ?? null;
       let rows = conversation ? aiResponseTurns.filter(row => row.conversation_id === conversation) : aiResponseTurns;
-      if (query.get('order')?.includes('occurred_at.asc')) {
+      rows = applyOccurredAtFilters(rows, query);
+      if (query.get('order')?.includes('occurred_at.desc')) {
+        rows = [...rows].sort((a, b) => String(b.occurred_at ?? '').localeCompare(String(a.occurred_at ?? '')));
+      } else if (query.get('order')?.includes('occurred_at.asc')) {
         rows = [...rows].sort((a, b) => String(a.occurred_at ?? '').localeCompare(String(b.occurred_at ?? '')));
       }
       const limit = Number(query.get('limit') ?? 0);

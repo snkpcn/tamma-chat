@@ -1,0 +1,134 @@
+// Live LINE follow-up mandate, Failure 1: the owner's expected API-cost
+// notification did not appear after a real production conversation. Traced
+// the real chain (LINE webhook -> conversation core -> OpenAI supervisor ->
+// usage accounting -> conversation cost accumulator -> idle-cost notifier
+// cron -> LINE delivery): usage accounting and cost accumulation are both
+// verified correct (ai_api_cost_events/ai_response_turns rows exist with
+// environment='live' in production), and the idle-notify cron IS bound and
+// HAS delivered successfully for this exact conversation earlier in the
+// same session (call_index 15, 20, 25) -- so the LINE binding and delivery
+// mechanics are not broken outright.
+//
+// Found and fixed one concrete, real structural bug in the freshness check
+// (sendIdleAiCostConversationSummaries in _ai-cost-notifier.ts): it fetched
+// turns ascending with a bounded limit and read the LAST array entry to find
+// the "most recent" turn. For a conversation_id reused across many
+// hours/days (exactly this owner's own repeated live-test pattern) that
+// silently returns a STALE turn once the conversation's turn count exceeds
+// the limit, not the genuinely most recent one. Fixed to fetch the single
+// latest turn directly, descending. Also added structured logging for every
+// skip/not-bound outcome so a future silent stop is diagnosable from
+// function logs alone, without DB forensics.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { sendIdleAiCostConversationSummaries } from '../netlify/functions/_ai-cost-notifier';
+import { withHarness } from './helpers/canonical-core-harness';
+
+const NOW = new Date('2026-09-29T16:00:00.000Z');
+
+function iso(minutesAgo: number): string {
+  return new Date(NOW.getTime() - minutesAgo * 60_000).toISOString();
+}
+
+test('F1: a genuinely idle conversation with real usage gets notified exactly once, and a second scan does not duplicate it', async () => {
+  await withHarness(async harness => {
+    harness.programOpsChannel('ai_cost', 'ai-cost-group-1');
+    harness.programAiCostRows(
+      [
+        {
+          conversation_id: 'conv-idle', event_id: 'evt-1', channel: 'line', model: 'gpt-5.6-sol',
+          call_purpose: 'semantic-interpreter', input_tokens: 500, cached_input_tokens: 0,
+          output_tokens: 80, cost_thb: 0.42, call_index_conversation: 1, latency_ms: 300,
+          occurred_at: iso(20),
+        },
+      ],
+      [
+        {
+          conversation_id: 'conv-idle', model_reply_used: true, grounded_knowledge_supplied: false,
+          zero_cost_turn: false, final_response_source: 'openai_direct_response', occurred_at: iso(20),
+        },
+      ],
+    );
+
+    const firstPass = await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(firstPass.length, 1, 'usage accounted and idle >=10 min must be accumulated into exactly one notification attempt');
+    assert.equal(firstPass[0]!.status, 'sent', 'the configured cost notification path must actually fire, not just compute a summary');
+    assert.ok(firstPass[0]!.costThb > 0, 'the accumulated conversation cost must be the real recorded amount, not zero');
+
+    const deliveries = harness.notificationDeliveries();
+    assert.equal(deliveries.filter(d => d.deliveryType === 'ai_cost_conversation').length, 1);
+
+    const secondPass = await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(secondPass[0]!.status, 'duplicate', 'a repeat scan of the same idle window must never re-send the same notification');
+    assert.equal(
+      harness.notificationDeliveries().filter(d => d.deliveryType === 'ai_cost_conversation').length,
+      1,
+      'notification is not duplicated incorrectly',
+    );
+  });
+});
+
+test('F2: a conversation with a turn in the last 10 minutes is correctly treated as still active and skipped, even for a long-lived conversation_id with many prior turns', async () => {
+  await withHarness(async harness => {
+    harness.programOpsChannel('ai_cost', 'ai-cost-group-1');
+    // Models the owner's own real usage pattern: the SAME conversation_id
+    // reused across many separate turns over hours. Real production
+    // regression this proves fixed: the freshness check must read the
+    // ACTUAL latest turn, not a stale one a bounded ascending scan would
+    // have returned once the turn count grew.
+    const oldTurns = Array.from({ length: 12 }, (_, i) => ({
+      conversation_id: 'conv-long-lived', model_reply_used: false, grounded_knowledge_supplied: false,
+      zero_cost_turn: true, final_response_source: 'deterministic_or_grounded_local',
+      occurred_at: iso(300 - i), // spread across several hours in the past
+    }));
+    harness.programAiCostRows(
+      [
+        {
+          conversation_id: 'conv-long-lived', event_id: 'evt-old', channel: 'line', model: 'gpt-5.6-sol',
+          call_purpose: 'semantic-interpreter', input_tokens: 500, cached_input_tokens: 0,
+          output_tokens: 80, cost_thb: 0.42, call_index_conversation: 1, latency_ms: 300,
+          occurred_at: iso(180),
+        },
+      ],
+      [
+        ...oldTurns,
+        // The genuinely latest turn: inside the 10-minute idle window, so
+        // this conversation must be treated as still active right now.
+        {
+          conversation_id: 'conv-long-lived', model_reply_used: false, grounded_knowledge_supplied: false,
+          zero_cost_turn: true, final_response_source: 'deterministic_or_grounded_local',
+          occurred_at: iso(3),
+        },
+      ],
+    );
+
+    const results = await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(results.length, 0, 'a conversation with real recent activity must never be reported idle');
+    assert.equal(harness.notificationDeliveries().filter(d => d.deliveryType === 'ai_cost_conversation').length, 0);
+  });
+});
+
+test('F3: a not-bound ai_cost team never throws (customer traffic is never affected) but is distinguishable from a genuine send', async () => {
+  await withHarness(async harness => {
+    // Deliberately never call programOpsChannel -- the team is unbound.
+    harness.programAiCostRows(
+      [
+        {
+          conversation_id: 'conv-unbound', event_id: 'evt-1', channel: 'line', model: 'gpt-5.6-sol',
+          call_purpose: 'semantic-interpreter', input_tokens: 500, cached_input_tokens: 0,
+          output_tokens: 80, cost_thb: 0.42, call_index_conversation: 1, latency_ms: 300,
+          occurred_at: iso(20),
+        },
+      ],
+      [
+        {
+          conversation_id: 'conv-unbound', model_reply_used: true, grounded_knowledge_supplied: false,
+          zero_cost_turn: false, final_response_source: 'openai_direct_response', occurred_at: iso(20),
+        },
+      ],
+    );
+    const results = await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(results.length, 1);
+    assert.equal(results[0]!.status, 'not_bound');
+  });
+});

@@ -9,7 +9,7 @@
 // turns have centralized deterministic copy so channel handlers never grow
 // their own fallback sentences.
 import type { BrainChannel } from './_thongthai-brain-v3';
-import type { SemanticTurn } from './_semantic-interpreter';
+import type { SemanticDomain, SemanticTurn } from './_semantic-interpreter';
 import type { DialogDecision } from './_dialog-manager';
 import type { KnowledgeBundle, GroundedFact } from './_knowledge-resolver';
 import {
@@ -302,6 +302,7 @@ export function parseComposedResponse(raw: string, input: ResponseComposerInput)
   }
 
   assertOperationalClaimSafety(message, input.operationalOutcome);
+  assertNoInventedTemporalStructure(message, input);
   return { message, usedFactKeys };
 }
 
@@ -322,6 +323,32 @@ export function assertOperationalClaimSafety(
       throw new ResponseCompositionError('composer_false_confirmation_claim');
     }
   }
+}
+
+// A real production regression: a customer describing an in-visit ORDER of
+// activities ("กินเสร็จแล้วค่อยไปขี่ม้า" -- eat, THEN ride) got rewritten by
+// the model into an invented separate-calendar-days itinerary ("วันแรก: ขี่ม้า
+// / วันที่สอง: ตำลาว"), even though the customer never mentioned staying
+// overnight, a second day, or any date. Day/night labels are structural
+// claims about the customer's trip, not phrasing -- they must never appear
+// unless the customer's OWN words (this turn or recent history) actually
+// supplied them.
+const DAY_ORDINAL_LABEL_RE = /วันแรก|วันที่สอง|วันที่หนึ่ง|วันที่\s*\d+\s*[:：]|day\s*\d+\s*[:：]/iu;
+const CUSTOMER_GROUNDED_MULTI_DAY_RE = /\d+\s*วัน\s*\d*\s*คืน|ค้างคืน|พักค้าง|กี่คืน|กี่วัน|วันแรก|วันที่สอง|overnight|multi-?day/iu;
+
+export function assertNoInventedTemporalStructure(
+  message: string,
+  input: Pick<ResponseComposerInput, 'userMessage' | 'conversationContext'>,
+): void {
+  if (!DAY_ORDINAL_LABEL_RE.test(message)) return;
+  const customerText = [
+    input.userMessage ?? '',
+    ...(input.conversationContext?.recentTurns ?? [])
+      .filter(turn => turn.role === 'user')
+      .map(turn => turn.content),
+  ].join(' ');
+  if (CUSTOMER_GROUNDED_MULTI_DAY_RE.test(customerText)) return;
+  throw new ResponseCompositionError('composer_invented_temporal_structure');
 }
 
 /** DB -> OpenAI natural-language composer -> customer (owner's Critical
@@ -495,26 +522,18 @@ function safeModelConversationReply(input: ResponseComposerInput): ComposedRespo
   // continuing turns still keep the conservative veto below.
   const unrelatedCurrentTurn = input.dialogDecision.reasons.includes('task_unrelated_turn_preserved');
   if (task?.commitmentIntent === true && !unrelatedCurrentTurn) return null;
+  // A state readback is never open-ended prose generation: composeThongthaiResponse
+  // handles 'active_task_summary' itself, always deterministically (see
+  // activeTaskSummaryMessage), specifically because the model's own free text
+  // here has been observed inventing an unmentioned domain (verified
+  // organization knowledge the customer never asked about, e.g. accommodation)
+  // and an unstated multi-day trip structure. This function must never be the
+  // one asked to summarize working state.
+  if (input.dialogDecision.responseIntent === 'active_task_summary') return null;
 
-  let customerReply = reply;
-  if (input.dialogDecision.responseIntent === 'active_task_summary') {
-    // A model can summarize cross-domain conversational state more naturally
-    // than the bounded ActiveTask renderer, but the owner/test contract
-    // requires the CURRENT transaction status to be explicit.  A conditional
-    // sentence such as "if both are unavailable, don't book" is an instruction,
-    // not proof that nothing has been booked.  Append one canonical status
-    // sentence from the verified operational outcome instead of asking the
-    // model to infer transaction state from prose/history.
-    const outcome = input.operationalOutcome;
-    const hasExecuted = outcome?.executed === true && outcome.success === true;
-    if (!hasExecuted) {
-      customerReply = input.language === 'th'
-        ? customerReply.replace(/\s+$/u, '') + '\n\nตอนนี้ยังไม่ได้ยืนยันหรือจองรายการใดให้ครับ'
-        : customerReply.replace(/\s+$/u, '') + '\n\nNothing in this working summary has been confirmed or booked.';
-    }
-  }
-
+  const customerReply = reply;
   assertOperationalClaimSafety(customerReply, input.operationalOutcome);
+  assertNoInventedTemporalStructure(customerReply, input);
   return {
     message: polishCustomerMessage(customerReply, input.channel),
     mode:'model',
@@ -1112,6 +1131,81 @@ function formatTaskSummaryValue(key: string, value: unknown, language: ResponseL
   return String(value);
 }
 
+// State-model discipline for a summary/readback (real production regression):
+// verified ORGANIZATION knowledge (what Tam Ma-Chat offers) must never
+// silently become CUSTOMER intent. A customer who only discussed food and
+// horse riding was shown "ที่พักทำมา-ชาติ เฮือนสเตย์" in their own summary --
+// accommodation they never asked about -- because the summary trusted the
+// model's own cross-sell-flavored prose. Both helpers below read ONLY
+// grounded, customer-observed conversation state (what the customer actually
+// said, never the business's full catalog), and unrecognized constraint
+// codes are silently omitted rather than rendered with a guessed label.
+const PREFERENCE_CONSTRAINT_LABELS_TH: Readonly<Record<string, string>> = {
+  no_shrimp: 'แพ้/ไม่ทานกุ้ง',
+  shrimp_allergy: 'แพ้กุ้ง',
+  no_peanut: 'แพ้/ไม่ทานถั่ว',
+  peanut_allergy: 'แพ้ถั่ว',
+  no_egg: 'แพ้/ไม่ทานไข่',
+  egg_allergy: 'แพ้ไข่',
+  no_fish: 'แพ้/ไม่ทานปลา',
+  fish_allergy: 'แพ้ปลา',
+  food_allergy: 'มีอาการแพ้อาหารบางชนิด',
+  no_pork: 'ไม่ทานหมู',
+  no_beef: 'ไม่ทานเนื้อวัว',
+  no_chicken: 'ไม่ทานไก่',
+  vegetarian: 'ทานมังสวิรัติ',
+  low_spicy: 'ชอบอาหารไม่เผ็ดมาก',
+  mild_spice: 'ชอบอาหารไม่เผ็ดมาก',
+  no_spicy: 'ทานเผ็ดไม่ได้',
+  low_intensity: 'ชอบกิจกรรมเบาๆ ไม่หนักมาก',
+  fear_of_falling: 'กังวลเรื่องกลัวตก/ล้ม',
+  fear_of_speed: 'ไม่ชอบความเร็ว',
+};
+
+function preferenceItems(input: ResponseComposerInput): string[] {
+  const constraints = input.conversationContext?.workingMemory?.constraints ?? [];
+  return [...new Set(
+    constraints
+      .map(constraint => PREFERENCE_CONSTRAINT_LABELS_TH[constraint.code])
+      .filter((label): label is string => Boolean(label)),
+  )];
+}
+
+const DOMAIN_INTEREST_LABELS_TH: Readonly<Partial<Record<SemanticDomain, string>>> = {
+  restaurant: 'อาหาร',
+  activity: 'กิจกรรม',
+  stay: 'ที่พัก',
+  cafe: 'คาเฟ่',
+  otop: 'ของฝาก/OTOP',
+  journey: 'แผนเที่ยว',
+  promotion: 'โปรโมชัน',
+};
+
+function discussedDomains(input: ResponseComposerInput): SemanticDomain[] {
+  const container = input.dialogDecision.taskStateContainer;
+  const domains = new Set<SemanticDomain>();
+  if (container.activeTask) domains.add(container.activeTask.domain);
+  if (container.suspendedTask) domains.add(container.suspendedTask.domain);
+  for (const selection of input.conversationContext?.workingMemory?.consideredSelections ?? []) {
+    domains.add(selection.domain);
+  }
+  for (const constraint of input.conversationContext?.workingMemory?.constraints ?? []) {
+    if (PREFERENCE_CONSTRAINT_LABELS_TH[constraint.code]) domains.add(constraint.domain);
+  }
+  for (const entity of input.conversationContext?.recentEntities ?? []) {
+    domains.add(entity.domain);
+  }
+  return [...domains];
+}
+
+function interestItems(input: ResponseComposerInput): string[] {
+  return [...new Set(
+    discussedDomains(input)
+      .map(domain => DOMAIN_INTEREST_LABELS_TH[domain])
+      .filter((label): label is string => Boolean(label)),
+  )];
+}
+
 function taskSummaryItems(
   task: ResponseComposerInput['dialogDecision']['taskStateContainer']['activeTask'],
   language: ResponseLanguage,
@@ -1139,6 +1233,17 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
   const container = input.dialogDecision.taskStateContainer;
   const activeItems = taskSummaryItems(container.activeTask, input.language);
   const suspendedItems = taskSummaryItems(container.suspendedTask, input.language);
+  const interests = interestItems(input);
+  const preferences = preferenceItems(input);
+  const extraSections: string[] = input.language === 'th'
+    ? [
+        interests.length ? `สนใจ: ${interests.join(', ')}` : '',
+        preferences.length ? `ความชอบ/ข้อจำกัดที่เคยแจ้งไว้: ${preferences.join(', ')}` : '',
+      ].filter(Boolean)
+    : [
+        interests.length ? `Interested in: ${interests.join(', ')}` : '',
+        preferences.length ? `Stated preferences/constraints: ${preferences.join(', ')}` : '',
+      ].filter(Boolean);
 
   if (!activeItems.length && !suspendedItems.length) {
     // Consider-only selections deliberately live in ConversationContext
@@ -1156,24 +1261,24 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
     const entityName = considered?.name
       ?? recentEntity?.name
       ?? firstCustomerFacingEntity(input.semanticTurn?.entities ?? {});
-    if (input.language === 'th') {
-      return entityName
+    const lead = input.language === 'th'
+      ? (entityName
         ? `ตอนนี้เลือกไว้เป็น ${entityName} ครับ แต่ยังไม่ได้ยืนยันการจอง และยังไม่ได้จองหรือส่งรายการ`
-        : 'ตอนนี้ยังไม่มีรายการที่กำลังเลือกหรือกรอกค้างอยู่ครับ และยังไม่ได้ยืนยันการจอง และยังไม่ได้จองหรือส่งรายการ';
-    }
-    return entityName
-      ? `The current selection is ${entityName}, but nothing has been booked or submitted.`
-      : 'There is no active or suspended selection right now, and nothing has been booked or submitted.';
+        : 'ตอนนี้ยังไม่มีรายการที่กำลังเลือกหรือกรอกค้างอยู่ครับ และยังไม่ได้ยืนยันการจอง และยังไม่ได้จองหรือส่งรายการ')
+      : (entityName
+        ? `The current selection is ${entityName}, but nothing has been booked or submitted.`
+        : 'There is no active or suspended selection right now, and nothing has been booked or submitted.');
+    return extraSections.length ? `${extraSections.join('\n')}\n\n${lead}` : lead;
   }
 
   if (input.language === 'th') {
-    const sections: string[] = [];
+    const sections: string[] = [...extraSections];
     if (activeItems.length) sections.push(`รายการที่กำลังคุยอยู่:\n• ${activeItems.join('\n• ')}`);
     if (suspendedItems.length) sections.push(`รายการที่พักไว้ก่อน:\n• ${suspendedItems.join('\n• ')}`);
     return `${sections.join('\n\n')}\n\nทั้งหมดนี้ยังเป็นข้อมูลที่คุยกันอยู่ ยังไม่ได้ยืนยันการจอง และยังไม่ได้จองหรือส่งรายการครับ`;
   }
 
-  const sections: string[] = [];
+  const sections: string[] = [...extraSections];
   if (activeItems.length) sections.push(`Current:\n- ${activeItems.join('\n- ')}`);
   if (suspendedItems.length) sections.push(`Paused:\n- ${suspendedItems.join('\n- ')}`);
   return `${sections.join('\n\n')}\n\nThese are conversation-state details only; nothing has been confirmed or submitted.`;
@@ -1396,12 +1501,14 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
   // A task summary is a readback of canonical working state, not an
   // open-ended prose-generation problem. It must outrank generic grounded
-  // rendering and the semantic model's conversational draft so stale/missing
-  // booking fields cannot replace the summary, and the customer always sees
-  // the real no-transaction status from ActiveTask state.
+  // rendering and the semantic model's conversational draft -- never the
+  // model's own free text (safeModelConversationReply refuses this
+  // responseIntent outright; see its own comment) -- so stale/missing
+  // booking fields cannot replace the summary, verified organization
+  // knowledge the customer never asked about cannot leak into it, and the
+  // customer always sees the real no-transaction status from ActiveTask
+  // state.
   if (input.dialogDecision.responseIntent === 'active_task_summary') {
-    const modelConversation = safeModelConversationReply(input);
-    if (modelConversation) return modelConversation;
     return composeDeterministicResponse(input);
   }
 
