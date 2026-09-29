@@ -16,7 +16,7 @@ import {
   hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest,
 } from './_slot-parsers';
 import { isExperienceDiscoveryIntent, PRIOR_REFERENCE_MARKER } from './_experience-discovery';
-import { isPromotionDiscoveryIntent } from './_promotion-dialog';
+import { isPromotionAcceptIntent, isPromotionDiscoveryIntent, isPromotionMention } from './_promotion-dialog';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 
 export const DETERMINISTIC_SEMANTIC_TURN_VERSION = 'deterministic-semantic-turn-v1';
@@ -273,6 +273,40 @@ function findMembershipTopic(message: string): boolean {
   return MEMBERSHIP_TOPIC_MARKER.test(message);
 }
 
+const PROMOTION_RECOMMENDATION_MARKER =
+  /คุ้ม(?:สุด|กว่า)?|ดี(?:ที่สุด|สุด)|เหมาะ(?:ที่สุด|สุด)|ถูก(?:ที่สุด|สุด)|ลด(?:เยอะ|มาก)(?:ที่สุด|สุด)?|แนะนำ/u;
+const NO_NEW_MEMBERSHIP_MARKER =
+  /(?:ไม่(?:เอา|ต้องการ|อยาก|ขอ)[^\n,.!?？]{0,36}(?:ต้อง\s*)?สมัครสมาชิก|(?:ไม่ต้อง|ไม่อยาก|ไม่ขอ)\s*สมัครสมาชิก|ไม่[^\n,.!?？]{0,20}สมาชิกเพิ่ม)/u;
+
+/** Provider-outage fallback for PROMOTION READS only.
+ * Explicit accept/redeem phrases are deliberately excluded so the existing
+ * promotion redemption state machine remains the sole transaction owner. */
+function promotionReadOnlyFallback(message: string): SemanticTurn | null {
+  if (!isPromotionMention(message) || isPromotionAcceptIntent(message)) return null;
+  const recommending = PROMOTION_RECOMMENDATION_MARKER.test(message);
+  const discovering = isPromotionDiscoveryIntent(message);
+  if (!recommending && !discovering) return null;
+
+  const entities: Record<string, unknown> = {};
+  if (/ร้านอาหาร|อาหาร|กินข้าว/u.test(message)) entities.businessScope = 'restaurant';
+  else if (/ห้อง|ที่พัก|พัก/u.test(message)) entities.businessScope = 'stay';
+  else if (/กิจกรรม|ขี่ม้า|atv|ยิงธนู|เป็ดน้ำ/iu.test(message)) entities.businessScope = 'activity';
+  else if (/ของฝาก|otop/iu.test(message)) entities.businessScope = 'otop';
+  else if (/กาแฟ|คาเฟ่|อินทนิล|inthanin/iu.test(message)) entities.businessScope = 'cafe';
+
+  return {
+    domain:'promotion',
+    intent:recommending ? 'promotion_recommendation' : 'promotion_discovery',
+    action:recommending ? 'recommend' : 'discover',
+    informationNeed:recommending ? 'recommendation' : 'catalog',
+    entities,
+    references:[],
+    constraints:NO_NEW_MEMBERSHIP_MARKER.test(message) ? ['no_new_membership'] : [],
+    confidence:0.9,
+    needsClarification:false,
+  };
+}
+
 /** A structural fallback, tried only once nothing task-specific matches
  *  (see deriveDeterministicSemanticTurn below): does this message name a
  *  DIFFERENT supported topic than whatever is currently active? If so, it's
@@ -282,17 +316,10 @@ function findMembershipTopic(message: string): boolean {
  *  differs from the active task's. Reuses the SAME topic-narrow markers
  *  already used for the no-task case, never a new phrase table. */
 function detectCrossDomainTopicSwitch(message: string, now: Date = new Date()): SemanticTurn | null {
-  // Promotion questions are cross-cutting by design. A current membership,
-  // restaurant, stay, or activity context must never absorb a clear request
-  // to browse promotions. Reuse the existing promotion dialog classifier so
-  // this remains one shared intent class rather than a new phrase patch.
-  if (isPromotionDiscoveryIntent(message)) {
-    return {
-      domain: 'promotion', intent: 'promotion_discovery', action: 'discover',
-      informationNeed: 'catalog',
-      entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false,
-    };
-  }
+  // Promotion is cross-cutting: the promotion remains the primary subject
+  // even when the message also names its restaurant/stay/activity scope.
+  const promotionTurn = promotionReadOnlyFallback(message);
+  if (promotionTurn) return promotionTurn;
   if (findRestaurantTableStatusQuestion(message)) {
     const entities: Record<string, unknown> = {};
     const date = extractDate(message, now);
@@ -1020,6 +1047,9 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  const promotionTurn = promotionReadOnlyFallback(trimmed);
+  if (promotionTurn) return promotionTurn;
+
   // A restaurant-topic marker with no active task (e.g. mid a stay
   // conversation that never created a task, since stay has no
   // task-creation mechanism today -- see THONGTHAI_HANDOFF.md). Without
@@ -1097,20 +1127,6 @@ export function deriveDeterministicSemanticTurn(
       references: [],
       constraints: [],
       confidence: 0.82,
-      needsClarification: false,
-    };
-  }
-
-  if (isPromotionDiscoveryIntent(trimmed)) {
-    return {
-      domain: 'promotion',
-      intent: 'promotion_discovery',
-      action: 'discover',
-      informationNeed: 'catalog',
-      entities: {},
-      references: [],
-      constraints: [],
-      confidence: 0.9,
       needsClarification: false,
     };
   }
