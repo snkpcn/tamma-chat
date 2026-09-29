@@ -144,6 +144,13 @@ function isExplicitTransaction(turn: SemanticTurn): boolean {
   return deriveSemanticMeaning(turn).commitmentLevel === 'explicit_transaction';
 }
 
+const NO_TRANSACTION_CONSTRAINT_RE = /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu;
+
+function explicitlyRevokesTransaction(turn: SemanticTurn): boolean {
+  return !isExplicitTransaction(turn)
+    && turn.constraints.some(constraint => NO_TRANSACTION_CONSTRAINT_RE.test(constraint));
+}
+
 /** An active task is INTERRUPTIBLE: having an unfinished task does not mean
  *  every following message is a slot fill. These actions are inherently
  *  side-questions/browsing, never a customer providing task information --
@@ -594,6 +601,18 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
         slotPatch, requiredFields: DOMAIN_TASK_REQUIRED_FIELDS[container.activeTask!.type] ?? [],
       }, now);
     }
+  }
+
+  // Consent is stateful while the customer is merely filling slots, but it is
+  // also REVOCABLE. A CURRENT explicit "not booking yet / consider only"
+  // semantic constraint must erase any historical commitment before this
+  // turn can be planned further; otherwise a later innocent slot fill could
+  // resurrect an old write authorization.
+  if (explicitlyRevokesTransaction(turn) && container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+    container = applyTaskStateEvent(container, {
+      kind:'clear_commitment', eventId:`${eventId}:commitment_revoked`,
+    }, now);
+    reasons.push('transaction_commitment_revoked');
   }
 
   // Remember an explicit book/order request across the remaining slot-
