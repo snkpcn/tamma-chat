@@ -91,9 +91,14 @@ test('Phase 6 final: shared current-turn boundary rejects questions, resume lang
   }
   assert.equal(hasStandaloneTransactionRequest('จองเลย'), true);
   assert.equal(hasStandaloneTransactionRequest('ยืนยันจอง'), true);
-  assert.equal(hasStandaloneTransactionRequest('จองไว้ก่อน'), true,
-    '"จองไว้ก่อน" is an explicit transaction, unlike a bare conversational hold');
-  assert.equal(hasExplicitNoTransactionMarker('จองไว้ก่อน'), false);
+  for (const message of ['จองไว้ก่อน','จองม้าไว้ก่อน','สั่งอาหารไว้ก่อน']) {
+    assert.equal(hasStandaloneTransactionRequest(message), true, message);
+    assert.equal(hasExplicitNoTransactionMarker(message), false, message);
+  }
+  assert.equal(hasStandaloneTransactionRequest('ไม่จองอันนี้ แต่จองอีกอัน'), true,
+    'a later affirmative alternative must outrank an earlier rejected transaction');
+  assert.equal(hasStandaloneTransactionRequest('จองอันนี้ แต่เปลี่ยนใจ ยังไม่จอง'), false,
+    'a later withholding signal must revoke an earlier affirmative request');
   assert.equal(hasExplicitNoTransactionMarker('เอาไว้ก่อน ยังไม่ต้องจอง'), true);
 
   // Same-turn self-correction: the latest explicit consent signal wins.
@@ -363,6 +368,29 @@ test('Phase 6 final: parser fails closed when model mislabels resume/withhold te
   assert.notEqual(withheld.action, 'book');
   assert.notEqual(withheld.speechAct, 'transaction_request');
   assert.ok(withheld.constraints.includes('no_transaction'));
+
+  const availabilityModel = JSON.stringify({
+    normalizedMeaning:'customer asks availability but explicitly is not booking yet',
+    reply:'',
+    speechAct:'transaction_request',
+    domain:'activity',
+    intent:'check_availability_without_booking',
+    action:'book',
+    informationNeed:'availability',
+    entities:{resourceCode:'activity-horse'},
+    references:[],
+    constraints:[],
+    confidence:0.99,
+    needsClarification:false,
+  });
+  const readOnlyNeed = parseSemanticTurnResponse(
+    availabilityModel,
+    context,
+    'ตัวนี้วันที่หกยังว่างไหม แต่ยังไม่จองนะ',
+  );
+  assert.notEqual(readOnlyNeed.action,'book');
+  assert.equal(readOnlyNeed.informationNeed,'availability');
+  assert.ok(readOnlyNeed.constraints.includes('no_transaction'));
 
   const trulyCommitted = parseSemanticTurnResponse(badModel, context, 'กลับไปเรื่องม้าที่ค้างไว้ แล้วจองเลย');
   assert.equal(trulyCommitted.action, 'book');
