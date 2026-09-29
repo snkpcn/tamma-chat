@@ -1454,7 +1454,8 @@ export function parseSemanticTurnResponse(
     // override an explicit CURRENT "not booking/order yet" statement.
     if (action === 'book' || action === 'order') action = 'ask';
     if (speechAct === 'transaction_request') speechAct = 'correction';
-    informationNeed = 'none';
+    // Keep any legitimate read-only predicate (availability/price/policy/etc).
+    // Revoking WRITE authority must not erase what the customer asked to know.
   }
 
   if (
