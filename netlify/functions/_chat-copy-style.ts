@@ -38,21 +38,14 @@ const MARKDOWN_TABLE_DIVIDER = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/;
 const BULLET_LINE = /^\s*•\s+/;
 const EMOJI_RE = /[\p{Extended_Pictographic}\uFE0F]/u;
 const LINE_PLATFORM_TEXT_LIMIT = 4900;
-const THONGTHAI_LINE_POLITE_PARTICLE_REPLACEMENTS: Array<[RegExp, string]> = [
-  [/เป็นพิเศษคะ(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu, 'เป็นพิเศษครับ'],
-  [/ไหมคะ(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu, 'ไหมครับ'],
-  [/นะคะ(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu, 'นะครับ'],
-  [/ได้ค่ะ(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu, 'ได้ครับ'],
-];
+const THONGTHAI_LINE_POLITE_PARTICLE = /(?:คะ|ค่ะ)(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu;
 
 function enforceThongthaiLinePoliteParticle(value: string): string {
-  // Narrow LINE-only production guard for the observed Thongthai voice leak.
-  // Do not globally rewrite every "คะ/ค่ะ"; hidden holdouts include legitimate
-  // Thai text, quotes, and web copy where preserving the original matters.
-  return THONGTHAI_LINE_POLITE_PARTICLE_REPLACEMENTS.reduce(
-    (text, [pattern, replacement]) => text.replace(pattern, replacement),
-    value,
-  );
+  // LINE/customer-facing Thongthai must not leak feminine polite particles.
+  // This only rewrites standalone sentence-final particles before a boundary;
+  // content words such as "คะน้า" are preserved because the next character is
+  // not a sentence boundary.
+  return value.replace(THONGTHAI_LINE_POLITE_PARTICLE, 'ครับ');
 }
 
 function plainInlineMarkdown(value: string): string {
