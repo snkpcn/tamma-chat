@@ -174,13 +174,29 @@ test('reset really resets: persisted routing/discourse memory is actually cleare
       }],
     };
     const existing = harness.getState(guestDbId);
-    harness.setState(guestDbId, { ...(existing?.state ?? {}), conversationContext: seeded });
+    harness.setState(guestDbId, {
+      ...(existing?.state ?? {}),
+      conversationContext: seeded,
+      aiCostLedger: {
+        version:'ai-cost-ledger-v1',
+        conversationId:gid,
+        startedAt:new Date().toISOString(),
+        lastActivityAt:new Date().toISOString(),
+        cumulativeCostUsd:0.12,
+        reservedCostUsd:0,
+        callCount:4,
+        events:[],
+      },
+    });
 
     const reset = await processThongthaiChatCore(brainRequest('เริ่มใหม่ครับ', gid, 'web'), 'evt-1');
     assert.equal(reset.statusCode, 200);
-    const after = harness.getState(guestDbId)?.state?.conversationContext as { activeDomain?: string | null; recentEntities?: unknown[] } | undefined;
+    const afterState = harness.getState(guestDbId)?.state;
+    const after = afterState?.conversationContext as { activeDomain?: string | null; recentEntities?: unknown[] } | undefined;
     assert.equal(after?.activeDomain ?? null, null, 'reset must actually clear the persisted active domain, not just say it will');
     assert.equal((after?.recentEntities ?? []).length, 0, 'reset must actually clear persisted recent entities');
+    assert.equal(afterState?.aiCostLedger, undefined,
+      'an explicit start-over must also start a fresh per-conversation AI budget instead of inheriting the previous session spend');
   });
 });
 
