@@ -552,3 +552,31 @@ for (const channel of ['web', 'line'] as const) {
     });
   });
 }
+
+
+test('Phase 6 final: provider fallback keeps promotion primary and preserves no-new-membership without stealing redemption', () => {
+  const recommendation = deriveDeterministicSemanticTurn(
+    'เอาโปรร้านอาหารที่คุ้มสุด แต่ไม่เอาแบบต้องสมัครสมาชิกเพิ่มนะ',
+    {...emptySemanticContext(),activeDomain:'restaurant'},
+    emptyTaskStateContainer(),
+    NOW,
+  );
+  assert.ok(recommendation);
+  assert.equal(recommendation!.domain,'promotion');
+  assert.equal(recommendation!.action,'recommend');
+  assert.equal(recommendation!.informationNeed,'recommendation');
+  assert.equal(recommendation!.entities.businessScope,'restaurant');
+  assert.ok(recommendation!.constraints.includes('no_new_membership'));
+
+  const acceptance = deriveDeterministicSemanticTurn(
+    'เอาโปรนี้ พรุ่งนี้ 12:00 ชื่อสมหญิง',
+    {...emptySemanticContext(),activeDomain:'promotion'},
+    emptyTaskStateContainer(),
+    NOW,
+  );
+  assert.ok(
+    acceptance === null
+      || !(acceptance.domain === 'promotion' && ['discover','recommend'].includes(acceptance.action)),
+    'explicit promotion acceptance must remain owned by the redemption flow, never downgraded to read-only discovery',
+  );
+});
