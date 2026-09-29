@@ -217,7 +217,7 @@ test('Phase 6 E2E provider outage cannot mutate or advance an existing committed
   let snapshot:GuestAgentStateSnapshot={exists:false,state:{},updatedAt:null};
   let offset=0;
   let outage=false;
-  const first='จองขี่ม้าภาราดร วันที่ 6 ตุลาคม 60 นาที สองคน';
+  const first='จองขี่ม้าภาราดร วันที่ 6 ตุลาคม 45 นาที สองคน';
   const deps:Partial<OneMindDependencies>={
     resolveCanonicalGuestId:async()=>CANON,
     guestDbIdFromAnonymousId:async()=>GUEST,
@@ -226,12 +226,15 @@ test('Phase 6 E2E provider outage cannot mutate or advance an existing committed
       assert.equal(message,first);
       return semantic({
         domain:'activity',intent:'book_horse',action:'book',speechAct:'transaction_request',
-        entities:{resourceCode:'activity-horse',horseName:'ภาราดร',date:'2026-10-06',durationMinutes:60,partySize:2},
+        entities:{resourceCode:'activity-horse',horseName:'ภาราดร',date:'2026-10-06',durationMinutes:45,partySize:2},
       });
     },
     buildKnowledgeAdapters:()=>({
       activity:{catalog:async()=>ok('activity_catalog','activity_live',[
+        fact('activity_asset:horse-pharadon:name','ภาราดร','activity','activity_catalog','activity_live'),
+        fact('activity_asset:horse-pharadon:activityCode','horse','activity','activity_catalog','activity_live'),
         fact('activity:horse:resourceCode','activity-horse','activity','activity_catalog','activity_live'),
+        fact('activity:horse:45min:price',500,'activity','activity_catalog','activity_live'),
       ])},
     }),
     mirrorActivityTaskToLegacySession:async()=>{},

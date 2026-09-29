@@ -143,7 +143,7 @@ test('M3 SOURCE_UNAVAILABLE is never rendered as "none available"',async()=>{
 test('M4 activity: explicit booking commit reaches ActionProposal but never executes inside One-Mind',async()=>{
   const state=memoryState();
   let turn=semantic('activity','confirm','select_horse',{
-    resourceCode:'activity-horse',horseName:'ภาราดร',date:'2026-09-19',durationMinutes:60,partySize:2,
+    resourceCode:'activity-horse',horseName:'ภาราดร',date:'2026-09-19',durationMinutes:45,partySize:2,
   });
   const adapters:KnowledgeSourceAdapters={
     activity:{
@@ -152,13 +152,15 @@ test('M4 activity: explicit booking commit reaches ActionProposal but never exec
       ]),
       catalog:async()=>ok('activity_catalog','activity_live',[
         fact('activity:horse:name','ขี่ม้า','activity','activity_catalog','activity_live'),
+        fact('activity:horse:resourceCode','activity-horse','activity','activity_catalog','activity_live'),
+        fact('activity:horse:45min:price',500,'activity','activity_catalog','activity_live'),
       ]),
     },
   };
   const deps=oneMindDeps(()=>turn,()=>adapters);
 
   const select=await processThongthaiOneMindTurnAuthoritative({
-    channel:'line',message:'เอาภาราดร 60 นาที พรุ่งนี้สองคน',eventId:'m-activity-select',
+    channel:'line',message:'เอาภาราดร 45 นาที พรุ่งนี้สองคน',eventId:'m-activity-select',
     providerUserKey:'line-key',persistState:true,environment:'test',
   },deps,state.deps,NOW);
   assert.ok(select.taskStateAfter.activeTask);

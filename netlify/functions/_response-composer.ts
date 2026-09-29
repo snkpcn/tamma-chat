@@ -1442,6 +1442,9 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     const durationChoice = missing.includes('durationMinutes')
       ? activityDurationChoiceForCollectField(input)
       : null;
+    const rejectedDuration = input.dialogDecision.reasons.includes('activity_duration_rejected')
+      ? Number(input.semanticTurn?.entities.durationMinutes)
+      : NaN;
     if (durationChoice?.status === 'multiple' && input.language === 'th') {
       // Authoritative activity duration policy: more than one verified
       // duration means ASK, never silently pick one. The choices come
@@ -1451,7 +1454,15 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
       const timeAck = suppliedTime
         ? `รับเวลา ${suppliedTime} ไว้ก่อนครับ (ยังไม่ได้ยืนยันคิว)\n`
         : '';
-      message = `${timeAck}เลือกระยะเวลาได้เลยครับ: ${durationChoice.options.map(minutes => `${minutes} นาที`).join(' หรือ ')}`;
+      const rejected = Number.isFinite(rejectedDuration)
+        ? `${rejectedDuration} นาทีไม่มีในตัวเลือกของกิจกรรมนี้ครับ `
+        : '';
+      message = `${timeAck}${rejected}${activeTaskSubjectTh(input)}เลือกระยะเวลาได้เลยครับ: ${durationChoice.options.map(minutes => `${minutes} นาที`).join(' หรือ ')}`;
+    } else if (durationChoice?.status === 'single' && input.language === 'th') {
+      const rejected = Number.isFinite(rejectedDuration)
+        ? `${rejectedDuration} นาทีไม่มีในตัวเลือกของกิจกรรมนี้ครับ `
+        : '';
+      message = `${rejected}${activeTaskSubjectTh(input)}ระยะเวลาที่มีในระบบตอนนี้คือ ${durationChoice.durationMinutes} นาทีครับ`;
     } else if (durationChoice?.status === 'unknown' && input.language === 'th') {
       message = 'ตอนนี้ทองไทยยังเช็กระยะเวลาของกิจกรรมนี้ให้ไม่ได้ครับ ไม่ขอเดา ให้ทีมงานช่วยตรวจสอบอีกครั้งนะครับ';
     } else if (input.language === 'th' && missing.length) {

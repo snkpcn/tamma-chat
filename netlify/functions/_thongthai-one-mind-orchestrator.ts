@@ -1464,7 +1464,9 @@ async function mirrorActivityTaskIfLineSourced(
   if (isTerminalTaskStatus(task.status)) return;
 
   const durationRaw = Number(task.slots.durationMinutes);
-  const durationMinutes = durationRaw === 30 || durationRaw === 60 || durationRaw === 90 ? (durationRaw as 30 | 60 | 90) : null;
+  const durationMinutes = Number.isInteger(durationRaw) && durationRaw >= 5 && durationRaw <= 600
+    ? durationRaw
+    : null;
 
   await deps.mirrorActivityTaskToLegacySession({
     guestDbId,

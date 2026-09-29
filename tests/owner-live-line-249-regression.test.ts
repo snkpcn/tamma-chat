@@ -47,6 +47,10 @@ test('OWNER LIVE #249: exact LINE continuity sequence survives provider outage w
     const duration = await send('เอา 60 นาที');
     assert.doesNotMatch(duration,/หมายถึงเมนู|เรื่องร้านอาหาร|ที่คุยไว้ก่อนหน้านี้/u,
       'duration-only follow-up must continue the held horse, not stale restaurant state');
+    assert.match(duration,/60 นาที.*ไม่มี|ไม่มี.*60 นาที/u,
+      'an unsupported horse duration must be rejected against the live catalog');
+    assert.match(duration,/30 นาที/u);
+    assert.match(duration,/45 นาที/u);
 
     const guestDbId = harness.guestDbId(gid)!;
     const afterDuration = harness.getState(guestDbId)?.state?.taskState as {
@@ -54,13 +58,22 @@ test('OWNER LIVE #249: exact LINE continuity sequence survives provider outage w
     } | undefined;
     assert.equal(afterDuration?.activeTask?.domain,'activity');
     assert.equal(afterDuration?.activeTask?.slots?.horseName,'ภาราดร');
-    assert.equal(afterDuration?.activeTask?.slots?.durationMinutes,60);
+    assert.equal(afterDuration?.activeTask?.slots?.durationMinutes,undefined);
     assert.equal(afterDuration?.activeTask?.commitmentIntent,false);
+    assert.equal(harness.postsTo('bookings').length,0);
+
+    const supportedDuration=await send('งั้นขอ 45 นาที แต่ยังไม่จองนะครับ');
+    assert.doesNotMatch(supportedDuration,/60 นาที.*ไม่มี/u);
+    const afterSupportedDuration=harness.getState(guestDbId)?.state?.taskState as {
+      activeTask?: { domain?: string; slots?: Record<string,unknown>; commitmentIntent?: boolean };
+    } | undefined;
+    assert.equal(afterSupportedDuration?.activeTask?.slots?.durationMinutes,45);
+    assert.equal(afterSupportedDuration?.activeTask?.commitmentIntent,false);
     assert.equal(harness.postsTo('bookings').length,0);
 
     const summary = await send('ตอนนี้ที่คุยไว้มีอะไรบ้าง');
     assert.match(summary,/ภาราดร/u);
-    assert.match(summary,/60/u);
+    assert.match(summary,/45/u);
     assert.doesNotMatch(summary,/จองแล้ว|ยืนยันการจองแล้ว|ส่งคำขอจอง/u);
 
     await send('พักเรื่องม้าไว้ก่อน ขอโปรร้านอาหารที่คุ้มสุด แต่ไม่เอาแบบต้องสมัครสมาชิกเพิ่ม');
@@ -76,7 +89,7 @@ test('OWNER LIVE #249: exact LINE continuity sequence survives provider outage w
     } | undefined;
     assert.equal(afterResume?.activeTask?.domain,'activity');
     assert.equal(afterResume?.activeTask?.slots?.horseName,'ภาราดร');
-    assert.equal(afterResume?.activeTask?.slots?.durationMinutes,60);
+    assert.equal(afterResume?.activeTask?.slots?.durationMinutes,45);
     assert.equal(afterResume?.activeTask?.commitmentIntent,false);
 
     await send('ตัวที่เลือกไว้วันที่ 6 ว่างไหม แต่ยังไม่จองนะ');

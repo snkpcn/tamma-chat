@@ -32,7 +32,11 @@ function knowledgeAdapters(): OneMindDependencies['buildKnowledgeAdapters'] {
     activity: {
       catalog: async (): Promise<SourceResult> => ({
         status: 'ok', sourceId: 'activity_assets', sourceType: 'activity_live', fetchedAt: NOW.toISOString(),
-        data: [{ key: 'activity:horse:price', value: 500, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }],
+        data: [
+          { key: 'activity:horse:resourceCode', value: 'activity-horse', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+          { key: 'activity:horse:30min:price', value: 300, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+          { key: 'activity:horse:45min:price', value: 500, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+        ],
       }),
       availability: async (): Promise<SourceResult> => ({
         status: 'ok', sourceId: 'schedule_rows', sourceType: 'activity_live', fetchedAt: NOW.toISOString(),
@@ -56,7 +60,7 @@ async function runConversation(channel: BrainChannel, guestDbId: string, mirrorC
     'เอา 30 นาทีครับ',
     '3 ตุลาคม เวลา 13.00',
     '2 คน',
-    'จริงๆ เปลี่ยนเป็น 60 นาที',
+    'จริงๆ เปลี่ยนเป็น 45 นาที',
     'ยืนยันการจอง',
   ];
 

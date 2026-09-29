@@ -174,19 +174,20 @@ test('reset really resets: persisted routing/discourse memory is actually cleare
       }],
     };
     const existing = harness.getState(guestDbId);
+    const seededLedger = {
+      version:'ai-cost-ledger-v1',
+      conversationId:gid,
+      startedAt:new Date().toISOString(),
+      lastActivityAt:new Date().toISOString(),
+      cumulativeCostUsd:0.12,
+      reservedCostUsd:0,
+      callCount:4,
+      events:[],
+    };
     harness.setState(guestDbId, {
       ...(existing?.state ?? {}),
       conversationContext: seeded,
-      aiCostLedger: {
-        version:'ai-cost-ledger-v1',
-        conversationId:gid,
-        startedAt:new Date().toISOString(),
-        lastActivityAt:new Date().toISOString(),
-        cumulativeCostUsd:0.12,
-        reservedCostUsd:0,
-        callCount:4,
-        events:[],
-      },
+      aiCostLedger: seededLedger,
     });
 
     const reset = await processThongthaiChatCore(brainRequest('เริ่มใหม่ครับ', gid, 'web'), 'evt-1');
@@ -195,22 +196,51 @@ test('reset really resets: persisted routing/discourse memory is actually cleare
     const after = afterState?.conversationContext as { activeDomain?: string | null; recentEntities?: unknown[] } | undefined;
     assert.equal(after?.activeDomain ?? null, null, 'reset must actually clear the persisted active domain, not just say it will');
     assert.equal((after?.recentEntities ?? []).length, 0, 'reset must actually clear persisted recent entities');
-    assert.equal(afterState?.aiCostLedger, undefined,
-      'an explicit start-over must also start a fresh per-conversation AI budget instead of inheriting the previous session spend');
+    assert.deepEqual(afterState?.aiCostLedger, seededLedger,
+      'conversation reset must not mint a fresh accounting budget session');
+    assert.equal((afterState?.aiCostLedger as { cumulativeCostUsd?: number } | undefined)?.cumulativeCostUsd,0.12,
+      'historical spend in the active accounting session remains auditable and enforceable');
   });
 });
 
-test('reset never touches a real active booking task (conversational reset is not an implicit transaction cancellation)', async () => {
+test('reset clears temporary canonical and legacy planning state without creating/cancelling an operational booking', async () => {
   await withHarness(async harness => {
     const gid = guestId('hotfix-reset-preserves-task');
     await processThongthaiChatCore(brainRequest('อยากขี่ม้า', gid, 'web'), 'evt-0');
     const guestDbId = harness.guestDbId(gid)!;
     const beforeTask = harness.getState(guestDbId)?.state?.taskState as { activeTask?: { status?: string } } | undefined;
     assert.ok(beforeTask?.activeTask, 'setup: a real active task must exist before the reset');
+    harness.setBookingSession(guestDbId, {
+      service_type:'activity',resource_code:'activity-horse',requested_date:null,
+      requested_time:null,end_date:null,party_size:null,quantity:45,
+      special_request:'activity_duration:45',status:'collecting',booking_code:null,
+    });
 
     await processThongthaiChatCore(brainRequest('ลืมที่คุยกันไปก่อนนะครับ', gid, 'web'), 'evt-1');
     const afterTask = harness.getState(guestDbId)?.state?.taskState as { activeTask?: { status?: string } } | undefined;
-    assert.deepEqual(afterTask, beforeTask, 'a conversational reset must never silently cancel a real in-progress task');
+    assert.equal(afterTask?.activeTask ?? null,null,'temporary canonical planning state must be cleared');
+    assert.equal(harness.getBookingSession(guestDbId)?.status,'cancelled','unfinished legacy planning adapter must not repopulate the reset state');
     assert.equal(harness.postsTo('bookings').length, 0);
+    assert.equal(harness.postsTo('booking_allocations').length, 0);
+  });
+});
+
+test('reset preserves a submitted operational booking session and never treats reset as cancellation', async () => {
+  await withHarness(async harness => {
+    const gid=guestId('hotfix-reset-preserves-submitted-record');
+    await processThongthaiChatCore(brainRequest('สวัสดี',gid,'line'),'evt-seed');
+    const guestDbId=harness.guestDbId(gid)!;
+    harness.setBookingSession(guestDbId,{
+      service_type:'activity',resource_code:'activity-horse',requested_date:'2026-10-06',
+      requested_time:'10:00',end_date:null,party_size:2,quantity:45,
+      special_request:'activity_duration:45',status:'submitted',booking_code:'BK-CONFIRMED-1',
+    });
+
+    await processThongthaiChatCore(brainRequest('เริ่มใหม่ครับ',gid,'line'),'evt-reset');
+
+    assert.equal(harness.getBookingSession(guestDbId)?.status,'submitted');
+    assert.equal(harness.getBookingSession(guestDbId)?.booking_code,'BK-CONFIRMED-1');
+    assert.equal(harness.postsTo('booking_sessions_patch').length,0);
+    assert.equal(harness.postsTo('bookings').length,0);
   });
 });

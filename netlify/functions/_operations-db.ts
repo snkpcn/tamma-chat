@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { interpretStayBookingTurn } from './_thongthai-brain-v3';
 import { CONTEXT_TTL_MS } from './_conversation-context';
 import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
-import { extractDate as extractDateShared } from './_slot-parsers';
+import { extractDate as extractDateShared, extractDurationMinutes as extractDurationMinutesShared } from './_slot-parsers';
 import { isActivityIntentStartMessage } from './_service-mind-conversation-flow';
 import {
   interpretActivityGoal,
@@ -566,6 +566,49 @@ async function saveLineBookingSession(guestDbId: string, environment: 'live' | '
   });
 }
 
+async function activityDurationOptionsForResource(resourceCode: string): Promise<number[]> {
+  const resourceResponse = await dbFetch(
+    `service_resources?code=eq.${encodeURIComponent(resourceCode)}&active=eq.true&select=code,metadata&limit=1`,
+  );
+  const resource = (await resourceResponse.json() as Array<{
+    code:string;metadata?:Record<string,unknown> | null;
+  }>)[0];
+  const configuredCode = [resource?.metadata?.activityCode, resource?.metadata?.activity_code]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  const activityCode = configuredCode?.trim()
+    ?? resourceCode.replace(/^activity-/u,'').replace(/-/gu,'_');
+  if (!activityCode) return [];
+  const offeringResponse = await dbFetch(
+    `activity_offerings?activity_code=eq.${encodeURIComponent(activityCode)}&active=eq.true&select=activity_code,duration_minutes&order=sort_order.asc`,
+  );
+  const rows = await offeringResponse.json() as Array<{activity_code?:string;duration_minutes?:number}>;
+  return [...new Set(rows
+    .filter(row => !row.activity_code || row.activity_code === activityCode)
+    .map(row => Number(row.duration_minutes))
+    .filter(value => Number.isInteger(value) && value >= 5 && value <= 600))]
+    .sort((a,b)=>a-b);
+}
+
+function formatDurationOptions(options: readonly number[]): string {
+  return options.map(minutes => `${minutes} นาที`).join(' หรือ ');
+}
+
+/** Clears only an unfinished legacy LINE planning adapter on an explicit
+ * conversation reset. A submitted session points at a real operational
+ * booking request and is deliberately preserved; this function never writes
+ * to bookings, allocations, inventory, payments, or notifications. */
+export async function resetLineBookingPlanningSession(guestDbId: string | null): Promise<void> {
+  if (!guestDbId) return;
+  const session = await loadLineBookingSession(guestDbId);
+  if (!session || session.status === 'submitted' || session.booking_code) return;
+  if (session.status === 'cancelled' || session.status === 'failed') return;
+  await dbFetch(`booking_sessions?guest_id=eq.${encodeURIComponent(guestDbId)}`, {
+    method:'PATCH',
+    headers:{ Prefer:'return=minimal' },
+    body:JSON.stringify({ status:'cancelled', updated_at:new Date().toISOString() }),
+  });
+}
+
 async function bookingStatusReply(bookingCode: string | null): Promise<string | null> {
   if (!bookingCode) return null;
   const response = await dbFetch(
@@ -661,26 +704,21 @@ function activityResourceFromText(text: string): string | null {
   return null;
 }
 
-export function activityDurationFromText(text: string): 30 | 60 | 90 | null {
+export function activityDurationFromText(text: string): number | null {
   if (/(?:ครึ่ง\s*ชั่วโมง|half\s*(?:an\s*)?hour)/iu.test(text)) return 30;
   if (/(?:ชั่วโมง\s*ครึ่ง|one\s*and\s*a\s*half\s*hours?)/iu.test(text)) return 90;
   if (/(?:1|หนึ่ง)\s*(?:ชั่วโมง|ชม\.?|hour)/iu.test(text)) return 60;
-  // No trailing boundary requirement after "นาที": Thai politeness particles
-  // (ครับ/ค่ะ/นะ) are routinely written directly attached to the preceding
-  // word with no space ("30 นาทีครับ"), which is the overwhelmingly common
-  // real phrasing -- requiring whitespace-or-end right after "นาที" rejected
-  // exactly that.
-  const m = text.match(/(?:^|\s)(30|60|90)\s*(?:นาที|min(?:ute)?s?)/iu);
-  const n = Number(m?.[1]);
-  return n === 30 || n === 60 || n === 90 ? n : null;
+  // Syntax parsing is intentionally generic; whether a parsed duration is
+  // actually offered is decided from activity_offerings, never this parser.
+  return extractDurationMinutesShared(text);
 }
 
-export function activityDurationFromSession(session: LineBookingSession | null): 30 | 60 | 90 | null {
+export function activityDurationFromSession(session: LineBookingSession | null): number | null {
   const fromQuantity = Number(session?.quantity);
-  if (fromQuantity === 30 || fromQuantity === 60 || fromQuantity === 90) return fromQuantity;
-  const fromNote = session?.special_request?.match(/activity_duration:(30|60|90)/)?.[1];
+  if (Number.isInteger(fromQuantity) && fromQuantity >= 5 && fromQuantity <= 600) return fromQuantity;
+  const fromNote = session?.special_request?.match(/activity_duration:(\d{1,3})/)?.[1];
   const n = Number(fromNote);
-  return n === 30 || n === 60 || n === 90 ? n : null;
+  return Number.isInteger(n) && n >= 5 && n <= 600 ? n : null;
 }
 
 /** The specific named asset (e.g. "ภาราดร") a customer selects mid-
@@ -703,7 +741,7 @@ export function activityAssetFromSession(session: LineBookingSession | null): { 
   return fromNote ? { assetCode: fromNote[1]!, name: decodeURIComponent(fromNote[2]!) } : null;
 }
 
-export function activitySessionMarker(durationMinutes: 30 | 60 | 90 | null, asset: { name: string; assetCode: string } | null): string | null {
+export function activitySessionMarker(durationMinutes: number | null, asset: { name: string; assetCode: string } | null): string | null {
   const parts: string[] = [];
   if (durationMinutes) parts.push(`activity_duration:${durationMinutes}`);
   if (asset) parts.push(`activity_asset:${asset.assetCode}:${encodeURIComponent(asset.name)}`);
@@ -755,7 +793,7 @@ export async function mirrorActivityTaskToLegacySession(input: {
   guestDbId: string | null;
   environment?: 'live' | 'test';
   resourceCode: string | null;
-  durationMinutes: 30 | 60 | 90 | null;
+  durationMinutes: number | null;
   date: string | null;
   time: string | null;
   partySize: number | null;
@@ -1008,7 +1046,16 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
   const activityIntent = activityBookingStartIntent(text);
   if (activityIntent || (activitySession && !startIntent)) {
     const resourceCode = activityResourceFromText(text) ?? activitySession?.resource_code ?? null;
-    const durationMinutes = activityDurationFromText(text) ?? activityDurationFromSession(activitySession);
+    const requestedDuration = activityDurationFromText(text);
+    const durationOptions = resourceCode
+      ? await activityDurationOptionsForResource(resourceCode).catch(() => [])
+      : [];
+    const sessionDuration = activityDurationFromSession(activitySession);
+    const durationMinutes = requestedDuration != null && durationOptions.includes(requestedDuration)
+      ? requestedDuration
+      : requestedDuration == null && sessionDuration != null && durationOptions.includes(sessionDuration)
+        ? sessionDuration
+        : null;
     const requestedDate = activityDateFromText(text) ?? activitySession?.requested_date ?? null;
     const requestedTime = activityTimeFromText(text) ?? activitySession?.requested_time ?? null;
     const partySize = partySizeFromText(text) ?? activitySession?.party_size ?? null;
@@ -1044,7 +1091,15 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
     const contact = await lineBookingContact(identity.customerId);
     await saveActivityProgress();
     if (!resourceCode) return 'ได้ครับ เลือกกิจกรรมก่อนนะครับ: ATV, ขี่ม้า หรือยิงธนู';
-    if (!durationMinutes) return `รับกิจกรรม ${activityLabel(resourceCode)} แล้วครับ เลือกระยะเวลา 30, 60 หรือ 90 นาทีได้เลย`;
+    if (!durationOptions.length) {
+      return `ตอนนี้ทองไทยยังเช็กระยะเวลาของ${activityLabel(resourceCode)}ให้ไม่ได้ครับ จึงยังไม่รับคำขอจองต่อจากข้อมูลที่เดา`;
+    }
+    if (requestedDuration != null && !durationOptions.includes(requestedDuration)) {
+      return `${requestedDuration} นาทีไม่มีในตัวเลือกของ${activityLabel(resourceCode)}ครับ ตอนนี้มี ${formatDurationOptions(durationOptions)}`;
+    }
+    if (!durationMinutes) {
+      return `รับกิจกรรม ${activityLabel(resourceCode)} แล้วครับ เลือกระยะเวลาได้เลย: ${formatDurationOptions(durationOptions)}`;
+    }
     if (!requestedDate) return 'ขอวันที่ต้องการเล่นครับ เช่น “พรุ่งนี้” หรือ “17/09”';
     if (!requestedTime) return 'ขอเวลาเริ่มครับ เช่น 10:00 น.';
     if (!partySize) return 'ขอจำนวนผู้เล่นทั้งหมดกี่ท่านครับ';
@@ -1282,9 +1337,9 @@ function dayBounds(date: string): { start: string; end: string } | null {
   };
 }
 
-function normalizeActivityDuration(value: number | null | undefined): 30 | 60 | 90 {
+function normalizeActivityDuration(value: number | null | undefined): number | null {
   const n = Number(value);
-  return n === 60 ? 60 : n === 90 ? 90 : 30;
+  return Number.isInteger(n) && n >= 5 && n <= 600 ? n : null;
 }
 
 export async function listBookingOptions(
@@ -1306,7 +1361,6 @@ export async function listBookingOptions(
   const output: BookingOption[] = [];
   const requestedUnits = Math.max(1, Math.min(50, Math.floor(partySize ?? 1)));
   const activityDuration = normalizeActivityDuration(durationMinutes);
-  const windowSize = activityDuration / 30;
 
   for (const resource of resources) {
     const res = await dbFetch(
@@ -1331,16 +1385,21 @@ export async function listBookingOptions(
       continue;
     }
 
-    for (let i = 0; i + windowSize <= rows.length; i += 1) {
-      const window = rows.slice(i, i + windowSize);
-      let contiguous = true;
-      for (let j = 1; j < window.length; j += 1) {
-        if (new Date(window[j].start_at).getTime() !== new Date(window[j - 1].end_at).getTime()) {
-          contiguous = false;
-          break;
-        }
+    if (!activityDuration) continue;
+    for (let i = 0; i < rows.length; i += 1) {
+      const window: typeof rows = [];
+      let accumulatedMinutes = 0;
+      for (let j = i; j < rows.length; j += 1) {
+        const row = rows[j]!;
+        if (window.length && new Date(row.start_at).getTime() !== new Date(window.at(-1)!.end_at).getTime()) break;
+        const rowMinutes = (new Date(row.end_at).getTime() - new Date(row.start_at).getTime()) / 60_000;
+        if (!Number.isFinite(rowMinutes) || rowMinutes <= 0) break;
+        if (accumulatedMinutes + rowMinutes > activityDuration) break;
+        window.push(row);
+        accumulatedMinutes += rowMinutes;
+        if (accumulatedMinutes === activityDuration) break;
       }
-      if (!contiguous) continue;
+      if (!window.length || accumulatedMinutes !== activityDuration) continue;
       const available = Math.min(...window.map(row => Math.max(0, Number(row.capacity_total) - Number(row.capacity_reserved))));
       if (available < requestedUnits) continue;
       output.push({
@@ -1605,7 +1664,10 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
   const environment = input.environment ?? 'live';
   if (input.serviceType === 'activity') {
     if (!input.resourceCode) throw new Error('activity_resource_required');
-    if (![30, 60, 90].includes(Number(input.durationMinutes))) throw new Error('activity_duration_required');
+    const duration = normalizeActivityDuration(input.durationMinutes);
+    if (!duration) throw new Error('activity_duration_required');
+    const supportedDurations = await activityDurationOptionsForResource(input.resourceCode);
+    if (!supportedDurations.includes(duration)) throw new Error('activity_duration_not_offered');
   }
   if (input.serviceType === 'stay') {
     if (!input.resourceCode) throw new Error('stay_resource_required');

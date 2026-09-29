@@ -707,13 +707,33 @@ function deriveForActiveTask(
     && hasExplicitNoTransactionMarker(message)
     && !(CONDITIONAL_UNAVAILABLE_MARKER.test(message) && NO_COMMIT_CONSEQUENCE_MARKER.test(message))
   ) {
+    // Withholding transaction consent does not erase concrete planning
+    // information stated in the same sentence. "45 นาที แต่ยังไม่จอง" must
+    // retain 45 as a candidate slot while clearing authorization.
+    const entities: Record<string, unknown> = {};
+    const date = extractDate(message, now);
+    const time = extractTime(message);
+    const partySize = extractPartySize(message);
+    const durationMinutes = extractDurationMinutes(message);
+    if (date) entities.date = date;
+    if (time) entities.time = time;
+    if (partySize) entities.partySize = partySize;
+    if (durationMinutes) entities.durationMinutes = durationMinutes;
+    const selectedAsset = task.domain === 'activity' ? findKnownActivityAssetSelection(message) : null;
+    if (selectedAsset) {
+      entities.resourceCode = selectedAsset.resourceCode;
+      entities.horseName = selectedAsset.name;
+    }
     return {
       domain: task.domain,
       intent: 'transaction_commitment_retracted',
       action: 'correct_previous',
       speechAct: 'correction',
-      entities: {},
-      references: [],
+      entities,
+      references: selectedAsset ? [{
+        type:'entity_selection',value:selectedAsset.name,refersToPriorContext:false,
+        resolvedEntityId:selectedAsset.entityId,
+      }] : [],
       constraints: ['no_transaction'],
       confidence: 0.95,
       needsClarification: false,
@@ -745,12 +765,20 @@ function deriveForActiveTask(
   if (entityMatch) {
     const resourceCode = directResourceCode(entityMatch);
     if (resourceCode) entities.resourceCode = resourceCode;
+    // A canonical activity-asset reference is the selected horse itself,
+    // not merely routing metadata. Preserve the customer-facing selection
+    // in the task slot just as the bounded known-asset fallback below does.
+    if (task.domain === 'activity' && entityMatch.id.startsWith('activity_asset:')) {
+      entities.horseName = entityMatch.name;
+    }
   } else if (knownActivityAsset) {
     entities.resourceCode = knownActivityAsset.resourceCode;
     entities.horseName = knownActivityAsset.name;
   }
-  const excludedKnownAssets = knownActivityAsset
-    ? negatedKnownActivityAssetNames(message).filter(name => name !== knownActivityAsset.name)
+  const chosenActivityAssetName = knownActivityAsset?.name
+    ?? (task.domain === 'activity' && entityMatch?.id.startsWith('activity_asset:') ? entityMatch.name : null);
+  const excludedKnownAssets = chosenActivityAssetName
+    ? negatedKnownActivityAssetNames(message).filter(name => name !== chosenActivityAssetName)
     : [];
   if (excludedKnownAssets.length) entities.excludedHorse = excludedKnownAssets[0]!;
 

@@ -67,7 +67,7 @@ test('activityDurationFromText accepts "30 นาทีครับ" (politeness
   assert.equal(activityDurationFromText('90 นาทีนะ'), 90);
 });
 
-test('activityDurationFromText still returns null for an out-of-range or unrelated number', () => {
-  assert.equal(activityDurationFromText('120 นาทีครับ'), null);
+test('activityDurationFromText parses plausible syntax but still rejects an unrelated extreme number', () => {
+  assert.equal(activityDurationFromText('120 นาทีครับ'), 120, 'syntax parsing is generic; canonical offerings validate whether the activity actually sells this duration');
   assert.equal(activityDurationFromText('เบอร์ 099999 นาที'), null);
 });

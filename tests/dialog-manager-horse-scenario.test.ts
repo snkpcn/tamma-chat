@@ -21,7 +21,8 @@ function activityCatalogFacts(): SourceResult {
     data: [
       { key: 'activity_asset:horse:thongthai:name', value: 'ทองไทย', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
       { key: 'activity_asset:horse:paradon:name', value: 'ภาราดร', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
-      { key: 'activity:horse:60min:price', value: 450, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity:horse:resourceCode', value: 'activity-horse', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity:horse:45min:price', value: 500, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
       // Deliberately NO temperament fact -- this source never provided one.
     ],
   };
@@ -101,7 +102,7 @@ test('canonical horse-booking scenario, all 7 turns, through the REAL Dialog Man
 
   const bookTurn = parseSemanticTurnResponse(JSON.stringify({
     domain: 'activity', intent: 'confirm_booking', action: 'book', speechAct:'transaction_request',
-    entities: { resourceCode:'activity-horse', date:'2026-09-19', time:'15:00', partySize:2, durationMinutes:60 },
+    entities: { resourceCode:'activity-horse', date:'2026-09-19', time:'15:00', partySize:2, durationMinutes:45 },
     references: [], constraints: [], confidence: 0.92, needsClarification: false,
   }), buildSemanticContext(conversationContext, NOW));
   decision = await processDialogTurn({ semanticTurn: bookTurn, conversationContext, taskState, channel: 'line', eventId: 'horse-scenario-7' }, adapters, NOW);

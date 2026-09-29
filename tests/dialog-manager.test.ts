@@ -276,11 +276,17 @@ test('replaying the exact same eventId produces the identical resulting taskStat
 test('processDialogTurn end-to-end: replaying the same turn twice never duplicates an ActionProposal', async () => {
   let taskState = emptyTaskStateContainer();
   const adapters: KnowledgeSourceAdapters = {};
-  let plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'confirm', entities: { resourceCode: 'activity-horse', date: '2026-09-19', durationMinutes: 60 } }), eventId: 'evt-1', taskState }));
+  let plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'confirm', entities: { resourceCode: 'activity-horse', date: '2026-09-19', durationMinutes: 45 } }), eventId: 'evt-1', taskState }));
   taskState = plan.taskStateContainer;
   const bookInput: DialogInput = input({ semanticTurn: turn({ domain: 'activity', action: 'book', entities: {} }), eventId: 'evt-2', taskState });
   const adaptersWithAvailability: KnowledgeSourceAdapters = {
-    activity: { availability: async () => okResult('schedule', [{ key: 'availability:activity-horse:2026-09-19T12:00:00+07:00:available', value: true, domain: 'activity', sourceId: 'schedule', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }]) },
+    activity: {
+      catalog: async () => okResult('catalog', [
+        { key: 'activity:horse:resourceCode', value: 'activity-horse', domain: 'activity', sourceId: 'catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+        { key: 'activity:horse:45min:price', value: 500, domain: 'activity', sourceId: 'catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      ]),
+      availability: async () => okResult('schedule', [{ key: 'availability:activity-horse:2026-09-19T12:00:00+07:00:available', value: true, domain: 'activity', sourceId: 'schedule', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() }]),
+    },
   };
   const firstDecision = await processDialogTurn(bookInput, adaptersWithAvailability, NOW);
   const secondDecision = await processDialogTurn({ ...bookInput, taskState: firstDecision.taskStateContainer }, adaptersWithAvailability, NOW);

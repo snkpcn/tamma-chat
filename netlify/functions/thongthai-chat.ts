@@ -30,10 +30,11 @@ import {
   persistBrainRuntime,
   registerGuestIdentity,
 } from './_thongthai-runtime-v3';
-import { activityAssetFromText, formatActivityAssetNote } from './_operations-db';
+import { activityAssetFromText, formatActivityAssetNote, resetLineBookingPlanningSession } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import { emptyConversationContextState } from './_conversation-context';
+import { emptyTaskStateContainer } from './_task-state';
 import { persistAiResponseTurn } from './_ai-cost-store';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
@@ -216,10 +217,12 @@ const CONVERSATION_RESET_RE = /ลืมที่คุยกันไปก่�
  * discussed before?" clarification -- see the One-Mind Dialog Manager's
  * own isAmbiguous() fix for the matching activity-domain case.
  *
- * Deliberately does NOT touch taskState (an active/suspended real
- * booking task): "let's talk about something else" is a conversational
- * reset, never an implicit cancellation of a real in-progress
- * transaction -- that stays whatever it already was.
+ * Clears temporary planning state, including the passive legacy LINE
+ * booking-session adapter, but never touches a real booking/order/payment
+ * record. Conversation reset and AI accounting are deliberately separate:
+ * the cost ledger keeps its current session/budget and expires only under
+ * the canonical idle/session policy, so repeatedly saying "start over"
+ * cannot create unlimited fresh budgets.
  */
 export async function deterministicConversationResetResponse(
   request: BrainRequest,
@@ -228,15 +231,20 @@ export async function deterministicConversationResetResponse(
   if (!CONVERSATION_RESET_RE.test(request.message)) return null;
   if (guestDbId) {
     await patchGuestAgentState(guestDbId, {
-      // A customer-visible "start over" is a NEW customer conversation for
-      // both discourse state and the per-conversation AI budget. Keeping the
-      // old aiCostLedger here made a fresh chat inherit the previous session's
-      // spent budget, so OpenAI could be blocked a few turns into an otherwise
-      // clean conversation and the product collapsed into degraded fallback.
-      set: { conversationContext: emptyConversationContextState() },
-      removeKeys: ['aiCostLedger'],
+      set: {
+        conversationContext: emptyConversationContextState(),
+        taskState: emptyTaskStateContainer(),
+      },
+      removeKeys: [
+        'active_topic', 'travel_context_summary', 'unresolved_need',
+        'pending_question', 'restaurantProposedSet',
+        'restaurantAdvisorContext', 'pendingPromotionRedemption',
+      ],
     }).catch(error => {
       console.error('THONGTHAI_CONVERSATION_RESET_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+    });
+    await resetLineBookingPlanningSession(guestDbId).catch(error => {
+      console.error('THONGTHAI_BOOKING_PLANNING_RESET_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
     });
   }
   return {
