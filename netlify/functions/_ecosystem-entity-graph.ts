@@ -38,6 +38,11 @@ export const ECOSYSTEM_ENTITY_GRAPH: EcosystemNode = {
         { id: 'activity-horse', type: 'activity', label: 'ขี่ม้า (horse riding)', children: [{ id: 'activity-horse-resources', type: 'resource_slot', label: 'named horse resources (from activity_assets, live)' }] },
         { id: 'activity-atv', type: 'activity', label: 'ATV', children: [{ id: 'activity-atv-resources', type: 'resource_slot', label: 'ATV unit resources (from activity_assets, live)' }] },
         { id: 'activity-archery', type: 'activity', label: 'ยิงธนู (archery)', children: [{ id: 'activity-archery-resources', type: 'resource_slot', label: 'archery lane/equipment resources (from activity_assets, live)' }] },
+        // No resource_slot child: pedal boats are identical, unnamed units
+        // (capacity comes from service_resources.default_capacity/
+        // metadata.inventoryTotal, never individual activity_assets rows --
+        // see phase4-dynamic-knowledge-v1.sql's own "no fake boat names").
+        { id: 'activity-pedal-boat', type: 'activity', label: 'ปั่นเรือเป็ดน้ำ (pedal boat)' },
       ],
     },
     { id: 'thamma-chat-stay', type: 'business_unit', label: 'ทำมา-ชาติ เฮือนสเตย์ (stay)' },

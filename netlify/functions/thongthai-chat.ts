@@ -666,7 +666,12 @@ function currentRestaurantSet(runtime: { agentState: Record<string, unknown> }):
 
 export function isRestaurantAdvisorTurn(request: BrainRequest, runtime: { agentState: Record<string, unknown> }): boolean {
   const text = normThai(request.message);
-  if (/(ขี่ม้า|atv|เอทีวี|ยิงธนู|ห้องพัก|ที่พัก|เฮือน|otop|กาแฟ|คาเฟ่)/iu.test(text)) return false;
+  // "เป็ดน้ำ"/"ปั่นเป็ดน้ำ"/"เรือเป็ด"/"ถีบเป็ด" name the pedal-boat activity
+  // here, never a live/cooked duck -- excluded the same way every other
+  // activity already is, so a future menu item sharing the "เป็ด" root
+  // (a real duck dish) can never accidentally pull a pedal-boat question
+  // into the restaurant advisor.
+  if (/(ขี่ม้า|atv|เอทีวี|ยิงธนู|ห้องพัก|ที่พัก|เฮือน|otop|กาแฟ|คาเฟ่|เป็ดน้ำ|ปั่นเป็ด|เรือเป็ด|ถีบเป็ด|pedal)/iu.test(text)) return false;
   // A promotion mention must always reach the LLM brain's redeem_promotion tool --
   // this deterministic shortcut has no knowledge of active_promotions_live and
   // would otherwise intercept "เอาโปรตำไทย..." before the promo could ever be redeemed.

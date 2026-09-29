@@ -657,6 +657,7 @@ function activityResourceFromText(text: string): string | null {
   if (/\bATV\b|เอทีวี/iu.test(text)) return 'activity-atv';
   if (/ยิงธนู|archery/iu.test(text)) return 'activity-archery';
   if (/ขี่ม้า|horse(?:\s*riding)?/iu.test(text)) return 'activity-horse';
+  if (/เป็ด|pedal/iu.test(text)) return 'activity-pedal-boat';
   return null;
 }
 

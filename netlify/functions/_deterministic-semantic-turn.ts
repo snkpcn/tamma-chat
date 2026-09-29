@@ -24,10 +24,15 @@ export const DETERMINISTIC_SEMANTIC_TURN_VERSION = 'deterministic-semantic-turn-
 // activities this ecosystem has today (see _ecosystem-entity-graph.ts, which
 // the rest of the system already treats as canonical structure), not a
 // growing table of customer phrasings.
+// "เป็ด" alone (bare substring) covers every owner-confirmed alias
+// (เป็ดน้ำ, ปั่นเป็ดน้ำ, เรือเป็ด, เรือเป็ดน้ำ, ถีบเป็ด, ปั่นเรือเป็ด) the
+// same way "ม้า" alone already covers every horse phrasing above -- never
+// a growing table of exact customer sentences.
 const ACTIVITY_TOPIC_KEYWORDS: ReadonlyArray<{ nodeId: string; activityCode: string; keyword: RegExp }> = [
   { nodeId: 'activity-horse', activityCode: 'horse', keyword: /ม้า/u },
   { nodeId: 'activity-atv', activityCode: 'atv', keyword: /atv|เอทีวี/iu },
   { nodeId: 'activity-archery', activityCode: 'archery', keyword: /ยิงธนู|ธนู/u },
+  { nodeId: 'activity-pedal-boat', activityCode: 'pedal_boat', keyword: /เป็ด|pedal/iu },
 ];
 
 // Canonical named activity assets that are part of the owner-verified
