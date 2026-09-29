@@ -63,6 +63,19 @@ async function restaurantMenuAdapter(now: Date = new Date()): Promise<SourceResu
         { ...base, key: `menu:${item.menu_item_id}:ingredients`, value: item.ingredient_names },
         { ...base, key: `menu:${item.menu_item_id}:unavailableIngredients`, value: item.unavailable_ingredients },
         { ...base, key: `menu:${item.menu_item_id}:signature`, value: item.is_signature },
+        { ...base, key: `menu:${item.menu_item_id}:safety`, value: item.safety },
+        { ...base, key: `menu:${item.menu_item_id}:customization`, value: item.customization },
+        { ...base, key: `menu:${item.menu_item_id}:customization:canRemoveChili`, value: item.customization.canRemoveChili },
+        { ...base, key: `menu:${item.menu_item_id}:customization:spiceAdjustable`, value: item.customization.spiceAdjustable },
+        { ...base, key: `menu:${item.menu_item_id}:customization:allowedSpiceLevels`, value: item.customization.allowedSpiceLevels },
+        { ...base, key: `menu:${item.menu_item_id}:customization:canRemoveFermentedFish`, value: item.customization.canRemoveFermentedFish },
+        { ...base, key: `menu:${item.menu_item_id}:customization:canRemoveMsg`, value: item.customization.canRemoveMsg },
+        { ...base, key: `menu:${item.menu_item_id}:customization:canReduceOrRemoveSugar`, value: item.customization.canReduceOrRemoveSugar },
+        { ...base, key: `menu:${item.menu_item_id}:customization:removableIngredients`, value: item.customization.removableIngredients },
+        { ...base, key: `menu:${item.menu_item_id}:customization:addableIngredients`, value: item.customization.addableIngredients },
+        { ...base, key: `menu:${item.menu_item_id}:customization:substitutions`, value: item.customization.substitutions },
+        { ...base, key: `menu:${item.menu_item_id}:safety:crossContaminationRisk`, value: item.safety.crossContaminationRisk },
+        ...Object.entries(item.safety.allergens).map(([allergen, state]) => ({ ...base, key: `menu:${item.menu_item_id}:allergen:${allergen}`, value: state })),
         ...(item.description ? [{ ...base, key: `menu:${item.menu_item_id}:description`, value: item.description }] : []),
       ];
     });
@@ -80,16 +93,39 @@ async function activityCatalogAdapter(request: KnowledgeRequest, now: Date = new
       ? request.entities.activityCode.trim()
       : null;
     for (const row of rows) {
-      const value = row.fact_value as { activities?: Array<{ activityCode: string; resourceCode: string; name: string; durations: Array<{ durationMinutes: number; price: number | null }>; assets: Array<{ code: string; name: string; type: string; metadata?: Record<string, unknown> }> }> };
+      const value = row.fact_value as { activities?: Array<{
+        activityCode: string;
+        resourceCode: string;
+        name: string;
+        status?: string;
+        inventoryTotal?: number;
+        activeInventory?: number;
+        notes?: string | null;
+        requirements?: string[];
+        durations: Array<{ durationMinutes: number; price: number | null; currency?: string; status?: string }>;
+        assets: Array<{ code: string; name: string; type: string; metadata?: Record<string, unknown> }>;
+      }> };
       const activities = requestedActivityCode
         ? (value.activities ?? []).filter(activity => activity.activityCode === requestedActivityCode)
         : (value.activities ?? []);
       for (const activity of activities) {
         facts.push({ key: `activity:${activity.activityCode}:name`, value: activity.name, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         facts.push({ key: `activity:${activity.activityCode}:resourceCode`, value: activity.resourceCode, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+        facts.push({ key: `activity:${activity.activityCode}:status`, value: activity.status ?? 'available', domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+        facts.push({ key: `activity:${activity.activityCode}:inventoryTotal`, value: Number(activity.inventoryTotal ?? activity.assets.length), domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+        facts.push({ key: `activity:${activity.activityCode}:activeInventory`, value: Number(activity.activeInventory ?? activity.assets.length), domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         facts.push({ key: `activity:${activity.activityCode}:assetCount`, value: activity.assets.length, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+        facts.push({ key: `activity:${activity.activityCode}:durationOptions`, value: activity.durations.map(duration => ({
+          durationMinutes: duration.durationMinutes,
+          price: duration.price,
+          currency: duration.currency ?? 'THB',
+          status: duration.status ?? activity.status ?? 'available',
+        })), domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+        if (activity.notes) facts.push({ key: `activity:${activity.activityCode}:notes`, value: activity.notes, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+        if (activity.requirements?.length) facts.push({ key: `activity:${activity.activityCode}:requirements`, value: activity.requirements, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         for (const duration of activity.durations) {
           facts.push({ key: `activity:${activity.activityCode}:${duration.durationMinutes}min:price`, value: duration.price, domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
+          facts.push({ key: `activity:${activity.activityCode}:${duration.durationMinutes}min:status`, value: duration.status ?? activity.status ?? 'available', domain: 'activity', sourceId: row.fact_key, sourceType: 'activity_live', authoritative: true, fetchedAt: now.toISOString(), updatedAt: row.updated_at });
         }
         for (const asset of activity.assets) {
           const entityId = `activity_asset:${asset.code}`;

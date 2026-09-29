@@ -2,7 +2,11 @@ import { decryptPii, piiHash } from './_operations-db';
 import { createHash } from 'node:crypto';
 import {
   adviseRestaurantMenu, normalizeRestaurantProfile,
+  normalizeRestaurantMenuCustomizationProfile,
+  normalizeRestaurantMenuSafetyProfile,
   type RestaurantAdvisorInput, type RestaurantAdvisorItem,
+  type RestaurantMenuCustomizationProfile,
+  type RestaurantMenuSafetyProfile,
 } from './_restaurant-intelligence';
 
 const RESTAURANT_SCHEMA = 'tamma_chart_os';
@@ -24,6 +28,9 @@ export type RestaurantMenuItem = {
   unavailable_ingredients: string[];
   available_servings: number;
   is_orderable: boolean;
+  profile: unknown;
+  safety: RestaurantMenuSafetyProfile;
+  customization: RestaurantMenuCustomizationProfile;
   source_updated_at: string;
 };
 type IngredientStock = {
@@ -110,20 +117,29 @@ function cleanList(value: unknown): string[] {
 
 export async function listRestaurantMenu(): Promise<RestaurantMenuItem[]> {
   const rid = await restaurantId();
+  const profiles = await restaurantMenuProfiles(rid);
   const response = await chartDbFetch(
     `restaurant_menu_live?restaurant_id=eq.${rid}`
     + '&select=menu_item_id,category_name,category_sort_order,sort_order,name,selling_price,description,is_signature,ingredient_names,unavailable_ingredients,available_servings,is_orderable,source_updated_at'
     + '&order=category_sort_order.asc,sort_order.asc',
   );
   const rows = await response.json() as Array<Record<string, unknown>>;
-  return rows.map(row => ({
-    menu_item_id: String(row.menu_item_id), category_name: String(row.category_name),
-    category_sort_order: Number(row.category_sort_order), sort_order: Number(row.sort_order), name: String(row.name),
-    selling_price: Number(row.selling_price), description: typeof row.description === 'string' ? row.description : null,
-    is_signature: row.is_signature === true, ingredient_names: cleanList(row.ingredient_names),
-    unavailable_ingredients: cleanList(row.unavailable_ingredients), available_servings: Number(row.available_servings ?? 0),
-    is_orderable: row.is_orderable === true, source_updated_at: String(row.source_updated_at ?? new Date().toISOString()),
-  }));
+  return rows.map(row => {
+    const profile = profiles.map.get(String(row.menu_item_id))?.profile;
+    const p = profile && typeof profile === 'object' ? profile as Record<string, unknown> : {};
+    return {
+      menu_item_id: String(row.menu_item_id), category_name: String(row.category_name),
+      category_sort_order: Number(row.category_sort_order), sort_order: Number(row.sort_order), name: String(row.name),
+      selling_price: Number(row.selling_price), description: typeof row.description === 'string' ? row.description : null,
+      is_signature: row.is_signature === true, ingredient_names: cleanList(row.ingredient_names),
+      unavailable_ingredients: cleanList(row.unavailable_ingredients), available_servings: Number(row.available_servings ?? 0),
+      is_orderable: row.is_orderable === true,
+      profile,
+      safety: normalizeRestaurantMenuSafetyProfile(p.safety),
+      customization: normalizeRestaurantMenuCustomizationProfile(p.customization),
+      source_updated_at: String(row.source_updated_at ?? profiles.map.get(String(row.menu_item_id))?.updated_at ?? new Date().toISOString()),
+    };
+  });
 }
 
 async function restaurantMenuProfiles(rid: string): Promise<{ rows: MenuProfileRow[]; map: Map<string, MenuProfileRow> }> {
@@ -140,13 +156,11 @@ async function restaurantMenuProfiles(rid: string): Promise<{ rows: MenuProfileR
 }
 
 async function advisorItems(menu: RestaurantMenuItem[]): Promise<RestaurantAdvisorItem[]> {
-  const rid = await restaurantId();
-  const profiles = await restaurantMenuProfiles(rid);
   return menu.map(item => ({
     id:item.menu_item_id, name:item.name, category:item.category_name, price:item.selling_price,
     signature:item.is_signature, orderable:item.is_orderable, availableServings:item.available_servings,
     ingredients:item.ingredient_names, unavailableIngredients:item.unavailable_ingredients,
-    profile:normalizeRestaurantProfile(profiles.map.get(item.menu_item_id)?.profile),
+    profile:normalizeRestaurantProfile(item.profile),
   }));
 }
 
