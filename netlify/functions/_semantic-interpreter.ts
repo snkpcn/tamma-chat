@@ -1414,6 +1414,18 @@ export function parseSemanticTurnResponse(
   const multiCandidateIdentityReference = references.some(reference =>
     requiresSingleEntity(reference)
     && (reference.resolvedEntityIds?.length ?? 0) > 1);
+
+  // A fixed bounded candidate SET is comparison, not open-ended
+  // recommendation. Models sometimes label "which of these two suits X?"
+  // as recommend because suitability is evaluative; the taxonomy contract is
+  // stricter: once the reference resolves to 2+ known candidates, the
+  // customer is comparing that set against a criterion.
+  const boundedMultiCandidateSet = references.some(reference =>
+    reference.refersToPriorContext
+    && (reference.resolvedEntityIds?.length ?? 0) > 1);
+  if (action === 'recommend' && boundedMultiCandidateSet) {
+    action = 'compare';
+  }
   if (
     multiCandidateIdentityReference
     && (
