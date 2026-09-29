@@ -292,6 +292,10 @@ function activityAssetRows(input: HumanGroundedRenderInput) {
       'activity_asset:' + code + ':beginnerSuitability',
       'activity_asset:' + code + ':beginnerSuitable',
     ].find(key => map.has(key));
+    const notesKey = [
+      'notes:activity_asset:' + code,
+      'activity_asset:' + code + ':notes',
+    ].find(key => map.has(key));
     const typeKey = 'activity_asset:' + code + ':type';
     const type = map.has(typeKey) ? map.get(typeKey) : undefined;
     return {
@@ -302,6 +306,8 @@ function activityAssetRows(input: HumanGroundedRenderInput) {
       temperament: temperamentKey ? map.get(temperamentKey) : undefined,
       beginnerKey,
       beginnerSuitable: beginnerKey ? map.get(beginnerKey) : undefined,
+      notesKey,
+      notes: notesKey ? map.get(notesKey) : undefined,
       typeKey,
       type: typeof type === 'string' ? type : undefined,
     };
@@ -460,12 +466,44 @@ export function renderActivityRecommendation(input: HumanGroundedRenderInput): H
   const wantsLight = wants(input, ['light_activity', 'low_exertion', 'not_too_tiring', 'ไม่หนัก', 'ไม่เหนื่อย']);
   const wantsRain = wants(input, ['rain', 'ฝน', 'weather_fallback']);
   const hasRecommendationShape = turn.action === 'recommend'
+    || turn.action === 'compare'
     || wantsCalm
     || wantsBeginner
     || wantsLight
     || wantsRain
     || excluded.size > 0;
   if(!hasRecommendationShape) return null;
+
+  // Comparison sets are intentionally multi-entity.  If the natural-language
+  // composer is unavailable or blocked by the conversation cost cap, render
+  // the same verified per-asset facts locally instead of collapsing to a name
+  // list or asking which entity the already-resolved set meant.  Notes and
+  // temperament come only from authoritative activity_assets metadata; no
+  // safety/suitability guarantee is inferred from either field.
+  if (turn.action === 'compare' && assets.length >= 2) {
+    const compared = assets.filter(asset => !excluded.has(asset.name)).slice(0, 4);
+    const withDetails = compared.filter(asset => asset.notes !== undefined || asset.temperament !== undefined);
+    if (withDetails.length >= 2) {
+      const used:string[]=[];
+      const lines=withDetails.map(asset=>{
+        used.push(asset.nameKey);
+        const details:string[]=[];
+        if(asset.notesKey && asset.notes !== undefined){
+          used.push(asset.notesKey);
+          details.push(String(asset.notes));
+        }
+        if(asset.temperamentKey && asset.temperament !== undefined){
+          used.push(asset.temperamentKey);
+          details.push(`ลักษณะนิสัย ${String(asset.temperament)}`);
+        }
+        return `• ${asset.name} — ${details.join('; ')}`;
+      });
+      return {
+        message:['สองตัวนี้ต่างกันตามข้อมูลที่ยืนยันได้ดังนี้ครับ',...lines].join('\n'),
+        usedFactKeys:[...new Set(used)],
+      };
+    }
+  }
 
   if (wantsLight && !wantsCalm && !wantsBeginner) {
     const activityNames=[...map.entries()]
