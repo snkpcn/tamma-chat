@@ -313,17 +313,12 @@ test('KERNEL V2 PHASE 1: restaurant availability question outranks stale horse t
     restaurant:{availability:async()=>emptyResult('restaurant-table-schedule','restaurant_live')},
   });
   const selected=await run(select);
-  assert.equal(selected.taskStateAfter.activeTask?.domain,'activity');
-  assert.equal(selected.taskStateAfter.activeTask?.slots.horseName,'ภาราดร');
-  assert.equal(selected.taskStateAfter.activeTask?.commitmentIntent,false,
-    'consideration may persist bounded working task state but must never authorize a transaction');
+  assert.equal(selected.taskStateAfter.activeTask,null,'consideration must not create a stale activity task');
   assert.ok(selected.conversationContextAfter.workingMemory.consideredSelections.some(selection=>selection.name==='ภาราดร'));
   assert.equal(selected.dialogDecision.actionProposal,undefined);
   const asked=await run(restaurant);
   assert.equal(asked.semanticMeaning.conversationalMode,'ASK');
   assert.equal(asked.semanticTurn.domain,'restaurant');
-  assert.equal(asked.taskStateAfter.suspendedTask?.slots.horseName,'ภาราดร',
-    'topic switch must suspend, not erase, the considered horse');
   assert.ok(asked.dialogDecision.knowledgeRequests.some(request=>request.domain==='restaurant'&&request.needs.includes('availability')));
   assert.equal(asked.dialogDecision.actionProposal,undefined);
   assert.notEqual(asked.dialogDecision.mode,'collect_field');
