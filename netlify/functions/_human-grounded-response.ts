@@ -123,6 +123,16 @@ export function renderStayResponse(input: HumanGroundedRenderInput): HumanGround
   }
 
   if (turn.informationNeed === 'availability') {
+    // A bare "ยังว่างไหม" with no check-in date at all can't be answered by
+    // ANY known-facts lookup -- asking which date is the honest response,
+    // not a guessed availability window.
+    const hasStayDate = typeof turn.entities.date === 'string'
+      || typeof turn.entities.checkIn === 'string'
+      || typeof turn.entities.startDate === 'string';
+    if (turn.needsClarification && !hasStayDate) {
+      const party = typeof turn.entities.partySize === 'number' ? `สำหรับ ${turn.entities.partySize} คน` : '';
+      return { message:`ขอวันเข้าพักหรือวันที่ต้องการเช็กอินก่อนนะครับ เดี๋ยวผมค่อยเช็กห้องที่เหมาะ${party ? party : ''}ให้`, usedFactKeys:[] };
+    }
     const availability = [...map.entries()].filter(([key]) => /^availability:[^:]+:.*:available$/u.test(key));
     if (!availability.length) {
       const source = input.knowledgeBundles.flatMap(bundle => bundle.sources).find(item => item.need === 'availability');
