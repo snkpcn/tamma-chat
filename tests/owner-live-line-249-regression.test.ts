@@ -1,0 +1,94 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { withHarness, guestId, brainRequest } from './helpers/canonical-core-harness';
+import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
+
+function text(payload: unknown): string {
+  return String((payload as { message?: unknown }).message ?? '');
+}
+
+test('OWNER LIVE #249: exact LINE continuity sequence survives provider outage without restaurant clarification loop or unintended booking', async () => {
+  await withHarness(async harness => {
+    const gid = guestId('owner-live-249-exact-sequence');
+    let event = 0;
+    const send = async (message:string) => {
+      event += 1;
+      const result = await processThongthaiChatCore(
+        brainRequest(message, gid, 'line'),
+        `owner249-${event}`,
+      );
+      assert.equal(result.statusCode, 200, message);
+      return text(result.payload);
+    };
+
+    await send('ลืมที่คุยกันไปก่อนนะครับ');
+    const food = await send('แฟนแพ้กุ้ง แล้วกินเผ็ดไม่ได้ มีอะไรกินได้บ้าง');
+    assert.match(food,/กุ้ง/u);
+    const snack = await send('แล้วถ้าเป็นของกินเล่นล่ะ');
+    assert.doesNotMatch(snack,/หมายถึง.*ที่คุยไว้ก่อนหน้านี้/u);
+
+    const activities = await send('เปลี่ยนเรื่องก่อน มีอะไรให้เล่นบ้าง');
+    assert.doesNotMatch(activities,/หมายถึง.*ร้านอาหาร/u);
+
+    const compare = await send('ทองไทยกับภาราดรต่างกันยังไง');
+    assert.match(compare,/ทองไทย/u);
+    assert.match(compare,/ภาราดร/u);
+
+    const beginner = await send('ถ้าไม่เคยขี่มาก่อน สองตัวนี้ตัวไหนเหมาะกว่ากัน');
+    assert.doesNotMatch(beginner,/หมายถึง.*ร้านอาหาร|หมายถึงเมนู|เรื่องร้านอาหาร/u,
+      'bounded two-horse comparison must not be stolen by stale restaurant context');
+    assert.match(beginner,/ทองไทย|ภาราดร|ม้า/u);
+
+    const held = await send('งั้นเอาภาราดรไว้ก่อน แต่ยังไม่จองนะ');
+    assert.doesNotMatch(held,/หมายถึง.*ภาราดร.*ใช่ไหม/u,
+      'an explicit named hold is already a complete selection, not a clarification question');
+    assert.equal(harness.postsTo('bookings').length,0);
+
+    const duration = await send('เอา 60 นาที');
+    assert.doesNotMatch(duration,/หมายถึงเมนู|เรื่องร้านอาหาร|ที่คุยไว้ก่อนหน้านี้/u,
+      'duration-only follow-up must continue the held horse, not stale restaurant state');
+
+    const guestDbId = harness.guestDbId(gid)!;
+    const afterDuration = harness.getState(guestDbId)?.state?.taskState as {
+      activeTask?: { domain?: string; slots?: Record<string,unknown>; commitmentIntent?: boolean };
+    } | undefined;
+    assert.equal(afterDuration?.activeTask?.domain,'activity');
+    assert.equal(afterDuration?.activeTask?.slots?.horseName,'ภาราดร');
+    assert.equal(afterDuration?.activeTask?.slots?.durationMinutes,60);
+    assert.equal(afterDuration?.activeTask?.commitmentIntent,false);
+    assert.equal(harness.postsTo('bookings').length,0);
+
+    const summary = await send('ตอนนี้ที่คุยไว้มีอะไรบ้าง');
+    assert.match(summary,/ภาราดร/u);
+    assert.match(summary,/60/u);
+    assert.doesNotMatch(summary,/จองแล้ว|ยืนยันการจองแล้ว|ส่งคำขอจอง/u);
+
+    await send('พักเรื่องม้าไว้ก่อน ขอโปรร้านอาหารที่คุ้มสุด แต่ไม่เอาแบบต้องสมัครสมาชิกเพิ่ม');
+    await send('มีโปรไหม');
+
+    const resumed = await send('กลับไปเรื่องม้าที่ค้างไว้');
+    assert.doesNotMatch(resumed,/ตอนนี้มีม้า 2 ตัว/u,
+      'resume must restore the held task rather than restart generic horse discovery');
+
+    const afterResume = harness.getState(guestDbId)?.state?.taskState as {
+      activeTask?: { domain?: string; slots?: Record<string,unknown>; commitmentIntent?: boolean };
+      suspendedTask?: { domain?: string };
+    } | undefined;
+    assert.equal(afterResume?.activeTask?.domain,'activity');
+    assert.equal(afterResume?.activeTask?.slots?.horseName,'ภาราดร');
+    assert.equal(afterResume?.activeTask?.slots?.durationMinutes,60);
+    assert.equal(afterResume?.activeTask?.commitmentIntent,false);
+
+    await send('ตัวที่เลือกไว้วันที่ 6 ว่างไหม แต่ยังไม่จองนะ');
+    await send('ถ้าวันนั้นไม่ว่างก็เอาไว้ก่อน ยังไม่ต้องทำอะไร');
+    assert.equal(harness.postsTo('bookings').length,0);
+
+    const bookingSummary = await send('สรุปให้หน่อยว่าตอนนี้ผมตกลงจองอะไรไปแล้วหรือยัง');
+    assert.match(bookingSummary,/ยัง.*ไม่.*จอง|ไม่ได้.*จอง|ยังไม่ได้/u);
+    assert.doesNotMatch(bookingSummary,/จองแล้ว|ยืนยันการจองแล้ว|ส่งคำขอจอง/u);
+
+    const close = await send('โอเค ยังไม่จองครับ เดี๋ยวตัดสินใจแล้วจะบอกอีกที');
+    assert.doesNotMatch(close,/หมายถึง.*ภาราดร.*ใช่ไหม/u);
+    assert.equal(harness.postsTo('bookings').length,0);
+  });
+});

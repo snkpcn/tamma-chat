@@ -415,6 +415,18 @@ const COMPARE_MARKER = /ตัวไหน|อันไหน|ชิ้นไห
 const CONDITIONAL_UNAVAILABLE_MARKER = /ไม่ว่าง/u;
 const NO_COMMIT_CONSEQUENCE_MARKER = /ไม่ต้อง(?:จอง|เลือก|ทำ|สั่ง)/u;
 
+// Provider-outage structural fallback for "what have we decided/provided so
+// far?" questions. This is intentionally about the SHAPE of a working-state
+// summary request, not one exact sentence: a summary verb or current/prior
+// state scope must co-occur with a state-query predicate. The actual answer is
+// rendered from canonical TaskState by the Dialog Manager/Response Composer.
+const WORKING_STATE_SUMMARY_MARKER =
+  /(?:สรุป[^\n]{0,48}(?:ตอนนี้|ที่คุย|ที่เลือก|ที่ให้|ตกลง|จอง)|(?:ตอนนี้|ที่คุย|ที่เลือก|ที่ให้|ตกลง)[^\n]{0,48}(?:มีอะไรบ้าง|อะไรไว้|ถึงไหน|จอง.*หรือยัง))/u;
+
+function isWorkingStateSummaryQuestion(message:string):boolean {
+  return WORKING_STATE_SUMMARY_MARKER.test(message);
+}
+
 /** A small, closed attribute vocabulary -- the SAME attributes the
  *  authoritative activity/asset source-of-truth is being asked to support
  *  (see _activity-catalog-policy.ts's ACTIVITY_ASSET_ATTRIBUTE_KEYS). A
@@ -422,7 +434,7 @@ const NO_COMMIT_CONSEQUENCE_MARKER = /ไม่ต้อง(?:จอง|เล�
  *  never falls back to a coarse "any fact exists" hallucination risk. */
 const COMPARE_ATTRIBUTE_KEYWORDS: ReadonlyArray<{ pattern: RegExp; attribute: string }> = [
   { pattern: /นิสัย|อารมณ์/u, attribute: 'temperament' },
-  { pattern: /มือใหม่|เริ่มต้น|หัดขี่/u, attribute: 'beginnerSuitability' },
+  { pattern: /มือใหม่|เริ่มต้น|หัดขี่|ไม่เคยขี่(?:ม้า)?(?:มาก่อน)?/u, attribute: 'beginnerSuitability' },
   { pattern: /อายุ/u, attribute: 'age' },
   { pattern: /เพศ/u, attribute: 'sex' },
   { pattern: /ขนาด|ตัวใหญ่|ตัวเล็ก/u, attribute: 'size' },
@@ -440,9 +452,24 @@ function detectCompareEntities(message: string, context: SemanticContext, domain
   if (!COMPARE_MARKER.test(message)) return null;
   const attribute = COMPARE_ATTRIBUTE_KEYWORDS.find(item => item.pattern.test(message))?.attribute;
   if (!attribute) return null;
-  const effectiveDomain: SemanticDomain | null = domain ?? 'activity';
+  let effectiveDomain: SemanticDomain | null = domain ?? 'activity';
   if (!effectiveDomain) return null;
-  const candidates = context.recentEntities.filter(entity => entity.domain === effectiveDomain);
+  let candidates = context.recentEntities.filter(entity => entity.domain === effectiveDomain);
+
+  // A stale activeDomain from a just-finished side topic must not override a
+  // structurally clear comparison of the recently discussed activity assets.
+  // The supported comparison attributes above are activity-asset attributes,
+  // so when the current domain has fewer than two candidates but bounded
+  // conversation evidence contains 2+ activity entities, that candidate set
+  // is the only grounded comparison target. This is context resolution, not
+  // a sentence-specific phrase patch.
+  if (candidates.length < 2 && effectiveDomain !== 'activity') {
+    const activityCandidates = context.recentEntities.filter(entity => entity.domain === 'activity');
+    if (activityCandidates.length >= 2) {
+      effectiveDomain = 'activity';
+      candidates = activityCandidates;
+    }
+  }
   if (candidates.length < 2) {
     // Production gateway fast paths may occasionally answer the prior catalog
     // turn outside One-Mind, leaving no recent entity records even though the
@@ -604,6 +631,23 @@ function deriveForActiveTask(
   task: ActiveTask,
   now: Date = new Date(),
 ): SemanticTurn | null {
+  // A request to summarize the current bounded working task is pure read-only
+  // state inspection. Resolve it before slot/selection parsing so a provider
+  // outage cannot turn "what do we have so far?" into an entity clarification.
+  if (isWorkingStateSummaryQuestion(message)) {
+    return {
+      domain: task.domain,
+      intent: 'summarize_active_task',
+      action: 'ask',
+      informationNeed: 'none',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.9,
+      needsClarification: false,
+    };
+  }
+
   // An explicit cancel ends the task outright, regardless of what other
   // slot-shaped content the message might also contain.
   if (hasCancelMarker(message)) {
@@ -909,6 +953,48 @@ export function deriveDeterministicSemanticTurn(
     }
   }
 
+  // A slot-only continuation can arrive after a non-transactional concrete
+  // selection that intentionally lived in conversation memory rather than a
+  // booking task ("เอาภาราดรไว้ก่อน แต่ยังไม่จอง" -> "เอา 60 นาที").
+  // Bind it only when the immediately preceding semantic action was a concrete
+  // selection/correction and the current active domain is activity. The most
+  // recent activity entity is ordered first by ConversationContext, so this
+  // resumes bounded working state without interpreting a random standalone
+  // number as a booking.
+  const durationOnly = extractDurationMinutes(trimmed);
+  if (
+    durationOnly
+    && effectiveDomain === 'activity'
+    && !hasCommitMarker(trimmed)
+    && ['confirm','correct_previous','modify'].includes(context.lastAction ?? '')
+  ) {
+    const recentActivityAsset = context.recentEntities.find(entity =>
+      entity.domain === 'activity' && entity.id.startsWith('activity_asset:'));
+    if (recentActivityAsset) {
+      const resourceCode = directResourceCode(recentActivityAsset) ?? 'activity-horse';
+      return {
+        domain:'activity',
+        intent:'continue_considered_activity',
+        action:'provide_information',
+        speechAct:'statement',
+        entities:{
+          resourceCode,
+          horseName:recentActivityAsset.name,
+          durationMinutes:durationOnly,
+        },
+        references:[{
+          type:'previous_selection',
+          value:recentActivityAsset.name,
+          refersToPriorContext:true,
+          resolvedEntityId:recentActivityAsset.id,
+        }],
+        constraints:['no_transaction'],
+        confidence:0.88,
+        needsClarification:false,
+      };
+    }
+  }
+
   // No active task: a selection among entities the customer already saw
   // this conversation ("เอาภาราดร" after being shown horse options).
   const entityMatch = findEntityByName(trimmed, context.recentEntities);
@@ -921,6 +1007,7 @@ export function deriveDeterministicSemanticTurn(
         : domain === 'activity' || domain === 'stay' ? 'book'
           : 'confirm'
       : 'confirm';
+    const explicitNoTransaction = !committing && hasExplicitNoTransactionMarker(trimmed);
     return {
       domain,
       intent: committing ? 'transaction_request_for_prior_entity' : 'select_prior_entity',
@@ -929,9 +1016,15 @@ export function deriveDeterministicSemanticTurn(
       // Lands directly as resourceCode where that's valid (stay/restaurant/
       // otop); for an activity asset, resourceCode resolves authoritatively
       // downstream from selectedEntities instead (see directResourceCode).
-      entities: resourceCode ? { resourceCode } : {},
+      entities: {
+        ...(resourceCode ? { resourceCode } : {}),
+        // Preserve the customer-facing canonical name as bounded working
+        // selection context. A later slot-only continuation (e.g. duration)
+        // must not have to reconstruct identity from a stale domain.
+        ...(domain === 'activity' ? { horseName: entityMatch.name } : {}),
+      },
       references: [{ type: 'entity_selection', value: entityMatch.name, refersToPriorContext: true, resolvedEntityId: entityMatch.id }],
-      constraints: [],
+      constraints: explicitNoTransaction ? ['no_transaction'] : [],
       confidence: 0.9,
       needsClarification: false,
     };
@@ -964,10 +1057,12 @@ export function deriveDeterministicSemanticTurn(
     const wantsRainFallback = /ฝน|rain/iu.test(trimmed);
     const committing=hasCommitMarker(trimmed);
     const correcting=hasCorrectionMarker(trimmed);
+    const explicitNoTransaction = hasExplicitNoTransactionMarker(trimmed);
     const constraints = [
       ...excludedKnownAssets.map(name => `exclude_${name === 'ทองไทย' ? 'thongthai' : name}`),
       ...(wantsCalmerKnownAsset ? ['preferred_horse_trait:calm'] : []),
       ...(wantsRainFallback ? ['weather_fallback_requested'] : []),
+      ...(explicitNoTransaction ? ['no_transaction'] : []),
     ];
     return {
       domain: 'activity',

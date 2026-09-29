@@ -372,3 +372,78 @@ test('a price question with no active task and no active domain defers rather th
   const turn = deriveDeterministicSemanticTurn('มีราคาเท่าไร', emptySemanticContext(), emptyTaskStateContainer());
   assert.equal(turn, null);
 });
+
+
+test('owner live regression: stale restaurant domain cannot steal a recent two-horse beginner comparison', () => {
+  const pharadon: SemanticContextEntity = {
+    id:'activity_asset:horse-pharadon', type:'activity_asset', name:'ภาราดร',
+    domain:'activity', source:'catalog', canonical:true,
+  };
+  const thongthai: SemanticContextEntity = {
+    id:'activity_asset:horse-thongthai', type:'activity_asset', name:'ทองไทย',
+    domain:'activity', source:'catalog', canonical:true,
+  };
+  const context: SemanticContext = {
+    activeDomain:'restaurant',
+    recentEntities:[pharadon, thongthai],
+  };
+  const turn = deriveDeterministicSemanticTurn(
+    'ถ้าไม่เคยขี่มาก่อน สองตัวนี้ตัวไหนเหมาะกว่ากัน',
+    context,
+    emptyTaskStateContainer(),
+    NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.domain,'activity');
+  assert.equal(turn!.action,'compare');
+  assert.equal(turn!.entities.compareAttribute,'beginnerSuitability');
+  assert.deepEqual(turn!.references[0]?.resolvedEntityIds,[
+    'activity_asset:horse-pharadon',
+    'activity_asset:horse-thongthai',
+  ]);
+});
+
+test('owner live regression: named horse hold is a concrete selection with explicit no-transaction memory', () => {
+  const turn = deriveDeterministicSemanticTurn(
+    'งั้นเอาภาราดรไว้ก่อน แต่ยังไม่จองนะ',
+    { activeDomain:'restaurant', recentEntities:[] },
+    emptyTaskStateContainer(),
+    NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.domain,'activity');
+  assert.equal(turn!.action,'confirm');
+  assert.equal(turn!.entities.horseName,'ภาราดร');
+  assert.ok(turn!.constraints.includes('no_transaction'));
+  assert.notEqual(turn!.speechAct,'transaction_request');
+});
+
+
+test('owner live regression: duration-only follow-up resumes the immediately held horse without booking', () => {
+  const pharadon: SemanticContextEntity = {
+    id:'activity_asset:horse-pharadon', type:'activity_asset', name:'ภาราดร',
+    domain:'activity', source:'conversation', canonical:true,
+  };
+  const thongthai: SemanticContextEntity = {
+    id:'activity_asset:horse-thongthai', type:'activity_asset', name:'ทองไทย',
+    domain:'activity', source:'catalog', canonical:true,
+  };
+  const context: SemanticContext = {
+    activeDomain:'activity',
+    lastAction:'confirm',
+    recentEntities:[pharadon, thongthai],
+  };
+  const turn = deriveDeterministicSemanticTurn(
+    'เอา 60 นาที',
+    context,
+    emptyTaskStateContainer(),
+    NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.domain,'activity');
+  assert.equal(turn!.action,'provide_information');
+  assert.equal(turn!.entities.horseName,'ภาราดร');
+  assert.equal(turn!.entities.durationMinutes,60);
+  assert.ok(turn!.constraints.includes('no_transaction'));
+  assert.equal(turn!.references[0]?.resolvedEntityId,'activity_asset:horse-pharadon');
+});

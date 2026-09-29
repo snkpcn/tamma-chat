@@ -33,7 +33,7 @@ import {
 import { activityAssetFromText, formatActivityAssetNote } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
-import { persistConversationContext, emptyConversationContextState } from './_conversation-context';
+import { emptyConversationContextState } from './_conversation-context';
 import { persistAiResponseTurn } from './_ai-cost-store';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
@@ -67,7 +67,7 @@ import {
 } from './_restaurant-preorder-dialog';
 import { processThongthaiOneMindTurnResilient, isTrustedZeroCostFactLookup } from './_thongthai-one-mind-orchestrator';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
-import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
+import { processOneMindCustomerTurn, isTrustedResolvedNoTransactionContinuation } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
@@ -226,9 +226,19 @@ export async function deterministicConversationResetResponse(
   guestDbId: string | null,
 ): Promise<BrainResponse | null> {
   if (!CONVERSATION_RESET_RE.test(request.message)) return null;
-  await persistConversationContext(guestDbId, emptyConversationContextState()).catch(error => {
-    console.error('THONGTHAI_CONVERSATION_RESET_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
-  });
+  if (guestDbId) {
+    await patchGuestAgentState(guestDbId, {
+      // A customer-visible "start over" is a NEW customer conversation for
+      // both discourse state and the per-conversation AI budget. Keeping the
+      // old aiCostLedger here made a fresh chat inherit the previous session's
+      // spent budget, so OpenAI could be blocked a few turns into an otherwise
+      // clean conversation and the product collapsed into degraded fallback.
+      set: { conversationContext: emptyConversationContextState() },
+      removeKeys: ['aiCostLedger'],
+    }).catch(error => {
+      console.error('THONGTHAI_CONVERSATION_RESET_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+    });
+  }
   return {
     message: 'ได้ครับ เริ่มคุยกันใหม่จากข้อความถัดไปเลยนะครับ 😊',
     intent: 'information',
@@ -4681,9 +4691,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         && oneMind.turn.semanticTurn.semanticSource === 'deterministic_fallback'
         && oneMind.response.mode === 'deterministic'
         && isTrustedZeroCostFactLookup(oneMind.turn.dialogSemanticTurn, request.message);
+      const trustedResolvedNoTransactionReady = oneMind.status === 'composed'
+        && oneMind.turn.semanticTurn.semanticSource === 'deterministic_fallback'
+        && oneMind.response.mode === 'deterministic'
+        && isTrustedResolvedNoTransactionContinuation(oneMind.turn);
       const supervisedMeaningReady = (oneMind.status === 'composed'
         && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor')
-        || trustedZeroCostReady;
+        || trustedZeroCostReady
+        || trustedResolvedNoTransactionReady;
       if (supervisedMeaningReady) {
         console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
           domain:oneMind.turn.semanticTurn.domain,

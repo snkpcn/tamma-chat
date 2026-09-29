@@ -166,6 +166,21 @@ export type ReadOnlyCutoverEligibilityOptions = {
   message?: string;
 };
 
+export function isTrustedResolvedNoTransactionContinuation(turn: OneMindTurnResult): boolean {
+  const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
+  const hasNoTransaction = semantic.constraints.some(constraint =>
+    /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint));
+  if (!hasNoTransaction) return false;
+  if (semantic.speechAct === 'transaction_request' || ['book','order','cancel'].includes(semantic.action)) return false;
+  const resolvedReference = semantic.references.some(reference =>
+    Boolean(reference.resolvedEntityId) || (reference.resolvedEntityIds?.length ?? 0) === 1);
+  if (!resolvedReference) return false;
+  return semantic.action === 'confirm'
+    || semantic.action === 'provide_information'
+    || semantic.action === 'correct_previous'
+    || semantic.action === 'modify';
+}
+
 export function readOnlyCutoverEligibility(
   turn: OneMindTurnResult,
   options: ReadOnlyCutoverEligibilityOptions = {},
@@ -191,7 +206,14 @@ export function readOnlyCutoverEligibility(
     // -- never a blanket relaxation for every deterministic_fallback turn.
     const trustedZeroCostBypass = options.message !== undefined
       && isTrustedZeroCostFactLookup(turn.dialogSemanticTurn ?? turn.semanticTurn, options.message);
-    if (!trustedZeroCostBypass) {
+    // A uniquely resolved prior entity plus an explicit CURRENT
+    // no-transaction constraint is also safe to own without a model. It can
+    // update bounded conversational/planning state, but can never create an
+    // ActionProposal or transaction consent. This prevents provider/budget
+    // degradation from bouncing a clear "keep this one, don't book" choice
+    // into a legacy clarification loop.
+    const trustedResolvedNoTransaction = isTrustedResolvedNoTransactionContinuation(turn);
+    if (!trustedZeroCostBypass && !trustedResolvedNoTransaction) {
       return { eligible:false, reason:'transactional_or_task_turn' };
     }
   }
