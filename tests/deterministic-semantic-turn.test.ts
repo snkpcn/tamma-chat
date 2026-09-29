@@ -417,3 +417,33 @@ test('owner live regression: named horse hold is a concrete selection with expli
   assert.ok(turn!.constraints.includes('no_transaction'));
   assert.notEqual(turn!.speechAct,'transaction_request');
 });
+
+
+test('owner live regression: duration-only follow-up resumes the immediately held horse without booking', () => {
+  const pharadon: SemanticContextEntity = {
+    id:'activity_asset:horse-pharadon', type:'activity_asset', name:'ภาราดร',
+    domain:'activity', source:'conversation', canonical:true,
+  };
+  const thongthai: SemanticContextEntity = {
+    id:'activity_asset:horse-thongthai', type:'activity_asset', name:'ทองไทย',
+    domain:'activity', source:'catalog', canonical:true,
+  };
+  const context: SemanticContext = {
+    activeDomain:'activity',
+    lastAction:'confirm',
+    recentEntities:[pharadon, thongthai],
+  };
+  const turn = deriveDeterministicSemanticTurn(
+    'เอา 60 นาที',
+    context,
+    emptyTaskStateContainer(),
+    NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.domain,'activity');
+  assert.equal(turn!.action,'provide_information');
+  assert.equal(turn!.entities.horseName,'ภาราดร');
+  assert.equal(turn!.entities.durationMinutes,60);
+  assert.ok(turn!.constraints.includes('no_transaction'));
+  assert.equal(turn!.references[0]?.resolvedEntityId,'activity_asset:horse-pharadon');
+});
