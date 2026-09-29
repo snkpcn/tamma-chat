@@ -95,6 +95,12 @@ test('Phase 6 final: shared current-turn boundary rejects questions, resume lang
     '"จองไว้ก่อน" is an explicit transaction, unlike a bare conversational hold');
   assert.equal(hasExplicitNoTransactionMarker('จองไว้ก่อน'), false);
   assert.equal(hasExplicitNoTransactionMarker('เอาไว้ก่อน ยังไม่ต้องจอง'), true);
+
+  // Same-turn self-correction: the latest explicit consent signal wins.
+  assert.equal(hasExplicitNoTransactionMarker('เอาไว้ก่อน เดี๋ยวค่อยคิด... เอาละ จองเลย'), false);
+  assert.equal(hasStandaloneTransactionRequest('เอาไว้ก่อน เดี๋ยวค่อยคิด... เอาละ จองเลย'), true);
+  assert.equal(hasExplicitNoTransactionMarker('จองเลย แต่เดี๋ยวก่อน ยังไม่จองนะ'), true);
+  assert.equal(hasStandaloneTransactionRequest('จองเลย แต่เดี๋ยวก่อน ยังไม่จองนะ'), false);
 });
 
 test('Phase 6 final: provider-outage deterministic fallback emits canonical no_transaction for an open task', () => {
