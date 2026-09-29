@@ -14,6 +14,7 @@
 import type { BrainChannel } from './_thongthai-brain-v3';
 import {
   processThongthaiOneMindTurnAuthoritative,
+  isTrustedZeroCostFactLookup,
   type OneMindDependencies,
   type OneMindTurnInput,
   type OneMindTurnResult,
@@ -433,13 +434,29 @@ export async function processOneMindCustomerTurn(
       && turn.semanticTurn.action === 'ask'
     ? composeMembershipInformationResponse(composerInput)
     : null;
-  const groundedFastPath = !deterministicFastPath && shouldPreferGroundedDeterministicResponse(
+  // Cost guard hotfix: a semantic turn that already skipped the paid
+  // semantic-interpreter call (semanticSource==='deterministic_fallback')
+  // AND matches the same narrow, proven-unambiguous allowlist
+  // (isTrustedZeroCostFactLookup) must not then spend a SECOND paid call
+  // here on grounded-response-composition just to re-phrase what canonical
+  // data already answers -- composeGroundedDeterministicResponse is the
+  // exact same fact-grounded renderer composeThongthaiResponse itself falls
+  // back to during a real outage, so this never risks a lower-quality or
+  // fabricated answer, only skips paying for a rephrase. If it returns null
+  // (no grounded facts found this way), the turn falls through to the
+  // normal paid path below rather than ever showing a false answer.
+  const zeroCostFactPath = !deterministicFastPath && !membershipFastPath
+      && turn.dialogSemanticTurn.semanticSource === 'deterministic_fallback'
+      && isTrustedZeroCostFactLookup(turn.dialogSemanticTurn, input.message)
+    ? composeGroundedDeterministicResponse(composerInput)
+    : null;
+  const groundedFastPath = !deterministicFastPath && !zeroCostFactPath && shouldPreferGroundedDeterministicResponse(
     turn,
     composerStartedAt - totalStartedAt,
   )
     ? composeGroundedDeterministicResponse(composerInput)
     : null;
-  const response = deterministicFastPath ?? membershipFastPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
+  const response = deterministicFastPath ?? membershipFastPath ?? zeroCostFactPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
   const composerMs = Date.now() - composerStartedAt;
   await persistAiResponseTurn({
     conversationId,

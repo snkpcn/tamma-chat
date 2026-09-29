@@ -45,7 +45,7 @@ import {
   type SemanticTaskContext,
   type SemanticTurn,
 } from './_semantic-interpreter';
-import { deriveDeterministicSemanticTurn } from './_deterministic-semantic-turn';
+import { deriveDeterministicSemanticTurn, PRICE_MARKER } from './_deterministic-semantic-turn';
 import {
   matchLearnedConcept, loadActiveSemanticConcepts, recordSemanticConceptEvidence,
   safeConceptEntities, companionConceptKeyForValue, MAX_MATCHABLE_MESSAGE_LENGTH,
@@ -538,6 +538,68 @@ const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
   'promotion_follow_up',
 ]);
 
+// Cost guard hotfix: a narrow, explicitly-reviewed allowlist of COARSE
+// candidates trusted enough to skip the paid semantic call anyway, because
+// the specific combination of intent+entities proves there is no remaining
+// "which item/context did they mean" ambiguity for a model to resolve --
+// unlike the general ask_price/broad_experience_discovery buckets, which
+// stay in COARSE_READ_ONLY_INTENTS below because they usually DO depend on
+// item/date/context. Every branch here is answered by the SAME composer
+// chain (composeGroundedDeterministicResponse) that already renders it
+// correctly from real activity_offerings/service_resources facts during a
+// genuine provider outage -- this only skips paying to have the model
+// re-phrase what canonical data already answers, never invents a fact the
+// deterministic composer couldn't already produce on its own.
+export function isTrustedZeroCostFactLookup(turn: SemanticTurn, message: string): boolean {
+  // A single activity price question that named its own activity in THIS
+  // message (see the ask_price branch in _deterministic-semantic-turn.ts --
+  // entities.activityCode is only ever set there from the message's own
+  // text, never from stale active-task context).
+  if (
+    turn.intent === 'ask_price'
+    && turn.domain === 'activity'
+    && typeof turn.entities.activityCode === 'string'
+    && turn.entities.activityCode.length > 0
+  ) {
+    return true;
+  }
+  // A cold-start activity price question ("เป็ดน้ำเท่าไหร่" as the very first
+  // message) never reaches the branch above: with no active task and no
+  // prior effectiveDomain yet, deriveDeterministicSemanticTurn classifies it
+  // as activity_topic_narrow (a plain catalog/discover turn), not ask_price
+  // -- see that function's own activityTopic branch in
+  // _deterministic-semantic-turn.ts, which always wins before
+  // detectActivitySideQuestion's ask_price branch ever gets a chance. It
+  // already carries entities.activityCode from the same explicit-in-message
+  // findActivityTopic resolution, so this is the exact same "no remaining
+  // ambiguity" proof as the ask_price case above -- only additionally
+  // gated on the raw message actually asking a price question, so a bare
+  // "เป็ดน้ำ" (no price marker) still correctly goes through the model as a
+  // genuine open-ended discovery turn.
+  if (
+    turn.intent === 'activity_topic_narrow'
+    && turn.domain === 'activity'
+    && typeof turn.entities.activityCode === 'string'
+    && turn.entities.activityCode.length > 0
+    && PRICE_MARKER.test(message)
+  ) {
+    return true;
+  }
+  // NOTE: broad_experience_discovery ("มีกิจกรรมอะไรบ้าง" and similar) was
+  // deliberately NOT added here. _dialog-source-adapters.ts has no
+  // 'ecosystem' domain knowledge adapter at all, so a deterministic
+  // broad_experience_discovery turn always resolves to a "can't verify"
+  // degradation apology, never a real activity list -- confirmed directly
+  // (tests/cost-guard-true-zero-cost.test.ts's own first attempt at this
+  // exception caught it). Skipping the paid call here would silently
+  // replace today's real, useful model-composed answer with that apology
+  // on every cold-start "what activities do you have" question -- exactly
+  // the Phase 4/5 behavior regression this hotfix must not cause. Stays on
+  // the paid path until a real ecosystem/activity-catalog knowledge source
+  // exists for it to safely render from.
+  return false;
+}
+
 // A tiny set of read-only deterministic results are already exact machine
 // facts rather than language guesses. Keeping them zero-model protects both
 // cost and reliability without making phrase routing the owner of broader
@@ -609,6 +671,11 @@ export function deterministicNeedsLanguageRefinement(
   // needs semantic supervision. The downstream transaction layer remains the
   // only execution authority.
   if (!LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)) return true;
+
+  // Cost guard hotfix: narrowly-proven exceptions inside the coarse bucket
+  // (see isTrustedZeroCostFactLookup's own header comment) -- checked before
+  // the blanket coarse-bucket refinement requirement right below.
+  if (isTrustedZeroCostFactLookup(turn, message)) return false;
 
   // Coarse read-only candidates are FALLBACKS, not final language ownership.
   // This includes read-only side questions asked while a booking/order task is
