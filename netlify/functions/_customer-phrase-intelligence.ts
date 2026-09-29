@@ -61,9 +61,10 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   // "กินเผ็ด" substring it contains, or the constraint would be re-added
   // in the same breath it was just removed.
   if (/(?:จริง ๆ|จริงๆ|แก้ไข|เปลี่ยนใจ).{0,12}(?:กินเผ็ดได้|ทานเผ็ดได้)/u.test(text)) {
-    removeConstraints.push('no_spicy');
+    removeConstraints.push('no_spicy', 'mild_spice');
   } else {
     if (/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้|ไม่ใส่พริก/u.test(text)) addConstraints.push('no_spicy');
+    else if (/(?:กิน|ทาน)เผ็ดไม่เก่ง|ไม่ค่อย(?:กิน|ทาน)?เผ็ด|(?:กิน|ทาน)เผ็ดได้นิดหน่อย/u.test(text)) addConstraints.push('mild_spice');
   }
 
   // Plain protein/ingredient avoidance -- a PREFERENCE ("ไม่กินไก่"), not

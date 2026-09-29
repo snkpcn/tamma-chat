@@ -105,3 +105,77 @@ test('OWNER LIVE #249: exact LINE continuity sequence survives provider outage w
     assert.equal(harness.postsTo('bookings').length,0);
   });
 });
+
+test('Phase 6 production-smoke repair: bad model output cannot promote selection to booking, stale horse context cannot steal an explicit food switch, and unsupported duration stays uncommitted', async () => {
+  await withHarness(async harness => {
+    const gid = guestId('phase6-production-smoke-repair');
+    let event = 0;
+    const send = async (message:string) => {
+      event += 1;
+      const result = await processThongthaiChatCore(
+        brainRequest(message, gid, 'line'),
+        `phase6-production-smoke-${event}`,
+      );
+      assert.equal(result.statusCode,200,message);
+      return result.payload as Record<string,unknown>;
+    };
+
+    await send('ลืมที่คุยกันไปก่อนนะครับ');
+    await send('มีม้าให้เลือกกี่ตัวครับ');
+    await send('สองตัวนี้ต่างกันยังไงครับ');
+
+    harness.programGeminiReply({
+      normalizedMeaning:'customer books the remaining horse',
+      reply:'ผมล็อกตัวเลือกภาราดรไว้ให้แล้วครับ ขอวันที่ เวลา และระยะเวลาครับ',
+      speechAct:'transaction_request',domain:'activity',intent:'book_other_horse',
+      action:'book',informationNeed:'none',entities:{resourceCode:'activity-horse',horseName:'ภาราดร'},
+      references:[],constraints:[],confidence:0.99,needsClarification:false,
+    });
+    const selected = await send('ไม่เอาทองไทยนะครับ เอาอีกตัว');
+    assert.notEqual(selected.intent,'booking','public intent must not claim a booking flow for a current selection');
+    assert.doesNotMatch(text(selected),/ล็อก.*(?:จอง|ตัวเลือก)|ขอวันที่.*เวลา.*ระยะเวลา/u);
+    assert.equal(harness.postsTo('bookings').length,0);
+
+    const held = await send('เอาภาราดรไว้ก่อน แต่ยังไม่จองครับ');
+    assert.doesNotMatch(text(held),/จองเรียบร้อย|ยืนยันการจองแล้ว/u);
+
+    const unsupported = await send('เอา 60 นาทีครับ');
+    assert.match(text(unsupported),/60 นาที.*ไม่มี|ไม่มี.*60 นาที/u);
+    assert.match(text(unsupported),/30 นาที/u);
+    assert.match(text(unsupported),/45 นาที/u);
+
+    const guestDbId = harness.guestDbId(gid)!;
+    const afterDuration = harness.getState(guestDbId)?.state?.taskState as {
+      activeTask?: { slots?: Record<string,unknown>; commitmentIntent?: boolean };
+    } | undefined;
+    assert.equal(afterDuration?.activeTask?.slots?.horseName,'ภาราดร');
+    assert.equal(afterDuration?.activeTask?.slots?.durationMinutes,undefined);
+    assert.equal(afterDuration?.activeTask?.commitmentIntent,false);
+
+    const foodSwitch = await send('ขอถามเรื่องอาหารก่อนครับ');
+    assert.doesNotMatch(text(foodSwitch),/หมายถึง.*ภาราดร|กำลังช่วยจอง/u);
+
+    await send('แฟนแพ้กุ้งครับ');
+    await send('ผมกินเผ็ดไม่เก่งด้วยครับ');
+    harness.programGeminiReply({
+      normalizedMeaning:'customer asks for menu recommendations matching prior dietary constraints',
+      reply:'แนะนำต้มยำกุ้งกับผัดไทยกุ้งสดครับ',
+      speechAct:'question',domain:'restaurant',intent:'recommend_menu',action:'recommend',
+      informationNeed:'recommendation',entities:{},references:[],constraints:[],
+      confidence:0.99,needsClarification:false,
+    });
+    const menu = await send('มีเมนูไหนเหมาะกับที่บอกไปบ้างครับ');
+    assert.match(text(menu),/ข้าวผัดหมู/u,'grounded response must select the catalog item compatible with remembered constraints');
+    assert.match(text(menu),/กุ้ง/u,'response must explicitly apply the remembered shrimp constraint');
+    assert.match(text(menu),/เผ็ด/u,'response must explicitly apply the remembered mild-spice preference');
+    assert.doesNotMatch(text(menu),/แนะนำต้มยำกุ้งกับผัดไทยกุ้งสด/u);
+
+    const resumed = await send('กลับมาเรื่องม้าที่เลือกไว้เมื่อกี้ครับ');
+    assert.match(text(resumed),/ภาราดร/u);
+    assert.doesNotMatch(text(resumed),/กำลังช่วยจอง/u);
+
+    const availability = await send('เช็กว่างเฉย ๆ ได้ไหมครับ ยังไม่จอง');
+    assert.doesNotMatch(text(availability),/จองเรียบร้อย|ยืนยันการจองแล้ว|ส่งคำขอจอง/u);
+    assert.equal(harness.postsTo('bookings').length,0);
+  });
+});

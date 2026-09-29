@@ -421,6 +421,32 @@ test('Phase 6 final: parser fails closed when model mislabels resume/withhold te
   assert.equal(trulyCommitted.speechAct, 'transaction_request');
 });
 
+test('Phase 6 final: a model cannot turn a current selection into booking consent without a transaction verb', () => {
+  const context:SemanticContext={
+    ...emptySemanticContext(),
+    activeDomain:'activity',
+    recentEntities:[
+      {id:'activity_asset:horse-pharadon',type:'activity_asset',name:'ภาราดร',domain:'activity',source:'catalog',canonical:true},
+      {id:'activity_asset:horse-thongthai',type:'activity_asset',name:'ทองไทย',domain:'activity',source:'catalog',canonical:true},
+    ],
+  };
+  const badModel=JSON.stringify({
+    normalizedMeaning:'book the remaining horse',reply:'',speechAct:'transaction_request',
+    domain:'activity',intent:'book_other_horse',action:'book',informationNeed:'none',
+    entities:{resourceCode:'activity-horse',horseName:'ภาราดร'},references:[],constraints:[],
+    confidence:0.99,needsClarification:false,
+  });
+  const selection=parseSemanticTurnResponse(badModel,context,'ไม่เอาทองไทยนะครับ เอาอีกตัว');
+  assert.equal(selection.action,'confirm');
+  assert.equal(selection.speechAct,'selection');
+  assert.equal(selection.entities.horseName,'ภาราดร');
+  assert.equal(selection.reply,undefined,'unsafe transaction draft must be discarded with the model\'s write authority');
+
+  const committed=parseSemanticTurnResponse(badModel,context,'ไม่เอาทองไทย จองภาราดรเลย');
+  assert.equal(committed.action,'book');
+  assert.equal(committed.speechAct,'transaction_request');
+});
+
 
 test('Phase 6 final: cross-cutting promotion subject outranks a narrower restaurant label and preserves no-new-membership preference', () => {
   const badModel = JSON.stringify({
