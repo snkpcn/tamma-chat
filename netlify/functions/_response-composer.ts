@@ -556,7 +556,17 @@ function requestedActivityId(input: ResponseComposerInput, facts: Map<string, un
   const activityCode = input.dialogDecision.knowledgeRequests
     .map(request => request.entities.activityCode)
     .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
-  return activityCode ?? null;
+  if (activityCode) return activityCode;
+  const text = [
+    input.userMessage ?? '',
+    ...input.dialogDecision.knowledgeRequests.flatMap(request => Object.values(request.entities).map(value => String(value ?? ''))),
+  ].join(' ').toLowerCase();
+  const candidates = [...new Set([...facts.keys()]
+    .map(key => key.match(/^activity:([^:]+):name$/)?.[1])
+    .filter((value): value is string => Boolean(value)))];
+  if (/เป็ด|pedal/u.test(text) && candidates.includes('pedal_boat')) return 'pedal_boat';
+  if (/ม้า|horse/u.test(text) && candidates.includes('horse')) return 'horse';
+  return null;
 }
 
 function activityDisplayName(activityId: string | null, facts: Map<string, unknown>): { name: string; key?: string } {
@@ -601,11 +611,17 @@ function activityPriceAnswer(input: ResponseComposerInput): { message: string; k
   const lines = entries.map(entry => {
     used.push(entry.key);
     return typeof entry.value === 'number'
-      ? `• ${entry.minutes} นาที — ${Math.round(entry.value)} บาท`
-      : `• ${entry.minutes} นาที — ยังไม่ได้ตั้งราคา`;
+      ? `${entry.minutes === 60 ? '1 ชั่วโมง' : `${entry.minutes} นาที`} ${Math.round(entry.value)} บาท`
+      : `${entry.minutes === 60 ? '1 ชั่วโมง' : `${entry.minutes} นาที`} ยังไม่ได้ตั้งราคา`;
   });
+  const inventoryKey = activityId ? `activity:${activityId}:inventoryTotal` : '';
+  const inventory = inventoryKey ? facts.get(inventoryKey) : undefined;
+  if (inventoryKey && typeof inventory === 'number') used.push(inventoryKey);
+  const inventoryCopy = activityId === 'pedal_boat' && typeof inventory === 'number'
+    ? ` ตอนนี้มีเรือเป็ด ${inventory} ลำ`
+    : '';
   return {
-    message: [`ราคาของ${display.name}ที่มีข้อมูลตอนนี้ครับ`, ...lines].join('\n'),
+    message: `${display.name}มี ${lines.join(' หรือ ')}ครับ 😊${inventoryCopy}`,
     keys: [...new Set(used)],
   };
 }

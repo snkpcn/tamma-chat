@@ -167,6 +167,28 @@ function wants(input: HumanGroundedRenderInput, fragments: readonly string[]): b
   return fragments.some(fragment => text.includes(fragment.toLowerCase()));
 }
 
+function entityText(input: HumanGroundedRenderInput): string {
+  const chunks:string[]=[];
+  const collect=(value:unknown):void=>{
+    if(typeof value==='string') chunks.push(value);
+    else if(Array.isArray(value)) value.forEach(collect);
+    else if(value&&typeof value==='object') Object.values(value as Record<string,unknown>).forEach(collect);
+  };
+  collect(semanticEntities(input));
+  return chunks.join(' ').toLowerCase();
+}
+
+type FoodRestriction = 'shrimp' | 'pork' | 'beef' | 'peanut' | 'seafood';
+type AllergenState = 'contains' | 'does_not_contain' | 'may_contain' | 'unknown';
+
+const ALLERGEN_LABELS:Record<FoodRestriction,string>={
+  shrimp:'กุ้ง',
+  pork:'หมู',
+  beef:'เนื้อ',
+  peanut:'ถั่ว',
+  seafood:'อาหารทะเล',
+};
+
 /** Dietary/allergy SAFETY checks -- unlike general preference signals (e.g.
  *  wantsCalm/wantsBeginner below, which stay on wants()) -- must never be
  *  decided from normalizedMeaning. That field is free-form observability
@@ -191,6 +213,32 @@ function hasFoodSafetyConstraint(input: HumanGroundedRenderInput, keys: readonly
     const value = constraint.toLowerCase();
     return lowered.some(key => value.includes(key));
   });
+}
+
+function foodRestriction(input:HumanGroundedRenderInput, restriction:FoodRestriction):boolean {
+  const keys:Record<FoodRestriction,string[]>={
+    shrimp:['no_shrimp','avoid_shrimp','shrimp_allergy','กุ้ง'],
+    pork:['no_pork','avoid_pork','pork_allergy','หมู'],
+    beef:['no_beef','avoid_beef','beef_allergy','เนื้อ'],
+    peanut:['no_peanut','avoid_peanut','peanut_allergy','ถั่ว'],
+    seafood:['no_seafood','avoid_seafood','seafood_allergy','อาหารทะเล','ทะเล'],
+  };
+  return hasFoodSafetyConstraint(input, keys[restriction]);
+}
+
+function allergyState(map:Map<string,unknown>, menuId:string, restriction:FoodRestriction):AllergenState {
+  const direct=map.get(`menu:${menuId}:allergen:${restriction}`);
+  if(direct==='contains'||direct==='does_not_contain'||direct==='may_contain'||direct==='unknown') return direct;
+  if(restriction==='seafood'){
+    const shrimp=allergyState(map,menuId,'shrimp');
+    if(shrimp==='contains'||shrimp==='may_contain') return shrimp;
+  }
+  return 'unknown';
+}
+
+function customerAskedAboutMenu(input:HumanGroundedRenderInput,row:{name:string}):boolean {
+  const text=entityText(input);
+  return Boolean(text) && text.includes(row.name.toLowerCase());
 }
 
 function numericEntity(input: HumanGroundedRenderInput, keys: readonly string[]): number | null {
@@ -530,6 +578,10 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     const orderableKey = `menu:${id}:orderable`;
     const servingsKey = `menu:${id}:availableServings`;
     const ingredientsKey = `menu:${id}:ingredients`;
+    const canRemoveChiliKey = `menu:${id}:customization:canRemoveChili`;
+    const spiceAdjustableKey = `menu:${id}:customization:spiceAdjustable`;
+    const removableIngredientsKey = `menu:${id}:customization:removableIngredients`;
+    const crossContaminationKey = `menu:${id}:safety:crossContaminationRisk`;
     return [{
       id,
       name:name.trim(),
@@ -544,8 +596,62 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
       servingsKey:map.has(servingsKey) ? servingsKey : undefined,
       ingredients:Array.isArray(map.get(ingredientsKey)) ? map.get(ingredientsKey) as unknown[] : undefined,
       ingredientsKey:map.has(ingredientsKey) ? ingredientsKey : undefined,
+      canRemoveChili:typeof map.get(canRemoveChiliKey)==='boolean' ? map.get(canRemoveChiliKey) as boolean : null,
+      canRemoveChiliKey:map.has(canRemoveChiliKey) ? canRemoveChiliKey : undefined,
+      spiceAdjustable:typeof map.get(spiceAdjustableKey)==='boolean' ? map.get(spiceAdjustableKey) as boolean : null,
+      spiceAdjustableKey:map.has(spiceAdjustableKey) ? spiceAdjustableKey : undefined,
+      removableIngredients:Array.isArray(map.get(removableIngredientsKey)) ? map.get(removableIngredientsKey) as unknown[] : undefined,
+      removableIngredientsKey:map.has(removableIngredientsKey) ? removableIngredientsKey : undefined,
+      crossContaminationRisk:map.get(crossContaminationKey),
+      crossContaminationKey:map.has(crossContaminationKey) ? crossContaminationKey : undefined,
     }];
   });
+
+  const restrictions:FoodRestriction[]=(['shrimp','pork','beef','peanut','seafood'] as const)
+    .filter(item=>foodRestriction(input,item));
+  const noShrimp = restrictions.includes('shrimp') || restrictions.includes('seafood');
+  const noPork = restrictions.includes('pork');
+  const lowSpice = wants(input, ['no_spicy', 'low_spicy', 'mild', 'ไม่เผ็ด', 'เผ็ดน้อย']);
+  const hasDietaryConstraint = restrictions.length > 0 || lowSpice;
+
+  const specificMenu = rows.find(row=>customerAskedAboutMenu(input,row)) ?? (rows.length===1 ? rows[0] : null);
+
+  if (lowSpice && specificMenu && specificMenu.canRemoveChiliKey) {
+    const used=[specificMenu.nameKey,specificMenu.canRemoveChiliKey];
+    if(specificMenu.spiceAdjustableKey) used.push(specificMenu.spiceAdjustableKey);
+    if(specificMenu.canRemoveChili===true) {
+      return { message:`ได้ครับ ${specificMenu.name}สั่งไม่ใส่พริกได้ครับ 😊 เดี๋ยวแจ้งครัวทำแบบไม่เผ็ดให้ได้เลย`, usedFactKeys:[...new Set(used)] };
+    }
+    if(specificMenu.canRemoveChili===false) {
+      return { message:`${specificMenu.name}ตอนนี้ครัวยังไม่ได้เปิดให้ทำแบบไม่ใส่พริกครับ แต่ถ้าต้องการลดเผ็ด เดี๋ยวผมช่วยเช็กกับครัวให้อีกทีครับ`, usedFactKeys:[...new Set(used)] };
+    }
+  }
+
+  if (restrictions.length && specificMenu) {
+    const unsafe=restrictions.map(kind=>({kind,state:allergyState(map,specificMenu.id,kind)}))
+      .find(item=>item.state==='contains'||item.state==='may_contain');
+    const unknown=restrictions.find(kind=>allergyState(map,specificMenu.id,kind)==='unknown');
+    const used=[specificMenu.nameKey,...restrictions.map(kind=>`menu:${specificMenu.id}:allergen:${kind}`).filter(key=>map.has(key))];
+    if(specificMenu.crossContaminationKey) used.push(specificMenu.crossContaminationKey);
+    if(unsafe) {
+      const label=ALLERGEN_LABELS[unsafe.kind];
+      const may=unsafe.state==='may_contain';
+      return {
+        message:`ถ้าแพ้${label} ผมยังไม่แนะนำ${specificMenu.name}ครับ${may?' เพราะข้อมูลเมนูระบุว่าอาจมีหรือเสี่ยงเจอ '+label:' เพราะข้อมูลเมนูระบุว่ามี '+label} ถ้าแพ้รุนแรง เดี๋ยวให้ครัวช่วยเช็กซ้ำให้ปลอดภัยกว่าครับ`,
+        usedFactKeys:[...new Set(used)],
+      };
+    }
+    if(unknown) {
+      return {
+        message:`${specificMenu.name}ยังไม่มีข้อมูลเรื่อง${ALLERGEN_LABELS[unknown]}ชัดพอให้ยืนยันว่าปลอดภัยครับ ถ้าแพ้จริง เดี๋ยวผมขอเช็กครัวให้ก่อนนะครับ`,
+        usedFactKeys:[...new Set(used)],
+      };
+    }
+    return {
+      message:`${specificMenu.name}ข้อมูลเมนูระบุว่าไม่มี${restrictions.map(kind=>ALLERGEN_LABELS[kind]).join(' / ')}ครับ ถ้าแพ้รุนแรง บอกผมได้นะครับ เดี๋ยวช่วยเช็กเรื่องครัวร่วมให้อีกที`,
+      usedFactKeys:[...new Set(used)],
+    };
+  }
 
   if (turn.informationNeed === 'price') {
     const priced = rows.filter(row => row.price !== undefined).slice(0, 8);
@@ -559,7 +665,7 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     return { message:['ราคาที่ตรวจจากเมนูปัจจุบันครับ',...lines].join('\n'), usedFactKeys:[...new Set(used)] };
   }
 
-  if (turn.informationNeed === 'ingredients') {
+  if (turn.informationNeed === 'ingredients' && !hasDietaryConstraint) {
     const shown=rows.slice(0,5);
     const used:string[]=[];
     const lines=shown.map(row=>{
@@ -570,11 +676,6 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     });
     return { message:['ส่วนผสมที่ตรวจได้จากข้อมูลเมนูครับ',...lines].join('\n'), usedFactKeys:[...new Set(used)] };
   }
-
-  const noShrimp = hasFoodSafetyConstraint(input, ['no_shrimp', 'avoid_shrimp', 'shrimp_allergy', 'กุ้ง']);
-  const noPork = hasFoodSafetyConstraint(input, ['no_pork', 'avoid_pork', 'หมู']);
-  const lowSpice = wants(input, ['no_spicy', 'low_spicy', 'mild', 'ไม่เผ็ด', 'เผ็ดน้อย']);
-  const hasDietaryConstraint = noShrimp || noPork || lowSpice;
 
   // A plain "what's there to eat" browse question is safe to answer with a
   // bare catalog dump ONLY when no dietary/safety constraint is in play.
@@ -608,23 +709,48 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
   const accepted: typeof rows = [];
   let spiceUnknown = false;
   let ingredientUnknown = false;
+  let allergyUnknown = false;
+  let allergyMayContain = false;
+  const hasStructuredAllergenFacts = restrictions.some(kind =>
+    rows.some(row => map.has(`menu:${row.id}:allergen:${kind}`)),
+  );
 
   for (const row of rows) {
     if (row.orderable === false || (typeof row.availableServings === 'number' && row.availableServings <= 0)) continue;
     const ingredientWords = row.ingredients?.map(value => String(value).toLowerCase()) ?? null;
-    if ((noShrimp || noPork) && !ingredientWords) {
+    if (restrictions.length && hasStructuredAllergenFacts) {
+      const states=restrictions.map(kind=>allergyState(map,row.id,kind));
+      if(states.some(state=>state==='contains')) continue;
+      if(states.some(state=>state==='may_contain')) {
+        allergyMayContain = true;
+        continue;
+      }
+      if(states.some(state=>state==='unknown')) {
+        allergyUnknown = true;
+        continue;
+      }
+    }
+    if ((noShrimp || noPork) && !ingredientWords && (!restrictions.length || !hasStructuredAllergenFacts)) {
       ingredientUnknown = true;
       continue;
     }
-    if (noShrimp && ingredientWords!.some(value => value.includes('shrimp') || value.includes('prawn') || value.includes('กุ้ง'))) continue;
-    if (noPork && ingredientWords!.some(value => value.includes('pork') || value.includes('หมู'))) continue;
+    if (!hasStructuredAllergenFacts) {
+      if (noShrimp && ingredientWords!.some(value => value.includes('shrimp') || value.includes('prawn') || value.includes('กุ้ง'))) continue;
+      if (noPork && ingredientWords!.some(value => value.includes('pork') || value.includes('หมู'))) continue;
+    }
 
     if (lowSpice) {
+      if(row.canRemoveChili===true || row.spiceAdjustable===true) {
+        // Structured customization says the kitchen can make this mild/no-chili.
+      } else if(row.canRemoveChili===false) {
+        continue;
+      } else {
       const spiceKey = [`menu:${row.id}:spiceLevel`, `menu:${row.id}:spicyLevel`, `menu:${row.id}:spicy`].find(key => map.has(key));
       if (!spiceKey) spiceUnknown = true;
       else {
         const spice = String(map.get(spiceKey)).toLowerCase();
         if (['hot', 'spicy', 'high', 'เผ็ดมาก'].some(value => spice.includes(value))) continue;
+      }
       }
     }
     if (budget !== null && row.price !== undefined && row.price > budget) continue;
@@ -632,8 +758,8 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
   }
 
   if (!accepted.length) {
-    if (noShrimp || noPork) {
-      return { message:'ตอนนี้ข้อมูลส่วนผสมที่ยืนยันได้ยังไม่พอให้จัดเมนูตามข้อจำกัดนี้แบบปลอดภัยครับ เลยไม่ขอเดา', usedFactKeys:[] };
+    if (restrictions.length) {
+      return { message:`ตอนนี้ผมยังไม่มีเมนูที่ยืนยันว่าเลี่ยง${restrictions.map(kind=>ALLERGEN_LABELS[kind]).join(' / ')}ได้ชัด ๆ ครับ${allergyUnknown || allergyMayContain ? ' มีบางเมนูที่ข้อมูลยังไม่ชัดหรืออาจปนเปื้อน เลยไม่อยากแนะนำมั่วครับ' : ''}`, usedFactKeys:[] };
     }
     if (lowSpice) {
       return { message:'ตอนนี้ยังไม่มีข้อมูลระดับความเผ็ดที่ยืนยันได้พอให้เลือกเมนูไม่เผ็ดแบบชัวร์ ๆ ครับ เลยไม่ขอเดา', usedFactKeys:[] };
@@ -655,22 +781,18 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
     ? chosen.reduce((sum,row)=>sum+(row.price??0),0)
     : null;
   const availabilityVerified=chosen.every(row=>row.orderable===true);
-  const safetyLabels=[
-    ...(noShrimp ? ['ไม่มีกุ้ง'] : []),
-    ...(noPork ? ['ไม่มีหมู'] : []),
-  ];
-  const intro=noShrimp||noPork
-    ? `จากส่วนผสมและข้อมูลเมนูที่ตรวจยืนยันได้ ตัวเลือกที่${safetyLabels.join(' และ ')}ตามข้อจำกัดที่บอกมีครับ`
+  const intro=restrictions.length
+    ? `ได้ครับ 😊 ถ้าเลี่ยง${restrictions.map(kind=>ALLERGEN_LABELS[kind]).join(' / ')} ผมแนะนำตัวที่ข้อมูลเมนูระบุว่าไม่มีสิ่งนี้ก่อนครับ`
     : availabilityVerified
       ? 'จากเมนูที่ยืนยันว่าพร้อมสั่ง ลองดูชุดนี้ได้ครับ'
       : 'จากข้อมูลเมนูที่ยืนยันได้ ลองดูชุดนี้ได้ครับ';
   const notes:string[]=[];
-  if(total!==null) notes.push('ถ้าเอารายการละ 1 จาน รวม '+Math.round(total)+' บาท');
   if(budget!==null && total!==null) notes.push(total<=budget
     ? 'ยังอยู่ในงบ '+Math.round(budget)+' บาท'
     : 'เกินงบ '+Math.round(budget)+' บาท');
   if(lowSpice && spiceUnknown) notes.push('ระดับความเผ็ดของบางรายการยังไม่มีข้อมูลยืนยัน จึงยังฟันธงเรื่องความเผ็ดไม่ได้ครับ');
-  if(ingredientUnknown) notes.push('รายการที่ไม่มีข้อมูลส่วนผสมครบถูกตัดออกจากคำแนะนำนี้');
+  if(allergyUnknown || ingredientUnknown) notes.push('ถ้าแพ้รุนแรง บอกผมได้นะครับ เดี๋ยวช่วยเช็กเรื่องครัวร่วมให้อีกที');
+  else if(restrictions.length) notes.push('ถ้าแพ้รุนแรง บอกผมได้นะครับ เดี๋ยวช่วยเช็กเรื่องครัวร่วมให้อีกที');
 
   return { message:[intro,...lines,...notes].join('\n'), usedFactKeys:[...new Set(used)] };
 }
