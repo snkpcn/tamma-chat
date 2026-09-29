@@ -181,7 +181,24 @@ test('Phase 6 production-smoke repair: bad model output cannot promote selection
       'an explicit resume must read back the restored duration as well as the horse');
     assert.doesNotMatch(text(resumed),/กำลังช่วยจอง/u);
 
+    // Production Turn 14 exposed a language-supervisor omission: the model
+    // kept the selected horse/duration and no-booking constraint, but dropped
+    // the customer's availability information need. Program that exact shape
+    // so the deterministic current-turn proof must restore the read-only need
+    // before response composition.
+    harness.programGeminiReply({
+      normalizedMeaning:'customer keeps the current horse plan without booking',
+      reply:'เลือกไว้เป็นภาราดร 45 นาทีครับ ยังไม่จอง',
+      speechAct:'correction',domain:'activity',intent:'keep_current_plan',
+      action:'correct_previous',informationNeed:'none',
+      entities:{horseName:'ภาราดร',durationMinutes:45},references:[],
+      constraints:['no_transaction'],confidence:0.99,needsClarification:false,
+    });
     const availability = await send('เช็กว่างเฉย ๆ ได้ไหมครับ ยังไม่จอง');
+    assert.match(text(availability),/ว่าง|คิว/u,
+      'the final response must answer the availability request, not merely repeat selected slots');
+    assert.match(text(availability),/ยัง.*ไม่.*จอง|ไม่ได้.*จอง/u,
+      'the read-only availability answer must preserve the current no-booking consequence');
     assert.doesNotMatch(text(availability),/จองเรียบร้อย|ยืนยันการจองแล้ว|ส่งคำขอจอง/u);
     assert.equal(harness.postsTo('bookings').length,0);
   });

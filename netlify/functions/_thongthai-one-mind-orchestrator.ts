@@ -897,7 +897,7 @@ function normalizeExplicitNoTransactionAvailabilityRefinement(
   if (!deterministic
       || !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
       || turn.domain !== deterministic.domain
-      || turn.informationNeed !== 'availability'
+      || deterministic.informationNeed !== 'availability'
       || turn.confidence < 0.9
       || turn.needsClarification === true) {
     return turn;
@@ -922,12 +922,19 @@ function normalizeExplicitNoTransactionAvailabilityRefinement(
 
   const actionNeedsDeescalation = !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action);
   const speechActNeedsDeescalation = turn.speechAct === 'selection';
-  if (!actionNeedsDeescalation && !speechActNeedsDeescalation) return turn;
+  const informationNeedWasDropped = turn.informationNeed !== 'availability';
+  const deterministicConstraintsWereDropped = deterministic.constraints
+    .some(value => !turn.constraints.includes(value));
+  if (!actionNeedsDeescalation
+      && !speechActNeedsDeescalation
+      && !informationNeedWasDropped
+      && !deterministicConstraintsWereDropped) return turn;
 
   return {
     ...turn,
-    action: deterministic.action,
-    speechAct: 'question',
+    action: actionNeedsDeescalation ? deterministic.action : turn.action,
+    speechAct: speechActNeedsDeescalation ? 'question' : turn.speechAct,
+    informationNeed:'availability',
     constraints: [...new Set([...turn.constraints, ...deterministic.constraints])],
   };
 }
