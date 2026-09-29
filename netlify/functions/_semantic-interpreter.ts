@@ -31,6 +31,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
+import { hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
 
@@ -691,6 +692,7 @@ Core rules:
 - Current message outranks stale context. Use context only to resolve real references or continuation.
 - Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
 - Current no-transaction wording keeps the turn read-only. Conditional fallback choices are status/availability, never immediate confirm/book/order.
+- If the CURRENT message explicitly says not to book/order yet, hold off, or keep it only as a consideration, ALWAYS include constraints=["no_transaction"] (plus any other real constraints). Never emit transaction_request for that turn.
 - Current corrections/replacements outrank stale selections and task values.
 - lastRecommendationReference is bounded evidence of what Thongthai previously recommended. Use it to resolve descriptive follow-ups across topic switches; if it uniquely identifies a recent entity, follow that entity's domain rather than stale activeDomain.
 - Asking what is selected/provided so far => intent=summarize_active_task, action=ask, informationNeed=none; never transaction_status.
@@ -1275,7 +1277,11 @@ function parseSemanticJsonObject(rawText: string): Record<string, unknown> {
   }
 }
 
-export function parseSemanticTurnResponse(rawText: string, context: SemanticContext): SemanticTurn {
+export function parseSemanticTurnResponse(
+  rawText: string,
+  context: SemanticContext,
+  currentMessage = '',
+): SemanticTurn {
   const parsed = parseSemanticJsonObject(rawText);
 
   const normalizedMeaning = typeof parsed.normalizedMeaning === 'string'
@@ -1427,17 +1433,32 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     action = 'confirm';
   }
 
+  const currentExplicitNoTransaction = Boolean(currentMessage)
+    && hasExplicitNoTransactionMarker(currentMessage);
+
+  if (currentExplicitNoTransaction) {
+    // Raw customer negation is a safety boundary, never an invitation to
+    // transact. A model can still help with language meaning, but it cannot
+    // override an explicit CURRENT "not booking/order yet" statement.
+    if (action === 'book' || action === 'order') action = 'ask';
+    if (speechAct === 'transaction_request') speechAct = 'correction';
+    informationNeed = 'none';
+  }
+
   if (
     taskDirective === 'resume_suspended'
-    && speechAct !== 'transaction_request'
-    && ['book','order','confirm','modify','cancel'].includes(action)
+    && (action === 'book' || action === 'order')
+    && (
+      currentMessage
+        ? !hasStandaloneTransactionRequest(currentMessage)
+        : speechAct !== 'transaction_request'
+    )
   ) {
-    // Resuming a suspended conversational task is working-state navigation,
-    // not transaction consent. A model may overread the suspended task's
-    // booking shape and emit "book" even when the CURRENT utterance only says
-    // "กลับไปเรื่อง...ที่ค้างไว้". Keep that read-only unless this same
-    // current turn independently carries an explicit transaction_request.
+    // Resuming working state is not fresh transaction consent. Suspended task
+    // shape and a stray model label cannot manufacture write authorization.
     action = 'ask';
+    informationNeed = 'none';
+    if (speechAct === 'transaction_request') speechAct = 'request';
   }
 
   const ambiguousReferenceRequiresClarification =
@@ -1539,6 +1560,11 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
         ? 'local'
         : (hasUnresolvedReference && noUsableContext ? 'unknown' : domain);
 
+  const canonicalConstraints = canonicalizeSemanticConstraints(parsed.constraints, entities);
+  if (currentExplicitNoTransaction && !canonicalConstraints.includes('no_transaction')) {
+    canonicalConstraints.push('no_transaction');
+  }
+
   return {
     normalizedMeaning: normalizedMeaning || undefined,
     reply: reply || undefined,
@@ -1549,7 +1575,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     informationNeed,
     entities,
     references,
-    constraints: canonicalizeSemanticConstraints(parsed.constraints, entities),
+    constraints: canonicalConstraints,
     confidence,
     // An unresolved prior-context reference (the model thinks this points at
     // something, but nothing in the real context matches) forces clarification
@@ -1633,7 +1659,7 @@ export async function interpretSemanticTurn(
     options.certificationMode ? 'semantic-certification-primary' : 'semantic-interpreter',
     options.callContext,
   );
-  const primary = parseSemanticTurnResponse(primaryRaw, context);
+  const primary = parseSemanticTurnResponse(primaryRaw, context, message);
   if (!options.certificationMode || !semanticTurnNeedsReview(primary, message, context)) return primary;
 
   const reviewPrompt = `${prompt}
@@ -1653,7 +1679,7 @@ Do not become more eager to transact. Return the same JSON schema only.`;
       'semantic-certification-reviewer',
       undefined,
     );
-    const reviewed = parseSemanticTurnResponse(reviewedRaw, context);
+    const reviewed = parseSemanticTurnResponse(reviewedRaw, context, message);
 
     // Review is allowed to replace the first pass only when it is actually
     // usable. Never replace a valid primary interpretation with a weaker
