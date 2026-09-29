@@ -1,4 +1,4 @@
-name: Production Smoke (real deployed endpoint)
+name: Phase 7 Final Production Certification
 
 # Human Core final certification: exercises the REAL deployed Netlify
 # production customer endpoint from a runner with real network access
@@ -32,7 +32,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Run real production smoke (read-only, no transactions)
+      - name: Run Phase 7 final production certification (read-only, no transactions)
         env:
           THONGTHAI_PRODUCTION_URL: ${{ inputs.production_url }}
-        run: npx tsx scripts/run-production-smoke.ts
+        run: npx tsx scripts/run-phase7-production-certification.ts
