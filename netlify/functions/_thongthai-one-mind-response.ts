@@ -37,7 +37,6 @@ import {
   applyConversationContextUpdate,
   parseConversationContextState,
 } from './_conversation-context';
-import { isPromotionMention } from './_promotion-dialog';
 import {
   compareAndSwapGuestAgentState,
   loadGuestAgentStateSnapshot,
@@ -84,14 +83,7 @@ export function shouldPreferGroundedDeterministicResponse(
 /** True for a task-active turn whose DialogDecision only collects/clarifies
  *  (never a real commitment) -- see TASK_CONTINUATION_SAFE_MODES above. */
 export function isSafeTaskContinuationTurn(turn: OneMindTurnResult): boolean {
-  const domain = (turn.dialogSemanticTurn ?? turn.semanticTurn).domain;
-  const relevantTask = [
-    turn.taskStateBefore.activeTask,
-    turn.taskStateAfter.activeTask,
-    turn.taskStateBefore.suspendedTask,
-    turn.taskStateAfter.suspendedTask,
-  ].some(task => Boolean(task) && task!.domain === domain);
-  return relevantTask
+  return Boolean(turn.taskStateBefore.activeTask || turn.taskStateAfter.activeTask)
     && TASK_CONTINUATION_SAFE_MODES.has(turn.dialogDecision.mode)
     && !turn.dialogDecision.actionProposal;
 }
@@ -125,27 +117,6 @@ export type OneMindCustomerTurnResult =
  *  hardening pass exists to close. */
 function isGenuinelyUnclassifiedFallback(turn: OneMindTurnResult): boolean {
   return turn.semanticTurn.clarificationReason === 'provider_unavailable';
-}
-
-function isTrustedGroundedPromotionProviderFallback(
-  turn: OneMindTurnResult,
-  message: string,
-): boolean {
-  const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
-  if (semantic.semanticSource !== 'deterministic_fallback') return false;
-  if (semantic.domain !== 'promotion') return false;
-  if (!['discover','recommend','ask'].includes(semantic.action)) return false;
-  if (!isPromotionMention(message)) return false;
-  if (turn.dialogDecision.actionProposal) return false;
-
-  // Only compose this provider-outage fallback when the canonical promotion
-  // source itself answered. An unavailable source still fails closed rather
-  // than turning deterministic language routing into a source of promo facts.
-  return turn.groundedKnowledge.some(bundle =>
-    bundle.domain === 'promotion'
-    && bundle.sources.some(source =>
-      source.need === 'promotion_eligibility'
-      && (source.status === 'ok' || source.status === 'empty')));
 }
 
 export type ReadOnlyCutoverEligibilityOptions = {
@@ -196,9 +167,7 @@ export function readOnlyCutoverEligibility(
     // -- never a blanket relaxation for every deterministic_fallback turn.
     const trustedZeroCostBypass = options.message !== undefined
       && isTrustedZeroCostFactLookup(turn.dialogSemanticTurn ?? turn.semanticTurn, options.message);
-    const trustedPromotionProviderFallback = options.message !== undefined
-      && isTrustedGroundedPromotionProviderFallback(turn, options.message);
-    if (!trustedZeroCostBypass && !trustedPromotionProviderFallback) {
+    if (!trustedZeroCostBypass) {
       return { eligible:false, reason:'transactional_or_task_turn' };
     }
   }
