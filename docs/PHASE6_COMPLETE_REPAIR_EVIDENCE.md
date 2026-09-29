@@ -33,6 +33,7 @@ The repair adds no second brain or state store.
 | legacy LINE duration split-brain | newly found | legacy parser/executor hardcoded 30/60/90 while canonical catalog offers horse 30/45 | parse syntax generically, validate both LINE collection and executor against live offerings, and compute exact contiguous schedule duration |
 | omitted prior-plan reference | newly exposed by final-head live LINE gate | model understood a journey edit but omitted `references[]`; the trust boundary discarded the otherwise correct meaning and asked again | recover only a concrete edit against exactly one canonical active journey task; retain clarification when another journey task competes |
 | conditional primary/fallback alias collision | newly exposed by the next final-head live LINE gate | model preserved the fallback horse but copied it into both the primary and fallback slots | structurally materialize two explicitly named current-turn roles and reconcile them before composition; keep the availability turn read-only and preserve the active selection |
+| compound correction dropped grounded answer | newly exposed after the conditional roles were repaired | the response bridge treated every correction as a pure state-update fast path, bypassing the availability bundle and its deterministic fallback when the paid composer was blocked by the cost ledger | use the acknowledgement fast path only when `informationNeed` is `none`; compound corrections continue through grounded composition and fail closed to the named availability renderer |
 | duplicate activity writes | already repaired before this branch | retry after a successful write | preserved executor duplicate check and replayed it with catalog validation enabled |
 
 ## Requirement-to-evidence matrix
@@ -73,7 +74,9 @@ test independently proves rejection occurs before any POST to `bookings`.
 
 - `npm test`: 1795/1795 passed, including the dedicated unsupported-duration
   dialog regression, both sides of the omitted prior-plan reference repair,
-  and the live conditional-role alias-collision regression.
+  the live conditional-role alias-collision regression, and the end-to-end
+  composer fallback assertion for both named horses, unchanged task slots,
+  no action proposal, and explicit no-booking wording.
 - Exact Netlify build command completed locally. Phase-O live and semantic
   certification correctly reported skipped because the local invocation was
   not a configured CI/live context; this is not counted as a live PASS.
