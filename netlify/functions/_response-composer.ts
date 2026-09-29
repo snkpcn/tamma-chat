@@ -428,10 +428,12 @@ function activeTaskSubjectTh(input: ResponseComposerInput): string {
       : resource==='activity-atv' ? ' ATV'
         : resource==='activity-archery' ? 'ยิงธนู'
           : 'กิจกรรม';
-    return `กำลังช่วยจอง${subject}ให้อยู่นะครับ `;
+    return task.commitmentIntent
+      ? `กำลังช่วยจอง${subject}ให้อยู่นะครับ `
+      : `กำลังคุยเรื่อง${subject}อยู่นะครับ `;
   }
-  if (task.type==='stay_booking') return 'กำลังช่วยจองที่พักให้อยู่นะครับ ';
-  if (task.type==='restaurant_preorder') return 'กำลังช่วยเตรียมรายการอาหารให้อยู่นะครับ ';
+  if (task.type==='stay_booking') return task.commitmentIntent ? 'กำลังช่วยจองที่พักให้อยู่นะครับ ' : 'กำลังคุยเรื่องที่พักอยู่นะครับ ';
+  if (task.type==='restaurant_preorder') return task.commitmentIntent ? 'กำลังช่วยเตรียมรายการอาหารให้อยู่นะครับ ' : 'กำลังคุยเรื่องรายการอาหารอยู่นะครับ ';
   return '';
 }
 

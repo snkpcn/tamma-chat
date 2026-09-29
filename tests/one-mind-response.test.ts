@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   ONE_MIND_RESPONSE_VERSION,
   readOnlyCutoverEligibility,
+  requiresDietarySafetyGroundedResponse,
 } from '../netlify/functions/_thongthai-one-mind-response';
 import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
 import { emptyTaskStateContainer, createActiveTask } from '../netlify/functions/_task-state';
@@ -49,6 +50,20 @@ function result(overrides: Partial<OneMindTurnResult> = {}): OneMindTurnResult {
 
 test('Phase I response bridge version is explicit', () => {
   assert.equal(ONE_MIND_RESPONSE_VERSION,'one-mind-response-v1');
+});
+
+test('dietary/allergy constraints require the centralized grounded safety renderer', () => {
+  const constrained=result();
+  constrained.dialogSemanticTurn={
+    ...constrained.semanticTurn,
+    domain:'restaurant',action:'recommend',informationNeed:'recommendation',
+    constraints:['shrimp_allergy','mild_spice'],
+  };
+  assert.equal(requiresDietarySafetyGroundedResponse(constrained),true);
+
+  const ordinary=result();
+  ordinary.dialogSemanticTurn={...ordinary.semanticTurn,domain:'restaurant',action:'discover',constraints:[]};
+  assert.equal(requiresDietarySafetyGroundedResponse(ordinary),false);
 });
 
 test('initial G.2 gate allows a task-free restaurant read-only turn', () => {

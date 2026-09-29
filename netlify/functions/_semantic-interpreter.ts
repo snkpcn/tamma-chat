@@ -1336,7 +1336,7 @@ export function parseSemanticTurnResponse(
   const normalizedMeaning = typeof parsed.normalizedMeaning === 'string'
     ? parsed.normalizedMeaning.trim().slice(0, 360)
     : '';
-  const reply = typeof parsed.reply === 'string'
+  let reply = typeof parsed.reply === 'string'
     ? parsed.reply.trim().slice(0, 700)
     : '';
   let speechAct = VALID_SPEECH_ACTS.includes(parsed.speechAct as SemanticSpeechAct)
@@ -1535,6 +1535,27 @@ export function parseSemanticTurnResponse(
       || explicitSelectionReference
     );
 
+  // A model may colloquially read "take the other one" as a booking/order,
+  // but selection and transaction authorization are separate state-machine
+  // events. The CURRENT customer text must contain an affirmative standalone
+  // transaction verb before a write-intent action can survive normalization.
+  // This is a one-way safety de-escalation: explicit booking/order language
+  // still passes unchanged, while a named choice remains useful planning
+  // state instead of being discarded.
+  if (
+    currentMessage
+    && (action === 'book' || action === 'order')
+    && !hasStandaloneTransactionRequest(currentMessage)
+  ) {
+    action = concreteCurrentSelection ? 'confirm' : 'provide_information';
+    speechAct = concreteCurrentSelection ? 'selection' : 'statement';
+    // The same untrusted model output may have drafted transaction claims or
+    // slot-collection copy that no longer matches the safety-normalized turn.
+    // Do not expose that stale draft after removing its write authority; force
+    // the grounded composer to render from the reconciled semantic/state data.
+    reply = '';
+  }
+
   if (currentExplicitNoTransaction) {
     // Raw customer negation is a safety boundary, never an invitation to
     // transact. A model can still help with language meaning, but it cannot
@@ -1551,6 +1572,7 @@ export function parseSemanticTurnResponse(
     }
     if (speechAct === 'transaction_request') {
       speechAct = concreteCurrentSelection ? 'selection' : 'correction';
+      reply = '';
     }
     // Keep any legitimate read-only predicate (availability/price/policy/etc).
     // Revoking WRITE authority must not erase what the customer asked to know.

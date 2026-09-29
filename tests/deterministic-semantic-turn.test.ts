@@ -68,6 +68,46 @@ test('short follow-ups reuse the active read-only domain when structurally clear
   assert.equal(cafe!.action, 'ask');
 });
 
+test('explicit restaurant topic navigation outranks an active horse task', () => {
+  const taskState:TaskStateContainer={
+    ...emptyTaskStateContainer(),
+    activeTask:createActiveTask({
+      type:'activity_booking',sourceChannel:'line',now:NOW,
+      initialSlots:{resourceCode:'activity-horse',horseName:'ภาราดร',durationMinutes:45},
+    }),
+  };
+  const turn=deriveDeterministicSemanticTurn(
+    'ขอถามเรื่องอาหารก่อนครับ',
+    {activeDomain:'activity',recentEntities:[horseEntity()]},
+    taskState,
+    NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.domain,'restaurant');
+  assert.equal(turn!.intent,'restaurant_topic_switch');
+  assert.equal(turn!.needsClarification,false);
+});
+
+test('spaced availability-only wording stays a read-only availability need', () => {
+  const taskState:TaskStateContainer={
+    ...emptyTaskStateContainer(),
+    activeTask:createActiveTask({
+      type:'activity_booking',sourceChannel:'line',now:NOW,
+      initialSlots:{resourceCode:'activity-horse',horseName:'ภาราดร',durationMinutes:45},
+    }),
+  };
+  const turn=deriveDeterministicSemanticTurn(
+    'เช็กว่างเฉย ๆ ได้ไหมครับ ยังไม่จอง',
+    {activeDomain:'activity',recentEntities:[horseEntity()]},
+    taskState,
+    NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.action,'status');
+  assert.equal(turn!.informationNeed,'availability');
+  assert.ok(turn!.constraints.includes('no_transaction'));
+});
+
 test('selecting a recently-shown entity by name resolves deterministically, with no active task yet', () => {
   const context: SemanticContext = { activeDomain: 'activity', recentEntities: [horseEntity()] };
   const turn = deriveDeterministicSemanticTurn('เอาภาราดร', context, emptyTaskStateContainer());

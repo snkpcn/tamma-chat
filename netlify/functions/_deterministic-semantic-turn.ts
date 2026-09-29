@@ -206,9 +206,14 @@ function isInventoryCountQuestion(message: string): boolean {
  *  toward the restaurant domain ("ร้านมีไรกิน" while mid-booking) is
  *  recognized structurally -- see detectCrossDomainTopicSwitch below. */
 const RESTAURANT_TOPIC_MARKER = /ร้าน.*(?:กิน|อาหาร|เมนู)|(?:กิน|อาหาร|เมนู).*ร้าน/u;
+const TOPIC_NAVIGATION_MARKER = /(?:ขอ)?(?:ถาม|คุย)(?:ต่อ)?(?:เรื่อง)?|(?:เปลี่ยน|พัก|กลับ)[^\n,.!?？]{0,24}เรื่อง|เรื่อง[^\n,.!?？]{0,24}(?:ก่อน|ต่อ)/u;
+const RESTAURANT_CATEGORY_MARKER = /ร้านอาหาร|อาหาร|เมนู|กินข้าว/u;
 
 function findRestaurantTopicNarrow(message: string): boolean {
-  return RESTAURANT_TOPIC_MARKER.test(message) && Boolean(findEcosystemNode('thamma-chat-restaurant'));
+  const explicitNavigation = TOPIC_NAVIGATION_MARKER.test(message)
+    && RESTAURANT_CATEGORY_MARKER.test(message);
+  return (RESTAURANT_TOPIC_MARKER.test(message) || explicitNavigation)
+    && Boolean(findEcosystemNode('thamma-chat-restaurant'));
 }
 
 /** "โต๊ะ...เต็ม/ว่าง" -- a live TABLE STATUS question, structurally distinct
@@ -521,7 +526,7 @@ function detectCompareEntities(message: string, context: SemanticContext, domain
 }
 
 export const PRICE_MARKER = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/u;
-const AVAILABILITY_STATUS_MARKER = /ว่างไหม|ว่างมั้ย|ว่างรึเปล่า|ว่างหรือเปล่า/u;
+const AVAILABILITY_STATUS_MARKER = /ว่าง(?:[^\n,.!?？]{0,20})?(?:ไหม|มั้ย|รึเปล่า|หรือเปล่า|เฉย)|(?:เช็ก|เช็ค|ดู|ถาม)[^\n,.!?？]{0,20}ว่าง/u;
 /** An informal or formal "how does this work" question -- "ยังไง"/
  *  "อย่างไร" (formal), or a bare sentence-final "ไง" (a common informal
  *  shorthand for the same, e.g. "จะขี่ม้าไง"). A structural, sentence-final
@@ -596,7 +601,7 @@ function detectActivitySideQuestion(
     const entities: Record<string, unknown> = {};
     const date = extractDate(message, now);
     if (date) entities.date = date;
-    return { domain, intent: 'ask_availability_status', action: 'status', entities, references: [], constraints: [], confidence: 0.8, needsClarification: false };
+    return { domain, intent: 'ask_availability_status', action: 'status', informationNeed:'availability', entities, references: [], constraints: [], confidence: 0.8, needsClarification: false };
   }
   if (HOW_IT_WORKS_MARKER.test(message)) {
     return { domain, intent: 'ask_how_it_works', action: 'ask', entities: {}, references: [], constraints: [], confidence: 0.75, needsClarification: false };

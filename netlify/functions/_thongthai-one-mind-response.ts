@@ -60,6 +60,16 @@ const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','statu
 // Payment/support remain on legacy until their own equivalence is proven.
 const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe','journey','general','local','incident']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
+const FOOD_SAFETY_CONSTRAINTS = new Set([
+  'no_shrimp','shrimp_allergy','no_seafood','seafood_allergy',
+  'no_peanut','peanut_allergy','no_egg','egg_allergy','food_allergy',
+  'no_spicy','mild_spice',
+]);
+
+export function requiresDietarySafetyGroundedResponse(turn: OneMindTurnResult): boolean {
+  return turn.dialogSemanticTurn.domain === 'restaurant'
+    && turn.dialogSemanticTurn.constraints.some(value => FOOD_SAFETY_CONSTRAINTS.has(value));
+}
 // Task-worthy modes that only ever COLLECT/CLARIFY information -- they never
 // execute or even propose a transaction (see DialogMode/COMMIT_ACTIONS in
 // _dialog-manager.ts: only 'propose_action'/'execute_tool' reach an
@@ -547,6 +557,14 @@ export async function processOneMindCustomerTurn(
       && turn.semanticTurn.action === 'ask'
     ? composeMembershipInformationResponse(composerInput)
     : null;
+  // Allergy and dietary filtering is an executable safety policy over
+  // authoritative menu facts, not a prose-style choice. Keep it on the
+  // centralized grounded renderer so a fluent model response cannot select
+  // an item without applying remembered/current restrictions first.
+  const dietarySafetyFastPath = !deterministicFastPath && !membershipFastPath
+      && requiresDietarySafetyGroundedResponse(turn)
+    ? composeGroundedDeterministicResponse(composerInput)
+    : null;
   // Cost guard hotfix: a semantic turn that already skipped the paid
   // semantic-interpreter call (semanticSource==='deterministic_fallback')
   // AND matches the same narrow, proven-unambiguous allowlist
@@ -558,7 +576,7 @@ export async function processOneMindCustomerTurn(
   // fabricated answer, only skips paying for a rephrase. If it returns null
   // (no grounded facts found this way), the turn falls through to the
   // normal paid path below rather than ever showing a false answer.
-  const zeroCostFactPath = !deterministicFastPath && !membershipFastPath
+  const zeroCostFactPath = !deterministicFastPath && !membershipFastPath && !dietarySafetyFastPath
       && turn.dialogSemanticTurn.semanticSource === 'deterministic_fallback'
       && isTrustedZeroCostFactLookup(turn.dialogSemanticTurn, input.message)
     ? composeGroundedDeterministicResponse(composerInput)
@@ -569,7 +587,7 @@ export async function processOneMindCustomerTurn(
   )
     ? composeGroundedDeterministicResponse(composerInput)
     : null;
-  const response = deterministicFastPath ?? membershipFastPath ?? zeroCostFactPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
+  const response = deterministicFastPath ?? membershipFastPath ?? dietarySafetyFastPath ?? zeroCostFactPath ?? groundedFastPath ?? await composeThongthaiResponse(composerInput);
   const composerMs = Date.now() - composerStartedAt;
   await persistAiResponseTurn({
     conversationId,
