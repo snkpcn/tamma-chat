@@ -397,6 +397,65 @@ test('Phase 6 final: parser fails closed when model mislabels resume/withhold te
   assert.equal(trulyCommitted.speechAct, 'transaction_request');
 });
 
+
+test('Phase 6 final: cross-cutting promotion subject outranks a narrower restaurant label and preserves no-new-membership preference', () => {
+  const badModel = JSON.stringify({
+    normalizedMeaning:'customer wants to browse restaurant options',
+    reply:'',
+    speechAct:'request',
+    domain:'restaurant',
+    intent:'restaurant_topic_switch',
+    action:'discover',
+    informationNeed:'none',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.99,
+    needsClarification:false,
+  });
+  const turn = parseSemanticTurnResponse(
+    badModel,
+    emptySemanticContext(),
+    'ขอโปรร้านอาหารที่คุ้มสุด แต่ไม่เอาแบบต้องสมัครสมาชิกเพิ่ม',
+  );
+  assert.equal(turn.domain,'promotion');
+  assert.equal(turn.action,'recommend');
+  assert.equal(turn.informationNeed,'recommendation');
+  assert.equal(turn.entities.businessScope,'restaurant');
+  assert.ok(turn.constraints.includes('no_new_membership'));
+});
+
+test('Phase 6 final: promotion reconciliation has negative guards for polite "โปรด" and explicit promo rejection', () => {
+  const restaurantModel = JSON.stringify({
+    normalizedMeaning:'customer wants ordinary menu recommendations',
+    reply:'',
+    speechAct:'request',
+    domain:'restaurant',
+    intent:'restaurant_recommendation',
+    action:'recommend',
+    informationNeed:'recommendation',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.99,
+    needsClarification:false,
+  });
+
+  const polite = parseSemanticTurnResponse(
+    restaurantModel,
+    emptySemanticContext(),
+    'โปรดแนะนำเมนูไม่เผ็ดหน่อย',
+  );
+  assert.equal(polite.domain,'restaurant');
+
+  const rejectsPromo = parseSemanticTurnResponse(
+    restaurantModel,
+    emptySemanticContext(),
+    'ไม่เอาโปร ขอเมนูปกติที่ไม่เผ็ด',
+  );
+  assert.equal(rejectsPromo.domain,'restaurant');
+});
+
 function modelTurn(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
     normalizedMeaning: 'phase 6 acceptance turn',
