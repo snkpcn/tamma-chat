@@ -664,7 +664,12 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
 
   const specificMenu = rows.find(row=>customerAskedAboutMenu(input,row)) ?? (rows.length===1 ? rows[0] : null);
 
-  if (lowSpice && specificMenu && specificMenu.canRemoveChiliKey) {
+  // A taste customization must never short-circuit an allergy restriction.
+  // When both are active, evaluate the safety facts first in the restriction
+  // branch below, then describe the verified spice customization alongside
+  // that result. Production evidence: the old ordering returned only "ไม่ใส่
+  // พริกได้" and silently omitted the same customer's shrimp allergy.
+  if (lowSpice && restrictions.length === 0 && specificMenu && specificMenu.canRemoveChiliKey) {
     const used=[specificMenu.nameKey,specificMenu.canRemoveChiliKey];
     if(specificMenu.spiceAdjustableKey) used.push(specificMenu.spiceAdjustableKey);
     if(specificMenu.canRemoveChili===true) {
@@ -695,8 +700,17 @@ export function renderRestaurantRecommendation(input: HumanGroundedRenderInput):
         usedFactKeys:[...new Set(used)],
       };
     }
+    const spiceNote = lowSpice
+      ? specificMenu.canRemoveChili === true || specificMenu.spiceAdjustable === true
+        ? ' และข้อมูลระบุว่าสั่งไม่ใส่พริกหรือปรับเผ็ดน้อยได้ครับ'
+        : specificMenu.canRemoveChili === false
+          ? ' แต่ข้อมูลระบุว่าปรับเป็นไม่ใส่พริกไม่ได้ครับ'
+          : ' ส่วนระดับความเผ็ดยังไม่มีข้อมูลยืนยันครบครับ'
+      : 'ครับ';
+    if (lowSpice && specificMenu.canRemoveChiliKey) used.push(specificMenu.canRemoveChiliKey);
+    if (lowSpice && specificMenu.spiceAdjustableKey) used.push(specificMenu.spiceAdjustableKey);
     return {
-      message:`${specificMenu.name}ข้อมูลเมนูระบุว่าไม่มี${restrictions.map(kind=>ALLERGEN_LABELS[kind]).join(' / ')}ครับ ถ้าแพ้รุนแรง บอกผมได้นะครับ เดี๋ยวช่วยเช็กเรื่องครัวร่วมให้อีกที`,
+      message:`${specificMenu.name}ข้อมูลเมนูระบุว่าไม่มี${restrictions.map(kind=>ALLERGEN_LABELS[kind]).join(' / ')}${spiceNote} ถ้าแพ้รุนแรง บอกผมได้นะครับ เดี๋ยวช่วยเช็กเรื่องครัวร่วมให้อีกที`,
       usedFactKeys:[...new Set(used)],
     };
   }
