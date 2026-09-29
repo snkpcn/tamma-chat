@@ -88,6 +88,61 @@ test('exact conditional horse availability remains in One-Mind under the semanti
   );
 });
 
+test('provider-outage gate accepts an exact no-booking duration update on the same active task', () => {
+  const beforeTask=createActiveTask({
+    type:'activity_booking',sourceChannel:'line',
+    initialSlots:{resourceCode:'activity-horse',horseName:'ภาราดร'},
+  },NOW);
+  const afterTask={
+    ...beforeTask,
+    slots:{...beforeTask.slots,durationMinutes:45},
+    commitmentIntent:false,
+  };
+  const before={...emptyTaskStateContainer(),activeTask:beforeTask};
+  const after={...emptyTaskStateContainer(),activeTask:afterTask};
+  const semantic={
+    domain:'activity' as const,intent:'transaction_commitment_retracted',
+    action:'correct_previous' as const,speechAct:'correction' as const,
+    informationNeed:'none' as const,entities:{durationMinutes:45},references:[],
+    constraints:['no_transaction'],confidence:.95,needsClarification:false,
+    semanticSource:'deterministic_fallback' as const,
+  };
+  const r=result({
+    semanticTurn:semantic,dialogSemanticTurn:semantic,
+    taskStateBefore:before,taskStateAfter:after,
+    dialogDecision:{
+      mode:'answer',taskStateContainer:after,knowledgeRequests:[],missingFields:[],
+      responseIntent:'grounded_answer',reasons:['transaction_commitment_revoked','nontransactional_state_update_preserved'],
+    },
+  });
+
+  assert.deepEqual(
+    readOnlyCutoverEligibility(r,{requireSemanticSupervisor:true,message:'งั้นขอ 45 นาที แต่ยังไม่จองนะครับ'}),
+    {eligible:true},
+  );
+});
+
+test('provider-outage gate still rejects a bounded slot update without current no-transaction consent', () => {
+  const beforeTask=createActiveTask({
+    type:'activity_booking',sourceChannel:'line',
+    initialSlots:{resourceCode:'activity-horse',horseName:'ภาราดร'},
+  },NOW);
+  const afterTask={...beforeTask,slots:{...beforeTask.slots,durationMinutes:45}};
+  const before={...emptyTaskStateContainer(),activeTask:beforeTask};
+  const after={...emptyTaskStateContainer(),activeTask:afterTask};
+  const semantic={
+    domain:'activity' as const,intent:'task_slot_update',action:'provide_information' as const,
+    informationNeed:'none' as const,entities:{durationMinutes:45},references:[],constraints:[],
+    confidence:.9,needsClarification:false,semanticSource:'deterministic_fallback' as const,
+  };
+  const r=result({semanticTurn:semantic,dialogSemanticTurn:semantic,taskStateBefore:before,taskStateAfter:after});
+
+  assert.deepEqual(
+    readOnlyCutoverEligibility(r,{requireSemanticSupervisor:true,message:'45 นาที'}),
+    {eligible:false,reason:'transactional_or_task_turn'},
+  );
+});
+
 test('initial G.2 gate refuses transactional action even before an ActionProposal exists', () => {
   const r=result();
   r.semanticTurn={...r.semanticTurn,domain:'activity',action:'book',intent:'activity_booking'};

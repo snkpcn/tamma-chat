@@ -176,19 +176,52 @@ export type ReadOnlyCutoverEligibilityOptions = {
   message?: string;
 };
 
-export function isTrustedResolvedNoTransactionContinuation(turn: OneMindTurnResult): boolean {
+const BOUNDED_NO_TRANSACTION_SLOT_KEYS = new Set([
+  'date', 'time', 'partySize', 'durationMinutes', 'quantity',
+]);
+
+/**
+ * A deterministic continuation may own the early recovery path when the
+ * customer explicitly withholds transaction consent and the turn is either:
+ *
+ *  1. a uniquely resolved entity selection; or
+ *  2. a bounded slot update on the same already-open task.
+ *
+ * The second shape matters for natural continuations such as supplying a
+ * duration, date, time, or party size while explicitly saying not to book.
+ * Those values have no entity reference by design, but they are still exact parser output
+ * and cannot authorize an ActionProposal. Rejecting them at the semantic-
+ * supervisor gate made a transient provider failure fall through every
+ * canonical layer to the legacy generic degraded-booking apology even though
+ * Dialog Manager had already produced the correct safe state update.
+ */
+export function isTrustedBoundedNoTransactionContinuation(turn: OneMindTurnResult): boolean {
   const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
   const hasNoTransaction = semantic.constraints.some(constraint =>
     /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint));
   if (!hasNoTransaction) return false;
   if (semantic.speechAct === 'transaction_request' || ['book','order','cancel'].includes(semantic.action)) return false;
+  if (turn.dialogDecision.actionProposal) return false;
+
   const resolvedReference = semantic.references.some(reference =>
     Boolean(reference.resolvedEntityId) || (reference.resolvedEntityIds?.length ?? 0) === 1);
-  if (!resolvedReference) return false;
-  return semantic.action === 'confirm'
+  const safeContinuationAction = semantic.action === 'confirm'
     || semantic.action === 'provide_information'
     || semantic.action === 'correct_previous'
     || semantic.action === 'modify';
+  if (!safeContinuationAction) return false;
+  if (resolvedReference) return true;
+
+  const before = turn.taskStateBefore.activeTask;
+  const after = turn.taskStateAfter.activeTask;
+  if (!before || !after) return false;
+  if (before.taskId !== after.taskId || before.domain !== after.domain || semantic.domain !== after.domain) return false;
+  if (before.commitmentIntent || after.commitmentIntent) return false;
+  if ((semantic.informationNeed ?? 'none') !== 'none') return false;
+
+  const entityKeys = Object.keys(semantic.entities);
+  if (!entityKeys.length || !entityKeys.every(key => BOUNDED_NO_TRANSACTION_SLOT_KEYS.has(key))) return false;
+  return entityKeys.every(key => Object.is(after.slots[key], semantic.entities[key]));
 }
 
 export function readOnlyCutoverEligibility(
@@ -222,8 +255,8 @@ export function readOnlyCutoverEligibility(
     // ActionProposal or transaction consent. This prevents provider/budget
     // degradation from bouncing a clear "keep this one, don't book" choice
     // into a legacy clarification loop.
-    const trustedResolvedNoTransaction = isTrustedResolvedNoTransactionContinuation(turn);
-    if (!trustedZeroCostBypass && !trustedResolvedNoTransaction) {
+    const trustedBoundedNoTransaction = isTrustedBoundedNoTransactionContinuation(turn);
+    if (!trustedZeroCostBypass && !trustedBoundedNoTransaction) {
       return { eligible:false, reason:'transactional_or_task_turn' };
     }
   }

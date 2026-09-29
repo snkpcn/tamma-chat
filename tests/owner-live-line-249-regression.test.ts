@@ -154,6 +154,8 @@ test('Phase 6 production-smoke repair: bad model output cannot promote selection
 
     const supported = await send('งั้นขอ 45 นาที แต่ยังไม่จองนะครับ');
     assert.match(text(supported),/45\s*นาที/u);
+    assert.doesNotMatch(text(supported),/ระบบจอง.*ตอบช้า|คิดช้ากว่าปกติ|ลองส่งอีกครั้ง/u,
+      'a provider outage must not replace an exact no-booking duration update with a generic apology');
 
     const foodSwitch = await send('ขอถามเรื่องอาหารก่อนครับ');
     assert.doesNotMatch(text(foodSwitch),/หมายถึง.*ภาราดร|กำลังช่วยจอง/u);
