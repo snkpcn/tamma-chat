@@ -551,6 +551,32 @@ const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
 // re-phrase what canonical data already answers, never invents a fact the
 // deterministic composer couldn't already produce on its own.
 export function isTrustedZeroCostFactLookup(turn: SemanticTurn, message: string): boolean {
+  // A conditional horse fallback with an explicit do-not-book consequence is
+  // an exact read-only availability lookup. The deterministic deriver emits
+  // this intent only after resolving two distinct, explicitly named current-
+  // turn roles (or one uniquely grounded active selection) and attaching
+  // `no_transaction`. Treating it as exact for language refinement but not
+  // trusted at the response cutover produced a split-brain: One-Mind already
+  // had the correct grounded availability turn, then handed it to legacy only
+  // because no paid supervisor call had been made.
+  if (
+    turn.intent === 'task_conditional_continuation'
+    && turn.domain === 'activity'
+    && turn.action === 'ask'
+    && turn.informationNeed === 'availability'
+    && turn.constraints.includes('no_transaction')
+    && (
+      (
+        typeof turn.entities.primaryHorse === 'string'
+        && typeof turn.entities.fallbackHorse === 'string'
+        && turn.entities.primaryHorse !== turn.entities.fallbackHorse
+      )
+      || typeof turn.entities.horseName === 'string'
+    )
+    && /ไม่(?:ต้อง)?จอง|ยังไม่จอง|ไม่ทำรายการ/u.test(message)
+  ) {
+    return true;
+  }
   // A single activity price question that named its own activity in THIS
   // message (see the ask_price branch in _deterministic-semantic-turn.ts --
   // entities.activityCode is only ever set there from the message's own

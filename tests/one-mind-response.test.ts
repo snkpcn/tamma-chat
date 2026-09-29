@@ -9,6 +9,7 @@ import {
 import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
 import { emptyTaskStateContainer, createActiveTask } from '../netlify/functions/_task-state';
 import type { OneMindTurnResult } from '../netlify/functions/_thongthai-one-mind-orchestrator';
+import { isTrustedZeroCostFactLookup } from '../netlify/functions/_thongthai-one-mind-orchestrator';
 
 const NOW=new Date('2026-09-18T12:00:00.000Z');
 
@@ -68,6 +69,23 @@ test('dietary/allergy constraints require the centralized grounded safety render
 
 test('initial G.2 gate allows a task-free restaurant read-only turn', () => {
   assert.deepEqual(readOnlyCutoverEligibility(result()), {eligible:true});
+});
+
+test('exact conditional horse availability remains in One-Mind under the semantic-supervisor recovery gate', () => {
+  const message='ถ้าภาราดรไม่ว่าง เอาทองไทยแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร';
+  const semantic={
+    domain:'activity' as const,intent:'task_conditional_continuation',action:'ask' as const,
+    informationNeed:'availability' as const,speechAct:'question' as const,
+    entities:{resourceCode:'activity-horse',primaryHorse:'ภาราดร',fallbackHorse:'ทองไทย',activityCode:'horse'},
+    references:[],constraints:['no_transaction'],confidence:.8,needsClarification:false,
+    semanticSource:'deterministic_fallback' as const,
+  };
+  const r=result({semanticTurn:semantic,dialogSemanticTurn:semantic});
+  assert.equal(isTrustedZeroCostFactLookup(semantic,message),true);
+  assert.deepEqual(
+    readOnlyCutoverEligibility(r,{requireSemanticSupervisor:true,message}),
+    {eligible:true},
+  );
 });
 
 test('initial G.2 gate refuses transactional action even before an ActionProposal exists', () => {

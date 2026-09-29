@@ -40,6 +40,7 @@ The repair adds no second brain or state store.
 | mild-spice phrasing was not durable | newly exposed by the end-to-end regression for the production sequence | the restaurant advisor parsed “กินเผ็ดไม่เก่ง”, but the canonical preference-capture boundary did not persist the same meaning | store `mild_spice` in the existing customer constraint memory and remove it on an explicit later correction |
 | resume wording falsely implied booking | newly exposed by the read-only production smoke after #250 | task-subject copy inferred “กำลังช่วยจอง” from task type alone | booking wording now also requires current `commitmentIntent`; planning tasks say only that the topic is being discussed |
 | spaced availability-only question lost its need | newly exposed by the read-only production smoke after #250 | the narrow marker missed “เช็กว่างเฉย ๆ ได้ไหม” and the detected side-question omitted `informationNeed=availability` | broaden the structural availability form and carry the availability facet into knowledge routing while preserving `no_transaction` |
+| exact conditional availability bounced to legacy | exposed by PR #251 final-head real LINE gate | the semantic orchestrator classified the conditional horse fallback as exact zero-call, while the response cutover did not trust that same bounded result under `requireSemanticSupervisor` | use one shared trusted predicate for the exact read-only availability shape: distinct named roles, availability need, current no-booking consequence, and no action proposal |
 | duplicate activity writes | already repaired before this branch | retry after a successful write | preserved executor duplicate check and replayed it with catalog validation enabled |
 
 ## Requirement-to-evidence matrix
@@ -85,7 +86,7 @@ slot is removed against the 30/45 catalog, and no `bookings` POST occurs.
 
 ## Local gates
 
-- Full Node test suite: 1799/1799 passed, including the production-smoke-shaped
+- Full Node test suite: 1800/1800 passed, including the production-smoke-shaped
   core regression with deliberately unsafe model output, final response,
   persisted state, catalog rejection, remembered allergy/spice constraints,
   suspend/resume wording, availability routing, and zero booking writes.
