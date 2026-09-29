@@ -286,6 +286,34 @@ test('Phase 6 final: cancellation is terminal and a later selection starts clean
   assert.equal(resolveDialogDecision(fresh, []).actionProposal, undefined);
 });
 
+test('Phase 6 gate: fixed bounded candidate-set suitability is compare even if model says recommend', () => {
+  const context: SemanticContext = {
+    ...emptySemanticContext(),
+    activeDomain: 'activity',
+    recentEntities: [
+      { id: 'activity_asset:horse-pharadon', type: 'activity_asset', name: 'ภาราดร', domain: 'activity', source: 'catalog', canonical: true },
+      { id: 'activity_asset:horse-thongthai', type: 'activity_asset', name: 'ทองไทย', domain: 'activity', source: 'catalog', canonical: true },
+    ],
+  };
+  const raw = JSON.stringify({
+    normalizedMeaning: 'which of the two known horses suits a first-time rider',
+    reply: '',
+    speechAct: 'question',
+    domain: 'activity',
+    intent: 'horse_suitability',
+    action: 'recommend',
+    informationNeed: 'recommendation',
+    entities: { selectionCriterion: 'first_time_rider' },
+    references: [{ type: 'candidate_set', value: 'สองตัวนี้', refersToPriorContext: true }],
+    constraints: ['first_time_rider'],
+    confidence: 0.98,
+    needsClarification: false,
+  });
+  const turn = parseSemanticTurnResponse(raw, context, 'สองตัวนี้ตัวไหนเหมาะกับคนไม่เคยขี่');
+  assert.equal(turn.action, 'compare');
+  assert.equal(turn.domain, 'activity');
+});
+
 test('Phase 6 final: parser fails closed when model mislabels resume/withhold text as transaction_request', () => {
   const suspendedTask: NonNullable<SemanticContext['suspendedTask']> = {
     type: 'activity_booking',
