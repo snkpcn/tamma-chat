@@ -901,6 +901,7 @@ export async function withHarness<T>(
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     THONGTHAI_ONE_MIND_CUTOVER: process.env.THONGTHAI_ONE_MIND_CUTOVER,
     LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+    THONGTHAI_TEST_BYPASS_COST_CAP: process.env.THONGTHAI_TEST_BYPASS_COST_CAP,
   };
   process.env.SUPABASE_URL = 'https://example.supabase.co';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
@@ -918,6 +919,11 @@ export async function withHarness<T>(
   // block in thongthai-chat.ts's handler is silently skipped and this
   // harness would never be testing what production actually runs.
   process.env.THONGTHAI_ONE_MIND_CUTOVER = '1';
+  // The canonical harness validates conversation semantics, state, and routing.
+  // Its mocked model calls are not customer production spend, so let them use
+  // the ledger's explicit test-only non-customer budget while direct
+  // reserveAiCall cost-guard tests continue exercising the real 5 THB ceiling.
+  process.env.THONGTHAI_TEST_BYPASS_COST_CAP = '1';
   const harness = createHarness(catalogOverrides);
   global.fetch = harness.fetchMock;
   try {
