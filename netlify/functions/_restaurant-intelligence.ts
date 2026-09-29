@@ -543,6 +543,15 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   const scored = available.map(item => scoreItem(item,pref,selectedRoles)).sort((a,b)=>b.score-a.score || a.item.price-b.item.price);
   const query = norm(input.query);
   const named = items.filter(item => query.includes(norm(item.name)));
+  // "แพ้กุ้ง ตำไทยกินได้ไหม" -- a yes/no safety question about ONE named
+  // dish under a stated allergy, structurally distinct from both a
+  // multi-item compareMode (named.length>=2) and a bare constraint
+  // declaration (which never names a specific dish). Answers about THAT
+  // dish specifically from its real recorded ingredients/allergenFlags,
+  // never a generic "I'll avoid X" acknowledgment that ignores the actual
+  // question, and never a full ingredient dump.
+  const singleItemSafetyQuestion = named.length === 1 && pref.allergenFlags.length > 0
+    && /ได้ไหม|ได้มั้ย|ปลอดภัยไหม|ปลอดภัยมั้ย|เป็นไรไหม|เป็นไรมั้ย/u.test(query);
   const compareMode = named.length >= 2 && /ต่าง|เทียบ|compare|อันไหน|ไหนดีกว่า|เลือกอะไร/u.test(query);
   const pairingRequested = pref.selectedNames.length > 0 && /เพิ่มอะไร|กินคู่|เข้ากับ|คู่กับ|ต่ออะไร/u.test(query);
   const composeMode = !compareMode && !pairingRequested && (pref.partySize != null || pref.budget != null || /จัด.*(?:ชุด|โต๊ะ)|เซ็ต|set|ครบโต๊ะ|กินกัน/u.test(query));
@@ -558,6 +567,14 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   if (pref.allergenFlags.length) notices.push('ตรวจจากวัตถุดิบที่บันทึกไว้และตัดเมนูที่มีสารก่อภูมิแพ้ตรงตัวออกแล้ว แต่ร้านยังไม่มีข้อมูลยืนยันเรื่องการปนเปื้อนข้ามอุปกรณ์/ครัว ขอให้แจ้งพนักงานอีกครั้งหน้างานเพื่อความปลอดภัยครับ');
   if (!available.length) notices.push('ไม่มีเมนูที่ผ่านข้อจำกัดและขายได้ในสต๊อกปัจจุบัน');
 
+  if (singleItemSafetyQuestion) {
+    const item = named[0]!;
+    return {
+      mode:'item_safety_check', parsed:pref, notices,
+      itemSafety:{ item:compactItem(item), safe:!isHardExcluded(item, pref) },
+      recommendations:[], comparison:null, set:null,
+    };
+  }
   if (compareMode) {
     return {
       mode:'compare', parsed:pref, notices,

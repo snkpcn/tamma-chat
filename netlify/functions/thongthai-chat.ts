@@ -33,6 +33,7 @@ import {
 import { activityAssetFromText, formatActivityAssetNote } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
+import { persistConversationContext, emptyConversationContextState } from './_conversation-context';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
@@ -186,6 +187,50 @@ export function deterministicGreetingResponse(request: BrainRequest): BrainRespo
       ? 'สวัสดีครับ ผมทองไทยครับ 😊 วันนี้อยากให้ช่วยเรื่องกิน พัก กิจกรรม โลเคชั่น อากาศ หรือจัดทริปให้ดีครับ'
       : "Hi, I'm Thongthai 😊 I can help with dining, stays, activities, location, weather, or planning your trip.",
     intent: 'greeting',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+// An explicit request to drop the prior conversation and start fresh. A
+// small, closed marker set (not a growing phrase table), matching this
+// codebase's convention for other structural intent markers.
+const CONVERSATION_RESET_RE = /ลืมที่คุยกันไปก่อน|ลืมที่คุยไปก่อน|เริ่มใหม่|ล้างก่อน|ไม่เอาที่คุยเมื่อกี้/u;
+
+/**
+ * A real reset, not merely a friendly acknowledgment: clears the
+ * persisted routing/discourse memory (active domain, recently-seen
+ * entities, working memory, any open question, the rolling summary) so
+ * the VERY NEXT message is interpreted fresh instead of being silently
+ * re-anchored to whatever business domain/entity the conversation
+ * happened to be on before this request. Real production incident this
+ * closes: "ลืมที่คุยกันไปก่อนนะครับ" got a natural-sounding "sure, let's
+ * start over" reply that never actually cleared anything, so the very
+ * next message (a completely different, self-contained request) still
+ * inherited the stale domain and triggered a false "do you mean what we
+ * discussed before?" clarification -- see the One-Mind Dialog Manager's
+ * own isAmbiguous() fix for the matching activity-domain case.
+ *
+ * Deliberately does NOT touch taskState (an active/suspended real
+ * booking task): "let's talk about something else" is a conversational
+ * reset, never an implicit cancellation of a real in-progress
+ * transaction -- that stays whatever it already was.
+ */
+export async function deterministicConversationResetResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (!CONVERSATION_RESET_RE.test(request.message)) return null;
+  await persistConversationContext(guestDbId, emptyConversationContextState()).catch(error => {
+    console.error('THONGTHAI_CONVERSATION_RESET_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+  });
+  return {
+    message: 'ได้ครับ เริ่มคุยกันใหม่จากข้อความถัดไปเลยนะครับ 😊',
+    intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
     suggestedActions: [],
@@ -744,7 +789,14 @@ function wantsFullRestaurantList(message: string): boolean {
 // do you have that's not spicy") is a real production phrasing that
 // combines a constraint AND a request in one, and must still get the
 // full (filtered) recommendation list, never the short ack alone.
-const RESTAURANT_RECOMMEND_REQUEST_MARKER = /มีอะไร|แนะนำอะไร|อยากกิน|กินอะไรดี|ขอเมนู|มีเมนู|จัดชุด|จัดโต๊ะ|อะไรอร่อย|มีไรกิน|ไรกิน/u;
+// "กินอะไรได้บ้าง"/"กินได้บ้าง" ("what can [they] eat") is just as common a
+// recommendation phrasing as "กินอะไรดี" or "มีอะไร...", but was missing
+// here -- real production incident this closes: "แฟนแพ้กุ้ง มีอะไรกินได้
+// บ้าง" only matched because it also happened to contain "มีอะไร"; the
+// equally common "แพ้กุ้ง กินอะไรได้บ้าง" (no "มี") matched nothing here at
+// all and silently fell back to the short constraint-only acknowledgment
+// instead of a real recommendation.
+const RESTAURANT_RECOMMEND_REQUEST_MARKER = /มีอะไร|แนะนำอะไร|อยากกิน|กินอะไรดี|กินอะไรได้|ขอเมนู|มีเมนู|จัดชุด|จัดโต๊ะ|อะไรอร่อย|มีไรกิน|ไรกิน/u;
 // The SAME constraint vocabulary _restaurant-intelligence.ts's own
 // parsePreferences checks -- but tested against ONLY the current
 // message (never chat history), to tell "the customer just stated this"
@@ -925,6 +977,29 @@ function formatAdvisorMessage(
   alreadyShownNames: string[] = [],
 ): string {
   const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
+  // "แพ้กุ้ง ตำไทยกินได้ไหม" -- answer about THAT specific named dish from
+  // its real recorded ingredients/allergenFlags, never a generic
+  // constraint-declaration ack that ignores the actual question, and
+  // never a full ingredient dump. Mirrors the allergy safety net's own
+  // conservative reasoning: "safe" here means "not excluded by what's
+  // recorded," never a claim of certainty, so a severe allergy still
+  // gets pointed at staff/kitchen confirmation either way.
+  if (advisor?.mode === 'item_safety_check' && advisor.itemSafety?.item) {
+    const { item, safe } = advisor.itemSafety as { item: { name: string }; safe: boolean };
+    const allergenLabelByCode: Record<string, string> = { peanut: 'ถั่ว', shrimp: 'กุ้ง/กุ้งแห้ง', fish: 'ปลา', egg: 'ไข่' };
+    const allergenFlags: string[] = Array.isArray(advisor?.parsed?.allergenFlags) ? advisor.parsed.allergenFlags : [];
+    const allergenLabel = allergenFlags.map(code => allergenLabelByCode[code]).filter(Boolean).join('/')
+      || 'สารก่อภูมิแพ้ที่บอกไว้';
+    return safe
+      ? composeLineShortReply([
+          `จากข้อมูลเมนูที่มี ${item.name} ไม่มี${allergenLabel}เป็นส่วนประกอบครับ`,
+          'แต่ถ้าแพ้รุนแรง ขอให้แจ้งพนักงานอีกครั้งก่อนสั่ง เผื่อเรื่องครัวร่วมเพื่อความปลอดภัยครับ',
+        ])
+      : composeLineShortReply([
+          `${item.name} มี${allergenLabel}เป็นส่วนประกอบครับ ขอแนะนำให้เลี่ยงไว้ก่อนนะครับ`,
+          'ถ้าอยากได้เมนูทดแทนที่ปลอดภัยกว่า บอกได้เลยครับ เดี๋ยวช่วยแนะนำให้',
+        ]);
+  }
   if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
     const [first, second] = advisor.comparison;
     const lines = advisor.comparison.slice(0, 4).map((row: any) => {
@@ -1468,15 +1543,20 @@ function deterministicExperienceDiscoveryResponse(
 // local context must never swallow an explicit booking/confirm/signup/
 // redeem intent (see Gates 1-3's exactly-once/no-premature-transaction
 // discipline, which this must not regress).
-// A specific food allergy ("แพ้กุ้ง กินอะไรได้บ้าง") must defer to the
-// restaurant SOT advisor below (deterministicRestaurantResponse), which
-// does real per-item, ingredient-based allergy filtering against the
-// live menu -- local concierge's food_culture answer is a generic Isan-
-// cuisine description with no allergy awareness at all, and would
-// otherwise win here first (FOOD_VISITOR_MARKER's "กินอะไรได้" matches
-// this exact phrasing). Same "defer to the more specific, safety-aware
+// A specific food allergy ("แพ้กุ้ง กินอะไรได้บ้าง") or a personalized
+// dietary question (a named companion who needs safe/suitable food -- a
+// child, an elderly guest) must defer to the restaurant SOT advisor below
+// (deterministicRestaurantResponse), which does real per-item, ingredient-
+// based filtering against the live menu -- local concierge's food_culture
+// answer is a generic Isan-cuisine description with no allergy/
+// suitability awareness at all, and would otherwise win here first
+// (FOOD_VISITOR_MARKER's "กินอะไรได้" matches this exact phrasing). Real
+// production incident this closes: "เด็กกินอะไรได้บ้าง"/"ผู้สูงอายุกินอะไร
+// ดี" (no explicit "แพ้..." allergy word, just an age-group qualifier)
+// still fell through to the generic food-culture blurb instead of a real
+// menu recommendation. Same "defer to the more specific, safety-aware
 // handler" precedent as every care/safety guard in this codebase.
-const LOCAL_CONCIERGE_ALLERGY_DEFER_RE = /แพ้\s*(?:ถั่ว(?:ลิสง)?|กุ้ง|ไข่|ปลา|อาหารทะเล|นม)/u;
+const LOCAL_CONCIERGE_ALLERGY_DEFER_RE = /แพ้\s*(?:ถั่ว(?:ลิสง)?|กุ้ง|ไข่|ปลา|อาหารทะเล|นม)|เด็ก|ผู้สูงอายุ/u;
 
 async function deterministicLocalConciergeResponse(request: BrainRequest): Promise<BrainResponse | null> {
   if (hasExplicitTransactionIntent(request.message)) return null;
@@ -1523,7 +1603,8 @@ async function deterministicRestaurantResponse(
   // sent while a CONCRETE proposed order is pending
   // (hasPendingRestaurantOrder's own comment).
   const dietaryIntent = classifyRestaurantDietaryIntent(request.message);
-  if (advice.mode !== 'compare' && advice.mode !== 'compose_set' && !hasPendingRestaurantOrder(runtime)
+  if (advice.mode !== 'compare' && advice.mode !== 'compose_set' && advice.mode !== 'item_safety_check'
+    && !hasPendingRestaurantOrder(runtime)
     && dietaryIntent === 'CONSTRAINT_ONLY') {
     return {
       message: formatConstraintCorrectionAck(request.message) ?? formatConstraintDeclarationAck(advice, request.message),
@@ -4402,6 +4483,27 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const earlyGreeting = deterministicGreetingResponse(request);
   if (earlyGreeting) {
     const polished = polishedResponse(earlyGreeting, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Checked before any semantic/One-Mind processing so a reset request
+  // never itself gets misread against the very context it's asking to
+  // clear (see deterministicConversationResetResponse's own comment for
+  // the real production incident this closes), and so the persisted
+  // routing memory is actually gone before the NEXT turn ever reads it.
+  const earlyConversationReset = await deterministicConversationResetResponse(request, guestDbId).catch(error => {
+    console.error('THONGTHAI_CONVERSATION_RESET_RESPONDER_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+    return null;
+  });
+  if (earlyConversationReset) {
+    const polished = polishedResponse(earlyConversationReset, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

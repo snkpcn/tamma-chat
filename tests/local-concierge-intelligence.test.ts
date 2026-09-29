@@ -71,7 +71,13 @@ test('B. place/region questions: locally aware, concise, connects to real busine
 
 test('C. food-culture questions: uses real style, handles constraints, does not invent a menu item', async () => {
   await withHarness(async harness => {
-    const messages = ['อาหารอีสานแท้ๆ คือแนวไหน', 'อยากกินนัวๆ แนะนำอะไร', 'ไม่กินเผ็ดกินอะไรได้', 'เด็กกินอะไรได้', 'เมนูไหน local ที่สุด'];
+    // "เด็กกินอะไรได้" deliberately excluded here -- a personalized dietary
+    // question (a named companion who needs safe/suitable food) now defers
+    // to the real restaurant SOT advisor instead of this generic Isan-
+    // cuisine blurb (see LOCAL_CONCIERGE_ALLERGY_DEFER_RE in
+    // thongthai-chat.ts), so any price it shows comes from the real,
+    // verified live menu, not an invented one -- covered separately below.
+    const messages = ['อาหารอีสานแท้ๆ คือแนวไหน', 'อยากกินนัวๆ แนะนำอะไร', 'ไม่กินเผ็ดกินอะไรได้', 'เมนูไหน local ที่สุด'];
     for (const [i, message] of messages.entries()) {
       const r = await ask(harness, `concierge-food-${i}`, message);
       assert.equal(r.statusCode, 200);
@@ -79,6 +85,19 @@ test('C. food-culture questions: uses real style, handles constraints, does not 
       assert.doesNotMatch(message_, NO_GENERIC_FAILURE, `"${message}" must not get a generic failure`);
       assert.doesNotMatch(message_, /\d+\s*บาท/u, `"${message}" must never invent a specific menu price without checking the real menu`);
     }
+  });
+});
+
+test('C2. a personalized dietary food-culture question ("เด็กกินอะไรได้") defers to the real grounded restaurant advisor, not the generic blurb', async () => {
+  await withHarness(async harness => {
+    const r = await ask(harness, 'concierge-food-child', 'เด็กกินอะไรได้');
+    assert.equal(r.statusCode, 200);
+    const message_ = msg(r.payload);
+    assert.doesNotMatch(message_, NO_GENERIC_FAILURE, 'must not get a generic failure');
+    // Any price shown here must be a real, verified live-menu price (the
+    // restaurant SOT advisor's own output), never a hallucinated one --
+    // proven by it matching the actual seeded fixture menu items.
+    assert.match(message_, /บาท/u, 'must give a real menu-grounded answer, not the generic Isan-cuisine blurb');
   });
 });
 

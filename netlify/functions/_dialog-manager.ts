@@ -286,6 +286,33 @@ function isAmbiguous(turn: SemanticTurn): boolean {
   // purely because needsClarification/an unrelated reference happened to be
   // set on a casual remark.
   if (turn.speechAct === 'social') return false;
+  // A genuine multi-candidate reference failure (references.some(ambiguous))
+  // always stays a real clarification -- untouched below. needsClarification
+  // alone is a weaker signal: it's the interpreter's own self-reported
+  // uncertainty, and specificClarificationMessage's generic per-domain
+  // fallback ("หมายถึง...ที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ") always phrases it as
+  // "did you mean what we discussed before" -- which is only honest when the
+  // turn actually carries a reference POINTING at something prior. Real
+  // production incident this closes: "แฟนแพ้กุ้ง มีอะไรกินได้บ้าง", a
+  // complete, self-contained allergy/menu request with domain+informationNeed
+  // both already resolved and ZERO reference to anything earlier, still got
+  // forced into that "what we discussed before" clarification purely because
+  // needsClarification came back true (from stale rolling-context confusion
+  // after a conversation reset) -- discarding legacy's own working
+  // deterministic restaurant advisor and Phase 4/5's real knowledge answer
+  // entirely. When the turn names a real business domain, a concrete
+  // informationNeed, and contains no reference pointing at prior context at
+  // all, let it flow through to knowledge planning instead of short-
+  // circuiting to a fabricated "before" -- Phase 4/5 (or legacy's own
+  // deterministic layer) can then answer directly, or honestly say the fact
+  // isn't verified, both strictly better than a false prior-context guess.
+  if (turn.needsClarification
+      && !turn.references.some(reference => reference.ambiguous === true)
+      && turn.domain !== 'unknown'
+      && (turn.informationNeed ?? 'none') !== 'none'
+      && !turn.references.some(reference => reference.refersToPriorContext === true)) {
+    return false;
+  }
   return turn.needsClarification || turn.references.some(reference => reference.ambiguous === true);
 }
 
