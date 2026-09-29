@@ -253,3 +253,52 @@ test('verified horse ride-feel facts reach OpenAI and produce a direct human com
     ],
   });
 });
+
+test('verified horse comparison remains grounded when the paid response composer is unavailable or budget-blocked',async()=>{
+  const semantic=turn({
+    domain:'activity',
+    intent:'compare_horse_options',
+    action:'compare',
+    informationNeed:'recommendation',
+    speechAct:'question',
+    references:[{
+      type:'comparison_set',value:'ทองไทย,ภาราดร',refersToPriorContext:true,
+      ambiguous:true,
+      resolvedEntityIds:['activity_asset:horse-pharadon','activity_asset:horse-thongthai'],
+    }],
+  });
+  const bundle:KnowledgeBundle={
+    domain:'activity',freshness:'live',missing:[],warnings:[],
+    sources:[{need:'entity_details',sourceId:'activity_catalog_live',sourceType:'activity_live',status:'ok'}],
+    entities:[],
+    facts:[
+      {key:'activity_asset:horse-pharadon:name',value:'ภาราดร',domain:'activity',sourceId:'activity_catalog_live',sourceType:'activity_live',authoritative:true},
+      {key:'notes:activity_asset:horse-pharadon',value:'ขี่นิ่มกว่าทองไทย',domain:'activity',sourceId:'activity_catalog_live',sourceType:'activity_live',authoritative:true},
+      {key:'temperament:activity_asset:horse-pharadon',value:'ขี้เล่น',domain:'activity',sourceId:'activity_catalog_live',sourceType:'activity_live',authoritative:true},
+      {key:'activity_asset:horse-thongthai:name',value:'ทองไทย',domain:'activity',sourceId:'activity_catalog_live',sourceType:'activity_live',authoritative:true},
+      {key:'notes:activity_asset:horse-thongthai',value:'ขี่กระด้างกว่าภาราดรเล็กน้อย',domain:'activity',sourceId:'activity_catalog_live',sourceType:'activity_live',authoritative:true},
+      {key:'temperament:activity_asset:horse-thongthai',value:'ขี้เล่น',domain:'activity',sourceId:'activity_catalog_live',sourceType:'activity_live',authoritative:true},
+    ],
+  };
+  const result=await composeThongthaiResponse({
+    channel:'line',language:'th',userMessage:'สองตัวนี้ต่างกันยังไงครับ',
+    semanticTurn:semantic,
+    conversationContext:emptyConversationContextState(),
+    dialogDecision:{
+      mode:'query_knowledge',taskStateContainer:emptyTaskStateContainer(),
+      knowledgeRequests:[],missingFields:[],responseIntent:'grounded_answer',reasons:[],
+    },
+    knowledgeBundles:[bundle],degradation,
+    // No paid-call context models the fail-closed path after a provider or
+    // budget guard refusal.  The final answer must still use verified facts.
+    aiCallContext:null,
+  });
+  assert.equal(result.mode,'deterministic');
+  assert.match(result.message,/ภาราดร.*นิ่มกว่า/u);
+  assert.match(result.message,/ทองไทย.*กระด้าง/u);
+  assert.match(result.message,/ขี้เล่น/u);
+  assert.doesNotMatch(result.message,/หมายถึงกิจกรรมหรือม้าตัว/u);
+  assert.doesNotMatch(result.message,/ปลอดภัย|รับประกัน|เหมาะกับทุกคน/u);
+  assert.ok(result.usedFactKeys.includes('notes:activity_asset:horse-pharadon'));
+  assert.ok(result.usedFactKeys.includes('notes:activity_asset:horse-thongthai'));
+});

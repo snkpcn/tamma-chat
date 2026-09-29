@@ -115,3 +115,36 @@ above. That run created no transaction, but it is recorded as a failed
 acceptance checkpoint, not as proof of completion. This hotfix must pass final
 head CI, merge, deploy with an exact commit match, and pass the same controlled
 production smoke before engineering verification can be declared complete.
+
+## Post-#251 production verification addendum
+
+PR #251 passed its final-head gates, merged as
+`2e2e49a045d352b513b8e05f2450e72091291338`, and Netlify production deploy
+`6abc20198b2d340008042fda` matched that merge. Replaying the owner sequence
+against that exact deployment then found three integration defects that unit
+fixtures had hidden:
+
+1. Production `activity_offerings` still had legacy 60/90-minute horse rows
+   active alongside the canonical 30/45-minute rows. Migration
+   `20260929204213_phase6_disable_unsupported_horse_durations.sql` retires only
+   those superseded rows without deleting history.
+2. Production `guest_memory_value_allowed` still accepted only the original
+   seven constraints. PostgREST rejected the whole memory write when
+   `shrimp_allergy` or `mild_spice` appeared. Migration
+   `20260929205003_phase6_extend_guest_memory_constraints.sql` aligns the
+   database allow-list with the runtime vocabulary; the canonical schema and
+   a drift-contract test now enforce that alignment.
+3. On “สองตัวนี้ต่างกันยังไง”, the semantic layer correctly returned
+   `action=compare`, `needsClarification=false`, and two resolved horse IDs,
+   but the Dialog Manager treated the resolver's legacy `ambiguous:true`
+   diagnostic as authoritative and asked which horse was meant. A bounded
+   multi-ID reference is now answerable when the current action is compare,
+   while selection ambiguity remains unchanged. If the paid response composer
+   is unavailable or budget-blocked, the deterministic renderer compares only
+   verified per-horse `notes`/`temperament` facts and makes no safety claim.
+
+The post-#251 focused tests pass 20/20 and the complete Node suite passes
+1805/1805. The exact Netlify build command passes locally without mutating
+source. `run-phase6-production-smoke.ts` is the repeatable connected 16-turn
+read-only gate; its final PASS remains contingent on deploying this addendum's
+source changes and replaying against the matching production commit.

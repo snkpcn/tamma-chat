@@ -108,6 +108,35 @@ test('C: a genuine multi-way comparison reference ("ตัวไหน") is stil
   assert.deepEqual(resolved!.resolvedEntityIds, ['activity_asset:horse:paradon', 'activity_asset:horse:thongthai']);
 });
 
+test('C2: a resolved multi-entity comparison set is answerable, not an ambiguous selection', () => {
+  const turn = baseTurn({
+    intent:'compare_horse_options',
+    action:'compare',
+    informationNeed:'recommendation',
+    references:[{
+      type:'comparison_set',
+      value:'ทองไทย,ภาราดร',
+      refersToPriorContext:true,
+      ambiguous:true,
+      resolvedEntityIds:['activity_asset:horse:paradon','activity_asset:horse:thongthai'],
+    }],
+    needsClarification:false,
+  });
+  const plan=planDialogTurn({
+    semanticTurn:turn,
+    conversationContext:emptyConversationContextState(NOW),
+    taskState:emptyTaskStateContainer(),
+    channel:'line',
+    eventId:'hotfix-c2-resolved-comparison',
+  },NOW);
+  assert.notEqual(plan.mode,'clarify');
+  assert.deepEqual(plan.compareEntityIds,[
+    'activity_asset:horse:paradon','activity_asset:horse:thongthai',
+  ]);
+  assert.equal(plan.knowledgeRequests[0]?.domain,'activity');
+  assert.ok(plan.knowledgeRequests[0]?.needs.includes('entity_details'));
+});
+
 // -- Failure classes D/F/G: an ambiguous side-reference must never block a
 // task summary or casual chat -----------------------------------------------
 

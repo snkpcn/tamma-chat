@@ -351,7 +351,22 @@ function isAmbiguous(turn: SemanticTurn): boolean {
       && !turn.references.some(reference => reference.refersToPriorContext === true)) {
     return false;
   }
-  return turn.needsClarification || turn.references.some(reference => reference.ambiguous === true);
+  // A reference may carry `ambiguous:true` because the bounded resolver found
+  // more than one candidate.  That is genuinely ambiguous for a selection,
+  // but it is the *expected successful shape* for a comparison: the customer
+  // asked about a set and `resolvedEntityIds` is that set.  Production exposed
+  // the disagreement between layers on "สองตัวนี้ต่างกันยังไง" -- semantic
+  // validation correctly returned action=compare, needsClarification=false and
+  // two canonical ids, then this older boolean check discarded the resolved
+  // set and made a generic clarification authoritative.  Current structured
+  // meaning must outrank the resolver's historical diagnostic flag.
+  const unresolvedAmbiguity = turn.references.some(reference =>
+    reference.ambiguous === true
+    && !(
+      turn.action === 'compare'
+      && (reference.resolvedEntityIds?.length ?? 0) >= 2
+    ));
+  return turn.needsClarification || unresolvedAmbiguity;
 }
 
 type TopicTransition = 'none' | 'suspend' | 'resume';
