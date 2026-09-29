@@ -162,6 +162,22 @@ export function hasCommitMarker(message: string): boolean {
   return false;
 }
 
+/** Shared structural boundary for a CURRENT-turn transaction request.
+ *  This is intentionally domain-agnostic: an explicit booking/order verb is
+ *  still read-only when it is a question, negated, deferred, or merely says
+ *  to return to an unfinished booking/order conversation. */
+const TRANSACTION_QUESTION_MARKER_RE =
+  /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
+
+export function hasStandaloneTransactionRequest(message: string): boolean {
+  if (hasCommitMarker(message)) return true;
+  if (!/(?:จอง|สั่ง)/u.test(message)) return false;
+  if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
+  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้|ต้อง)?\s*(?:จอง|สั่ง)|ยกเลิก|ไว้ก่อน/u.test(message)) return false;
+  if (TRANSACTION_QUESTION_MARKER_RE.test(message)) return false;
+  return true;
+}
+
 /** A customer explicitly asking to cancel/abandon whatever is in progress
  *  ("ยกเลิกก่อน", "ไม่เอาแล้ว"). A small, closed marker, not a phrase table. */
 export function hasCancelMarker(message: string): boolean {
