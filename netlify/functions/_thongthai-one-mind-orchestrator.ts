@@ -991,6 +991,8 @@ async function resolveSemanticTurn(
         channel:input.channel,
         eventId:input.eventId,
         callerLabel:'semantic-interpreter',
+        certificationMode: input.environment !== 'live'
+          && process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE === '1',
       },
     });
     const correctionReconciledTurn = reconcileSafeConversationalCorrectionDomain(rawModelTurn, deterministic);
