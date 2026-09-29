@@ -5396,9 +5396,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // be swallowed by a model-composed or stale-domain answer. For a
   // transport-history-free follow-up
   // ("ราคาเท่าไร"), consult only the bounded active_topic snapshot.
-  const hasPendingPromotionRedemption = Boolean(
-    parsePendingPromotionRedemption(runtime.agentState.pendingPromotionRedemption),
-  );
+  // This checkpoint runs BEFORE BrainRuntime is loaded below, so inspect
+  // only the persisted agent-state snapshot here. Reading `runtime` at this
+  // point creates a temporal-dead-zone crash that takes unrelated domains
+  // down with it. This pre-cutover probe is read-only; the real continuation
+  // still uses the fully loaded runtime later.
+  let hasPendingPromotionRedemption = false;
+  if (guestDbId) {
+    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+      console.error(
+        'THONGTHAI_PROMOTION_PRECUTOVER_STATE_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return { state:null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
+    });
+    hasPendingPromotionRedemption = isObject(snapshot.state)
+      && Boolean(parsePendingPromotionRedemption(snapshot.state.pendingPromotionRedemption));
+  }
   const preservePromotionFastPath =
     hasPendingPromotionRedemption
     || isPromotionDiscoveryIntent(request.message)
