@@ -83,7 +83,14 @@ export function shouldPreferGroundedDeterministicResponse(
 /** True for a task-active turn whose DialogDecision only collects/clarifies
  *  (never a real commitment) -- see TASK_CONTINUATION_SAFE_MODES above. */
 export function isSafeTaskContinuationTurn(turn: OneMindTurnResult): boolean {
-  return Boolean(turn.taskStateBefore.activeTask || turn.taskStateAfter.activeTask)
+  const domain = (turn.dialogSemanticTurn ?? turn.semanticTurn).domain;
+  const relevantTask = [
+    turn.taskStateBefore.activeTask,
+    turn.taskStateAfter.activeTask,
+    turn.taskStateBefore.suspendedTask,
+    turn.taskStateAfter.suspendedTask,
+  ].some(task => Boolean(task) && task!.domain === domain);
+  return relevantTask
     && TASK_CONTINUATION_SAFE_MODES.has(turn.dialogDecision.mode)
     && !turn.dialogDecision.actionProposal;
 }
