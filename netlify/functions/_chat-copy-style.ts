@@ -41,7 +41,7 @@ const LINE_PLATFORM_TEXT_LIMIT = 4900;
 const THONGTHAI_LINE_POLITE_PARTICLE = /(?:ค่ะ|คะ)(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu;
 
 function enforceThongthaiLinePoliteParticle(value: string): string {
-  // LINE/customer-facing Thongthai must not leak feminine polite particles.
+  // Customer-facing Thongthai must not leak feminine polite particles.
   // This only rewrites standalone sentence-final particles before a boundary;
   // content words such as "คะน้า" are preserved because the next character is
   // not a sentence boundary.
@@ -156,7 +156,7 @@ export function polishCustomerMessage(
     .replace(/\n[ \t]+/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-  return channel === 'line' ? enforceThongthaiLinePoliteParticle(polished) : polished;
+  return plainTextChannel ? enforceThongthaiLinePoliteParticle(polished) : polished;
 }
 
 function safeSliceEnd(text: string, requested: number): number {
