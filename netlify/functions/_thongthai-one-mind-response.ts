@@ -166,7 +166,7 @@ export type ReadOnlyCutoverEligibilityOptions = {
   message?: string;
 };
 
-function isTrustedResolvedNoTransactionContinuation(turn: OneMindTurnResult): boolean {
+export function isTrustedResolvedNoTransactionContinuation(turn: OneMindTurnResult): boolean {
   const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
   const hasNoTransaction = semantic.constraints.some(constraint =>
     /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint));
