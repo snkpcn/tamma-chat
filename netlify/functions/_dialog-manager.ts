@@ -952,6 +952,9 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
     && turn.references.some(reference =>
       reference.type === 'entity_selection'
       && Boolean(reference.resolvedEntityId));
+  const namedConsideredSelectionUpdate =
+    explicitSelectionNames(turn).length > 0
+    && explicitlyRevokesTransaction(turn);
 
   const isNonTransactionalStateUpdate = hasOpenTask
     && !customerCommitPresent
@@ -962,6 +965,7 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
       || turn.action === 'correct_previous'
       || turn.action === 'modify'
       || namedActivitySelectionUpdate
+      || namedConsideredSelectionUpdate
     );
 
   if (isTaskSideQuestion) reasons.push('task_side_question_preserved');

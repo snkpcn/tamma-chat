@@ -1549,16 +1549,29 @@ export function parseSemanticTurnResponse(
   const explicitSelectionReference = references.some(reference =>
     (reference.type === 'previous_selection' || reference.type === 'entity_selection')
     && Boolean(reference.resolvedEntityId));
-  if (action === 'provide_information' && explicitSelectionReference) {
+  const currentExplicitNoTransaction = Boolean(currentMessage)
+    && hasExplicitNoTransactionMarker(currentMessage);
+  const hasNamedSelectionEntity = informationNeed === 'none'
+    && ['horseName','resourceName','roomType','itemName','productName','promotionName','name']
+      .some(key => typeof entities[key] === 'string' && String(entities[key]).trim().length > 0);
+  if (
+    action === 'provide_information'
+    && (
+      explicitSelectionReference
+      || (hasNamedSelectionEntity && speechAct === 'selection')
+      || (hasNamedSelectionEntity && currentExplicitNoTransaction)
+    )
+  ) {
+    // A named, explicitly non-transactional choice is still a selection in
+    // working memory. Models may label the speech act as preference_update,
+    // but Dialog Manager must not mistake that safe hold for generic slot
+    // filling and start asking for booking fields.
     action = 'confirm';
   }
 
-  const currentExplicitNoTransaction = Boolean(currentMessage)
-    && hasExplicitNoTransactionMarker(currentMessage);
   const concreteCurrentSelection = informationNeed === 'none'
     && (
-      ['horseName','resourceName','roomType','itemName','productName','promotionName','name']
-        .some(key => typeof entities[key] === 'string' && String(entities[key]).trim().length > 0)
+      hasNamedSelectionEntity
       || explicitSelectionReference
     );
 
