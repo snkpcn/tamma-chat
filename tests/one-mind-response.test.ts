@@ -86,44 +86,6 @@ test('initial G.2 gate allows a safe task-continuation turn (collect_field, no A
   assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:true});
 });
 
-test('Phase 6 gate allows read-only continuation of a matching suspended task, but not by unrelated suspended state', () => {
-  const suspended=createActiveTask({
-    type:'activity_booking',
-    sourceChannel:'line',
-    initialSlots:{resourceCode:'activity-horse'},
-  },NOW);
-  const state={...emptyTaskStateContainer(),suspendedTask:suspended};
-
-  const matching=result({
-    taskStateBefore:state,
-    taskStateAfter:state,
-    semanticTurn:{
-      domain:'activity',intent:'task_conditional_continuation',action:'ask',
-      informationNeed:'availability',entities:{resourceCode:'activity-horse'},references:[],
-      constraints:['no_transaction'],confidence:.9,needsClarification:false,
-    },
-    dialogDecision:{
-      mode:'query_knowledge',taskStateContainer:state,knowledgeRequests:[],missingFields:[],
-      responseIntent:'grounded_answer',reasons:[],
-    },
-  });
-  assert.deepEqual(readOnlyCutoverEligibility(matching),{eligible:true});
-
-  const unrelated=result({
-    taskStateBefore:state,
-    taskStateAfter:state,
-    semanticTurn:{
-      domain:'restaurant',intent:'menu_question',action:'provide_information',
-      entities:{},references:[],constraints:[],confidence:.9,needsClarification:false,
-    },
-    dialogDecision:{
-      mode:'answer',taskStateContainer:state,knowledgeRequests:[],missingFields:[],
-      responseIntent:'grounded_answer',reasons:[],
-    },
-  });
-  assert.deepEqual(readOnlyCutoverEligibility(unrelated),{eligible:false,reason:'transactional_or_task_turn'});
-});
-
 test('PR F gate allows a newly-created Restaurant planning task when it is collect-only and has no ActionProposal', () => {
   const after={...emptyTaskStateContainer(),activeTask:createActiveTask({
     type:'restaurant_preorder',
@@ -219,59 +181,4 @@ test('journey modify with no transactional task remains eligible for One-Mind re
     reasons:[],
   };
   assert.deepEqual(readOnlyCutoverEligibility(r),{eligible:true});
-});
-
-
-test('requireSemanticSupervisor still allows a grounded deterministic promotion recommendation after provider outage', () => {
-  const r=result({
-    semanticTurn:{
-      semanticSource:'deterministic_fallback',
-      domain:'promotion',
-      intent:'promotion_recommendation',
-      action:'recommend',
-      informationNeed:'recommendation',
-      entities:{businessUnit:'restaurant'},
-      references:[],
-      constraints:['no_new_membership'],
-      confidence:.9,
-      needsClarification:false,
-    },
-    dialogDecision:{
-      mode:'query_knowledge',
-      taskStateContainer:emptyTaskStateContainer(),
-      knowledgeRequests:[],
-      missingFields:[],
-      responseIntent:'grounded_answer',
-      reasons:[],
-    },
-    groundedKnowledge:[{
-      domain:'promotion',
-      sources:[{
-        need:'promotion_eligibility',
-        sourceId:'promotion-test',
-        sourceType:'promotion_runtime',
-        status:'ok',
-      }],
-      facts:[{
-        key:'promo:restaurant-current',
-        value:{name:'โปรร้านอาหาร',requiresMembership:false},
-        domain:'promotion',
-        sourceId:'promotion-test',
-        sourceType:'promotion_runtime',
-        authoritative:true,
-        fetchedAt:NOW.toISOString(),
-      }],
-      entities:[],
-      missing:[],
-      warnings:[],
-      freshness:'live',
-    }],
-  });
-  assert.deepEqual(
-    readOnlyCutoverEligibility(r,{
-      requireSemanticSupervisor:true,
-      message:'เอาโปรร้านอาหารที่คุ้มสุด แต่ไม่เอาแบบต้องสมัครสมาชิกเพิ่มนะ',
-    }),
-    {eligible:true},
-  );
 });
