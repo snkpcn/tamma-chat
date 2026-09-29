@@ -415,6 +415,18 @@ const COMPARE_MARKER = /ตัวไหน|อันไหน|ชิ้นไห
 const CONDITIONAL_UNAVAILABLE_MARKER = /ไม่ว่าง/u;
 const NO_COMMIT_CONSEQUENCE_MARKER = /ไม่ต้อง(?:จอง|เลือก|ทำ|สั่ง)/u;
 
+// Provider-outage structural fallback for "what have we decided/provided so
+// far?" questions. This is intentionally about the SHAPE of a working-state
+// summary request, not one exact sentence: a summary verb or current/prior
+// state scope must co-occur with a state-query predicate. The actual answer is
+// rendered from canonical TaskState by the Dialog Manager/Response Composer.
+const WORKING_STATE_SUMMARY_MARKER =
+  /(?:สรุป[^\n]{0,48}(?:ตอนนี้|ที่คุย|ที่เลือก|ที่ให้|ตกลง|จอง)|(?:ตอนนี้|ที่คุย|ที่เลือก|ที่ให้|ตกลง)[^\n]{0,48}(?:มีอะไรบ้าง|อะไรไว้|ถึงไหน|จอง.*หรือยัง))/u;
+
+function isWorkingStateSummaryQuestion(message:string):boolean {
+  return WORKING_STATE_SUMMARY_MARKER.test(message);
+}
+
 /** A small, closed attribute vocabulary -- the SAME attributes the
  *  authoritative activity/asset source-of-truth is being asked to support
  *  (see _activity-catalog-policy.ts's ACTIVITY_ASSET_ATTRIBUTE_KEYS). A
@@ -619,6 +631,23 @@ function deriveForActiveTask(
   task: ActiveTask,
   now: Date = new Date(),
 ): SemanticTurn | null {
+  // A request to summarize the current bounded working task is pure read-only
+  // state inspection. Resolve it before slot/selection parsing so a provider
+  // outage cannot turn "what do we have so far?" into an entity clarification.
+  if (isWorkingStateSummaryQuestion(message)) {
+    return {
+      domain: task.domain,
+      intent: 'summarize_active_task',
+      action: 'ask',
+      informationNeed: 'none',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.9,
+      needsClarification: false,
+    };
+  }
+
   // An explicit cancel ends the task outright, regardless of what other
   // slot-shaped content the message might also contain.
   if (hasCancelMarker(message)) {
