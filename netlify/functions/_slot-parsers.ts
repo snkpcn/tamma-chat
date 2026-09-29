@@ -211,14 +211,11 @@ function lastNoTransactionMarkerIndex(message: string): number {
     const before = message.slice(Math.max(0, index - 40), index);
     // Affirmative "จอง...ไว้ก่อน" / "สั่ง...ไว้ก่อน" in the same short
     // clause is a transaction request, e.g. "จองม้าไว้ก่อน".
-    if (/(?:จอง|สั่ง)[^\n.!?？]{0,32}$/u.test(before)
-        && !NEGATED_BEFORE_TRANSACTION_VERB_RE.test(
-          before.slice(0, Math.max(0, before.lastIndexOf('จอง') >= 0
-            ? before.lastIndexOf('จอง')
-            : before.lastIndexOf('สั่ง'))),
-        )) {
-      continue;
-    }
+    const verbIndex = Math.max(before.lastIndexOf('จอง'), before.lastIndexOf('สั่ง'));
+    const affirmativeHold = verbIndex >= 0
+      && /(?:จอง|สั่ง)[^\n.!?？]{0,32}$/u.test(before)
+      && !NEGATED_BEFORE_TRANSACTION_VERB_RE.test(before.slice(0, verbIndex));
+    if (affirmativeHold) continue;
     last = Math.max(last, index);
   }
   return last;
