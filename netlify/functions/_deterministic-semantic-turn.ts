@@ -440,9 +440,24 @@ function detectCompareEntities(message: string, context: SemanticContext, domain
   if (!COMPARE_MARKER.test(message)) return null;
   const attribute = COMPARE_ATTRIBUTE_KEYWORDS.find(item => item.pattern.test(message))?.attribute;
   if (!attribute) return null;
-  const effectiveDomain: SemanticDomain | null = domain ?? 'activity';
+  let effectiveDomain: SemanticDomain | null = domain ?? 'activity';
   if (!effectiveDomain) return null;
-  const candidates = context.recentEntities.filter(entity => entity.domain === effectiveDomain);
+  let candidates = context.recentEntities.filter(entity => entity.domain === effectiveDomain);
+
+  // A stale activeDomain from a just-finished side topic must not override a
+  // structurally clear comparison of the recently discussed activity assets.
+  // The supported comparison attributes above are activity-asset attributes,
+  // so when the current domain has fewer than two candidates but bounded
+  // conversation evidence contains 2+ activity entities, that candidate set
+  // is the only grounded comparison target. This is context resolution, not
+  // a sentence-specific phrase patch.
+  if (candidates.length < 2 && effectiveDomain !== 'activity') {
+    const activityCandidates = context.recentEntities.filter(entity => entity.domain === 'activity');
+    if (activityCandidates.length >= 2) {
+      effectiveDomain = 'activity';
+      candidates = activityCandidates;
+    }
+  }
   if (candidates.length < 2) {
     // Production gateway fast paths may occasionally answer the prior catalog
     // turn outside One-Mind, leaving no recent entity records even though the
@@ -964,10 +979,12 @@ export function deriveDeterministicSemanticTurn(
     const wantsRainFallback = /ฝน|rain/iu.test(trimmed);
     const committing=hasCommitMarker(trimmed);
     const correcting=hasCorrectionMarker(trimmed);
+    const explicitNoTransaction = hasExplicitNoTransactionMarker(trimmed);
     const constraints = [
       ...excludedKnownAssets.map(name => `exclude_${name === 'ทองไทย' ? 'thongthai' : name}`),
       ...(wantsCalmerKnownAsset ? ['preferred_horse_trait:calm'] : []),
       ...(wantsRainFallback ? ['weather_fallback_requested'] : []),
+      ...(explicitNoTransaction ? ['no_transaction'] : []),
     ];
     return {
       domain: 'activity',
