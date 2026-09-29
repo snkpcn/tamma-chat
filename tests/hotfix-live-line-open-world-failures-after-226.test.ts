@@ -137,6 +137,52 @@ test('C2: a resolved multi-entity comparison set is answerable, not an ambiguous
   assert.ok(plan.knowledgeRequests[0]?.needs.includes('entity_details'));
 });
 
+test('C3: prior customer constraints stay conversation evidence when many menu entities are recent', () => {
+  const context:SemanticContext = {
+    activeDomain:'restaurant',
+    recentEntities:[
+      {id:'menu:1',type:'menu_item',name:'ตำลาว',domain:'restaurant'},
+      {id:'menu:2',type:'menu_item',name:'ตำไทย',domain:'restaurant'},
+      {id:'menu:3',type:'menu_item',name:'ไก่ย่าง',domain:'restaurant'},
+    ],
+    recentTurns:[
+      {role:'user',content:'แฟนแพ้กุ้ง มีอะไรกินได้บ้าง'},
+      {role:'assistant',content:'แนะนำเมนูที่ตรวจสอบส่วนผสมให้ครับ'},
+      {role:'user',content:'ผมกินเผ็ดไม่เก่งด้วยครับ'},
+    ],
+  };
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'recommend menus matching the customer constraints already stated',
+    speechAct:'request',
+    domain:'restaurant',
+    intent:'menu_recommendation_for_shrimp_avoidance',
+    action:'recommend',
+    informationNeed:'recommendation',
+    entities:{allergen:'shrimp'},
+    references:[{type:'prior_constraint',value:'avoid_shrimp',refersToPriorContext:true}],
+    constraints:['no_shrimp','mild_spice'],
+    confidence:0.96,
+    needsClarification:false,
+  }),context,'มีเมนูไหนเหมาะกับที่บอกไปบ้างครับ');
+
+  assert.equal(turn.action,'recommend','a prior constraint must not turn a recommendation into a menu comparison');
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.references[0]?.resolvedFromConversation,true);
+  assert.equal(turn.references[0]?.resolvedEntityIds,undefined);
+  assert.equal(turn.references[0]?.ambiguous,undefined);
+
+  const plan=planDialogTurn({
+    semanticTurn:turn,
+    conversationContext:emptyConversationContextState(NOW),
+    taskState:emptyTaskStateContainer(),
+    channel:'line',
+    eventId:'hotfix-c3-prior-constraint',
+  },NOW);
+  assert.notEqual(plan.mode,'clarify');
+  assert.notEqual(plan.responseIntent,'cannot_verify_comparison');
+  assert.ok(plan.knowledgeRequests.some(request=>request.domain==='restaurant'));
+});
+
 // -- Failure classes D/F/G: an ambiguous side-reference must never block a
 // task summary or casual chat -----------------------------------------------
 

@@ -1110,6 +1110,22 @@ function normalizeReferences(value: unknown): SemanticReference[] {
  *  the head of that list IS the correct antecedent. */
 const GENERIC_DEMONSTRATIVE_RE = /^(?:เดิม|อันนั้น|ตัวนั้น|ที่คุยไว้|ที่คุยกัน|same|previous|that one)$/iu;
 
+/** References to prior customer evidence are not references to business
+ * entities.  Keep this taxonomy separate from the catalog resolver: a phrase
+ * such as "ที่บอกไป" may point at an allergy/preference while six menu items
+ * happen to be recent.  Treating those six items as its antecedents silently
+ * changes a recommendation into a comparison. */
+const CONVERSATION_EVIDENCE_REFERENCE_TYPES = new Set([
+  'prior_constraint',
+  'prior_preference',
+  'previous_request',
+  'prior_request',
+  'prior_plan',
+  'previous_plan',
+  'prior_topic',
+  'previous_topic',
+]);
+
 export function resolveReferences(references: SemanticReference[], context: SemanticContext): SemanticReference[] {
   return references.map(reference => {
     if (!reference.refersToPriorContext) return reference;
@@ -1159,6 +1175,17 @@ export function resolveReferences(references: SemanticReference[], context: Sema
     // reach the bounded-evidence fallback below rather than bailing out here.
     const hasBoundedConversationEvidence =
       (context.recentTurns?.length ?? 0) > 0 || Boolean(context.rollingSummary) || Boolean(context.lastRecommendationReference);
+    if (CONVERSATION_EVIDENCE_REFERENCE_TYPES.has(reference.type)) {
+      return hasBoundedConversationEvidence
+        ? {
+            ...reference,
+            resolvedFromConversation:true,
+            resolvedEntityId:undefined,
+            resolvedEntityIds:undefined,
+            ambiguous:undefined,
+          }
+        : reference;
+    }
     if (!context.recentEntities.length) {
       return hasBoundedConversationEvidence ? { ...reference, resolvedFromConversation:true } : reference;
     }
