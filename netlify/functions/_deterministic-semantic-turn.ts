@@ -586,24 +586,6 @@ function deriveForActiveTask(
     };
   }
 
-  // Explicitly withholding a transaction after one was previously requested
-  // is a consent revocation, not an empty/unknown turn. This must remain
-  // available when the model provider is down so a stale commitment can never
-  // survive merely because semantic supervision is unavailable.
-  if (!hasCommitMarker(message) && hasExplicitNoTransactionMarker(message)) {
-    return {
-      domain: task.domain,
-      intent: 'transaction_commitment_retracted',
-      action: 'correct_previous',
-      speechAct: 'correction',
-      entities: {},
-      references: [],
-      constraints: ['no_transaction'],
-      confidence: 0.95,
-      needsClarification: false,
-    };
-  }
-
   // A CONDITIONAL continuation of the already-selected task entity ("ถ้าตัว
   // นั้นไม่ว่าง เอาอีกตัวแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจอง"): structurally,
   // an unavailability condition PLUS an explicit "so don't transact"
@@ -637,7 +619,31 @@ function deriveForActiveTask(
   // (see the Dialog Manager's SIDE_QUESTION_ACTIONS precedence, which
   // preserves the task untouched for exactly these actions).
   const sideQuestion = detectActivitySideQuestion(message, task.domain, activityTopicFromResourceCode(task.slots.resourceCode), now);
-  if (sideQuestion) return sideQuestion;
+  if (sideQuestion) {
+    if (!hasCommitMarker(message) && hasExplicitNoTransactionMarker(message)) {
+      return {
+        ...sideQuestion,
+        constraints:[...new Set([...sideQuestion.constraints, 'no_transaction'])],
+      };
+    }
+    return sideQuestion;
+  }
+
+  // A pure consent retraction with no richer read-only predicate still needs
+  // to survive provider outage as a canonical no_transaction turn.
+  if (!hasCommitMarker(message) && hasExplicitNoTransactionMarker(message)) {
+    return {
+      domain: task.domain,
+      intent: 'transaction_commitment_retracted',
+      action: 'correct_previous',
+      speechAct: 'correction',
+      entities: {},
+      references: [],
+      constraints: ['no_transaction'],
+      confidence: 0.95,
+      needsClarification: false,
+    };
+  }
 
   const entities: Record<string, unknown> = {};
   const date = extractDate(message, now);
