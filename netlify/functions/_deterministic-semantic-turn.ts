@@ -978,6 +978,7 @@ export function deriveDeterministicSemanticTurn(
         : domain === 'activity' || domain === 'stay' ? 'book'
           : 'confirm'
       : 'confirm';
+    const explicitNoTransaction = !committing && hasExplicitNoTransactionMarker(trimmed);
     return {
       domain,
       intent: committing ? 'transaction_request_for_prior_entity' : 'select_prior_entity',
@@ -986,9 +987,15 @@ export function deriveDeterministicSemanticTurn(
       // Lands directly as resourceCode where that's valid (stay/restaurant/
       // otop); for an activity asset, resourceCode resolves authoritatively
       // downstream from selectedEntities instead (see directResourceCode).
-      entities: resourceCode ? { resourceCode } : {},
+      entities: {
+        ...(resourceCode ? { resourceCode } : {}),
+        // Preserve the customer-facing canonical name as bounded working
+        // selection context. A later slot-only continuation (e.g. duration)
+        // must not have to reconstruct identity from a stale domain.
+        ...(domain === 'activity' ? { horseName: entityMatch.name } : {}),
+      },
       references: [{ type: 'entity_selection', value: entityMatch.name, refersToPriorContext: true, resolvedEntityId: entityMatch.id }],
-      constraints: [],
+      constraints: explicitNoTransaction ? ['no_transaction'] : [],
       confidence: 0.9,
       needsClarification: false,
     };
