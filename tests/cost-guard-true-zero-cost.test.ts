@@ -444,3 +444,39 @@ test('TEST 10 -- end-to-end through processThongthaiChatCore: horse price makes 
     assert.equal(harness.modelCallCount(), 0, 'the real HTTP-mocked model provider must never be called for this turn end-to-end');
   }, pedalBoatAndHorseCatalog());
 });
+
+// TEST 11 -- REGRESSION (owner-reported after PR #240): pedal boat price
+// must answer correctly, as a TRUE zero-cost turn, even while an
+// unrelated horse activity task is still open from earlier in the SAME
+// conversation. See tests/response-composer-stale-active-task-activity-id
+// .test.ts for the precise composer-level reproduction/fix
+// (requestedActivityId in _response-composer.ts); this is the full
+// end-to-end confirmation through the real processThongthaiChatCore path.
+test('TEST 11 -- pedal boat price answers correctly (TRUE zero-cost) even with an unrelated open horse task', async () => {
+  await withHarness(async harness => {
+    const gid = harnessGuestId('e2e-boat-after-horse-task');
+    // Turn 1: establish the activity topic, then select a named horse --
+    // the same flow tests/zero-cost-provider-outage.test.ts already relies
+    // on to reliably create activeTask.slots.resourceCode='activity-horse'.
+    // These setup turns legitimately spend real model calls of their own
+    // (unrelated to this regression) -- only the THIRD turn's own delta is
+    // the zero-cost claim under test.
+    await processThongthaiChatCore(brainRequest('ม้าล่ะ', gid, 'line'), 'e2e-boat-after-horse-1');
+    await processThongthaiChatCore(brainRequest('เอาภาราดร', gid, 'line'), 'e2e-boat-after-horse-2');
+    const callsBeforeTargetTurn = harness.modelCallCount();
+
+    const result = await processThongthaiChatCore(brainRequest('เป็ดน้ำเท่าไหร่', gid, 'line'), 'e2e-boat-after-horse-3');
+    assert.equal(result.statusCode, 200);
+    const message = String((result.payload as { message: string }).message);
+    assert.doesNotMatch(message, /ยังไม่มีข้อมูลยืนยัน/u, 'must never say price is unconfirmed when canonical pedal_boat rows exist');
+    assert.doesNotMatch(message, /ไม่ขอเดา/u);
+    assert.match(message, /50\s*บาท/u);
+    assert.match(message, /100\s*บาท/u);
+    assert.equal(harness.modelCallCount() - callsBeforeTargetTurn, 0, 'the pedal-boat price turn itself must remain true zero-cost even with an unrelated open task');
+  }, {
+    ...pedalBoatAndHorseCatalog(),
+    activityAssets: [
+      { activity_code: 'horse', asset_code: 'horse-pharadon', name: 'ภาราดร', asset_type: 'horse', metadata: {} },
+    ],
+  });
+});

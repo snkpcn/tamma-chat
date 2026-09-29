@@ -545,6 +545,41 @@ function groundedValueMap(input: ResponseComposerInput): Map<string, unknown> {
 }
 
 function requestedActivityId(input: ResponseComposerInput, facts: Map<string, unknown>): string | null {
+  // An explicit activity named in THIS turn -- either via the already-
+  // resolved entities.activityCode (see entities.activityCode population
+  // in _deterministic-semantic-turn.ts, and isTrustedZeroCostFactLookup's
+  // own "explicit in this message" discipline in
+  // _thongthai-one-mind-orchestrator.ts) or, failing that, a direct
+  // keyword match against this turn's own text -- always wins over a
+  // stale active task's resourceCode. A real production regression this
+  // closes: asking a pedal-boat price question while an unrelated
+  // activity task (e.g. a horse booking) was still open silently
+  // answered "price not confirmed" for pedal_boat, because the stale
+  // task's resourceCode was checked FIRST and unconditionally short-
+  // circuited the lookup to 'horse' -- even though the customer
+  // explicitly named a different activity in this exact message, and the
+  // knowledge gateway had already correctly fetched real pedal_boat
+  // facts for it. Naming a different activity mid-conversation must never
+  // silently answer about whatever task happened to still be open.
+  const activityCode = input.dialogDecision.knowledgeRequests
+    .map(request => request.entities.activityCode)
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  if (activityCode) return activityCode;
+
+  const candidates = [...new Set([...facts.keys()]
+    .map(key => key.match(/^activity:([^:]+):name$/)?.[1])
+    .filter((value): value is string => Boolean(value)))];
+  const text = [
+    input.userMessage ?? '',
+    ...input.dialogDecision.knowledgeRequests.flatMap(request => Object.values(request.entities).map(value => String(value ?? ''))),
+  ].join(' ').toLowerCase();
+  if (/เป็ด|pedal/u.test(text) && candidates.includes('pedal_boat')) return 'pedal_boat';
+  if (/ม้า|horse/u.test(text) && candidates.includes('horse')) return 'horse';
+
+  // Only once this turn's OWN text/entities name nothing explicit does a
+  // still-open active task's resourceCode get to decide -- the genuinely
+  // context-dependent case (a bare "ราคาเท่าไหร่" relying on whichever
+  // activity is currently being discussed) that this fallback exists for.
   const resourceCode = input.dialogDecision.taskStateContainer.activeTask?.slots.resourceCode;
   if (typeof resourceCode === 'string' && resourceCode.trim()) {
     for (const [key, value] of facts) {
@@ -553,19 +588,6 @@ function requestedActivityId(input: ResponseComposerInput, facts: Map<string, un
     }
     return resourceCode.replace(/^activity-/, '') || null;
   }
-  const activityCode = input.dialogDecision.knowledgeRequests
-    .map(request => request.entities.activityCode)
-    .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
-  if (activityCode) return activityCode;
-  const text = [
-    input.userMessage ?? '',
-    ...input.dialogDecision.knowledgeRequests.flatMap(request => Object.values(request.entities).map(value => String(value ?? ''))),
-  ].join(' ').toLowerCase();
-  const candidates = [...new Set([...facts.keys()]
-    .map(key => key.match(/^activity:([^:]+):name$/)?.[1])
-    .filter((value): value is string => Boolean(value)))];
-  if (/เป็ด|pedal/u.test(text) && candidates.includes('pedal_boat')) return 'pedal_boat';
-  if (/ม้า|horse/u.test(text) && candidates.includes('horse')) return 'horse';
   return null;
 }
 
