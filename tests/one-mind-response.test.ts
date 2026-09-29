@@ -220,3 +220,58 @@ test('journey modify with no transactional task remains eligible for One-Mind re
   };
   assert.deepEqual(readOnlyCutoverEligibility(r),{eligible:true});
 });
+
+
+test('requireSemanticSupervisor still allows a grounded deterministic promotion recommendation after provider outage', () => {
+  const r=result({
+    semanticTurn:{
+      semanticSource:'deterministic_fallback',
+      domain:'promotion',
+      intent:'promotion_recommendation',
+      action:'recommend',
+      informationNeed:'recommendation',
+      entities:{businessUnit:'restaurant'},
+      references:[],
+      constraints:['no_new_membership'],
+      confidence:.9,
+      needsClarification:false,
+    },
+    dialogDecision:{
+      mode:'query_knowledge',
+      taskStateContainer:emptyTaskStateContainer(),
+      knowledgeRequests:[],
+      missingFields:[],
+      responseIntent:'grounded_answer',
+      reasons:[],
+    },
+    groundedKnowledge:[{
+      domain:'promotion',
+      sources:[{
+        need:'promotion_eligibility',
+        sourceId:'promotion-test',
+        sourceType:'promotion_runtime',
+        status:'ok',
+      }],
+      facts:[{
+        key:'promo:restaurant-current',
+        value:{name:'โปรร้านอาหาร',requiresMembership:false},
+        domain:'promotion',
+        sourceId:'promotion-test',
+        sourceType:'promotion_runtime',
+        authoritative:true,
+        fetchedAt:NOW.toISOString(),
+      }],
+      entities:[],
+      missing:[],
+      warnings:[],
+      freshness:'live',
+    }],
+  });
+  assert.deepEqual(
+    readOnlyCutoverEligibility(r,{
+      requireSemanticSupervisor:true,
+      message:'เอาโปรร้านอาหารที่คุ้มสุด แต่ไม่เอาแบบต้องสมัครสมาชิกเพิ่มนะ',
+    }),
+    {eligible:true},
+  );
+});
