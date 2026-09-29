@@ -38,6 +38,15 @@ const MARKDOWN_TABLE_DIVIDER = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/;
 const BULLET_LINE = /^\s*•\s+/;
 const EMOJI_RE = /[\p{Extended_Pictographic}\uFE0F]/u;
 const LINE_PLATFORM_TEXT_LIMIT = 4900;
+const THONGTHAI_FEMININE_POLITE_PARTICLE = /(ค่ะ|คะ)(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu;
+
+function enforceThongthaiPoliteParticle(value: string): string {
+  // Customer-facing Thongthai uses the masculine/neutral staff voice: "ครับ".
+  // This last-mile guard exists because paid model fallback can occasionally
+  // leak "คะ/ค่ะ" despite the persona prompt. It only replaces sentence-final
+  // polite particles, so content words like "คะน้า" remain intact.
+  return value.replace(THONGTHAI_FEMININE_POLITE_PARTICLE, 'ครับ');
+}
 
 function plainInlineMarkdown(value: string): string {
   return value
@@ -142,11 +151,12 @@ export function polishCustomerMessage(
 
   const softLimit = channel === 'line' ? 180 : 260;
   const structured = plainTextChannel ? addStructuralSpacing(lines, softLimit) : lines;
-  return structured
+  const polished = structured
     .join('\n')
     .replace(/\n[ \t]+/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  return plainTextChannel ? enforceThongthaiPoliteParticle(polished) : polished;
 }
 
 function safeSliceEnd(text: string, requested: number): number {
