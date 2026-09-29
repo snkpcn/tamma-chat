@@ -90,6 +90,8 @@ import { applyGuestAgentStatePatch, type GuestAgentStateSnapshot } from '../netl
 import { emptySemanticContext, type SemanticContext } from '../netlify/functions/_semantic-interpreter';
 import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
 import type { GroundedFact, KnowledgeSourceAdapters, SourceResult } from '../netlify/functions/_knowledge-resolver';
+import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
+import { withHarness, guestId as harnessGuestId, brainRequest, type HarnessCatalog } from './helpers/canonical-core-harness';
 
 const NOW = new Date('2026-09-29T05:00:00.000Z');
 const CANON = '55555555-5555-4555-8555-555555555555';
@@ -379,4 +381,66 @@ test('TEST 8 -- structural proof: deterministicNeedsLanguageRefinement returns f
   const genericDiscovery = deriveDeterministicSemanticTurn('มีอะไรให้เล่นบ้าง', emptySemanticContext(), emptyTaskStateContainer());
   assert.ok(genericDiscovery);
   assert.equal(deterministicNeedsLanguageRefinement(genericDiscovery, emptyTaskStateContainer(), 'มีอะไรให้เล่นบ้าง'), true, 'the general first-visit discovery bucket stays on the paid path');
+});
+
+// TEST 9/10 -- full end-to-end regression through processThongthaiChatCore
+// ITSELF, using the real HTTP-boundary-mocked harness (matching
+// tests/pedal-boat-price-hotfix.test.ts's own convention), not just
+// processOneMindCustomerTurn. This is the exact seam where a real
+// production bug was found AFTER this hotfix's first version merged: a
+// live LINE retest showed "เป็ดน้ำเท่าไหร่"/"ขี่ม้ากี่บาท" correctly skipped
+// the semantic-interpreter call (proving TEST 1/2 above were right about
+// processOneMindCustomerTurn's own internals) but STILL logged a real
+// grounded-response-composition charge in production ai_api_cost_events.
+// Root cause: thongthai-chat.ts's early "Human Conversation Recovery" gate
+// (processThongthaiChatCore's first processOneMindCustomerTurn attempt)
+// only accepted a composed answer when semanticSource==='openai_supervisor'
+// -- so a genuinely zero-cost deterministic_fallback answer (correct and
+// already free) was discarded there and the turn fell through into a
+// legacy path that paid for composition anyway. Fixed by also accepting a
+// composed deterministic_fallback answer when isTrustedZeroCostFactLookup
+// already proved it trustworthy. These two tests exercise the REAL
+// processThongthaiChatCore entry point end to end (the same function LINE
+// production calls) so a regression here can never hide behind a narrower
+// unit test again.
+function pedalBoatAndHorseCatalog(): HarnessCatalog {
+  return {
+    activityOfferings: [
+      { activity_code: 'horse', activity_name: 'ขี่ม้า', duration_minutes: 30, price: 300, currency: 'THB', metadata: {} },
+      { activity_code: 'horse', activity_name: 'ขี่ม้า', duration_minutes: 45, price: 500, currency: 'THB', metadata: {} },
+      { activity_code: 'pedal_boat', activity_name: 'ปั่นเรือเป็ดน้ำ', duration_minutes: 30, price: 50, currency: 'THB', metadata: {} },
+      { activity_code: 'pedal_boat', activity_name: 'ปั่นเรือเป็ดน้ำ', duration_minutes: 60, price: 100, currency: 'THB', metadata: {} },
+    ],
+    serviceResources: [
+      { id: 'res-room-a', code: 'stay-hueun', name: 'เฮือนสเตย์', metadata: {} },
+      {
+        id: 'res-pedal-boat', code: 'activity-pedal-boat', name: 'ปั่นเรือเป็ดน้ำ', default_capacity: 2, active: true,
+        metadata: { activityCode: 'pedal_boat', inventoryTotal: 2, status: 'available' },
+      },
+    ],
+  };
+}
+
+test('TEST 9 -- end-to-end through processThongthaiChatCore: pedal boat price makes ZERO real model-provider calls', async () => {
+  await withHarness(async harness => {
+    const gid = harnessGuestId('e2e-zc-boat');
+    const result = await processThongthaiChatCore(brainRequest('เป็ดน้ำเท่าไหร่', gid, 'line'), 'e2e-evt-boat');
+    assert.equal(result.statusCode, 200);
+    const message = String((result.payload as { message: string }).message);
+    assert.match(message, /50\s*บาท/u);
+    assert.match(message, /100\s*บาท/u);
+    assert.equal(harness.modelCallCount(), 0, 'the real HTTP-mocked model provider must never be called for this turn end-to-end');
+  }, pedalBoatAndHorseCatalog());
+});
+
+test('TEST 10 -- end-to-end through processThongthaiChatCore: horse price makes ZERO real model-provider calls', async () => {
+  await withHarness(async harness => {
+    const gid = harnessGuestId('e2e-zc-horse');
+    const result = await processThongthaiChatCore(brainRequest('ขี่ม้ากี่บาท', gid, 'line'), 'e2e-evt-horse');
+    assert.equal(result.statusCode, 200);
+    const message = String((result.payload as { message: string }).message);
+    assert.match(message, /300\s*บาท/u);
+    assert.match(message, /500\s*บาท/u);
+    assert.equal(harness.modelCallCount(), 0, 'the real HTTP-mocked model provider must never be called for this turn end-to-end');
+  }, pedalBoatAndHorseCatalog());
 });

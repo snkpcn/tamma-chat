@@ -65,7 +65,7 @@ import {
   type RestaurantPreorderDraft,
   type RestaurantProposedSetState,
 } from './_restaurant-preorder-dialog';
-import { processThongthaiOneMindTurnResilient } from './_thongthai-one-mind-orchestrator';
+import { processThongthaiOneMindTurnResilient, isTrustedZeroCostFactLookup } from './_thongthai-one-mind-orchestrator';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { processOneMindCustomerTurn } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
@@ -4663,8 +4663,27 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       // slot. If the supervisor is unavailable, leave the later proven
       // deterministic One-Mind compatibility cutover available.
       oneMindAttemptedEarly = oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor';
-      const supervisedMeaningReady = oneMind.status === 'composed'
-        && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor';
+      // Cost guard hotfix: this gate used to accept ONLY an openai_supervisor
+      // result, so a genuinely zero-cost deterministic_fallback answer
+      // (isTrustedZeroCostFactLookup already proved it unambiguous enough to
+      // skip the paid semantic-interpreter call -- see
+      // _thongthai-one-mind-orchestrator.ts) was discarded here and the turn
+      // fell through into a legacy path that paid for grounded-response-
+      // composition anyway. Confirmed directly against production
+      // ai_api_cost_events: "เป็ดน้ำเท่าไหร่"/"ขี่ม้ากี่บาท" correctly skipped
+      // semantic-interpreter but still logged a real grounded-response-
+      // composition charge, because this gate threw away their correct,
+      // free, already-composed answer. This accepts that SAME narrow,
+      // reviewed allowlist here too -- never any deterministic_fallback
+      // result, only the ones the cost architecture already trusts enough to
+      // have skipped the paid call for in the first place.
+      const trustedZeroCostReady = oneMind.status === 'composed'
+        && oneMind.turn.semanticTurn.semanticSource === 'deterministic_fallback'
+        && oneMind.response.mode === 'deterministic'
+        && isTrustedZeroCostFactLookup(oneMind.turn.dialogSemanticTurn, request.message);
+      const supervisedMeaningReady = (oneMind.status === 'composed'
+        && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor')
+        || trustedZeroCostReady;
       if (supervisedMeaningReady) {
         console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
           domain:oneMind.turn.semanticTurn.domain,

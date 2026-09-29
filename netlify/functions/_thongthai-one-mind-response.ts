@@ -132,6 +132,14 @@ export type ReadOnlyCutoverEligibilityOptions = {
    *  strictly better than the flat generic apology, so the exclusion below
    *  is waived. The PRIMARY cutover path never sets this. */
   allowGenuinelyUnclassifiedFallback?: boolean;
+  /** Cost guard hotfix: the raw customer message, used ONLY to let a
+   *  requireSemanticSupervisor-gated turn through when it ALSO satisfies
+   *  isTrustedZeroCostFactLookup below -- never a general relaxation of the
+   *  requireSemanticSupervisor safety boundary. Populated automatically by
+   *  processOneMindCustomerTurn from its own input; a caller invoking
+   *  readOnlyCutoverEligibility directly may omit it, which simply keeps
+   *  the exception inactive (original strict behavior). */
+  message?: string;
 };
 
 export function readOnlyCutoverEligibility(
@@ -142,7 +150,26 @@ export function readOnlyCutoverEligibility(
   | { eligible:false; reason:'transactional_or_task_turn' | 'domain_not_cut_over' } {
   if (options.requireSemanticSupervisor
       && turn.semanticTurn.semanticSource !== 'openai_supervisor') {
-    return { eligible:false, reason:'transactional_or_task_turn' };
+    // requireSemanticSupervisor exists to stop an UNVERIFIED deterministic
+    // guess from pre-mutating state or answering early before legacy's own
+    // careful pre-checks run -- it was never meant to force a second real
+    // paid model call for a turn the cost architecture already trusts
+    // enough to have skipped interpretSemanticTurn for in the first place
+    // (see isTrustedZeroCostFactLookup in
+    // _thongthai-one-mind-orchestrator.ts). Confirmed via a real production
+    // regression: a single-activity price question correctly skipped the
+    // semantic-interpreter call, but this gate then rejected the resulting
+    // composed answer outright (before the composer even ran) purely
+    // because its source wasn't openai_supervisor, forcing a SECOND
+    // attempt that paid for grounded-response-composition anyway. The
+    // exception is narrow and read-only by construction (every branch of
+    // isTrustedZeroCostFactLookup is action:'ask', never a task mutation)
+    // -- never a blanket relaxation for every deterministic_fallback turn.
+    const trustedZeroCostBypass = options.message !== undefined
+      && isTrustedZeroCostFactLookup(turn.dialogSemanticTurn ?? turn.semanticTurn, options.message);
+    if (!trustedZeroCostBypass) {
+      return { eligible:false, reason:'transactional_or_task_turn' };
+    }
   }
   // The transaction-safety gate always runs first, regardless of domain:
   // an ActionProposal can never be composed by One-Mind's read-only path.
@@ -310,15 +337,23 @@ export async function processOneMindCustomerTurn(
   eligibilityOptions: ReadOnlyCutoverEligibilityOptions = {},
 ): Promise<OneMindCustomerTurnResult> {
   const totalStartedAt = Date.now();
+  // Threading input.message into eligibilityOptions here (rather than
+  // requiring every caller to do it) is what lets
+  // readOnlyCutoverEligibility's requireSemanticSupervisor exception
+  // (isTrustedZeroCostFactLookup) actually engage -- see its own comment.
+  const eligibilityOptionsWithMessage: ReadOnlyCutoverEligibilityOptions = {
+    ...eligibilityOptions,
+    message: eligibilityOptions.message ?? input.message,
+  };
   const turn = await processThongthaiOneMindTurnAuthoritative(
     { ...input, persistState:input.persistState !== false },
     dependencies,
     stateDependencies,
     now,
     4,
-    candidate => readOnlyCutoverEligibility(candidate, eligibilityOptions).eligible,
+    candidate => readOnlyCutoverEligibility(candidate, eligibilityOptionsWithMessage).eligible,
   );
-  const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptions);
+  const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptionsWithMessage);
 
   // Never acknowledge a state-mutating conversational decision unless the
   // authoritative state write actually succeeded. This matters for cancel /
