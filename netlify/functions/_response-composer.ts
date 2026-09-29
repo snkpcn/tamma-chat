@@ -1300,6 +1300,15 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
     && turn.references.some(reference =>
       reference.type === 'entity_selection'
       && Boolean(reference.resolvedEntityId));
+  const namedConsideredSelection =
+    turn.action === 'confirm'
+    && [
+      turn.entities.horseName, turn.entities.resourceName, turn.entities.roomType,
+      turn.entities.itemName, turn.entities.productName, turn.entities.promotionName,
+      turn.entities.name,
+    ].some(value => typeof value === 'string' && value.trim().length > 0)
+    && turn.constraints.some(constraint =>
+      /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint));
 
   if (
     noCommitment
@@ -1310,6 +1319,7 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
       || turn.action === 'correct_previous'
       || turn.action === 'modify'
       || namedActivitySelection
+      || namedConsideredSelection
     )
   ) {
     const entities = turn.entities;

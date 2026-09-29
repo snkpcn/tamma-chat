@@ -183,6 +183,62 @@ test('C3: prior customer constraints stay conversation evidence when many menu e
   assert.ok(plan.knowledgeRequests.some(request=>request.domain==='restaurant'));
 });
 
+test('C4: named no-booking preference is canonicalized to a safe working selection, not missing-field collection', () => {
+  const context=twoHorseContext({
+    activeTask:{
+      taskId:'task-horse',domain:'activity',type:'activity_booking',
+      selectedEntities:[],knownSlots:{activityCode:'horse'},constraints:[],
+      missingFields:['resourceCode','date','durationMinutes'],commitmentIntent:false,
+    },
+  });
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'customer keeps ภาราดร as a tentative choice without booking',
+    reply:'ได้ครับ ผมเก็บภาราดรไว้เป็นตัวเลือกก่อนนะครับ ยังไม่ดำเนินการจองให้ครับ',
+    speechAct:'preference_update',
+    domain:'activity',
+    intent:'hold_horse_selection_without_booking',
+    action:'provide_information',
+    informationNeed:'none',
+    entities:{horseName:'ภาราดร',activityCode:'horse'},
+    references:[],
+    constraints:['no_transaction'],
+    confidence:0.99,
+    needsClarification:false,
+  }),context,'เอาภาราดรไว้ก่อน แต่ยังไม่จองครับ');
+
+  assert.equal(turn.action,'confirm');
+  assert.equal(turn.speechAct,'preference_update');
+  assert.deepEqual(turn.constraints,['no_transaction']);
+
+  const existing=createActiveTask({
+    type:'activity_booking',sourceChannel:'line',initialSlots:{activityCode:'horse'},
+    requiredFields:['resourceCode','date','durationMinutes'],now:NOW,
+  });
+  const taskState:TaskStateContainer={
+    ...emptyTaskStateContainer(),
+    activeTask:{...existing,slots:{activityCode:'horse'},missingFields:['resourceCode','date','durationMinutes']},
+  };
+  const plan=planDialogTurn({
+    semanticTurn:turn,
+    conversationContext:emptyConversationContextState(NOW),
+    taskState,
+    channel:'line',
+    eventId:'hotfix-c4-safe-hold',
+  },NOW);
+  assert.notEqual(plan.mode,'collect_field');
+  assert.equal(plan.actionProposal,undefined);
+  assert.notEqual(plan.taskStateContainer.activeTask?.commitmentIntent,true);
+  assert.equal(plan.taskStateContainer.activeTask?.slots.horseName,'ภาราดร');
+  const response=composeDeterministicResponse(emptyComposerInput({
+    semanticTurn:turn,
+    dialogDecision:plan,
+    conversationContext:emptyConversationContextState(NOW),
+  }));
+  assert.match(response.message,/ภาราดร/u);
+  assert.doesNotMatch(response.message,/ขอรายการที่ต้องการ|ขอ.*วัน/u);
+  assert.doesNotMatch(response.message,/จองเรียบร้อย|ยืนยันการจองแล้ว/u);
+});
+
 // -- Failure classes D/F/G: an ambiguous side-reference must never block a
 // task summary or casual chat -----------------------------------------------
 
