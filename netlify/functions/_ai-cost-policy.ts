@@ -1,16 +1,15 @@
 // Canonical OpenAI pricing and hard-budget policy for customer production.
 // No other module may contain model-rate or conversation-cap arithmetic.
 //
-// OpenAI human-fallback experiment (owner directive): quality comes first
-// during this phase. There is deliberately NO hard THB cap, NO fallback-call
-// quota, and NO semantic-call gap tight enough to block a genuinely needed
-// intelligence call -- see THONGTHAI_AI_COST telemetry (_ai-cost-ledger.ts)
-// for the real per-call/per-conversation cost measurement this phase exists
-// to produce. The ceilings below are intentionally generous runaway-bug
-// guards, not budget targets; raise them (never below the reviewed default)
-// via the matching THONGTHAI_* env var if a real conversation ever needs
-// more.
-export const DEFAULT_MAX_CONVERSATION_AI_COST_USD = 5;
+// Owner hard production requirement: OpenAI spend for one customer
+// conversation may never exceed 5 THB. The ledger still reasons in USD for
+// provider pricing, but the canonical ceiling is THB and is converted using
+// the same reporting rate used by cost telemetry. Environment configuration
+// may make the cap stricter, never looser.
+export const DEFAULT_USD_TO_THB_RATE = 36;
+export const DEFAULT_MAX_CONVERSATION_AI_COST_THB = 5;
+export const DEFAULT_MAX_CONVERSATION_AI_COST_USD =
+  DEFAULT_MAX_CONVERSATION_AI_COST_THB / DEFAULT_USD_TO_THB_RATE;
 export const DEFAULT_MAX_AI_CALLS_PER_TURN = 3;
 export const DEFAULT_MAX_AI_CALLS_PER_CONVERSATION = 2_000;
 export const DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS = 900;
@@ -30,10 +29,6 @@ export const DEFAULT_COMPLEX_SEMANTIC_INPUT_TOKENS = 6_200;
 // payload is never blocked by prompt size when cost is no longer the
 // limiting concern this phase.
 export const ABSOLUTE_SEMANTIC_INPUT_TOKENS = 16_000;
-// THB conversion for cost telemetry only (see emitCostMetric in
-// _ai-cost-ledger.ts). Not a limiter -- a display/reporting rate.
-export const DEFAULT_USD_TO_THB_RATE = 36;
-
 export type ModelPricing = {
   inputUsdPerMillion: number;
   cachedInputUsdPerMillion: number;
@@ -122,16 +117,24 @@ export function pricingForModel(model: string): ModelPricing {
 }
 
 export function aiCostPolicy(): AiCostPolicy {
-  return {
-    // Owner hard caps are one-way configurable: environment values may make
-    // production stricter, never more expensive than the reviewed ceiling.
-    maxConversationCostUsd: Math.min(
-      finiteNumber(
-        process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD,
-        DEFAULT_MAX_CONVERSATION_AI_COST_USD,
-      ),
-      DEFAULT_MAX_CONVERSATION_AI_COST_USD,
+  const rate = usdToThbRate();
+  const configuredThbCap = Math.min(
+    finiteNumber(
+      process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_THB,
+      DEFAULT_MAX_CONVERSATION_AI_COST_THB,
     ),
+    DEFAULT_MAX_CONVERSATION_AI_COST_THB,
+  );
+  const thbDerivedUsdCap = configuredThbCap / rate;
+  // Keep the legacy USD override as a backwards-compatible STRICTER-only
+  // override. It can lower the effective cap, but it can never raise the
+  // owner-mandated THB ceiling.
+  const legacyUsdCap = finiteNumber(
+    process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD,
+    thbDerivedUsdCap,
+  );
+  return {
+    maxConversationCostUsd: Math.min(thbDerivedUsdCap, legacyUsdCap),
     maxCallsPerTurn: boundedInteger(
       process.env.THONGTHAI_MAX_AI_CALLS_PER_TURN,
       DEFAULT_MAX_AI_CALLS_PER_TURN,
@@ -205,7 +208,10 @@ export function roundUsd(value: number): number {
 }
 
 export function usdToThbRate(): number {
-  return finiteNumber(process.env.THONGTHAI_USD_TO_THB_RATE, DEFAULT_USD_TO_THB_RATE);
+  // The reporting/conversion rate must stay positive or the THB hard cap
+  // could be divided by zero and become ineffective.
+  const configured = finiteNumber(process.env.THONGTHAI_USD_TO_THB_RATE, DEFAULT_USD_TO_THB_RATE);
+  return configured > 0 ? configured : DEFAULT_USD_TO_THB_RATE;
 }
 
 export function usdToThb(usd: number): number {

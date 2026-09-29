@@ -1427,7 +1427,16 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     action = 'confirm';
   }
 
-  if (taskDirective === 'resume_suspended' && action === 'confirm') {
+  if (
+    taskDirective === 'resume_suspended'
+    && speechAct !== 'transaction_request'
+    && ['book','order','confirm','modify','cancel'].includes(action)
+  ) {
+    // Resuming a suspended conversational task is working-state navigation,
+    // not transaction consent. A model may overread the suspended task's
+    // booking shape and emit "book" even when the CURRENT utterance only says
+    // "กลับไปเรื่อง...ที่ค้างไว้". Keep that read-only unless this same
+    // current turn independently carries an explicit transaction_request.
     action = 'ask';
   }
 

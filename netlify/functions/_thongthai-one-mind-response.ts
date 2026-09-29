@@ -420,6 +420,8 @@ export async function processOneMindCustomerTurn(
       channel: input.channel,
       eventId: input.eventId,
       callerLabel: 'grounded-response-composition',
+      certificationMode: input.environment !== 'live'
+        && process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE === '1',
     } : null,
     allowModelComposition: (composerStartedAt - totalStartedAt) < COMPOSER_MODEL_BUDGET_CUTOFF_MS,
   };
