@@ -132,3 +132,86 @@ test('F3: a not-bound ai_cost team never throws (customer traffic is never affec
     assert.equal(results[0]!.status, 'not_bound');
   });
 });
+
+
+test('F4: reused conversation_id is partitioned at a reset call index so a new idle session reports only its own cost', async () => {
+  await withHarness(async harness => {
+    harness.programOpsChannel('ai_cost', 'ai-cost-group-1');
+    harness.programAiCostRows([
+      {
+        conversation_id:'conv-reused',event_id:'old-1',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,output_tokens:20,
+        cost_thb:1.25,call_index_conversation:1,occurred_at:iso(120),
+      },
+      {
+        conversation_id:'conv-reused',event_id:'old-2',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'grounded-response-composition',input_tokens:200,cached_input_tokens:0,output_tokens:30,
+        cost_thb:2.75,call_index_conversation:2,occurred_at:iso(119),
+      },
+      {
+        conversation_id:'conv-reused',event_id:'new-1',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,output_tokens:20,
+        cost_thb:0.20,call_index_conversation:1,occurred_at:iso(20),
+      },
+      {
+        conversation_id:'conv-reused',event_id:'new-2',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,output_tokens:20,
+        cost_thb:0.30,call_index_conversation:2,occurred_at:iso(19),
+      },
+    ],[
+      {
+        conversation_id:'conv-reused',model_reply_used:true,grounded_knowledge_supplied:false,
+        zero_cost_turn:false,final_response_source:'openai_direct_response',occurred_at:iso(19),
+      },
+    ]);
+
+    const results=await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(results.length,1);
+    assert.equal(results[0]!.status,'sent');
+    assert.equal(results[0]!.costThb,0.5,'the new session must not inherit prior sessions from the same stable conversation_id');
+    assert.equal(harness.notificationDeliveries().filter(d=>d.deliveryType==='ai_cost_conversation').length,1);
+  });
+});
+
+test('F5: two separate ledger sessions may end at the same call index without suppressing the later cost notification as duplicate', async () => {
+  await withHarness(async harness => {
+    harness.programOpsChannel('ai_cost', 'ai-cost-group-1');
+    const session1=[
+      {
+        conversation_id:'conv-same-count',event_id:'s1-1',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,output_tokens:20,
+        cost_thb:0.20,call_index_conversation:1,occurred_at:iso(80),
+      },
+      {
+        conversation_id:'conv-same-count',event_id:'s1-2',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,output_tokens:20,
+        cost_thb:0.30,call_index_conversation:2,occurred_at:iso(79),
+      },
+    ];
+    harness.programAiCostRows(session1,[]);
+    const first=await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(first[0]!.status,'sent');
+
+    const session2=[
+      {
+        conversation_id:'conv-same-count',event_id:'s2-1',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,output_tokens:20,
+        cost_thb:0.25,call_index_conversation:1,occurred_at:iso(20),
+      },
+      {
+        conversation_id:'conv-same-count',event_id:'s2-2',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,output_tokens:20,
+        cost_thb:0.35,call_index_conversation:2,occurred_at:iso(19),
+      },
+    ];
+    harness.programAiCostRows([...session1,...session2],[]);
+    const second=await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(second[0]!.status,'sent','a later reset session with the same max call index must get a distinct delivery');
+    assert.equal(second[0]!.costThb,0.6);
+    assert.equal(harness.notificationDeliveries().filter(d=>d.deliveryType==='ai_cost_conversation').length,2);
+
+    const repeat=await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(repeat[0]!.status,'duplicate','re-scanning the same latest session must remain idempotent');
+    assert.equal(harness.notificationDeliveries().filter(d=>d.deliveryType==='ai_cost_conversation').length,2);
+  });
+});

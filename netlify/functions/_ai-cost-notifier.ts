@@ -1,4 +1,5 @@
 import { sendAiCostLineNotification } from './_ops-notifications';
+import { aiCostPolicy } from './_ai-cost-policy';
 
 type CostRow={
   conversation_id:string;event_id:string;channel:string;model:string;call_purpose:string;
@@ -38,6 +39,22 @@ function dayBounds(d:string){
     end:new Date(`${nextDate(d)}T00:00:00+07:00`).toISOString(),
   };
 }
+function latestLedgerSession(rows:CostRow[]):CostRow[]{
+  if(!rows.length)return[];
+  const ordered=[...rows].sort((a,b)=>a.occurred_at.localeCompare(b.occurred_at));
+  const ledgerIdleMs=aiCostPolicy().conversationIdleMs;
+  let start=0;
+  for(let i=1;i<ordered.length;i+=1){
+    const previous=ordered[i-1]!,current=ordered[i]!;
+    const previousIndex=n(previous.call_index_conversation),currentIndex=n(current.call_index_conversation);
+    const previousAt=Date.parse(previous.occurred_at),currentAt=Date.parse(current.occurred_at);
+    const indexReset=previousIndex>0&&currentIndex>0&&currentIndex<=previousIndex;
+    const idleReset=Number.isFinite(previousAt)&&Number.isFinite(currentAt)&&currentAt-previousAt>=ledgerIdleMs;
+    if(indexReset||idleReset)start=i;
+  }
+  return ordered.slice(start);
+}
+
 function summarize(rows:CostRow[],turns:TurnRow[]){
   const conversations=new Set(rows.map(x=>x.conversation_id));
   return {
@@ -71,7 +88,15 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
     const list=byConversation.get(row.conversation_id)??[];list.push(row);byConversation.set(row.conversation_id,list);
   }
   const results:Array<{conversationId:string;status:string;costThb:number}>=[];
-  for(const [conversationId,calls] of byConversation){
+  for(const [conversationId,allCalls] of byConversation){
+    // conversation_id is a stable customer/thread identifier, not a unique
+    // AI-cost ledger session. The ledger intentionally resets its call index
+    // after its idle window, so a 24h notifier scan can contain several
+    // separate conversations for the same LINE user. Summarize only the
+    // latest ledger session; otherwise old + new sessions are aggregated and
+    // the old max call index can reuse a previous idempotency key forever.
+    const calls=latestLedgerSession(allCalls);
+    if(!calls.length)continue;
     const latest=calls[calls.length-1]!;
     // Only notify a conversation whose latest call is itself idle >=10 min.
     // If it resumed after our query window, a cheap existence lookup catches
@@ -123,11 +148,16 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
       `Zero-cost turns: ${s.zero}`,
     ].filter(Boolean).join('\n');
     const maxIndex=Math.max(...calls.map(x=>n(x.call_index_conversation)));
+    const sessionStart=calls[0]!.occurred_at;
+    const sessionEvent=calls[0]!.event_id || sessionStart;
     const status=await sendAiCostLineNotification({
-      idempotencyKey:`ai_cost_conversation:${conversationId}:${maxIndex}`,
+      // call_index_conversation resets for every ledger session. It therefore
+      // cannot be the sole idempotency discriminator for a stable LINE
+      // conversation_id; two separate sessions can both end at index 22.
+      idempotencyKey:`ai_cost_conversation:${conversationId}:${sessionEvent}:${maxIndex}`,
       deliveryType:'ai_cost_conversation',
       text,
-      payload:{conversation_id:conversationId,cost_thb:s.cost,calls:s.calls},
+      payload:{conversation_id:conversationId,cost_thb:s.cost,calls:s.calls,session_start_at:sessionStart,session_end_at:latest.occurred_at,max_call_index:maxIndex},
     });
     if(status==='not_bound'){
       // No error is thrown here (sendTeamMessage returns a status, not a
