@@ -108,6 +108,45 @@ test('Phase 6 final: shared current-turn boundary rejects questions, resume lang
   assert.equal(hasStandaloneTransactionRequest('จองเลย แต่เดี๋ยวก่อน ยังไม่จองนะ'), false);
 });
 
+test('Phase 6 final: conditional primary/fallback availability preserves both named horses and stays read-only', () => {
+  const started = plan(semantic({
+    action:'confirm',
+    speechAct:'selection',
+    entities:{resourceCode:'activity-horse',horseName:'ภาราดร'},
+  }),emptyTaskStateContainer(),'phase6-conditional-start');
+
+  const context:SemanticContext={
+    ...emptySemanticContext(),
+    activeDomain:'activity',
+    recentEntities:[
+      {id:'activity_asset:horse-pharadon',type:'activity_asset',name:'ภาราดร',domain:'activity',source:'catalog',canonical:true},
+      {id:'activity_asset:horse-thongthai',type:'activity_asset',name:'ทองไทย',domain:'activity',source:'catalog',canonical:true},
+    ],
+    activeTask:started.taskStateContainer.activeTask ? {
+      type:started.taskStateContainer.activeTask.type,
+      domain:started.taskStateContainer.activeTask.domain,
+      status:started.taskStateContainer.activeTask.status,
+      knownSlots:started.taskStateContainer.activeTask.slots,
+      missingFields:started.taskStateContainer.activeTask.missingFields,
+      selectedEntities:started.taskStateContainer.activeTask.selectedEntities,
+      constraints:started.taskStateContainer.activeTask.constraints,
+    } : null,
+  };
+
+  const turn=deriveDeterministicSemanticTurn(
+    'ถ้าภาราดรไม่ว่าง เอาทองไทยแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร',
+    context,
+    started.taskStateContainer,
+    NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.action,'ask');
+  assert.equal(turn!.informationNeed,'availability');
+  assert.equal(turn!.entities.primaryHorse,'ภาราดร');
+  assert.equal(turn!.entities.fallbackHorse,'ทองไทย');
+  assert.ok(turn!.constraints.includes('no_transaction'));
+});
+
 test('Phase 6 final: provider-outage deterministic fallback emits canonical no_transaction for an open task', () => {
   const committed = plan(semantic({
     action: 'book',
