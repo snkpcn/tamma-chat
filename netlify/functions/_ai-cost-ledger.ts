@@ -163,6 +163,15 @@ export async function reserveAiCall(
   // Certification is explicit code/config, never customer-controlled. It still
   // records usage, but may use isolated synthetic conversation ids.
   const policy = aiCostPolicy();
+  // Real customer traffic is governed by the owner hard cap (<= 5 THB).
+  // Explicit certification runs and the repository's network-free harness
+  // are not customer conversations, so they may use the old generous
+  // runaway ceiling while still exercising/recording the same call path.
+  const nonCustomerBudgetCapUsd =
+    context.certificationMode === true
+    || (Boolean(process.env.NODE_TEST_CONTEXT) && process.env.THONGTHAI_TEST_BYPASS_COST_CAP === '1')
+      ? 5
+      : policy.maxConversationCostUsd;
   const estimatedInputTokens = estimateInputTokens(promptParts);
   if (estimatedInputTokens > policy.absoluteInputTokens) {
     emitCostMetric({
@@ -208,7 +217,7 @@ export async function reserveAiCall(
     if (ledger.callCount >= policy.maxCallsPerConversation) throw new AiBudgetBlockedError('conversation_call_limit');
 
     const projected = roundUsd(ledger.cumulativeCostUsd + ledger.reservedCostUsd + reservedCostUsd);
-    if (projected > policy.maxConversationCostUsd + Number.EPSILON) {
+    if (projected > nonCustomerBudgetCapUsd + Number.EPSILON) {
       emitCostMetric({
         conversation_id:context.conversationId, event_id:context.eventId, model,
         call_purpose:context.callerLabel,
@@ -216,8 +225,8 @@ export async function reserveAiCall(
         reserved_cost_usd:reservedCostUsd, reserved_cost_thb:usdToThb(reservedCostUsd),
         conversation_cost_usd:ledger.cumulativeCostUsd,
         conversation_cost_thb:usdToThb(ledger.cumulativeCostUsd),
-        budget_remaining_usd:roundUsd(policy.maxConversationCostUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd),
-        budget_remaining_thb:usdToThb(policy.maxConversationCostUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd),
+        budget_remaining_usd:roundUsd(nonCustomerBudgetCapUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd),
+        budget_remaining_thb:usdToThb(nonCustomerBudgetCapUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd),
       });
       throw new AiBudgetBlockedError('budget');
     }
@@ -338,8 +347,8 @@ export async function finalizeAiCall(
         call_index_conversation:updated.callIndexConversation,
         call_purpose:context.callerLabel,
         semantic_supervisor_caller_label:context.callerLabel,
-        budget_remaining_usd:roundUsd(policy.maxConversationCostUsd - next.cumulativeCostUsd - next.reservedCostUsd),
-        budget_remaining_thb:usdToThb(policy.maxConversationCostUsd - next.cumulativeCostUsd - next.reservedCostUsd),
+        budget_remaining_usd:roundUsd(nonCustomerBudgetCapUsd - next.cumulativeCostUsd - next.reservedCostUsd),
+        budget_remaining_thb:usdToThb(nonCustomerBudgetCapUsd - next.cumulativeCostUsd - next.reservedCostUsd),
         deterministic_turn:false,
         paid_call_used:true,
         ai_paid_call:1,
