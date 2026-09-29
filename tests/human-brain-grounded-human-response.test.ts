@@ -150,6 +150,46 @@ test('restaurant recommendation filters a REMEMBERED "shrimp_allergy" constraint
     'a remembered shrimp allergy must never surface a shrimp dish, even though the CURRENT turn never said "no_shrimp" itself');
 });
 
+test('ecosystem recommendation renders owner-verified static paths instead of generic fallback',()=>{
+  const ecosystem:KnowledgeBundle={
+    domain:'ecosystem',
+    sources:[{need:'recommendations_input',sourceId:'owner_verified_ecosystem_paths_v1',sourceType:'bible',status:'ok'}],
+    facts:[
+      fact('ecosystem:path:chill:name','สายชิล','ecosystem','bible'),
+      fact('ecosystem:path:chill:description','คาเฟ่ + ถ่ายรูป + อาหาร','ecosystem','bible'),
+      fact('ecosystem:path:activity:name','สายกิจกรรม','ecosystem','bible'),
+      fact('ecosystem:path:activity:description','ขี่ม้า / ATV / ยิงธนู','ecosystem','bible'),
+      fact('ecosystem:path:stay:name','สายพัก','ecosystem','bible'),
+      fact('ecosystem:path:stay:description','เฮือนสเตย์ + ธรรมชาติ','ecosystem','bible'),
+    ],
+    entities:[],missing:[],warnings:[],freshness:'stable',
+  };
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({domain:'ecosystem',intent:'recommend_relaxed_visit',action:'recommend',informationNeed:'recommendation',constraints:['relaxed']}),
+    bundles:[ecosystem],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/สายชิล/u);
+  assert.match(response.message,/คาเฟ่/u);
+  assert.match(response.message,/ขี่ม้า/u);
+  assert.match(response.message,/เฮือนสเตย์/u);
+  assert.doesNotMatch(response.message,/ยังตอบเรื่องนี้ให้แม่นไม่ได้/u);
+});
+
+test('activity availability with no live source answers honestly instead of generic fallback',()=>{
+  const response=composeGroundedDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',intent:'horse_availability_inquiry',action:'status',informationNeed:'availability',
+      entities:{activityCode:'horse',date:'2026-09-29'},constraints:['non_committal_preview'],
+    }),
+    bundles:[],
+  }));
+  assert.ok(response);
+  assert.match(response.message,/คิวสด|ว่าง/u);
+  assert.match(response.message,/ยังไม่ได้ทำรายการ|ยังไม่ได้.*จอง/u);
+  assert.doesNotMatch(response.message,/ยังตอบเรื่องนี้ให้แม่นไม่ได้|ลองอีกครั้งสักครู่/u);
+});
+
 test('journey renderer composes verified cross-domain options instead of dumping one catalog or generic fallback',()=>{
   const restaurant=bundle('restaurant','restaurant_live',[fact('menu:chicken:name','ไก่ย่าง','restaurant','restaurant_live')]);
   const stay=bundle('stay','stay_live',[fact('stay:two-bedroom:name','บ้านสองห้องนอน','stay','stay_live')]);
