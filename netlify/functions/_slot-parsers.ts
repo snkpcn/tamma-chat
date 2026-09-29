@@ -168,7 +168,11 @@ export function hasCommitMarker(message: string): boolean {
  * book/order yet?". Shared by semantic reconciliation and deterministic
  * provider-outage fallback so both enforce the same transaction boundary. */
 export function hasExplicitNoTransactionMarker(message: string): boolean {
-  return /ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้|ต้อง)?\s*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ไว้ก่อน|ไว้ก่อน/u.test(message);
+  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้|ต้อง)?\s*(?:จอง|สั่ง)/u.test(message)) return true;
+  // Bare "ไว้ก่อน" means hold the conversational choice for now, but an
+  // explicit "จองไว้ก่อน"/"สั่งไว้ก่อน" is itself a transaction request.
+  if (/ไว้ก่อน/u.test(message) && !/(?:จอง|สั่ง)\s*ไว้ก่อน/u.test(message)) return true;
+  return false;
 }
 
 const TRANSACTION_QUESTION_MARKER_RE =
