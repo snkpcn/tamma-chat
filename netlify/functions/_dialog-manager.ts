@@ -843,7 +843,8 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   const hasOpenTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
   const missingFields = hasOpenTask ? container.activeTask!.missingFields : [];
   const currentTurnCommit = isExplicitTransaction(turn);
-  const customerCommitPresent = currentTurnCommit || Boolean(container.activeTask?.commitmentIntent);
+  const customerCommitPresent = currentTurnCommit
+    || (hasOpenTask && Boolean(container.activeTask?.commitmentIntent));
   if (currentTurnCommit) reasons.push('explicit_commit_received');
 
   // CORE PRECEDENCE: the CURRENT turn must contain positive structural
