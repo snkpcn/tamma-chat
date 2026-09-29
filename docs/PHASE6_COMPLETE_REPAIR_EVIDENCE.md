@@ -32,6 +32,7 @@ The repair adds no second brain or state store.
 | reset / AI-ledger boundary | newly found | reset deleted `aiCostLedger` but retained canonical and legacy temporary planning state | reset discourse/task/planning state, preserve current accounting ledger and submitted operational records |
 | legacy LINE duration split-brain | newly found | legacy parser/executor hardcoded 30/60/90 while canonical catalog offers horse 30/45 | parse syntax generically, validate both LINE collection and executor against live offerings, and compute exact contiguous schedule duration |
 | omitted prior-plan reference | newly exposed by final-head live LINE gate | model understood a journey edit but omitted `references[]`; the trust boundary discarded the otherwise correct meaning and asked again | recover only a concrete edit against exactly one canonical active journey task; retain clarification when another journey task competes |
+| conditional primary/fallback alias collision | newly exposed by the next final-head live LINE gate | model preserved the fallback horse but copied it into both the primary and fallback slots | structurally materialize two explicitly named current-turn roles and reconcile them before composition; keep the availability turn read-only and preserve the active selection |
 | duplicate activity writes | already repaired before this branch | retry after a successful write | preserved executor duplicate check and replayed it with catalog validation enabled |
 
 ## Requirement-to-evidence matrix
@@ -70,8 +71,9 @@ test independently proves rejection occurs before any POST to `bookings`.
 
 ## Local gates
 
-- `npm test`: 1794/1794 passed, including the dedicated unsupported-duration
-  dialog regression and both sides of the omitted prior-plan reference repair.
+- `npm test`: 1795/1795 passed, including the dedicated unsupported-duration
+  dialog regression, both sides of the omitted prior-plan reference repair,
+  and the live conditional-role alias-collision regression.
 - Exact Netlify build command completed locally. Phase-O live and semantic
   certification correctly reported skipped because the local invocation was
   not a configured CI/live context; this is not counted as a live PASS.

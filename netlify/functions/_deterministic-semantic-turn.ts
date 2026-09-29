@@ -415,6 +415,30 @@ const COMPARE_MARKER = /ตัวไหน|อันไหน|ชิ้นไห
 const CONDITIONAL_UNAVAILABLE_MARKER = /ไม่ว่าง/u;
 const NO_COMMIT_CONSEQUENCE_MARKER = /ไม่ต้อง(?:จอง|เลือก|ทำ|สั่ง)/u;
 
+/**
+ * Extract an explicitly named primary/fallback pair from the structural form
+ * “if A is unavailable, use B instead”. Both names must be canonical known
+ * assets, distinct, and separated by an actual fallback-selection cue. This
+ * never infers availability or transaction consent; it only preserves entity
+ * roles the customer stated in the current turn.
+ */
+export function conditionalKnownActivityAssetFallback(
+  message:string,
+):{ primary:typeof ACTIVITY_ASSET_SELECTIONS[number]; fallback:typeof ACTIVITY_ASSET_SELECTIONS[number] } | null {
+  const unavailableIndex=message.search(CONDITIONAL_UNAVAILABLE_MARKER);
+  if(unavailableIndex<0 || !NO_COMMIT_CONSEQUENCE_MARKER.test(message)) return null;
+  const mentions=ACTIVITY_ASSET_SELECTIONS.flatMap(item=>{
+    const index=message.search(item.pattern);
+    return index<0 ? [] : [{item,index}];
+  }).sort((a,b)=>a.index-b.index);
+  const primary=[...mentions].reverse().find(mention=>mention.index<unavailableIndex);
+  const fallback=mentions.find(mention=>mention.index>unavailableIndex && mention.item!==primary?.item);
+  if(!primary || !fallback) return null;
+  const fallbackClause=message.slice(unavailableIndex,fallback.index+fallback.item.name.length+12);
+  if(!/(?:เอา|เลือก|ใช้|ขอ|แทน)/u.test(fallbackClause)) return null;
+  return {primary:primary.item,fallback:fallback.item};
+}
+
 // Provider-outage structural fallback for "what have we decided/provided so
 // far?" questions. This is intentionally about the SHAPE of a working-state
 // summary request, not one exact sentence: a summary verb or current/prior
@@ -674,10 +698,18 @@ function deriveForActiveTask(
     && NO_COMMIT_CONSEQUENCE_MARKER.test(message)) {
     const entities: Record<string, unknown> = {};
     if (typeof task.slots.resourceCode === 'string') entities.resourceCode = task.slots.resourceCode;
+    const namedFallback = task.domain === 'activity'
+      ? conditionalKnownActivityAssetFallback(message)
+      : null;
+    if (namedFallback) {
+      entities.primaryHorse = namedFallback.primary.name;
+      entities.fallbackHorse = namedFallback.fallback.name;
+      entities.activityCode = 'horse';
+    }
     // The task's own slot key is `assetSelection` (see ACTIVITY_BOOKING_
     // REQUIRED_FIELDS in thongthai-chat.ts); renderActivityAvailability
     // reads the customer-facing name back under `entities.horseName`.
-    if (typeof task.slots.assetSelection === 'string') entities.horseName = task.slots.assetSelection;
+    if (!namedFallback && typeof task.slots.assetSelection === 'string') entities.horseName = task.slots.assetSelection;
     return {
       domain: task.domain, intent: 'task_conditional_continuation', action: 'ask',
       informationNeed: 'availability',

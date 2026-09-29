@@ -202,8 +202,12 @@ test('REAL LINE: conditional fallback remains read-only and cannot replace the c
       entities:{resourceCode:'activity-horse',horseName:'ภาราดร'},
     }),
     [conditional]:semantic({
-      domain:'activity',intent:'conditional_horse_fallback',action:'status',informationNeed:'availability',speechAct:'request',
-      entities:{primaryHorse:'ภาราดร',fallbackHorse:'ทองไทย'},constraints:['no_transaction_if_unavailable'],
+      domain:'activity',intent:'set_horse_availability_fallback',action:'status',informationNeed:'availability',speechAct:'preference_update',
+      // Real provider output observed on PR #250 head: the fallback name was
+      // accidentally copied into both roles. Current named entities must
+      // structurally repair those roles before response composition.
+      entities:{horseName:'ทองไทย',fallbackHorseName:'ทองไทย',activityCode:'horse'},
+      constraints:['no_transaction','fallback_if_paradorn_unavailable','do_not_book_if_both_unavailable'],
     }),
   },{
     activity:{
@@ -215,6 +219,9 @@ test('REAL LINE: conditional fallback remains read-only and cannot replace the c
   const before=structuredClone(selected.taskStateAfter.activeTask?.slots);
   const result=await run(conditional);
   assert.deepEqual(result.taskStateAfter.activeTask?.slots,before);
+  assert.equal(result.semanticTurn.entities.primaryHorse,'ภาราดร');
+  assert.equal(result.semanticTurn.entities.fallbackHorse,'ทองไทย');
+  assert.notEqual(result.semanticTurn.entities.primaryHorse,result.semanticTurn.entities.fallbackHorse);
   assert.equal(result.dialogDecision.actionProposal,undefined);
   assert.ok(result.dialogDecision.knowledgeRequests.some(r=>r.needs.includes('availability')));
 });
