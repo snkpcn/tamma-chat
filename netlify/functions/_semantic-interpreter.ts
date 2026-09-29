@@ -1491,13 +1491,30 @@ export function parseSemanticTurnResponse(
 
   const currentExplicitNoTransaction = Boolean(currentMessage)
     && hasExplicitNoTransactionMarker(currentMessage);
+  const concreteCurrentSelection = informationNeed === 'none'
+    && (
+      ['horseName','resourceName','roomType','itemName','productName','promotionName','name']
+        .some(key => typeof entities[key] === 'string' && String(entities[key]).trim().length > 0)
+      || explicitSelectionReference
+    );
 
   if (currentExplicitNoTransaction) {
     // Raw customer negation is a safety boundary, never an invitation to
     // transact. A model can still help with language meaning, but it cannot
     // override an explicit CURRENT "not booking/order yet" statement.
-    if (action === 'book' || action === 'order') action = 'ask';
-    if (speechAct === 'transaction_request') speechAct = 'correction';
+    //
+    // Important continuity distinction: "เอาภาราดรไว้ก่อน แต่ยังไม่จอง"
+    // contains a REAL current selection plus an explicit refusal to transact.
+    // Demoting a model's over-eager book/order label all the way to generic
+    // ask throws that selection away, so the next "เอา 60 นาที" has no task
+    // to continue. Preserve the choice as non-transactional confirm/selection;
+    // questions such as availability/price remain read-only ask/status.
+    if (action === 'book' || action === 'order') {
+      action = concreteCurrentSelection ? 'confirm' : 'ask';
+    }
+    if (speechAct === 'transaction_request') {
+      speechAct = concreteCurrentSelection ? 'selection' : 'correction';
+    }
     // Keep any legitimate read-only predicate (availability/price/policy/etc).
     // Revoking WRITE authority must not erase what the customer asked to know.
   }
