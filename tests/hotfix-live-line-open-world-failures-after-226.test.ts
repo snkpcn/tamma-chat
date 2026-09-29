@@ -183,6 +183,39 @@ test('C3: prior customer constraints stay conversation evidence when many menu e
   assert.ok(plan.knowledgeRequests.some(request=>request.domain==='restaurant'));
 });
 
+test('C3b: free-form dietary_constraint provider variant cannot become a menu comparison', () => {
+  const context:SemanticContext = {
+    activeDomain:'restaurant',
+    recentEntities:[
+      {id:'menu:1',type:'menu_item',name:'ตำลาว',domain:'restaurant'},
+      {id:'menu:2',type:'menu_item',name:'ตำไทย',domain:'restaurant'},
+      {id:'menu:3',type:'menu_item',name:'ตำซั่ว',domain:'restaurant'},
+    ],
+    recentTurns:[
+      {role:'user',content:'แฟนแพ้กุ้ง มีอะไรกินได้บ้าง'},
+      {role:'user',content:'ผมกินเผ็ดไม่เก่งด้วยครับ'},
+    ],
+  };
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'recommend a menu matching the previously stated shrimp restriction',
+    speechAct:'question',domain:'restaurant',intent:'recommend_menu_by_dietary_constraint',
+    action:'recommend',informationNeed:'recommendation',
+    entities:{menuName:'ตำลาว',allergen:'shrimp'},
+    references:[{type:'dietary_constraint',value:'avoid_shrimp',refersToPriorContext:true}],
+    constraints:['no_shrimp'],confidence:0.98,needsClarification:false,
+  }),context,'มีเมนูไหนเหมาะกับที่บอกไปบ้างครับ');
+
+  assert.equal(turn.action,'recommend');
+  assert.equal(turn.references[0]?.resolvedFromConversation,true);
+  assert.equal(turn.references[0]?.resolvedEntityIds,undefined);
+  const plan=planDialogTurn({
+    semanticTurn:turn,
+    conversationContext:emptyConversationContextState(NOW),
+    taskState:emptyTaskStateContainer(),channel:'line',eventId:'hotfix-c3b-dietary-constraint',
+  },NOW);
+  assert.notEqual(plan.responseIntent,'cannot_verify_comparison');
+});
+
 test('C4: named no-booking preference is canonicalized to a safe working selection, not missing-field collection', () => {
   const context=twoHorseContext({
     activeTask:{
