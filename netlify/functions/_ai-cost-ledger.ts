@@ -180,11 +180,18 @@ export async function reserveAiCall(
   }
 
   const key = eventKey(context);
-  // Reserve against the configured absolute input ceiling, not the average
-  // estimate. Correctness never depends on prompt caching or optimistic token
-  // estimation; a request that could cross the cap is blocked before fetch.
+  // Reserve against a deliberately conservative estimate of THIS prompt,
+  // not the global 16k absolute ceiling. estimateInputTokens already uses
+  // UTF-8 bytes / 3 (conservative for Thai); add 25% + fixed framing headroom
+  // and still clamp to the reviewed absolute ceiling. This keeps the 5 THB
+  // hard cap meaningful without exhausting an entire conversation after only
+  // a couple of small semantic calls.
+  const reservedInputTokens = Math.min(
+    policy.absoluteInputTokens,
+    Math.ceil(estimatedInputTokens * 1.25) + 256,
+  );
   const reservedCostUsd = roundUsd(
-    reserveWorstCaseCostUsd(model, policy.absoluteInputTokens, maxOutputTokens),
+    reserveWorstCaseCostUsd(model, reservedInputTokens, maxOutputTokens),
   );
 
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
