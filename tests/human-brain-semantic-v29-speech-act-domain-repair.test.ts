@@ -457,6 +457,80 @@ test('resolved previous-plan continuation inherits journey domain and suppresses
   assert.equal(turn.clarificationReason,undefined);
 });
 
+test('omitted prior-plan reference is recovered from one active journey task and a concrete current edit', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'journey' as const,
+    recentTurns:[
+      {role:'user' as const,content:'ช่วยจัดทริปสองวันให้หน่อย'},
+      {role:'assistant' as const,content:'วันแรกขี่ม้า วันที่สองกินข้าวและซื้อของฝากครับ'},
+    ],
+    activeTask:{
+      type:'journey_planning', domain:'journey' as const, status:'active',
+      knownSlots:{stayNights:2}, missingFields:[], selectedEntities:[], constraints:[],
+    },
+    suspendedTask:{
+      type:'restaurant_planning', domain:'restaurant' as const, status:'suspended',
+      knownSlots:{partySize:3}, missingFields:[], selectedEntities:[], constraints:[],
+    },
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'keep the active itinerary and move it to tomorrow',
+    speechAct:'request',
+    domain:'journey',
+    intent:'modify_previous_plan_date',
+    action:'modify',
+    informationNeed:'none',
+    entities:{date:'2026-10-01'},
+    references:[],
+    constraints:[],
+    confidence:0.96,
+    needsClarification:true,
+    clarificationReason:'which previous plan',
+  }), context, 'เอาอันเดิม แต่เปลี่ยนเป็นพรุ่งนี้');
+
+  assert.equal(turn.references.length,1);
+  assert.equal(turn.references[0]?.resolvedFromConversation,true);
+  assert.equal(turn.domain,'journey');
+  assert.equal(turn.action,'modify');
+  assert.equal(turn.entities.date,'2026-10-01');
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.clarificationReason,undefined);
+});
+
+test('omitted prior-plan repair does not guess when another journey task competes', () => {
+  const context = {
+    ...emptySemanticContext(),
+    activeDomain:'journey' as const,
+    activeTask:{
+      type:'journey_planning', domain:'journey' as const, status:'active',
+      knownSlots:{stayNights:2}, missingFields:[], selectedEntities:[], constraints:[],
+    },
+    suspendedTask:{
+      type:'journey_planning', domain:'journey' as const, status:'suspended',
+      knownSlots:{stayNights:1}, missingFields:[], selectedEntities:[], constraints:[],
+    },
+  };
+  const turn = parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'move the old plan to tomorrow',
+    speechAct:'request',
+    domain:'journey',
+    intent:'modify_previous_plan_date',
+    action:'modify',
+    informationNeed:'none',
+    entities:{date:'2026-10-01'},
+    references:[],
+    constraints:[],
+    confidence:0.96,
+    needsClarification:true,
+    clarificationReason:'which previous plan',
+  }), context, 'ใช้แผนเดิม แต่เลื่อนไปพรุ่งนี้');
+
+  assert.equal(turn.references.length,0);
+  assert.equal(turn.needsClarification,true);
+  assert.equal(turn.clarificationReason,'which previous plan');
+});
+
 // Real 16-turn live acceptance regression (2026-09-27): the model is free to
 // spell a prior-context reference's `type` however it likes -- it is not
 // contractually bound to the literal words "previous_plan"/"prior_request".

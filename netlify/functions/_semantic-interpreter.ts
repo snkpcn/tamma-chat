@@ -1298,6 +1298,34 @@ function currentMessageRejectsNewMembership(message:string):boolean {
   return /(?:ไม่(?:เอา|ต้องการ|อยาก|ขอ)[^\n,.!?？]{0,36}(?:ต้อง\s*)?สมัครสมาชิก|(?:ไม่ต้อง|ไม่อยาก|ไม่ขอ)\s*สมัครสมาชิก|ไม่[^\n,.!?？]{0,20}สมาชิกเพิ่ม)/u.test(message);
 }
 
+const PRIOR_PLAN_DEICTIC_RE = /(?:อัน|แผน|รายการ|แบบ|เรื่อง)(?:เดิม|ก่อน|เมื่อกี้)|ที่(?:คุย|เลือก|จัด|วาง)(?:ไว้|กันไว้|เมื่อกี้)|เหมือนเดิม|same\s+(?:plan|itinerary)|previous\s+(?:plan|itinerary)/iu;
+
+/**
+ * Recover a reference the language model omitted only when canonical state
+ * proves there is exactly one active journey plan and the same turn carries a
+ * concrete edit. This is intentionally narrower than generic pronoun repair:
+ * a suspended competing journey keeps the turn ambiguous, and a bare “อันเดิม”
+ * without any changed field still asks for clarification.
+ */
+function omittedSingleActiveJourneyReference(
+  message:string,
+  context:SemanticContext,
+  action:SemanticAction,
+  entities:Record<string,unknown>,
+  references:SemanticReference[],
+):SemanticReference | null {
+  if (references.length > 0 || !message.trim() || !PRIOR_PLAN_DEICTIC_RE.test(message)) return null;
+  if (context.activeTask?.domain !== 'journey' || context.suspendedTask?.domain === 'journey') return null;
+  if (!['ask','modify','correct_previous','provide_information'].includes(action)) return null;
+  if (Object.keys(entities).length === 0) return null;
+  return {
+    type:'active_journey_plan',
+    value:'active journey plan',
+    refersToPriorContext:true,
+    resolvedFromConversation:true,
+  };
+}
+
 export function parseSemanticTurnResponse(
   rawText: string,
   context: SemanticContext,
@@ -1351,6 +1379,15 @@ export function parseSemanticTurnResponse(
 
   let references = resolveReferences(normalizeReferences(parsed.references), context);
   const entities = canonicalizeEntityAliases(asRecord(parsed.entities), domain);
+
+  const recoveredJourneyReference = omittedSingleActiveJourneyReference(
+    currentMessage,
+    context,
+    action,
+    entities,
+    references,
+  );
+  if (recoveredJourneyReference) references = [recoveredJourneyReference];
 
   const currentPromotionSubject = Boolean(currentMessage)
     && currentMessagePromotionSubject(currentMessage);
