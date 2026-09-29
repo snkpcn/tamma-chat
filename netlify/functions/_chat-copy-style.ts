@@ -38,7 +38,7 @@ const MARKDOWN_TABLE_DIVIDER = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/;
 const BULLET_LINE = /^\s*•\s+/;
 const EMOJI_RE = /[\p{Extended_Pictographic}\uFE0F]/u;
 const LINE_PLATFORM_TEXT_LIMIT = 4900;
-const THONGTHAI_LINE_POLITE_PARTICLE = /(?:คะ|ค่ะ)(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu;
+const THONGTHAI_LINE_POLITE_PARTICLE = /(?:ค่ะ|คะ)(?=$|[\s.!?…。，,、:;\)\]}»”’"ฯๆ🙂😊😄😁😃😆🥰🙏✅]|—|-)/gu;
 
 function enforceThongthaiLinePoliteParticle(value: string): string {
   // LINE/customer-facing Thongthai must not leak feminine polite particles.
