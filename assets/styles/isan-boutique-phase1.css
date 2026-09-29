@@ -1,0 +1,323 @@
+/*
+ * Isan Boutique responsive art direction — phase 1
+ * Presentation only. Functional IDs, state, events and API contracts stay untouched.
+ */
+
+html.isan-boutique {
+  --cream: #f2ede3;
+  --cream-2: #f8f4ec;
+  --paper: #fcfaf5;
+  --ink: #241c17;
+  --ink-soft: #5b5046;
+  --teak: #4b2d1e;
+  --brown-deep: #2a1c14;
+  --brown: #5b301f;
+  --terracotta: #9c4f2f;
+  --bronze: #96764b;
+  --bronze-soft: #c8ad7d;
+  --olive: #676a45;
+  --line: rgba(42, 28, 20, 0.16);
+  --line-soft: rgba(42, 28, 20, 0.09);
+  --shadow-warm: 0 28px 80px -42px rgba(35, 24, 18, 0.55);
+  --shadow-soft: 0 18px 48px -34px rgba(35, 24, 18, 0.42);
+  --radius-lg: 4px;
+  --radius-md: 4px;
+  --radius-sm: 3px;
+  --container: 1280px;
+}
+
+html.isan-boutique body {
+  background: var(--cream-2);
+  color: var(--ink);
+  font-size: 16px;
+}
+
+html.isan-boutique .container {
+  padding-inline: clamp(20px, 4.5vw, 72px);
+}
+
+html.isan-boutique .eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  font-weight: 500;
+}
+
+html.isan-boutique .eyebrow::before {
+  width: 34px;
+}
+
+html.isan-boutique .btn {
+  min-height: 48px;
+  padding: 13px 24px;
+  border-radius: 2px;
+  box-shadow: none;
+  letter-spacing: 0.015em;
+}
+
+html.isan-boutique .btn-primary {
+  background: #e9dfcc;
+  color: #2a1c14;
+}
+
+html.isan-boutique .btn-primary:hover {
+  background: #f4ecdc;
+  color: #201610;
+  box-shadow: none;
+}
+
+html.isan-boutique .btn-secondary {
+  background: #713a25;
+}
+
+/* Header: quiet, editorial and readable over both photography and paper. */
+html.isan-boutique .site-header {
+  padding: 20px 0;
+}
+
+html.isan-boutique .site-header::before {
+  background: linear-gradient(to bottom, rgba(20, 14, 10, 0.64), rgba(20, 14, 10, 0));
+}
+
+html.isan-boutique .site-header.is-solid {
+  padding: 13px 0;
+  background: rgba(248, 244, 236, 0.94);
+  border-bottom-color: rgba(42, 28, 20, 0.1);
+  box-shadow: 0 16px 50px -38px rgba(42, 28, 20, 0.7);
+}
+
+html.isan-boutique .brand {
+  gap: 14px;
+}
+
+html.isan-boutique .brand img {
+  height: 40px;
+}
+
+html.isan-boutique .brand-sub {
+  font-size: 9px;
+  letter-spacing: 0.24em;
+}
+
+html.isan-boutique .main-nav {
+  gap: clamp(18px, 2.2vw, 34px);
+}
+
+html.isan-boutique .main-nav a {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+html.isan-boutique .lang-toggle,
+html.isan-boutique .menu-btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Hero: one strong image, restrained host, and a calm editorial rhythm. */
+html.isan-boutique .hero {
+  min-height: 720px;
+  height: min(94svh, 920px);
+  max-height: none;
+  background: #211710;
+  align-items: flex-end;
+}
+
+html.isan-boutique .hero-bg,
+html.isan-boutique .hero-bg picture {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+html.isan-boutique .hero-bg img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 54%;
+}
+
+html.isan-boutique .hero-bg::after {
+  background:
+    linear-gradient(to top, rgba(20, 14, 10, 0.72) 0%, rgba(20, 14, 10, 0.18) 48%, rgba(20, 14, 10, 0.18) 100%),
+    linear-gradient(to right, rgba(20, 14, 10, 0.72) 0%, rgba(20, 14, 10, 0.4) 35%, rgba(20, 14, 10, 0.08) 64%, rgba(20, 14, 10, 0) 78%);
+}
+
+html.isan-boutique .hero-inner {
+  padding-bottom: clamp(76px, 10vh, 112px);
+}
+
+html.isan-boutique .hero-copy {
+  max-width: 680px;
+}
+
+html.isan-boutique .hero-copy h1 {
+  max-width: 17ch;
+  margin-top: 18px;
+  font-size: clamp(42px, 4.2vw, 64px);
+  line-height: 1.18;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  text-shadow: 0 5px 28px rgba(0, 0, 0, 0.28);
+}
+
+html.isan-boutique .hero-copy .sub {
+  max-width: 440px;
+  margin-top: 24px;
+  font-size: 17px;
+  line-height: 1.85;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+html.isan-boutique .hero-actions {
+  margin-top: 34px;
+  gap: 10px;
+}
+
+html.isan-boutique .hero .btn-ghost-light {
+  background: rgba(23, 16, 11, 0.18);
+  border-color: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(10px);
+}
+
+html.isan-boutique .hero-character {
+  right: clamp(20px, 4.5vw, 82px);
+  bottom: -2%;
+  width: clamp(280px, 28vw, 440px);
+  opacity: 0.96;
+}
+
+html.isan-boutique .hero-character img {
+  filter: drop-shadow(0 24px 34px rgba(10, 6, 3, 0.38));
+}
+
+html.isan-boutique .hero-scroll-cue {
+  left: auto;
+  right: clamp(20px, 4.5vw, 72px);
+  transform: none;
+}
+
+/* First content transition: lighter and less like an application form. */
+html.isan-boutique #onboarding {
+  background: var(--paper);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+html.isan-boutique #onboarding .section-head {
+  max-width: 720px;
+}
+
+@media (max-width: 1023.98px) {
+  html.isan-boutique .site-header {
+    padding: 14px 0;
+  }
+
+  html.isan-boutique .brand img {
+    height: 36px;
+  }
+
+  html.isan-boutique .brand-sub {
+    display: none;
+  }
+
+  html.isan-boutique .mobile-nav-panel {
+    width: min(360px, 90vw);
+    padding: calc(22px + env(safe-area-inset-top)) 24px calc(28px + env(safe-area-inset-bottom));
+    background: #f7f2e9;
+  }
+
+  html.isan-boutique .mobile-nav-links a {
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    font-size: 18px;
+    font-weight: 500;
+  }
+}
+
+@media (max-width: 767.98px) {
+  html.isan-boutique .container {
+    padding-inline: 20px;
+  }
+
+  html.isan-boutique .hero {
+    height: 100svh;
+    min-height: 680px;
+    max-height: 860px;
+  }
+
+  html.isan-boutique .hero-bg img {
+    object-position: 63% center;
+  }
+
+  html.isan-boutique .hero-bg::after {
+    background:
+      linear-gradient(to top, rgba(20, 14, 10, 0.84) 0%, rgba(20, 14, 10, 0.48) 38%, rgba(20, 14, 10, 0.12) 70%, rgba(20, 14, 10, 0.34) 100%);
+  }
+
+  html.isan-boutique .hero-character {
+    display: none;
+  }
+
+  html.isan-boutique .hero-inner {
+    padding-bottom: calc(54px + env(safe-area-inset-bottom));
+  }
+
+  html.isan-boutique .hero-copy {
+    max-width: 100%;
+  }
+
+  html.isan-boutique .hero-copy h1 {
+    max-width: 11.5ch;
+    margin-top: 14px;
+    font-size: clamp(34px, 10vw, 45px);
+    line-height: 1.22;
+    letter-spacing: -0.02em;
+  }
+
+  html.isan-boutique .hero-copy .sub {
+    max-width: 31ch;
+    margin-top: 18px;
+    font-size: 16px;
+    line-height: 1.7;
+  }
+
+  html.isan-boutique .hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 9px;
+    margin-top: 26px;
+    max-width: 360px;
+  }
+
+  html.isan-boutique .hero-actions .btn {
+    width: 100%;
+  }
+
+  html.isan-boutique .section-pad {
+    padding-block: 68px;
+  }
+
+  html.isan-boutique .section-head h2 {
+    font-size: clamp(28px, 8vw, 36px);
+    line-height: 1.35;
+  }
+
+  html.isan-boutique .section-head p {
+    font-size: 16px;
+    line-height: 1.75;
+  }
+}
+
+@media (max-width: 380px) {
+  html.isan-boutique .hero-copy h1 {
+    font-size: 32px;
+  }
+
+  html.isan-boutique .lang-toggle {
+    padding-inline: 10px;
+  }
+}
