@@ -196,6 +196,20 @@ export function findKnownActivityAssetSelection(message: string): typeof ACTIVIT
   return accepted[0]!.item;
 }
 
+/** Known activity assets the customer explicitly ruled out in this same
+ *  message ("ไม่เอาทองไทยนะ เอาภาราดร") -- reuses the same negation-window
+ *  check as findKnownActivityAssetSelection so a rejected name only counts
+ *  when the negation marker sits directly before it. */
+function negatedKnownActivityAssetNames(message: string): string[] {
+  const names = ACTIVITY_ASSET_SELECTIONS.flatMap(item => {
+    const match = item.pattern.exec(message);
+    if (!match) return [];
+    const before = message.slice(Math.max(0, match.index - 12), match.index);
+    return ASSET_NEGATION_BEFORE_NAME_RE.test(before) ? [item.name] : [];
+  });
+  return [...new Set(names)];
+}
+
 function isInventoryCountQuestion(message: string): boolean {
   // Generic quantity-question structure, not a phrase answer table. The
   // activity topic itself comes from the canonical ecosystem graph above.
@@ -653,6 +667,10 @@ function deriveForActiveTask(
     entities.resourceCode = knownActivityAsset.resourceCode;
     entities.horseName = knownActivityAsset.name;
   }
+  const excludedKnownAssets = knownActivityAsset
+    ? negatedKnownActivityAssetNames(message).filter(name => name !== knownActivityAsset.name)
+    : [];
+  if (excludedKnownAssets.length) entities.excludedHorse = excludedKnownAssets[0]!;
 
   const correcting = hasCorrectionMarker(message);
   const committing = hasCommitMarker(message);
@@ -682,7 +700,7 @@ function deriveForActiveTask(
           : undefined,
     entities,
     references,
-    constraints: [],
+    constraints: excludedKnownAssets.map(name => `exclude_${name === 'ทองไทย' ? 'thongthai' : name}`),
     confidence: 0.9,
     needsClarification: false,
   };
@@ -895,8 +913,24 @@ export function deriveDeterministicSemanticTurn(
     if (time) entities.time = time;
     if (partySize) entities.partySize = partySize;
     if (durationMinutes) entities.durationMinutes = durationMinutes;
+    // A known-asset selection is always task-worthy (it must persist as the
+    // customer's considered/booked choice -- see ACTIVITY_BOOKING_REQUIRED_FIELDS
+    // downstream), even when the customer also named what they excluded or
+    // preferred about it ("ไม่เอาทองไทยนะ เอาตัวที่นิสัยนิ่งกว่า"). That extra
+    // context is carried as constraints only, never as a different action --
+    // reclassifying it to a non-task-worthy "recommendation" action would lose
+    // the selection instead of just describing it.
+    const excludedKnownAssets = negatedKnownActivityAssetNames(trimmed).filter(name => name !== knownActivityAsset.name);
+    if (excludedKnownAssets.length) entities.excludedHorse = excludedKnownAssets[0]!;
+    const wantsCalmerKnownAsset = /นิ่งกว่า|นิสัยนิ่ง|ใจเย็นกว่า|calmer/iu.test(trimmed);
+    const wantsRainFallback = /ฝน|rain/iu.test(trimmed);
     const committing=hasCommitMarker(trimmed);
     const correcting=hasCorrectionMarker(trimmed);
+    const constraints = [
+      ...excludedKnownAssets.map(name => `exclude_${name === 'ทองไทย' ? 'thongthai' : name}`),
+      ...(wantsCalmerKnownAsset ? ['preferred_horse_trait:calm'] : []),
+      ...(wantsRainFallback ? ['weather_fallback_requested'] : []),
+    ];
     return {
       domain: 'activity',
       intent: 'select_known_activity_asset',
@@ -904,7 +938,7 @@ export function deriveDeterministicSemanticTurn(
       speechAct: committing ? 'transaction_request' : correcting ? 'correction' : 'selection',
       entities,
       references: [{ type: 'entity_selection', value: knownActivityAsset.name, refersToPriorContext: false, resolvedEntityId: knownActivityAsset.entityId }],
-      constraints: [],
+      constraints,
       confidence: 0.82,
       needsClarification: false,
     };
