@@ -282,6 +282,7 @@ export type TaskStateEvent =
   | { kind: 'set_entities'; eventId: string; entities: SemanticContextEntity[] }
   | { kind: 'add_constraint'; eventId: string; constraint: string }
   | { kind: 'mark_commitment'; eventId: string }
+  | { kind: 'clear_commitment'; eventId: string }
   | { kind: 'transition'; eventId: string; nextStatus: ActiveTaskStatus }
   | { kind: 'suspend'; eventId: string }
   | { kind: 'resume'; eventId: string };
@@ -312,6 +313,10 @@ export function applyTaskStateEvent(container: TaskStateContainer, event: TaskSt
     case 'mark_commitment': {
       if (!withEvent.activeTask || isTerminalTaskStatus(withEvent.activeTask.status)) return withEvent;
       return { ...withEvent, activeTask:{ ...withEvent.activeTask, commitmentIntent:true, updatedAt:now.toISOString() } };
+    }
+    case 'clear_commitment': {
+      if (!withEvent.activeTask || isTerminalTaskStatus(withEvent.activeTask.status)) return withEvent;
+      return { ...withEvent, activeTask:{ ...withEvent.activeTask, commitmentIntent:false, updatedAt:now.toISOString() } };
     }
     case 'transition': {
       if (!withEvent.activeTask) return withEvent;
