@@ -162,6 +162,31 @@ export function hasCommitMarker(message: string): boolean {
   return false;
 }
 
+/** Closed safety vocabulary for explicitly withholding/revoking transaction
+ * consent. This does not infer a business intent; it only answers the
+ * dangerous yes/no question "did the CURRENT text explicitly say not to
+ * book/order yet?". Shared by semantic reconciliation and deterministic
+ * provider-outage fallback so both enforce the same transaction boundary. */
+export function hasExplicitNoTransactionMarker(message: string): boolean {
+  return /ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้|ต้อง)?\s*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ไว้ก่อน|ไว้ก่อน/u.test(message);
+}
+
+const TRANSACTION_QUESTION_MARKER_RE =
+  /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
+
+/** A CURRENT-turn transaction request that is safe to use as write
+ * authorization in deterministic paths. Questions, explicit withholding,
+ * and "return to the unfinished booking/order" task-control language are
+ * never treated as fresh consent. */
+export function hasStandaloneTransactionRequest(message: string): boolean {
+  if (hasCommitMarker(message)) return true;
+  if (!/(?:จอง|สั่ง)/u.test(message)) return false;
+  if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
+  if (hasExplicitNoTransactionMarker(message)) return false;
+  if (TRANSACTION_QUESTION_MARKER_RE.test(message)) return false;
+  return true;
+}
+
 /** A customer explicitly asking to cancel/abandon whatever is in progress
  *  ("ยกเลิกก่อน", "ไม่เอาแล้ว"). A small, closed marker, not a phrase table. */
 export function hasCancelMarker(message: string): boolean {
