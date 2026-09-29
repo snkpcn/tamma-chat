@@ -152,6 +152,9 @@ test('Phase 6 production-smoke repair: bad model output cannot promote selection
     assert.equal(afterDuration?.activeTask?.slots?.durationMinutes,undefined);
     assert.equal(afterDuration?.activeTask?.commitmentIntent,false);
 
+    const supported = await send('งั้นขอ 45 นาที แต่ยังไม่จองนะครับ');
+    assert.match(text(supported),/45\s*นาที/u);
+
     const foodSwitch = await send('ขอถามเรื่องอาหารก่อนครับ');
     assert.doesNotMatch(text(foodSwitch),/หมายถึง.*ภาราดร|กำลังช่วยจอง/u);
 
@@ -172,6 +175,8 @@ test('Phase 6 production-smoke repair: bad model output cannot promote selection
 
     const resumed = await send('กลับมาเรื่องม้าที่เลือกไว้เมื่อกี้ครับ');
     assert.match(text(resumed),/ภาราดร/u);
+    assert.match(text(resumed),/45\s*นาที/u,
+      'an explicit resume must read back the restored duration as well as the horse');
     assert.doesNotMatch(text(resumed),/กำลังช่วยจอง/u);
 
     const availability = await send('เช็กว่างเฉย ๆ ได้ไหมครับ ยังไม่จอง');
