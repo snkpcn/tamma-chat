@@ -591,3 +591,21 @@ for (const channel of ['web', 'line'] as const) {
     });
   });
 }
+
+
+test('Phase 6 final: promotion remains primary during provider fallback and preserves no-new-membership constraint', () => {
+  for (const activeDomain of ['promotion','restaurant'] as const) {
+    const turn = deriveDeterministicSemanticTurn(
+      'เอาโปรร้านอาหารที่คุ้มสุด แต่ไม่เอาแบบต้องสมัครสมาชิกเพิ่มนะ',
+      {...emptySemanticContext(),activeDomain},
+      emptyTaskStateContainer(),
+      NOW,
+    );
+    assert.ok(turn);
+    assert.equal(turn!.domain,'promotion');
+    assert.equal(turn!.action,'recommend');
+    assert.equal(turn!.informationNeed,'recommendation');
+    assert.equal(turn!.entities.businessUnit,'restaurant');
+    assert.ok(turn!.constraints.includes('no_new_membership'));
+  }
+});
