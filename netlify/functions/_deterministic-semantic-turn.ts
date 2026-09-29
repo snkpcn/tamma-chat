@@ -13,9 +13,10 @@ import { isTerminalTaskStatus, type ActiveTask, type TaskStateContainer } from '
 import {
   extractDate, extractDurationMinutes, extractPartySize, extractTime,
   hasCancelMarker, hasCommitMarker, hasCorrectionMarker,
+  hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest,
 } from './_slot-parsers';
 import { isExperienceDiscoveryIntent, PRIOR_REFERENCE_MARKER } from './_experience-discovery';
-import { isPromotionDiscoveryIntent } from './_promotion-dialog';
+import { isPromotionAcceptIntent, isPromotionDiscoveryIntent, isPromotionMention } from './_promotion-dialog';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 
 export const DETERMINISTIC_SEMANTIC_TURN_VERSION = 'deterministic-semantic-turn-v1';
@@ -90,29 +91,11 @@ function findActivityTopic(message: string): { nodeId: string; activityCode: str
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
 }
 
-// General "is this phrased as a question" structural signal, shared by
-// every place in this file that must tell a genuine commitment/selection
-// apart from someone merely asking about the same words. Not a phrase
-// table for one sentence or one asset -- any message matching this is
-// read-only, whatever domain or name it names.
-const QUESTION_MARKER_RE = /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
-
-function hasStandaloneTransactionRequest(message:string):boolean {
-  if (hasCommitMarker(message)) return true;
-  if (!/(?:จอง|สั่ง)/u.test(message)) return false;
-  // Conversational task control ("กลับมาจอง...ต่อ") resumes state; it is not
-  // a new commitment. Questions and explicit negation remain read-only.
-  if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
-  // "ไม่ต้องจอง"/"ยังไม่ต้องจอง" (don't need to book yet) is a real, common
-  // production phrasing distinct from "ไม่จอง"/"ไม่ได้จอง" -- the "ต้อง" in
-  // the middle previously fell outside this alternation's fixed word set
-  // and this whole message was silently treated as a real commit request.
-  // "ไว้ก่อน" ("hold off for now") is the other real production phrasing
-  // for the exact same "preference only, not a commitment yet" meaning.
-  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้|ต้อง)?\s*(?:จอง|สั่ง)|ยกเลิก|ไว้ก่อน/u.test(message)) return false;
-  if (QUESTION_MARKER_RE.test(message)) return false;
-  return true;
-}
+/** Generic question-shape signal reused by read-only deterministic branches.
+ * Transaction authorization itself lives in _slot-parsers.ts; this constant
+ * only tells other fallback classifiers that a sentence is interrogative. */
+const QUESTION_MARKER_RE =
+  /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
 
 // Same negation guard findEntityByName above uses -- see NEGATION_BEFORE_NAME_RE.
 const ASSET_NEGATION_BEFORE_NAME_RE = NEGATION_BEFORE_NAME_RE;
@@ -290,6 +273,40 @@ function findMembershipTopic(message: string): boolean {
   return MEMBERSHIP_TOPIC_MARKER.test(message);
 }
 
+const PROMOTION_RECOMMENDATION_MARKER =
+  /คุ้ม(?:สุด|กว่า)?|ดี(?:ที่สุด|สุด)|เหมาะ(?:ที่สุด|สุด)|ถูก(?:ที่สุด|สุด)|ลด(?:เยอะ|มาก)(?:ที่สุด|สุด)?|แนะนำ/u;
+const NO_NEW_MEMBERSHIP_MARKER =
+  /(?:ไม่(?:เอา|ต้องการ|อยาก|ขอ)[^\n,.!?？]{0,36}(?:ต้อง\s*)?สมัครสมาชิก|(?:ไม่ต้อง|ไม่อยาก|ไม่ขอ)\s*สมัครสมาชิก|ไม่[^\n,.!?？]{0,20}สมาชิกเพิ่ม)/u;
+
+/** Provider-outage fallback for PROMOTION READS only.
+ * Explicit accept/redeem phrases are deliberately excluded so the existing
+ * promotion redemption state machine remains the sole transaction owner. */
+function promotionReadOnlyFallback(message: string): SemanticTurn | null {
+  if (!isPromotionMention(message) || isPromotionAcceptIntent(message)) return null;
+  const recommending = PROMOTION_RECOMMENDATION_MARKER.test(message);
+  const discovering = isPromotionDiscoveryIntent(message);
+  if (!recommending && !discovering) return null;
+
+  const entities: Record<string, unknown> = {};
+  if (/ร้านอาหาร|อาหาร|กินข้าว/u.test(message)) entities.businessScope = 'restaurant';
+  else if (/ห้อง|ที่พัก|พัก/u.test(message)) entities.businessScope = 'stay';
+  else if (/กิจกรรม|ขี่ม้า|atv|ยิงธนู|เป็ดน้ำ/iu.test(message)) entities.businessScope = 'activity';
+  else if (/ของฝาก|otop/iu.test(message)) entities.businessScope = 'otop';
+  else if (/กาแฟ|คาเฟ่|อินทนิล|inthanin/iu.test(message)) entities.businessScope = 'cafe';
+
+  return {
+    domain:'promotion',
+    intent:recommending ? 'promotion_recommendation' : 'promotion_discovery',
+    action:recommending ? 'recommend' : 'discover',
+    informationNeed:recommending ? 'recommendation' : 'catalog',
+    entities,
+    references:[],
+    constraints:NO_NEW_MEMBERSHIP_MARKER.test(message) ? ['no_new_membership'] : [],
+    confidence:0.9,
+    needsClarification:false,
+  };
+}
+
 /** A structural fallback, tried only once nothing task-specific matches
  *  (see deriveDeterministicSemanticTurn below): does this message name a
  *  DIFFERENT supported topic than whatever is currently active? If so, it's
@@ -299,17 +316,10 @@ function findMembershipTopic(message: string): boolean {
  *  differs from the active task's. Reuses the SAME topic-narrow markers
  *  already used for the no-task case, never a new phrase table. */
 function detectCrossDomainTopicSwitch(message: string, now: Date = new Date()): SemanticTurn | null {
-  // Promotion questions are cross-cutting by design. A current membership,
-  // restaurant, stay, or activity context must never absorb a clear request
-  // to browse promotions. Reuse the existing promotion dialog classifier so
-  // this remains one shared intent class rather than a new phrase patch.
-  if (isPromotionDiscoveryIntent(message)) {
-    return {
-      domain: 'promotion', intent: 'promotion_discovery', action: 'discover',
-      informationNeed: 'catalog',
-      entities: {}, references: [], constraints: [], confidence: 0.9, needsClarification: false,
-    };
-  }
+  // Promotion is cross-cutting: the promotion remains the primary subject
+  // even when the message also names its restaurant/stay/activity scope.
+  const promotionTurn = promotionReadOnlyFallback(message);
+  if (promotionTurn) return promotionTurn;
   if (findRestaurantTableStatusQuestion(message)) {
     const entities: Record<string, unknown> = {};
     const date = extractDate(message, now);
@@ -636,7 +646,35 @@ function deriveForActiveTask(
   // (see the Dialog Manager's SIDE_QUESTION_ACTIONS precedence, which
   // preserves the task untouched for exactly these actions).
   const sideQuestion = detectActivitySideQuestion(message, task.domain, activityTopicFromResourceCode(task.slots.resourceCode), now);
-  if (sideQuestion) return sideQuestion;
+  if (sideQuestion) {
+    if (!hasCommitMarker(message) && hasExplicitNoTransactionMarker(message)) {
+      return {
+        ...sideQuestion,
+        constraints:[...new Set([...sideQuestion.constraints, 'no_transaction'])],
+      };
+    }
+    return sideQuestion;
+  }
+
+  // A pure consent retraction with no richer read-only predicate still needs
+  // to survive provider outage as a canonical no_transaction turn.
+  if (
+    !hasCommitMarker(message)
+    && hasExplicitNoTransactionMarker(message)
+    && !(CONDITIONAL_UNAVAILABLE_MARKER.test(message) && NO_COMMIT_CONSEQUENCE_MARKER.test(message))
+  ) {
+    return {
+      domain: task.domain,
+      intent: 'transaction_commitment_retracted',
+      action: 'correct_previous',
+      speechAct: 'correction',
+      entities: {},
+      references: [],
+      constraints: ['no_transaction'],
+      confidence: 0.95,
+      needsClarification: false,
+    };
+  }
 
   const entities: Record<string, unknown> = {};
   const date = extractDate(message, now);
@@ -1009,6 +1047,9 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  const promotionTurn = promotionReadOnlyFallback(trimmed);
+  if (promotionTurn) return promotionTurn;
+
   // A restaurant-topic marker with no active task (e.g. mid a stay
   // conversation that never created a task, since stay has no
   // task-creation mechanism today -- see THONGTHAI_HANDOFF.md). Without
@@ -1086,20 +1127,6 @@ export function deriveDeterministicSemanticTurn(
       references: [],
       constraints: [],
       confidence: 0.82,
-      needsClarification: false,
-    };
-  }
-
-  if (isPromotionDiscoveryIntent(trimmed)) {
-    return {
-      domain: 'promotion',
-      intent: 'promotion_discovery',
-      action: 'discover',
-      informationNeed: 'catalog',
-      entities: {},
-      references: [],
-      constraints: [],
-      confidence: 0.9,
       needsClarification: false,
     };
   }

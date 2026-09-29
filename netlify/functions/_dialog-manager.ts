@@ -63,7 +63,8 @@ export type DialogReasonCode =
   | 'task_suspended_for_topic_switch' | 'task_resumed' | 'cannot_verify_comparison'
   | 'known_unconfigured_price' | 'duplicate_event_ignored' | 'no_active_task'
   | 'task_side_question_preserved' | 'task_unrelated_turn_preserved' | 'task_cancelled'
-  | 'task_summary_requested' | 'nontransactional_state_update_preserved';
+  | 'task_summary_requested' | 'nontransactional_state_update_preserved'
+  | 'transaction_commitment_revoked';
 
 export type ResponseIntent =
   | 'discovery_response' | 'grounded_answer' | 'clarify_ambiguous_entity' | 'ask_missing_field'
@@ -142,6 +143,13 @@ const COMMIT_ACTIONS: ReadonlySet<SemanticAction> = new Set(['book', 'order']);
 
 function isExplicitTransaction(turn: SemanticTurn): boolean {
   return deriveSemanticMeaning(turn).commitmentLevel === 'explicit_transaction';
+}
+
+const NO_TRANSACTION_CONSTRAINT_RE = /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu;
+
+function explicitlyRevokesTransaction(turn: SemanticTurn): boolean {
+  return !isExplicitTransaction(turn)
+    && turn.constraints.some(constraint => NO_TRANSACTION_CONSTRAINT_RE.test(constraint));
 }
 
 /** An active task is INTERRUPTIBLE: having an unfinished task does not mean
@@ -596,6 +604,18 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     }
   }
 
+  // Consent is stateful while the customer is merely filling slots, but it is
+  // also REVOCABLE. A CURRENT explicit "not booking yet / consider only"
+  // semantic constraint must erase any historical commitment before this
+  // turn can be planned further; otherwise a later innocent slot fill could
+  // resurrect an old write authorization.
+  if (explicitlyRevokesTransaction(turn) && container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+    container = applyTaskStateEvent(container, {
+      kind:'clear_commitment', eventId:`${eventId}:commitment_revoked`,
+    }, now);
+    reasons.push('transaction_commitment_revoked');
+  }
+
   // Remember an explicit book/order request across the remaining slot-
   // collection turns. This flag is conversational intent only: it cannot
   // execute a tool and it does not replace the separate confirmation gate.
@@ -823,7 +843,8 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
   const hasOpenTask = Boolean(container.activeTask) && !isTerminalTaskStatus(container.activeTask!.status);
   const missingFields = hasOpenTask ? container.activeTask!.missingFields : [];
   const currentTurnCommit = isExplicitTransaction(turn);
-  const customerCommitPresent = currentTurnCommit || Boolean(container.activeTask?.commitmentIntent);
+  const customerCommitPresent = currentTurnCommit
+    || (hasOpenTask && Boolean(container.activeTask?.commitmentIntent));
   if (currentTurnCommit) reasons.push('explicit_commit_received');
 
   // CORE PRECEDENCE: the CURRENT turn must contain positive structural
@@ -1044,7 +1065,13 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
   // live availability check was requested this turn, it came back verified
   // (not merely "no source configured for it").
   let actionProposal: ActionProposal | undefined;
-  if (plan.customerCommitPresent && plan.missingFields.length === 0 && plan.taskStateContainer.activeTask && !unavailable) {
+  if (
+    plan.customerCommitPresent
+    && plan.missingFields.length === 0
+    && plan.taskStateContainer.activeTask
+    && !isTerminalTaskStatus(plan.taskStateContainer.activeTask.status)
+    && !unavailable
+  ) {
     const task = plan.taskStateContainer.activeTask;
     const availabilityRequested = plan.knowledgeRequests.some(request => request.needs.includes('availability'));
     const availabilityVerified = !availabilityRequested

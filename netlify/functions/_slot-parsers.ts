@@ -152,14 +152,96 @@ const COMMIT_MARKER_RE = /จองเลย|ยืนยันจอง|สั�
 // matchers in _deterministic-semantic-turn.ts already use.
 const NEGATED_BEFORE_COMMIT_RE = /(?:ไม่ต้อง|ไม่ได้|ไม่เอา|ไม่)\s*$/u;
 
-export function hasCommitMarker(message: string): boolean {
+function lastCommitMarkerIndex(message: string): number {
   let match: RegExpExecArray | null;
+  let last = -1;
   COMMIT_MARKER_RE.lastIndex = 0;
   while ((match = COMMIT_MARKER_RE.exec(message))) {
     const before = message.slice(Math.max(0, match.index - 12), match.index);
-    if (!NEGATED_BEFORE_COMMIT_RE.test(before)) return true;
+    if (!NEGATED_BEFORE_COMMIT_RE.test(before)) last = Math.max(last, match.index);
   }
-  return false;
+  return last;
+}
+
+export function hasCommitMarker(message: string): boolean {
+  return lastCommitMarkerIndex(message) >= 0;
+}
+
+const TRANSACTION_QUESTION_MARKER_RE =
+  /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
+
+const NEGATED_TRANSACTION_MENTION_RE =
+  /(?:ยัง\s*)?(?:ไม่ได้(?:คิดจะ|คิด|จะ|ให้)?|ไม่(?:ได้|ต้อง|เอา|อยาก|จะ)?)\s*(?:ยืนยัน(?:การ)?)?\s*(?:จอง|สั่ง)/gu;
+const NEGATED_BEFORE_TRANSACTION_VERB_RE =
+  /(?:ยัง\s*)?(?:ไม่ได้(?:คิดจะ|คิด|จะ|ให้)?|ไม่(?:ได้|ต้อง|เอา|อยาก|จะ)?)\s*(?:ยืนยัน(?:การ)?)?\s*$/u;
+
+function lastAffirmativeTransactionVerbIndex(message: string): number {
+  let last = lastCommitMarkerIndex(message);
+  for (const match of message.matchAll(/จอง|สั่ง/gu)) {
+    const index = match.index ?? -1;
+    if (index < 0) continue;
+    const before = message.slice(Math.max(0, index - 24), index);
+    if (NEGATED_BEFORE_TRANSACTION_VERB_RE.test(before)) continue;
+
+    const around = message.slice(Math.max(0, index - 16), Math.min(message.length, index + 24));
+    // Returning to an unfinished transaction conversation is state navigation,
+    // not a fresh write authorization.
+    if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(around)) continue;
+
+    const after = message.slice(index, Math.min(message.length, index + 40));
+    if (TRANSACTION_QUESTION_MARKER_RE.test(after)) continue;
+    last = Math.max(last, index);
+  }
+  return last;
+}
+
+/** Closed safety vocabulary for explicitly withholding/revoking transaction
+ * consent. This does not infer a business intent; it only answers the
+ * dangerous yes/no question "did the CURRENT text explicitly say not to
+ * book/order yet?". Shared by semantic reconciliation and deterministic
+ * provider-outage fallback so both enforce the same transaction boundary. */
+function lastNoTransactionMarkerIndex(message: string): number {
+  let last = -1;
+  for (const match of message.matchAll(NEGATED_TRANSACTION_MENTION_RE)) {
+    last = Math.max(last, match.index ?? -1);
+  }
+  for (const match of message.matchAll(/ไว้ก่อน/gu)) {
+    const index = match.index ?? -1;
+    if (index < 0) continue;
+    const before = message.slice(Math.max(0, index - 40), index);
+    // Affirmative "จอง...ไว้ก่อน" / "สั่ง...ไว้ก่อน" in the same short
+    // clause is a transaction request, e.g. "จองม้าไว้ก่อน".
+    const verbIndex = Math.max(before.lastIndexOf('จอง'), before.lastIndexOf('สั่ง'));
+    const affirmativeHold = verbIndex >= 0
+      && /(?:จอง|สั่ง)[^\n.!?？]{0,32}$/u.test(before)
+      && !NEGATED_BEFORE_TRANSACTION_VERB_RE.test(before.slice(0, verbIndex));
+    if (affirmativeHold) continue;
+    last = Math.max(last, index);
+  }
+  return last;
+}
+
+export function hasExplicitNoTransactionMarker(message: string): boolean {
+  const withheldAt = lastNoTransactionMarkerIndex(message);
+  if (withheldAt < 0) return false;
+  // Same-turn self-corrections are ordered: the latest meaningful signal wins.
+  // "ไม่จองอันนี้ แต่จองอีกอัน" commits to the later alternative;
+  // "จองเลย ... ยังไม่จอง" revokes the earlier commitment.
+  return withheldAt > lastAffirmativeTransactionVerbIndex(message);
+}
+
+/** A CURRENT-turn transaction request that is safe to use as write
+ * authorization in deterministic paths. Questions, explicit withholding,
+ * and "return to the unfinished booking/order" task-control language are
+ * never treated as fresh consent. */
+export function hasStandaloneTransactionRequest(message: string): boolean {
+  // Explicit CURRENT withholding wins over any earlier commit phrase.
+  if (hasExplicitNoTransactionMarker(message)) return false;
+  if (hasCommitMarker(message)) return true;
+  if (!/(?:จอง|สั่ง)/u.test(message)) return false;
+  if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
+  if (TRANSACTION_QUESTION_MARKER_RE.test(message)) return false;
+  return true;
 }
 
 /** A customer explicitly asking to cancel/abandon whatever is in progress

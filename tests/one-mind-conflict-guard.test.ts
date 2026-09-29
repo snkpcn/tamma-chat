@@ -99,3 +99,59 @@ test('the guard still protects a genuine mutation-vs-mutation conflict: determin
   assert.equal(result.semanticTurn.domain, 'activity');
   assert.equal(result.semanticTurn.semanticSource, 'deterministic_fallback');
 });
+
+
+test('same-entity model selection may refine a deterministic correction without losing OpenAI ownership', async () => {
+  const result = await processThongthaiOneMindTurn({
+    channel: 'line',
+    message: 'เมื่อกี้บอกว่าเอาภาราดร เปลี่ยนใจละ เอาทองไทยเหมือนเดิม',
+    eventId: 'conflict-guard-same-entity-correction-selection',
+    providerUserKey: 'line-key',
+  }, {
+    ...baseDeps(),
+    interpretSemanticTurn: async () => ({
+      domain: 'activity',
+      intent: 'change_horse_selection',
+      action: 'confirm',
+      speechAct: 'selection',
+      entities: { resourceCode:'activity-horse', horseName:'ทองไทย' },
+      references: [],
+      constraints: [],
+      confidence: 0.98,
+      needsClarification: false,
+    }),
+  }, NOW);
+
+  assert.equal(result.semanticTurn.domain,'activity');
+  assert.equal(result.semanticTurn.action,'confirm');
+  assert.equal(result.semanticTurn.entities.horseName,'ทองไทย');
+  assert.equal(result.semanticTurn.semanticSource,'openai_supervisor',
+    'same canonical entity means this is a safe conversational refinement, not a transaction conflict');
+});
+
+test('different-entity model selection cannot bypass deterministic correction conflict guard', async () => {
+  const result = await processThongthaiOneMindTurn({
+    channel: 'line',
+    message: 'เมื่อกี้บอกว่าเอาภาราดร เปลี่ยนใจละ เอาทองไทยเหมือนเดิม',
+    eventId: 'conflict-guard-different-entity-correction-selection',
+    providerUserKey: 'line-key',
+  }, {
+    ...baseDeps(),
+    interpretSemanticTurn: async () => ({
+      domain: 'activity',
+      intent: 'change_horse_selection',
+      action: 'confirm',
+      speechAct: 'selection',
+      entities: { resourceCode:'activity-horse', horseName:'ภาราดร' },
+      references: [],
+      constraints: [],
+      confidence: 0.98,
+      needsClarification: false,
+    }),
+  }, NOW);
+
+  assert.equal(result.semanticTurn.action,'correct_previous');
+  assert.equal(result.semanticTurn.entities.horseName,'ทองไทย');
+  assert.equal(result.semanticTurn.semanticSource,'deterministic_fallback',
+    'a disagreement about canonical identity must still fail closed');
+});

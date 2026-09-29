@@ -31,6 +31,8 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
+import { hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
+import { isPromotionMention } from './_promotion-dialog';
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
 
@@ -691,6 +693,7 @@ Core rules:
 - Current message outranks stale context. Use context only to resolve real references or continuation.
 - Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
 - Current no-transaction wording keeps the turn read-only. Conditional fallback choices are status/availability, never immediate confirm/book/order.
+- If the CURRENT message explicitly says not to book/order yet, hold off, or keep it only as a consideration, ALWAYS include constraints=["no_transaction"] (plus any other real constraints). Never emit transaction_request for that turn.
 - Current corrections/replacements outrank stale selections and task values.
 - lastRecommendationReference is bounded evidence of what Thongthai previously recommended. Use it to resolve descriptive follow-ups across topic switches; if it uniquely identifies a recent entity, follow that entity's domain rather than stale activeDomain.
 - Asking what is selected/provided so far => intent=summarize_active_task, action=ask, informationNeed=none; never transaction_status.
@@ -1275,7 +1278,31 @@ function parseSemanticJsonObject(rawText: string): Record<string, unknown> {
   }
 }
 
-export function parseSemanticTurnResponse(rawText: string, context: SemanticContext): SemanticTurn {
+
+function currentMessagePromotionSubject(message:string):boolean {
+  if (!message.trim()) return false;
+  const mentionsPromotion = isPromotionMention(message)
+    || /ส่วนลด|\bdiscount\b|\boffer(?:s)?\b/iu.test(message);
+  if (!mentionsPromotion) return false;
+  // Explicitly rejecting promotions in favor of a normal/non-promo option
+  // means promotion is NOT the requested primary subject.
+  if (/ไม่(?:เอา|ต้องการ|สนใจ|ใช้|รับ)\s*(?:โปร|โปรโมชั่น|โปรโมชัน|ส่วนลด)/u.test(message)) return false;
+  return true;
+}
+
+function currentMessageAsksPromotionRecommendation(message:string):boolean {
+  return /คุ้ม(?:สุด|กว่า)|ดี(?:ที่สุด|สุด)|เหมาะ(?:ที่สุด|สุด)|ถูก(?:ที่สุด|สุด)|ลด(?:เยอะ|มาก)(?:ที่สุด|สุด)?|(?:อัน|ตัว|โปร)ไหน(?:ดี|คุ้ม)/u.test(message);
+}
+
+function currentMessageRejectsNewMembership(message:string):boolean {
+  return /(?:ไม่(?:เอา|ต้องการ|อยาก|ขอ)[^\n,.!?？]{0,36}(?:ต้อง\s*)?สมัครสมาชิก|(?:ไม่ต้อง|ไม่อยาก|ไม่ขอ)\s*สมัครสมาชิก|ไม่[^\n,.!?？]{0,20}สมาชิกเพิ่ม)/u.test(message);
+}
+
+export function parseSemanticTurnResponse(
+  rawText: string,
+  context: SemanticContext,
+  currentMessage = '',
+): SemanticTurn {
   const parsed = parseSemanticJsonObject(rawText);
 
   const normalizedMeaning = typeof parsed.normalizedMeaning === 'string'
@@ -1324,6 +1351,29 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
 
   let references = resolveReferences(normalizeReferences(parsed.references), context);
   const entities = canonicalizeEntityAliases(asRecord(parsed.entities), domain);
+
+  const currentPromotionSubject = Boolean(currentMessage)
+    && currentMessagePromotionSubject(currentMessage);
+  if (currentPromotionSubject) {
+    // Promotion is a cross-cutting PRIMARY domain. A restaurant/stay/activity
+    // noun describes the promotion's business scope; it must not steal domain
+    // ownership from the promotion request itself.
+    domain = 'promotion';
+    if (currentMessageAsksPromotionRecommendation(currentMessage)) {
+      action = 'recommend';
+      informationNeed = 'recommendation';
+    }
+    // Preserve an obvious named business scope even when the model returned
+    // the narrower business domain and omitted a scope entity.
+    if (entities.businessScope === undefined) {
+      if (/ร้านอาหาร|อาหาร|กินข้าว/u.test(currentMessage)) entities.businessScope = 'restaurant';
+      else if (/ห้อง|ที่พัก|พัก/u.test(currentMessage)) entities.businessScope = 'stay';
+      else if (/กิจกรรม|ขี่ม้า|atv|ยิงธนู|เป็ดน้ำ/iu.test(currentMessage)) entities.businessScope = 'activity';
+      else if (/ของฝาก|otop/iu.test(currentMessage)) entities.businessScope = 'otop';
+      else if (/กาแฟ|คาเฟ่|อินทนิล/u.test(currentMessage)) entities.businessScope = 'cafe';
+    }
+  }
+
   domain = normalizeCrossDomainJourney(domain, action, informationNeed, entities, references, context);
 
   // A request to summarize the current working state is answered from the
@@ -1408,6 +1458,18 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
   const multiCandidateIdentityReference = references.some(reference =>
     requiresSingleEntity(reference)
     && (reference.resolvedEntityIds?.length ?? 0) > 1);
+
+  // A fixed bounded candidate SET is comparison, not open-ended
+  // recommendation. Models sometimes label "which of these two suits X?"
+  // as recommend because suitability is evaluative; the taxonomy contract is
+  // stricter: once the reference resolves to 2+ known candidates, the
+  // customer is comparing that set against a criterion.
+  const boundedMultiCandidateSet = references.some(reference =>
+    reference.refersToPriorContext
+    && (reference.resolvedEntityIds?.length ?? 0) > 1);
+  if (action === 'recommend' && boundedMultiCandidateSet) {
+    action = 'compare';
+  }
   if (
     multiCandidateIdentityReference
     && (
@@ -1427,16 +1489,44 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     action = 'confirm';
   }
 
+  const currentExplicitNoTransaction = Boolean(currentMessage)
+    && hasExplicitNoTransactionMarker(currentMessage);
+
+  if (currentExplicitNoTransaction) {
+    // Raw customer negation is a safety boundary, never an invitation to
+    // transact. A model can still help with language meaning, but it cannot
+    // override an explicit CURRENT "not booking/order yet" statement.
+    if (action === 'book' || action === 'order') action = 'ask';
+    if (speechAct === 'transaction_request') speechAct = 'correction';
+    // Keep any legitimate read-only predicate (availability/price/policy/etc).
+    // Revoking WRITE authority must not erase what the customer asked to know.
+  }
+
   if (
     taskDirective === 'resume_suspended'
-    && speechAct !== 'transaction_request'
-    && ['book','order','confirm','modify','cancel'].includes(action)
+    && (action === 'book' || action === 'order')
+    && (
+      currentMessage
+        ? !hasStandaloneTransactionRequest(currentMessage)
+        : speechAct !== 'transaction_request'
+    )
   ) {
-    // Resuming a suspended conversational task is working-state navigation,
-    // not transaction consent. A model may overread the suspended task's
-    // booking shape and emit "book" even when the CURRENT utterance only says
-    // "กลับไปเรื่อง...ที่ค้างไว้". Keep that read-only unless this same
-    // current turn independently carries an explicit transaction_request.
+    // Resuming working state is not fresh transaction consent. Suspended task
+    // shape and a stray model label cannot manufacture write authorization.
+    action = 'ask';
+    informationNeed = 'none';
+    if (speechAct === 'transaction_request') speechAct = 'request';
+  }
+
+  if (
+    taskDirective === 'resume_suspended'
+    && action === 'confirm'
+    && !explicitSelectionReference
+    && Object.keys(entities).length === 0
+  ) {
+    // A bare "resume that task" is working-state navigation, not confirmation
+    // of an entity/choice. Preserve a real same-turn selection when one is
+    // actually present, but never let the suspended task's old shape invent it.
     action = 'ask';
   }
 
@@ -1539,6 +1629,18 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
         ? 'local'
         : (hasUnresolvedReference && noUsableContext ? 'unknown' : domain);
 
+  const canonicalConstraints = canonicalizeSemanticConstraints(parsed.constraints, entities);
+  if (currentExplicitNoTransaction && !canonicalConstraints.includes('no_transaction')) {
+    canonicalConstraints.push('no_transaction');
+  }
+  if (
+    currentPromotionSubject
+    && currentMessageRejectsNewMembership(currentMessage)
+    && !canonicalConstraints.includes('no_new_membership')
+  ) {
+    canonicalConstraints.push('no_new_membership');
+  }
+
   return {
     normalizedMeaning: normalizedMeaning || undefined,
     reply: reply || undefined,
@@ -1549,7 +1651,7 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
     informationNeed,
     entities,
     references,
-    constraints: canonicalizeSemanticConstraints(parsed.constraints, entities),
+    constraints: canonicalConstraints,
     confidence,
     // An unresolved prior-context reference (the model thinks this points at
     // something, but nothing in the real context matches) forces clarification
@@ -1633,7 +1735,7 @@ export async function interpretSemanticTurn(
     options.certificationMode ? 'semantic-certification-primary' : 'semantic-interpreter',
     options.callContext,
   );
-  const primary = parseSemanticTurnResponse(primaryRaw, context);
+  const primary = parseSemanticTurnResponse(primaryRaw, context, message);
   if (!options.certificationMode || !semanticTurnNeedsReview(primary, message, context)) return primary;
 
   const reviewPrompt = `${prompt}
@@ -1653,7 +1755,7 @@ Do not become more eager to transact. Return the same JSON schema only.`;
       'semantic-certification-reviewer',
       undefined,
     );
-    const reviewed = parseSemanticTurnResponse(reviewedRaw, context);
+    const reviewed = parseSemanticTurnResponse(reviewedRaw, context, message);
 
     // Review is allowed to replace the first pass only when it is actually
     // usable. Never replace a valid primary interpretation with a weaker

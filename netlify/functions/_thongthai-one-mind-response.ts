@@ -43,6 +43,7 @@ import {
 } from './_guest-agent-state-store';
 import { deriveSemanticMeaning } from './_semantic-meaning';
 import { persistAiResponseTurn } from './_ai-cost-store';
+import { isPromotionMention } from './_promotion-dialog';
 
 export const ONE_MIND_RESPONSE_VERSION = 'one-mind-response-v1';
 
@@ -117,6 +118,29 @@ export type OneMindCustomerTurnResult =
  *  hardening pass exists to close. */
 function isGenuinelyUnclassifiedFallback(turn: OneMindTurnResult): boolean {
   return turn.semanticTurn.clarificationReason === 'provider_unavailable';
+}
+
+function isTrustedGroundedPromotionProviderFallback(
+  turn: OneMindTurnResult,
+  message: string,
+): boolean {
+  const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
+  if (semantic.semanticSource !== 'deterministic_fallback') return false;
+  if (semantic.domain !== 'promotion') return false;
+  if (!['discover','recommend','ask'].includes(semantic.action)) return false;
+  if (!isPromotionMention(message)) return false;
+  if (turn.dialogDecision.actionProposal) return false;
+
+  // The language model may be unavailable, but promotion facts still must
+  // come from the canonical runtime source. This exception only authorizes
+  // response composition when that source answered; it never authorizes a
+  // redemption/write and the authoritative persistence predicate keeps this
+  // fallback response-only under requireSemanticSupervisor.
+  return turn.groundedKnowledge.some(bundle =>
+    bundle.domain === 'promotion'
+    && bundle.sources.some(source =>
+      source.need === 'promotion_eligibility'
+      && (source.status === 'ok' || source.status === 'empty')));
 }
 
 export type ReadOnlyCutoverEligibilityOptions = {
@@ -207,7 +231,15 @@ export function readOnlyCutoverEligibility(
   if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
     return { eligible:false, reason:'domain_not_cut_over' };
   }
-  if (isSafeConversationalMode) {
+  const suspendedTask = turn.taskStateAfter.suspendedTask ?? turn.taskStateBefore.suspendedTask;
+  const hasOnlySuspendedTask = Boolean(suspendedTask)
+    && !turn.taskStateBefore.activeTask
+    && !turn.taskStateAfter.activeTask;
+  const unrelatedSuspendedMutationShape = hasOnlySuspendedTask
+    && suspendedTask!.domain !== turn.semanticTurn.domain
+    && !READ_ONLY_ACTIONS.has(turn.semanticTurn.action);
+
+  if (isSafeConversationalMode && !unrelatedSuspendedMutationShape) {
     return { eligible:true };
   }
   if (READ_ONLY_ACTIONS.has(turn.semanticTurn.action)
@@ -351,7 +383,22 @@ export async function processOneMindCustomerTurn(
     stateDependencies,
     now,
     4,
-    candidate => readOnlyCutoverEligibility(candidate, eligibilityOptionsWithMessage).eligible,
+    candidate => {
+      const eligible = readOnlyCutoverEligibility(candidate, eligibilityOptionsWithMessage).eligible;
+      if (!eligible) return false;
+      // A grounded promotion fallback is safe to SHOW during a provider outage,
+      // but requireSemanticSupervisor explicitly means deterministic meaning is
+      // not authoritative enough to mutate canonical working state. Keep this
+      // response-only so a temporary outage cannot steal ownership from the
+      // existing promotion redemption/continuation state machine.
+      if (
+        eligibilityOptionsWithMessage.requireSemanticSupervisor
+        && isTrustedGroundedPromotionProviderFallback(candidate, eligibilityOptionsWithMessage.message ?? input.message)
+      ) {
+        return false;
+      }
+      return true;
+    },
   );
   const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptionsWithMessage);
 

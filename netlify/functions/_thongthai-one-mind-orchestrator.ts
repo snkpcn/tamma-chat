@@ -720,20 +720,60 @@ function isTrustedConversationalCorrection(
   );
 }
 
+function hasMatchingCanonicalSelectionIdentity(
+  turn: SemanticTurn,
+  deterministic: SemanticTurn,
+): boolean {
+  // Only identity-bearing fields count. resourceCode alone is intentionally
+  // excluded because several assets may share the same resource (e.g. both
+  // horses are activity-horse) and therefore cannot prove the same selection.
+  const identityKeys = [
+    'horseName','accommodationName','roomType','itemName','productName',
+    'campaignId','campaignCode','promotionName',
+  ] as const;
+  return identityKeys.some(key => {
+    const modelValue = turn.entities[key];
+    const deterministicValue = deterministic.entities[key];
+    return typeof modelValue === 'string'
+      && typeof deterministicValue === 'string'
+      && modelValue.trim().length > 0
+      && modelValue.trim() === deterministicValue.trim();
+  }) || turn.references.some(modelReference =>
+    Boolean(modelReference.resolvedEntityId)
+    && deterministic.references.some(deterministicReference =>
+      deterministicReference.resolvedEntityId === modelReference.resolvedEntityId));
+}
+
 function isTrustedConversationalSelection(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
 ): boolean {
+  if (!deterministic
+      || turn.action !== 'confirm'
+      || turn.speechAct !== 'selection'
+      || turn.domain !== deterministic.domain
+      || turn.confidence < 0.9
+      || turn.needsClarification !== false
+      || turn.speechAct === 'transaction_request') {
+    return false;
+  }
+
+  const ordinaryReadOnlyBase =
+    LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+    && COARSE_READ_ONLY_INTENTS.has(deterministic.intent);
+
+  // A deterministic correction and a model selection are two safe readings
+  // of the same conversational state update when (and only when) both point
+  // at the same canonical entity. This is NOT transaction authority:
+  // book/order/actionProposal are still blocked independently downstream.
+  const sameEntityCorrectionBase =
+    deterministic.action === 'correct_previous'
+    && hasMatchingCanonicalSelectionIdentity(turn, deterministic);
+
   return Boolean(
-    deterministic
-    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
-    && COARSE_READ_ONLY_INTENTS.has(deterministic.intent)
-    && turn.action === 'confirm'
-    && turn.speechAct === 'selection'
-    && turn.domain === deterministic.domain
-    && turn.confidence >= 0.9
-    && turn.needsClarification === false
-    && (Object.keys(turn.entities).length > 0 || turn.references.some(reference => Boolean(reference.resolvedEntityId)))
+    (ordinaryReadOnlyBase || sameEntityCorrectionBase)
+    && (Object.keys(turn.entities).length > 0
+      || turn.references.some(reference => Boolean(reference.resolvedEntityId)))
   );
 }
 
