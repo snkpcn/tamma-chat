@@ -1523,14 +1523,34 @@ export async function composeThongthaiResponse(input: ResponseComposerInput): Pr
   //
   // This preserves OpenAI for language understanding while avoiding the old
   // semantic-call + second Sol composer call on most ordinary customer turns.
+  const semanticActivityCode = typeof input.semanticTurn?.entities?.activityCode === 'string'
+    ? input.semanticTurn.entities.activityCode
+    : '';
+  const preferHumanGroundedComparison =
+    input.semanticTurn?.domain === 'activity'
+    && input.semanticTurn?.action === 'compare'
+    && semanticActivityCode === 'horse';
+
+  // Horse ride-feel comparison is the one grounded activity shape whose
+  // deterministic renderer does not preserve the verified per-horse notes
+  // (ride feel / temperament) well enough. Keep the natural grounded composer
+  // for this structural compare case only; ordinary grounded answers still
+  // stay zero-extra-call below.
+  if (preferHumanGroundedComparison) {
+    const groundedComparison = await composeGroundedModelResponse(input);
+    if (groundedComparison) return groundedComparison;
+  }
+
   const modelConversation = safeModelConversationReply(input);
   if (modelConversation) return modelConversation;
 
   const grounded = composeGroundedDeterministicResponse(input);
   if (grounded) return grounded;
 
-  const groundedModel = await composeGroundedModelResponse(input);
-  if (groundedModel) return groundedModel;
+  if (!preferHumanGroundedComparison) {
+    const groundedModel = await composeGroundedModelResponse(input);
+    if (groundedModel) return groundedModel;
+  }
 
   return composeDeterministicResponse(input);
 }
