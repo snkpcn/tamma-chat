@@ -512,10 +512,22 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     const explicitNoTransaction = turn.constraints.some(constraint =>
       /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint)
     );
+    const concreteTaskSelection =
+      explicitSelectionNames(turn).length > 0
+      || turn.references.some(reference =>
+        Boolean(reference.resolvedEntityId)
+        && (reference.type === 'entity_selection' || reference.type === 'previous_selection' || reference.type === 'selected_entity'));
     const considerOnlyWithoutTask =
       meaning.conversationalMode === 'CONSIDER'
       && !isExplicitTransaction(turn)
       && !hasPlanningBudgetSignal
+      // A concrete "keep this one in mind, but don't book yet" selection is
+      // still useful bounded WORKING TASK state. Persist it with
+      // commitmentIntent=false so a later slot-only message ("60 นาที") and
+      // suspend/resume can continue the exact choice without ever authorizing
+      // a write. Pure preferences/constraints with no concrete selection stay
+      // conversation-memory-only as before.
+      && !concreteTaskSelection
       && (
         explicitNoTransaction
         || turn.speechAct === 'preference_update'
