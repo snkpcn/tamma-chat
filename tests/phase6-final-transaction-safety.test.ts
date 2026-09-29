@@ -184,6 +184,30 @@ test('Phase 6 final: CURRENT no-transaction revokes historical commitment and la
     'a fresh explicit transaction request must be able to re-arm the same task');
 });
 
+test('Phase 6 final: changing an already-approved material detail invalidates stale commitment until a fresh explicit request', () => {
+  const committed = plan(semantic({
+    action:'book',speechAct:'transaction_request',
+    entities:{resourceCode:'activity-horse',horseName:'ภาราดร',date:'2026-10-06',time:'10:00',durationMinutes:30,partySize:2},
+  }),emptyTaskStateContainer(),'phase6-material-start');
+  assert.equal(committed.taskStateContainer.activeTask?.commitmentIntent,true);
+
+  const changed = plan(semantic({
+    action:'correct_previous',speechAct:'correction',entities:{durationMinutes:45},
+  }),committed.taskStateContainer,'phase6-material-change');
+  assert.equal(changed.taskStateContainer.activeTask?.slots.durationMinutes,45);
+  assert.equal(changed.taskStateContainer.activeTask?.commitmentIntent,false,
+    'approval for 30 minutes must not silently authorize a changed 45-minute request');
+  assert.equal(changed.customerCommitPresent,false);
+  assert.ok(changed.reasons.includes('transaction_commitment_invalidated'));
+  assert.equal(resolveDialogDecision(changed,[activityAvailable()]).actionProposal,undefined);
+
+  const rearmed = plan(semantic({
+    action:'book',speechAct:'transaction_request',entities:{},
+  }),changed.taskStateContainer,'phase6-material-rearm');
+  assert.equal(rearmed.taskStateContainer.activeTask?.commitmentIntent,true);
+  assert.equal(rearmed.customerCommitPresent,true);
+});
+
 test('Phase 6 final: resume_suspended plus no_transaction clears a suspended task old commitment', () => {
   const activityCommitted = plan(semantic({
     action: 'book',
@@ -520,10 +544,10 @@ for (const channel of ['web', 'line'] as const) {
         normalizedMeaning: 'customer only supplies the previously missing duration',
         speechAct: 'statement',
         action: 'provide_information',
-        entities: { durationMinutes: 60 },
+        entities: { durationMinutes: 45 },
       }));
       const third = await processThongthaiChatCore(
-        brainRequest('60 นาที', gid, channel),
+        brainRequest('45 นาที', gid, channel),
         `phase6-e2e-${channel}-3`,
       );
       assert.equal(third.statusCode, 200);

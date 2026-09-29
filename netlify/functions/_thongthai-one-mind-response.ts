@@ -520,6 +520,13 @@ export async function processOneMindCustomerTurn(
   const conversationalStateUpdate = !turn.dialogDecision.actionProposal
     && !turn.taskStateAfter.activeTask?.commitmentIntent
     && !['book','order','cancel'].includes(turn.semanticTurn.action)
+    // A correction/selection can also carry a real business-truth question
+    // (for example, "if the primary asset is unavailable, use the named
+    // fallback; otherwise book nothing"). That turn must still consume its
+    // authoritative availability result. Treat only a pure working-state update as this
+    // zero-cost acknowledgement fast path; compound information needs must
+    // continue through the grounded composer and its deterministic fallback.
+    && (turn.dialogSemanticTurn.informationNeed ?? 'none') === 'none'
     && (
       turn.semanticTurn.speechAct === 'selection'
       || turn.semanticTurn.speechAct === 'correction'

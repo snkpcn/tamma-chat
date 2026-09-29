@@ -845,6 +845,25 @@ function mergeSafeDeterministicSlots(
   return {...turn,entities};
 }
 
+function reconcileNamedConditionalAvailabilityRoles(
+  turn:SemanticTurn,
+  deterministic:SemanticTurn|null,
+):SemanticTurn {
+  if(!deterministic
+    || deterministic.domain!=='activity'
+    || deterministic.intent!=='task_conditional_continuation'
+    || turn.domain!=='activity'
+    || turn.informationNeed!=='availability') return turn;
+  const primary=deterministic.entities.primaryHorse;
+  const fallback=deterministic.entities.fallbackHorse;
+  if(typeof primary!=='string' || typeof fallback!=='string' || !primary || !fallback || primary===fallback) return turn;
+  // These roles were parsed from two explicit canonical names in the CURRENT
+  // customer turn. They outrank a model alias collision (observed live as
+  // horseName=ทองไทย + fallbackHorseName=ทองไทย), while every other semantic
+  // field remains model-owned and the action remains read-only.
+  return {...turn,entities:{...turn.entities,primaryHorse:primary,fallbackHorse:fallback}};
+}
+
 function normalizeExplicitNoTransactionAvailabilityRefinement(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
@@ -1037,7 +1056,8 @@ async function resolveSemanticTurn(
     });
     const correctionReconciledTurn = reconcileSafeConversationalCorrectionDomain(rawModelTurn, deterministic);
     const slotMergedTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
-    const modelTurn = normalizeExplicitNoTransactionAvailabilityRefinement(slotMergedTurn, deterministic);
+    const roleReconciledTurn = reconcileNamedConditionalAvailabilityRoles(slotMergedTurn, deterministic);
+    const modelTurn = normalizeExplicitNoTransactionAvailabilityRefinement(roleReconciledTurn, deterministic);
 
     // Journey planning is conversational state only: there is no journey
     // transaction executor. A short ellipsis such as "same one, move it to
@@ -1464,7 +1484,9 @@ async function mirrorActivityTaskIfLineSourced(
   if (isTerminalTaskStatus(task.status)) return;
 
   const durationRaw = Number(task.slots.durationMinutes);
-  const durationMinutes = durationRaw === 30 || durationRaw === 60 || durationRaw === 90 ? (durationRaw as 30 | 60 | 90) : null;
+  const durationMinutes = Number.isInteger(durationRaw) && durationRaw >= 5 && durationRaw <= 600
+    ? durationRaw
+    : null;
 
   await deps.mirrorActivityTaskToLegacySession({
     guestDbId,

@@ -77,6 +77,42 @@ function scriptedConversation(
   };
 }
 
+function scriptedCustomerConversation(
+  meanings: Record<string, SemanticTurn>,
+  adapters: KnowledgeSourceAdapters = {},
+) {
+  let snapshot:GuestAgentStateSnapshot={exists:false,state:{},updatedAt:null};
+  let offset=0;
+  const deps:Partial<OneMindDependencies>={
+    resolveCanonicalGuestId:async()=>CANON,
+    guestDbIdFromAnonymousId:async()=>GUEST,
+    interpretSemanticTurn:async message=>{
+      const turn=meanings[message];
+      if(!turn) throw new Error(`missing scripted semantic turn: ${message}`);
+      return structuredClone(turn);
+    },
+    buildKnowledgeAdapters:()=>adapters,
+    mirrorActivityTaskToLegacySession:async()=>{},
+  };
+  return async(message:string)=>{
+    offset+=1;
+    return processOneMindCustomerTurn({
+      channel:'line',language:'th',message,
+      eventId:`real-line-customer-${offset}`,
+      providerUserKey:'line-real-customer-regression',
+      persistState:true,
+    },deps,{
+      loadSnapshot:async()=>snapshot,
+      compareAndSwap:async(_id,current,patch)=>{
+        const next={...current.state,...(patch.set??{})};
+        for(const key of patch.removeKeys??[]) delete next[key];
+        snapshot={exists:true,state:next,updatedAt:new Date(NOW.getTime()+offset*1000).toISOString()};
+        return {status:'applied',snapshot};
+      },
+    },new Date(NOW.getTime()+offset*1000));
+  };
+}
+
 test('REAL LINE: availability question with date/time never mutates an unfinished horse booking or asks its missing duration', async()=>{
   const select='เอาภาราดร';
   const availability='ยังไม่ต้องทำรายการอะไรทั้งนั้น แค่อยากรู้ว่าพรุ่งนี้ม้าตัวไหนว่างช่วง 16:30';
@@ -196,14 +232,18 @@ test('REAL LINE: itinerary composition is owned by One-Mind instead of falling t
 test('REAL LINE: conditional fallback remains read-only and cannot replace the current horse selection', async()=>{
   const select='เอาภาราดร';
   const conditional='ถ้าภาราดรไม่ว่าง เอาทองไทยแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร';
-  const run=scriptedConversation({
+  const run=scriptedCustomerConversation({
     [select]:semantic({
       domain:'activity',intent:'select_horse',action:'confirm',speechAct:'selection',
       entities:{resourceCode:'activity-horse',horseName:'ภาราดร'},
     }),
     [conditional]:semantic({
-      domain:'activity',intent:'conditional_horse_fallback',action:'status',informationNeed:'availability',speechAct:'request',
-      entities:{primaryHorse:'ภาราดร',fallbackHorse:'ทองไทย'},constraints:['no_transaction_if_unavailable'],
+      domain:'activity',intent:'set_horse_availability_fallback',action:'status',informationNeed:'availability',speechAct:'preference_update',
+      // Real provider output observed on PR #250 head: the fallback name was
+      // accidentally copied into both roles. Current named entities must
+      // structurally repair those roles before response composition.
+      entities:{horseName:'ทองไทย',fallbackHorseName:'ทองไทย',activityCode:'horse'},
+      constraints:['no_transaction','fallback_if_paradorn_unavailable','do_not_book_if_both_unavailable'],
     }),
   },{
     activity:{
@@ -212,11 +252,19 @@ test('REAL LINE: conditional fallback remains read-only and cannot replace the c
     },
   });
   const selected=await run(select);
-  const before=structuredClone(selected.taskStateAfter.activeTask?.slots);
+  assert.equal(selected.status,'composed');
+  const before=structuredClone(selected.turn.taskStateAfter.activeTask?.slots);
   const result=await run(conditional);
-  assert.deepEqual(result.taskStateAfter.activeTask?.slots,before);
-  assert.equal(result.dialogDecision.actionProposal,undefined);
-  assert.ok(result.dialogDecision.knowledgeRequests.some(r=>r.needs.includes('availability')));
+  assert.equal(result.status,'composed');
+  assert.deepEqual(result.turn.taskStateAfter.activeTask?.slots,before);
+  assert.equal(result.turn.semanticTurn.entities.primaryHorse,'ภาราดร');
+  assert.equal(result.turn.semanticTurn.entities.fallbackHorse,'ทองไทย');
+  assert.notEqual(result.turn.semanticTurn.entities.primaryHorse,result.turn.semanticTurn.entities.fallbackHorse);
+  assert.equal(result.turn.dialogDecision.actionProposal,undefined);
+  assert.ok(result.turn.dialogDecision.knowledgeRequests.some(r=>r.needs.includes('availability')));
+  assert.match(result.response.message,/ภาราดร/u);
+  assert.match(result.response.message,/ทองไทย/u);
+  assert.match(result.response.message,/ยังไม่ได้(?:เลือกหรือ)?จอง|ไม่ได้ทำรายการ/u);
 });
 
 

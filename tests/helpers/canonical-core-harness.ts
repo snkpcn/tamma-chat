@@ -101,7 +101,8 @@ function projectSelect<T extends Record<string, unknown>>(row: T, query: URLSear
 export function defaultCatalog(): Required<HarnessCatalog> {
   return {
     activityOfferings: [
-      { activity_code: 'horse', activity_name: 'ขี่ม้า', duration_minutes: 60, price: 500, currency: 'THB', metadata: {} },
+      { activity_code: 'horse', activity_name: 'ขี่ม้า', duration_minutes: 30, price: 300, currency: 'THB', metadata: {} },
+      { activity_code: 'horse', activity_name: 'ขี่ม้า', duration_minutes: 45, price: 500, currency: 'THB', metadata: {} },
       { activity_code: 'atv', activity_name: 'ATV', duration_minutes: 30, price: 400, currency: 'THB', metadata: {} },
     ],
     activityAssets: [
@@ -729,6 +730,14 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
         bookingSessions.set(body.guest_id, { ...existing, ...body });
       }
       recordPost('booking_sessions', body);
+      return jsonResponse([]);
+    }
+    if (path.startsWith('booking_sessions') && method === 'PATCH') {
+      const guestId = query.get('guest_id')?.replace('eq.', '') ?? '';
+      const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      const existing = bookingSessions.get(guestId);
+      if (existing) bookingSessions.set(guestId, { ...existing, ...body });
+      recordPost('booking_sessions_patch', { guest_id:guestId, ...body });
       return jsonResponse([]);
     }
 

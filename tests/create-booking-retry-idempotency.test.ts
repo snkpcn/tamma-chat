@@ -37,7 +37,7 @@ function jsonResponse(body: unknown, status = 200): Response {
  *  in-memory `bookings` table so a second createBooking() call actually
  *  sees whatever the first one already wrote -- the real condition the
  *  duplicate check has to work under, not just a canned single response. */
-function mockSupabase() {
+function mockSupabase(offeredDurations: number[] = [60]) {
   let postCount = 0;
   const bookingPosts: Array<Record<string, unknown>> = [];
   const bookingsTable: Array<{ guest_id: string | null; booking_code: string; status: string; start_at: string; end_at: string; created_at: string }> = [];
@@ -52,6 +52,11 @@ function mockSupabase() {
       // internal one hit this same table with slightly different selects --
       // one row is correct for either.
       return jsonResponse([{ ...RESOURCE_ROW, metadata: {} }]);
+    }
+    if (u.includes('/activity_offerings') && method === 'GET') {
+      return jsonResponse(offeredDurations.map((duration_minutes, index) => ({
+        activity_code: 'horse', duration_minutes, price: index === 0 ? 300 : 500, active: true,
+      })));
     }
     if (u.includes('/service_schedules') && method === 'GET') {
       // Contiguous 30-minute slots covering 10:00-12:00, full capacity.
@@ -104,6 +109,34 @@ function mockSupabase() {
 
   return { fetchMock, postCount: () => postCount, bookingPosts: () => bookingPosts };
 }
+
+test('executor rejects a syntactically valid duration that the canonical activity catalog does not offer', async () => {
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.SUPABASE_URL;
+  const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = 'https://example.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+  const { fetchMock, postCount } = mockSupabase([30, 45]);
+  global.fetch = fetchMock;
+
+  try {
+    await assert.rejects(() => createBooking({
+      guestDbId: GUEST_DB_ID,
+      channel: 'line',
+      serviceType: 'activity',
+      resourceCode: 'activity-horse',
+      date: '2026-10-01',
+      time: '10:00',
+      durationMinutes: 60,
+      partySize: 1,
+    }), /activity_duration_not_offered/);
+    assert.equal(postCount(), 0, 'catalog rejection must happen before any booking write');
+  } finally {
+    global.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+  }
+});
 
 test('a retried committed-activity-booking turn never creates a second real booking', async () => {
   const originalFetch = global.fetch;

@@ -43,7 +43,11 @@ test('activity: an unknown how-it-works detail is honestly declined, only the re
     assert.match(message, /ไม่มีข้อมูล|ไม่ขอเดา/, 'must not invent step-by-step riding instructions');
     // The one fact it DOES state (duration) must be the real catalog value,
     // not a different invented number.
-    if (/นาที/u.test(message)) assert.match(message, /60\s*นาที/, 'if it states a duration, it must be the real one, not an invented one');
+    if (/นาที/u.test(message)) {
+      assert.match(message, /30\s*นาที/, 'if it states durations, it must include the real 30-minute option');
+      assert.match(message, /45\s*นาที/, 'if it states durations, it must include the real 45-minute option');
+      assert.doesNotMatch(message, /60\s*นาที/, 'it must not resurrect the obsolete 60-minute fixture value');
+    }
   });
 });
 

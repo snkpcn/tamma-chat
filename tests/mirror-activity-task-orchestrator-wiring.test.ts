@@ -16,6 +16,7 @@ import {
 import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
 import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
+import type { SourceResult } from '../netlify/functions/_knowledge-resolver';
 
 const NOW = new Date('2026-09-22T12:00:00.000Z');
 const CANONICAL = '11111111-1111-4111-8111-111111111111';
@@ -41,7 +42,19 @@ function baseDeps(semantic: SemanticTurn, mirrorCalls: Array<Parameters<OneMindD
     loadTaskState: async () => emptyTaskStateContainer(),
     persistTaskState: async () => {},
     interpretSemanticTurn: async () => semantic,
-    buildKnowledgeAdapters: () => ({}),
+    buildKnowledgeAdapters: () => ({
+      activity: {
+        catalog: async (): Promise<SourceResult> => ({
+          status: 'ok', sourceId: 'activity_catalog', sourceType: 'activity_live', fetchedAt: NOW.toISOString(),
+          data: [
+            { key: 'activity_asset:horse-pharadon:name', value: 'ภาราดร', domain: 'activity', sourceId: 'activity_catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+            { key: 'activity_asset:horse-pharadon:activityCode', value: 'horse', domain: 'activity', sourceId: 'activity_catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+            { key: 'activity:horse:resourceCode', value: 'activity-horse', domain: 'activity', sourceId: 'activity_catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+            { key: 'activity:horse:30min:price', value: 300, domain: 'activity', sourceId: 'activity_catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+          ],
+        }),
+      },
+    }),
     mirrorActivityTaskToLegacySession: async input => { mirrorCalls.push(input); },
   };
 }

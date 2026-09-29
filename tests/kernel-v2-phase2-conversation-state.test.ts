@@ -47,6 +47,8 @@ test('Kernel V2 Phase 2: 34-turn working conversation memory survives switches, 
         data: [
           { key: 'activity_asset:horse:paradon:name', value: 'ภาราดร', domain: 'activity', sourceId: 'activity-catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
           { key: 'activity_asset:horse:thongthai:name', value: 'ทองไทย', domain: 'activity', sourceId: 'activity-catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+          { key: 'activity:horse:resourceCode', value: 'activity-horse', domain: 'activity', sourceId: 'activity-catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+          { key: 'activity:horse:45min:price', value: 500, domain: 'activity', sourceId: 'activity-catalog', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
         ],
       }),
       availability: async () => ({
@@ -101,7 +103,7 @@ test('Kernel V2 Phase 2: 34-turn working conversation memory survives switches, 
     { message: 'กลับไปตัวม้า', semantic: turn({ domain: 'activity', intent: 'resume_activity_final', action: 'ask', references: [{ type: 'topic', value: 'horse', refersToPriorContext: true, resolvedFromConversation: true }] }) },
     { message: 'ขอเช็คราคาไว้ก่อน', semantic: turn({ domain: 'activity', intent: 'ask_price_before_booking', action: 'ask', informationNeed: 'price', entities: { resourceCode: 'activity-horse' } }) },
     { message: 'โอเค ยังไม่จอง', semantic: turn({ domain: 'activity', intent: 'final_no_commit', action: 'correct_previous', speechAct: 'correction', constraints: ['not_yet_booking'] }) },
-    { message: 'โอเค จองภาราดรพรุ่งนี้บ่ายสาม 2 คน 60 นาทีให้เลย', semantic: turn({ domain: 'activity', intent: 'book_horse', action: 'book', speechAct: 'transaction_request', entities: { resourceCode: 'activity-horse', date: '2026-09-29', time: '15:00', partySize: 2, durationMinutes: 60 } }) },
+    { message: 'โอเค จองภาราดรพรุ่งนี้บ่ายสาม 2 คน 45 นาทีให้เลย', semantic: turn({ domain: 'activity', intent: 'book_horse', action: 'book', speechAct: 'transaction_request', entities: { resourceCode: 'activity-horse', date: '2026-09-29', time: '15:00', partySize: 2, durationMinutes: 45 } }) },
   ];
 
   for (const [index, step] of turns.entries()) {

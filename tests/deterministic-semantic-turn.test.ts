@@ -268,6 +268,27 @@ test('REGRESSION: a correction naming BOTH the rejected and the newly-chosen hor
   }
 });
 
+test('named conditional fallback keeps current primary/fallback roles distinct', () => {
+  const taskState:TaskStateContainer={
+    ...emptyTaskStateContainer(),
+    activeTask:createActiveTask({
+      type:'activity_booking',sourceChannel:'line',now:NOW,
+      initialSlots:{resourceCode:'activity-horse',assetSelection:'ภาราดร',date:'2026-10-01',partySize:4},
+    }),
+  };
+  const turn=deriveDeterministicSemanticTurn(
+    'ถ้าภาราดรไม่ว่าง เอาทองไทยแทนได้ แต่ถ้าทั้งคู่ไม่ว่างไม่ต้องจองอะไร',
+    emptySemanticContext(),taskState,NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.intent,'task_conditional_continuation');
+  assert.equal(turn!.informationNeed,'availability');
+  assert.equal(turn!.entities.primaryHorse,'ภาราดร');
+  assert.equal(turn!.entities.fallbackHorse,'ทองไทย');
+  assert.equal(turn!.entities.horseName,undefined,'a read-only fallback rule must not replace the active selection');
+  assert.ok(turn!.constraints.includes('no_transaction'));
+});
+
 // Human Core PR A (2026-09-27): "ทองไทย" is both a horse's name AND the
 // assistant/business's own name. A question that merely NAMES the
 // assistant/business ("ร้านทองไทยเปิดกี่โมงคะ", "ทองไทยตอบได้เร็วไหม") must

@@ -36,7 +36,13 @@ function activityCatalogAdapter(): () => Promise<SourceResult> {
     data: [
       { key: 'activity:horse:count', value: 2, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
       { key: 'activity:horse:names', value: ['ภาราดร', 'ทองไทย'], domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
-      { key: 'activity:horse:price', value: 500, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity_asset:horse-pharadon:name', value: 'ภาราดร', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity_asset:horse-pharadon:activityCode', value: 'horse', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity_asset:horse-thongthai:name', value: 'ทองไทย', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity_asset:horse-thongthai:activityCode', value: 'horse', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity:horse:resourceCode', value: 'activity-horse', domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity:horse:30min:price', value: 300, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
+      { key: 'activity:horse:45min:price', value: 500, domain: 'activity', sourceId: 'activity_assets', sourceType: 'activity_live', authoritative: true, fetchedAt: NOW.toISOString() },
     ],
   });
 }
@@ -166,11 +172,11 @@ test('CRITICAL REQUIREMENT: the exact 16-turn activity booking conversation work
   assert.equal(t11.taskStateAfter.activeTask?.slots.partySize, 2);
   assert.deepEqual(t11.taskStateAfter.activeTask?.missingFields, []);
 
-  // Turn 12: "จริงๆ เปลี่ยนเป็น 60 นาที" -- explicit correction. The NEW
+  // Turn 12: "จริงๆ เปลี่ยนเป็น 45 นาที" -- explicit correction. The NEW
   // value must win; every other slot must survive untouched.
-  const t12 = await turn('t12', 'จริงๆ เปลี่ยนเป็น 60 นาที', 12);
+  const t12 = await turn('t12', 'จริงๆ เปลี่ยนเป็น 45 นาที', 12);
   assert.equal(t12.semanticTurn.action, 'correct_previous');
-  assert.equal(t12.taskStateAfter.activeTask?.slots.durationMinutes, 60, 'the correction must overwrite the prior value');
+  assert.equal(t12.taskStateAfter.activeTask?.slots.durationMinutes, 45, 'the correction must overwrite the prior value');
   assert.equal(t12.taskStateAfter.activeTask?.slots.horseName, 'ภาราดร');
   assert.equal(t12.taskStateAfter.activeTask?.slots.date, '2026-10-03');
   assert.equal(t12.taskStateAfter.activeTask?.slots.time, '13:00');
@@ -183,7 +189,7 @@ test('CRITICAL REQUIREMENT: the exact 16-turn activity booking conversation work
   const t13 = await turn('t13', 'ไม่เอาภาราดรแล้ว เอาทองไทย', 13);
   assert.equal(t13.semanticTurn.entities.horseName, 'ทองไทย', 'the semantic layer must extract the CHOSEN name, never the rejected one');
   assert.equal(t13.taskStateAfter.activeTask?.slots.horseName, 'ทองไทย', 'ภาราดร must not silently persist after being explicitly replaced');
-  assert.equal(t13.taskStateAfter.activeTask?.slots.durationMinutes, 60, 'duration must survive an asset-only correction');
+  assert.equal(t13.taskStateAfter.activeTask?.slots.durationMinutes, 45, 'duration must survive an asset-only correction');
   assert.equal(t13.taskStateAfter.activeTask?.slots.date, '2026-10-03');
   assert.equal(t13.taskStateAfter.activeTask?.slots.time, '13:00');
   assert.equal(t13.taskStateAfter.activeTask?.slots.partySize, 2);
@@ -198,21 +204,21 @@ test('CRITICAL REQUIREMENT: the exact 16-turn activity booking conversation work
   // Must not corrupt state even though it doesn't yet answer the question.
   const t15 = await turn('t15', 'ตอนนี้ที่เลือกไว้มีอะไรบ้าง', 15);
   assert.equal(t15.taskStateAfter.activeTask?.slots.horseName, 'ทองไทย');
-  assert.equal(t15.taskStateAfter.activeTask?.slots.durationMinutes, 60);
+  assert.equal(t15.taskStateAfter.activeTask?.slots.durationMinutes, 45);
   assert.equal(t15.taskStateAfter.activeTask?.slots.date, '2026-10-03');
   assert.equal(t15.taskStateAfter.activeTask?.slots.time, '13:00');
   assert.equal(t15.taskStateAfter.activeTask?.slots.partySize, 2);
   assert.deepEqual(t15.taskStateAfter.activeTask?.missingFields, [], 'still fully specified going into the final turn');
 
   // Turn 16: "ยืนยันการจอง" -- EXACTLY ONE transaction proposal, carrying
-  // the FINAL, corrected slot values (ทองไทย, 60 minutes) -- never the
+  // the FINAL, corrected slot values (ทองไทย, 45 minutes) -- never the
   // original ภาราดร/30-minute values from earlier in the conversation.
   const t16 = await turn('t16', 'ยืนยันการจอง', 16);
   assert.equal(t16.dialogDecision.mode, 'propose_action');
   assert.ok(t16.dialogDecision.actionProposal, 'the final confirmation must produce a transaction proposal');
   assert.equal(t16.dialogDecision.actionProposal?.toolName, 'create_booking');
   assert.equal(t16.dialogDecision.actionProposal?.validatedArgs.horseName, 'ทองไทย');
-  assert.equal(t16.dialogDecision.actionProposal?.validatedArgs.durationMinutes, 60);
+  assert.equal(t16.dialogDecision.actionProposal?.validatedArgs.durationMinutes, 45);
   assert.equal(t16.dialogDecision.actionProposal?.validatedArgs.date, '2026-10-03');
   assert.equal(t16.dialogDecision.actionProposal?.validatedArgs.time, '13:00');
   assert.equal(t16.dialogDecision.actionProposal?.validatedArgs.partySize, 2);

@@ -64,7 +64,8 @@ export type DialogReasonCode =
   | 'known_unconfigured_price' | 'duplicate_event_ignored' | 'no_active_task'
   | 'task_side_question_preserved' | 'task_unrelated_turn_preserved' | 'task_cancelled'
   | 'task_summary_requested' | 'nontransactional_state_update_preserved'
-  | 'transaction_commitment_revoked';
+  | 'transaction_commitment_revoked' | 'transaction_commitment_invalidated'
+  | 'activity_duration_rejected';
 
 export type ResponseIntent =
   | 'discovery_response' | 'grounded_answer' | 'clarify_ambiguous_entity' | 'ask_missing_field'
@@ -152,6 +153,30 @@ function explicitlyRevokesTransaction(turn: SemanticTurn): boolean {
     && turn.constraints.some(constraint => NO_TRANSACTION_CONSTRAINT_RE.test(constraint));
 }
 
+// A prior explicit transaction request is scoped to the material details the
+// customer approved. Filling a previously-empty field may legitimately
+// continue that request, but replacing an already-known material field is a
+// new proposal and must be explicitly committed again. This is deliberately
+// based on structured slots, never raw customer wording.
+const TRANSACTION_BINDING_SLOT_KEYS = new Set([
+  'resourceCode', 'horseName', 'assetSelection', 'date', 'time', 'endDate',
+  'checkIn', 'checkOut', 'nights', 'durationMinutes', 'partySize', 'quantity',
+  'bedrooms', 'roomType', 'items', 'itemName', 'campaignId', 'campaignCode',
+  'promotionName', 'fulfillmentType', 'shippingAddress',
+]);
+
+function changesCommittedMaterialSlot(task: ActiveTask, patch: Record<string, unknown>): boolean {
+  if (!task.commitmentIntent) return false;
+  return Object.entries(patch).some(([key, next]) => {
+    if (!TRANSACTION_BINDING_SLOT_KEYS.has(key)) return false;
+    const previous = task.slots[key];
+    // Supplying a genuinely missing field continues collection. Only a
+    // replacement invalidates the earlier approval.
+    if (previous === undefined || previous === null || previous === '') return false;
+    return JSON.stringify(previous) !== JSON.stringify(next);
+  });
+}
+
 /** An active task is INTERRUPTIBLE: having an unfinished task does not mean
  *  every following message is a slot fill. These actions are inherently
  *  side-questions/browsing, never a customer providing task information --
@@ -191,7 +216,12 @@ const NON_SLOT_META_KEYS = new Set(['compareAttribute', 'restaurantTransactionTy
 function taskSlotPatch(entities: Record<string, unknown>): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(entities)) {
-    if (!NON_SLOT_META_KEYS.has(key)) patch[key] = value;
+    // Model/deterministic parsers may carry optional keys with an explicit
+    // `undefined` value. Absence is not a customer correction and must not
+    // erase a previously grounded slot (for example a horse-only correction
+    // must preserve the selected duration). Intentional clears use an
+    // explicit task-state event at the policy boundary instead.
+    if (!NON_SLOT_META_KEYS.has(key) && value !== undefined && value !== null) patch[key] = value;
   }
   return patch;
 }
@@ -608,11 +638,20 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     && turnContributesToActiveTask(turn, container.activeTask!)
   ) {
     const slotPatch = taskSlotPatch(turn.entities);
+    const invalidatesCommittedDetails = !isExplicitTransaction(turn)
+      && !explicitlyRevokesTransaction(turn)
+      && changesCommittedMaterialSlot(container.activeTask!, slotPatch);
     if (Object.keys(slotPatch).length) {
       container = applyTaskStateEvent(container, {
         kind: 'update_slots', eventId: `${eventId}:task_merge`,
         slotPatch, requiredFields: DOMAIN_TASK_REQUIRED_FIELDS[container.activeTask!.type] ?? [],
       }, now);
+    }
+    if (invalidatesCommittedDetails && container.activeTask && !isTerminalTaskStatus(container.activeTask.status)) {
+      container = applyTaskStateEvent(container, {
+        kind:'clear_commitment', eventId:`${eventId}:commitment_details_changed`,
+      }, now);
+      reasons.push('transaction_commitment_invalidated');
     }
   }
 
@@ -670,13 +709,17 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
   return { container, reasons };
 }
 
-function needsActivityCatalogResolution(task: ActiveTask): boolean {
+function needsActivityCatalogResolution(task: ActiveTask, turn: SemanticTurn): boolean {
   if (task.type !== 'activity_booking') return false;
   const resourceCode = task.slots.resourceCode;
   if (!resourceCode) {
     return task.selectedEntities.some(entity => entity.id.startsWith('activity_asset:'));
   }
-  return !task.slots.durationMinutes;
+  // Validate a duration on the same turn it is supplied, even when every
+  // booking field is otherwise complete. This closes the live case where a
+  // syntactically valid but unsupported duration (e.g. 60 minutes for a
+  // 30/45-minute horse catalog) was persisted and treated as actionable.
+  return !task.slots.durationMinutes || turn.entities.durationMinutes !== undefined;
 }
 
 function hasRecommendationCriteria(turn:SemanticTurn):boolean {
@@ -781,9 +824,19 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       // resourceCode yet, or a resourceCode set but no verified duration
       // yet, needs the SAME real catalog data discovery already fetches --
       // never a hardcoded/guessed value.
-      if (task && needsActivityCatalogResolution(task)) return [{ ...base, domain: 'activity', needs: ['catalog'] }];
+      if (task && needsActivityCatalogResolution(task, turn)) {
+        const needs = task.missingFields.length === 0
+          && (turn.action === 'provide_information' || isExplicitTransaction(turn))
+          ? ['catalog','availability']
+          : ['catalog'];
+        return [{ ...base, domain: 'activity', needs }];
+      }
       if (task && task.missingFields.length === 0 && (turn.action === 'provide_information' || isExplicitTransaction(turn))) {
-        return [{ ...base, domain: 'activity', needs: ['availability'] }];
+        // Complete persisted tasks are revalidated against the current
+        // catalog at the transaction boundary as well as availability. A
+        // stale pre-fix duration must not bypass catalog validation merely
+        // because it was written on an earlier turn.
+        return [{ ...base, domain: 'activity', needs: ['catalog','availability'] }];
       }
       return [];
     case 'stay':
@@ -1158,7 +1211,32 @@ function applyActivityCatalogPolicy(
     }
   }
 
-  if (resourceCode && !container.activeTask?.slots.durationMinutes) {
+  const suppliedDuration = Number(container.activeTask?.slots.durationMinutes);
+  const catalogRequested = plan.knowledgeRequests.some(request =>
+    request.domain === 'activity' && request.needs.includes('catalog'));
+  if (resourceCode && catalogRequested && Number.isFinite(suppliedDuration) && suppliedDuration > 0) {
+    const durationPolicy = resolveActivityDurationOptions(bundles, resourceCode);
+    const supported = durationPolicy.status === 'single'
+      ? suppliedDuration === durationPolicy.durationMinutes
+      : durationPolicy.status === 'multiple'
+        ? durationPolicy.options.includes(suppliedDuration)
+        : false;
+    if (!supported) {
+      container = applyTaskStateEvent(container, {
+        kind: 'update_slots', eventId: `${input.eventId}:activity_duration_rejected`,
+        slotPatch: { durationMinutes: undefined },
+        requiredFields: DOMAIN_TASK_REQUIRED_FIELDS.activity_booking,
+      }, now);
+      // An invalid/unverified material detail cannot retain transaction
+      // authorization, even if the customer asked to book earlier.
+      if (container.activeTask?.commitmentIntent) {
+        container = applyTaskStateEvent(container, {
+          kind:'clear_commitment', eventId:`${input.eventId}:activity_duration_commitment_cleared`,
+        }, now);
+      }
+      applied = true;
+    }
+  } else if (resourceCode && !container.activeTask?.slots.durationMinutes) {
     const durationPolicy = resolveActivityDurationOptions(bundles, resourceCode);
     if (durationPolicy.status === 'single') {
       container = applyTaskStateEvent(container, {
@@ -1169,7 +1247,12 @@ function applyActivityCatalogPolicy(
     }
   }
 
-  return applied ? planDialogTurn({ ...input, taskState: container }, now) : null;
+  if (!applied) return null;
+  const replanned = planDialogTurn({ ...input, taskState: container }, now);
+  if (Number.isFinite(suppliedDuration) && suppliedDuration > 0 && !container.activeTask?.slots.durationMinutes) {
+    replanned.reasons.push('activity_duration_rejected');
+  }
+  return replanned;
 }
 
 /** Pure Restaurant preorder slot normalization. It consumes only semantic
