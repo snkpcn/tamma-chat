@@ -249,6 +249,20 @@ test('non-transactional party-size correction is acknowledged rather than becomi
   assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้|ขอรายละเอียดเพิ่ม/u);
 });
 
+test('non-transactional duration correction names the accepted duration without implying a booking',()=>{
+  const response=composeDeterministicResponse(input({
+    semanticTurn:semantic({
+      domain:'activity',intent:'correct_duration',action:'correct_previous',speechAct:'selection',
+      entities:{durationMinutes:45},constraints:['no_transaction'],
+    }),
+    bundles:[],
+    dialogDecision:decision({mode:'query_knowledge',responseIntent:'grounded_answer',reasons:['transaction_commitment_revoked','nontransactional_state_update_preserved']}),
+  }));
+  assert.match(response.message,/45 นาที/u);
+  assert.match(response.message,/ยังไม่ได้จอง/u);
+  assert.doesNotMatch(response.message,/แก้ข้อมูลตามที่บอก/u);
+});
+
 
 test('compound availability turn still renders the grounded horse recommendation and rain fallback',()=>{
   const availabilityBundle:KnowledgeBundle={

@@ -1335,6 +1335,7 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
     const partySize = Number(entities.partySize);
     const children = Number(entities.children);
     const adults = Number(entities.adults);
+    const durationMinutes = Number(entities.durationMinutes);
     const parts: string[] = [];
 
     if (typeof chosen === 'string') {
@@ -1343,6 +1344,11 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
     if (Number.isFinite(partySize) && partySize > 0) parts.push('จำนวนรวม ' + partySize + ' คน');
     if (Number.isFinite(adults) && adults >= 0) parts.push('ผู้ใหญ่ ' + adults + ' คน');
     if (Number.isFinite(children) && children >= 0) parts.push('เด็ก ' + children + ' คน');
+    // A short slot-only continuation is still a concrete state update. Name
+    // the value from the CURRENT turn so a correct canonical update cannot be
+    // hidden behind the generic "แก้ข้อมูลตามที่บอก" fallback. This is
+    // intentionally presentation-only and does not arm a transaction.
+    if (Number.isFinite(durationMinutes) && durationMinutes > 0) parts.push('ระยะเวลา ' + durationMinutes + ' นาที');
 
     if (!parts.length && turn.action === 'correct_previous') {
       parts.push('แก้ข้อมูลตามที่บอกแล้วครับ');
