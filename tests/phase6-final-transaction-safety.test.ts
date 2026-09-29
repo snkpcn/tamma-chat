@@ -91,6 +91,9 @@ test('Phase 6 final: shared current-turn boundary rejects questions, resume lang
   }
   assert.equal(hasStandaloneTransactionRequest('จองเลย'), true);
   assert.equal(hasStandaloneTransactionRequest('ยืนยันจอง'), true);
+  assert.equal(hasStandaloneTransactionRequest('จองไว้ก่อน'), true,
+    '"จองไว้ก่อน" is an explicit transaction, unlike a bare conversational hold');
+  assert.equal(hasExplicitNoTransactionMarker('จองไว้ก่อน'), false);
   assert.equal(hasExplicitNoTransactionMarker('เอาไว้ก่อน ยังไม่ต้องจอง'), true);
 });
 
