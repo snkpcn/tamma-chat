@@ -32,6 +32,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 import { hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
+import { isPromotionMention } from './_promotion-dialog';
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
 
@@ -1277,6 +1278,26 @@ function parseSemanticJsonObject(rawText: string): Record<string, unknown> {
   }
 }
 
+
+function currentMessagePromotionSubject(message:string):boolean {
+  if (!message.trim()) return false;
+  const mentionsPromotion = isPromotionMention(message)
+    || /ส่วนลด|\bdiscount\b|\boffer(?:s)?\b/iu.test(message);
+  if (!mentionsPromotion) return false;
+  // Explicitly rejecting promotions in favor of a normal/non-promo option
+  // means promotion is NOT the requested primary subject.
+  if (/ไม่(?:เอา|ต้องการ|สนใจ|ใช้|รับ)\s*(?:โปร|โปรโมชั่น|โปรโมชัน|ส่วนลด)/u.test(message)) return false;
+  return true;
+}
+
+function currentMessageAsksPromotionRecommendation(message:string):boolean {
+  return /คุ้ม(?:สุด|กว่า)|ดี(?:ที่สุด|สุด)|เหมาะ(?:ที่สุด|สุด)|ถูก(?:ที่สุด|สุด)|ลด(?:เยอะ|มาก)(?:ที่สุด|สุด)?|(?:อัน|ตัว|โปร)ไหน(?:ดี|คุ้ม)/u.test(message);
+}
+
+function currentMessageRejectsNewMembership(message:string):boolean {
+  return /(?:ไม่(?:เอา|ต้องการ|อยาก|ขอ)[^\n,.!?？]{0,36}(?:ต้อง\s*)?สมัครสมาชิก|(?:ไม่ต้อง|ไม่อยาก|ไม่ขอ)\s*สมัครสมาชิก|ไม่[^\n,.!?？]{0,20}สมาชิกเพิ่ม)/u.test(message);
+}
+
 export function parseSemanticTurnResponse(
   rawText: string,
   context: SemanticContext,
@@ -1330,6 +1351,29 @@ export function parseSemanticTurnResponse(
 
   let references = resolveReferences(normalizeReferences(parsed.references), context);
   const entities = canonicalizeEntityAliases(asRecord(parsed.entities), domain);
+
+  const currentPromotionSubject = Boolean(currentMessage)
+    && currentMessagePromotionSubject(currentMessage);
+  if (currentPromotionSubject) {
+    // Promotion is a cross-cutting PRIMARY domain. A restaurant/stay/activity
+    // noun describes the promotion's business scope; it must not steal domain
+    // ownership from the promotion request itself.
+    domain = 'promotion';
+    if (currentMessageAsksPromotionRecommendation(currentMessage)) {
+      action = 'recommend';
+      informationNeed = 'recommendation';
+    }
+    // Preserve an obvious named business scope even when the model returned
+    // the narrower business domain and omitted a scope entity.
+    if (entities.businessScope === undefined) {
+      if (/ร้านอาหาร|อาหาร|กินข้าว/u.test(currentMessage)) entities.businessScope = 'restaurant';
+      else if (/ห้อง|ที่พัก|พัก/u.test(currentMessage)) entities.businessScope = 'stay';
+      else if (/กิจกรรม|ขี่ม้า|atv|ยิงธนู|เป็ดน้ำ/iu.test(currentMessage)) entities.businessScope = 'activity';
+      else if (/ของฝาก|otop/iu.test(currentMessage)) entities.businessScope = 'otop';
+      else if (/กาแฟ|คาเฟ่|อินทนิล/u.test(currentMessage)) entities.businessScope = 'cafe';
+    }
+  }
+
   domain = normalizeCrossDomainJourney(domain, action, informationNeed, entities, references, context);
 
   // A request to summarize the current working state is answered from the
@@ -1588,6 +1632,13 @@ export function parseSemanticTurnResponse(
   const canonicalConstraints = canonicalizeSemanticConstraints(parsed.constraints, entities);
   if (currentExplicitNoTransaction && !canonicalConstraints.includes('no_transaction')) {
     canonicalConstraints.push('no_transaction');
+  }
+  if (
+    currentPromotionSubject
+    && currentMessageRejectsNewMembership(currentMessage)
+    && !canonicalConstraints.includes('no_new_membership')
+  ) {
+    canonicalConstraints.push('no_new_membership');
   }
 
   return {
