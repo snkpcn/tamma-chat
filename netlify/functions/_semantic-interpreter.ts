@@ -672,8 +672,8 @@ export function buildProductionSemanticInterpreterPrompt(
       ? 'restaurant=food/menu/table/dining' : null,
     /(?:พัก|ห้อง|บ้าน|เช็คอิน|เช็คเอาท์)/u.test(message) || context.activeDomain === 'stay'
       ? 'stay=rooms/houses/check-in/check-out' : null,
-    /(?:ม้า|ขี่|ATV|ยิงธนู|กิจกรรม)/iu.test(message) || context.activeDomain === 'activity'
-      ? 'activity=horse riding/ATV/archery' : null,
+    /(?:ม้า|ขี่|ATV|ยิงธนู|เป็ด|pedal|กิจกรรม)/iu.test(message) || context.activeDomain === 'activity'
+      ? 'activity=horse riding/ATV/archery/pedal boat' : null,
     /(?:กาแฟ|คาเฟ่|อินทนิล)/u.test(message) || context.activeDomain === 'cafe'
       ? 'cafe=Inthanin/cafe/drinks' : null,
     /(?:สินค้า|ของฝาก|OTOP)/iu.test(message) || context.activeDomain === 'otop'
@@ -715,7 +715,7 @@ Core rules:
 - A question about conditions, places, animals, routes, or surroundings in the area uses domain=local even when the exact place needs clarification; missing location detail does not change the domain to unknown.
 - For descriptive references, if bounded context uniquely links the description to a named entity, emit that canonical name as reference value; if several fit, clarify.
 - IDs may only come from canonical context below. Otherwise leave unresolved.
-- Activity TYPE (not one named asset) named: set entities.activityCode to horse|atv|archery. Not for a whole-domain browse or a named asset (use horseName).
+- Activity TYPE (not one named asset) named: set entities.activityCode to horse|atv|archery|pedal_boat. "เป็ดน้ำ"/"ปั่นเป็ดน้ำ"/"เรือเป็ด"/"ถีบเป็ด" mean the pedal-boat activity here, never a live duck. Not for a whole-domain browse or a named asset (use horseName).
 
 Today in Bangkok: ${currentBangkok}
 Relevant organization vocabulary: ${vocabulary.length ? vocabulary.join('; ') : 'none needed'}
