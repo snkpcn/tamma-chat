@@ -31,6 +31,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
+import { hasStandaloneTransactionRequest } from './_slot-parsers';
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
 
@@ -1275,7 +1276,11 @@ function parseSemanticJsonObject(rawText: string): Record<string, unknown> {
   }
 }
 
-export function parseSemanticTurnResponse(rawText: string, context: SemanticContext): SemanticTurn {
+export function parseSemanticTurnResponse(
+  rawText: string,
+  context: SemanticContext,
+  currentMessage = '',
+): SemanticTurn {
   const parsed = parseSemanticJsonObject(rawText);
 
   const normalizedMeaning = typeof parsed.normalizedMeaning === 'string'
@@ -1429,15 +1434,20 @@ export function parseSemanticTurnResponse(rawText: string, context: SemanticCont
 
   if (
     taskDirective === 'resume_suspended'
-    && speechAct !== 'transaction_request'
-    && ['book','order','confirm','modify','cancel'].includes(action)
+    && ['book','order'].includes(action)
+    && (
+      currentMessage
+        ? !hasStandaloneTransactionRequest(currentMessage)
+        : speechAct !== 'transaction_request'
+    )
   ) {
     // Resuming a suspended conversational task is working-state navigation,
-    // not transaction consent. A model may overread the suspended task's
-    // booking shape and emit "book" even when the CURRENT utterance only says
-    // "กลับไปเรื่อง...ที่ค้างไว้". Keep that read-only unless this same
-    // current turn independently carries an explicit transaction_request.
+    // not transaction consent. The CURRENT utterance must independently carry
+    // a standalone transaction request; stale suspended booking shape and a
+    // stray model speechAct label cannot manufacture permission to transact.
     action = 'ask';
+    informationNeed = 'none';
+    if (speechAct === 'transaction_request') speechAct = 'request';
   }
 
   const ambiguousReferenceRequiresClarification =
@@ -1633,7 +1643,7 @@ export async function interpretSemanticTurn(
     options.certificationMode ? 'semantic-certification-primary' : 'semantic-interpreter',
     options.callContext,
   );
-  const primary = parseSemanticTurnResponse(primaryRaw, context);
+  const primary = parseSemanticTurnResponse(primaryRaw, context, message);
   if (!options.certificationMode || !semanticTurnNeedsReview(primary, message, context)) return primary;
 
   const reviewPrompt = `${prompt}
@@ -1653,7 +1663,7 @@ Do not become more eager to transact. Return the same JSON schema only.`;
       'semantic-certification-reviewer',
       undefined,
     );
-    const reviewed = parseSemanticTurnResponse(reviewedRaw, context);
+    const reviewed = parseSemanticTurnResponse(reviewedRaw, context, message);
 
     // Review is allowed to replace the first pass only when it is actually
     // usable. Never replace a valid primary interpretation with a weaker
