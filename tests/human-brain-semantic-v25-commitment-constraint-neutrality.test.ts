@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildSemanticInterpreterPrompt,
   emptySemanticContext,
+  parseSemanticTurnResponse,
   SEMANTIC_INTERPRETER_VERSION,
 } from '../netlify/functions/_semantic-interpreter';
 import { SEMANTIC_EVAL_CORPUS } from './fixtures/semantic-eval-corpus';
@@ -39,4 +40,47 @@ test('semantic-v28 requires an evaluative request beyond companion metadata',()=
 
 test('semantic-v28 version is explicit',()=>{
   assert.equal(SEMANTIC_INTERPRETER_VERSION, 'semantic-v31');
+});
+
+
+test('resume_suspended cannot manufacture transaction consent from stale booking context',()=>{
+  const context={
+    ...emptySemanticContext(),
+    activeDomain:'restaurant' as const,
+    suspendedTask:{
+      type:'activity_booking',
+      domain:'activity' as const,
+      status:'collecting',
+      knownSlots:{horseName:'ภาราดร'},
+      missingFields:['date','time','partySize'],
+      selectedEntities:[],
+      constraints:[],
+    },
+  };
+  const modelOutput=JSON.stringify({
+    normalizedMeaning:'กลับไปทำรายการจองม้าที่พักไว้',
+    reply:'',
+    speechAct:'transaction_request',
+    domain:'activity',
+    intent:'resume_booking',
+    action:'book',
+    informationNeed:'none',
+    taskDirective:'resume_suspended',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.98,
+    needsClarification:false,
+  });
+
+  for(const message of ['กลับไปเรื่องม้าที่ค้างไว้','กลับมาจองม้าต่อก่อน']) {
+    const turn=parseSemanticTurnResponse(modelOutput,context,message);
+    assert.equal(turn.taskDirective,'resume_suspended');
+    assert.notEqual(turn.action,'book');
+    assert.notEqual(turn.speechAct,'transaction_request');
+  }
+
+  const committed=parseSemanticTurnResponse(modelOutput,context,'กลับไปเรื่องม้าที่ค้างไว้ แล้วจองเลย');
+  assert.equal(committed.action,'book');
+  assert.equal(committed.speechAct,'transaction_request');
 });
