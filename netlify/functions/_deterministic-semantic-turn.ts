@@ -633,10 +633,21 @@ function deriveForActiveTask(
     && NO_COMMIT_CONSEQUENCE_MARKER.test(message)) {
     const entities: Record<string, unknown> = {};
     if (typeof task.slots.resourceCode === 'string') entities.resourceCode = task.slots.resourceCode;
-    // The task's own slot key is `assetSelection` (see ACTIVITY_BOOKING_
-    // REQUIRED_FIELDS in thongthai-chat.ts); renderActivityAvailability
-    // reads the customer-facing name back under `entities.horseName`.
-    if (typeof task.slots.assetSelection === 'string') entities.horseName = task.slots.assetSelection;
+    // Preserve explicitly named primary/fallback assets in the CURRENT
+    // conditional sentence. These are identity labels only; availability is
+    // still verified downstream from the live source.
+    const namedAssets = ACTIVITY_ASSET_SELECTIONS
+      .map(asset => ({ asset, index:message.search(asset.pattern) }))
+      .filter(item => item.index >= 0)
+      .sort((a,b)=>a.index-b.index);
+    if (namedAssets.length >= 1) entities.primaryHorse = namedAssets[0]!.asset.name;
+    if (namedAssets.length >= 2) entities.fallbackHorse = namedAssets[1]!.asset.name;
+
+    // When the current sentence uses only a pronoun/deictic, retain the
+    // already-selected task asset as the primary identity.
+    if (namedAssets.length === 0 && typeof task.slots.assetSelection === 'string') {
+      entities.horseName = task.slots.assetSelection;
+    }
     return {
       domain: task.domain, intent: 'task_conditional_continuation', action: 'ask',
       informationNeed: 'availability',
