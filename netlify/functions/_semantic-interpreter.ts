@@ -1474,6 +1474,18 @@ export function parseSemanticTurnResponse(
     if (speechAct === 'transaction_request') speechAct = 'request';
   }
 
+  if (
+    taskDirective === 'resume_suspended'
+    && action === 'confirm'
+    && !explicitSelectionReference
+    && Object.keys(entities).length === 0
+  ) {
+    // A bare "resume that task" is working-state navigation, not confirmation
+    // of an entity/choice. Preserve a real same-turn selection when one is
+    // actually present, but never let the suspended task's old shape invent it.
+    action = 'ask';
+  }
+
   const ambiguousReferenceRequiresClarification =
     hasAmbiguousReference
     && !(['ask','discover','recommend','compare'] as SemanticAction[]).includes(parsedAction);
