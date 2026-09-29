@@ -68,7 +68,7 @@ import {
 } from './_restaurant-preorder-dialog';
 import { processThongthaiOneMindTurnResilient, isTrustedZeroCostFactLookup } from './_thongthai-one-mind-orchestrator';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
-import { processOneMindCustomerTurn, isTrustedResolvedNoTransactionContinuation } from './_thongthai-one-mind-response';
+import { processOneMindCustomerTurn, isTrustedBoundedNoTransactionContinuation } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
@@ -4699,14 +4699,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         && oneMind.turn.semanticTurn.semanticSource === 'deterministic_fallback'
         && oneMind.response.mode === 'deterministic'
         && isTrustedZeroCostFactLookup(oneMind.turn.dialogSemanticTurn, request.message);
-      const trustedResolvedNoTransactionReady = oneMind.status === 'composed'
+      const trustedBoundedNoTransactionReady = oneMind.status === 'composed'
         && oneMind.turn.semanticTurn.semanticSource === 'deterministic_fallback'
         && oneMind.response.mode === 'deterministic'
-        && isTrustedResolvedNoTransactionContinuation(oneMind.turn);
+        && isTrustedBoundedNoTransactionContinuation(oneMind.turn);
       const supervisedMeaningReady = (oneMind.status === 'composed'
         && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor')
         || trustedZeroCostReady
-        || trustedResolvedNoTransactionReady;
+        || trustedBoundedNoTransactionReady;
       if (supervisedMeaningReady) {
         console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
           domain:oneMind.turn.semanticTurn.domain,
