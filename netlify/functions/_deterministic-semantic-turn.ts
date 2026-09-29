@@ -91,6 +91,12 @@ function findActivityTopic(message: string): { nodeId: string; activityCode: str
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
 }
 
+/** Generic question-shape signal reused by read-only deterministic branches.
+ * Transaction authorization itself lives in _slot-parsers.ts; this constant
+ * only tells other fallback classifiers that a sentence is interrogative. */
+const QUESTION_MARKER_RE =
+  /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
+
 // Same negation guard findEntityByName above uses -- see NEGATION_BEFORE_NAME_RE.
 const ASSET_NEGATION_BEFORE_NAME_RE = NEGATION_BEFORE_NAME_RE;
 
