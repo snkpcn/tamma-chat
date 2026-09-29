@@ -512,10 +512,21 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     const explicitNoTransaction = turn.constraints.some(constraint =>
       /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint)
     );
+    const hasResolvedContinuationReference = hasResolvedTaskReference(turn);
+    const hasConcretePlanningSlot = [
+      'date','time','partySize','durationMinutes','quantity',
+      'checkIn','checkOut','endDate','nights','bedrooms','roomType','items',
+    ].some(key => turn.entities[key] !== undefined && turn.entities[key] !== null);
+    const isBoundedPlanningContinuation =
+      explicitNoTransaction
+      && hasResolvedContinuationReference
+      && hasConcretePlanningSlot
+      && (turn.action === 'provide_information' || turn.action === 'confirm' || turn.action === 'modify');
     const considerOnlyWithoutTask =
       meaning.conversationalMode === 'CONSIDER'
       && !isExplicitTransaction(turn)
       && !hasPlanningBudgetSignal
+      && !isBoundedPlanningContinuation
       && (
         explicitNoTransaction
         || turn.speechAct === 'preference_update'
@@ -559,6 +570,7 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     if (
       noTransactionMemory
       && !isExplicitTransaction(turn)
+      && !isBoundedPlanningContinuation
       && (hasConsideredSelectionInDomain || meaning.conversationalMode === 'CONSIDER')
     ) {
       reasons.push('nontransactional_state_update_preserved');
