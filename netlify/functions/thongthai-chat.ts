@@ -5396,7 +5396,13 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // be swallowed by a model-composed or stale-domain answer. For a
   // transport-history-free follow-up
   // ("ราคาเท่าไร"), consult only the bounded active_topic snapshot.
-  const preservePromotionFastPath = isPromotionDiscoveryIntent(request.message);
+  const hasPendingPromotionRedemption = Boolean(
+    parsePendingPromotionRedemption(runtime.agentState.pendingPromotionRedemption),
+  );
+  const preservePromotionFastPath =
+    hasPendingPromotionRedemption
+    || isPromotionDiscoveryIntent(request.message)
+    || isPromotionAcceptIntent(request.message);
 
   let preserveCafeFastPath = isCafeReadOnlyTurn(request.message);
   if (!preserveCafeFastPath
