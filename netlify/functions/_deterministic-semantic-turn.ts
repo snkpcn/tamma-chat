@@ -12,7 +12,7 @@ import type {
 import { isTerminalTaskStatus, type ActiveTask, type TaskStateContainer } from './_task-state';
 import {
   extractDate, extractDurationMinutes, extractPartySize, extractTime,
-  hasCancelMarker, hasCommitMarker, hasCorrectionMarker,
+  hasCancelMarker, hasCommitMarker, hasCorrectionMarker, hasStandaloneTransactionRequest,
 } from './_slot-parsers';
 import { isExperienceDiscoveryIntent, PRIOR_REFERENCE_MARKER } from './_experience-discovery';
 import { isPromotionDiscoveryIntent } from './_promotion-dialog';
@@ -88,30 +88,6 @@ function directResourceCode(entity: SemanticContextEntity): string | null {
 function findActivityTopic(message: string): { nodeId: string; activityCode: string } | null {
   const match = ACTIVITY_TOPIC_KEYWORDS.find(item => item.keyword.test(message) && Boolean(findEcosystemNode(item.nodeId)));
   return match ? { nodeId: match.nodeId, activityCode: match.activityCode } : null;
-}
-
-// General "is this phrased as a question" structural signal, shared by
-// every place in this file that must tell a genuine commitment/selection
-// apart from someone merely asking about the same words. Not a phrase
-// table for one sentence or one asset -- any message matching this is
-// read-only, whatever domain or name it names.
-const QUESTION_MARKER_RE = /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
-
-function hasStandaloneTransactionRequest(message:string):boolean {
-  if (hasCommitMarker(message)) return true;
-  if (!/(?:จอง|สั่ง)/u.test(message)) return false;
-  // Conversational task control ("กลับมาจอง...ต่อ") resumes state; it is not
-  // a new commitment. Questions and explicit negation remain read-only.
-  if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
-  // "ไม่ต้องจอง"/"ยังไม่ต้องจอง" (don't need to book yet) is a real, common
-  // production phrasing distinct from "ไม่จอง"/"ไม่ได้จอง" -- the "ต้อง" in
-  // the middle previously fell outside this alternation's fixed word set
-  // and this whole message was silently treated as a real commit request.
-  // "ไว้ก่อน" ("hold off for now") is the other real production phrasing
-  // for the exact same "preference only, not a commitment yet" meaning.
-  if (/ไม่ได้(?:คิด|จะ|ให้)?\s*(?:จอง|สั่ง)|ไม่(?:ได้|ต้อง)?\s*(?:จอง|สั่ง)|ยกเลิก|ไว้ก่อน/u.test(message)) return false;
-  if (QUESTION_MARKER_RE.test(message)) return false;
-  return true;
 }
 
 // Same negation guard findEntityByName above uses -- see NEGATION_BEFORE_NAME_RE.
