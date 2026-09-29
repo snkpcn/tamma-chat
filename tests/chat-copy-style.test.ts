@@ -18,6 +18,17 @@ test('customer copy removes raw markdown but preserves readable spacing', () => 
   );
 });
 
+test('customer-facing copy enforces Thongthai male-neutral polite particle without rewriting words', () => {
+  assert.equal(
+    polishCustomerMessage('เรื่องม้าอยากทราบด้านไหนเป็นพิเศษคะ—อยากขี่ม้าไหมคะ', 'line'),
+    'เรื่องม้าอยากทราบด้านไหนเป็นพิเศษครับ—อยากขี่ม้าไหมครับ',
+  );
+  assert.equal(
+    polishCustomerMessage('ผัดคะน้าพร้อมเสิร์ฟค่ะ', 'web'),
+    'ผัดคะน้าพร้อมเสิร์ฟครับ',
+  );
+});
+
 test('web copy keeps URLs byte-for-byte while cleaning presentation markup', () => {
   const url = 'https://tamma-chat.netlify.app/account.html?code=12345678&from=line';
   const value = `**สมัครสมาชิก**\n\n${url}`;
