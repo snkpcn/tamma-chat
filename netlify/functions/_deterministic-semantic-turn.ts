@@ -631,7 +631,11 @@ function deriveForActiveTask(
 
   // A pure consent retraction with no richer read-only predicate still needs
   // to survive provider outage as a canonical no_transaction turn.
-  if (!hasCommitMarker(message) && hasExplicitNoTransactionMarker(message)) {
+  if (
+    !hasCommitMarker(message)
+    && hasExplicitNoTransactionMarker(message)
+    && !(CONDITIONAL_UNAVAILABLE_MARKER.test(message) && NO_COMMIT_CONSEQUENCE_MARKER.test(message))
+  ) {
     return {
       domain: task.domain,
       intent: 'transaction_commitment_retracted',
