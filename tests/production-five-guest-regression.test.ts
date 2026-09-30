@@ -9,7 +9,10 @@ import {
   emptySemanticContext,
   parseSemanticTurnResponse,
 } from '../netlify/functions/_semantic-interpreter';
-import { resolveOtopStructuredSlots } from '../netlify/functions/_dialog-manager';
+import {
+  resolveOtopStructuredSlots,
+  resolveStayCatalogStructuredSlots,
+} from '../netlify/functions/_dialog-manager';
 import { createActiveTask } from '../netlify/functions/_task-state';
 
 function readOnlyModel(domain: string, entities: Record<string, unknown> = {}): string {
@@ -33,7 +36,11 @@ test('guest 1: restaurant booking outranks the Thongthai horse-name collision', 
   const message = 'หวัดดีทองไทย ขอจองโต๊ะร้านตำมา-ชาติวันที่ 15 ตุลาคม 2569 เวลา 18:30 จำนวน 4 คน ชื่อ E2E TEST 01 โทร 0800000001 จองจริงเลยครับ';
   assert.equal(classifyTopLevelSemanticIntent(message), 'BUSINESS_TRANSACTION');
 
-  const turn = parseSemanticTurnResponse(readOnlyModel('restaurant'), emptySemanticContext(), message);
+  const turn = parseSemanticTurnResponse(
+    readOnlyModel('activity', { horseName: 'ทองไทย', activityCode: 'horse' }),
+    emptySemanticContext(),
+    message,
+  );
   assert.equal(turn.domain, 'restaurant');
   assert.equal(turn.action, 'book');
   assert.equal(turn.speechAct, 'transaction_request');
@@ -82,13 +89,33 @@ test('guest 3: compact Buddhist-year stay range is recovered without re-asking s
   assert.deepEqual(extractDateRange(message, new Date('2026-09-30T00:00:00Z')), {
     date: '2026-10-17', endDate: '2026-10-18',
   });
-  const turn = parseSemanticTurnResponse(readOnlyModel('stay', { bedrooms: 1 }), emptySemanticContext(), message);
+  const turn = parseSemanticTurnResponse(readOnlyModel('ecosystem'), emptySemanticContext(), message);
+  assert.equal(turn.domain, 'stay');
   assert.equal(turn.action, 'book');
   assert.equal(turn.speechAct, 'transaction_request');
   assert.equal(turn.informationNeed, 'none');
   assert.equal(turn.entities.date, '2026-10-17');
   assert.equal(turn.entities.endDate, '2026-10-18');
   assert.equal(turn.entities.partySize, 2);
+  assert.equal(turn.entities.bedrooms, 1);
+
+  const task = createActiveTask({
+    type:'stay_booking', sourceChannel:'web',
+    initialSlots:{...turn.entities},
+  });
+  const bundle = {
+    domain:'stay', sourceId:'stay_service_resources_live', sourceType:'stay_live', status:'ok',
+    freshness:{fetchedAt:'2026-09-30T00:00:00Z'},
+    facts:[
+      {key:'stay:stay-one-bedroom:name',value:'เฮือนสเตย์ 1 ห้องนอน',domain:'stay',authoritative:true},
+      {key:'stay:stay-one-bedroom:bedrooms',value:1,domain:'stay',authoritative:true},
+      {key:'stay:stay-two-bedroom:name',value:'เฮือนสเตย์ 2 ห้องนอน',domain:'stay',authoritative:true},
+      {key:'stay:stay-two-bedroom:bedrooms',value:2,domain:'stay',authoritative:true},
+    ],
+  } as any;
+  assert.deepEqual(resolveStayCatalogStructuredSlots(task, [bundle]), {
+    resourceCode:'stay-one-bedroom', resourceName:'เฮือนสเตย์ 1 ห้องนอน',
+  });
 });
 
 test('guest 4: an imperative send-now cafe request becomes a staff inquiry even without the word order', () => {
@@ -102,6 +129,14 @@ test('guest 4: an imperative send-now cafe request becomes a staff inquiry even 
 });
 
 test('guest 5: harmless OTOP product-name spacing resolves to one live SKU and stock', () => {
+  const message = 'ขอสั่งซื้อผ้าไหมมัดหมี่บ้านเขว้า 1 ชิ้น จัดส่ง ชื่อ E2E TEST 05 โทร 0800000005 ที่อยู่ 99 หมู่ 1 ตำบลในเมือง อำเภอเมืองชัยภูมิ จังหวัดชัยภูมิ 36000 ยืนยันสั่งซื้อจริงตอนนี้';
+  const turn = parseSemanticTurnResponse(readOnlyModel('restaurant', {
+    productName:'ผ้าไหมมัดหมี่บ้านเขว้า', quantity:1, fulfillmentType:'pickup',
+  }), emptySemanticContext(), message);
+  assert.equal(turn.domain, 'otop');
+  assert.equal(turn.entities.fulfillmentType, 'shipping');
+  assert.equal(turn.entities.shippingAddress, '99 หมู่ 1 ตำบลในเมือง อำเภอเมืองชัยภูมิ จังหวัดชัยภูมิ 36000');
+
   const task = createActiveTask({
     type: 'otop_order', sourceChannel: 'web',
     initialSlots: { productName: 'ผ้าไหมมัดหมี่บ้านเขว้า', quantity: 1 },
@@ -119,4 +154,3 @@ test('guest 5: harmless OTOP product-name spacing resolves to one live SKU and s
   });
   assert.equal(hasStandaloneTransactionRequest('ยืนยันสั่งซื้อจริงตอนนี้'), true);
 });
-
