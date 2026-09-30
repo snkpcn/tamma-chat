@@ -11,7 +11,7 @@ import type {
 } from './_semantic-interpreter';
 import { isTerminalTaskStatus, type ActiveTask, type TaskStateContainer } from './_task-state';
 import {
-  extractDate, extractDurationMinutes, extractPartySize, extractTime,
+  extractDate, extractDateRange, extractDurationMinutes, extractPartySize, extractTime,
   hasCancelMarker, hasCommitMarker, hasCorrectionMarker,
   hasExplicitCheckoutDateMarker,
   hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest,
@@ -913,6 +913,54 @@ export function deriveDeterministicSemanticTurn(
       constraints:[],
       confidence:0.92,
       needsClarification:false,
+    };
+  }
+
+  // Cold-start business transactions must be classified before the bounded
+  // activity-asset lexicon below. "ทองไทย" is both the assistant and a real
+  // horse name; without this precedence an explicit restaurant reservation
+  // addressed to the assistant became a horse booking whenever the language
+  // provider was unavailable. These branches only recover labelled,
+  // mechanically parseable slots and never execute a write themselves.
+  if (!activeTask && hasStandaloneTransactionRequest(trimmed)
+      && /(?:โต๊ะ|ที่นั่ง)/u.test(trimmed) && /จอง/u.test(trimmed)) {
+    const entities: Record<string,unknown> = { restaurantTransactionType:'table_booking' };
+    const date=extractDate(trimmed,now);
+    const time=extractTime(trimmed);
+    const partySize=extractPartySize(trimmed);
+    const phone=trimmed.match(/(?:เบอร์|โทร)\s*([0-9][0-9\s-]{7,18}[0-9])/u)?.[1]?.replace(/\D/g,'');
+    const customerName=trimmed.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|จำนวน|จอง|ยืนยัน|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+    if(date) entities.date=date;
+    if(time) entities.time=time;
+    if(partySize) entities.partySize=partySize;
+    if(customerName) entities.customerName=customerName;
+    if(phone) entities.phone=phone;
+    return {
+      domain:'restaurant', intent:'restaurant_table_booking_request', action:'book',
+      speechAct:'transaction_request', entities, references:[], constraints:[],
+      confidence:0.95, needsClarification:false,
+    };
+  }
+
+  if (!activeTask && hasStandaloneTransactionRequest(trimmed)
+      && /(?:เฮือนสเตย์|โฮมสเตย์|ที่พัก|ห้องนอน)/u.test(trimmed) && /จอง/u.test(trimmed)) {
+    const entities: Record<string,unknown> = {};
+    const range=extractDateRange(trimmed,now);
+    const date=range?.date ?? extractDate(trimmed,now);
+    const partySize=extractPartySize(trimmed);
+    const bedrooms=trimmed.match(/(\d{1,2})\s*ห้องนอน/u);
+    const phone=trimmed.match(/(?:เบอร์|โทร)\s*([0-9][0-9\s-]{7,18}[0-9])/u)?.[1]?.replace(/\D/g,'');
+    const customerName=trimmed.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|จำนวน|จอง|ยืนยัน|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+    if(date) entities.date=date;
+    if(range?.endDate) entities.endDate=range.endDate;
+    if(partySize) entities.partySize=partySize;
+    if(bedrooms) entities.bedrooms=Number(bedrooms[1]);
+    if(customerName) entities.customerName=customerName;
+    if(phone) entities.phone=phone;
+    return {
+      domain:'stay', intent:'stay_booking_request', action:'book',
+      speechAct:'transaction_request', entities, references:[], constraints:[],
+      confidence:0.95, needsClarification:false,
     };
   }
 
