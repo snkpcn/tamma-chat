@@ -1964,9 +1964,60 @@ export async function loadCustomerPortal(authUserId: string): Promise<Record<str
   if (!account?.id) return null;
   const [bookingRes, orderRes, inquiryRes] = await Promise.all([
     dbFetch(`bookings?customer_id=eq.${account.id}&select=booking_code,service_type,start_at,end_at,party_size,quantity,status,contact_status,created_at&order=created_at.desc&limit=50`),
-    dbFetch(`otop_orders?customer_id=eq.${account.id}&select=order_code,status,total_amount,fulfillment_type,contact_status,created_at&order=created_at.desc&limit=50`),
+    dbFetch(
+      `otop_orders?customer_id=eq.${account.id}`
+      + '&select=id,order_code,status,total_amount,subtotal_amount,shipping_fee,fulfillment_type,contact_status,shipping_status,carrier_name,tracking_number_enc,tracking_url,shipping_recipient_name_enc,shipping_phone_enc,shipping_address_enc,shipped_at,delivered_at,created_at'
+      + '&order=created_at.desc&limit=50',
+    ),
     dbFetch(`cafe_inquiries?customer_id=eq.${account.id}&select=inquiry_code,question,status,response_note,created_at&order=created_at.desc&limit=50`),
   ]);
+  const orders = await orderRes.json() as Array<Record<string, unknown>>;
+  const orderIds = orders.map(order => String(order.id ?? '')).filter(Boolean);
+  let orderItems: Array<Record<string, unknown>> = [];
+  let paymentRequests: Array<Record<string, unknown>> = [];
+  let shippingEvents: Array<Record<string, unknown>> = [];
+  if (orderIds.length) {
+    const idList = orderIds.join(',');
+    const [itemRes, paymentRes, eventRes] = await Promise.all([
+      dbFetch(
+        `otop_order_items?order_id=in.(${idList})`
+        + '&select=order_id,quantity,unit_price,line_total,otop_products(sku,name)',
+      ),
+      dbFetch(
+        `payment_requests?entity_type=eq.otop_order&entity_id=in.(${idList})`
+        + '&select=entity_id,payment_code,amount,status,created_at,updated_at',
+      ),
+      dbFetch(
+        `otop_shipping_events?order_id=in.(${idList})`
+        + '&select=order_id,status,customer_message,created_at&order=created_at.asc',
+      ),
+    ]);
+    orderItems = await itemRes.json() as Array<Record<string, unknown>>;
+    paymentRequests = await paymentRes.json() as Array<Record<string, unknown>>;
+    shippingEvents = await eventRes.json() as Array<Record<string, unknown>>;
+  }
+  const portalOrders = orders.map(order => ({
+    order_code: order.order_code,
+    status: order.status,
+    total_amount: order.total_amount,
+    subtotal_amount: order.subtotal_amount,
+    shipping_fee: order.shipping_fee,
+    fulfillment_type: order.fulfillment_type,
+    contact_status: order.contact_status,
+    shipping_status: order.shipping_status,
+    carrier_name: order.carrier_name,
+    tracking_number: decryptPii(order.tracking_number_enc as string | null),
+    tracking_url: order.tracking_url,
+    shipping_recipient_name: decryptPii(order.shipping_recipient_name_enc as string | null),
+    shipping_phone: decryptPii(order.shipping_phone_enc as string | null),
+    shipping_address: decryptPii(order.shipping_address_enc as string | null),
+    shipped_at: order.shipped_at,
+    delivered_at: order.delivered_at,
+    created_at: order.created_at,
+    items: orderItems.filter(item => item.order_id === order.id),
+    payment: paymentRequests.find(payment => payment.entity_id === order.id) ?? null,
+    shipping_events: shippingEvents.filter(event => event.order_id === order.id),
+  }));
   return {
     id: account.id,
     guestId: account.guest_id,
@@ -1984,7 +2035,7 @@ export async function loadCustomerPortal(authUserId: string): Promise<Record<str
     profileCompleted: Boolean(account.profile_completed_at),
     createdAt: account.created_at,
     bookings: await bookingRes.json(),
-    orders: await orderRes.json(),
+    orders: portalOrders,
     inquiries: await inquiryRes.json(),
   };
 }
