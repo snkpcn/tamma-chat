@@ -14,6 +14,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { scroll-behavior: smooth; }
 body {
   margin: 0;
@@ -74,6 +75,7 @@ button { font: inherit; }
   color: #f8eddb;
   font-size: 15px;
   font-weight: 600;
+  white-space: nowrap;
   transition: background .25s ease, color .25s ease, transform .25s ease;
 }
 .account-link:hover, .account-link:focus-visible { background: rgba(255,255,255,.09); transform: translateY(-1px); }
@@ -82,24 +84,56 @@ button { font: inherit; }
 
 main { width: min(1480px, 100%); margin: 0 auto; padding: 0 clamp(18px, 4vw, 64px) 70px; }
 .map-intro {
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 40px;
-  padding: clamp(52px, 8vw, 106px) 0 clamp(38px, 5vw, 64px);
+  min-height: clamp(560px, 72vw, 780px);
+  margin: clamp(24px, 4vw, 52px) 0 clamp(38px, 5vw, 64px);
+  padding: clamp(38px, 6vw, 76px);
+  overflow: hidden;
+  border: 1px solid rgba(225, 197, 147, .28);
+  border-radius: 28px;
+  box-shadow: 0 34px 90px rgba(0,0,0,.32);
 }
-.map-intro-copy { max-width: 790px; }
+.map-intro::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(28,14,7,.88) 0%, rgba(28,14,7,.62) 50%, rgba(28,14,7,.18) 78%),
+    linear-gradient(0deg, rgba(28,14,7,.66) 0%, transparent 58%);
+}
+.map-intro-photo { position: absolute; z-index: -2; inset: 0; }
+.map-intro-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center 47%; }
+.map-intro-photo span {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(24,13,7,.7);
+  color: rgba(255,249,237,.86);
+  font-size: 11px;
+  backdrop-filter: blur(8px);
+}
+.map-intro-copy { position: relative; z-index: 1; max-width: 790px; }
 .map-kicker, .map-overline, .province-en {
   margin: 0 0 14px;
   color: var(--map-gold-light);
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: .19em;
+  letter-spacing: .055em;
 }
 .map-intro h1 {
   margin: 0;
-  font: 500 clamp(43px, 7vw, 88px)/1.08 var(--font-display);
-  letter-spacing: -.03em;
+  max-width: 15ch;
+  color: #fffaf0;
+  font: 500 clamp(43px, 6vw, 78px)/1.14 var(--font-display);
+  letter-spacing: 0;
 }
 .map-intro-copy > p:last-child {
   max-width: 690px;
@@ -108,8 +142,8 @@ main { width: min(1480px, 100%); margin: 0 auto; padding: 0 clamp(18px, 4vw, 64p
   font-size: clamp(17px, 1.55vw, 21px);
   line-height: 1.75;
 }
-.map-intro-mark { display: flex; align-items: center; gap: 18px; color: rgba(248, 239, 224, .66); font-size: 13px; line-height: 1.35; letter-spacing: .08em; text-transform: uppercase; }
-.map-intro-mark img { width: clamp(170px, 14vw, 220px); height: auto; filter: drop-shadow(0 22px 36px rgba(0,0,0,.3)); }
+.map-intro-mark { position: relative; z-index: 1; display: flex; align-items: center; gap: 18px; color: rgba(248, 239, 224, .82); font-size: 13px; line-height: 1.35; letter-spacing: .04em; }
+.map-intro-mark img { width: clamp(150px, 13vw, 210px); height: auto; filter: drop-shadow(0 22px 36px rgba(0,0,0,.3)); }
 
 .map-workspace {
   display: grid;
@@ -227,14 +261,28 @@ main { width: min(1480px, 100%); margin: 0 auto; padding: 0 clamp(18px, 4vw, 64p
   .brand-lockup { gap: 10px; }
   .brand-divider { height: 30px; }
   .brand-lockup .brand-main-logo { width: 112px; }
-  .brand-lockup .brand-otop-logo { width: 60px; height: 60px; }
+  .brand-lockup .brand-otop-logo { width: 68px; height: 68px; }
   .account-nav { gap: 6px; }
   .account-link { min-height: 40px; padding: 8px 11px; font-size: 13px; }
   main { padding-inline: 12px; }
-  .map-intro { grid-template-columns: 1fr; gap: 24px; padding-top: 42px; }
-  .map-intro h1 { font-size: clamp(43px, 15vw, 62px); }
-  .map-intro-mark { order: -1; }
-  .map-intro-mark img { width: 154px; }
+  .map-intro {
+    grid-template-columns: 1fr;
+    align-content: end;
+    gap: 18px;
+    min-height: 650px;
+    margin-top: 16px;
+    padding: 28px 22px 62px;
+    border-radius: 20px;
+  }
+  .map-intro::after {
+    background: linear-gradient(0deg, rgba(28,14,7,.92) 0%, rgba(28,14,7,.54) 52%, rgba(28,14,7,.12) 78%);
+  }
+  .map-intro-photo img { object-position: 58% center; }
+  .map-intro-photo span { right: 12px; bottom: 12px; font-size: 10px; }
+  .map-intro h1 { max-width: 13ch; font-size: clamp(38px, 11vw, 50px); line-height: 1.18; }
+  .map-intro-copy > p:last-child { margin-top: 16px; line-height: 1.65; }
+  .map-intro-mark { grid-row: 1; align-self: start; }
+  .map-intro-mark img { width: 104px; }
   .map-card, .province-panel { border-radius: 18px; }
   .map-card-head { align-items: start; flex-direction: column; padding: 24px 20px 10px; }
   .map-legend { justify-content: flex-start; }
@@ -256,7 +304,7 @@ main { width: min(1480px, 100%); margin: 0 auto; padding: 0 clamp(18px, 4vw, 64p
   .brand-divider { display: none; }
   .brand-lockup { gap: 7px; }
   .brand-lockup .brand-main-logo { width: 102px; }
-  .brand-lockup .brand-otop-logo { width: 54px; height: 54px; }
+  .brand-lockup .brand-otop-logo { width: 62px; height: 62px; }
   .account-link { padding-inline: 9px; }
   .map-canvas-wrap { min-height: 430px; }
   .map-intro-copy > p:last-child { font-size: 16px; }

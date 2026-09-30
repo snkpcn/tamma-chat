@@ -122,7 +122,7 @@ html = html.slice(0, communityStart) + communityBlock + html.slice(communityActi
 
 const chessArt = `      <div class="tt-chess-home-art" aria-hidden="true">
         <img class="tt-chess-home-board" src="assets/chess/derived/A01_chessboard_full.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="">
-        <img class="tt-chess-home-character" src="assets/brand/characters/thongthai-portrait-master-v2-4k.png" width="4096" height="4096" loading="lazy" decoding="async" alt="">
+        <img class="tt-chess-home-character" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" decoding="async" alt="">
       </div>`;
 html = html.replace(
   /      <div class="tt-chess-home-art"[^>]*>[\s\S]*?<\/div>\s*(?:<div class="tt-chess-winner-pass">[\s\S]*?<\/div>)?/u,
@@ -196,16 +196,27 @@ html = html
 
 html = html.replace(
   /<img id="fabAvatarImg"[^>]*>/u,
-  '<img id="fabAvatarImg" src="assets/brand/logos/tamma-chat-logo.svg" width="1051" height="404" alt="ทำมา-ชาติ">',
+  '<img id="fabAvatarImg" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" alt="ทองไทย">',
 );
 html = html.replace(
   /<img id="headerAvatarImg"[^>]*>/u,
-  '<img id="headerAvatarImg" src="assets/brand/logos/tamma-chat-logo.svg" width="1051" height="404" alt="ทำมา-ชาติ">',
+  '<img id="headerAvatarImg" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" alt="ทองไทย">',
 );
-html = html.replace(
-  /function avatarSrc\(state\)\{ return THONGTHAI_CHAT_ICONS\[state\] \|\| THONGTHAI_CHAT_ICONS\.default; \}/u,
-  "function avatarSrc(){ return 'assets/brand/logos/tamma-chat-logo.svg'; }",
-);
+
+// The original document embedded several multi-megabyte portraits directly in
+// JavaScript. Apart from making the page unnecessarily heavy, one damaged
+// base64 string can prevent every interaction on the page from initialising.
+// Keep one current, externally cached Thongthai portrait for every chat state.
+const avatarMapStart = html.indexOf('const THONGTHAI_CHAT_ICONS = {');
+const avatarFunctionStart = html.indexOf('function avatarSrc', avatarMapStart);
+if (avatarMapStart >= 0 && avatarFunctionStart >= 0) {
+  const avatarFunctionEnd = html.indexOf('\n', avatarFunctionStart);
+  const avatarBlock = `const THONGTHAI_CHAT_PORTRAIT = 'assets/brand/characters/thongthai-portrait-master-4k.webp';
+function avatarSrc(){ return THONGTHAI_CHAT_PORTRAIT; }`;
+  html = html.slice(0, avatarMapStart) + avatarBlock + html.slice(avatarFunctionEnd);
+} else if (!html.includes('const THONGTHAI_CHAT_PORTRAIT =')) {
+  throw new Error('Thongthai chat portrait block not found');
+}
 
 html = html.replace(
   /<img\s+src="data:image\/svg\+xml;base64,[^"]+"([^>]*\balt="ทำมา-ชาติ"[^>]*)>/gu,
