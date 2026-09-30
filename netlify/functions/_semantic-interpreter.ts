@@ -1654,6 +1654,33 @@ export function parseSemanticTurnResponse(
     // Revoking WRITE authority must not erase what the customer asked to know.
   }
 
+  // Production models can correctly identify the Cafe domain and the absence
+  // of verified Cafe facts, yet still collapse an explicit "submit this to the
+  // team" request into a read-only question. Reconcile that closed-field
+  // contradiction only across a deliberately narrow authorization boundary:
+  // the CURRENT turn must contain both a standalone order request and an
+  // explicit staff-handoff instruction. This creates only a cafe_inquiry (not
+  // a sale or payment), and ordinary menu/availability questions stay read-only.
+  const explicitCafeStaffInquiryAuthorization = domain === 'cafe'
+    && Boolean(currentMessage)
+    && !currentExplicitNoTransaction
+    && hasStandaloneTransactionRequest(currentMessage)
+    && (
+      /(?:ส่ง|ฝาก|แจ้ง)\s*(?:เรื่อง|คำถาม|คำขอ)[\s\S]{0,120}?(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,120}?(?:ติดต่อ(?:กลับ)?|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
+      || /(?:ขอให้|ให้)\s*(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,120}?(?:ติดต่อกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
+    );
+  if (explicitCafeStaffInquiryAuthorization) {
+    action = 'order';
+    speechAct = 'transaction_request';
+    informationNeed = 'none';
+    if (typeof entities.question !== 'string' || entities.question.trim().length === 0) {
+      entities.question = currentMessage.trim().slice(0, 2000);
+    }
+    // A model-authored read-only/source-unavailable reply contradicts the
+    // reconciled operation. Let the grounded Cafe inquiry composer respond.
+    reply = '';
+  }
+
   // A concrete Restaurant preorder request is not an availability question
   // merely because it contains a pickup date/time. Live production exposed
   // a contradictory supervisor result (`action=order` plus
@@ -1852,10 +1879,10 @@ export function parseSemanticTurnResponse(
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
+    needsClarification: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
       ? false
       : (parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification),
-    clarificationReason: (isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
+    clarificationReason: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
       ? undefined
       : (typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
         ? parsed.clarificationReason.trim()
