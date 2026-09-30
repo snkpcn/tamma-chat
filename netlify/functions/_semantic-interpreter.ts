@@ -33,6 +33,7 @@ import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 import {
   extractDate,
+  extractTime,
   hasExplicitCheckoutDateMarker,
   hasExplicitNoTransactionMarker,
   hasStandaloneTransactionRequest,
@@ -1649,6 +1650,35 @@ export function parseSemanticTurnResponse(
     }
     // Keep any legitimate read-only predicate (availability/price/policy/etc).
     // Revoking WRITE authority must not erase what the customer asked to know.
+  }
+
+  // A concrete Restaurant preorder request is not an availability question
+  // merely because it contains a pickup date/time. Live production exposed
+  // a contradictory supervisor result (`action=order` plus
+  // `informationNeed=availability`) for a fully specified order, which sent
+  // the turn to the table-availability source and blocked the real preorder.
+  // Normalize only an explicit transaction_request with concrete items and
+  // no actual availability/conditional wording. Generic slot parsers recover
+  // date/time the model omitted; menu lines and contact data remain model-
+  // supplied and are still validated by the preorder task policy.
+  const explicitRestaurantPreorder = domain === 'restaurant'
+    && action === 'order'
+    && speechAct === 'transaction_request'
+    && Array.isArray(entities.items)
+    && entities.items.length > 0
+    && Boolean(currentMessage)
+    && hasStandaloneTransactionRequest(currentMessage);
+  const asksRestaurantAvailability = /ว่าง(?:ไหม|มั้ย|หรือเปล่า)|(?:ได้|รับ)(?:ไหม|มั้ย)|ถ้า\s*ว่าง|เช็ก(?:คิว|ว่า)/u.test(currentMessage);
+  if (explicitRestaurantPreorder && !asksRestaurantAvailability) {
+    informationNeed = 'none';
+    if (entities.date === undefined) {
+      const recoveredDate = extractDate(currentMessage);
+      if (recoveredDate) entities.date = recoveredDate;
+    }
+    if (entities.time === undefined) {
+      const recoveredTime = extractTime(currentMessage);
+      if (recoveredTime) entities.time = recoveredTime;
+    }
   }
 
   if (
