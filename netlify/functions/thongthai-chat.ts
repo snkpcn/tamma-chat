@@ -2105,11 +2105,14 @@ export function resolveSupervisedOtopCutover(
       || turn.semanticTurn.semanticSource!=='openai_supervisor') return null;
   if(oneMind.status==='composed') return {kind:'respond',response:oneMind.response};
 
-  const meaning=turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
   const proposal=turn.dialogDecision.actionProposal;
   const task=turn.dialogDecision.taskStateContainer.activeTask;
-  if(meaning.commitmentLevel==='explicit_transaction'
-      && proposal?.toolName==='create_otop_order'
+  // Dialog Manager's customerCommitPresent is the canonical current-turn
+  // authorization proof. Production legitimately labels "ยืนยันสั่ง..." as
+  // action=confirm (rather than order) while still emitting this validated
+  // proposal; requiring a second commitment label here discards the correct
+  // proposal and can never add safety beyond that canonical proof.
+  if(proposal?.toolName==='create_otop_order'
       && proposal.customerCommitPresent
       && task?.type==='otop_order'
       && turn.dialogDecision.mode==='propose_action') {
