@@ -13,6 +13,7 @@ import { isTerminalTaskStatus, type ActiveTask, type TaskStateContainer } from '
 import {
   extractDate, extractDurationMinutes, extractPartySize, extractTime,
   hasCancelMarker, hasCommitMarker, hasCorrectionMarker,
+  hasExplicitCheckoutDateMarker,
   hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest,
 } from './_slot-parsers';
 import { isExperienceDiscoveryIntent, PRIOR_REFERENCE_MARKER } from './_experience-discovery';
@@ -752,7 +753,10 @@ function deriveForActiveTask(
     const time = extractTime(message);
     const partySize = extractPartySize(message);
     const durationMinutes = extractDurationMinutes(message);
-    if (date) entities.date = date;
+    if (date) {
+      if (task.domain === 'stay' && hasExplicitCheckoutDateMarker(message)) entities.endDate = date;
+      else entities.date = date;
+    }
     if (time) entities.time = time;
     if (partySize) entities.partySize = partySize;
     if (durationMinutes) entities.durationMinutes = durationMinutes;
@@ -782,7 +786,10 @@ function deriveForActiveTask(
   const time = extractTime(message);
   const partySize = extractPartySize(message);
   const durationMinutes = extractDurationMinutes(message);
-  if (date) entities.date = date;
+  if (date) {
+    if (task.domain === 'stay' && hasExplicitCheckoutDateMarker(message)) entities.endDate = date;
+    else entities.date = date;
+  }
   if (time) entities.time = time;
   if (partySize) entities.partySize = partySize;
   if (durationMinutes) entities.durationMinutes = durationMinutes;
