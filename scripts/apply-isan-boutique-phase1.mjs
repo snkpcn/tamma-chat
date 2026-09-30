@@ -190,8 +190,10 @@ const thaiFallbackCopy = new Map([
 for (const [oldCopy, newCopy] of thaiFallbackCopy) {
   html = html.replaceAll(oldCopy, newCopy);
 }
+// Keep the internal hotspot key in English so it continues to resolve the
+// translated hotspot_journal_* strings. Only the visible/accessible copy is Thai.
 html = html
-  .replace('data-name="Journal" data-title="สมุดบันทึก"', 'data-name="สมุดบันทึก" data-title="สมุดบันทึก"')
+  .replace('data-name="สมุดบันทึก" data-title="สมุดบันทึก"', 'data-name="Journal" data-title="สมุดบันทึก"')
   .replace('aria-label="Journal"', 'aria-label="สมุดบันทึก"');
 
 html = html.replace(
