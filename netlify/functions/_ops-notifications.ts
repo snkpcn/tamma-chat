@@ -1,5 +1,6 @@
 import { handleBookingOpsCommand } from './_ops-booking-actions';
 import { decryptPii, encryptPii, piiHash } from './_operations-db';
+import { safeTrackingUrl, shippingStatusLabel, type ShippingStatus } from './_member-delivery';
 
 export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all' | 'owner_general' | 'ai_cost';
 export type OpsNotificationEntity = 'booking' | 'cafe_inquiry' | 'otop_order' | 'feedback_event' | 'ai_cost';
@@ -574,11 +575,14 @@ async function notifyCafeInquiry(id: string): Promise<'sent' | 'duplicate' | 'no
 async function notifyOtopOrder(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
   const orderResponse = await dbFetch(
     `otop_orders?id=eq.${id}`
-    + '&select=id,order_code,customer_id,status,source_channel,fulfillment_type,customer_note,total_amount,environment&limit=1',
+    + '&select=id,order_code,customer_id,status,source_channel,fulfillment_type,customer_note,total_amount,subtotal_amount,shipping_fee,shipping_recipient_name_enc,shipping_phone_enc,shipping_address_enc,shipping_status,environment&limit=1',
   );
   const order = (await orderResponse.json() as Array<{
     id: string; order_code: string; customer_id: string | null; status: string; source_channel: string;
-    fulfillment_type: string; customer_note: string | null; total_amount: number | string; environment: string;
+    fulfillment_type: string; customer_note: string | null; total_amount: number | string;
+    subtotal_amount: number | string; shipping_fee: number | string;
+    shipping_recipient_name_enc: string | null; shipping_phone_enc: string | null;
+    shipping_address_enc: string | null; shipping_status: string | null; environment: string;
   }>)[0];
   if (!order || !['live', 'test'].includes(order.environment)) return 'ignored';
   const environmentPrefix = order.environment === 'test' ? '🧪 TEST — ' : '';
@@ -600,6 +604,10 @@ async function notifyOtopOrder(id: string): Promise<'sent' | 'duplicate' | 'not_
     ? items.map(item => `${products.get(item.product_id) ?? 'สินค้า'} × ${item.quantity}`).join(', ')
     : 'ดูรายละเอียดในหลังบ้าน';
   const total = Number(order.total_amount || 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  const shippingFee = Number(order.shipping_fee || 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  const shippingRecipient = decryptPii(order.shipping_recipient_name_enc);
+  const shippingPhone = decryptPii(order.shipping_phone_enc);
+  const shippingAddress = decryptPii(order.shipping_address_enc);
   const lines = [
     `${environmentPrefix}🛍️ ออเดอร์ใหม่ — ${TEAM_LABELS.otop}`,
     `เลขที่: ${order.order_code}`,
@@ -609,6 +617,12 @@ async function notifyOtopOrder(id: string): Promise<'sent' | 'duplicate' | 'not_
     `รายการ: ${itemText}`,
     `ยอดรวม: ${total} บาท`,
     `รับสินค้า: ${order.fulfillment_type === 'shipping' ? 'จัดส่ง' : 'รับที่ร้าน'}`,
+    order.fulfillment_type === 'shipping' ? `ค่าจัดส่ง: ${shippingFee} บาท` : '',
+    order.fulfillment_type === 'shipping' && shippingRecipient ? `ผู้รับ: ${shippingRecipient}` : '',
+    order.fulfillment_type === 'shipping' && shippingPhone ? `โทรผู้รับ: ${shippingPhone}` : '',
+    order.fulfillment_type === 'shipping' && shippingAddress ? `ที่อยู่: ${shippingAddress}` : '',
+    order.fulfillment_type === 'shipping' ? `พร้อมส่ง: พร้อมส่ง ${order.order_code}` : '',
+    order.fulfillment_type === 'shipping' ? `แจ้งพัสดุ: จัดส่ง ${order.order_code} | ขนส่ง | เลขพัสดุ | https://ลิงก์ติดตาม` : '',
     `ช่องทาง: ${order.source_channel.toUpperCase()}`,
     order.customer_note ? `หมายเหตุ: ${cleanText(order.customer_note, 500)}` : '',
     `หลังบ้าน: ${BACKOFFICE_URL}`,
@@ -926,6 +940,90 @@ async function customerLineTarget(customerId: string | null): Promise<string | n
   return decryptPii(row?.external_id_enc) ?? null;
 }
 
+type OtopShippingRow = {
+  id: string;
+  order_code: string;
+  customer_id: string | null;
+  fulfillment_type: string;
+  shipping_status: string | null;
+  carrier_name: string | null;
+  tracking_number_enc: string | null;
+  tracking_url: string | null;
+  staff_note: string | null;
+  environment: string;
+};
+
+async function updateOtopShippingFromOpsGroup(input: {
+  binding: NotificationChannel;
+  orderCode: string;
+  status: ShippingStatus;
+  userId?: string | null;
+  carrier?: string | null;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
+}): Promise<string> {
+  if (input.binding.team_code !== 'otop') return 'คำสั่งจัดส่งใช้ได้เฉพาะกลุ่มทีม OTOP ครับ';
+  const response = await dbFetch(
+    `otop_orders?order_code=eq.${encodeURIComponent(input.orderCode)}`
+    + '&select=id,order_code,customer_id,fulfillment_type,shipping_status,carrier_name,tracking_number_enc,tracking_url,staff_note,environment&limit=1',
+  );
+  const order = (await response.json() as OtopShippingRow[])[0];
+  if (!order) return `ไม่พบเลขที่ ${input.orderCode} ครับ`;
+  if (order.fulfillment_type !== 'shipping') return `${order.order_code} เป็นรายการรับเอง จึงไม่มีสถานะจัดส่งครับ`;
+
+  const carrier = input.carrier?.replace(/\s+/g, ' ').trim().slice(0, 120) || null;
+  const trackingNumber = input.trackingNumber?.replace(/\s+/g, '').trim().slice(0, 120) || null;
+  const trackingUrl = safeTrackingUrl(input.trackingUrl);
+  if (input.status === 'shipped' && (!carrier || !trackingNumber)) {
+    return `รูปแบบไม่ครบครับ ใช้: จัดส่ง ${order.order_code} | ขนส่ง | เลขพัสดุ | https://ลิงก์ติดตาม`;
+  }
+  if (input.trackingUrl && !trackingUrl) return 'ลิงก์ติดตามต้องขึ้นต้นด้วย https:// ครับ';
+  const allowed: Partial<Record<ShippingStatus, ShippingStatus[]>> = {
+    packing: ['ready_to_ship'],
+    ready_to_ship: ['shipped'],
+    shipped: ['delivered'],
+  };
+  if (order.shipping_status !== input.status
+      && !(allowed[order.shipping_status as ShippingStatus] ?? []).includes(input.status)) {
+    return `${order.order_code} อยู่สถานะ “${shippingStatusLabel(order.shipping_status)}” จึงเปลี่ยนเป็น “${shippingStatusLabel(input.status)}” ไม่ได้ครับ`;
+  }
+
+  const actorHash = input.userId ? piiHash(input.userId)?.slice(0, 12) : null;
+  const auditLine = `อัปเดตจัดส่งผ่าน LINE · ${actorHash ? `staff:${actorHash}` : 'staff'} · ${new Date().toISOString()}`;
+  const body: Record<string, unknown> = {
+    shipping_status: input.status,
+    updated_at: new Date().toISOString(),
+    staff_note: [order.staff_note?.trim(), auditLine].filter(Boolean).join('\n').slice(0, 4000),
+  };
+  if (input.status === 'shipped') {
+    body.carrier_name = carrier;
+    body.tracking_number_enc = encryptPii(trackingNumber);
+    body.tracking_url = trackingUrl;
+  }
+  await dbFetch(`otop_orders?id=eq.${order.id}`, {
+    method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(body),
+  });
+
+  const customerText = [
+    `${order.environment === 'test' ? '🧪 TEST — ' : ''}📦 อัปเดตการจัดส่งจากทองไทย`,
+    `เลขที่: ${order.order_code}`,
+    `สถานะ: ${shippingStatusLabel(input.status)}`,
+    input.status === 'shipped' ? `ขนส่ง: ${carrier}` : '',
+    input.status === 'shipped' ? `เลขพัสดุ: ${trackingNumber}` : '',
+    input.status === 'shipped' && trackingUrl ? `ติดตาม: ${trackingUrl}` : '',
+    '',
+    'ดูรายละเอียดและประวัติสถานะได้ที่ https://tamma-chat.netlify.app/account.html',
+  ].filter(Boolean).join('\n');
+  const target = await customerLineTarget(order.customer_id);
+  if (!target) return `✅ อัปเดต ${order.order_code} เป็น “${shippingStatusLabel(input.status)}” แล้ว แต่ลูกค้ายังไม่ได้เชื่อม LINE ครับ`;
+  try {
+    await linePush(target, customerText);
+    return `✅ อัปเดต ${order.order_code} เป็น “${shippingStatusLabel(input.status)}” และแจ้งลูกค้าทาง LINE แล้วครับ`;
+  } catch {
+    return `⚠️ อัปเดต ${order.order_code} แล้ว แต่ส่ง LINE หาลูกค้าไม่สำเร็จครับ`;
+  }
+}
+
 async function confirmBookingFromOpsGroup(input: {
   binding: NotificationChannel;
   bookingCode: string;
@@ -1006,6 +1104,26 @@ export async function handleLineOpsGroupMessage(input: {
     const binding = await currentBindingForTarget(input.targetId);
     if (!binding) return 'กลุ่มนี้ยังไม่ได้ผูกทีมครับ';
     return confirmBookingFromOpsGroup({ binding, bookingCode: confirmMatch[1].toUpperCase(), userId: input.userId });
+  }
+
+  const readyMatch = text.match(/^พร้อมส่ง\s+(OR-\d{6}-[A-Z0-9]{8})$/iu);
+  const deliveredMatch = text.match(/^(?:ส่งสำเร็จ|จัดส่งสำเร็จ)\s+(OR-\d{6}-[A-Z0-9]{8})$/iu);
+  const shippedMatch = text.match(/^จัดส่ง\s+(OR-\d{6}-[A-Z0-9]{8})\s*\|\s*([^|]+)\|\s*([^|]+)(?:\|\s*(\S+))?$/iu);
+  if (readyMatch || deliveredMatch || shippedMatch) {
+    const binding = await currentBindingForTarget(input.targetId);
+    if (!binding) return 'กลุ่มนี้ยังไม่ได้ผูกทีมครับ';
+    if (shippedMatch) {
+      return updateOtopShippingFromOpsGroup({
+        binding, orderCode: shippedMatch[1].toUpperCase(), status: 'shipped', userId: input.userId,
+        carrier: shippedMatch[2], trackingNumber: shippedMatch[3], trackingUrl: shippedMatch[4] ?? null,
+      });
+    }
+    return updateOtopShippingFromOpsGroup({
+      binding,
+      orderCode: (readyMatch?.[1] ?? deliveredMatch?.[1] ?? '').toUpperCase(),
+      status: readyMatch ? 'ready_to_ship' : 'delivered',
+      userId: input.userId,
+    });
   }
 
   const bindMatch = text.match(/^ผูกทีม\s+(.+)$/iu);
