@@ -125,6 +125,19 @@ if (!html.includes('tt-chess-home-character')) {
 const journalIcon = `<div class="jf-icon-wrap" data-step="remember"><span class="jf-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22V5.5Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5A2.5 2.5 0 0 1 20 22V5.5Z"/><path d="m15.2 14.8 3.9-3.9 1.4 1.4-3.9 3.9-2 .6.6-2Z"/></svg></span><span class="jf-num-badge"><span class="jf-num-digit">4</span><svg class="jf-num-mark" viewBox="0 0 24 24" fill="none" stroke="#F7F1E4" stroke-width="2.6" stroke-linecap="round"><path d="M7 5v6a5 5 0 0 0 10 0V5"/></svg></span></div>`;
 html = html.replace(/<div class="jf-icon-wrap" data-step="remember">[^\n]+<\/div>/u, journalIcon);
 
+const thaiJourneyLabels = new Map([
+  ['flow_s1_t', 'ต้อนรับ'],
+  ['flow_s2_t', 'ค้นพบ'],
+  ['flow_s3_t', 'สัมผัสอีสาน'],
+  ['flow_s4_t', 'บันทึกเรื่องราว'],
+  ['flow_s5_t', 'สิทธิพิเศษ'],
+  ['flow_s6_t', 'กลับมาเยือน'],
+]);
+for (const [key, label] of thaiJourneyLabels) {
+  html = html.replace(new RegExp(`(<h4 data-i18n="${key}">)[^<]+(</h4>)`, 'u'), `$1${label}$2`);
+  html = html.replace(new RegExp(`(${key}:)"[^"]+"`, 'u'), `$1"${label}"`);
+}
+
 const hotspotLabels = new Map([
   ['Inthanin', 'กาแฟ Inthanin'],
   ['Reception', 'ต้อนรับ'],

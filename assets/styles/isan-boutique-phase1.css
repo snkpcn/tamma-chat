@@ -1037,6 +1037,69 @@ html.isan-boutique .ca-box img[src*="thongthai-portrait-master-4k"] {
   object-position: center 22%;
 }
 
+/* Journey: replace the decorative icon/badge stack with a quiet editorial
+   sequence. Progress hooks stay in the DOM, but the visual language is now
+   one clear number per step instead of six unrelated pictograms. */
+html.isan-boutique .jf-steps {
+  counter-reset: journey-step;
+}
+
+html.isan-boutique .jf-step {
+  counter-increment: journey-step;
+}
+
+html.isan-boutique .jf-icon-wrap {
+  width: 54px;
+}
+
+html.isan-boutique .jf-icon {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+html.isan-boutique .jf-icon::before {
+  content: "0" counter(journey-step);
+  color: var(--bronze);
+  font-family: var(--font-display);
+  font-size: 25px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+html.isan-boutique .jf-icon::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 8px;
+  width: 34px;
+  height: 1px;
+  background: rgba(150, 118, 75, 0.55);
+}
+
+html.isan-boutique .jf-icon svg,
+html.isan-boutique .jf-num-badge {
+  display: none !important;
+}
+
+html.isan-boutique .jf-text h4 {
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+html.isan-boutique .jf-text p {
+  max-width: 24ch;
+  font-size: 13.5px;
+}
+
 @media (min-width: 768px) {
   html.isan-boutique .concierge-fab {
     left: 28px;
@@ -1131,5 +1194,90 @@ html.isan-boutique .ca-box img[src*="thongthai-portrait-master-4k"] {
     right: auto;
     bottom: calc(16px + env(safe-area-inset-bottom));
     max-width: calc(100vw - 28px);
+  }
+}
+
+@media (max-width: 559.98px) {
+  html.isan-boutique #chess-challenge .tt-chess-home-wrap {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 32px 20px 24px;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-content {
+    grid-column: 1;
+    width: 100%;
+    padding-right: 0;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-content h3,
+  html.isan-boutique #chess-challenge .tt-chess-home-content p {
+    max-width: none;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-art {
+    grid-column: 1;
+    min-height: 238px;
+    margin-top: 18px;
+    overflow: hidden;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-character {
+    right: -10px;
+    bottom: -14px;
+    width: 258px;
+    height: 258px;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-winner-pass {
+    grid-column: 1;
+    padding-top: 16px;
+  }
+
+  html.isan-boutique .journey-flow-wrap {
+    margin-top: 28px;
+  }
+
+  html.isan-boutique .jf-step {
+    align-items: flex-start;
+    gap: 16px;
+    padding: 14px 0 22px;
+  }
+
+  html.isan-boutique .jf-step:not(:last-child)::after {
+    left: 17px;
+    top: 57px;
+    bottom: -3px;
+    width: 1px;
+    background: rgba(150, 118, 75, 0.34);
+  }
+
+  html.isan-boutique .jf-icon-wrap,
+  html.isan-boutique .jf-icon {
+    width: 38px;
+  }
+
+  html.isan-boutique .jf-icon {
+    height: 48px;
+  }
+
+  html.isan-boutique .jf-icon::before {
+    font-size: 22px;
+  }
+
+  html.isan-boutique .jf-icon::after {
+    bottom: 7px;
+    width: 26px;
+  }
+
+  html.isan-boutique .jf-text h4 {
+    font-size: 18px;
+    line-height: 1.45;
+  }
+
+  html.isan-boutique .jf-text p {
+    max-width: none;
+    font-size: 14px;
+    line-height: 1.65;
   }
 }
