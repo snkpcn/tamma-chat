@@ -640,6 +640,14 @@ async function lineBookingContact(customerId: string): Promise<{ fullName: strin
   return { fullName: decryptPii(row?.full_name_enc), phone: decryptPii(row?.phone_enc), isTest: row?.is_test === true };
 }
 
+export type CreatedBooking = {
+  id: string;
+  bookingCode: string;
+  status: string;
+  startAt: string;
+  endAt: string;
+};
+
 async function createUnscheduledBookingRequest(input: {
   guestDbId: string | null;
   customerId: string;
@@ -657,7 +665,7 @@ async function createUnscheduledBookingRequest(input: {
   phone?: string | null;
   email?: string | null;
   specialRequest?: string | null;
-}): Promise<{ bookingCode: string; status: string; startAt: string; endAt: string }> {
+}): Promise<CreatedBooking> {
   const resourceResponse = await dbFetch(
     `service_resources?service_type=eq.${input.serviceType}&active=eq.true`
     + (input.resourceCode ? `&code=eq.${encodeURIComponent(input.resourceCode)}` : '')
@@ -683,13 +691,14 @@ async function createUnscheduledBookingRequest(input: {
     const duplicateResponse = await dbFetch(
       `bookings?guest_id=eq.${input.guestDbId}&resource_id=eq.${resource.id}&start_at=eq.${encodeURIComponent(startAt)}`
       + `&status=neq.cancelled&created_at=gte.${encodeURIComponent(recentWindowStart)}`
-      + '&select=booking_code,status,start_at,end_at&order=created_at.desc&limit=1',
+      + '&select=id,booking_code,status,start_at,end_at&order=created_at.desc&limit=1',
     );
     const existing = (await duplicateResponse.json() as Array<{
-      booking_code: string; status: string; start_at: string; end_at: string;
+      id: string; booking_code: string; status: string; start_at: string; end_at: string;
     }>)[0];
     if (existing) {
       return {
+        id: existing.id,
         bookingCode: existing.booking_code,
         status: existing.status,
         startAt: existing.start_at,
@@ -722,9 +731,9 @@ async function createUnscheduledBookingRequest(input: {
       environment: input.environment,
     }),
   });
-  const booking = (await response.json() as Array<{ booking_code: string; status: string }>)[0];
+  const booking = (await response.json() as Array<{ id: string; booking_code: string; status: string }>)[0];
   if (!booking?.booking_code) throw new Error('booking_not_created');
-  return { bookingCode: booking.booking_code, status: booking.status, startAt, endAt };
+  return { id: booking.id, bookingCode: booking.booking_code, status: booking.status, startAt, endAt };
 }
 
 function thaiShortDate(iso: string): string {
@@ -1709,7 +1718,7 @@ export interface CreateBookingInput {
   environment?: 'live' | 'test';
 }
 
-export async function createBooking(input: CreateBookingInput): Promise<{ bookingCode: string; status: string; startAt: string; endAt: string }> {
+export async function createBooking(input: CreateBookingInput): Promise<CreatedBooking> {
   const environment = input.environment ?? 'live';
   if (input.serviceType === 'activity') {
     if (!input.resourceCode) throw new Error('activity_resource_required');
@@ -1828,10 +1837,10 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
     const dupRes = await dbFetch(
       `bookings?guest_id=eq.${input.guestDbId}&resource_id=eq.${resourceRows[0].id}&start_at=eq.${encodeURIComponent(startAt)}`
       + `&status=neq.cancelled&created_at=gte.${encodeURIComponent(recentWindowStart)}`
-      + '&select=booking_code,status,start_at,end_at&order=created_at.desc&limit=1',
+      + '&select=id,booking_code,status,start_at,end_at&order=created_at.desc&limit=1',
     );
-    const existing = (await dupRes.json() as Array<{ booking_code: string; status: string; start_at: string; end_at: string }>)[0];
-    if (existing) return { bookingCode: existing.booking_code, status: existing.status, startAt: existing.start_at, endAt: existing.end_at };
+    const existing = (await dupRes.json() as Array<{ id: string; booking_code: string; status: string; start_at: string; end_at: string }>)[0];
+    if (existing) return { id: existing.id, bookingCode: existing.booking_code, status: existing.status, startAt: existing.start_at, endAt: existing.end_at };
   }
 
   const bookingRes = await dbFetch('bookings', {
@@ -1875,7 +1884,7 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
     await dbFetch(`bookings?id=eq.${booking.id}`, { method: 'DELETE' }).catch(() => undefined);
     throw error;
   }
-  return { bookingCode: booking.booking_code, status: booking.status, startAt, endAt };
+  return { id: booking.id, bookingCode: booking.booking_code, status: booking.status, startAt, endAt };
 }
 
 export async function createCafeInquiry(input: {
@@ -1886,7 +1895,7 @@ export async function createCafeInquiry(input: {
   phone?: string | null;
   email?: string | null;
   environment?: 'live' | 'test';
-}): Promise<{ inquiryCode: string }> {
+}): Promise<{ id: string; inquiryCode: string }> {
   const customerId = await upsertCustomerAccount({
     guestDbId: input.guestDbId,
     fullName: input.customerName,
@@ -1906,9 +1915,9 @@ export async function createCafeInquiry(input: {
       environment: input.environment ?? 'live',
     }),
   });
-  const rows = await res.json() as Array<{ inquiry_code: string }>;
+  const rows = await res.json() as Array<{ id: string; inquiry_code: string }>;
   if (!rows[0]?.inquiry_code) throw new Error('inquiry_not_created');
-  return { inquiryCode: rows[0].inquiry_code };
+  return { id: rows[0].id, inquiryCode: rows[0].inquiry_code };
 }
 
 export interface OrderableProduct { sku: string; name: string; description: string | null; price: number; stock: number }
@@ -1933,7 +1942,7 @@ export async function createOtopOrder(input: {
   shippingAddress?: string | null;
   note?: string | null;
   environment?: 'live' | 'test';
-}): Promise<{ orderCode: string; total: number }> {
+}): Promise<{ id: string; orderCode: string; total: number }> {
   const environment = input.environment ?? 'live';
   const productRes = await dbFetch(
     `otop_products?sku=eq.${encodeURIComponent(input.sku)}&environment=eq.${environment}&active=eq.true&verified=eq.true&select=id,price,stock_qty&limit=1`,
@@ -1984,7 +1993,7 @@ export async function createOtopOrder(input: {
     await dbFetch(`otop_orders?id=eq.${order.id}`, { method: 'DELETE' }).catch(() => undefined);
     throw error;
   }
-  return { orderCode: order.order_code, total };
+  return { id: order.id, orderCode: order.order_code, total };
 }
 
 export async function authUserFromBearer(authHeader: string | undefined): Promise<{ id: string; email: string | null } | null> {
