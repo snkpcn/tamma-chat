@@ -113,7 +113,7 @@
 
   function fallbackHeroUrl(province) {
     if (province.provinceId === INITIAL_PROVINCE_ID) {
-      return 'assets/brand/backgrounds/ban-khwao-silk-weaving-real.jpg';
+      return 'assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp';
     }
     const item = state.heroItems.find(hero => hero.provinceTh === province.provinceName);
     return item ? DATA_ROOT + 'province-hero/' + item.web : '';
@@ -121,7 +121,7 @@
 
   function primaryHeroUrl(province) {
     if (province.provinceId === INITIAL_PROVINCE_ID) {
-      return 'assets/brand/backgrounds/ban-khwao-silk-weaving-real.jpg';
+      return 'assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp';
     }
     return province.heroProductImage || province.heroImage;
   }

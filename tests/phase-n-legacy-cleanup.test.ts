@@ -2,6 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
+test('public homepage starts in standards mode and uses current 4K visual assets',()=>{
+  const html=readFileSync('index.html','utf8');
+  assert.ok(html.startsWith('<!DOCTYPE html>'),'no bytes or text may appear before the doctype');
+  assert.match(html,/ban-khwao-silk-weaving-4k\.webp/);
+  assert.match(html,/thongthai-portrait-master-v2-4k\.png/);
+  assert.doesNotMatch(html,/assets\/thongthai\/thongthai-default\.webp/);
+});
+
 test('Phase N web never invokes the retired local ConciergeProvider as a second business brain',()=>{
   const html=readFileSync('index.html','utf8');
   assert.doesNotMatch(html,/ConciergeProvider\.reply\s*\(/);
