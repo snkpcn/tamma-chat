@@ -986,6 +986,25 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  if (!activeTask && hasStandaloneTransactionRequest(trimmed)
+      && /สั่งซื้อ/u.test(trimmed) && /(?:จัดส่ง|ส่งถึง|ส่งไป)/u.test(trimmed) && /ที่อยู่/u.test(trimmed)) {
+    const entities:Record<string,unknown>={fulfillmentType:'shipping'};
+    const productName=trimmed.match(/สั่งซื้อ\s*(.+?)(?=\s+\d+\s*(?:ชิ้น|อัน|ชุด|ถุง|กล่อง))/u)?.[1]?.trim();
+    const quantity=Number(trimmed.match(/(\d+)\s*(?:ชิ้น|อัน|ชุด|ถุง|กล่อง)/u)?.[1]);
+    const shippingAddress=trimmed.match(/ที่อยู่\s*(.+?)(?=\s*(?:ยืนยัน(?:การ)?สั่ง(?:ซื้อ)?|สั่งซื้อจริง|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+    const phone=trimmed.match(/(?:เบอร์|โทร)\s*([0-9][0-9\s-]{7,18}[0-9])/u)?.[1]?.replace(/\D/g,'');
+    const customerName=trimmed.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|ที่อยู่|จำนวน|ยืนยัน|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+    if(productName) entities.productName=productName;
+    if(Number.isInteger(quantity)&&quantity>0) entities.quantity=quantity;
+    if(shippingAddress) entities.shippingAddress=shippingAddress;
+    if(phone) entities.phone=phone;
+    if(customerName) entities.customerName=customerName;
+    return {
+      domain:'otop',intent:'otop_order_request',action:'order',speechAct:'transaction_request',
+      informationNeed:'none',entities,references:[],constraints:[],confidence:0.97,needsClarification:false,
+    };
+  }
+
   // A comparison among recently-shown entities can happen with or without an
   // open task (e.g. "ตัวไหนนิสัยดีกว่า" right after browsing, before any
   // selection is made) -- checked first, and it never touches task state.
