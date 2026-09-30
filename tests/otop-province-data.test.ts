@@ -57,7 +57,10 @@ test('map UI is province-experience first and links to the separate store', () =
   assert.match(mapSource, /province\.experienceTitle/u);
   assert.match(mapSource, /province\.experienceDescription/u);
   assert.match(mapSource, /otop\.html\?provinceId=/u);
-  assert.doesNotMatch(mapSource, /<image|primaryHeroUrl|renderProducts|productCard/u);
+  assert.match(mapSource, /province-hero-manifest\.json/u);
+  assert.match(mapSource, /class: 'selected-image'/u);
+  assert.match(mapSource, /clip-path.*selectedProvinceClip/u);
+  assert.doesNotMatch(mapSource, /renderProducts|productCard/u);
   assert.doesNotMatch(page, /map-intro-photo|provinceImage|provinceProductGrid|province-products/u);
   assert.match(page, /id="provinceExperienceTitle"/u);
   assert.match(page, /ดูสินค้าจากชัยภูมิ/u);
