@@ -55,6 +55,13 @@ test('validated supervised OTOP proposal reaches the terminal order executor',()
   });
 });
 
+test('production-shaped confirm action executes when Dialog Manager proves current customer commit',()=>{
+  const slots={sku:'OTOP-NB-003',quantity:1,fulfillmentType:'pickup'};
+  const turn=semantic({action:'confirm',intent:'confirm_product_order',speechAct:'selection'});
+  const decision=resolveSupervisedOtopCutover(oneMind(turn,slots),'line','th');
+  assert.equal(decision?.kind,'execute_order');
+});
+
 test('OTOP cutover never executes an unvalidated or noncommitted proposal',()=>{
   const slots={sku:'OTOP-NB-003',quantity:1};
   const wrongTool=resolveSupervisedOtopCutover(oneMind(semantic(),slots,'create_restaurant_preorder'),'line','th');
