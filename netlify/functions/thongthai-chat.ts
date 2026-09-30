@@ -4882,6 +4882,48 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // A complete, explicitly-authorized transaction must reach its executor
+  // before the conversation-first composer can turn it back into a generic
+  // "please add more details" reply. Both branches remain fail-closed:
+  // Activity requires every operational slot plus a current-turn commit;
+  // Stay requires one exact live property match plus every booking slot.
+  const committedActivityDraft = activityBookingFallbackDraft(request);
+  if (committedActivityDraft
+      && authorizedActivityBookingCommit(request)
+      && missingActivityFallbackFields(committedActivityDraft).length === 0) {
+    const executed = await executeDeterministicActivityBooking(
+      committedActivityDraft,
+      request,
+      guestDbId,
+      channel,
+    );
+    const polished = polishedResponse(executed, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const committedExactStay = await explicitStayBookingFallback(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_PRE_SUPERVISION_STAY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (committedExactStay) {
+    const polished = polishedResponse(committedExactStay, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   // Human Conversation Recovery: UNDERSTAND FIRST.
   //
   // Safety/escalation/service-feedback responders above may remain

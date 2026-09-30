@@ -15,7 +15,11 @@ import {
 } from '../netlify/functions/_dialog-manager';
 import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
 import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
-import { resolveExplicitStayFallbackArgs } from '../netlify/functions/thongthai-chat';
+import {
+  activityBookingFallbackDraft,
+  authorizedActivityBookingCommit,
+  resolveExplicitStayFallbackArgs,
+} from '../netlify/functions/thongthai-chat';
 
 function readOnlyModel(domain: string, entities: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -92,6 +96,15 @@ test('guest 2: an explicit send-to-system confirmation commits the one active ac
   assert.equal(turn.action, 'book');
   assert.equal(turn.speechAct, 'transaction_request');
   assert.equal(turn.informationNeed, 'none');
+
+  const productionMessage = 'อยากขี่ม้ากับน้องภาราดร 30 นาที วันที่ 16 ตุลาคม 2569 เวลา 10:00 จำนวน 1 คน ชื่อ E2E FINAL2 02 โทร 0800000502 พิมไม่ค่อยเก่งแต่ยืนยันจองจริงส่งระบบตอนนี้นะ';
+  const productionRequest = { message:productionMessage, chatHistory:[] } as any;
+  assert.equal(authorizedActivityBookingCommit(productionRequest), true);
+  assert.deepEqual(activityBookingFallbackDraft(productionRequest), {
+    serviceType:'activity', resourceCode:'activity-horse', horseName:'ภาราดร',
+    note:'เลือก: ภาราดร [asset:horse-pharadon]', date:'2026-10-16', time:'10:00',
+    durationMinutes:30, partySize:1, customerName:'E2E FINAL2 02', phone:'0800000502',
+  });
 });
 
 test('guest 3: compact Buddhist-year stay range is recovered without re-asking supplied dates', () => {
@@ -136,13 +149,13 @@ test('guest 3: compact Buddhist-year stay range is recovered without re-asking s
     resourceCode:'stay-one-bedroom', resourceName:'เฮือนสเตย์ 1 ห้องนอน',
   });
 
-  const namedMessage = 'เลือกที่พักนภา 1 ห้องนอน วันที่ 17-18 ตุลาคม 2569 พัก 2 คน พาผู้สูงอายุไปด้วย ชื่อ E2E TEST 03 โทร 0800000003 ยืนยันส่งจองเข้าระบบจริงตอนนี้ครับ';
+  const namedMessage = 'ขอจองที่พักนภา 1 ห้องนอน วันที่ 17-18 ตุลาคม 2569 พัก 2 คน พาผู้สูงอายุไปด้วย ชื่อ E2E FINAL2 03 โทร 0800000503 ยืนยันส่งจองเข้าระบบจริงตอนนี้ครับ';
   assert.deepEqual(resolveExplicitStayFallbackArgs(namedMessage, [
     {code:'stay-napa',name:'นภา'}, {code:'stay-rin',name:'ริน'}, {code:'stay-varee',name:'วารี'},
   ], new Date('2026-09-30T00:00:00Z')), {
     serviceType:'stay', resourceCode:'stay-napa', accommodationName:'นภา',
     date:'2026-10-17', endDate:'2026-10-18', partySize:2, quantity:1,
-    customerName:'E2E TEST 03', phone:'0800000003',
+    customerName:'E2E FINAL2 03', phone:'0800000503',
     note:'มีผู้สูงอายุร่วมเข้าพัก — กรุณาตรวจสอบการเข้าถึงก่อนยืนยัน',
   });
   assert.equal(resolveExplicitStayFallbackArgs(
