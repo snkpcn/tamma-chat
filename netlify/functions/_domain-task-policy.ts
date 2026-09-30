@@ -26,6 +26,7 @@ const RESTAURANT_BOOKING_REQUIRED = ['date', 'time', 'partySize', 'customerName'
 // contact fields are optional because the source channel may itself be
 // reachable (for example a real LINE conversation).
 const CAFE_INQUIRY_REQUIRED = ['question'] as const;
+const OTOP_ORDER_REQUIRED = ['sku', 'quantity'] as const;
 
 function missingFromStaticList(slots: Record<string, unknown>, required: readonly string[]): string[] {
   return required.filter(field => slots[field] === null || slots[field] === undefined || slots[field] === '');
@@ -92,6 +93,8 @@ export function computeTaskMissingFields(task: ActiveTask): string[] {
       return missingFromStaticList(task.slots, RESTAURANT_BOOKING_REQUIRED);
     case 'cafe_inquiry':
       return missingFromStaticList(task.slots, CAFE_INQUIRY_REQUIRED);
+    case 'otop_order':
+      return missingFromStaticList(task.slots, OTOP_ORDER_REQUIRED);
     default:
       return [];
   }
@@ -109,4 +112,5 @@ export const DOMAIN_TASK_REQUIRED_FIELDS: Partial<Record<ActiveTaskType, readonl
   stay_booking: STAY_BOOKING_REQUIRED,
   restaurant_booking: RESTAURANT_BOOKING_REQUIRED,
   cafe_inquiry: CAFE_INQUIRY_REQUIRED,
+  otop_order: OTOP_ORDER_REQUIRED,
 };

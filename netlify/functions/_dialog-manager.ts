@@ -887,6 +887,10 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
     case 'otop':
       if (turn.action === 'status') return [{ ...base, domain: 'otop', needs: ['order_status'] }];
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'otop', needs: ['catalog'] }];
+      if (task?.type === 'otop_order'
+          || ['order','confirm','provide_information','modify','correct_previous'].includes(turn.action)) {
+        return [{ ...base, domain:'otop', needs:['catalog'] }];
+      }
       return [];
     case 'membership':
       if (turn.action === 'status') return [{ ...base, domain: 'membership', needs: ['membership_status'] }];
@@ -1444,6 +1448,71 @@ function applyPromotionStructuredPolicy(
   return planDialogTurn({...input,taskState:container},now);
 }
 
+/** Resolve an OTOP product name/selection to exactly one current LIVE SKU.
+ * The model may understand a human product name, but only authoritative
+ * catalog facts may supply the operational SKU and stock boundary. */
+export function resolveOtopStructuredSlots(
+  task:ActiveTask,
+  bundles:readonly KnowledgeBundle[],
+):Record<string,unknown> {
+  if(task.type!=='otop_order') return {};
+  const map=new Map<string,unknown>();
+  for(const bundle of bundles){
+    if(bundle.domain!=='otop') continue;
+    for(const fact of bundle.facts) map.set(fact.key,fact.value);
+  }
+  const skus=[...new Set([...map.keys()]
+    .map(key=>key.match(/^otop:(.+):name$/u)?.[1])
+    .filter((value):value is string=>Boolean(value)))];
+  if(!skus.length) return {};
+
+  const evidenceSets:string[][]=[];
+  const declaredSku=[task.slots.sku,task.slots.productSku]
+    .find((value):value is string=>typeof value==='string'&&value.trim().length>0)?.trim() ?? '';
+  if(declaredSku) evidenceSets.push(skus.filter(sku=>sku===declaredSku));
+
+  const selected=[...new Set(task.selectedEntities
+    .map(entity=>entity.id.match(/^otop:(.+)$/u)?.[1])
+    .filter((value):value is string=>Boolean(value)))];
+  if(selected.length) evidenceSets.push(skus.filter(sku=>selected.includes(sku)));
+
+  const named=[task.slots.productName,task.slots.itemName,task.slots.name]
+    .find((value):value is string=>typeof value==='string'&&value.trim().length>0)?.trim() ?? '';
+  if(named) evidenceSets.push(skus.filter(sku=>map.get(`otop:${sku}:name`)===named));
+
+  if(!evidenceSets.length || evidenceSets.some(set=>set.length===0)) return {};
+  const matches=evidenceSets.reduce((current,set)=>current.filter(sku=>set.includes(sku)),skus);
+  const unique=[...new Set(matches)];
+  if(unique.length!==1) return {};
+
+  const sku=unique[0]!;
+  const stock=Number(map.get(`otop:${sku}:stock`));
+  const quantity=Number(task.slots.quantity);
+  if(!Number.isInteger(quantity) || quantity<1 || quantity>99
+      || !Number.isFinite(stock) || stock<quantity) return {};
+  return {sku,productName:String(map.get(`otop:${sku}:name`) ?? named)};
+}
+
+function applyOtopStructuredPolicy(
+  plan:DialogPlan,
+  bundles:readonly KnowledgeBundle[],
+  input:DialogInput,
+  now:Date,
+):DialogPlan|null {
+  const task=plan.taskStateContainer.activeTask;
+  if(!task || task.type!=='otop_order') return null;
+  const slotPatch=resolveOtopStructuredSlots(task,bundles);
+  if(!Object.keys(slotPatch).length) return null;
+  const changed=Object.entries(slotPatch).some(([key,value])=>
+    JSON.stringify(task.slots[key]??null)!==JSON.stringify(value??null));
+  if(!changed) return null;
+  const container=applyTaskStateEvent(plan.taskStateContainer,{
+    kind:'update_slots',eventId:`${input.eventId}:otop_verified_identity`,slotPatch,
+    requiredFields:DOMAIN_TASK_REQUIRED_FIELDS.otop_order,
+  },now);
+  return planDialogTurn({...input,taskState:container},now);
+}
+
 /** Pure Stay slot normalization. It consumes only already-understood
  * SemanticMeaning/task state: a canonical selected stay entity, ISO check-in
  * date, and either ISO checkout or a numeric night count. No customer text is
@@ -1498,6 +1567,12 @@ export async function processDialogTurnDetailed(
   const promotionReplanned=applyPromotionStructuredPolicy(plan,bundles,input,now);
   if(promotionReplanned){
     plan=promotionReplanned;
+    bundles=await resolveBundles(plan,adapters,now);
+  }
+
+  const otopReplanned=applyOtopStructuredPolicy(plan,bundles,input,now);
+  if(otopReplanned){
+    plan=otopReplanned;
     bundles=await resolveBundles(plan,adapters,now);
   }
 
