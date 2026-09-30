@@ -3,6 +3,13 @@ import fs from 'node:fs';
 const file = new URL('../index.html', import.meta.url);
 let html = fs.readFileSync(file, 'utf8');
 
+// Keep the document in standards mode even if an upstream binary operation
+// accidentally prepends bytes before the doctype.
+const doctypeIndex = html.indexOf('<!DOCTYPE html>');
+if (doctypeIndex > 0) {
+  html = html.slice(doctypeIndex);
+}
+
 if (!html.includes('class="isan-boutique"')) {
   html = html.replace('<html lang="th">', '<html lang="th" class="isan-boutique">');
 }
@@ -93,8 +100,8 @@ if (communityStart < 0 || communityActions < 0) {
 const communityBlock = `    <div class="community-map-gateway fade-up">
       <article class="community-feature community-story-feature">
         <div class="community-feature-media">
-          <img class="community-feature-bg" src="assets/brand/backgrounds/ban-khwao-silk-weaving-real.jpg" width="640" height="427" loading="lazy" decoding="async" alt="ช่างทอผ้าไหมบ้านเขว้ากำลังทอผ้าบนกี่">
-          <span class="community-photo-credit">ภาพการผลิตจริง · Nation Photo</span>
+          <img class="community-feature-bg" src="assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp" width="3840" height="2560" loading="lazy" decoding="async" alt="ช่างทอผ้าไหมบ้านเขว้ากำลังทอผ้าบนกี่">
+          <span class="community-photo-credit">ภาพต้นฉบับ Nation Photo · ปรับความละเอียด 4K</span>
         </div>
         <div class="community-feature-copy">
           <img class="community-feature-logo" src="assets/brand/logos/otop-logo-brown-1024.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="OTOP">
@@ -115,7 +122,7 @@ html = html.slice(0, communityStart) + communityBlock + html.slice(communityActi
 
 const chessArt = `      <div class="tt-chess-home-art" aria-hidden="true">
         <img class="tt-chess-home-board" src="assets/chess/derived/A01_chessboard_full.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="">
-        <img class="tt-chess-home-character" src="assets/thongthai/thongthai-default.webp" width="512" height="512" loading="lazy" decoding="async" alt="">
+        <img class="tt-chess-home-character" src="assets/brand/characters/thongthai-portrait-master-v2-4k.png" width="4096" height="4096" loading="lazy" decoding="async" alt="">
       </div>`;
 html = html.replace(
   /      <div class="tt-chess-home-art"[^>]*>[\s\S]*?<\/div>\s*(?:<div class="tt-chess-winner-pass">[\s\S]*?<\/div>)?/u,

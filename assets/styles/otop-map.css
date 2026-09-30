@@ -60,7 +60,7 @@ button { font: inherit; }
 .brand-divider { width: 1px; height: 42px; background: rgba(237, 218, 183, .28); }
 .brand-lockup img { object-fit: contain; }
 .brand-lockup .brand-main-logo { width: clamp(132px, 14vw, 190px); height: auto; }
-.brand-lockup .brand-otop-logo { width: 64px; height: 64px; }
+.brand-lockup .brand-otop-logo { width: 88px; height: 88px; }
 
 .account-nav { display: flex; align-items: center; gap: 9px; }
 .account-link {
@@ -109,7 +109,7 @@ main { width: min(1480px, 100%); margin: 0 auto; padding: 0 clamp(18px, 4vw, 64p
   line-height: 1.75;
 }
 .map-intro-mark { display: flex; align-items: center; gap: 18px; color: rgba(248, 239, 224, .66); font-size: 13px; line-height: 1.35; letter-spacing: .08em; text-transform: uppercase; }
-.map-intro-mark img { width: clamp(118px, 11vw, 164px); height: auto; filter: drop-shadow(0 22px 36px rgba(0,0,0,.3)); }
+.map-intro-mark img { width: clamp(170px, 14vw, 220px); height: auto; filter: drop-shadow(0 22px 36px rgba(0,0,0,.3)); }
 
 .map-workspace {
   display: grid;
@@ -227,14 +227,14 @@ main { width: min(1480px, 100%); margin: 0 auto; padding: 0 clamp(18px, 4vw, 64p
   .brand-lockup { gap: 10px; }
   .brand-divider { height: 30px; }
   .brand-lockup .brand-main-logo { width: 112px; }
-  .brand-lockup .brand-otop-logo { width: 46px; height: 46px; }
+  .brand-lockup .brand-otop-logo { width: 60px; height: 60px; }
   .account-nav { gap: 6px; }
   .account-link { min-height: 40px; padding: 8px 11px; font-size: 13px; }
   main { padding-inline: 12px; }
   .map-intro { grid-template-columns: 1fr; gap: 24px; padding-top: 42px; }
   .map-intro h1 { font-size: clamp(43px, 15vw, 62px); }
   .map-intro-mark { order: -1; }
-  .map-intro-mark img { width: 108px; }
+  .map-intro-mark img { width: 154px; }
   .map-card, .province-panel { border-radius: 18px; }
   .map-card-head { align-items: start; flex-direction: column; padding: 24px 20px 10px; }
   .map-legend { justify-content: flex-start; }
@@ -256,7 +256,7 @@ main { width: min(1480px, 100%); margin: 0 auto; padding: 0 clamp(18px, 4vw, 64p
   .brand-divider { display: none; }
   .brand-lockup { gap: 7px; }
   .brand-lockup .brand-main-logo { width: 102px; }
-  .brand-lockup .brand-otop-logo { width: 42px; height: 42px; }
+  .brand-lockup .brand-otop-logo { width: 54px; height: 54px; }
   .account-link { padding-inline: 9px; }
   .map-canvas-wrap { min-height: 430px; }
   .map-intro-copy > p:last-child { font-size: 16px; }
