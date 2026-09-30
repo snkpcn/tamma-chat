@@ -104,7 +104,7 @@ const communityBlock = `    <div class="community-map-gateway fade-up">
           <span class="community-photo-credit">ภาพต้นฉบับ Nation Photo · ปรับความละเอียด 4K</span>
         </div>
         <div class="community-feature-copy">
-          <img class="community-feature-logo" src="assets/brand/logos/otop-logo-brown-1024.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="OTOP">
+          <img class="community-feature-logo" src="assets/brand/logos/otop-logo-brown-trimmed.webp" width="352" height="347" loading="lazy" decoding="async" alt="OTOP">
           <div class="card-kicker">ของดีชัยภูมิ · บ้านเขว้า</div>
           <h3>ผ้าไหมบ้านเขว้า งานฝีมือที่ยังทอจริง</h3>
           <p>ชาวบ้านเขว้าสืบทอดการทอผ้าไหมมัดหมี่มาเกือบ 200 ปี ตั้งแต่การสาวไหม มัดลาย ย้อมสี จนถึงทอด้วยกี่ทีละเส้น ลายหมี่คั่นขอนารีจึงไม่ใช่แค่ลวดลายสวยงาม แต่เป็นฝีมือและเรื่องราวของคนชัยภูมิที่อยู่ในผ้าทุกผืน</p>
