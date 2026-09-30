@@ -31,7 +31,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
-import { hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
+import { extractDate, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
 import { isPromotionMention } from './_promotion-dialog';
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
@@ -1416,6 +1416,24 @@ export function parseSemanticTurnResponse(
 
   let references = resolveReferences(normalizeReferences(parsed.references), context);
   const entities = canonicalizeEntityAliases(asRecord(parsed.entities), domain);
+
+  // An explicit checkout-date answer is a closed task-slot update, not an
+  // open-ended language inference.  Live supervision can correctly keep the
+  // Stay domain/action while omitting `endDate` from a short answer such as
+  // "เช็กเอาต์วันที่ 3 ตุลาคม 2569".  When a real Stay task is already open,
+  // recover only that explicitly labelled date through the shared canonical
+  // date parser.  This cannot start a booking, select a room, or grant commit
+  // authority; it merely prevents an otherwise-complete task from getting
+  // stuck asking for checkout forever.
+  if (
+    domain === 'stay'
+    && context.activeTask?.domain === 'stay'
+    && entities.endDate === undefined
+    && /เช(?:็ก|็ค)เอ(?:า|้า)?(?:ต์|ท์)|check[\s-]?out/iu.test(currentMessage)
+  ) {
+    const explicitCheckoutDate = extractDate(currentMessage);
+    if (explicitCheckoutDate) entities.endDate = explicitCheckoutDate;
+  }
 
   const recoveredJourneyReference = omittedSingleActiveJourneyReference(
     currentMessage,
