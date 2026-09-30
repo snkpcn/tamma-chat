@@ -5,6 +5,7 @@ import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
 import { deterministicNeedsLanguageRefinement } from '../netlify/functions/_thongthai-one-mind-orchestrator';
 import {
   resolveStayBookingProposalArgs,
+  resolveDeterministicStayTransactionCutover,
   resolveSupervisedStayCutover,
 } from '../netlify/functions/thongthai-chat';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
@@ -70,4 +71,38 @@ test('G/H: selection is planning; only explicit_transaction plus gate-issued pro
   assert.equal(bare?.kind,'respond','bare acknowledgement remains non-transactional even if stale proposal-like state is injected');
   const committed=resolveSupervisedStayCutover(result(semantic({action:'book',speechAct:'transaction_request',informationNeed:'none'}),decision({mode:'propose_action',taskStateContainer:task,actionProposal:proposal})),'web','th');
   assert.equal(committed?.kind,'execute_booking');
+});
+
+test('provider outage executes only a complete Dialog-Manager-authorized Stay proposal', () => {
+  const task={...emptyTaskStateContainer(),activeTask:{taskId:'stay-outage-1',type:'stay_booking',domain:'stay',status:'ready',slots:{resourceCode:'stay-varee',date:'2026-10-02',endDate:'2026-10-03',partySize:2,quantity:1},missingFields:[],selectedEntities:[{id:'stay:stay-varee',type:'stay',name:'วารี',domain:'stay',canonical:true}],constraints:[],commitmentIntent:true,sourceChannel:'line',createdAt:'2026-09-30T00:00:00Z',updatedAt:'2026-09-30T00:00:00Z'}} as any;
+  const proposal={toolName:'create_booking',validatedArgs:task.activeTask.slots,requiresExplicitConfirmation:true,customerCommitPresent:true,idempotencyKey:'stay-outage-1'};
+  const committed=result(
+    semantic({action:'book',speechAct:'transaction_request',informationNeed:'none'}),
+    decision({mode:'propose_action',taskStateContainer:task,actionProposal:proposal}),
+    'deterministic_fallback',
+  );
+  const execution=resolveDeterministicStayTransactionCutover(committed);
+  assert.equal(execution?.kind,'execute_booking');
+  assert.equal(execution?.args.resourceCode,'stay-varee');
+
+  const noProposal=result(
+    semantic({action:'book',speechAct:'transaction_request',informationNeed:'none'}),
+    decision({taskStateContainer:task}),
+    'deterministic_fallback',
+  );
+  assert.equal(resolveDeterministicStayTransactionCutover(noProposal),null);
+
+  const acknowledgement=result(
+    semantic({action:'confirm',speechAct:'acknowledgement',informationNeed:'none'}),
+    decision({mode:'propose_action',taskStateContainer:task,actionProposal:proposal}),
+    'deterministic_fallback',
+  );
+  assert.equal(resolveDeterministicStayTransactionCutover(acknowledgement),null);
+
+  const readOnly=result(
+    semantic({action:'ask',informationNeed:'availability'}),
+    decision({taskStateContainer:task}),
+    'deterministic_fallback',
+  );
+  assert.equal(resolveDeterministicStayTransactionCutover(readOnly),null);
 });

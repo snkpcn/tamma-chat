@@ -1887,6 +1887,31 @@ export function resolveSupervisedStayCutover(
   return { kind:'respond', response };
 }
 
+/** Provider-outage bridge for Stay writes only. Read-only deterministic
+ * meanings still yield to the existing compatibility path; this accepts
+ * nothing unless Dialog Manager already emitted a complete, explicitly
+ * committed create_booking proposal for the active Stay task. */
+export function resolveDeterministicStayTransactionCutover(
+  oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+): { kind:'execute_booking'; args:Record<string, unknown> } | null {
+  if (oneMind.status !== 'legacy_required') return null;
+  const turn = oneMind.turn;
+  if (turn.semanticTurn.domain !== 'stay'
+      || turn.semanticTurn.semanticSource !== 'deterministic_fallback') return null;
+  const task = turn.dialogDecision.taskStateContainer.activeTask;
+  const proposal = turn.dialogDecision.actionProposal;
+  const meaning = turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
+  if (meaning.commitmentLevel !== 'explicit_transaction'
+      || task?.type !== 'stay_booking'
+      || proposal?.toolName !== 'create_booking'
+      || !proposal.customerCommitPresent
+      || turn.dialogDecision.mode !== 'propose_action') return null;
+  return {
+    kind:'execute_booking',
+    args:resolveStayBookingProposalArgs(proposal, task),
+  };
+}
+
 /** Structured-only Stay transaction args. Canonical selection lives on the
  * active task; dates/party size/nights were normalized by the dialog layer.
  * This function deliberately has no message/request parameter. */
@@ -4813,8 +4838,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const supervisedStay = earlyOneMind
     ? resolveSupervisedStayCutover(earlyOneMind, channel, request.language)
     : null;
-  if (supervisedStay?.kind === 'execute_booking') {
-    const executed = await executeDeterministicStayBooking(supervisedStay.args, request, guestDbId, channel);
+  const deterministicStayTransaction = earlyOneMind
+    ? resolveDeterministicStayTransactionCutover(earlyOneMind)
+    : null;
+  const stayBookingArgs = supervisedStay?.kind === 'execute_booking'
+    ? supervisedStay.args
+    : deterministicStayTransaction?.args;
+  if (stayBookingArgs) {
+    const executed = await executeDeterministicStayBooking(stayBookingArgs, request, guestDbId, channel);
     const polished = polishedResponse(executed, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
