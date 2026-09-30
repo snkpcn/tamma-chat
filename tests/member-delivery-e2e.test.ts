@@ -80,6 +80,13 @@ test('customer and store pages expose member address book, live catalog and auth
   assert.match(account, /tamma_auth_session/u);
   assert.match(store, /\.netlify\/functions\/otop-store/u);
   assert.match(store, /ยืนยันคำสั่งซื้อ/u);
+  assert.match(store, /id="provinceSelect"/u);
+  assert.match(store, /id="search"/u);
+  assert.match(store, /id="productDialog"/u);
+  assert.match(store, /function openProduct\(sku\)/u);
+  assert.match(store, /function addToCart\(sku,quantity=1\)/u);
+  assert.match(store, /history\.replaceState/u);
+  assert.match(store, /ban-khwao-silk-weaving-4k\.webp/u);
   assert.doesNotMatch(store, /Sandbox/u);
 });
 
