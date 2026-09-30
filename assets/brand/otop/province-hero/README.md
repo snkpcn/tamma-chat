@@ -2,13 +2,12 @@
 
 Twenty conceptual hero images for the interactive OTOP map. Each image is composed as a close, frame-filling texture so it stays legible when clipped by an irregular province SVG path.
 
-## Asset sets
+## Production assets
 
-- `master/`: 1,254 × 1,254 PNG generation masters.
-- `web/`: 960 × 960 WebP production derivatives, approximately 130–300 KB each.
-- `province-hero-manifest.json`: province boundary key, Thai/English product name, and selected asset paths.
-- `province-hero-contact-sheet-v2.jpg`: approved-set overview in manifest order.
-- `rejected/`: superseded or invalid generations; never reference these in the UI.
+- `web/`: 960 × 960 WebP derivatives, approximately 130–300 KB each.
+- `province-hero-manifest.json`: province boundary key, Thai/English product name, selected web asset, and archive reference for the generation master.
+
+The high-resolution generation masters, contact sheets, and rejected drafts are kept outside the production bundle so visitors only download the optimized web images.
 
 ## Shared generation direction
 
