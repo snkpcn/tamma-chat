@@ -1478,7 +1478,13 @@ export function resolveOtopStructuredSlots(
 
   const named=[task.slots.productName,task.slots.itemName,task.slots.name]
     .find((value):value is string=>typeof value==='string'&&value.trim().length>0)?.trim() ?? '';
-  if(named) evidenceSets.push(skus.filter(sku=>map.get(`otop:${sku}:name`)===named));
+  // Human product names vary harmlessly in whitespace/punctuation (for
+  // example "ผ้าไหมมัดหมี่บ้านเขว้า" vs "ผ้าไหมมัดหมี่ บ้านเขว้า").
+  // Normalize presentation only; SKU and stock still come exclusively from
+  // the live authoritative catalog and ambiguity still fails closed.
+  const normalizedName=(value:unknown)=>String(value??'').normalize('NFKC').toLocaleLowerCase('th-TH')
+    .replace(/[\s\-–—_/.,，()（）]+/gu,'');
+  if(named) evidenceSets.push(skus.filter(sku=>normalizedName(map.get(`otop:${sku}:name`))===normalizedName(named)));
 
   if(!evidenceSets.length || evidenceSets.some(set=>set.length===0)) return {};
   const matches=evidenceSets.reduce((current,set)=>current.filter(sku=>set.includes(sku)),skus);

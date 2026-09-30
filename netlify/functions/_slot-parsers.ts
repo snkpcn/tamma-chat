@@ -149,7 +149,7 @@ export function hasCorrectionMarker(message: string): boolean {
  *  zero-LLM slot-fill parser can recognize "this message is trying to do
  *  more than I can safely interpret" and defer (return null) instead of
  *  silently dropping the commit intent by only extracting the slot value. */
-const COMMIT_MARKER_RE = /จองเลย|ยืนยันจอง|สั่งเลย|ยืนยันการจอง|ยืนยันการสั่ง/gu;
+const COMMIT_MARKER_RE = /จอง(?:จริง)?เลย|ส่งจองจริง|ยืนยัน(?:การ)?จอง|สั่งเลย|ยืนยัน(?:การ)?สั่ง(?:ซื้อ)?|ส่งเข้าระบบ(?:เลย)?|ส่งคำขอ(?:จอง|สั่ง)?(?:จริง)?/gu;
 // A commit phrase immediately preceded by a negation ("ไม่ต้องจองเลย", "ยัง
 // ไม่ยืนยันจอง") is being explicitly DECLINED, not requested -- the bare
 // substring match above alone would misread "don't book it at all" as an
@@ -269,4 +269,21 @@ export function extractDurationMinutes(message: string): number | null {
   if (!match) return null;
   const minutes = Number(match[1]);
   return minutes >= 5 && minutes <= 600 ? minutes : null;
+}
+
+/** Parse a compact Thai stay range such as "17-18 ตุลาคม 2569".  The two
+ * dates are normalized through extractDate, so Buddhist-year conversion and
+ * calendar validation stay in one place. */
+export function extractDateRange(
+  message: string,
+  now: Date = new Date(),
+): { date: string; endDate: string } | null {
+  const range = message.match(
+    /(?:^|\s)(\d{1,2})\s*(?:-|–|—|ถึง)\s*(\d{1,2})\s*(มกราคม|ม\.ค\.|กุมภาพันธ์|ก\.พ\.|มีนาคม|มี\.ค\.|เมษายน|เม\.ย\.|พฤษภาคม|พ\.ค\.|มิถุนายน|มิ\.ย\.|กรกฎาคม|ก\.ค\.|สิงหาคม|ส\.ค\.|กันยายน|ก\.ย\.|ตุลาคม|ต\.ค\.|พฤศจิกายน|พ\.ย\.|ธันวาคม|ธ\.ค\.)\s*(\d{2,4})?(?=$|\s|[,，])/u,
+  );
+  if (!range) return null;
+  const suffix = `${range[3]}${range[4] ? ` ${range[4]}` : ''}`;
+  const date = extractDate(`${range[1]} ${suffix}`, now);
+  const endDate = extractDate(`${range[2]} ${suffix}`, now);
+  return date && endDate && endDate > date ? { date, endDate } : null;
 }

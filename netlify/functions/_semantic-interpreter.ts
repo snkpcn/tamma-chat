@@ -33,6 +33,8 @@ import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 import {
   extractDate,
+  extractDateRange,
+  extractPartySize,
   extractTime,
   hasExplicitCheckoutDateMarker,
   hasExplicitNoTransactionMarker,
@@ -1661,12 +1663,13 @@ export function parseSemanticTurnResponse(
   // the CURRENT turn must contain both a standalone order request and an
   // explicit staff-handoff instruction. This creates only a cafe_inquiry (not
   // a sale or payment), and ordinary menu/availability questions stay read-only.
+  const explicitCafeImperativeNow = /(?:กรุณา|รบกวน|ขอให้)\s*(?:ช่วย)?\s*(?:ส่ง|ฝาก|แจ้ง)[\s\S]{0,100}?(?:เรื่อง|คำถาม|คำขอ)[\s\S]{0,100}?(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,100}?(?:ตอนนี้|ติดต่อ(?:กลับ)?|โทรกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage);
   const explicitCafeStaffInquiryAuthorization = domain === 'cafe'
     && Boolean(currentMessage)
     && !currentExplicitNoTransaction
-    && hasStandaloneTransactionRequest(currentMessage)
+    && (hasStandaloneTransactionRequest(currentMessage) || explicitCafeImperativeNow)
     && (
-      /(?:ส่ง|ฝาก|แจ้ง)\s*(?:เรื่อง|คำถาม|คำขอ)[\s\S]{0,120}?(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,120}?(?:ติดต่อ(?:กลับ)?|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
+      /(?:ส่ง|ฝาก|แจ้ง)\s*(?:เรื่อง|คำถาม|คำขอ)[\s\S]{0,120}?(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,120}?(?:ติดต่อ(?:กลับ)?|โทรกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
       || /(?:ขอให้|ให้)\s*(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,120}?(?:ติดต่อกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
     );
   if (explicitCafeStaffInquiryAuthorization) {
@@ -1708,6 +1711,65 @@ export function parseSemanticTurnResponse(
       const recoveredTime = extractTime(currentMessage);
       if (recoveredTime) entities.time = recoveredTime;
     }
+  }
+
+  // A fully stated table reservation is still a booking request when the
+  // supervisor incorrectly labels it as availability/read-only.  Recover
+  // only closed, mechanically verifiable slots from the current sentence;
+  // the normal Restaurant task policy still refuses execution if anything
+  // required remains missing.
+  const explicitRestaurantTableBooking = domain === 'restaurant'
+    && Boolean(currentMessage)
+    && /(?:โต๊ะ|ที่นั่ง)/u.test(currentMessage)
+    && hasStandaloneTransactionRequest(currentMessage);
+  if (explicitRestaurantTableBooking) {
+    action = 'book';
+    speechAct = 'transaction_request';
+    informationNeed = 'none';
+    entities.restaurantTransactionType = 'table_booking';
+    entities.date ??= extractDate(currentMessage) ?? undefined;
+    entities.time ??= extractTime(currentMessage) ?? undefined;
+    entities.partySize ??= extractPartySize(currentMessage) ?? undefined;
+    const recoveredPhone = currentMessage.match(/(?:เบอร์|โทร)\s*([0-9][0-9\s-]{7,18}[0-9])/u)?.[1]?.replace(/\D/g, '');
+    const recoveredName = currentMessage.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|จำนวน|จอง|ยืนยัน|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+    if (entities.phone === undefined && recoveredPhone) entities.phone = recoveredPhone;
+    if (entities.customerName === undefined && recoveredName) entities.customerName = recoveredName;
+    reply = '';
+  }
+
+  // Thai customers commonly state a one-night stay as a compact range
+  // ("17-18 ตุลาคม 2569").  Repair an omitted range on an explicit Stay
+  // commit without guessing a property or availability.
+  if (domain === 'stay' && Boolean(currentMessage) && hasStandaloneTransactionRequest(currentMessage)) {
+    action = 'book';
+    speechAct = 'transaction_request';
+    informationNeed = 'none';
+    const range = extractDateRange(currentMessage);
+    if (range) {
+      entities.date ??= range.date;
+      entities.endDate ??= range.endDate;
+    }
+    entities.partySize ??= extractPartySize(currentMessage) ?? undefined;
+    reply = '';
+  }
+
+  // "ยืนยัน ส่งเข้าระบบเลย" is explicit current-turn authorization when
+  // it answers one open transactional task.  The active task supplies the
+  // bounded object; without it the same phrase remains non-executable.
+  const activeTaskSubmissionPhrase = /(?:ยืนยัน[\s\S]{0,40})?(?:ส่งเข้าระบบ|ส่งคำขอ|ทำรายการ)(?:เลย|จริง|ตอนนี้)?/u.test(currentMessage);
+  if (context.activeTask && activeTaskSubmissionPhrase
+      && (domain === 'unknown' || domain === 'general')) {
+    domain = context.activeTask.domain;
+  }
+  const explicitActiveTaskSubmission = Boolean(context.activeTask)
+    && context.activeTask?.domain === domain
+    && !currentExplicitNoTransaction
+    && activeTaskSubmissionPhrase;
+  if (explicitActiveTaskSubmission) {
+    action = domain === 'activity' || domain === 'stay' || domain === 'restaurant' ? 'book' : 'order';
+    speechAct = 'transaction_request';
+    informationNeed = 'none';
+    reply = '';
   }
 
   // Cafe writes are staff inquiries, never authoritative menu/availability
