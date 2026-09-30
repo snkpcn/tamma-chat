@@ -15,6 +15,7 @@ import {
 } from '../netlify/functions/_dialog-manager';
 import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
 import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
+import { resolveExplicitStayFallbackArgs } from '../netlify/functions/thongthai-chat';
 
 function readOnlyModel(domain: string, entities: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -134,16 +135,41 @@ test('guest 3: compact Buddhist-year stay range is recovered without re-asking s
   assert.deepEqual(resolveStayCatalogStructuredSlots(task, [bundle]), {
     resourceCode:'stay-one-bedroom', resourceName:'เฮือนสเตย์ 1 ห้องนอน',
   });
+
+  const namedMessage = 'เลือกที่พักนภา 1 ห้องนอน วันที่ 17-18 ตุลาคม 2569 พัก 2 คน พาผู้สูงอายุไปด้วย ชื่อ E2E TEST 03 โทร 0800000003 ยืนยันส่งจองเข้าระบบจริงตอนนี้ครับ';
+  assert.deepEqual(resolveExplicitStayFallbackArgs(namedMessage, [
+    {code:'stay-napa',name:'นภา'}, {code:'stay-rin',name:'ริน'}, {code:'stay-varee',name:'วารี'},
+  ], new Date('2026-09-30T00:00:00Z')), {
+    serviceType:'stay', resourceCode:'stay-napa', accommodationName:'นภา',
+    date:'2026-10-17', endDate:'2026-10-18', partySize:2, quantity:1,
+    customerName:'E2E TEST 03', phone:'0800000003',
+    note:'มีผู้สูงอายุร่วมเข้าพัก — กรุณาตรวจสอบการเข้าถึงก่อนยืนยัน',
+  });
+  assert.equal(resolveExplicitStayFallbackArgs(
+    message,
+    [{code:'stay-napa',name:'นภา'}, {code:'stay-rin',name:'ริน'}],
+    new Date('2026-09-30T00:00:00Z'),
+  ), null, 'a room type that matches multiple live properties must remain a clarification');
 });
 
 test('guest 4: an imperative send-now cafe request becomes a staff inquiry even without the word order', () => {
-  const message = 'ไม่ต้องยืนยันเมนู กรุณาส่งคำถาม/คำขอไปทีมคาเฟ่ตอนนี้ให้โทรกลับ ชื่อ E2E TEST 04 โทร 0800000004';
+  const message = 'ขอสั่งลาเต้เย็น 5 แก้ว วันที่ 18 ตุลาคม 2569 เวลา 09:00 ชื่อ E2E TEST 04 โทร 0800000004 ฝากส่งเรื่องให้อินทนิลจริงตอนนี้และให้โทรกลับครับ';
   const turn = parseSemanticTurnResponse(readOnlyModel('cafe'), emptySemanticContext(), message);
   assert.equal(turn.action, 'order');
   assert.equal(turn.speechAct, 'transaction_request');
   assert.equal(turn.informationNeed, 'none');
   assert.equal(turn.entities.question, message);
   assert.equal(turn.reply, undefined);
+
+  const fallback = deriveDeterministicSemanticTurn(
+    message, emptySemanticContext(), emptyTaskStateContainer(), new Date('2026-09-30T00:00:00Z'),
+  );
+  assert.equal(fallback?.domain, 'cafe');
+  assert.equal(fallback?.action, 'order');
+  assert.equal(fallback?.speechAct, 'transaction_request');
+  assert.equal(fallback?.entities.question, message);
+  assert.equal(fallback?.entities.customerName, 'E2E TEST 04');
+  assert.equal(fallback?.entities.phone, '0800000004');
 });
 
 test('guest 5: harmless OTOP product-name spacing resolves to one live SKU and stock', () => {
