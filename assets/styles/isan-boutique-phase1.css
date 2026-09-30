@@ -665,6 +665,9 @@ html.isan-boutique .reward-seal {
 /* Rewards: use a restrained editorial sequence instead of pictograms. The
    cards remain the same interactive milestones and keep their locked state. */
 html.isan-boutique .reward-seal {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: start;
   gap: 16px;
 }
 
@@ -700,11 +703,22 @@ html.isan-boutique .reward-seal.is-unlocked .reward-medal::after {
 }
 
 html.isan-boutique .reward-title-row {
+  align-items: baseline;
   gap: 14px;
+}
+
+html.isan-boutique .reward-body {
+  width: 100%;
+  padding: 0;
+}
+
+html.isan-boutique .reward-seal h5 {
+  margin: 0;
 }
 
 @media (max-width: 559.98px) {
   html.isan-boutique .reward-seal {
+    grid-template-columns: 32px minmax(0, 1fr);
     gap: 12px;
     padding: 18px 16px;
   }
@@ -712,7 +726,7 @@ html.isan-boutique .reward-title-row {
   html.isan-boutique .reward-medal {
     width: 32px;
     font-size: 17px;
-    padding-top: 2px;
+    padding-top: 1px;
   }
 
   html.isan-boutique .reward-seal h5 {
