@@ -662,6 +662,69 @@ html.isan-boutique .reward-seal {
   border-radius: 3px;
 }
 
+/* Rewards: use a restrained editorial sequence instead of pictograms. The
+   cards remain the same interactive milestones and keep their locked state. */
+html.isan-boutique .reward-seal {
+  gap: 16px;
+}
+
+html.isan-boutique .reward-medal {
+  width: 38px;
+  height: auto;
+  min-height: 30px;
+  justify-content: flex-start;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none !important;
+  color: var(--bronze-soft);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+html.isan-boutique .reward-seal.is-locked .reward-medal {
+  border: 0;
+  color: rgba(238, 228, 213, 0.5);
+  background: transparent;
+}
+
+html.isan-boutique .reward-seal.is-unlocked .reward-medal {
+  color: var(--bronze);
+}
+
+html.isan-boutique .reward-seal.is-unlocked .reward-medal::after {
+  display: none;
+}
+
+html.isan-boutique .reward-title-row {
+  gap: 14px;
+}
+
+@media (max-width: 559.98px) {
+  html.isan-boutique .reward-seal {
+    gap: 12px;
+    padding: 18px 16px;
+  }
+
+  html.isan-boutique .reward-medal {
+    width: 32px;
+    font-size: 17px;
+    padding-top: 2px;
+  }
+
+  html.isan-boutique .reward-seal h5 {
+    font-size: 15px;
+  }
+
+  html.isan-boutique .reward-desc {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+}
+
 html.isan-boutique .journal-character,
 html.isan-boutique .rewards-character {
   z-index: 2;

@@ -146,6 +146,15 @@ html = html.replace(
   '$1"บันทึกทุกเรื่องราวไว้ในสมุดการเดินทาง"',
 );
 
+html = html.replace(
+  'grid.innerHTML = REWARD_DEFS.map(r=>{',
+  'grid.innerHTML = REWARD_DEFS.map((r, index)=>{',
+);
+html = html.replace(
+  '<span class="reward-medal">${rewardIconSvg(r.iconKey)}</span>',
+  '<span class="reward-medal" aria-hidden="true">${String(index + 1).padStart(2, \'0\')}</span>',
+);
+
 const hotspotLabels = new Map([
   ['Inthanin', 'กาแฟ Inthanin'],
   ['Reception', 'ต้อนรับ'],
