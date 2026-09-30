@@ -29,6 +29,8 @@ test('mobile menu, Thongthai chat and OTOP imagery keep their intended roles',()
   assert.match(html,/on\(menuBtn,'click',openMobileNav\)/);
   assert.match(html,/on\(qs\('#conciergeFab'\),'click', openChat\)/);
   assert.match(html,/id="fabAvatarImg"[^>]+thongthai-portrait-master-4k\.webp/);
+  assert.match(html,/data-name="Journal" data-title="สมุดบันทึก"/);
+  assert.doesNotMatch(html,/data-name="สมุดบันทึก"/);
   assert.match(mapHtml,/class="map-intro-photo"[\s\S]+ban-khwao-silk-weaving-4k\.webp/);
   assert.match(mapHtml,/id="provinceImage"[^>]+01-chaiyaphum-mudmee-silk-hero\.webp/);
   assert.doesNotMatch(mapScript,/INITIAL_PROVINCE_ID\)[\s\S]{0,100}ban-khwao-silk-weaving-4k\.webp/);
