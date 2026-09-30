@@ -24,6 +24,7 @@ export type TopLevelSemanticIntent =
   | 'BOT_ADDRESS'
   | 'HORSE_RELATED'
   | 'GENERAL_RECOMMENDATION'
+  | 'BUSINESS_TRANSACTION'
   | 'OTHER';
 
 const LOCATION_MARKER =
@@ -52,6 +53,13 @@ const BOT_ADDRESS_MARKER =
 const GENERAL_RECOMMEND_MARKER =
   /^(?:มีอะไรแนะนำ|แนะนำหน่อย|ช่วยแนะนำหน่อย|ทองไทยแนะนำหน่อย)(?:ครับ|ค่ะ|คะ|คับ|นะ|หน่อย)?[\s?.!]*$/u;
 
+// A named business transaction outranks the lexical collision between the
+// assistant name "ทองไทย" and the horse with the same name.  This is a
+// routing guard only; it never authorizes a write.  Transaction consent is
+// still checked by the domain dialog/executor layer.
+const BUSINESS_TRANSACTION_MARKER =
+  /(?:จอง(?:โต๊ะ|ที่พัก|ห้อง|บ้าน)|สั่ง(?:ซื้อ|สินค้า|ของฝาก|อาหาร|กาแฟ)|ส่ง(?:เรื่อง|คำถาม|คำขอ).{0,80}(?:ทีม|ร้าน|คาเฟ่)|(?:OTOP|โอทอป|ของฝาก).{0,80}(?:สั่ง|จัดส่ง))/iu;
+
 export function classifyTopLevelSemanticIntent(message: string): TopLevelSemanticIntent {
   const text = String(message ?? '').trim();
   if (!text) return 'OTHER';
@@ -59,6 +67,9 @@ export function classifyTopLevelSemanticIntent(message: string): TopLevelSemanti
   // Whole-sentence intent outranks name/entity tokens. This ordering is the
   // central product rule this gate exists to enforce.
   if (LOCATION_MARKER.test(text)) return 'LOCATION_REQUEST';
+
+  // Whole-sentence business intent must win before the horse-name token.
+  if (BUSINESS_TRANSACTION_MARKER.test(text)) return 'BUSINESS_TRANSACTION';
 
   // Explicit horse/riding language wins over a bare weather-adjective hit.
   // "ม้าตัวนี้ขี้ร้อนไหม" (does this horse run hot / overheat) must stay a
@@ -79,5 +90,6 @@ export function topLevelIntentBlocksHorseTokenRouting(intent: TopLevelSemanticIn
   return intent === 'LOCATION_REQUEST'
     || intent === 'WEATHER_REQUEST'
     || intent === 'BOT_ADDRESS'
-    || intent === 'GENERAL_RECOMMENDATION';
+    || intent === 'GENERAL_RECOMMENDATION'
+    || intent === 'BUSINESS_TRANSACTION';
 }
