@@ -13,7 +13,8 @@ import {
   resolveOtopStructuredSlots,
   resolveStayCatalogStructuredSlots,
 } from '../netlify/functions/_dialog-manager';
-import { createActiveTask } from '../netlify/functions/_task-state';
+import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
+import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
 
 function readOnlyModel(domain: string, entities: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -53,6 +54,14 @@ test('guest 1: restaurant booking outranks the Thongthai horse-name collision', 
     phone: '0800000001',
     customerName: 'E2E TEST 01',
   });
+
+  const fallback = deriveDeterministicSemanticTurn(
+    message, emptySemanticContext(), emptyTaskStateContainer(), new Date('2026-09-30T00:00:00Z'),
+  );
+  assert.equal(fallback?.domain, 'restaurant');
+  assert.equal(fallback?.action, 'book');
+  assert.equal(fallback?.entities.restaurantTransactionType, 'table_booking');
+  assert.equal(fallback?.entities.customerName, 'E2E TEST 01');
 });
 
 test('guest 2: an explicit send-to-system confirmation commits the one active activity task', () => {
@@ -98,6 +107,15 @@ test('guest 3: compact Buddhist-year stay range is recovered without re-asking s
   assert.equal(turn.entities.endDate, '2026-10-18');
   assert.equal(turn.entities.partySize, 2);
   assert.equal(turn.entities.bedrooms, 1);
+
+  const fallback = deriveDeterministicSemanticTurn(
+    message, emptySemanticContext(), emptyTaskStateContainer(), new Date('2026-09-30T00:00:00Z'),
+  );
+  assert.equal(fallback?.domain, 'stay');
+  assert.equal(fallback?.action, 'book');
+  assert.equal(fallback?.entities.date, '2026-10-17');
+  assert.equal(fallback?.entities.endDate, '2026-10-18');
+  assert.equal(fallback?.entities.bedrooms, 1);
 
   const task = createActiveTask({
     type:'stay_booking', sourceChannel:'web',
