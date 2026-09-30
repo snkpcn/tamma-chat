@@ -65,7 +65,7 @@ export type DialogReasonCode =
   | 'task_side_question_preserved' | 'task_unrelated_turn_preserved' | 'task_cancelled'
   | 'task_summary_requested' | 'nontransactional_state_update_preserved'
   | 'transaction_commitment_revoked' | 'transaction_commitment_invalidated'
-  | 'activity_duration_rejected';
+  | 'activity_duration_rejected' | 'stay_manual_availability_request';
 
 export type ResponseIntent =
   | 'discovery_response' | 'grounded_answer' | 'clarify_ambiguous_entity' | 'ask_missing_field'
@@ -1091,6 +1091,25 @@ function hasMatchingVerifiedAvailability(
   }));
 }
 
+/** A Stay can still be submitted as a REQUEST when the authoritative source
+ *  is reachable but has no schedule rows for the selected property/dates.
+ *  This is deliberately distinct from both a source outage and an explicit
+ *  full/unavailable fact. Staff must verify the room before confirmation. */
+function canCreateManualStayAvailabilityRequest(
+  bundles: readonly KnowledgeBundle[],
+  task: ActiveTask,
+): boolean {
+  if (task.type !== 'stay_booking') return false;
+  const availabilitySourceResolved = bundles.some(bundle =>
+    bundle.domain === 'stay'
+    && bundle.sources.some(source => source.need === 'availability' && (source.status === 'ok' || source.status === 'empty')),
+  );
+  if (!availabilitySourceResolved) return false;
+  return !bundles.some(bundle => bundle.domain === 'stay' && bundle.facts.some(fact =>
+    /^availability:.+:\d{4}-\d{2}-\d{2}T.+:available$/u.test(fact.key),
+  ));
+}
+
 function hasVerifiedPromotionRedemption(
   bundles:readonly KnowledgeBundle[],
   task:ActiveTask,
@@ -1169,9 +1188,13 @@ export function resolveDialogDecision(plan: DialogPlan, bundles: readonly Knowle
     const availabilityRequested = plan.knowledgeRequests.some(request => request.needs.includes('availability'));
     const availabilityVerified = !availabilityRequested
       || hasMatchingVerifiedAvailability(bundles, task);
+    const manualStayRequest = availabilityRequested
+      && !availabilityVerified
+      && canCreateManualStayAvailabilityRequest(bundles, task);
     const promotionVerified = hasVerifiedPromotionRedemption(bundles, task);
     if (!promotionVerified && task.type==='promotion_redemption') reasons.push('knowledge_unverified');
-    if (availabilityVerified && promotionVerified) {
+    if (manualStayRequest) reasons.push('stay_manual_availability_request');
+    if ((availabilityVerified || manualStayRequest) && promotionVerified) {
       const toolName = TOOL_NAME_FOR_TASK_TYPE[task.type];
       if (toolName) {
         mode = 'propose_action';
