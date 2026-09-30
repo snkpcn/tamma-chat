@@ -77,6 +77,53 @@ test('explicit Cafe inquiry submission is transactional but remains an inquiry, 
   assert.equal(hasStandaloneTransactionRequest('กลับมาสั่งต่อครับ'),false);
 });
 
+test('explicit Cafe staff handoff repairs a live-model read-only misclassification',()=>{
+  const message='ยืนยันสั่งกาแฟ 5 แก้ว วันที่ 2 ตุลาคม 2569 เวลา 09:00 กรุณาส่งเรื่องให้ทีม Inthanin Café ติดต่อกลับ ชื่อทดสอบ E2E โทร 0800000004';
+  const modelOutput=JSON.stringify({
+    normalizedMeaning:'ask about cafe preorder availability',
+    reply:'ขออภัย ยังไม่มีข้อมูลจากร้าน',
+    speechAct:'request',domain:'cafe',intent:'cafe_read_only_inquiry',action:'ask',
+    informationNeed:'availability',entities:{customerName:'ทดสอบ E2E',phone:'0800000004'},
+    references:[],constraints:[],confidence:.95,needsClarification:true,
+    clarificationReason:'source unavailable',
+  });
+  const turn=parseSemanticTurnResponse(modelOutput,emptySemanticContext(),message);
+  assert.equal(turn.action,'order');
+  assert.equal(turn.speechAct,'transaction_request');
+  assert.equal(turn.informationNeed,'none');
+  assert.equal(turn.entities.question,message);
+  assert.equal(turn.entities.customerName,'ทดสอบ E2E');
+  assert.equal(turn.entities.phone,'0800000004');
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.clarificationReason,undefined);
+  assert.equal(turn.reply,undefined);
+});
+
+test('Cafe handoff repair does not authorize ordinary or explicitly withheld questions',()=>{
+  const readOnlyModel={
+    normalizedMeaning:'ask about cafe menu',speechAct:'question',domain:'cafe',
+    intent:'cafe_read_only_inquiry',action:'ask',informationNeed:'catalog',entities:{},
+    references:[],constraints:[],confidence:.95,needsClarification:false,
+  };
+  const ordinary=parseSemanticTurnResponse(
+    JSON.stringify(readOnlyModel),emptySemanticContext(),'คาเฟ่มีลาเต้ไหม',
+  );
+  assert.notEqual(ordinary.action,'order');
+  assert.equal(ordinary.informationNeed,'catalog');
+
+  const handoffWithoutOrder=parseSemanticTurnResponse(
+    JSON.stringify(readOnlyModel),emptySemanticContext(),'ช่วยส่งเรื่องให้ทีมคาเฟ่ติดต่อกลับ',
+  );
+  assert.notEqual(handoffWithoutOrder.action,'order');
+
+  const withheld=parseSemanticTurnResponse(
+    JSON.stringify(readOnlyModel),emptySemanticContext(),
+    'ยังไม่สั่ง แค่ถามว่ามีลาเต้ไหม กรุณาส่งเรื่องให้ทีมคาเฟ่ติดต่อกลับ',
+  );
+  assert.notEqual(withheld.action,'order');
+  assert.ok(withheld.constraints.includes('no_transaction'));
+});
+
 test('Cafe inquiry policy requires a concrete question and keeps contact fields optional',()=>{
   assert.deepEqual(computeTaskMissingFields(active({})) ,['question']);
   assert.deepEqual(computeTaskMissingFields(active({question:'สอบถามพรีออเดอร์กาแฟ'})),[]);
