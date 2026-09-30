@@ -31,7 +31,12 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
 import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
-import { extractDate, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
+import {
+  extractDate,
+  hasExplicitCheckoutDateMarker,
+  hasExplicitNoTransactionMarker,
+  hasStandaloneTransactionRequest,
+} from './_slot-parsers';
 import { isPromotionMention } from './_promotion-dialog';
 
 export const SEMANTIC_INTERPRETER_VERSION = 'semantic-v31';
@@ -1429,7 +1434,7 @@ export function parseSemanticTurnResponse(
     domain === 'stay'
     && context.activeTask?.domain === 'stay'
     && entities.endDate === undefined
-    && /เช(?:็ก|็ค)เอ(?:า|้า)?(?:ต์|ท์)|check[\s-]?out/iu.test(currentMessage)
+    && hasExplicitCheckoutDateMarker(currentMessage)
   ) {
     const explicitCheckoutDate = extractDate(currentMessage);
     if (explicitCheckoutDate) entities.endDate = explicitCheckoutDate;
