@@ -92,17 +92,28 @@ if (communityStart < 0 || communityActions < 0) {
   throw new Error('Community asset block not found');
 }
 
-const communityBlock = `    <div class="community-grid fade-up" id="communityGrid">
-      <div class="community-card community-empty-state community-feature" id="communityEmptyState">
+const communityBlock = `    <div class="community-map-gateway fade-up">
+      <div class="community-feature">
         <div class="community-feature-media" aria-hidden="true">
           <img class="community-feature-bg" src="assets/brand/backgrounds/otop-craft-shop-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="">
         </div>
         <div class="community-feature-copy">
           <img class="community-feature-logo" src="assets/brand/logos/otop-logo-brown-1024.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="OTOP">
-          <div class="card-kicker" data-i18n="otop_empty_kicker">Verified community catalog</div>
-          <h3 data-i18n="otop_empty_heading">กำลังเตรียมเรื่องราวจากชุมชน</h3>
-          <p data-i18n="otop_empty_body">ขณะนี้ยังไม่มีสินค้า OTOP หรือกิจกรรมชุมชนที่ผ่านการยืนยันและเปิดใช้งานในระบบ รายการจะแสดงเมื่อมีข้อมูลจริงเท่านั้น</p>
+          <div class="card-kicker">OTOP · 20 จังหวัดอีสาน</div>
+          <h3>เปิดแผนที่ของดีอีสาน</h3>
+          <p>แตะจังหวัดเพื่อค้นพบของดีเด่นในขอบเขตแผนที่จริง เริ่มต้นจากชัยภูมิ แล้วเดินทางต่อไปให้ครบทั้งภูมิภาค</p>
+          <div class="community-map-actions">
+            <a class="btn btn-primary community-map-launch" href="otop-map.html">เปิดแผนที่ของดีอีสาน</a>
+            <a class="btn btn-outline" href="account.html?mode=signup&amp;return=otop-map.html">สมัครสมาชิก</a>
+          </div>
         </div>
+      </div>
+    </div>
+    <div class="community-grid fade-up" id="communityGrid">
+      <div class="community-card community-empty-state" id="communityEmptyState">
+        <div class="card-kicker" data-i18n="otop_empty_kicker">Verified community catalog</div>
+        <h3 data-i18n="otop_empty_heading">กำลังเตรียมเรื่องราวจากชุมชน</h3>
+        <p data-i18n="otop_empty_body">ขณะนี้ยังไม่มีสินค้า OTOP หรือกิจกรรมชุมชนที่ผ่านการยืนยันและเปิดใช้งานในระบบ รายการจะแสดงเมื่อมีข้อมูลจริงเท่านั้น</p>
       </div>
     </div>
 `;
