@@ -137,6 +137,14 @@ for (const [key, label] of thaiJourneyLabels) {
   html = html.replace(new RegExp(`(<h4 data-i18n="${key}">)[^<]+(</h4>)`, 'u'), `$1${label}$2`);
   html = html.replace(new RegExp(`(${key}:)"[^"]+"`, 'u'), `$1"${label}"`);
 }
+html = html.replace(
+  /(<p data-i18n="flow_s4_d">)[^<]+(<\/p>)/u,
+  '$1บันทึกทุกเรื่องราวไว้ในสมุดการเดินทาง$2',
+);
+html = html.replace(
+  /(flow_s4_d:)"บันทึกทุกเรื่องราวไว้ใน Journey Journal"/u,
+  '$1"บันทึกทุกเรื่องราวไว้ในสมุดการเดินทาง"',
+);
 
 const hotspotLabels = new Map([
   ['Inthanin', 'กาแฟ Inthanin'],
