@@ -1056,8 +1056,38 @@ html.isan-boutique .hotspot-label {
 }
 
 html.isan-boutique .community-feature-logo {
-  width: 144px;
-  height: 144px;
+  width: clamp(170px, 16vw, 214px);
+  height: clamp(170px, 16vw, 214px);
+  filter: drop-shadow(0 18px 28px rgba(60, 25, 8, 0.16));
+}
+
+html.isan-boutique .community-map-gateway {
+  margin-bottom: clamp(24px, 4vw, 42px);
+}
+
+html.isan-boutique .community-map-gateway .community-feature {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(340px, 0.92fr);
+  overflow: hidden;
+  border: 1px solid rgba(43, 29, 19, 0.12);
+  border-radius: 24px;
+  background: #f7efe2;
+  box-shadow: 0 26px 60px -34px rgba(43, 29, 19, 0.44);
+}
+
+html.isan-boutique .community-map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+html.isan-boutique .community-map-launch {
+  background: var(--brown);
+}
+
+html.isan-boutique .community-map-launch:hover {
+  background: var(--brown-deep);
 }
 
 html.isan-boutique #chess-challenge .tt-chess-home-wrap {
@@ -1209,9 +1239,26 @@ html.isan-boutique .jf-text p {
   }
 
   html.isan-boutique .community-feature-logo {
-    width: 132px;
-    height: 132px;
+    width: 156px;
+    height: 156px;
     margin-bottom: 24px;
+  }
+
+  html.isan-boutique .community-map-gateway .community-feature {
+    grid-template-columns: 1fr;
+  }
+
+  html.isan-boutique .community-map-gateway .community-feature-media {
+    min-height: 270px;
+  }
+
+  html.isan-boutique .community-map-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  html.isan-boutique .community-map-actions .btn {
+    width: 100%;
   }
 
   html.isan-boutique #chess-challenge .tt-chess-home-wrap {

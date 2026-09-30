@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#25150d">
+  <title>แผนที่ของดีอีสาน — ทำมา-ชาติ OTOP</title>
+  <meta name="description" content="สำรวจของดีจาก 20 จังหวัดอีสานผ่านแผนที่ขอบเขตจังหวัดจริง เริ่มต้นที่ชัยภูมิ">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/styles/otop-map.css">
+</head>
+<body>
+  <a class="skip-link" href="#isanMap">ข้ามไปยังแผนที่</a>
+
+  <header class="map-header">
+    <a class="brand-lockup" href="index.html" aria-label="กลับหน้าหลักทำมา-ชาติ">
+      <span class="brand-wordmark">ทำมา-ชาติ</span>
+      <span class="brand-divider" aria-hidden="true"></span>
+      <img src="assets/brand/logos/otop-logo-brown-1024.webp" width="1024" height="1024" alt="OTOP">
+    </a>
+    <nav class="account-nav" aria-label="สมาชิก">
+      <a class="account-link" id="loginLink" href="account.html?mode=login&amp;return=otop-map.html">เข้าสู่ระบบ</a>
+      <a class="account-link account-link-primary" id="signupLink" href="account.html?mode=signup&amp;return=otop-map.html">สมัครสมาชิก</a>
+      <a class="account-link account-link-primary" id="accountLink" href="account.html" hidden>บัญชีของฉัน</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="map-intro" aria-labelledby="mapTitle">
+      <div class="map-intro-copy">
+        <p class="map-kicker">OTOP · 20 จังหวัดอีสาน</p>
+        <h1 id="mapTitle">แผนที่ของดีอีสาน</h1>
+        <p>แตะจังหวัดเพื่อเปิดภาพของดีเด่นภายในขอบเขตแผนที่จริง เริ่มต้นจากชัยภูมิ และค่อย ๆ เดินทางต่อให้ครบทั้งภูมิภาค</p>
+      </div>
+      <div class="map-intro-mark" aria-label="OTOP">
+        <img src="assets/brand/logos/otop-logo-brown-1024.webp" width="1024" height="1024" alt="OTOP">
+        <span>One Tambon<br>One Product</span>
+      </div>
+    </section>
+
+    <section class="map-workspace" aria-label="แผนที่สินค้า OTOP ภาคอีสาน">
+      <div class="map-card">
+        <div class="map-card-head">
+          <div>
+            <span class="map-overline">ISAN DISCOVERY MAP</span>
+            <h2>เลือกจังหวัดที่อยากค้นพบ</h2>
+          </div>
+          <div class="map-legend" aria-label="คำอธิบายแผนที่">
+            <span><i class="legend-swatch legend-open"></i>จังหวัดที่เลือก</span>
+            <span><i class="legend-swatch legend-next"></i>จุดหมายถัดไป</span>
+          </div>
+        </div>
+
+        <div class="map-canvas-wrap" id="mapCanvasWrap">
+          <p class="map-loading" id="mapLoading">กำลังเปิดแผนที่อีสาน…</p>
+          <svg id="isanMap" class="isan-map" viewBox="0 0 760 870" role="group" aria-label="แผนที่ขอบเขตจริง 20 จังหวัดภาคอีสาน"></svg>
+          <div class="map-selected-label" id="mapSelectedLabel" aria-hidden="true">
+            <span id="mapSelectedOrder">01</span>
+            <strong id="mapSelectedName">ชัยภูมิ</strong>
+          </div>
+        </div>
+
+        <div class="province-quick-list" id="provinceQuickList" aria-label="รายชื่อ 20 จังหวัด"></div>
+      </div>
+
+      <aside class="province-panel" id="provincePanel" aria-live="polite">
+        <div class="province-image-wrap">
+          <img id="provinceImage" src="assets/brand/otop/province-hero/web/01-chaiyaphum-mudmee-silk-hero.webp" alt="ภาพจำลองผ้าไหมมัดหมี่บ้านเขว้า จังหวัดชัยภูมิ">
+          <span class="province-count" id="provinceCount">01 / 20</span>
+        </div>
+        <div class="province-panel-body">
+          <div class="province-status" id="provinceStatus"><span></span>เปิดสำรวจแล้ว</div>
+          <p class="province-en" id="provinceEn">CHAIYAPHUM</p>
+          <h2 id="provinceName">ชัยภูมิ</h2>
+          <p class="province-product-label">ของดีประจำจังหวัด</p>
+          <h3 id="provinceProduct">ผ้าไหมมัดหมี่บ้านเขว้า</h3>
+          <p class="province-description" id="provinceDescription">จุดเริ่มต้นของการเดินทางผ่านงานหัตถกรรม ภูมิปัญญา และเรื่องราวจากชุมชนอีสาน</p>
+          <a class="province-cta" id="provinceCta" href="index.html#community">ดูสินค้า OTOP ชัยภูมิ</a>
+          <p class="concept-note">ภาพจำลองเพื่อการนำเสนอแนวคิด สินค้าและรายละเอียดจริงอาจแตกต่างออกไป</p>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <footer class="map-footer">
+    <a href="index.html">กลับหน้าหลัก</a>
+    <p>ทำมา-ชาติ · Experiences of Isan</p>
+  </footer>
+
+  <script src="assets/scripts/otop-map.js" defer></script>
+</body>
+</html>
