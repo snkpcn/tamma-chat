@@ -1,0 +1,267 @@
+/*
+ * Final mobile/tablet repair pass.
+ * Loaded after the boutique stylesheet so it can neutralise older cascade
+ * guards without rewriting the large base file during deployment.
+ */
+
+html.isan-boutique,
+html.isan-boutique body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+html.isan-boutique .header-inner,
+html.isan-boutique .brand,
+html.isan-boutique .hero-copy,
+html.isan-boutique #chess-challenge .tt-chess-home-wrap,
+html.isan-boutique #chess-challenge .tt-chess-home-content {
+  min-width: 0;
+}
+
+html[lang="th"].isan-boutique .brand-sub,
+html[lang="th"].isan-boutique .eyebrow,
+html[lang="th"].isan-boutique .card-kicker {
+  letter-spacing: 0.035em;
+  text-transform: none;
+}
+
+html[lang="th"].isan-boutique .brand-sub {
+  white-space: nowrap;
+}
+
+html[lang="th"].isan-boutique .hero-copy h1 {
+  font-family: var(--font-body);
+  font-weight: 500;
+  letter-spacing: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+html.isan-boutique .ca-box img,
+html.isan-boutique .concierge-fab .ca-box img {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  object-fit: cover;
+  object-position: center 18%;
+  background: #efe3d1;
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-wrap {
+  position: relative;
+  grid-template-columns: minmax(0, 0.78fr) minmax(360px, 0.62fr);
+  align-items: center;
+  gap: clamp(24px, 4vw, 54px);
+  overflow: hidden;
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-content {
+  position: relative;
+  z-index: 2;
+  align-self: center;
+}
+
+html.isan-boutique #chess-challenge .tt-chess-winner-pass {
+  display: block !important;
+  width: min(100%, 360px);
+  margin: 4px 0 2px;
+  padding: 8px;
+  border: 1px solid rgba(132, 78, 38, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 250, 241, 0.74);
+  box-shadow: 0 18px 34px -28px rgba(47, 26, 13, 0.45);
+}
+
+html.isan-boutique #chess-challenge .tt-chess-winner-pass img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-art {
+  position: relative;
+  min-height: 430px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #ede3d2, #d6c1a1);
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-board {
+  position: absolute;
+  z-index: 1;
+  left: 5%;
+  top: 38px;
+  width: min(55%, 310px);
+  height: auto;
+  transform: rotate(-4deg);
+  opacity: 0.9;
+  filter: drop-shadow(0 18px 22px rgba(47, 26, 13, 0.22));
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-character {
+  position: absolute;
+  z-index: 2;
+  display: block !important;
+  right: -3%;
+  bottom: -4px;
+  width: min(60%, 310px);
+  height: 92%;
+  object-fit: contain;
+  object-position: center bottom;
+  filter: drop-shadow(0 20px 28px rgba(47, 26, 13, 0.18));
+}
+
+@media (max-width: 1399.98px) {
+  html.isan-boutique .hero-copy h1 {
+    max-width: 16ch;
+    font-size: clamp(38px, 4.4vw, 58px);
+    line-height: 1.2;
+  }
+
+  html.isan-boutique .hero-copy .sub {
+    font-size: clamp(15.5px, 1.35vw, 17px);
+  }
+}
+
+@media (max-width: 1023.98px) {
+  html.isan-boutique .brand img {
+    max-width: min(164px, 34vw);
+    height: auto;
+  }
+
+  html.isan-boutique .hero {
+    min-height: 680px;
+    height: auto;
+  }
+
+  html.isan-boutique .hero-inner {
+    padding-top: clamp(116px, 16vw, 148px);
+  }
+
+  html.isan-boutique .hero-copy h1 {
+    max-width: 14.5ch;
+    font-size: clamp(34px, 6.2vw, 52px);
+    line-height: 1.22;
+  }
+
+  html.isan-boutique .ecosystem-map {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    overflow: visible;
+    border: 0;
+    box-shadow: none;
+  }
+
+  html.isan-boutique .ecosystem-map > img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    box-shadow: 0 22px 46px -24px rgba(0, 0, 0, 0.72);
+  }
+
+  html.isan-boutique .ecosystem-map .hotspot {
+    position: relative !important;
+    inset: auto !important;
+    transform: none;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 11px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  html.isan-boutique .ecosystem-map .hotspot-label {
+    position: static;
+    grid-column: 2;
+    max-width: none;
+    padding: 0;
+    transform: none;
+    overflow: visible;
+    background: transparent;
+    color: #fff8ed;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: normal;
+    backdrop-filter: none;
+  }
+
+  html.isan-boutique .ecosystem-map .hotspot-card {
+    position: static;
+    grid-column: 1 / -1;
+    width: 100%;
+    max-height: 0;
+    margin: 0;
+    padding: 0 12px;
+    transform: none;
+    overflow: hidden;
+    opacity: 0;
+    box-shadow: none;
+    transition: max-height .25s ease, opacity .2s ease, padding .25s ease;
+  }
+
+  html.isan-boutique .ecosystem-map .hotspot.is-active .hotspot-card {
+    max-height: 220px;
+    padding: 14px 12px;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 767.98px) {
+  html.isan-boutique .hero-copy .eyebrow {
+    letter-spacing: 0.02em;
+  }
+
+  html.isan-boutique .hero-copy h1 {
+    max-width: 100%;
+    font-size: clamp(28px, 7.4vw, 34px);
+    line-height: 1.25;
+    text-wrap: wrap;
+  }
+
+  html.isan-boutique .hero-copy .sub {
+    max-width: 32ch;
+    font-size: 16px;
+    line-height: 1.65;
+  }
+
+  html.isan-boutique .hero-actions .btn,
+  html.isan-boutique .community-map-actions .btn {
+    min-width: 0;
+    white-space: normal;
+    text-align: center;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-wrap {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 30px 20px 24px;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-winner-pass {
+    width: min(100%, 330px);
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-art {
+    min-height: 320px;
+    margin-top: 8px;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-board {
+    left: 4%;
+    top: 24px;
+    width: 66%;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-character {
+    right: -2%;
+    bottom: -4px;
+    width: 56%;
+    height: 94%;
+  }
+}

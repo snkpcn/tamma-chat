@@ -18,6 +18,10 @@ const stylesheet = '<link rel="stylesheet" href="assets/styles/isan-boutique-pha
 if (!html.includes(stylesheet)) {
   html = html.replace('</head>', `${stylesheet}\n</head>`);
 }
+const repairStylesheet = '<link rel="stylesheet" href="assets/styles/isan-final-repair.css">';
+if (!html.includes(repairStylesheet)) {
+  html = html.replace(stylesheet, `${stylesheet}\n${repairStylesheet}`);
+}
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -93,7 +97,9 @@ const communityStart = existingCommunityGateway >= 0
   ? existingCommunityGateway
   : html.indexOf('    <div class="community-grid fade-up" id="communityGrid"');
 const communityActions = html.indexOf('    <div class="community-actions fade-up">', communityStart);
-if (communityStart < 0 || communityActions < 0) {
+const communityNote = html.indexOf('    <p class="community-note"', communityStart);
+const communityTail = communityActions >= 0 ? communityActions : communityNote;
+if (communityStart < 0 || communityTail < 0) {
   throw new Error('Community asset block not found');
 }
 
@@ -118,7 +124,7 @@ const communityBlock = `    <div class="community-map-gateway fade-up">
     <div class="community-grid fade-up" id="communityGrid" aria-live="polite"></div>
 `;
 
-html = html.slice(0, communityStart) + communityBlock + html.slice(communityActions);
+html = html.slice(0, communityStart) + communityBlock + html.slice(communityTail);
 
 const chessArt = `      <div class="tt-chess-home-art" aria-hidden="true">
         <img class="tt-chess-home-board" src="assets/chess/derived/A01_chessboard_full.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="">
@@ -127,6 +133,20 @@ const chessArt = `      <div class="tt-chess-home-art" aria-hidden="true">
 html = html.replace(
   /      <div class="tt-chess-home-art"[^>]*>[\s\S]*?<\/div>\s*(?:<div class="tt-chess-winner-pass">[\s\S]*?<\/div>)?/u,
   chessArt,
+);
+
+const winnerPass = `        <div class="tt-chess-winner-pass" aria-label="Winner Pass">
+          <img src="assets/chess/derived/A10_winner_pass_frame.webp" width="1080" height="608" loading="lazy" decoding="async" alt="Winner Pass สำหรับผู้ชนะทองไทย">
+        </div>`;
+html = html.replace(/\s*<div class="tt-chess-winner-pass"[\s\S]*?<\/div>/u, '');
+html = html.replace(
+  /(\s*<div class="tt-chess-home-badge-row" aria-hidden="true">[\s\S]*?<\/div>)/u,
+  `$1\n${winnerPass}`,
+);
+
+html = html.replace(
+  /\s*<div class="community-actions fade-up">[\s\S]*?<\/div>\s*(?=<p class="community-note")/u,
+  '\n    ',
 );
 
 const journalIcon = `<div class="jf-icon-wrap" data-step="remember"><span class="jf-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22V5.5Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5A2.5 2.5 0 0 1 20 22V5.5Z"/><path d="m15.2 14.8 3.9-3.9 1.4 1.4-3.9 3.9-2 .6.6-2Z"/></svg></span><span class="jf-num-badge"><span class="jf-num-digit">4</span><svg class="jf-num-mark" viewBox="0 0 24 24" fill="none" stroke="#F7F1E4" stroke-width="2.6" stroke-linecap="round"><path d="M7 5v6a5 5 0 0 0 10 0V5"/></svg></span></div>`;
