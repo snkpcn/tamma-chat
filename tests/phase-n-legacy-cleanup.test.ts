@@ -35,7 +35,9 @@ test('mobile menu, Thongthai chat and the OTOP experience map keep their intende
   assert.match(mapHtml,/id="provinceExperienceTitle"/);
   assert.match(mapScript,/province\.experienceDescription/);
   assert.doesNotMatch(mapHtml,/map-intro-photo|provinceImage|provinceProductGrid/);
-  assert.doesNotMatch(mapScript,/primaryHeroUrl|selected-image|renderProducts/);
+  assert.match(mapScript,/province-hero-manifest\.json/);
+  assert.match(mapScript,/class: 'selected-image'/);
+  assert.doesNotMatch(mapScript,/renderProducts/);
 });
 
 test('Phase N web never invokes the retired local ConciergeProvider as a second business brain',()=>{
