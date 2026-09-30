@@ -3,6 +3,7 @@
 
   const DATA_ROOT = 'assets/brand/otop/';
   const MAP_URL = DATA_ROOT + 'map/isan-provinces.geojson';
+  const MANIFEST_URL = DATA_ROOT + 'province-hero/province-hero-manifest.json';
   const CATALOG_URL = '/.netlify/functions/otop-province-catalog';
   const VIEW = { width: 760, height: 870, pad: 28 };
   const INITIAL_PROVINCE_ID = 'chaiyaphum';
@@ -35,6 +36,7 @@
   const panel = document.getElementById('provincePanel');
   let state = {
     geo: null,
+    heroItems: [],
     provinces: [],
     selectedProvinceId: INITIAL_PROVINCE_ID,
     project: null,
@@ -81,6 +83,18 @@
     }).join('') + 'Z').join('')).join('');
   }
 
+  function geometryBounds(geometry, project) {
+    const points = coordinatesOf(geometry).map(project);
+    const xs = points.map(point => point[0]);
+    const ys = points.map(point => point[1]);
+    return {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+    };
+  }
+
   function provinceFor(provinceId) {
     return state.provinces.find(province => province.provinceId === provinceId);
   }
@@ -93,20 +107,21 @@
     return state.geo.features.find(feature => provinceIdForFeature(feature) === provinceId);
   }
 
+  function heroUrlFor(province) {
+    const hero = state.heroItems.find(item => item.provinceTh === province.provinceName);
+    return hero ? DATA_ROOT + 'province-hero/' + hero.web : (province.heroProductImage || province.heroImage || '');
+  }
+
   function renderMap() {
     svg.replaceChildren();
     const selectedFeature = featureFor(state.selectedProvinceId);
     if (!selectedFeature) return;
 
     const defs = element('defs');
-    const selectedGradient = element('linearGradient', {
-      id: 'selectedProvinceGradient', x1: '0', y1: '0', x2: '1', y2: '1'
-    });
-    selectedGradient.append(
-      element('stop', { offset: '0%', 'stop-color': '#a95027' }),
-      element('stop', { offset: '100%', 'stop-color': '#6a2e07' })
-    );
-    defs.append(selectedGradient);
+    const selectedPathData = geometryPath(selectedFeature.geometry, state.project);
+    const clip = element('clipPath', { id: 'selectedProvinceClip' });
+    clip.append(element('path', { d: selectedPathData, 'fill-rule': 'evenodd' }));
+    defs.append(clip);
     svg.append(defs);
 
     const shapeGroup = element('g');
@@ -116,7 +131,7 @@
       if (!province) return;
       const path = element('path', {
         d: geometryPath(feature.geometry, state.project),
-        fill: provinceId === state.selectedProvinceId ? 'url(#selectedProvinceGradient)' : '#d9cdb9',
+        fill: provinceId === state.selectedProvinceId ? 'transparent' : '#d9cdb9',
         stroke: '#fff8eb',
         'stroke-width': '2.2',
         'vector-effect': 'non-scaling-stroke',
@@ -141,7 +156,23 @@
     });
     svg.append(shapeGroup);
 
-    const selectedPathData = geometryPath(selectedFeature.geometry, state.project);
+    const province = provinceFor(state.selectedProvinceId);
+    const heroUrl = heroUrlFor(province);
+    if (heroUrl) {
+      const bounds = geometryBounds(selectedFeature.geometry, state.project);
+      const image = element('image', {
+        href: heroUrl,
+        x: bounds.x,
+        y: bounds.y,
+        width: Math.max(bounds.width, 1),
+        height: Math.max(bounds.height, 1),
+        preserveAspectRatio: 'xMidYMid slice',
+        'clip-path': 'url(#selectedProvinceClip)',
+        class: 'selected-image',
+        'aria-hidden': 'true',
+      });
+      svg.append(image);
+    }
     svg.append(element('path', { d: selectedPathData, class: 'selected-outline', 'fill-rule': 'evenodd' }));
     svg.append(element('path', { d: selectedPathData, class: 'selected-inner-outline', 'fill-rule': 'evenodd' }));
   }
@@ -198,16 +229,18 @@
   async function initialise() {
     syncAccountNavigation();
     try {
-      const [geoResponse, catalogResponse] = await Promise.all([
+      const [geoResponse, manifestResponse, catalogResponse] = await Promise.all([
         fetch(MAP_URL),
+        fetch(MANIFEST_URL),
         fetch(CATALOG_URL),
       ]);
-      if (!geoResponse.ok || !catalogResponse.ok) throw new Error('Map data unavailable');
-      const [geo, catalog] = await Promise.all([
-        geoResponse.json(), catalogResponse.json(),
+      if (!geoResponse.ok || !manifestResponse.ok || !catalogResponse.ok) throw new Error('Map data unavailable');
+      const [geo, manifest, catalog] = await Promise.all([
+        geoResponse.json(), manifestResponse.json(), catalogResponse.json(),
       ]);
       if (geo.features.length !== 20 || catalog.provinces.length !== 20) throw new Error('Incomplete province data');
       state.geo = geo;
+      state.heroItems = Array.isArray(manifest.items) ? manifest.items : [];
       state.provinces = catalog.provinces;
       state.project = makeProject(geo.features);
       renderMap();
