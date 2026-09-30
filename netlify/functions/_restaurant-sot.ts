@@ -57,6 +57,7 @@ type PreorderCreateResult = {
   id: string; preorderCode: string; totalAmount: number; status: string;
   items: Array<{ name: string; quantity: number }>;
   requestedFor: string; environment: string; duplicate?: boolean;
+  notificationStatus: 'sent' | 'duplicate' | 'not_bound' | 'failed';
 };
 type PromotionPreorderCreateResult = PreorderCreateResult & { normalTotalAmount: number; discountAmount: number };
 type PaymentRequestRow = { id: string; status: string };
@@ -365,13 +366,14 @@ export async function createRestaurantPreorder(input: {
     p_customer_note: input.note ?? '', p_items: canonicalItems, p_guest_id:input.guestDbId,
     p_environment:environment, p_idempotency_key:idempotencyKey,
   });
+  const notificationStatus = await notifyRestaurantPreorderTeam(created.id).catch(error => {
+    console.error('RESTAURANT_PREORDER_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return 'failed' as const;
+  });
   const result: PreorderCreateResult = {
     ...created, items: resolved.map(item => ({ name:item.menu!.name, quantity:item.quantity })),
-    requestedFor: requestedFor.toISOString(), environment,
+    requestedFor: requestedFor.toISOString(), environment, notificationStatus,
   };
-  await notifyRestaurantPreorderTeam(created.id).catch(error => {
-    console.error('RESTAURANT_PREORDER_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
-  });
   await dispatchRestaurantPreorderPayment(created.id).catch(error => {
     console.error('RESTAURANT_PREORDER_PAYMENT_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
   });
@@ -443,13 +445,14 @@ export async function createRestaurantPreorderWithPromotion(input: {
     p_environment:environment, p_idempotency_key:idempotencyKey,
     p_promotion_campaign_id:input.promotionCampaignId, p_pricing_override:input.pricingOverride,
   });
+  const notificationStatus = await notifyRestaurantPreorderTeam(created.id).catch(error => {
+    console.error('RESTAURANT_PREORDER_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return 'failed' as const;
+  });
   const result: PromotionPreorderCreateResult = {
     ...created, items: resolved.map(item => ({ name:item.menu!.name, quantity:item.quantity })),
-    requestedFor: requestedFor.toISOString(), environment,
+    requestedFor: requestedFor.toISOString(), environment, notificationStatus,
   };
-  await notifyRestaurantPreorderTeam(created.id).catch(error => {
-    console.error('RESTAURANT_PREORDER_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
-  });
   await dispatchRestaurantPreorderPayment(created.id).catch(error => {
     console.error('RESTAURANT_PREORDER_PAYMENT_NOTIFY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
   });

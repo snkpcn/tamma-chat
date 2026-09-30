@@ -10,6 +10,7 @@ import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts,
 import { loadActivePromotionsWorldFact, redeemPromotion } from './_promotions-runtime';
 import { loadActivityWorldFacts } from './_activity-sot';
 import { patchGuestAgentState } from './_guest-agent-state-store';
+import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 
 export const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
@@ -184,8 +185,9 @@ export async function executeBrainTools(
             note:typeof call.args.note === 'string' ? call.args.note : null,
             environment:'live',
           });
+          const notificationStatus = await dispatchCreatedTransactionNotification('booking', created.id);
           await insertEvent(guestDbId,'agent_action','booking',{action:'create_booking',bookingCode:created.bookingCode,channel});
-          results.push({name:call.name,ok:true,detail:JSON.stringify(created)});
+          results.push({name:call.name,ok:true,detail:JSON.stringify({...created,notificationStatus})});
         } catch (error) {
           const detail = toolErrorDetail(error);
           if (detail === 'schedule_choice_required' || detail === 'no_matching_schedule') {
@@ -245,8 +247,9 @@ export async function executeBrainTools(
           email:typeof call.args.email === 'string' ? call.args.email : null,
           environment:'live',
         });
+        const notificationStatus = await dispatchCreatedTransactionNotification('cafe_inquiry', created.id);
         await insertEvent(guestDbId,'agent_action','customer_service',{action:'create_cafe_inquiry',inquiryCode:created.inquiryCode,channel});
-        results.push({name:call.name,ok:true,detail:JSON.stringify(created)}); continue;
+        results.push({name:call.name,ok:true,detail:JSON.stringify({...created,notificationStatus})}); continue;
       }
       if (call.name === 'list_otop_products') {
         const products = await listOtopProducts('live');
@@ -279,8 +282,9 @@ export async function executeBrainTools(
           note:typeof call.args.note === 'string' ? call.args.note : null,
           environment:'live',
         });
+        const notificationStatus = await dispatchCreatedTransactionNotification('otop_order', created.id);
         await insertEvent(guestDbId,'agent_action','order',{action:'create_otop_order',orderCode:created.orderCode,channel});
-        results.push({name:call.name,ok:true,detail:JSON.stringify(created)}); continue;
+        results.push({name:call.name,ok:true,detail:JSON.stringify({...created,notificationStatus})}); continue;
       }
       results.push({name:call.name,ok:false,detail:'unsupported_tool'});
     } catch (error) {

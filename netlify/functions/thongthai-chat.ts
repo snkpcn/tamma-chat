@@ -1159,6 +1159,15 @@ function preorderFailureMessage(detail: string): string {
   return 'ตอนนี้ระบบสร้างออเดอร์ให้ยังไม่สำเร็จครับ ข้อมูลชุดเดิมยังอยู่ ลองส่งวัน เวลา หรือชื่ออีกครั้งได้เลย';
 }
 
+function transactionNotificationMessage(detail: Record<string, unknown>): string {
+  const status = detail.notificationStatus;
+  if (status === 'sent') return 'แจ้งทีมงานทาง LINE แล้วครับ';
+  if (status === 'duplicate') return 'ทีมงานได้รับการแจ้งเตือนรายการนี้แล้วครับ';
+  if (status === 'not_bound') return 'บันทึกเข้าหลังบ้านแล้ว แต่กลุ่ม LINE ของทีมนี้ยังไม่ได้ผูกครับ';
+  if (status === 'failed') return 'บันทึกเข้าหลังบ้านแล้ว แต่การแจ้งกลุ่ม LINE ไม่สำเร็จ ทีมงานตรวจต่อจากหลังบ้านได้ครับ';
+  return 'บันทึกเข้าหลังบ้านแล้วครับ';
+}
+
 function isRestaurantPriceQuestion(text: string): boolean {
   return /(ราคา|กี่บาท|เท่าไร|เท่าไหร่|รวม)/u.test(text);
 }
@@ -1273,7 +1282,7 @@ export async function restaurantPreorderDialogResponse(
       '',
       duplicate
         ? 'ทองไทยใช้รายการเดิมให้ ไม่ได้สร้างซ้ำครับ'
-        : 'ส่งเข้าหลังร้านและแจ้งทีมแล้วครับ',
+        : transactionNotificationMessage(detail),
     ].filter(Boolean).join('\n'),
     agentStateUpdate:{ restaurantProposedSet: clearedSet as AgentStateUpdate['restaurantProposedSet'] },
   };
@@ -3974,6 +3983,7 @@ async function executeDeterministicActivityBooking(
       'ส่งคำขอจองเข้าระบบแล้วครับ ✅',
       bookingCode ? `เลขที่จอง ${bookingCode}` : '',
       selectedHorseName ? `ม้าที่เลือก: ${selectedHorseName}` : '',
+      transactionNotificationMessage(detail),
       'ทีมงานจะยืนยันอีกครั้งทาง LINE / โทร / อีเมล',
     ].filter(Boolean).join('\n'),
   };
@@ -4026,6 +4036,7 @@ async function executeDeterministicRestaurantTableBooking(
       bookingCode ? `เลขที่คำขอ ${bookingCode}` : '',
       `${date} เวลา ${time} · ${partySize} ท่าน`,
       status === 'confirmed' ? 'สถานะ: ยืนยันแล้ว' : 'สถานะ: รอทีมงานยืนยัน',
+      transactionNotificationMessage(detail),
     ].filter(Boolean).join('\n'),
   };
 }
@@ -4103,6 +4114,7 @@ async function executeDeterministicRestaurantPreorder(
       totalAmount !== null ? `รวม ${Math.round(totalAmount)} บาท` : '',
       `รับอาหาร ${date} เวลา ${time}`,
       'สถานะ: รอร้านรับออเดอร์',
+      transactionNotificationMessage(detail),
     ].filter(Boolean).join('\n'),
   };
 }
@@ -4140,9 +4152,10 @@ async function executeDeterministicCafeInquiry(
   return {
     ...firstResponse,
     message:[
-      'ส่งเรื่องให้ทีม Inthanin Café แล้วครับ ✅',
+      'สร้างรายการติดตามของ Inthanin Café แล้วครับ ✅',
       inquiryCode?`เลขที่ติดตาม ${inquiryCode}`:'',
       'สถานะ: รอทีมงานติดต่อกลับ',
+      transactionNotificationMessage(detail),
       'รายการนี้เป็นคำขอให้ทีมตรวจสอบ ยังไม่ใช่ออเดอร์หรือการชำระเงิน',
     ].filter(Boolean).join('\n'),
   };
@@ -4190,6 +4203,7 @@ async function executeDeterministicOtopOrder(
       Number.isFinite(total)?`ยอดชำระ ${Math.round(total)} บาท`:'',
       fulfillmentType==='shipping'?'จัดส่งตามที่อยู่ที่ให้ไว้':'รับสินค้าที่ร้าน',
       'สถานะ: รอดำเนินการและรอชำระเงิน',
+      transactionNotificationMessage(detail),
     ].filter(Boolean).join('\n'),
   };
 }
@@ -4288,6 +4302,7 @@ async function executeDeterministicStayBooking(
       'ส่งคำขอจองที่พักเข้าระบบแล้วครับ ✅',
       bookingCode ? `เลขที่จอง ${bookingCode}` : '',
       accommodationName ? `ที่พักที่เลือก: ${accommodationName}` : '',
+      transactionNotificationMessage(detail),
       'ทีมงานจะตรวจสอบและยืนยันอีกครั้งทาง LINE / โทร / อีเมล',
     ].filter(Boolean).join('\n'),
   };
