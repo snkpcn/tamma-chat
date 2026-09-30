@@ -59,7 +59,7 @@ replaceImageByAlt(
 );
 replaceImageByAlt(
   'ร้านอินทนิลคอฟฟี่ ณ ทำมา-ชาติ ยามพลบค่ำ',
-  '<img src="assets/brand/backgrounds/inthanin-tadtone-real-1536.webp" width="1536" height="1152" loading="lazy" decoding="async" alt="ร้านอินทนิล สาขาตาดโตน ณ ทำมา-ชาติ">',
+  '<img src="assets/brand/backgrounds/inthanin-tadtone-boutique-grade-1536.webp" width="1536" height="1152" loading="lazy" decoding="async" alt="ร้านอินทนิล สาขาตาดโตน ณ ทำมา-ชาติ">',
 );
 replaceImageByAlt(
   'ผังพื้นที่ทำมา-ชาติจากมุมสูง แสดงจุดเชื่อมโยงประสบการณ์ต่าง ๆ',
