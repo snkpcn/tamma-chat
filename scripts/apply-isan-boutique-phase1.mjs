@@ -126,22 +126,36 @@ const communityBlock = `    <div class="community-map-gateway fade-up">
 
 html = html.slice(0, communityStart) + communityBlock + html.slice(communityTail);
 
-const chessArt = `      <div class="tt-chess-home-art" aria-hidden="true">
-        <img class="tt-chess-home-board" src="assets/chess/derived/A01_chessboard_full.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="">
-        <img class="tt-chess-home-character" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" decoding="async" alt="">
-      </div>`;
-html = html.replace(
-  /      <div class="tt-chess-home-art"[^>]*>[\s\S]*?<\/div>\s*(?:<div class="tt-chess-winner-pass">[\s\S]*?<\/div>)?/u,
-  chessArt,
-);
-
-const winnerPass = `        <div class="tt-chess-winner-pass" aria-label="Winner Pass">
+const chessSection = `<section class="section-pad" id="chess-challenge">
+  <div class="container">
+    <div class="tt-chess-home-wrap fade-up">
+      <div class="tt-chess-home-content">
+        <span class="eyebrow" data-i18n="chess_card_eyebrow">ดวลหมากรุกกับทองไทย</span>
+        <h3 data-i18n="chess_card_heading">เล่นหมากรุกกับทองไทย</h3>
+        <p data-i18n="chess_card_sub">ชนะทองไทย รับรางวัลใช้จริงในทำมา-ชาติ</p>
+        <div class="tt-chess-home-badge-row" aria-hidden="true">
+          <img src="assets/chess/derived/B01_badge_easy.webp" alt="">
+          <img src="assets/chess/derived/B03_badge_hard.webp" alt="">
+          <img src="assets/chess/derived/B04_badge_master.webp" alt="">
+        </div>
+        <div class="tt-chess-winner-pass" aria-label="Winner Pass">
           <img src="assets/chess/derived/A10_winner_pass_frame.webp" width="1080" height="608" loading="lazy" decoding="async" alt="Winner Pass สำหรับผู้ชนะทองไทย">
-        </div>`;
-html = html.replace(/\s*<div class="tt-chess-winner-pass"[\s\S]*?<\/div>/u, '');
+        </div>
+      </div>
+      <div class="tt-chess-home-stage">
+        <div class="tt-chess-home-actions">
+          <a href="chess.html" class="btn btn-primary btn-sm" data-i18n="chess_card_cta">เริ่มเล่นหมากรุก</a>
+        </div>
+        <div class="tt-chess-home-art">
+          <img class="tt-chess-home-character" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" loading="lazy" decoding="async" alt="ทองไทยชวนเล่นหมากรุก">
+        </div>
+      </div>
+    </div>
+  </div>
+</section>`;
 html = html.replace(
-  /(\s*<div class="tt-chess-home-badge-row" aria-hidden="true">[\s\S]*?<\/div>)/u,
-  `$1\n${winnerPass}`,
+  /<section class="section-pad" id="chess-challenge">[\s\S]*?<\/section>/u,
+  chessSection,
 );
 
 html = html.replace(
