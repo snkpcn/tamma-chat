@@ -21,6 +21,12 @@ const THAI_MONTH_PATTERN = new RegExp(
   'u',
 );
 
+/** A structural checkout label used to distinguish an explicitly supplied
+ * checkout date from a check-in/general date while a Stay task is active. */
+export function hasExplicitCheckoutDateMarker(message: string): boolean {
+  return /เช(?:็ก|็ค)เอ(?:า|้า)?(?:ต์|ท์)|check[\s-]?out/iu.test(message);
+}
+
 function bangkokDate(now: Date): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
