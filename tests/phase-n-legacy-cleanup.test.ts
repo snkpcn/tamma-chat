@@ -1,13 +1,37 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { Script } from 'node:vm';
 
 test('public homepage starts in standards mode and uses current 4K visual assets',()=>{
   const html=readFileSync('index.html','utf8');
   assert.ok(html.startsWith('<!DOCTYPE html>'),'no bytes or text may appear before the doctype');
   assert.match(html,/ban-khwao-silk-weaving-4k\.webp/);
-  assert.match(html,/thongthai-portrait-master-v2-4k\.png/);
+  assert.match(html,/thongthai-portrait-master-4k\.webp/);
+  assert.doesNotMatch(html,/thongthai-portrait-master-v2-4k\.png/);
   assert.doesNotMatch(html,/assets\/thongthai\/thongthai-default\.webp/);
+});
+
+test('every inline homepage script parses so navigation and chat can initialise',()=>{
+  const html=readFileSync('index.html','utf8');
+  const scripts=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
+  assert.ok(scripts.length>0);
+  scripts.forEach((match,index)=>{
+    if(!match[1].trim()) return;
+    assert.doesNotThrow(()=>new Script(match[1],{filename:`index-inline-${index}.js`}));
+  });
+});
+
+test('mobile menu, Thongthai chat and OTOP imagery keep their intended roles',()=>{
+  const html=readFileSync('index.html','utf8');
+  const mapHtml=readFileSync('otop-map.html','utf8');
+  const mapScript=readFileSync('assets/scripts/otop-map.js','utf8');
+  assert.match(html,/on\(menuBtn,'click',openMobileNav\)/);
+  assert.match(html,/on\(qs\('#conciergeFab'\),'click', openChat\)/);
+  assert.match(html,/id="fabAvatarImg"[^>]+thongthai-portrait-master-4k\.webp/);
+  assert.match(mapHtml,/class="map-intro-photo"[\s\S]+ban-khwao-silk-weaving-4k\.webp/);
+  assert.match(mapHtml,/id="provinceImage"[^>]+01-chaiyaphum-mudmee-silk-hero\.webp/);
+  assert.doesNotMatch(mapScript,/INITIAL_PROVINCE_ID\)[\s\S]{0,100}ban-khwao-silk-weaving-4k\.webp/);
 });
 
 test('Phase N web never invokes the retired local ConciergeProvider as a second business brain',()=>{

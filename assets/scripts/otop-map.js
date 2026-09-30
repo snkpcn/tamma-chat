@@ -111,19 +111,17 @@
     return state.geo.features.find(feature => provinceIdForFeature(feature) === provinceId);
   }
 
-  function fallbackHeroUrl(province) {
-    if (province.provinceId === INITIAL_PROVINCE_ID) {
-      return 'assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp';
-    }
+  function manifestHeroUrl(province) {
     const item = state.heroItems.find(hero => hero.provinceTh === province.provinceName);
     return item ? DATA_ROOT + 'province-hero/' + item.web : '';
   }
 
+  function fallbackHeroUrl(province) {
+    return province.heroProductImage || province.heroImage || '';
+  }
+
   function primaryHeroUrl(province) {
-    if (province.provinceId === INITIAL_PROVINCE_ID) {
-      return 'assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp';
-    }
-    return province.heroProductImage || province.heroImage;
+    return manifestHeroUrl(province) || fallbackHeroUrl(province);
   }
 
   function setImageWithFallback(image, province) {
@@ -225,16 +223,14 @@
     panel.classList.add('is-changing');
     image.onload = () => panel.classList.remove('is-changing');
     setImageWithFallback(image, province);
-    image.alt = province.provinceId === INITIAL_PROVINCE_ID
-      ? 'ช่างทอผ้าไหมบ้านเขว้ากำลังทอผ้าบนกี่'
-      : province.heroTitle;
+    image.alt = province.heroTitle;
     document.getElementById('provinceCount').textContent = `${paddedOrder} / 20`;
     document.getElementById('provinceEn').textContent = 'OTOP · ภาคอีสาน';
     document.getElementById('provinceName').textContent = province.provinceName;
     document.getElementById('provinceProduct').textContent = province.provinceId === INITIAL_PROVINCE_ID
       ? 'ผ้าไหมมัดหมี่บ้านเขว้า'
       : province.heroTitle;
-    document.getElementById('provincePhotoCredit').hidden = province.provinceId !== INITIAL_PROVINCE_ID;
+    document.getElementById('provincePhotoCredit').hidden = true;
     document.getElementById('mapSelectedOrder').textContent = paddedOrder;
     document.getElementById('mapSelectedName').textContent = province.provinceName;
 
