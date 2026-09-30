@@ -22,7 +22,7 @@ test('every inline homepage script parses so navigation and chat can initialise'
   });
 });
 
-test('mobile menu, Thongthai chat and OTOP imagery keep their intended roles',()=>{
+test('mobile menu, Thongthai chat and the OTOP experience map keep their intended roles',()=>{
   const html=readFileSync('index.html','utf8');
   const mapHtml=readFileSync('otop-map.html','utf8');
   const mapScript=readFileSync('assets/scripts/otop-map.js','utf8');
@@ -31,9 +31,11 @@ test('mobile menu, Thongthai chat and OTOP imagery keep their intended roles',()
   assert.match(html,/id="fabAvatarImg"[^>]+thongthai-portrait-master-4k\.webp/);
   assert.match(html,/data-name="Journal" data-title="สมุดบันทึก"/);
   assert.doesNotMatch(html,/data-name="สมุดบันทึก"/);
-  assert.match(mapHtml,/class="map-intro-photo"[\s\S]+ban-khwao-silk-weaving-4k\.webp/);
-  assert.match(mapHtml,/id="provinceImage"[^>]+01-chaiyaphum-mudmee-silk-hero\.webp/);
-  assert.doesNotMatch(mapScript,/INITIAL_PROVINCE_ID\)[\s\S]{0,100}ban-khwao-silk-weaving-4k\.webp/);
+  assert.match(mapHtml,/id="isanMap"/);
+  assert.match(mapHtml,/id="provinceExperienceTitle"/);
+  assert.match(mapScript,/province\.experienceDescription/);
+  assert.doesNotMatch(mapHtml,/map-intro-photo|provinceImage|provinceProductGrid/);
+  assert.doesNotMatch(mapScript,/primaryHeroUrl|selected-image|renderProducts/);
 });
 
 test('Phase N web never invokes the retired local ConciergeProvider as a second business brain',()=>{
