@@ -728,7 +728,16 @@ function needsActivityCatalogResolution(task: ActiveTask, turn: SemanticTurn): b
   if (task.type !== 'activity_booking') return false;
   const resourceCode = task.slots.resourceCode;
   if (!resourceCode) {
-    return task.selectedEntities.some(entity => entity.id.startsWith('activity_asset:'));
+    // The semantic supervisor can correctly identify an activity type without
+    // emitting a resolved asset reference (for example
+    // `{ horseName:'ภาราดร', activityCode:'horse' }`).  `activityCode` is not
+    // itself a bookable resource id, but it is sufficient to request the
+    // authoritative catalog that maps the type to the real resourceCode.
+    // Without this branch the task remains permanently missing resourceCode
+    // and can never reach create_booking even though the customer's meaning
+    // and every other required slot are complete.
+    return task.selectedEntities.some(entity => entity.id.startsWith('activity_asset:'))
+      || (typeof task.slots.activityCode === 'string' && task.slots.activityCode.trim().length > 0);
   }
   // Validate a duration on the same turn it is supplied, even when every
   // booking field is otherwise complete. This closes the live case where a
@@ -1219,7 +1228,15 @@ function applyActivityCatalogPolicy(
   let resourceCode = typeof task.slots.resourceCode === 'string' ? task.slots.resourceCode : null;
   if (!resourceCode) {
     const assetSelection = task.selectedEntities.find(entity => entity.id.startsWith('activity_asset:'));
-    const resolved = assetSelection ? resolveActivityResourceCode(bundles, assetSelection.id) : null;
+    // Prefer the canonical asset identity when present.  If the model only
+    // supplied the closed activityCode, resolve that through the SAME live
+    // catalog facts.  Never copy activityCode into resourceCode and never
+    // hardcode horse/ATV/etc mappings here.
+    const activityCode = typeof task.slots.activityCode === 'string'
+      ? task.slots.activityCode.trim()
+      : '';
+    const catalogSelection = assetSelection?.id ?? activityCode;
+    const resolved = catalogSelection ? resolveActivityResourceCode(bundles, catalogSelection) : null;
     if (resolved) {
       container = applyTaskStateEvent(container, {
         kind: 'update_slots', eventId: `${input.eventId}:activity_resource_autofill`,
