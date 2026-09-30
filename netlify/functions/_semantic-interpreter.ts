@@ -615,6 +615,7 @@ informationNeed: one of none | availability | price | schedule | inventory | cat
 - Stay transaction boundary: selecting a house/room, asking whether it is free, asking a question after selecting it, or saying a bare acknowledgement is planning/read-only, never book. Use action=book and speechAct=transaction_request only when the CURRENT turn explicitly asks to submit a booking. A selection such as "take this one" is speechAct=selection with action=confirm/provide_information, not book.
 - Restaurant: for one concrete menu item, put its stated name in entities.itemName; if context already supplies a canonical menu id, use entities.menuItemId. For a menu category put the category label in entities.menuCategory. For an explicit order, put concrete requested lines in entities.items as [{"name":string,"quantity":number}] and include customerName/phone/email only when the customer actually supplied them. Never invent a dish, quantity, contact value, or order line.
 - Restaurant transaction type: when the customer explicitly wants a TABLE/SEAT reservation, set entities.restaurantTransactionType="table_booking" and action=book. When the customer explicitly wants FOOD prepared/ordered, set entities.restaurantTransactionType="preorder" and action=order. If it is genuinely unclear which transaction they mean, set needsClarification=true instead of guessing.
+- Cafe operational boundary: verified cafe menu, price, hours, inventory, and direct checkout are not available. A customer who merely asks about those facts remains ask/discover/recommend and must not be treated as a transaction. When the customer explicitly instructs Thongthai to SEND/SUBMIT a cafe question, preorder request, availability request, or contact request to the cafe team now, use domain=cafe, action=order, speechAct=transaction_request, informationNeed=none, and put the concrete matter to send in entities.question. Include customerName/phone/email only when actually stated. This creates an inquiry for staff follow-up, not a confirmed cafe order or sale.
 - Promotion: for one concrete promotion, put the stated title/name in entities.promotionName. If context already supplies verified promotion identity, put entities.campaignId and/or entities.campaignCode; never invent either. Merely showing interest or selecting a promotion ("สนใจอันนี้", "เอาโปรนี้") is action=confirm with speechAct=selection and is NOT redemption. Use action=order + speechAct=transaction_request only when the CURRENT turn explicitly instructs Thongthai to redeem/use/claim the selected promotion now. Eligibility/status questions remain read-only.
 taskDirective: OPTIONAL one of cancel_active | suspend_active | resume_suspended, only for the bounded conversational working task as described above
 entities: an object of whatever concrete values the message actually states (e.g. {"partySize":2}, {"date":"พรุ่งนี้"}, {"time":"บ่ายสาม"}, {"horseName":"ภาราดร"}) -- never invent a value that wasn't stated
@@ -1680,6 +1681,20 @@ export function parseSemanticTurnResponse(
       if (recoveredTime) entities.time = recoveredTime;
     }
   }
+
+  // Cafe writes are staff inquiries, never authoritative menu/availability
+  // answers or completed sales. When the supervisor has already extracted a
+  // concrete inquiry and the customer explicitly authorizes submission, an
+  // incidental availability label must not route the turn back into the
+  // intentionally unavailable cafe knowledge adapter.
+  const explicitCafeInquiry = domain === 'cafe'
+    && action === 'order'
+    && speechAct === 'transaction_request'
+    && typeof entities.question === 'string'
+    && entities.question.trim().length > 0
+    && Boolean(currentMessage)
+    && hasStandaloneTransactionRequest(currentMessage);
+  if (explicitCafeInquiry) informationNeed = 'none';
 
   if (
     taskDirective === 'resume_suspended'
