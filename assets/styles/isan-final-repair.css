@@ -279,16 +279,22 @@ html.isan-boutique #chess-challenge .tt-chess-home-character {
   }
 
   html.isan-boutique #chess-challenge .tt-chess-home-stage {
-    grid-template-columns: minmax(128px, 0.76fr) minmax(190px, 1.24fr);
-    min-height: 300px;
+    grid-template-columns: minmax(124px, 0.82fr) minmax(210px, 1.38fr);
+    align-items: end;
+    min-height: 318px;
     width: calc(100% + 40px);
     margin: 0 -20px;
     padding-left: 20px;
   }
 
   html.isan-boutique #chess-challenge .tt-chess-home-stage .tt-chess-home-actions {
-    align-self: center;
-    padding: 0 4px 16px 0;
+    position: relative;
+    z-index: 2;
+    grid-column: 1 !important;
+    grid-row: 1;
+    align-self: end;
+    justify-self: start;
+    padding: 0 4px 18px 0;
   }
 
   html.isan-boutique #chess-challenge .tt-chess-home-stage .tt-chess-home-actions .btn {
@@ -298,8 +304,25 @@ html.isan-boutique #chess-challenge .tt-chess-home-character {
   }
 
   html.isan-boutique #chess-challenge .tt-chess-home-character {
-    width: 124%;
-    margin-inline: -12%;
+    position: static;
+    width: 132%;
+    max-width: none;
+    flex: none;
+    margin-inline: 0;
     margin-bottom: -4.1%;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-stage .tt-chess-home-art {
+    position: relative;
+    z-index: 1;
+    grid-column: 2 !important;
+    grid-row: 1;
+    align-self: end;
+    justify-self: stretch;
+    justify-content: flex-end;
+    width: 100%;
+    max-width: none;
+    margin: 0 !important;
+    overflow: visible;
   }
 }
