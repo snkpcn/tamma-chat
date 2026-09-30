@@ -175,6 +175,25 @@ for (const [oldLabel, newLabel] of hotspotLabels) {
   html = html.replace(`<span class="hotspot-label">${oldLabel}</span>`, `<span class="hotspot-label">${newLabel}</span>`);
 }
 
+// Keep the Thai page readable even before the translation runtime hydrates.
+// Do not mix Journey / Journal into the default Thai markup or fallbacks.
+const thaiFallbackCopy = new Map([
+  ['เริ่มต้น Journey แรกของคุณ', 'เริ่มเก็บความทรงจำครั้งแรก'],
+  ['ทองไทยกำลังวาง Journey ของคุณ', 'ทองไทยกำลังจัดแผนเที่ยวให้คุณ'],
+  ['ตรวจสอบ Journey', 'ตรวจสอบแผนเที่ยว'],
+  ['Journey ที่แนะนำสำหรับคุณ', 'แผนเที่ยวที่แนะนำสำหรับคุณ'],
+  ['บันทึก Journey', 'บันทึกแผนเที่ยว'],
+  ['เพิ่มลง Journal', 'เพิ่มลงสมุดบันทึก'],
+  ['ดู Journey ของฉัน', 'ดูบันทึกของฉัน'],
+  ['บันทึก Journey ที่วางแผนไว้', 'บันทึกแผนเที่ยวที่วางไว้'],
+]);
+for (const [oldCopy, newCopy] of thaiFallbackCopy) {
+  html = html.replaceAll(oldCopy, newCopy);
+}
+html = html
+  .replace('data-name="Journal" data-title="สมุดบันทึก"', 'data-name="สมุดบันทึก" data-title="สมุดบันทึก"')
+  .replace('aria-label="Journal"', 'aria-label="สมุดบันทึก"');
+
 html = html.replace(
   /<img id="fabAvatarImg"[^>]*>/u,
   '<img id="fabAvatarImg" src="assets/brand/logos/tamma-chat-logo.svg" width="1051" height="404" alt="ทำมา-ชาติ">',
