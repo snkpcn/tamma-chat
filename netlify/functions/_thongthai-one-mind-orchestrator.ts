@@ -971,14 +971,37 @@ function modelRefinementIsUsable(
     return false;
   }
 
+  // Cafe's bounded staff-inquiry contract is the one intentional exception
+  // to the general no-escalation rule below. The Semantic Interpreter has
+  // already required current-turn transaction authorization plus an explicit
+  // staff handoff before it can produce this exact shape. The operation only
+  // creates a cafe_inquiry; it cannot create a sale, payment, or availability
+  // claim. Without this exception, the coarse deterministic Cafe topic matcher
+  // (`cafe_read_only_inquiry`) silently discards that validated handoff.
+  const trustedCafeInquiryRefinement = Boolean(
+    deterministic
+    && deterministic.domain === 'cafe'
+    && deterministic.intent === 'cafe_read_only_inquiry'
+    && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+    && turn.domain === 'cafe'
+    && turn.action === 'order'
+    && turn.speechAct === 'transaction_request'
+    && turn.informationNeed === 'none'
+    && typeof turn.entities.question === 'string'
+    && turn.entities.question.trim().length > 0
+    && turn.confidence >= 0.7
+    && turn.needsClarification === false
+  );
+
   // Critical safety boundary: refining a read-only deterministic candidate
-  // can NEVER escalate the turn into book/order/confirm/modify/cancel/etc.
-  // Write-capable meaning must enter through the existing transactional
-  // contracts, not through semantic refinement.
+  // cannot otherwise escalate the turn into book/order/confirm/modify/cancel.
+  // Write-capable meaning must enter through an explicit transactional
+  // contract, not through semantic refinement.
   if (
     deterministic
     && LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
     && !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(turn.action)
+    && !trustedCafeInquiryRefinement
     && !isTrustedConversationalStateRefinement(turn, deterministic)
   ) {
     return false;

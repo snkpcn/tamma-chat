@@ -10,7 +10,26 @@ import {
 } from '../netlify/functions/_semantic-interpreter';
 import { hasStandaloneTransactionRequest } from '../netlify/functions/_slot-parsers';
 import { emptyTaskStateContainer, type ActiveTask } from '../netlify/functions/_task-state';
+import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
+import {
+  processThongthaiOneMindTurn,
+  type OneMindDependencies,
+} from '../netlify/functions/_thongthai-one-mind-orchestrator';
 import { resolveSupervisedCafeCutover } from '../netlify/functions/thongthai-chat';
+
+const NOW=new Date('2026-09-30T00:00:00.000Z');
+
+function oneMindDeps():Partial<OneMindDependencies> {
+  return {
+    resolveCanonicalGuestId:async()=> 'a7150001-2620-4f7f-8e2e-790730003014',
+    guestDbIdFromAnonymousId:async()=> 'a7150001-2620-4f7f-8e2e-790730003014',
+    loadConversationContext:async()=>emptyConversationContextState(NOW),
+    persistConversationContext:async()=>undefined,
+    loadTaskState:async()=>emptyTaskStateContainer(),
+    persistTaskState:async()=>undefined,
+    buildKnowledgeAdapters:()=>({}),
+  };
+}
 
 function semantic(overrides:Partial<SemanticTurn>={}):SemanticTurn {
   return {
@@ -97,6 +116,30 @@ test('explicit Cafe staff handoff repairs a live-model read-only misclassificati
   assert.equal(turn.needsClarification,false);
   assert.equal(turn.clarificationReason,undefined);
   assert.equal(turn.reply,undefined);
+});
+
+test('validated Cafe inquiry survives the coarse deterministic read-only conflict guard',async()=>{
+  const message='ยืนยันสั่งกาแฟ 5 แก้ว วันที่ 2 ตุลาคม 2569 เวลา 09:00 กรุณาส่งเรื่องให้ทีม Inthanin Café ติดต่อกลับ ชื่อทดสอบ E2E โทร 0800000004';
+  const modelOutput=JSON.stringify({
+    normalizedMeaning:'ask about cafe preorder availability',speechAct:'request',
+    domain:'cafe',intent:'cafe_read_only_inquiry',action:'ask',informationNeed:'availability',
+    entities:{customerName:'ทดสอบ E2E',phone:'0800000004'},references:[],constraints:[],
+    confidence:.95,needsClarification:true,clarificationReason:'source unavailable',
+  });
+  const result=await processThongthaiOneMindTurn({
+    channel:'line',message,eventId:'cafe-prod-a715-001',providerUserKey:'line-key',
+  },{
+    ...oneMindDeps(),
+    interpretSemanticTurn:async()=>parseSemanticTurnResponse(
+      modelOutput,emptySemanticContext(),message,
+    ),
+  },NOW);
+  assert.equal(result.semanticTurn.semanticSource,'openai_supervisor');
+  assert.equal(result.semanticTurn.domain,'cafe');
+  assert.equal(result.semanticTurn.action,'order');
+  assert.equal(result.semanticTurn.speechAct,'transaction_request');
+  assert.equal(result.semanticTurn.informationNeed,'none');
+  assert.equal(result.semanticTurn.entities.question,message);
 });
 
 test('Cafe handoff repair does not authorize ordinary or explicitly withheld questions',()=>{
