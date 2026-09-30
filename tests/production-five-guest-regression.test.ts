@@ -197,4 +197,14 @@ test('guest 5: harmless OTOP product-name spacing resolves to one live SKU and s
     sku: 'OTOP-BK-001', productName: 'ผ้าไหมมัดหมี่ บ้านเขว้า',
   });
   assert.equal(hasStandaloneTransactionRequest('ยืนยันสั่งซื้อจริงตอนนี้'), true);
+
+  const fallback = deriveDeterministicSemanticTurn(
+    message, emptySemanticContext(), emptyTaskStateContainer(), new Date('2026-09-30T00:00:00Z'),
+  );
+  assert.equal(fallback?.domain,'otop');
+  assert.equal(fallback?.action,'order');
+  assert.equal(fallback?.entities.productName,'ผ้าไหมมัดหมี่บ้านเขว้า');
+  assert.equal(fallback?.entities.quantity,1);
+  assert.equal(fallback?.entities.fulfillmentType,'shipping');
+  assert.equal(fallback?.entities.shippingAddress,'99 หมู่ 1 ตำบลในเมือง อำเภอเมืองชัยภูมิ จังหวัดชัยภูมิ 36000');
 });

@@ -1709,6 +1709,30 @@ export function parseSemanticTurnResponse(
     reply = '';
   }
 
+  // A labelled shipped-product purchase is unambiguously an OTOP/storefront
+  // order even when a degraded model drifts into the Restaurant domain. The
+  // product is still resolved against the live OTOP catalog before execution.
+  const explicitOtopShippingPurchase = Boolean(currentMessage)
+    && /สั่งซื้อ/u.test(currentMessage)
+    && /(?:จัดส่ง|ส่งถึง|ส่งไป)/u.test(currentMessage)
+    && /ที่อยู่/u.test(currentMessage)
+    && hasStandaloneTransactionRequest(currentMessage);
+  if (explicitOtopShippingPurchase) {
+    domain = 'otop';
+    action = 'order';
+    speechAct = 'transaction_request';
+    informationNeed = 'none';
+    const productName = currentMessage.match(/สั่งซื้อ\s*(.+?)(?=\s+\d+\s*(?:ชิ้น|อัน|ชุด|ถุง|กล่อง))/u)?.[1]?.trim();
+    const quantity = Number(currentMessage.match(/(\d+)\s*(?:ชิ้น|อัน|ชุด|ถุง|กล่อง)/u)?.[1]);
+    const phone = currentMessage.match(/(?:เบอร์|โทร)\s*([0-9][0-9\s-]{7,18}[0-9])/u)?.[1]?.replace(/\D/g,'');
+    const customerName = currentMessage.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|ที่อยู่|จำนวน|ยืนยัน|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+    if(productName) entities.productName=productName;
+    if(Number.isInteger(quantity)&&quantity>0) entities.quantity=quantity;
+    if(phone) entities.phone=phone;
+    if(customerName) entities.customerName=customerName;
+    reply='';
+  }
+
   // A concrete Restaurant preorder request is not an availability question
   // merely because it contains a pickup date/time. Live production exposed
   // a contradictory supervisor result (`action=order` plus

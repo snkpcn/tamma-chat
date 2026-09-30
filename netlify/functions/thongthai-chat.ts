@@ -5066,6 +5066,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       suggestedActions:polished.suggestedActions,
     });
   }
+  // A fully-labelled request with one exact live property must not be
+  // downgraded into the supervised read-only response below. This fallback
+  // still fails closed on ambiguous room-type text and stores only a pending
+  // request when no schedule exists.
+  const exactStayFallback = await explicitStayBookingFallback(request,guestDbId,channel).catch(error => {
+    console.error('THONGTHAI_EXACT_STAY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if(exactStayFallback) {
+    const polished=polishedResponse(exactStayFallback,channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,suggestedActions:polished.suggestedActions,
+    });
+  }
   if (supervisedStay?.kind === 'respond') {
     const semantic = earlyOneMind!.turn.semanticTurn;
     const polished = polishedResponse({
@@ -5422,24 +5438,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       contextUpdates: polished.contextUpdates,
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
-    });
-  }
-
-  // Final safety net for a fully-labelled, explicitly committed Stay request
-  // whose exact live property name is present. It runs before the legacy
-  // read-only homestay responder, which otherwise re-asks dates already in
-  // the same sentence. Ambiguous room-type text still returns null and never
-  // writes anything.
-  const explicitStayFallback = await explicitStayBookingFallback(request,guestDbId,channel).catch(error => {
-    console.error('THONGTHAI_EXPLICIT_STAY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
-    return null;
-  });
-  if(explicitStayFallback) {
-    const polished=polishedResponse(explicitStayFallback,channel);
-    await persistBrainRuntime(guestDbId,channel,polished);
-    return coreResult(200,{
-      message:polished.message,intent:polished.intent,contextUpdates:polished.contextUpdates,
-      journeyAction:polished.journeyAction,suggestedActions:polished.suggestedActions,
     });
   }
 
