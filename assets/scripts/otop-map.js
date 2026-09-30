@@ -3,7 +3,6 @@
 
   const DATA_ROOT = 'assets/brand/otop/';
   const MAP_URL = DATA_ROOT + 'map/isan-provinces.geojson';
-  const MANIFEST_URL = DATA_ROOT + 'province-hero/province-hero-manifest.json';
   const CATALOG_URL = '/.netlify/functions/otop-province-catalog';
   const VIEW = { width: 760, height: 870, pad: 28 };
   const INITIAL_PROVINCE_ID = 'chaiyaphum';
@@ -34,17 +33,11 @@
   const loading = document.getElementById('mapLoading');
   const quickList = document.getElementById('provinceQuickList');
   const panel = document.getElementById('provincePanel');
-  const productGrid = document.getElementById('provinceProductGrid');
-  const productHeading = document.getElementById('provinceProductsHeading');
-  const productSummary = document.getElementById('provinceProductsSummary');
   let state = {
     geo: null,
-    heroItems: [],
     provinces: [],
     selectedProvinceId: INITIAL_PROVINCE_ID,
-    productsByProvince: new Map(),
     project: null,
-    selectionRequest: 0,
   };
 
   function element(name, attributes = {}) {
@@ -88,17 +81,6 @@
     }).join('') + 'Z').join('')).join('');
   }
 
-  function geometryBounds(geometry, project) {
-    const points = coordinatesOf(geometry).map(project);
-    const xs = points.map(point => point[0]);
-    const ys = points.map(point => point[1]);
-    return {
-      x: Math.min(...xs), y: Math.min(...ys),
-      width: Math.max(...xs) - Math.min(...xs),
-      height: Math.max(...ys) - Math.min(...ys)
-    };
-  }
-
   function provinceFor(provinceId) {
     return state.provinces.find(province => province.provinceId === provinceId);
   }
@@ -111,38 +93,20 @@
     return state.geo.features.find(feature => provinceIdForFeature(feature) === provinceId);
   }
 
-  function manifestHeroUrl(province) {
-    const item = state.heroItems.find(hero => hero.provinceTh === province.provinceName);
-    return item ? DATA_ROOT + 'province-hero/' + item.web : '';
-  }
-
-  function fallbackHeroUrl(province) {
-    return province.heroProductImage || province.heroImage || '';
-  }
-
-  function primaryHeroUrl(province) {
-    return manifestHeroUrl(province) || fallbackHeroUrl(province);
-  }
-
-  function setImageWithFallback(image, province) {
-    const fallback = fallbackHeroUrl(province);
-    image.onerror = () => {
-      image.onerror = null;
-      if (fallback) image.src = fallback;
-    };
-    image.src = primaryHeroUrl(province);
-  }
-
   function renderMap() {
     svg.replaceChildren();
     const selectedFeature = featureFor(state.selectedProvinceId);
     if (!selectedFeature) return;
 
     const defs = element('defs');
-    const clip = element('clipPath', { id: 'selectedProvinceClip' });
-    const selectedPathData = geometryPath(selectedFeature.geometry, state.project);
-    clip.append(element('path', { d: selectedPathData, 'fill-rule': 'evenodd' }));
-    defs.append(clip);
+    const selectedGradient = element('linearGradient', {
+      id: 'selectedProvinceGradient', x1: '0', y1: '0', x2: '1', y2: '1'
+    });
+    selectedGradient.append(
+      element('stop', { offset: '0%', 'stop-color': '#a95027' }),
+      element('stop', { offset: '100%', 'stop-color': '#6a2e07' })
+    );
+    defs.append(selectedGradient);
     svg.append(defs);
 
     const shapeGroup = element('g');
@@ -152,19 +116,19 @@
       if (!province) return;
       const path = element('path', {
         d: geometryPath(feature.geometry, state.project),
-        fill: provinceId === state.selectedProvinceId ? 'transparent' : '#d9cdb9',
+        fill: provinceId === state.selectedProvinceId ? 'url(#selectedProvinceGradient)' : '#d9cdb9',
         stroke: '#fff8eb',
         'stroke-width': '2.2',
         'vector-effect': 'non-scaling-stroke',
         'fill-rule': 'evenodd',
         tabindex: '0',
         role: 'button',
-        'aria-label': `${province.provinceName}: ${province.heroTitle}`,
+        'aria-label': `${province.provinceName}: ${province.experienceTitle}`,
         class: `province-shape${provinceId === state.selectedProvinceId ? ' is-selected' : ''}`,
         'data-province-id': provinceId
       });
       const title = element('title');
-      title.textContent = province.heroTitle;
+      title.textContent = `${province.provinceName} — ${province.experienceTitle}`;
       path.append(title);
       path.addEventListener('click', () => selectProvince(provinceId));
       path.addEventListener('keydown', event => {
@@ -177,20 +141,7 @@
     });
     svg.append(shapeGroup);
 
-    const province = provinceFor(state.selectedProvinceId);
-    const bounds = geometryBounds(selectedFeature.geometry, state.project);
-    const image = element('image', {
-      href: primaryHeroUrl(province),
-      x: bounds.x, y: bounds.y, width: Math.max(bounds.width, 1), height: Math.max(bounds.height, 1),
-      preserveAspectRatio: 'xMidYMid slice',
-      'clip-path': 'url(#selectedProvinceClip)',
-      class: 'selected-image'
-    });
-    const fallback = fallbackHeroUrl(province);
-    image.addEventListener('error', () => {
-      if (fallback && image.getAttribute('href') !== fallback) image.setAttribute('href', fallback);
-    }, { once: true });
-    svg.append(image);
+    const selectedPathData = geometryPath(selectedFeature.geometry, state.project);
     svg.append(element('path', { d: selectedPathData, class: 'selected-outline', 'fill-rule': 'evenodd' }));
     svg.append(element('path', { d: selectedPathData, class: 'selected-inner-outline', 'fill-rule': 'evenodd' }));
   }
@@ -210,128 +161,30 @@
     quickList.querySelector('.is-selected')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   }
 
-  function selectedProducts() {
-    return state.productsByProvince.get(state.selectedProvinceId);
-  }
-
   function renderPanel() {
     const province = provinceFor(state.selectedProvinceId);
-    const products = selectedProducts();
-    const hasProducts = Array.isArray(products) && products.length > 0;
     const paddedOrder = String(province.sortOrder).padStart(2, '0');
-    const image = document.getElementById('provinceImage');
     panel.classList.add('is-changing');
-    image.onload = () => panel.classList.remove('is-changing');
-    setImageWithFallback(image, province);
-    image.alt = province.heroTitle;
-    document.getElementById('provinceCount').textContent = `${paddedOrder} / 20`;
-    document.getElementById('provinceEn').textContent = 'OTOP · ภาคอีสาน';
+    document.getElementById('provinceCount').textContent = paddedOrder;
+    document.getElementById('provinceEn').textContent = `ประสบการณ์จังหวัด · ${paddedOrder}`;
     document.getElementById('provinceName').textContent = province.provinceName;
-    document.getElementById('provinceProduct').textContent = province.provinceId === INITIAL_PROVINCE_ID
-      ? 'ผ้าไหมมัดหมี่บ้านเขว้า'
-      : province.heroTitle;
-    document.getElementById('provincePhotoCredit').hidden = true;
+    document.getElementById('provinceExperienceTitle').textContent = province.experienceTitle;
+    document.getElementById('provinceDescription').textContent = province.experienceDescription;
     document.getElementById('mapSelectedOrder').textContent = paddedOrder;
     document.getElementById('mapSelectedName').textContent = province.provinceName;
 
-    const status = document.getElementById('provinceStatus');
-    status.classList.add('is-open');
-    status.lastChild.textContent = hasProducts
-      ? `${products.length} เรื่องราวพร้อมสำรวจ`
-      : 'เปิดให้สำรวจแล้ว';
-    document.getElementById('provinceDescription').textContent = province.provinceId === INITIAL_PROVINCE_ID
-      ? 'บ้านเขว้าสืบทอดการทอผ้าไหมมัดหมี่มาเกือบ 200 ปี ตั้งแต่สาวไหม มัดลาย ย้อมสี จนถึงทอด้วยกี่ทีละเส้น'
-      : province.heroSubtitle;
-
     const cta = document.getElementById('provinceCta');
-    cta.hidden = !hasProducts;
-    cta.classList.remove('is-disabled');
-    cta.textContent = `ดูสินค้า OTOP ${province.provinceName}`;
-    cta.href = '#provinceProducts';
-    cta.setAttribute('aria-disabled', 'false');
+    cta.textContent = `ดูสินค้าจาก${province.provinceName}`;
+    cta.href = `otop.html?provinceId=${encodeURIComponent(province.provinceId)}`;
+    requestAnimationFrame(() => panel.classList.remove('is-changing'));
   }
 
-  function productCard(product) {
-    const card = document.createElement('article');
-    card.className = 'story-product-card';
-
-    const media = document.createElement('div');
-    media.className = 'story-product-media';
-    const image = document.createElement('img');
-    image.src = product.image;
-    image.alt = product.productName;
-    image.loading = 'lazy';
-    image.addEventListener('error', () => {
-      media.classList.add('is-placeholder');
-      image.remove();
-    }, { once: true });
-    media.append(image);
-
-    const body = document.createElement('div');
-    body.className = 'story-product-body';
-    const tags = document.createElement('p');
-    tags.className = 'story-product-tags';
-    tags.textContent = `${product.category} · ${product.originPlace}`;
-    const title = document.createElement('h3');
-    title.textContent = product.productName;
-    const description = document.createElement('p');
-    description.className = 'story-product-description';
-    description.textContent = product.shortDescription;
-    const caption = document.createElement('p');
-    caption.className = 'story-product-caption';
-    caption.textContent = product.imageCaption;
-    body.append(tags, title, description, caption);
-    card.append(media, body);
-    return card;
-  }
-
-  function renderProducts() {
-    const province = provinceFor(state.selectedProvinceId);
-    const products = selectedProducts();
-    productHeading.textContent = `สินค้า OTOP ${province.provinceName}`;
-    if (!Array.isArray(products)) {
-      productSummary.textContent = 'กำลังโหลดข้อมูลสินค้าจากระบบ…';
-      productGrid.replaceChildren();
-      return;
-    }
-    if (!products.length) {
-      productSummary.textContent = 'ข้อมูลจังหวัดพร้อมแล้ว';
-      const empty = document.createElement('div');
-      empty.className = 'province-products-empty';
-      empty.textContent = 'ยังไม่มีสินค้าที่ผ่านการยืนยันสำหรับแสดงในหน้านี้';
-      productGrid.replaceChildren(empty);
-      return;
-    }
-    productSummary.textContent = `${products.length} เรื่องราว · ยังไม่เปิดจำหน่ายจนกว่าราคา สต๊อก และการจัดส่งจะยืนยันครบ`;
-    productGrid.replaceChildren(...products.map(productCard));
-  }
-
-  async function loadProducts(provinceId) {
-    if (state.productsByProvince.has(provinceId)) return;
-    const response = await fetch(`${CATALOG_URL}?provinceId=${encodeURIComponent(provinceId)}`);
-    if (!response.ok) throw new Error('Province catalog unavailable');
-    const data = await response.json();
-    state.productsByProvince.set(provinceId, Array.isArray(data.products) ? data.products : []);
-  }
-
-  async function selectProvince(provinceId) {
+  function selectProvince(provinceId) {
     if (!provinceFor(provinceId)) return;
     state.selectedProvinceId = provinceId;
-    const request = ++state.selectionRequest;
     renderMap();
     renderQuickList();
     renderPanel();
-    renderProducts();
-    try {
-      await loadProducts(provinceId);
-      if (request !== state.selectionRequest || state.selectedProvinceId !== provinceId) return;
-      renderPanel();
-      renderProducts();
-    } catch (error) {
-      if (request !== state.selectionRequest) return;
-      productSummary.textContent = 'ยังโหลดข้อมูลสินค้าจังหวัดนี้ไม่ได้ กรุณาลองใหม่อีกครั้ง';
-      console.error(error);
-    }
   }
 
   function syncAccountNavigation() {
@@ -345,28 +198,22 @@
   async function initialise() {
     syncAccountNavigation();
     try {
-      const [geoResponse, manifestResponse, catalogResponse] = await Promise.all([
+      const [geoResponse, catalogResponse] = await Promise.all([
         fetch(MAP_URL),
-        fetch(MANIFEST_URL),
         fetch(CATALOG_URL),
       ]);
-      if (!geoResponse.ok || !manifestResponse.ok || !catalogResponse.ok) throw new Error('Map data unavailable');
-      const [geo, manifest, catalog] = await Promise.all([
-        geoResponse.json(), manifestResponse.json(), catalogResponse.json(),
+      if (!geoResponse.ok || !catalogResponse.ok) throw new Error('Map data unavailable');
+      const [geo, catalog] = await Promise.all([
+        geoResponse.json(), catalogResponse.json(),
       ]);
       if (geo.features.length !== 20 || catalog.provinces.length !== 20) throw new Error('Incomplete province data');
       state.geo = geo;
-      state.heroItems = Array.isArray(manifest.items) ? manifest.items : [];
       state.provinces = catalog.provinces;
       state.project = makeProject(geo.features);
       renderMap();
       renderQuickList();
       renderPanel();
-      renderProducts();
       loading.hidden = true;
-      await loadProducts(INITIAL_PROVINCE_ID);
-      renderPanel();
-      renderProducts();
     } catch (error) {
       loading.hidden = false;
       loading.textContent = 'ไม่สามารถเปิดแผนที่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง';

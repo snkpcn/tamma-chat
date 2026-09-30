@@ -7,6 +7,8 @@ export type OtopProvince = {
   heroSubtitle: string;
   heroImage: string;
   heroProductImage?: string;
+  experienceTitle: string;
+  experienceDescription: string;
   productCount: number;
   isActive: boolean;
   sortOrder: number;

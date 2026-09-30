@@ -19,6 +19,10 @@ test('OTOP province registry contains the 20 unique required province IDs', () =
     'udonthani', 'nongkhai', 'buengkan', 'loei', 'nongbualamphu',
   ]);
   assert.equal(OTOP_PROVINCES.find((province) => province.provinceId === 'chaiyaphum')?.productCount, 10);
+  for (const province of OTOP_PROVINCES) {
+    assert.ok(province.experienceTitle.length > 12);
+    assert.ok(province.experienceDescription.length > 60);
+  }
 });
 
 test('Chaiyaphum owns 10 complete, story-only and public-safe products', () => {
@@ -46,16 +50,15 @@ test('province and product lookup helpers handle populated, empty and unknown ID
   assert.equal(getOtopProductById('missing-product'), undefined);
 });
 
-test('map UI loads by provinceId and renders exact empty-state and story fields', () => {
+test('map UI is province-experience first and links to the separate store', () => {
   const mapSource = readFileSync('assets/scripts/otop-map.js', 'utf8');
   const page = readFileSync('otop-map.html', 'utf8');
   assert.match(mapSource, /data-province-id/u);
-  assert.match(mapSource, /provinceId=/u);
-  assert.match(mapSource, /product\.shortDescription/u);
-  assert.match(mapSource, /product\.imageCaption/u);
-  assert.match(mapSource, /product\.category/u);
-  assert.match(mapSource, /product\.originPlace/u);
-  assert.match(mapSource, /ยังไม่มีสินค้าที่ผ่านการยืนยันสำหรับแสดงในหน้านี้/u);
-  assert.doesNotMatch(mapSource, /กำลังเตรียมสินค้า OTOP ของจังหวัดนี้/u);
-  assert.match(page, /id="provinceProductGrid"/u);
+  assert.match(mapSource, /province\.experienceTitle/u);
+  assert.match(mapSource, /province\.experienceDescription/u);
+  assert.match(mapSource, /otop\.html\?provinceId=/u);
+  assert.doesNotMatch(mapSource, /<image|primaryHeroUrl|renderProducts|productCard/u);
+  assert.doesNotMatch(page, /map-intro-photo|provinceImage|provinceProductGrid|province-products/u);
+  assert.match(page, /id="provinceExperienceTitle"/u);
+  assert.match(page, /ดูสินค้าจากชัยภูมิ/u);
 });

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#25150d">
   <title>แผนที่ของดีอีสาน — ทำมา-ชาติ OTOP</title>
-  <meta name="description" content="สำรวจของดีจาก 20 จังหวัดอีสานผ่านแผนที่ขอบเขตจังหวัดจริง พร้อมเรื่องราวชุมชนจากทำมา-ชาติ">
+  <meta name="description" content="เลือกจังหวัดบนแผนที่อีสาน แล้วรู้จักผู้คน วิถีชีวิต และเรื่องราวของแต่ละพื้นที่ ก่อนเลือกชมสินค้าชุมชน">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -28,28 +28,13 @@
   </header>
 
   <main>
-    <section class="map-intro" aria-labelledby="mapTitle">
-      <div class="map-intro-photo">
-        <img src="assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp" width="3840" height="2560" fetchpriority="high" decoding="async" alt="ช่างทอผ้าไหมบ้านเขว้ากำลังทอผ้าบนกี่">
-        <span>ภาพการผลิตจริง · Nation Photo · ภาพความละเอียด 4K</span>
-      </div>
-      <div class="map-intro-copy">
-        <p class="map-kicker">OTOP · ของดีจากคนทำจริง</p>
-        <h1 id="mapTitle">ผ้าไหมบ้านเขว้า<br>งานฝีมือที่ยังทอจริง</h1>
-        <p>เริ่มจากช่างทอบ้านเขว้า จังหวัดชัยภูมิ แล้วเปิดแผนที่เพื่อรู้จักของดี งานฝีมือ และเรื่องราวจากชุมชนทั้ง 20 จังหวัดอีสาน</p>
-      </div>
-      <div class="map-intro-mark" aria-label="OTOP">
-        <img src="assets/brand/logos/otop-logo-brown-trimmed.webp" width="352" height="347" alt="OTOP">
-        <span>หนึ่งตำบล<br>หนึ่งผลิตภัณฑ์</span>
-      </div>
-    </section>
-
-    <section class="map-workspace" aria-label="แผนที่สินค้า OTOP ภาคอีสาน">
+    <section class="map-workspace" aria-labelledby="mapTitle">
       <div class="map-card">
         <div class="map-card-head">
           <div>
-            <span class="map-overline">แผนที่ของดี 20 จังหวัด</span>
-            <h2>เลือกจังหวัดที่อยากค้นพบ</h2>
+            <span class="map-overline">ประสบการณ์อีสาน 20 จังหวัด</span>
+            <h1 id="mapTitle">เลือกจังหวัดที่อยากรู้จัก</h1>
+            <p>แตะบนแผนที่หรือเลือกชื่อจังหวัดด้านล่าง เพื่อเปิดเรื่องราวของผู้คน วิถีชีวิต และสิ่งที่ทำให้แต่ละพื้นที่ไม่เหมือนกัน</p>
           </div>
           <div class="map-legend" aria-label="คำอธิบายแผนที่">
             <span><i class="legend-swatch legend-open"></i>จังหวัดที่เลือก</span>
@@ -70,32 +55,20 @@
       </div>
 
       <aside class="province-panel" id="provincePanel" aria-live="polite">
-        <div class="province-image-wrap">
-          <img id="provinceImage" src="assets/brand/otop/province-hero/web/01-chaiyaphum-mudmee-silk-hero.webp" width="960" height="960" alt="ผ้าไหมมัดหมี่บ้านเขว้า จังหวัดชัยภูมิ">
-          <span class="province-count" id="provinceCount">01 / 20</span>
+        <div class="province-index" aria-hidden="true">
+          <span id="provinceCount">01</span>
+          <small>/ 20</small>
         </div>
         <div class="province-panel-body">
-          <div class="province-status" id="provinceStatus"><span></span>เปิดสำรวจแล้ว</div>
           <p class="province-en" id="provinceEn">CHAIYAPHUM</p>
           <h2 id="provinceName">ชัยภูมิ</h2>
-          <p class="province-product-label">ของดีประจำจังหวัด</p>
-          <h3 id="provinceProduct">ผ้าไหมมัดหมี่บ้านเขว้า</h3>
-          <p class="province-description" id="provinceDescription">บ้านเขว้าสืบทอดการทอผ้าไหมมัดหมี่มาเกือบ 200 ปี ตั้งแต่สาวไหม มัดลาย ย้อมสี จนถึงทอด้วยกี่ทีละเส้น</p>
-          <a class="province-cta" id="provinceCta" href="#provinceProducts">ดูสินค้า OTOP ชัยภูมิ</a>
-          <p class="concept-note"><span id="provincePhotoCredit" hidden></span>สินค้าหลักประจำจังหวัดที่คัดเลือกไว้ เพื่อพาไปรู้จักฝีมือ วัตถุดิบ และที่มาของชุมชน</p>
+          <p class="province-story-label">เรื่องราวของจังหวัด</p>
+          <h3 id="provinceExperienceTitle">ผืนไหม ธรรมชาติ และวิถีชุมชนเชิงเขา</h3>
+          <p class="province-description" id="provinceDescription">ชัยภูมิชวนให้รู้จักอีสานผ่านจังหวะชีวิตที่ค่อยเป็นค่อยไป ตั้งแต่งานทอบ้านเขว้า อาหารพื้นถิ่น ไปจนถึงธรรมชาติรอบตาดโตน ทุกประสบการณ์เชื่อมกลับไปหาคนและพื้นที่จริง</p>
+          <a class="province-cta" id="provinceCta" href="otop.html?provinceId=chaiyaphum">ดูสินค้าจากชัยภูมิ</a>
+          <p class="concept-note">เลือกซื้อเมื่อพร้อม หลังจากได้รู้จักที่มา คนทำ และคุณค่าของพื้นที่นั้นแล้ว</p>
         </div>
       </aside>
-    </section>
-
-    <section class="province-products" id="provinceProducts" aria-labelledby="provinceProductsHeading">
-      <div class="province-products-head">
-        <div>
-          <p class="map-overline">เรื่องราวจากชุมชน</p>
-          <h2 id="provinceProductsHeading">สินค้า OTOP ชัยภูมิ</h2>
-        </div>
-        <p id="provinceProductsSummary">กำลังโหลดข้อมูลสินค้าจากระบบ…</p>
-      </div>
-      <div class="province-products-grid" id="provinceProductGrid" aria-live="polite"></div>
     </section>
   </main>
 
