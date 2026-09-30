@@ -2087,6 +2087,61 @@ export function resolveSupervisedCafeCutover(
   return { kind:'respond', response };
 }
 
+export type SupervisedOtopCutoverDecision =
+  | { kind:'respond'; response:ComposedResponse }
+  | { kind:'execute_order'; args:Record<string, unknown> };
+
+/** Terminal OTOP boundary. A supervised catalog/read-only turn renders from
+ * live product facts, while a write can execute only the Dialog Manager's
+ * validated create_otop_order proposal. This prevents a correctly understood
+ * OTOP purchase from falling through into the legacy Restaurant responder. */
+export function resolveSupervisedOtopCutover(
+  oneMind:Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel:BrainChannel,
+  language:BrainRequest['language'],
+):SupervisedOtopCutoverDecision|null {
+  const turn=oneMind.turn;
+  if(turn.semanticTurn.domain!=='otop'
+      || turn.semanticTurn.semanticSource!=='openai_supervisor') return null;
+  if(oneMind.status==='composed') return {kind:'respond',response:oneMind.response};
+
+  const meaning=turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
+  const proposal=turn.dialogDecision.actionProposal;
+  const task=turn.dialogDecision.taskStateContainer.activeTask;
+  if(meaning.commitmentLevel==='explicit_transaction'
+      && proposal?.toolName==='create_otop_order'
+      && proposal.customerCommitPresent
+      && task?.type==='otop_order'
+      && turn.dialogDecision.mode==='propose_action') {
+    const value=proposal.validatedArgs;
+    const sku=typeof value.sku==='string'?value.sku.trim():'';
+    const quantity=Math.floor(Number(value.quantity));
+    if(sku && Number.isInteger(quantity) && quantity>=1 && quantity<=99) {
+      return {
+        kind:'execute_order',
+        args:{
+          sku,quantity,
+          fulfillmentType:value.fulfillmentType==='shipping'?'shipping':'pickup',
+          ...(typeof value.customerName==='string'&&value.customerName.trim()?{customerName:value.customerName.trim()}:{}),
+          ...(typeof value.phone==='string'&&value.phone.trim()?{phone:value.phone.trim()}:{}),
+          ...(typeof value.email==='string'&&value.email.trim()?{email:value.email.trim()}:{}),
+          ...(typeof value.shippingAddress==='string'&&value.shippingAddress.trim()?{shippingAddress:value.shippingAddress.trim()}:{}),
+          ...(typeof value.note==='string'&&value.note.trim()?{note:value.note.trim()}:{}),
+        },
+      };
+    }
+  }
+
+  const composerInput={
+    channel,language,semanticTurn:turn.dialogSemanticTurn,
+    dialogDecision:turn.dialogDecision,knowledgeBundles:turn.groundedKnowledge,
+    degradation:turn.knowledgeDegradation,operationalOutcome:null,
+  };
+  const response=composeGroundedDeterministicResponse(composerInput)
+    ?? composeDeterministicResponse(composerInput);
+  return {kind:'respond',response};
+}
+
 /** Defense-in-depth sanitizer for a proposal already validated by Dialog
  * Manager/domain policy. No customer message enters this function. */
 export function resolveRestaurantTableBookingProposalArgs(
@@ -4048,6 +4103,52 @@ async function executeDeterministicCafeInquiry(
   };
 }
 
+async function executeDeterministicOtopOrder(
+  args:Record<string,unknown>,
+  request:BrainRequest,
+  guestDbId:string|null,
+  channel:BrainChannel,
+):Promise<BrainResponse> {
+  const sku=typeof args.sku==='string'?args.sku.trim():'';
+  const quantity=Math.floor(Number(args.quantity));
+  const fulfillmentType=args.fulfillmentType==='shipping'?'shipping':'pickup';
+  const firstResponse:BrainResponse={
+    message:'',intent:'order',contextUpdates:{},journeyAction:{type:'none',journey:null},
+    suggestedActions:[],responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+  };
+  if(!sku || !Number.isInteger(quantity) || quantity<1 || quantity>99) {
+    return {...firstResponse,message:'ยังสร้างออเดอร์ OTOP ไม่ได้ครับ กรุณาเลือกสินค้าและจำนวนอีกครั้ง'};
+  }
+  const [result]=await executeBrainTools(guestDbId,channel,[{
+    name:'create_otop_order',
+    args:{
+      sku,quantity,fulfillmentType,
+      ...(typeof args.customerName==='string'?{customerName:args.customerName}:{}),
+      ...(typeof args.phone==='string'?{phone:args.phone}:{}),
+      ...(typeof args.email==='string'?{email:args.email}:{}),
+      ...(typeof args.shippingAddress==='string'?{shippingAddress:args.shippingAddress}:{}),
+      ...(typeof args.note==='string'?{note:args.note}:{}),
+    },
+  }],firstResponse,request);
+  if(!result?.ok) {
+    return {...firstResponse,message:'ยังสร้างออเดอร์ OTOP ไม่สำเร็จครับ ระบบตรวจสินค้าและสต็อกไม่ผ่าน จึงยังไม่ตัดสต็อกหรือสร้างยอดชำระ'};
+  }
+  let detail:Record<string,unknown>={};
+  try { detail=JSON.parse(result.detail) as Record<string,unknown>; } catch { /* safe defaults */ }
+  const orderCode=typeof detail.orderCode==='string'?detail.orderCode:'';
+  const total=typeof detail.total==='number'?detail.total:Number(detail.total);
+  return {
+    ...firstResponse,
+    message:[
+      'สร้างออเดอร์ OTOP แล้วครับ ✅',
+      orderCode?`เลขออเดอร์ ${orderCode}`:'',
+      Number.isFinite(total)?`ยอดชำระ ${Math.round(total)} บาท`:'',
+      fulfillmentType==='shipping'?'จัดส่งตามที่อยู่ที่ให้ไว้':'รับสินค้าที่ร้าน',
+      'สถานะ: รอดำเนินการและรอชำระเงิน',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 async function executeDeterministicPromotionRedemption(
   args:Record<string,unknown>,
   request:BrainRequest,
@@ -5067,6 +5168,39 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       intent:polished.intent,
       contextUpdates:polished.contextUpdates,
       journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  // Terminal OTOP boundary. A validated purchase must execute here instead
+  // of falling through into legacy Restaurant/menu responders.
+  const supervisedOtop=earlyOneMind
+    ? resolveSupervisedOtopCutover(earlyOneMind,channel,request.language)
+    : null;
+  if(supervisedOtop?.kind==='execute_order') {
+    const executed=await executeDeterministicOtopOrder(
+      supervisedOtop.args,request,guestDbId,channel,
+    );
+    const polished=polishedResponse(executed,channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,
+      contextUpdates:polished.contextUpdates,journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+  if(supervisedOtop?.kind==='respond') {
+    const semantic=earlyOneMind!.turn.semanticTurn;
+    const polished=polishedResponse({
+      message:supervisedOtop.response.message,
+      intent:semantic.action==='discover'||semantic.action==='recommend'?'recommendation':'information',
+      contextUpdates:{},journeyAction:{type:'none',journey:null},suggestedActions:[],
+      responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+    },channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,
+      contextUpdates:polished.contextUpdates,journeyAction:polished.journeyAction,
       suggestedActions:polished.suggestedActions,
     });
   }
