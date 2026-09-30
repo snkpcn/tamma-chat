@@ -1589,6 +1589,31 @@ export function parseSemanticTurnResponse(
     && Boolean(reference.resolvedEntityId));
   const currentExplicitNoTransaction = Boolean(currentMessage)
     && hasExplicitNoTransactionMarker(currentMessage);
+
+  // A fully named business transaction owns the domain even when the model
+  // is distracted by a colliding proper noun.  Production example:
+  // "หวัดดีทองไทย ขอจองโต๊ะร้าน..." was labelled Activity because
+  // "ทองไทย" is also a horse name.  These repairs are intentionally narrow:
+  // they require an affirmative transaction request plus an unmistakable
+  // business object, and still grant no write authority by themselves.
+  if (currentMessage && !currentExplicitNoTransaction && hasStandaloneTransactionRequest(currentMessage)) {
+    if (/(?:โต๊ะ|ที่นั่ง)/u.test(currentMessage) && /จอง/u.test(currentMessage)) {
+      domain = 'restaurant';
+      delete entities.horseName;
+      delete entities.activityCode;
+      delete entities.assetSelection;
+    } else if (/(?:เฮือนสเตย์|โฮมสเตย์|ที่พัก|ห้องนอน)/u.test(currentMessage) && /จอง/u.test(currentMessage)) {
+      domain = 'stay';
+      const bedrooms = currentMessage.match(/(\d{1,2})\s*ห้องนอน/u);
+      if (entities.bedrooms === undefined && bedrooms) entities.bedrooms = Number(bedrooms[1]);
+      delete entities.horseName;
+      delete entities.activityCode;
+      delete entities.assetSelection;
+    } else if (/สั่งซื้อ/u.test(currentMessage)
+        && /(?:จัดส่ง|ส่งถึง|ส่งไป|ที่อยู่)/u.test(currentMessage)) {
+      domain = 'otop';
+    }
+  }
   const hasNamedSelectionEntity = informationNeed === 'none'
     && ['horseName','resourceName','roomType','itemName','productName','promotionName','name']
       .some(key => typeof entities[key] === 'string' && String(entities[key]).trim().length > 0);
@@ -1750,6 +1775,22 @@ export function parseSemanticTurnResponse(
       entities.endDate ??= range.endDate;
     }
     entities.partySize ??= extractPartySize(currentMessage) ?? undefined;
+    reply = '';
+  }
+
+  // OTOP delivery is a material order choice.  Never let a model-defaulted
+  // pickup value override explicit current-turn shipping language.  Recover
+  // only the address text after the explicit "ที่อยู่" label; executors still
+  // validate SKU, quantity and stock from the authoritative live catalog.
+  if (domain === 'otop' && Boolean(currentMessage) && hasStandaloneTransactionRequest(currentMessage)
+      && /(?:จัดส่ง|ส่งถึง|ส่งไป)/u.test(currentMessage)) {
+    entities.fulfillmentType = 'shipping';
+    if (entities.shippingAddress === undefined) {
+      const address = currentMessage.match(
+        /ที่อยู่\s*(.+?)(?=\s*(?:ยืนยัน(?:การ)?สั่ง(?:ซื้อ)?|สั่งซื้อจริง|ครับ|ค่ะ|คะ|$))/u,
+      )?.[1]?.trim();
+      if (address) entities.shippingAddress = address;
+    }
     reply = '';
   }
 

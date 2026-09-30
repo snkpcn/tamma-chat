@@ -746,6 +746,15 @@ function needsActivityCatalogResolution(task: ActiveTask, turn: SemanticTurn): b
   return !task.slots.durationMinutes || turn.entities.durationMinutes !== undefined;
 }
 
+function needsStayCatalogResolution(task: ActiveTask): boolean {
+  if (task.type !== 'stay_booking') return false;
+  if (typeof task.slots.resourceCode === 'string' && task.slots.resourceCode.trim()) return false;
+  return Number.isInteger(Number(task.slots.bedrooms))
+    || (typeof task.slots.roomType === 'string' && task.slots.roomType.trim().length > 0)
+    || (typeof task.slots.resourceName === 'string' && task.slots.resourceName.trim().length > 0)
+    || (typeof task.slots.accommodationName === 'string' && task.slots.accommodationName.trim().length > 0);
+}
+
 function hasRecommendationCriteria(turn:SemanticTurn):boolean {
   if(turn.action==='recommend' || turn.informationNeed==='recommendation') return true;
   const entityKeys=Object.keys(turn.entities).map(key=>key.toLowerCase());
@@ -872,6 +881,12 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.informationNeed === 'transaction_status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
       if ((turn.informationNeed ?? 'none') === 'none' && turn.action === 'status') return [{ ...base, domain: 'stay', needs: ['booking_status'] }];
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend' || turn.action === 'compare') return [{ ...base, domain: 'stay', needs: ['catalog'] }];
+      // A bedroom/room-type selection is not itself a canonical bookable
+      // resource code. Fetch the live Stay catalog so the policy below can
+      // resolve it only when exactly one real resource matches.
+      if (task && needsStayCatalogResolution(task)) {
+        return [{ ...base, domain:'stay', needs:['catalog'] }];
+      }
       if (task && task.missingFields.length === 0) return [{ ...base, domain: 'stay', needs: ['availability'] }];
       return [];
     case 'promotion':
@@ -1543,6 +1558,50 @@ export function resolveStayStructuredSlots(task: ActiveTask): Record<string, unk
   return patch;
 }
 
+/** Resolve a descriptive Stay choice to one canonical live resource.  Every
+ * candidate and attribute comes from authoritative catalog facts; zero or
+ * multiple matches fail closed and keep resourceCode missing. */
+export function resolveStayCatalogStructuredSlots(
+  task: ActiveTask,
+  bundles: readonly KnowledgeBundle[],
+): Record<string, unknown> {
+  if (task.type !== 'stay_booking') return {};
+  if (typeof task.slots.resourceCode === 'string' && task.slots.resourceCode.trim()) return {};
+
+  const facts = bundles.flatMap(bundle => bundle.domain === 'stay' ? bundle.facts : [])
+    .filter(fact => fact.authoritative === true && fact.stale !== true);
+  const names = new Map<string,string>();
+  for (const fact of facts) {
+    const match = fact.key.match(/^stay:([^:]+):name$/u);
+    if (match && typeof fact.value === 'string') names.set(match[1]!, fact.value);
+  }
+  let candidates = [...names.keys()];
+
+  const bedrooms = Number(task.slots.bedrooms);
+  if (Number.isInteger(bedrooms) && bedrooms > 0) {
+    candidates = candidates.filter(code => facts.some(fact =>
+      fact.key === `stay:${code}:bedrooms` && Number(fact.value) === bedrooms));
+  }
+  const roomType = typeof task.slots.roomType === 'string' ? task.slots.roomType.trim().toLocaleLowerCase('th-TH') : '';
+  if (roomType) {
+    candidates = candidates.filter(code => facts.some(fact =>
+      fact.key === `stay:${code}:roomType`
+      && String(fact.value).trim().toLocaleLowerCase('th-TH') === roomType));
+  }
+  const requestedName = [task.slots.resourceName, task.slots.accommodationName]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ?.trim().replace(/[\s\p{P}\p{S}]+/gu, '').toLocaleLowerCase('th-TH') ?? '';
+  if (requestedName) {
+    candidates = candidates.filter(code =>
+      (names.get(code) ?? '').replace(/[\s\p{P}\p{S}]+/gu, '').toLocaleLowerCase('th-TH') === requestedName);
+  }
+
+  const unique = [...new Set(candidates)];
+  return unique.length === 1
+    ? { resourceCode:unique[0], resourceName:names.get(unique[0]!) }
+    : {};
+}
+
 function applyStayStructuredPolicy(plan: DialogPlan, input: DialogInput, now: Date): DialogPlan | null {
   const task = plan.taskStateContainer.activeTask;
   if (!task || task.type !== 'stay_booking') return null;
@@ -1550,6 +1609,23 @@ function applyStayStructuredPolicy(plan: DialogPlan, input: DialogInput, now: Da
   if (!Object.keys(slotPatch).length) return null;
   const container = applyTaskStateEvent(plan.taskStateContainer, {
     kind:'update_slots', eventId:`${input.eventId}:stay_structured_autofill`, slotPatch,
+  }, now);
+  return planDialogTurn({ ...input, taskState:container }, now);
+}
+
+function applyStayCatalogPolicy(
+  plan: DialogPlan,
+  bundles: readonly KnowledgeBundle[],
+  input: DialogInput,
+  now: Date,
+): DialogPlan | null {
+  const task = plan.taskStateContainer.activeTask;
+  if (!task || task.type !== 'stay_booking') return null;
+  const slotPatch = resolveStayCatalogStructuredSlots(task, bundles);
+  if (!Object.keys(slotPatch).length) return null;
+  const container = applyTaskStateEvent(plan.taskStateContainer, {
+    kind:'update_slots', eventId:`${input.eventId}:stay_verified_identity`, slotPatch,
+    requiredFields:DOMAIN_TASK_REQUIRED_FIELDS.stay_booking,
   }, now);
   return planDialogTurn({ ...input, taskState:container }, now);
 }
@@ -1569,6 +1645,12 @@ export async function processDialogTurnDetailed(
   const stayReplanned = applyStayStructuredPolicy(plan, input, now);
   if (stayReplanned) plan = stayReplanned;
   let bundles = await resolveBundles(plan, adapters, now);
+
+  const stayCatalogReplanned = applyStayCatalogPolicy(plan, bundles, input, now);
+  if (stayCatalogReplanned) {
+    plan = stayCatalogReplanned;
+    bundles = await resolveBundles(plan, adapters, now);
+  }
 
   const promotionReplanned=applyPromotionStructuredPolicy(plan,bundles,input,now);
   if(promotionReplanned){
