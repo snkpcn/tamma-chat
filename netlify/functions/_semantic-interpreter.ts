@@ -1688,14 +1688,14 @@ export function parseSemanticTurnResponse(
   // the CURRENT turn must contain both a standalone order request and an
   // explicit staff-handoff instruction. This creates only a cafe_inquiry (not
   // a sale or payment), and ordinary menu/availability questions stay read-only.
-  const explicitCafeImperativeNow = /(?:กรุณา|รบกวน|ขอให้)\s*(?:ช่วย)?\s*(?:ส่ง|ฝาก|แจ้ง)[\s\S]{0,100}?(?:เรื่อง|คำถาม|คำขอ)[\s\S]{0,100}?(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,100}?(?:ตอนนี้|ติดต่อ(?:กลับ)?|โทรกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage);
+  const explicitCafeImperativeNow = /(?:กรุณา|รบกวน|ขอให้)\s*(?:ช่วย)?\s*(?:ส่ง|ฝาก|แจ้ง)[\s\S]{0,100}?(?:เรื่อง|คำถาม|คำขอ)[\s\S]{0,100}?(?:ทีม|ร้าน|คาเฟ่|อินทนิล|inthanin)[\s\S]{0,100}?(?:ตอนนี้|ติดต่อ(?:กลับ)?|โทรกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage);
   const explicitCafeStaffInquiryAuthorization = domain === 'cafe'
     && Boolean(currentMessage)
     && !currentExplicitNoTransaction
     && (hasStandaloneTransactionRequest(currentMessage) || explicitCafeImperativeNow)
     && (
-      /(?:ส่ง|ฝาก|แจ้ง)\s*(?:เรื่อง|คำถาม|คำขอ)[\s\S]{0,120}?(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,120}?(?:ติดต่อ(?:กลับ)?|โทรกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
-      || /(?:ขอให้|ให้)\s*(?:ทีม|ร้าน|คาเฟ่)[\s\S]{0,120}?(?:ติดต่อกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
+      /(?:ส่ง|ฝาก|แจ้ง)\s*(?:เรื่อง|คำถาม|คำขอ)[\s\S]{0,120}?(?:ทีม|ร้าน|คาเฟ่|อินทนิล|inthanin)[\s\S]{0,120}?(?:ติดต่อ(?:กลับ)?|โทรกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
+      || /(?:ขอให้|ให้)\s*(?:ทีม|ร้าน|คาเฟ่|อินทนิล|inthanin)[\s\S]{0,120}?(?:ติดต่อกลับ|รับเรื่อง|ตรวจสอบ)/iu.test(currentMessage)
     );
   if (explicitCafeStaffInquiryAuthorization) {
     action = 'order';

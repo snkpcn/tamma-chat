@@ -30,7 +30,7 @@ import {
   persistBrainRuntime,
   registerGuestIdentity,
 } from './_thongthai-runtime-v3';
-import { activityAssetFromText, formatActivityAssetNote, resetLineBookingPlanningSession } from './_operations-db';
+import { activityAssetFromText, formatActivityAssetNote, listServiceResources, resetLineBookingPlanningSession } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import { emptyConversationContextState } from './_conversation-context';
@@ -87,10 +87,12 @@ import {
 } from './_promotion-dialog';
 import {
   extractDate,
+  extractDateRange,
   extractDurationMinutes,
   extractPartySize,
   extractTime,
   hasCommitMarker,
+  hasStandaloneTransactionRequest,
 } from './_slot-parsers';
 import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask, suspendActiveTask } from './_task-state';
 import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
@@ -3879,6 +3881,46 @@ async function activityBookingFallbackResponse(
   return executeDeterministicActivityBooking(draft, request, guestDbId, channel);
 }
 
+export function resolveExplicitStayFallbackArgs(
+  message:string,
+  resources:ReadonlyArray<{code:string;name:string}>,
+  now:Date=new Date(),
+):Record<string,unknown>|null {
+  if (!hasStandaloneTransactionRequest(message)
+      || !/จอง/u.test(message)
+      || !/(?:เฮือนสเตย์|โฮมสเตย์|ที่พัก|ห้องนอน)/u.test(message)) return null;
+  const normalizedMessage=message.replace(/[\s\-–—_/]/gu,'').toLowerCase();
+  const matches=resources.filter(resource => {
+    const normalizedName=resource.name.replace(/[\s\-–—_/]/gu,'').toLowerCase();
+    return normalizedName.length>=2 && normalizedMessage.includes(normalizedName);
+  });
+  if(matches.length!==1) return null;
+  const range=extractDateRange(message,now);
+  const date=range?.date ?? extractDate(message,now);
+  const endDate=range?.endDate;
+  const partySize=extractPartySize(message);
+  const phone=message.match(/(?:เบอร์|โทร)\s*([0-9][0-9\s-]{7,18}[0-9])/u)?.[1]?.replace(/\D/g,'');
+  const customerName=message.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|จำนวน|จอง|ยืนยัน|ส่ง|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+  if(!date||!endDate||!partySize||!phone||!customerName) return null;
+  return {
+    serviceType:'stay', resourceCode:matches[0]!.code,
+    accommodationName:matches[0]!.name, date, endDate, partySize,
+    quantity:1, customerName, phone,
+    ...(/ผู้สูงอายุ/u.test(message)?{note:'มีผู้สูงอายุร่วมเข้าพัก — กรุณาตรวจสอบการเข้าถึงก่อนยืนยัน'}:{}),
+  };
+}
+
+async function explicitStayBookingFallback(
+  request:BrainRequest,
+  guestDbId:string|null,
+  channel:BrainChannel,
+):Promise<BrainResponse|null> {
+  if(!hasStandaloneTransactionRequest(request.message)) return null;
+  const resources=await listServiceResources('stay');
+  const args=resolveExplicitStayFallbackArgs(request.message,resources);
+  return args?executeDeterministicStayBooking(args,request,guestDbId,channel):null;
+}
+
 async function executeDeterministicActivityBooking(
   args: Record<string, unknown>,
   request: BrainRequest,
@@ -5380,6 +5422,24 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       contextUpdates: polished.contextUpdates,
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  // Final safety net for a fully-labelled, explicitly committed Stay request
+  // whose exact live property name is present. It runs before the legacy
+  // read-only homestay responder, which otherwise re-asks dates already in
+  // the same sentence. Ambiguous room-type text still returns null and never
+  // writes anything.
+  const explicitStayFallback = await explicitStayBookingFallback(request,guestDbId,channel).catch(error => {
+    console.error('THONGTHAI_EXPLICIT_STAY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if(explicitStayFallback) {
+    const polished=polishedResponse(explicitStayFallback,channel);
+    await persistBrainRuntime(guestDbId,channel,polished);
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,suggestedActions:polished.suggestedActions,
     });
   }
 

@@ -250,7 +250,7 @@ const STAY_TOPIC_MARKER = /ห้อง|ที่พัก|เฮือน|บ�
 const STAY_CHECKIN_CHECKOUT_TIME_MARKER =
   /(?:เช[็็]?คอิน|เช็คอิน|เช็คเอาท์|เช็กเอาต์)[^\n]{0,10}(?:กี่โมง|เวลาไหน|ตอนไหน)|(?:กี่โมง|เวลาไหน)[^\n]{0,10}(?:เช[็็]?คอิน|เช็คอิน|เช็คเอาท์|เช็กเอาต์)/u;
 const OTOP_TOPIC_MARKER = /otop|โอทอป|ของฝาก|สินค้าชุมชน/iu;
-const CAFE_TOPIC_MARKER = /กาแฟ|คาเฟ่|อินทนิน|inthanin|ลาเต้|latte|เครื่องดื่ม/iu;
+const CAFE_TOPIC_MARKER = /กาแฟ|คาเฟ่|อินทนิล|อินทนิน|inthanin|ลาเต้|latte|เครื่องดื่ม/iu;
 const MEMBERSHIP_TOPIC_MARKER = /สมาชิก|member|membership/iu;
 // Distinguishes an actual status QUESTION ("เป็นสมาชิกหรือยัง" -- am I
 // already a member?) from a generic membership mention, so it renders a
@@ -961,6 +961,28 @@ export function deriveDeterministicSemanticTurn(
       domain:'stay', intent:'stay_booking_request', action:'book',
       speechAct:'transaction_request', entities, references:[], constraints:[],
       confidence:0.95, needsClarification:false,
+    };
+  }
+
+  // A cafe has no mutable menu/stock source yet, so a customer-authorized
+  // "send this to staff now / call me back" request is recorded as an
+  // inquiry rather than guessed into a product order. This must outrank the
+  // generic cafe read-only fallback below during provider outages; otherwise
+  // an explicit handoff request is silently answered with catalog copy and
+  // never reaches the staff queue.
+  const cafeStaffHandoff = /(?:ส่ง|ฝาก|แจ้ง)[^\n]{0,28}(?:เรื่อง|คำถาม|คำขอ)[^\n]{0,28}(?:ทีม|ร้าน|คาเฟ่|อินทนิล|inthanin)[^\n]{0,40}(?:ตอนนี้|ติดต่อกลับ|โทรกลับ|รับเรื่อง|ตรวจสอบ)|(?:โทรกลับ|ติดต่อกลับ)[^\n]{0,40}(?:คาเฟ่|อินทนิล|inthanin)/iu.test(trimmed);
+  if (!activeTask && hasStandaloneTransactionRequest(trimmed)
+      && findCafeTopic(trimmed) && cafeStaffHandoff) {
+    const entities: Record<string,unknown> = { question:trimmed };
+    const phone=trimmed.match(/(?:เบอร์|โทร)\s*([0-9][0-9\s-]{7,18}[0-9])/u)?.[1]?.replace(/\D/g,'');
+    const customerName=trimmed.match(/(?:^|\s)ชื่อ\s*([^,\n]+?)(?=\s*(?:เบอร์|โทร|จำนวน|สั่ง|ยืนยัน|ฝาก|ครับ|ค่ะ|คะ|$))/u)?.[1]?.trim();
+    if(customerName) entities.customerName=customerName;
+    if(phone) entities.phone=phone;
+    return {
+      domain:'cafe', intent:'cafe_staff_inquiry_request', action:'order',
+      speechAct:'transaction_request', informationNeed:'none',
+      entities, references:[], constraints:[], confidence:0.95,
+      needsClarification:false,
     };
   }
 

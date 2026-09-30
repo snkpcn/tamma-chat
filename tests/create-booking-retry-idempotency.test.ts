@@ -261,3 +261,65 @@ test('two genuinely distinct bookings (different guests) for the same slot are n
     if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
   }
 });
+
+test('missing live schedules create requested activity and restaurant work items without reserving capacity', async () => {
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.SUPABASE_URL;
+  const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = 'https://example.supabase.co';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+  const bookingPosts: Array<Record<string, unknown>> = [];
+  let allocationPosts = 0;
+
+  global.fetch = (async (url: string | URL, init: RequestInit = {}) => {
+    const value = decodeURIComponent(String(url));
+    const method = init.method ?? 'GET';
+    if (value.includes('/activity_offerings') && method === 'GET') {
+      return jsonResponse([{ activity_code:'horse', duration_minutes:30, price:300, active:true }]);
+    }
+    if (value.includes('/service_resources') && method === 'GET') {
+      const restaurant = value.includes('service_type=eq.restaurant');
+      return jsonResponse([restaurant
+        ? { id:'res-restaurant-1', code:'restaurant-table', name:'โต๊ะร้านอาหาร', metadata:{} }
+        : { ...RESOURCE_ROW, metadata:{} }]);
+    }
+    if (value.includes('/service_schedules') && method === 'GET') return jsonResponse([]);
+    if (value.includes('/customer_accounts') && method === 'GET') return jsonResponse([{ id:'cust-1' }]);
+    if (value.includes('/customer_accounts') && method === 'PATCH') return jsonResponse([]);
+    if (value.includes('/bookings?') && method === 'GET') return jsonResponse([]);
+    if (value.endsWith('/bookings') && method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      bookingPosts.push(body);
+      return jsonResponse([{ id:`booking-${bookingPosts.length}`, booking_code:`BK-PENDING-${bookingPosts.length}`, status:'requested' }]);
+    }
+    if (value.includes('/booking_allocations') && method === 'POST') {
+      allocationPosts += 1;
+      return jsonResponse([]);
+    }
+    throw new Error(`unexpected fetch in test: ${method} ${value}`);
+  }) as typeof fetch;
+
+  try {
+    const activity = await createBooking({
+      guestDbId:'44444444-4444-4444-8444-444444444444', channel:'web',
+      serviceType:'activity', resourceCode:'activity-horse', date:'2026-10-16',
+      time:'10:00', durationMinutes:30, partySize:1,
+    });
+    const restaurant = await createBooking({
+      guestDbId:'55555555-5555-4555-8555-555555555555', channel:'web',
+      serviceType:'restaurant', date:'2026-10-15', time:'18:30', partySize:4,
+    });
+
+    assert.equal(activity.status, 'requested');
+    assert.equal(restaurant.status, 'requested');
+    assert.equal(bookingPosts.length, 2);
+    assert.deepEqual(bookingPosts.map(row => row.service_type), ['activity', 'restaurant']);
+    assert.ok(bookingPosts.every(row => row.contact_status === 'pending'));
+    assert.ok(bookingPosts.every(row => /รอยืนยัน|ห้ามถือว่าเวลาว่าง/u.test(String(row.staff_note))));
+    assert.equal(allocationPosts, 0, 'unverified requests must not reserve schedule capacity');
+  } finally {
+    global.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+  }
+});

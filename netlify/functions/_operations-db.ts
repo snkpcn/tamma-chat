@@ -640,12 +640,15 @@ async function lineBookingContact(customerId: string): Promise<{ fullName: strin
   return { fullName: decryptPii(row?.full_name_enc), phone: decryptPii(row?.phone_enc), isTest: row?.is_test === true };
 }
 
-async function createUnscheduledStayRequest(input: {
+async function createUnscheduledBookingRequest(input: {
   guestDbId: string | null;
   customerId: string;
+  serviceType: ServiceType;
   resourceCode?: string | null;
   date: string;
-  endDate: string;
+  time?: string | null;
+  endDate?: string | null;
+  durationMinutes?: number | null;
   partySize: number;
   quantity: number;
   environment: 'live' | 'test';
@@ -656,14 +659,24 @@ async function createUnscheduledStayRequest(input: {
   specialRequest?: string | null;
 }): Promise<{ bookingCode: string; status: string; startAt: string; endAt: string }> {
   const resourceResponse = await dbFetch(
-    'service_resources?service_type=eq.stay&active=eq.true'
+    `service_resources?service_type=eq.${input.serviceType}&active=eq.true`
     + (input.resourceCode ? `&code=eq.${encodeURIComponent(input.resourceCode)}` : '')
     + '&select=id&order=created_at.asc&limit=1',
   );
   const resource = (await resourceResponse.json() as Array<{ id: string }>)[0];
   if (!resource?.id) throw new Error('resource_not_found');
-  const startAt = `${input.date}T00:00:00+07:00`;
-  const endAt = `${input.endDate}T00:00:00+07:00`;
+  const isStay = input.serviceType === 'stay';
+  if (!isStay && !/^\d{2}:\d{2}$/.test(input.time ?? '')) throw new Error('booking_time_required');
+  if (isStay && !input.endDate) throw new Error('stay_checkout_required');
+  const startAt = isStay
+    ? `${input.date}T00:00:00+07:00`
+    : `${input.date}T${input.time}:00+07:00`;
+  const endAt = isStay
+    ? `${input.endDate}T00:00:00+07:00`
+    : new Date(
+      new Date(startAt).getTime()
+      + (input.serviceType === 'activity' ? Math.max(5, Number(input.durationMinutes ?? 60)) : 60) * 60_000,
+    ).toISOString();
 
   if (input.guestDbId) {
     const recentWindowStart = new Date(Date.now() - 120_000).toISOString();
@@ -690,7 +703,7 @@ async function createUnscheduledStayRequest(input: {
     body: JSON.stringify({
       customer_id: input.customerId,
       guest_id: input.guestDbId,
-      service_type: 'stay',
+      service_type: input.serviceType,
       resource_id: resource.id,
       start_at: startAt,
       end_at: endAt,
@@ -702,7 +715,9 @@ async function createUnscheduledStayRequest(input: {
       booking_customer_name_enc: encryptPii(input.customerName),
       booking_phone_enc: encryptPii(cleanPhone(input.phone)),
       booking_email_enc: encryptPii(cleanEmail(input.email)),
-      staff_note: 'ยังไม่มีตารางจริงสำหรับช่วงนี้ — กรุณาตรวจสอบห้องว่างก่อนยืนยัน',
+      staff_note: input.serviceType === 'stay'
+        ? 'ยังไม่มีตารางจริงสำหรับช่วงนี้ — กรุณาตรวจสอบห้องว่างก่อนยืนยัน'
+        : 'ยังไม่มีรอบจริงตรงกับเวลาที่ลูกค้าขอ — เป็นคำขอรอยืนยัน ห้ามถือว่าเวลาว่างจนกว่าทีมงานจะตรวจสอบ',
       contact_status: 'pending',
       environment: input.environment,
     }),
@@ -1332,8 +1347,9 @@ export async function handleLineBookingMessage(anonymousId: string, rawLineUserI
       return `ขออภัยครับ ช่วง ${thaiShortDate(requestedDate)} – ${thaiShortDate(endDate)} ห้องเต็มแล้วครับ ❌ และยังไม่พบช่วงที่มีห้องพอใน 30 วันถัดไป กรุณาเลือกวันอื่นครับ`;
     }
     if (!(error instanceof Error) || !error.message.includes('no_matching_schedule')) throw error;
-    created = await createUnscheduledStayRequest({
+    created = await createUnscheduledBookingRequest({
       guestDbId: identity.guestDbId, customerId: identity.customerId,
+      serviceType: 'stay',
       date: requestedDate, endDate, partySize, quantity,
       environment, specialRequest,
     });
@@ -1728,14 +1744,42 @@ export async function createBooking(input: CreateBookingInput): Promise<{ bookin
       preferredContact: input.phone ? 'phone' : input.email ? 'email' : null,
       isTest: environment === 'test',
     });
-    return createUnscheduledStayRequest({
+    return createUnscheduledBookingRequest({
       guestDbId: input.guestDbId ?? null,
       customerId,
+      serviceType: input.serviceType,
       resourceCode: input.resourceCode,
       date: input.date,
       endDate: input.endDate!,
       partySize: Number(input.partySize),
       quantity: Math.max(1, Math.min(6, Math.floor(input.quantity ?? 1))),
+      environment,
+      channel: input.channel,
+      customerName: input.customerName,
+      phone: input.phone,
+      email: input.email,
+      specialRequest: input.note,
+    });
+  }
+  if (!options.length && (input.serviceType === 'activity' || input.serviceType === 'restaurant')) {
+    const customerId = await upsertCustomerAccount({
+      guestDbId: input.guestDbId,
+      fullName: input.customerName,
+      email: input.email,
+      phone: input.phone,
+      preferredContact: input.phone ? 'phone' : input.email ? 'email' : null,
+      isTest: environment === 'test',
+    });
+    return createUnscheduledBookingRequest({
+      guestDbId: input.guestDbId ?? null,
+      customerId,
+      serviceType: input.serviceType,
+      resourceCode: input.resourceCode,
+      date: input.date,
+      time: input.time,
+      durationMinutes: input.durationMinutes,
+      partySize: Math.max(1, Number(input.partySize ?? 1)),
+      quantity: Math.max(1, Math.min(50, Math.floor(input.quantity ?? 1))),
       environment,
       channel: input.channel,
       customerName: input.customerName,
