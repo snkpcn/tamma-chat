@@ -699,6 +699,7 @@ Core rules:
 - Understand natural/colloquial Thai, typos, ellipsis, corrections, topic shifts, and multi-intent sentences by meaning.
 - Current message outranks stale context. Use context only to resolve real references or continuation.
 - Selection is not transaction commitment. Questions/catalog/availability are read-only. Use book/order only for an explicit request to transact now; missing slots do not erase explicit commitment.
+- Cafe has no verified menu/price/hours/inventory or direct checkout. A request for those facts stays read-only. But when the customer explicitly instructs Thongthai to SEND/SUBMIT a cafe question, preorder request, availability request, or contact request to the cafe team now, classify domain=cafe, action=order, speechAct=transaction_request, informationNeed=none, and put the concrete matter to send in entities.question (plus only contact details actually stated). This authorizes a staff inquiry only, never a confirmed cafe order, sale, availability, or payment.
 - Current no-transaction wording keeps the turn read-only. Conditional fallback choices are status/availability, never immediate confirm/book/order.
 - If the CURRENT message explicitly says not to book/order yet, hold off, or keep it only as a consideration, ALWAYS include constraints=["no_transaction"] (plus any other real constraints). Never emit transaction_request for that turn.
 - Current corrections/replacements outrank stale selections and task values.
