@@ -180,6 +180,11 @@ const NEGATED_TRANSACTION_MENTION_RE =
   /(?:ยัง\s*)?(?:ไม่ได้(?:คิดจะ|คิด|จะ|ให้)?|ไม่(?:ได้|ต้อง|เอา|อยาก|จะ)?)\s*(?:ยืนยัน(?:การ)?)?\s*(?:จอง|สั่ง)/gu;
 const NEGATED_BEFORE_TRANSACTION_VERB_RE =
   /(?:ยัง\s*)?(?:ไม่ได้(?:คิดจะ|คิด|จะ|ให้)?|ไม่(?:ได้|ต้อง|เอา|อยาก|จะ)?)\s*(?:ยืนยัน(?:การ)?)?\s*$/u;
+// State-navigation wording must be adjacent to the transaction verb. The old
+// broad `(?:จอง|สั่ง).*ต่อ` shape also matched the `ต่อ` inside `ติดต่อ`,
+// incorrectly stripping consent from a cafe request such as "สั่งกาแฟ แล้ว
+// ให้ทีมติดต่อกลับ".
+const RESUME_TRANSACTION_RE = /กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง)(?:\s|รายการ)*ต่อ(?:$|\s|ครับ|ค่ะ|นะ)/u;
 
 function lastAffirmativeTransactionVerbIndex(message: string): number {
   let last = lastCommitMarkerIndex(message);
@@ -192,7 +197,7 @@ function lastAffirmativeTransactionVerbIndex(message: string): number {
     const around = message.slice(Math.max(0, index - 16), Math.min(message.length, index + 24));
     // Returning to an unfinished transaction conversation is state navigation,
     // not a fresh write authorization.
-    if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(around)) continue;
+    if (RESUME_TRANSACTION_RE.test(around)) continue;
 
     const after = message.slice(index, Math.min(message.length, index + 40));
     if (TRANSACTION_QUESTION_MARKER_RE.test(after)) continue;
@@ -245,7 +250,7 @@ export function hasStandaloneTransactionRequest(message: string): boolean {
   if (hasExplicitNoTransactionMarker(message)) return false;
   if (hasCommitMarker(message)) return true;
   if (!/(?:จอง|สั่ง)/u.test(message)) return false;
-  if (/กลับ.*(?:จอง|สั่ง)|(?:จอง|สั่ง).*ต่อ/u.test(message)) return false;
+  if (RESUME_TRANSACTION_RE.test(message)) return false;
   if (TRANSACTION_QUESTION_MARKER_RE.test(message)) return false;
   return true;
 }

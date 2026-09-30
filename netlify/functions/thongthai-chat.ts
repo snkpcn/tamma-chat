@@ -2035,21 +2035,44 @@ export function resolvePromotionRedemptionProposalArgs(
   };
 }
 
-/** Human Core PR H terminal Cafe boundary. Cafe has no transaction concept
- *  and no verified live menu/price/hours source in production at all, so
- *  once OpenAI supervision owns Cafe meaning there is nothing left for
- *  deterministicCafeResponse's raw-text keyword gate to do: every such turn
- *  renders the same honest "no verified source" answer via the response
- *  composer (renderCafeUnavailableSourceResponse), never re-derived from
- *  request.message. */
+export type SupervisedCafeCutoverDecision =
+  | { kind:'respond'; response:ComposedResponse }
+  | { kind:'execute_inquiry'; args:Record<string, unknown> };
+
+/** Human Core PR H terminal Cafe boundary. Cafe still has no verified live
+ *  menu/price/hours source and no direct sale executor. It does, however,
+ *  have a real staff-inquiry operation. A supervised explicit submission may
+ *  execute only an already-validated create_cafe_inquiry proposal; every
+ *  read-only Cafe turn keeps the honest "no verified source" response. */
 export function resolveSupervisedCafeCutover(
   oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
   channel: BrainChannel,
   language: BrainRequest['language'],
-): { kind:'respond'; response:ComposedResponse } | null {
+): SupervisedCafeCutoverDecision | null {
   const turn = oneMind.turn;
   if (turn.semanticTurn.domain !== 'cafe' || turn.semanticTurn.semanticSource !== 'openai_supervisor') return null;
   if (oneMind.status === 'composed') return { kind:'respond', response:oneMind.response };
+
+  const meaning = turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
+  const proposal = turn.dialogDecision.actionProposal;
+  if (meaning.commitmentLevel === 'explicit_transaction'
+      && proposal?.toolName === 'create_cafe_inquiry'
+      && proposal.customerCommitPresent
+      && turn.dialogDecision.taskStateContainer.activeTask?.type === 'cafe_inquiry') {
+    const value = proposal.validatedArgs;
+    return {
+      kind:'execute_inquiry',
+      args:{
+        question:typeof value.question === 'string' ? value.question.trim() : '',
+        ...(typeof value.customerName === 'string' && value.customerName.trim()
+          ? { customerName:value.customerName.trim() } : {}),
+        ...(typeof value.phone === 'string' && value.phone.trim()
+          ? { phone:value.phone.trim() } : {}),
+        ...(typeof value.email === 'string' && value.email.trim()
+          ? { email:value.email.trim() } : {}),
+      },
+    };
+  }
 
   const composerInput = {
     channel,
@@ -3984,6 +4007,47 @@ async function executeDeterministicRestaurantPreorder(
   };
 }
 
+async function executeDeterministicCafeInquiry(
+  args:Record<string,unknown>,
+  request:BrainRequest,
+  guestDbId:string|null,
+  channel:BrainChannel,
+):Promise<BrainResponse> {
+  // Structured-only operational handoff. This deliberately creates an
+  // inquiry, not a cafe sale/order, because Cafe has no verified catalog,
+  // stock, price, or checkout source in production today.
+  const question=typeof args.question==='string'?args.question.trim():'';
+  const customerName=typeof args.customerName==='string'?args.customerName.trim():'';
+  const phone=typeof args.phone==='string'?args.phone.trim():'';
+  const email=typeof args.email==='string'?args.email.trim():'';
+  const firstResponse:BrainResponse={
+    message:'',intent:'customer_service',contextUpdates:{},journeyAction:{type:'none',journey:null},
+    suggestedActions:[],responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+  };
+  if(!question) {
+    return {...firstResponse,message:'ยังส่งเรื่องให้ทีมคาเฟ่ไม่ได้ครับ ขอเรื่องที่ต้องการให้ทีมช่วยเพิ่มอีกนิด'};
+  }
+  const [result]=await executeBrainTools(guestDbId,channel,[{
+    name:'create_cafe_inquiry',
+    args:{question,...(customerName?{customerName}:{}),...(phone?{phone}:{}),...(email?{email}:{})},
+  }],firstResponse,request);
+  if(!result?.ok) {
+    return {...firstResponse,message:'ยังส่งเรื่องให้ทีมคาเฟ่ไม่สำเร็จครับ จึงยังไม่ได้สร้างรายการติดตาม'};
+  }
+  let detail:Record<string,unknown>={};
+  try { detail=JSON.parse(result.detail) as Record<string,unknown>; } catch { /* safe copy below */ }
+  const inquiryCode=typeof detail.inquiryCode==='string'?detail.inquiryCode:'';
+  return {
+    ...firstResponse,
+    message:[
+      'ส่งเรื่องให้ทีม Inthanin Café แล้วครับ ✅',
+      inquiryCode?`เลขที่ติดตาม ${inquiryCode}`:'',
+      'สถานะ: รอทีมงานติดต่อกลับ',
+      'รายการนี้เป็นคำขอให้ทีมตรวจสอบ ยังไม่ใช่ออเดอร์หรือการชำระเงิน',
+    ].filter(Boolean).join('\n'),
+  };
+}
+
 async function executeDeterministicPromotionRedemption(
   args:Record<string,unknown>,
   request:BrainRequest,
@@ -4972,6 +5036,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const supervisedCafe = earlyOneMind
     ? resolveSupervisedCafeCutover(earlyOneMind, channel, request.language)
     : null;
+  if (supervisedCafe?.kind === 'execute_inquiry') {
+    const executed = await executeDeterministicCafeInquiry(
+      supervisedCafe.args,
+      request,
+      guestDbId,
+      channel,
+    );
+    const polished = polishedResponse(executed, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
   if (supervisedCafe?.kind === 'respond') {
     const semantic = earlyOneMind!.turn.semanticTurn;
     const polished = polishedResponse({

@@ -415,6 +415,7 @@ const FIELD_LABELS_TH: Record<string, string> = {
   checkIn:'วันเช็กอิน', checkOut:'วันเช็กเอาต์', endDate:'วันเช็กเอาต์',
   nights:'จำนวนคืน', bedrooms:'จำนวนห้องนอน', quantity:'จำนวน',
   items:'รายการอาหารและจำนวน', itemName:'เมนู',
+  question:'เรื่องที่ต้องการให้ทีมคาเฟ่ช่วย',
 };
 
 function activeTaskSubjectTh(input: ResponseComposerInput): string {
@@ -434,6 +435,7 @@ function activeTaskSubjectTh(input: ResponseComposerInput): string {
   }
   if (task.type==='stay_booking') return task.commitmentIntent ? 'กำลังช่วยจองที่พักให้อยู่นะครับ ' : 'กำลังคุยเรื่องที่พักอยู่นะครับ ';
   if (task.type==='restaurant_preorder') return task.commitmentIntent ? 'กำลังช่วยเตรียมรายการอาหารให้อยู่นะครับ ' : 'กำลังคุยเรื่องรายการอาหารอยู่นะครับ ';
+  if (task.type==='cafe_inquiry') return task.commitmentIntent ? 'กำลังช่วยส่งเรื่องให้ทีมคาเฟ่อยู่นะครับ ' : 'กำลังคุยเรื่องคาเฟ่อยู่นะครับ ';
   return '';
 }
 

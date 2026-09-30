@@ -22,6 +22,10 @@ import type { ActiveTask, ActiveTaskType } from './_task-state';
 const ACTIVITY_BOOKING_REQUIRED = ['resourceCode', 'date', 'durationMinutes'] as const;
 const STAY_BOOKING_REQUIRED = ['resourceCode', 'date', 'endDate', 'partySize'] as const;
 const RESTAURANT_BOOKING_REQUIRED = ['date', 'time', 'partySize', 'customerName', 'phone'] as const;
+// createCafeInquiry's only operationally required payload is the question;
+// contact fields are optional because the source channel may itself be
+// reachable (for example a real LINE conversation).
+const CAFE_INQUIRY_REQUIRED = ['question'] as const;
 
 function missingFromStaticList(slots: Record<string, unknown>, required: readonly string[]): string[] {
   return required.filter(field => slots[field] === null || slots[field] === undefined || slots[field] === '');
@@ -55,9 +59,9 @@ function taskSlotsToPendingPromotionRedemption(task: ActiveTask): PendingPromoti
 
 /** Single entry point: given a task's CURRENT slots, what is still missing?
  *  Reuses real business logic for the two domains that already have it;
- *  uses a code-grounded static list (see file header) for the three that
+ *  uses a code-grounded static list (see file header) for domains that
  *  don't. Returns [] for domains with no authored policy yet (membership,
- *  otop_order, cafe_inquiry, journey_planning) -- deliberately NOT guessed. */
+ *  otop_order, journey_planning) -- deliberately NOT guessed. */
 function hasValidRestaurantPreorderItems(task: ActiveTask): boolean {
   if (!Array.isArray(task.slots.items) || task.slots.items.length === 0) return false;
   return task.slots.items.every(item => {
@@ -86,6 +90,8 @@ export function computeTaskMissingFields(task: ActiveTask): string[] {
       return missingFromStaticList(task.slots, STAY_BOOKING_REQUIRED);
     case 'restaurant_booking':
       return missingFromStaticList(task.slots, RESTAURANT_BOOKING_REQUIRED);
+    case 'cafe_inquiry':
+      return missingFromStaticList(task.slots, CAFE_INQUIRY_REQUIRED);
     default:
       return [];
   }
@@ -102,4 +108,5 @@ export const DOMAIN_TASK_REQUIRED_FIELDS: Partial<Record<ActiveTaskType, readonl
   activity_booking: ACTIVITY_BOOKING_REQUIRED,
   stay_booking: STAY_BOOKING_REQUIRED,
   restaurant_booking: RESTAURANT_BOOKING_REQUIRED,
+  cafe_inquiry: CAFE_INQUIRY_REQUIRED,
 };
