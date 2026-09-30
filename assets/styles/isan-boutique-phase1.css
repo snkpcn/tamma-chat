@@ -739,6 +739,193 @@ html.isan-boutique .reward-seal h5 {
   }
 }
 
+/* Final layout pass: keep the desktop header readable and give each section
+   a deliberate editorial composition without decorative mascot clutter. */
+html.isan-boutique .hero-character,
+html.isan-boutique .jf-character,
+html.isan-boutique .journal-character,
+html.isan-boutique .rewards-character,
+html.isan-boutique .community-feature-character,
+html.isan-boutique #chess-challenge .tt-chess-winner-pass {
+  display: none !important;
+}
+
+html.isan-boutique .hero-copy {
+  max-width: 790px;
+}
+
+html.isan-boutique .hero-copy h1 {
+  max-width: 16ch;
+  text-wrap: balance;
+}
+
+html.isan-boutique .journey-flow-wrap {
+  display: block;
+  padding: clamp(24px, 3.2vw, 44px);
+}
+
+html.isan-boutique .jf-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+html.isan-boutique .jf-step {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  min-height: 150px;
+  padding: 24px 20px;
+  border: 1px solid rgba(92, 66, 45, 0.13);
+  border-radius: 16px;
+  background: rgba(255, 252, 246, 0.72);
+}
+
+html.isan-boutique .jf-step::after {
+  display: none !important;
+}
+
+html.isan-boutique .jf-text p {
+  max-width: none;
+}
+
+html.isan-boutique .journal-inner {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.68fr) minmax(480px, 1fr);
+  align-items: center;
+  gap: clamp(30px, 5vw, 76px);
+}
+
+html.isan-boutique .journal-head,
+html.isan-boutique .journal-panel {
+  width: 100%;
+  max-width: none;
+}
+
+html.isan-boutique .community-story-feature .community-feature-media {
+  position: relative;
+  min-height: 540px;
+}
+
+html.isan-boutique .community-story-feature .community-feature-bg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+html.isan-boutique .community-photo-credit {
+  position: absolute;
+  z-index: 2;
+  left: 18px;
+  bottom: 18px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: rgba(24, 15, 9, 0.76);
+  color: #fff8ed;
+  font-size: 11px;
+  font-weight: 650;
+  backdrop-filter: blur(8px);
+}
+
+html.isan-boutique .community-story-feature .community-feature-logo {
+  width: 92px;
+  height: 92px;
+  margin-bottom: 22px;
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-wrap {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.68fr);
+  gap: 34px;
+  padding: clamp(34px, 5vw, 64px);
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-art {
+  min-height: 360px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #ede3d2, #d6c1a1);
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-board {
+  position: absolute;
+  left: 24px;
+  top: 38px;
+  width: min(70%, 280px);
+  height: auto;
+  transform: rotate(-4deg);
+  opacity: 0.86;
+  filter: drop-shadow(0 18px 22px rgba(47, 26, 13, 0.22));
+}
+
+html.isan-boutique #chess-challenge .tt-chess-home-character {
+  right: -2px;
+  bottom: -8px;
+  width: min(58%, 230px);
+  height: auto;
+}
+
+html.isan-boutique .ca-box img[src*="tamma-chat-logo"],
+html.isan-boutique .concierge-fab img[src*="tamma-chat-logo"] {
+  object-fit: contain;
+  object-position: center;
+  padding: 7px;
+  background: #f8f3e9;
+}
+
+@media (min-width: 1024px) and (max-width: 1199.98px) {
+  html.isan-boutique .main-nav,
+  html.isan-boutique .hdr-cta {
+    display: none !important;
+  }
+
+  html.isan-boutique .menu-btn {
+    display: inline-flex !important;
+  }
+}
+
+@media (min-width: 1200px) {
+  html.isan-boutique .main-nav {
+    display: flex;
+  }
+
+  html.isan-boutique .menu-btn {
+    display: none;
+  }
+}
+
+@media (max-width: 767.98px) {
+  html.isan-boutique .jf-steps,
+  html.isan-boutique .journal-inner {
+    grid-template-columns: 1fr;
+  }
+
+  html.isan-boutique .jf-step {
+    grid-template-columns: 42px minmax(0, 1fr);
+    min-height: 0;
+    padding: 18px 16px;
+  }
+
+  html.isan-boutique .community-story-feature .community-feature-media {
+    min-height: 300px;
+  }
+
+  html.isan-boutique .community-story-feature .community-feature-logo {
+    width: 84px;
+    height: 84px;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-wrap {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+
+  html.isan-boutique #chess-challenge .tt-chess-home-art {
+    min-height: 280px;
+  }
+}
+
 html.isan-boutique .journal-character,
 html.isan-boutique .rewards-character {
   z-index: 2;
@@ -1404,4 +1591,53 @@ html.isan-boutique .jf-text p {
     font-size: 14px;
     line-height: 1.65;
   }
+}
+
+/* Final cascade guard for the redesigned sections. */
+html.isan-boutique .hero-character,
+html.isan-boutique .jf-character,
+html.isan-boutique .journal-character,
+html.isan-boutique .rewards-character,
+html.isan-boutique .community-feature-character,
+html.isan-boutique #chess-challenge .tt-chess-winner-pass { display: none !important; }
+html.isan-boutique .hero-copy { max-width: 790px; }
+html.isan-boutique .hero-copy h1 { max-width: 16ch; text-wrap: balance; }
+html.isan-boutique .journey-flow-wrap { display: block; padding: clamp(24px, 3.2vw, 44px); }
+html.isan-boutique .jf-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+html.isan-boutique .jf-step { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: start; gap: 14px; min-height: 150px; padding: 24px 20px; border: 1px solid rgba(92,66,45,.13); border-radius: 16px; background: rgba(255,252,246,.72); }
+html.isan-boutique .jf-step::after { display: none !important; }
+html.isan-boutique .jf-text p { max-width: none; }
+html.isan-boutique .journal-inner { display: grid; grid-template-columns: minmax(260px,.68fr) minmax(480px,1fr); align-items: center; gap: clamp(30px,5vw,76px); }
+html.isan-boutique .journal-head,
+html.isan-boutique .journal-panel { width: 100%; max-width: none; }
+html.isan-boutique .community-story-feature .community-feature-media { position: relative; min-height: 540px; }
+html.isan-boutique .community-story-feature .community-feature-bg { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+html.isan-boutique .community-photo-credit { position: absolute; z-index: 2; left: 18px; bottom: 18px; padding: 7px 11px; border-radius: 999px; background: rgba(24,15,9,.76); color: #fff8ed; font-size: 11px; font-weight: 650; backdrop-filter: blur(8px); }
+html.isan-boutique .community-story-feature .community-feature-logo { width: 92px; height: 92px; margin-bottom: 22px; }
+html.isan-boutique #chess-challenge .tt-chess-home-wrap { grid-template-columns: minmax(0,1fr) minmax(300px,.68fr); gap: 34px; padding: clamp(34px,5vw,64px); }
+html.isan-boutique #chess-challenge .tt-chess-home-art { min-height: 360px; overflow: hidden; border-radius: 18px; background: linear-gradient(145deg,#ede3d2,#d6c1a1); }
+html.isan-boutique #chess-challenge .tt-chess-home-board { position: absolute; left: 24px; top: 38px; width: min(70%,280px); height: auto; transform: rotate(-4deg); opacity: .86; filter: drop-shadow(0 18px 22px rgba(47,26,13,.22)); }
+html.isan-boutique #chess-challenge .tt-chess-home-character { right: -2px; bottom: -8px; width: min(58%,230px); height: auto; }
+html.isan-boutique .ca-box img[src*="tamma-chat-logo"],
+html.isan-boutique .concierge-fab img[src*="tamma-chat-logo"] { object-fit: contain; object-position: center; padding: 7px; background: #f8f3e9; }
+
+@media (min-width: 1024px) and (max-width: 1199.98px) {
+  html.isan-boutique .main-nav,
+  html.isan-boutique .hdr-cta { display: none !important; }
+  html.isan-boutique .menu-btn { display: inline-flex !important; }
+}
+
+@media (min-width: 1200px) {
+  html.isan-boutique .main-nav { display: flex; }
+  html.isan-boutique .menu-btn { display: none; }
+}
+
+@media (max-width: 767.98px) {
+  html.isan-boutique .jf-steps,
+  html.isan-boutique .journal-inner { grid-template-columns: 1fr; }
+  html.isan-boutique .jf-step { grid-template-columns: 42px minmax(0,1fr); min-height: 0; padding: 18px 16px; }
+  html.isan-boutique .community-story-feature .community-feature-media { min-height: 300px; }
+  html.isan-boutique .community-story-feature .community-feature-logo { width: 84px; height: 84px; }
+  html.isan-boutique #chess-challenge .tt-chess-home-wrap { grid-template-columns: 1fr; gap: 22px; }
+  html.isan-boutique #chess-challenge .tt-chess-home-art { min-height: 280px; }
 }

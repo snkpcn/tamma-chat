@@ -112,8 +112,18 @@
   }
 
   function fallbackHeroUrl(province) {
+    if (province.provinceId === INITIAL_PROVINCE_ID) {
+      return 'assets/brand/backgrounds/ban-khwao-silk-weaving-real.jpg';
+    }
     const item = state.heroItems.find(hero => hero.provinceTh === province.provinceName);
     return item ? DATA_ROOT + 'province-hero/' + item.web : '';
+  }
+
+  function primaryHeroUrl(province) {
+    if (province.provinceId === INITIAL_PROVINCE_ID) {
+      return 'assets/brand/backgrounds/ban-khwao-silk-weaving-real.jpg';
+    }
+    return province.heroProductImage || province.heroImage;
   }
 
   function setImageWithFallback(image, province) {
@@ -122,7 +132,7 @@
       image.onerror = null;
       if (fallback) image.src = fallback;
     };
-    image.src = province.heroProductImage || province.heroImage;
+    image.src = primaryHeroUrl(province);
   }
 
   function renderMap() {
@@ -172,7 +182,7 @@
     const province = provinceFor(state.selectedProvinceId);
     const bounds = geometryBounds(selectedFeature.geometry, state.project);
     const image = element('image', {
-      href: province.heroProductImage || province.heroImage,
+      href: primaryHeroUrl(province),
       x: bounds.x, y: bounds.y, width: Math.max(bounds.width, 1), height: Math.max(bounds.height, 1),
       preserveAspectRatio: 'xMidYMid slice',
       'clip-path': 'url(#selectedProvinceClip)',
@@ -215,26 +225,34 @@
     panel.classList.add('is-changing');
     image.onload = () => panel.classList.remove('is-changing');
     setImageWithFallback(image, province);
-    image.alt = `ภาพนำเสนอ${province.heroTitle}`;
+    image.alt = province.provinceId === INITIAL_PROVINCE_ID
+      ? 'ช่างทอผ้าไหมบ้านเขว้ากำลังทอผ้าบนกี่'
+      : province.heroTitle;
     document.getElementById('provinceCount').textContent = `${paddedOrder} / 20`;
     document.getElementById('provinceEn').textContent = 'OTOP · ภาคอีสาน';
     document.getElementById('provinceName').textContent = province.provinceName;
-    document.getElementById('provinceProduct').textContent = province.heroTitle;
+    document.getElementById('provinceProduct').textContent = province.provinceId === INITIAL_PROVINCE_ID
+      ? 'ผ้าไหมมัดหมี่บ้านเขว้า'
+      : province.heroTitle;
+    document.getElementById('provincePhotoCredit').hidden = province.provinceId !== INITIAL_PROVINCE_ID;
     document.getElementById('mapSelectedOrder').textContent = paddedOrder;
     document.getElementById('mapSelectedName').textContent = province.provinceName;
 
     const status = document.getElementById('provinceStatus');
-    status.classList.toggle('is-open', hasProducts);
+    status.classList.add('is-open');
     status.lastChild.textContent = hasProducts
       ? `${products.length} เรื่องราวพร้อมสำรวจ`
-      : 'กำลังเตรียมข้อมูลจังหวัดนี้';
-    document.getElementById('provinceDescription').textContent = province.heroSubtitle;
+      : 'เปิดให้สำรวจแล้ว';
+    document.getElementById('provinceDescription').textContent = province.provinceId === INITIAL_PROVINCE_ID
+      ? 'บ้านเขว้าสืบทอดการทอผ้าไหมมัดหมี่มาเกือบ 200 ปี ตั้งแต่สาวไหม มัดลาย ย้อมสี จนถึงทอด้วยกี่ทีละเส้น'
+      : province.heroSubtitle;
 
     const cta = document.getElementById('provinceCta');
-    cta.classList.toggle('is-disabled', !hasProducts);
-    cta.textContent = hasProducts ? `ดูสินค้า OTOP ${province.provinceName}` : 'กำลังเตรียมสินค้า OTOP';
-    cta.href = hasProducts ? '#provinceProducts' : '#';
-    cta.setAttribute('aria-disabled', hasProducts ? 'false' : 'true');
+    cta.hidden = !hasProducts;
+    cta.classList.remove('is-disabled');
+    cta.textContent = `ดูสินค้า OTOP ${province.provinceName}`;
+    cta.href = '#provinceProducts';
+    cta.setAttribute('aria-disabled', 'false');
   }
 
   function productCard(product) {
@@ -276,15 +294,15 @@
     const products = selectedProducts();
     productHeading.textContent = `สินค้า OTOP ${province.provinceName}`;
     if (!Array.isArray(products)) {
-      productSummary.textContent = 'กำลังโหลดเรื่องราวจากชุมชน…';
+      productSummary.textContent = 'กำลังโหลดข้อมูลสินค้าจากระบบ…';
       productGrid.replaceChildren();
       return;
     }
     if (!products.length) {
-      productSummary.textContent = 'ข้อมูลจังหวัดพร้อมแล้ว และจะเปิดสินค้าเมื่อผ่านการยืนยัน';
+      productSummary.textContent = 'ข้อมูลจังหวัดพร้อมแล้ว';
       const empty = document.createElement('div');
       empty.className = 'province-products-empty';
-      empty.textContent = 'กำลังเตรียมสินค้า OTOP ของจังหวัดนี้';
+      empty.textContent = 'ยังไม่มีสินค้าที่ผ่านการยืนยันสำหรับแสดงในหน้านี้';
       productGrid.replaceChildren(empty);
       return;
     }

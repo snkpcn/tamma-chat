@@ -55,6 +55,7 @@ test('map UI loads by provinceId and renders exact empty-state and story fields'
   assert.match(mapSource, /product\.imageCaption/u);
   assert.match(mapSource, /product\.category/u);
   assert.match(mapSource, /product\.originPlace/u);
-  assert.match(mapSource, /กำลังเตรียมสินค้า OTOP ของจังหวัดนี้/u);
+  assert.match(mapSource, /ยังไม่มีสินค้าที่ผ่านการยืนยันสำหรับแสดงในหน้านี้/u);
+  assert.doesNotMatch(mapSource, /กำลังเตรียมสินค้า OTOP ของจังหวัดนี้/u);
   assert.match(page, /id="provinceProductGrid"/u);
 });
