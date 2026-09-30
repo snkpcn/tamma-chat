@@ -2,7 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeTaskMissingFields } from '../netlify/functions/_domain-task-policy';
 import { deriveSemanticMeaning } from '../netlify/functions/_semantic-meaning';
-import { emptySemanticContext, parseSemanticTurnResponse, type SemanticTurn } from '../netlify/functions/_semantic-interpreter';
+import {
+  buildProductionSemanticInterpreterPrompt,
+  emptySemanticContext,
+  parseSemanticTurnResponse,
+  type SemanticTurn,
+} from '../netlify/functions/_semantic-interpreter';
 import { hasStandaloneTransactionRequest } from '../netlify/functions/_slot-parsers';
 import { emptyTaskStateContainer, type ActiveTask } from '../netlify/functions/_task-state';
 import { resolveSupervisedCafeCutover } from '../netlify/functions/thongthai-chat';
@@ -46,6 +51,13 @@ function oneMind(turn:SemanticTurn,task:ActiveTask) {
 }
 
 test('explicit Cafe inquiry submission is transactional but remains an inquiry, not a fact lookup',()=>{
+  const productionPrompt=buildProductionSemanticInterpreterPrompt(
+    emptySemanticContext(),
+    'ยืนยันสั่งกาแฟ 5 แก้ว กรุณาส่งเรื่องให้ทีมคาเฟ่ติดต่อกลับ',
+  );
+  assert.match(productionPrompt,/Cafe has no verified menu\/price\/hours\/inventory or direct checkout/);
+  assert.match(productionPrompt,/entities\.question/);
+
   const modelOutput=JSON.stringify({
     normalizedMeaning:'send this preorder question to the cafe team',speechAct:'transaction_request',
     domain:'cafe',intent:'submit_cafe_preorder_inquiry',action:'order',informationNeed:'availability',
