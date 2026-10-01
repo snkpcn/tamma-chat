@@ -86,8 +86,17 @@ test('customer and store pages expose member address book, live catalog and auth
   assert.match(store, /function openProduct\(sku\)/u);
   assert.match(store, /function addToCart\(sku,quantity=1\)/u);
   assert.match(store, /history\.replaceState/u);
-  assert.match(store, /ban-khwao-silk-weaving-4k\.webp/u);
+  assert.match(store, /function productImages\(p\)/u);
+  assert.match(store, /class="detailThumb/u);
+  assert.doesNotMatch(store, /ban-khwao-silk-weaving-4k\.webp/u);
   assert.doesNotMatch(store, /Sandbox/u);
+});
+
+test('live OTOP catalog exposes the ordered four-image gallery from backoffice', () => {
+  const catalog = readFileSync('netlify/functions/_member-delivery-db.ts', 'utf8');
+  assert.match(catalog, /otop_product_images\(public_url,alt_text,sort_order,is_primary\)/u);
+  assert.match(catalog, /\.slice\(0, 4\)/u);
+  assert.match(catalog, /Number\(b\.primary\) - Number\(a\.primary\)/u);
 });
 
 test('OTOP staff can move shipping through the operational LINE group', () => {
