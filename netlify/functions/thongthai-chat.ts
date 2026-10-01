@@ -5854,8 +5854,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           || oneMind.turn.semanticTurn.action === 'discover'
           ? 'recommendation'
           : 'information';
+        const customerMessage = polishCustomerMessage(oneMind.response.message, channel) || oneMind.response.message.trim();
         return coreResult(200, {
-          message:oneMind.response.message,
+          message:customerMessage,
           intent:mappedIntent,
           contextUpdates:{},
           journeyAction:{type:'none',journey:null},
