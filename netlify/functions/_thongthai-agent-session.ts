@@ -284,17 +284,27 @@ async function waitForCompletedTurn(
   throw new Error('Agent shadow turn timed out before completion.');
 }
 
-async function outputForTurn(sessionId: string, turnId: string): Promise<string> {
-  const page = await openai<{ data?: SessionItem[] }>(`/agents/sessions/${sessionId}/items?order=asc&limit=100`);
-  const messages = (page.data ?? []).filter(item =>
+export function finalAssistantTextFromItems(items: SessionItem[], turnId: string): string | null {
+  // A tool-using Agent turn can emit one or more intermediate assistant
+  // messages before function calls, then a final answer after tool results.
+  // Only the LAST assistant message is customer-facing. Joining every
+  // assistant message leaks internal progress narration and duplicates text.
+  const messages = items.filter(item =>
     item.type === 'message' && item.role === 'assistant' && item.turn_id === turnId
   );
-  const parts = messages.flatMap(item => item.content ?? [])
+  const finalMessage = messages.at(-1);
+  const parts = (finalMessage?.content ?? [])
     .filter(part => part.type === 'output_text' && typeof part.text === 'string')
     .map(part => part.text!.trim())
     .filter(Boolean);
-  if (!parts.length) throw new Error('Agent completed without customer-facing output text.');
-  return parts.join('\n').trim();
+  return parts.length ? parts.join('\n').trim() : null;
+}
+
+async function outputForTurn(sessionId: string, turnId: string): Promise<string> {
+  const page = await openai<{ data?: SessionItem[] }>(`/agents/sessions/${sessionId}/items?order=asc&limit=100`);
+  const output = finalAssistantTextFromItems(page.data ?? [], turnId);
+  if (!output) throw new Error('Agent completed without customer-facing output text.');
+  return output;
 }
 
 function usageFromTurn(turn: AgentTurn): AgentShadowTurnResult['usage'] {
