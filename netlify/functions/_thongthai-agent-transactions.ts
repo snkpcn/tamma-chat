@@ -1334,6 +1334,157 @@ async function commitPreparedOtopOrder(
   };
 }
 
+async function loadPreparedCafeInquiry(guestDbId: string): Promise<PreparedCafeInquiry | null> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const raw = snapshot.state[CAFE_INQUIRY_STATE_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Partial<PreparedCafeInquiry>;
+  if (value.version !== 1 || value.kind !== 'cafe_inquiry' || typeof value.confirmationId !== 'string') return null;
+  return value as PreparedCafeInquiry;
+}
+
+async function savePreparedCafeInquiry(guestDbId: string, value: PreparedCafeInquiry): Promise<void> {
+  const ok = await patchGuestAgentState(guestDbId, { set: { [CAFE_INQUIRY_STATE_KEY]: value } });
+  if (!ok) throw new Error('prepared_cafe_inquiry_state_unavailable');
+}
+
+export function currentTurnExplicitlyConfirmsCafeInquiry(message: string): boolean {
+  if (hasCancelMarker(message) || /ยังไม่ส่ง|ไม่ต้องส่ง|เอาไว้ก่อน|ไว้ก่อน/u.test(message)) return false;
+  return /ยืนยันs*ส่งs*(?:คำถาม|เรื่อง|ให้ทีม)?|ส่งs*(?:คำถาม|เรื่องนี้)?s*ให้ทีม(?:เลย)?|ส่งให้ทีมเลย/u.test(message);
+}
+
+async function prepareCafeInquiry(
+  args: Record<string, unknown>,
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok:false, error:'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+
+  const question = textArg(args, 'question', 1800);
+  const customerName = textArg(args, 'customer_name', 160);
+  const phone = textArg(args, 'phone', 40);
+  const email = textArg(args, 'email', 200);
+
+  const missing:string[] = [];
+  if (!question || question.length < 3) missing.push('question');
+  if (!customerName) missing.push('customer_name');
+  if (!validPhone(phone)) missing.push('phone');
+  if (missing.length) return { ok:false, error:'missing_or_invalid_fields', missing_fields:missing };
+
+  const now = new Date();
+  const prepared:PreparedCafeInquiry = {
+    version:1,
+    kind:'cafe_inquiry',
+    status:'prepared',
+    confirmationId:randomUUID(),
+    preparedEventId:context.eventId,
+    preparedAt:now.toISOString(),
+    expiresAt:new Date(now.getTime()+PREPARED_TTL_MS).toISOString(),
+    environment:mode.environment,
+    payload:{
+      question:question!,
+      customerName:customerName!,
+      phone:phone!,
+      email,
+    },
+  };
+  await savePreparedCafeInquiry(context.guestDbId, prepared);
+  return {
+    ok:true,
+    prepared:true,
+    confirmation_id:prepared.confirmationId,
+    expires_at:prepared.expiresAt,
+    summary:{
+      question:prepared.payload.question,
+      customer_name:prepared.payload.customerName,
+      phone:prepared.payload.phone,
+      email:prepared.payload.email,
+    },
+    confirmation_required:true,
+    exact_confirmation_phrase_th:'ยืนยันส่งคำถาม',
+    instruction:'Do not call commit_prepared_cafe_inquiry in this same customer turn. Show the exact handoff summary and ask for explicit confirmation.',
+  };
+}
+
+async function getPreparedCafeInquiry(
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok:false, error:'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+  const prepared = await loadPreparedCafeInquiry(context.guestDbId);
+  if (!prepared) return { ok:true, prepared:false };
+  if (prepared.environment !== mode.environment) return { ok:true, prepared:false };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) return { ok:true, prepared:false, expired:true };
+  if (prepared.status === 'committed') {
+    return { ok:true, prepared:false, committed:true, confirmation_id:prepared.confirmationId, result:prepared.result ?? null };
+  }
+  return {
+    ok:true,
+    prepared:true,
+    confirmation_id:prepared.confirmationId,
+    expires_at:prepared.expiresAt,
+    summary:{
+      question:prepared.payload.question,
+      customer_name:prepared.payload.customerName,
+      phone:prepared.payload.phone,
+      email:prepared.payload.email,
+    },
+    exact_confirmation_phrase_th:'ยืนยันส่งคำถาม',
+  };
+}
+
+async function commitPreparedCafeInquiry(
+  args: Record<string, unknown>,
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok:false, error:'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+
+  const confirmationId = textArg(args, 'confirmation_id', 80);
+  if (!confirmationId) return { ok:false, error:'confirmation_id_required' };
+  const prepared = await loadPreparedCafeInquiry(context.guestDbId);
+  if (!prepared || prepared.confirmationId !== confirmationId) return { ok:false, error:'prepared_cafe_inquiry_not_found' };
+  if (prepared.status === 'committed' && prepared.result) return { ok:true, committed:true, replayed:true, ...prepared.result };
+  if (prepared.environment !== mode.environment) return { ok:false, error:'prepared_transaction_environment_mismatch' };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) return { ok:false, error:'prepared_transaction_expired' };
+  if (prepared.preparedEventId === context.eventId) return { ok:false, error:'same_turn_commit_blocked' };
+  if (!currentTurnExplicitlyConfirmsCafeInquiry(context.message)) {
+    return { ok:false, error:'explicit_customer_confirmation_required', exact_confirmation_phrase_th:'ยืนยันส่งคำถาม' };
+  }
+
+  const created = await createCafeInquiry({
+    guestDbId:context.guestDbId,
+    channel:context.channel,
+    question:prepared.payload.question,
+    customerName:prepared.payload.customerName,
+    phone:prepared.payload.phone,
+    email:prepared.payload.email,
+    environment:mode.environment,
+  });
+  const notificationStatus = mode.environment === 'live'
+    ? await dispatchCreatedTransactionNotification('cafe_inquiry', created.id)
+    : 'ignored_test_mode';
+
+  const result = {
+    inquiryId:created.id,
+    inquiryCode:created.inquiryCode,
+    notificationStatus,
+  };
+  await savePreparedCafeInquiry(context.guestDbId, { ...prepared, status:'committed', result });
+
+  return {
+    ok:true,
+    committed:true,
+    replayed:false,
+    inquiry_code:created.inquiryCode,
+    notification_status:notificationStatus,
+    customer_copy_rule:'This confirms only that the cafe inquiry was recorded. Do not imply a cafe order, payment, reservation, or staff response has been completed.',
+  };
+}
+
 export async function executeThongthaiTransactionTool(
   name: string,
   rawArgs: unknown,
@@ -1368,6 +1519,12 @@ export async function executeThongthaiTransactionTool(
     result = await getPreparedOtopOrder(context);
   } else if (name === 'commit_prepared_otop_order') {
     result = await commitPreparedOtopOrder(args, context);
+  } else if (name === 'prepare_cafe_inquiry') {
+    result = await prepareCafeInquiry(args, context);
+  } else if (name === 'get_prepared_cafe_inquiry') {
+    result = await getPreparedCafeInquiry(context);
+  } else if (name === 'commit_prepared_cafe_inquiry') {
+    result = await commitPreparedCafeInquiry(args, context);
   } else {
     result = { ok: false, error: 'unknown_transaction_tool' };
   }
