@@ -45,6 +45,9 @@ test('staging transaction surface is intentionally tiny and two-step', () => {
     'prepare_otop_order',
     'get_prepared_otop_order',
     'commit_prepared_otop_order',
+    'prepare_cafe_inquiry',
+    'get_prepared_cafe_inquiry',
+    'commit_prepared_cafe_inquiry',
   ]);
   for (const tool of THONGTHAI_STAGING_TRANSACTION_TOOLS) {
     assert.equal(tool.type, 'function');
@@ -134,4 +137,18 @@ test('Agent OTOP checkout idempotency key is deterministic and durable-length', 
   assert.equal(first, second);
   assert.equal(first, 'thongthai-agent-otop:11111111-2222-4333-8444-555555555555');
   assert.ok(first.length >= 16);
+});
+
+
+test('cafe inquiry prepare also fails closed while transaction mode is off', async () => {
+  const result = JSON.parse(await executeThongthaiAgentTool('prepare_cafe_inquiry', {}, {
+    guestDbId: 'synthetic-guest',
+    channel: 'web',
+    environment: 'test',
+    eventId: 'evt-cafe-1',
+    message: 'ให้ทีมคาเฟ่ติดต่อกลับครับ',
+    transactionMode: 'off',
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'transaction_tools_disabled');
 });
