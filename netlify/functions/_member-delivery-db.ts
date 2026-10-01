@@ -7,6 +7,7 @@ import {
   type MemberAddressInput,
   type ShippingSettings,
 } from './_member-delivery';
+import { publicOtopStory } from './_otop-store-story';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SKU_RE = /^[A-Z0-9][A-Z0-9_-]{2,79}$/;
@@ -256,6 +257,7 @@ export async function loadOtopStoreCatalog() {
       price: Number(row.price),
       stock: Number(row.stock_qty),
       metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
+      story: publicOtopStory(row.metadata),
       images: (Array.isArray(row.otop_product_images) ? row.otop_product_images : [])
         .map(image => ({
           url: typeof image.public_url === 'string' ? image.public_url : '',

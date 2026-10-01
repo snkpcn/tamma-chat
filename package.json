@@ -8,7 +8,9 @@
     "eval:semantic:live": "tsx scripts/run-semantic-live-eval.ts",
     "eval:phase1:live": "tsx scripts/run-phase1-open-world-live-eval.ts",
     "certify:phase7:production": "tsx scripts/run-phase7-production-certification.ts",
-    "agent:thongthai:staging": "tsx scripts/create-thongthai-staging-agent.ts"
+    "agent:thongthai:staging": "tsx scripts/create-thongthai-staging-agent.ts",
+    "otop:story:backfill": "tsx scripts/backfill-otop-product-stories.ts",
+    "otop:story:backfill:apply": "tsx scripts/backfill-otop-product-stories.ts --apply"
   },
   "dependencies": {
     "chess.js": "^1.4.0"
