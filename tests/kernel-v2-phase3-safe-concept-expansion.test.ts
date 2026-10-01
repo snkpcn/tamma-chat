@@ -151,7 +151,7 @@ test('Phase 3: privacy gate rejects personal payload from new concept families b
 
 test('Phase 3: migration only expands the existing concept-key constraint', () => {
   const sql=readFileSync(
-    new URL('../supabase/migrations/20261001152000_semantic_concept_memory_expand_safe_concepts.sql',import.meta.url),
+    new URL('../supabase/migrations/20261001154119_semantic_concept_memory_expand_safe_concepts.sql',import.meta.url),
     'utf8',
   );
   assert.match(sql,/alter table public\.semantic_concept_memory/u);
