@@ -186,12 +186,28 @@ async function loadPersistedSession(
   return parseState(snapshot.state[runtime.stateKey], runtime.agentId);
 }
 
+export function completedPrimaryRuntimeStateFields(
+  channel: BrainChannel | undefined,
+): Record<string, unknown> {
+  if (!channel) return {};
+  return {
+    last_intent: 'information',
+    last_channel: channel,
+    last_style_mode: 'direct',
+  };
+}
+
 async function saveSessionState(
   guestDbId: string,
   runtime: AgentRuntimeConfig,
   state: SessionState,
+  responseCompleted = false,
 ): Promise<void> {
-  const ok = await patchGuestAgentState(guestDbId, { set: { [runtime.stateKey]: state } });
+  const set: Record<string, unknown> = { [runtime.stateKey]: state };
+  if (responseCompleted && runtime.mode === 'primary') {
+    Object.assign(set, completedPrimaryRuntimeStateFields(state.lastChannel));
+  }
+  const ok = await patchGuestAgentState(guestDbId, { set });
   if (!ok) throw new Error('Could not persist Thongthai Agent session state.');
 }
 
@@ -546,7 +562,10 @@ async function runThongthaiAgentTurn(input: AgentShadowTurnInput): Promise<Agent
     existing?.lastTurnId ?? null,
   );
   const output = await outputForTurn(sessionId, turn.id);
-  const settledTurn = await retrieveTurnWithSettledUsage(sessionId, turn.id);
+  // latestTurn() commonly already includes settled usage for a completed turn.
+  // Avoid an unnecessary extra Agents API GET on the customer-response
+  // critical path; only re-fetch when usage is genuinely absent.
+  const settledTurn = turn.usage ? turn : await retrieveTurnWithSettledUsage(sessionId, turn.id);
   const usage = usageFromTurn(settledTurn);
   const costPersisted = await persistAgentCost(input, runtime, settledTurn, usage);
 
@@ -566,7 +585,7 @@ async function runThongthaiAgentTurn(input: AgentShadowTurnInput): Promise<Agent
     lastConversationId: input.conversationId,
     lastChannel: input.channel,
     lastEnvironment: input.environment ?? 'live',
-  });
+  }, true);
 
   return {
     sessionId,
