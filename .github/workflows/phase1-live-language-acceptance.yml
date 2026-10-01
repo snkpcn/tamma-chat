@@ -32,6 +32,8 @@ jobs:
             echo "PHASE1_LIVE_NOT_RUN: repository OPENAI_API_KEY secret is not configured."
             exit 2
           fi
+      - name: Run Phase 2 final production Safety Gauntlet
+        run: npx tsx scripts/run-phase2-live-safety-gauntlet.ts
       - name: Run real OpenAI regression acceptance
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
