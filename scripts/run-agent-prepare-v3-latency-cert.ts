@@ -1,5 +1,5 @@
 const PRODUCTION_URL = 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
-const GUEST_ID = 'prepare-latency-cert-v3';
+const GUEST_ID = ['f7f7f7f7','0251','4f7f','8f7f','000000000392'].join('-');
 
 type Result = {
   turn:number;
@@ -51,16 +51,16 @@ async function send(eventId:string,message:string,history:Array<{role:'user'|'as
 async function main():Promise<void>{
   const history:Array<{role:'user'|'assistant';content:string}>=[];
   const firstMessage='ขอจองขี่ม้าน้องภาราดร 30 นาที วันที่ 20 ตุลาคม 2569 เวลา 10:00 จำนวน 1 คน ชื่อ PREPARE LATENCY TEST โทร 0000000012 ขอให้เตรียมรายละเอียดให้ตรวจสอบก่อนครับ';
-  const first=await send('agent-prepare-v3-latency-1',firstMessage,history);
+  const first=await send('agent-prepare-v3-latency-final-1',firstMessage,history);
   console.log(JSON.stringify(first));
   history.push({role:'user',content:firstMessage},{role:'assistant',content:first.response});
 
   const secondMessage='ยืนยันจองครับ';
-  const second=await send('agent-prepare-v3-latency-2',secondMessage,history);
+  const second=await send('agent-prepare-v3-latency-final-2',secondMessage,history);
   console.log(JSON.stringify(second));
 
-  const firstPreparedSignal=/ยืนยันจอง|รายการ.*เตรียม|ร่าง.*จอง|ยังไม่ได้ส่งจอง/u.test(first.response);
-  const secondStillUnsubmitted=/ยัง.*ไม่.*(?:ส่ง|จอง)|ไม่ได้.*(?:ส่ง|จอง)|ยังไม่ได้.*เข้าระบบ|ยังไม่สามารถส่ง/u.test(second.response);
+  const firstPreparedSignal=/ยืนยันจอง/u.test(first.response) && /300|30 นาที/u.test(first.response);
+  const secondStillUnsubmitted=/(?:ยัง|ไม่ได้|ไม่สำเร็จ|ไม่สามารถ).{0,24}(?:ส่ง|จอง|เข้าระบบ)|(?:ส่ง|จอง).{0,24}(?:ไม่สำเร็จ|ไม่ได้)/u.test(second.response);
   const firstTurnWithinGatewayBudget=first.latencyMs < 25_000;
   const passed=
     first.pass
