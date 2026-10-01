@@ -10,7 +10,7 @@ type CostRow={
 };
 type TurnRow={
   conversation_id:string;event_id:string;channel:string;model_reply_used:boolean;grounded_knowledge_supplied:boolean;
-  zero_cost_turn:boolean;occurred_at:string;
+  zero_cost_turn:boolean;final_response_source:string;occurred_at:string;
 };
 
 function cfg():{url:string;key:string}|null{
@@ -26,6 +26,25 @@ async function get<T>(path:string):Promise<T[]>{
 function enc(v:string){return encodeURIComponent(v)}
 function n(v:unknown){const x=Number(v);return Number.isFinite(x)?x:0}
 function baht(v:number){return v.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:4})}
+function channelLabel(channel:string){
+  const labels:Record<string,string>={line:'LINE',web:'เว็บไซต์',facebook:'Facebook',messenger:'Messenger',unknown:'ไม่ทราบช่องทาง'};
+  return labels[channel.toLowerCase()]??channel.toUpperCase();
+}
+function purposeLabel(purpose:string){
+  const labels:Record<string,string>={
+    'semantic-interpreter':'ทำความเข้าใจข้อความลูกค้า',
+    'semantic-supervisor':'ทำความเข้าใจข้อความลูกค้า',
+    'grounded-response-composition':'เรียบเรียงคำตอบจากข้อมูลที่ตรวจสอบแล้ว',
+    'direct-response':'สร้างคำตอบโดยตรง',
+    'repair':'ตรวจและแก้คำตอบ',
+  };
+  return labels[purpose]??purpose.replace(/[-_]+/g,' ');
+}
+function thaiDateTime(value:string){
+  return new Intl.DateTimeFormat('th-TH',{
+    timeZone:'Asia/Bangkok',day:'numeric',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,
+  }).format(new Date(value));
+}
 function localDate(now=new Date()){
   return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
 }
@@ -69,6 +88,7 @@ function latestConversationSession(costRows:CostRow[],turnRows:TurnRow[]):{calls
 
 function summarize(rows:CostRow[],turns:TurnRow[]){
   const conversations=new Set(rows.map(x=>x.conversation_id));
+  const paidEventIds=new Set(rows.map(x=>x.event_id).filter(Boolean));
   return {
     conversations:conversations.size,
     calls:rows.length,
@@ -78,7 +98,11 @@ function summarize(rows:CostRow[],turns:TurnRow[]){
     cost:rows.reduce((s,x)=>s+n(x.cost_thb),0),
     direct:turns.filter(x=>x.model_reply_used).length,
     grounded:turns.filter(x=>x.model_reply_used&&x.grounded_knowledge_supplied).length,
-    zero:turns.filter(x=>x.zero_cost_turn).length,
+    // Older/live rows can predate the explicit zero_cost_turn flag. A turn
+    // with no cost event at all is still provably zero-cost; report that
+    // operational truth instead of the contradictory "0 calls / 0 zero-cost
+    // turns" message that confused the owner in LINE.
+    zero:turns.filter(x=>x.zero_cost_turn||rows.length===0||(x.event_id&&!paidEventIds.has(x.event_id))).length,
   };
 }
 
@@ -101,6 +125,18 @@ function channelBreakdown(rows:CostRow[],turns:TurnRow[]){
   }));
 }
 
+function purposeBreakdown(rows:CostRow[]){
+  const purposes=new Map<string,{cost:number;calls:number}>();
+  for(const row of rows){
+    const key=row.call_purpose||'unknown';
+    const value=purposes.get(key)??{cost:0,calls:0};
+    value.cost+=n(row.cost_thb);
+    value.calls+=1;
+    purposes.set(key,value);
+  }
+  return [...purposes.entries()].sort(([,a],[,b])=>b.cost-a.cost).map(([purpose,value])=>({purpose,...value}));
+}
+
 export async function sendIdleAiCostConversationSummaries(now=new Date()){
   // Look back far enough that a temporarily unavailable scheduled invocation
   // does not permanently lose a conversation summary. Delivery idempotency
@@ -118,7 +154,7 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
     get<TurnRow>(
       'ai_response_turns?environment=eq.live&occurred_at=gte.'+enc(oldest)
       +'&occurred_at=lte.'+enc(now.toISOString())
-      +'&select=conversation_id,event_id,channel,model_reply_used,grounded_knowledge_supplied,zero_cost_turn,occurred_at'
+      +'&select=conversation_id,event_id,channel,model_reply_used,grounded_knowledge_supplied,zero_cost_turn,final_response_source,occurred_at'
       +'&order=occurred_at.asc&limit=5000',
     ),
   ]);
@@ -145,27 +181,48 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
     const s=summarize(calls,turns);
     const models=[...new Set(calls.map(x=>x.model))].join(', ');
     const breakdown=channelBreakdown(calls,turns);
+    const purposes=purposeBreakdown(calls);
     const channelLines=breakdown.map(item=>
-      `• ${item.channel.toUpperCase()}: ${baht(item.cost)} THB · ${item.calls} calls · ${item.turns} turns`,
+      `• ${channelLabel(item.channel)} — ${baht(item.cost)} บาท\n  OpenAI ${item.calls} ครั้ง · ตอบ ${item.turns} ข้อความ`,
     );
+    const purposeLines=purposes.length
+      ?purposes.map(item=>`• ${purposeLabel(item.purpose)}: ${item.calls} ครั้ง — ${baht(item.cost)} บาท`)
+      :['• ไม่มีการเรียก OpenAI'];
+    const directUngrounded=Math.max(0,s.direct-s.grounded);
+    const responseLines=[
+      s.grounded?`• OpenAI เรียบเรียงจากข้อมูลที่ตรวจสอบแล้ว: ${s.grounded} ข้อความ`:'',
+      directUngrounded?`• OpenAI สร้างคำตอบโดยตรง: ${directUngrounded} ข้อความ`:'',
+      s.zero?`• ตอบจากข้อมูล/กติกาในระบบโดยไม่เรียก OpenAI: ${s.zero} ข้อความ`:'',
+    ].filter(Boolean);
+    const overview=s.calls===0
+      ?'ไม่เสียค่า AI — ตอบจากข้อมูลหรือกติกาที่มีในระบบ'
+      :`เรียก OpenAI ${s.calls} ครั้ง ต้นทุนรวม ${baht(s.cost)} บาท`;
+    const startAt=[calls[0]?.occurred_at,turns[0]?.occurred_at].filter(Boolean).sort()[0]??lastActivityAt;
+    const timeLabel=startAt===lastActivityAt
+      ?thaiDateTime(lastActivityAt)
+      :`${thaiDateTime(startAt)} – ${thaiDateTime(lastActivityAt)}`;
     const text=[
-      '💰 Thongthai AI Cost',
+      '💰 ต้นทุนจริงต่อบทสนทนา — ทองไทย',
       '',
-      `Conversation: ${conversationId.slice(0,18)}…`,
-      `Channels (${breakdown.length}):`,
+      `สรุป: ${overview}`,
+      `ช่องทางลูกค้า: ${breakdown.map(item=>channelLabel(item.channel)).join(', ')}`,
+      `ช่วงเวลา: ${timeLabel}`,
+      `อ้างอิง: ${conversationId.slice(0,18)}${conversationId.length>18?'…':''}`,
+      '',
+      `ต้นทุนรวม: ${baht(s.cost)} บาท`,
+      `จำนวนข้อความที่ตอบ: ${turns.length}`,
+      '',
+      'แยกตามช่องทาง',
       ...channelLines,
-      `OpenAI calls: ${s.calls}`,
-      models?`Model: ${models}`:'Model: none (deterministic)',
       '',
-      `Input: ${s.input.toLocaleString('th-TH')} tokens`,
-      `Cached: ${s.cached.toLocaleString('th-TH')} tokens`,
-      `Output: ${s.output.toLocaleString('th-TH')} tokens`,
+      'ต้นทุนเกิดจาก',
+      ...purposeLines,
       '',
-      `Cost: ${baht(s.cost)} THB`,
-      `Turns: ${turns.length}`,
-      `Direct AI replies: ${s.direct}`,
-      `Grounded AI replies: ${s.grounded}`,
-      `Zero-cost turns: ${s.zero}`,
+      'รูปแบบคำตอบ',
+      ...(responseLines.length?responseLines:['• ยังไม่มีข้อมูลรูปแบบคำตอบ']),
+      '',
+      models?`โมเดล: ${models}`:'โมเดล: ไม่ได้ใช้',
+      `โทเคน: เข้า ${s.input.toLocaleString('th-TH')} · cache ${s.cached.toLocaleString('th-TH')} · ออก ${s.output.toLocaleString('th-TH')}`,
     ].filter(Boolean).join('\n');
     const maxIndex=calls.length?Math.max(...calls.map(x=>n(x.call_index_conversation))):0;
     const sessionStart=[calls[0]?.occurred_at,turns[0]?.occurred_at].filter(Boolean).sort()[0]??lastActivityAt;

@@ -383,6 +383,18 @@ test('TEST 8 -- structural proof: deterministicNeedsLanguageRefinement returns f
   assert.equal(deterministicNeedsLanguageRefinement(genericDiscovery, emptyTaskStateContainer(), 'มีอะไรให้เล่นบ้าง'), true, 'the general first-visit discovery bucket stays on the paid path');
 });
 
+test('payment status is a trusted zero-call fact lookup and never waits for language refinement', () => {
+  const message = 'สถานะชำระเงินรายการ OR-260930-A0924DDC ตอนนี้เป็นยังไงครับ';
+  const turn = deriveDeterministicSemanticTurn(message, emptySemanticContext(), emptyTaskStateContainer());
+  assert.ok(turn);
+  assert.equal(turn!.domain, 'payment');
+  assert.equal(turn!.intent, 'check_payment_status');
+  assert.equal(turn!.action, 'status');
+  assert.equal(turn!.informationNeed, 'transaction_status');
+  assert.equal(isTrustedZeroCostFactLookup(turn!, message), true);
+  assert.equal(deterministicNeedsLanguageRefinement(turn, emptyTaskStateContainer(), message), false);
+});
+
 // TEST 9/10 -- full end-to-end regression through processThongthaiChatCore
 // ITSELF, using the real HTTP-boundary-mocked harness (matching
 // tests/pedal-boat-price-hotfix.test.ts's own convention), not just
