@@ -1271,7 +1271,7 @@ p{ margin:0; }
         <div class="rewards-layout">
           <div class="rewards-head">
             <span class="eyebrow" data-i18n="rewards_status_eyebrow">สถานะของคุณตอนนี้</span>
-            <h3 id="rewardsHeadline">เริ่มเก็บความทรงจำครั้งแรก</h3>
+            <h3 id="rewardsHeadline" data-i18n="rewards_headline_zero">เริ่มเก็บความทรงจำครั้งแรก</h3>
             <p data-i18n="rewards_desc">ปลดล็อกตราสัญลักษณ์เหล่านี้ด้วยการใช้เวลาอยู่กับทำมา-ชาติ ยิ่งเก็บบันทึกมาก ยิ่งได้รับการต้อนรับที่ลึกซึ้งขึ้น</p>
           </div>
           <div class="rewards-grid" id="rewardsGrid"></div>
@@ -1480,7 +1480,7 @@ p{ margin:0; }
       </div>
     </div>
     <div class="footer-bottom">
-      <span>© 2026 ทำมา-ชาติ — Experiences of Isan</span>
+      <span data-i18n="footer_copyright">© 2026 ทำมา-ชาติ — Experiences of Isan</span>
       <div class="footer-socials" aria-label="ช่องทางโซเชียลมีเดีย">
         <a href="#" aria-label="Facebook"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M22 12a10 10 0 1 0-11.6 9.9v-7H7.9V12h2.5V9.8c0-2.5 1.5-3.9 3.8-3.9 1.1 0 2.2.2 2.2.2v2.5h-1.3c-1.2 0-1.6.8-1.6 1.6V12h2.8l-.4 2.9h-2.4v7A10 10 0 0 0 22 12Z"/></svg></a>
         <a href="#" aria-label="Instagram"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg></a>
@@ -1775,6 +1775,7 @@ const TRANSLATIONS = {
 th: {
   nav_experiences:"ประสบการณ์", nav_journey:"เส้นทางการเที่ยว", nav_chess:"เล่นหมากรุก", nav_plan:"วางแผนเที่ยว", nav_about:"เกี่ยวกับเรา",
   brand_sub:"เรื่องราวอีสานที่มีชีวิต",
+  page_title:"ทำมา-ชาติ — Experiences of Isan", footer_copyright:"© 2026 ทำมา-ชาติ — Experiences of Isan",
   exp_tag_dining:"กิน", exp_tag_stay:"พัก", exp_tag_adventure:"กิจกรรม",
   hotspot_inthanin_label:"กาแฟ Inthanin", hotspot_reception_label:"ต้อนรับ", hotspot_dining_label:"ร้านอาหาร",
   hotspot_stay_label:"บ้านพัก", hotspot_adventure_label:"กิจกรรม", hotspot_journal_label:"สมุดบันทึก", hotspot_return_label:"สิทธิพิเศษ",
@@ -1993,6 +1994,7 @@ th: {
 en: {
   nav_experiences:"Things to Do", nav_journey:"How to Visit", nav_chess:"Play Chess", nav_plan:"Plan a Visit", nav_about:"About",
   brand_sub:"Living stories of Isan",
+  page_title:"Tamma-Chat — Experiences of Isan", footer_copyright:"© 2026 Tamma-Chat — Experiences of Isan",
   exp_tag_dining:"EAT", exp_tag_stay:"STAY", exp_tag_adventure:"EXPLORE",
   hotspot_inthanin_label:"Coffee at Inthanin", hotspot_reception_label:"Welcome", hotspot_dining_label:"Dining",
   hotspot_stay_label:"Stay", hotspot_adventure_label:"Activities", hotspot_journal_label:"Travel Notes", hotspot_return_label:"Member Benefits",
@@ -2211,6 +2213,7 @@ en: {
 zh: {
   nav_experiences:"体验项目", nav_journey:"行程", nav_chess:"挑战通泰", nav_plan:"规划行程", nav_about:"关于我们",
   brand_sub:"鲜活的伊森故事",
+  page_title:"Tamma-Chat — 伊森体验", footer_copyright:"© 2026 Tamma-Chat — 伊森体验",
   exp_tag_dining:"美食", exp_tag_stay:"住宿", exp_tag_adventure:"探索",
   hotspot_inthanin_label:"Inthanin 咖啡", hotspot_reception_label:"迎宾", hotspot_dining_label:"餐厅",
   hotspot_stay_label:"住宿", hotspot_adventure_label:"活动", hotspot_journal_label:"行程日记", hotspot_return_label:"会员礼遇",
@@ -2429,6 +2432,7 @@ zh: {
 lo: {
   nav_experiences:"ປະສົບການ", nav_journey:"ການເດີນທາງ", nav_chess:"ທ້າທາຍທອງໄທ", nav_plan:"ວາງແຜນການເດີນທາງ", nav_about:"ກ່ຽວກັບພວກເຮົາ",
   brand_sub:"ເລື່ອງລາວອີສານທີ່ຍັງມີຊີວິດ",
+  page_title:"Tamma-Chat — ປະສົບການອີສານ", footer_copyright:"© 2026 Tamma-Chat — Experiences of Isan",
   exp_tag_dining:"ກິນ", exp_tag_stay:"ພັກ", exp_tag_adventure:"ຄົ້ນພົບ",
   hotspot_inthanin_label:"ກາເຟ Inthanin", hotspot_reception_label:"ຕ້ອນຮັບ", hotspot_dining_label:"ຮ້ານອາຫານ",
   hotspot_stay_label:"ທີ່ພັກ", hotspot_adventure_label:"ກິດຈະກຳ", hotspot_journal_label:"ບັນທຶກການເດີນທາງ", hotspot_return_label:"ສິດທິສະມາຊິກ",
@@ -2647,6 +2651,7 @@ lo: {
 vi: {
   nav_experiences:"Trải Nghiệm", nav_journey:"Hành Trình", nav_chess:"Thách Đấu Thongthai", nav_plan:"Lên Kế Hoạch", nav_about:"Giới Thiệu",
   brand_sub:"Những câu chuyện Isan đang tiếp diễn",
+  page_title:"Tamma-Chat — Trải nghiệm Isan", footer_copyright:"© 2026 Tamma-Chat — Trải nghiệm Isan",
   exp_tag_dining:"ĂN", exp_tag_stay:"NGHỈ", exp_tag_adventure:"KHÁM PHÁ",
   hotspot_inthanin_label:"Cà phê Inthanin", hotspot_reception_label:"Chào đón", hotspot_dining_label:"Ẩm thực",
   hotspot_stay_label:"Lưu trú", hotspot_adventure_label:"Hoạt động", hotspot_journal_label:"Nhật ký hành trình", hotspot_return_label:"Quyền lợi thành viên",
@@ -2905,6 +2910,7 @@ function t(key){
 
 function applyTranslations(){
   document.documentElement.setAttribute('lang', currentLang);
+  document.title = t('page_title');
   document.querySelectorAll('[data-i18n]').forEach(el=>{
     el.textContent = t(el.getAttribute('data-i18n'));
   });
