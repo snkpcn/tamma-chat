@@ -1,0 +1,23 @@
+name: One-time Thongthai activity transaction smoke
+
+on:
+  push:
+    branches:
+      - test/run-agent-activity-transaction-smoke-20261001
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run three fixed synthetic transaction turns
+        run: |
+          set -euo pipefail
+          for turn in 1 2 3; do
+            echo "===== TURN $turn ====="
+            curl --fail-with-body --silent --show-error               --max-time 45               "https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-activity-transaction-smoke?turn=$turn"
+            echo
+          done
