@@ -9,12 +9,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Package tracked application source (no environment or credentials)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Package tracked application source and locked test dependencies
         run: |
-          git ls-files | grep -E '^(netlify/|src/|tests/|scripts/|supabase/|\.github/)|\.(json|toml|md|html)$' > /tmp/source-files.txt
+          git ls-files | grep -E '^(netlify/|src/|tests/|scripts/|supabase/|\.github/|assets/scripts/)|\.(json|toml|md|html|css)$' > /tmp/source-files.txt
           tar -czf /tmp/thongthai-source-context.tar.gz -T /tmp/source-files.txt
+          tar -czf /tmp/thongthai-test-dependencies.tar.gz node_modules
       - uses: actions/upload-artifact@v4
         with:
           name: thongthai-source-context
-          path: /tmp/thongthai-source-context.tar.gz
+          path: |
+            /tmp/thongthai-source-context.tar.gz
+            /tmp/thongthai-test-dependencies.tar.gz
           retention-days: 1
