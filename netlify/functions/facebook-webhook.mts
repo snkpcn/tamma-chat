@@ -1,5 +1,4 @@
 import type { Config, Context } from '@netlify/functions';
-import { processThongthaiChatCore } from './thongthai-chat';
 import {
   detectFacebookLanguage,
   extractFacebookTextEvents,
@@ -22,7 +21,9 @@ type ThongthaiResponse = {
   suggestedActions?: unknown[];
 };
 
-// Meta verification/runtime secrets are resolved from Netlify environment variables.\n// Redeploy production after changing their scopes or contexts so the live function sees the new values.\nfunction env(name: string): string {
+// Meta verification/runtime secrets are resolved from Netlify environment variables.
+// Redeploy production after changing their scopes or contexts so the live function sees the new values.
+function env(name: string): string {
   return Netlify.env.get(name)?.trim() ?? '';
 }
 
@@ -86,6 +87,9 @@ async function sendFacebookTextReliably(
 }
 
 async function askThongthai(message: string, psid: string, eventId: string): Promise<ThongthaiResponse> {
+  // Keep Meta's GET verification path tiny and fast: load the full Thongthai
+  // application graph only for real POST message processing.
+  const { processThongthaiChatCore } = await import('./thongthai-chat');
   const result = await processThongthaiChatCore({
     guestId: facebookGuestId(psid),
     message,
@@ -117,6 +121,15 @@ export default async (req: Request, _context: Context) => {
 
   if (req.method === 'GET') {
     const url = new URL(req.url);
+    if (url.searchParams.get('probe') === '1') {
+      return Response.json({
+        ok: true,
+        verifyTokenConfigured: Boolean(verifyToken),
+        pageTokenConfigured: Boolean(pageToken),
+        pageIdConfigured: Boolean(pageId),
+        appSecretConfigured: Boolean(appSecret),
+      });
+    }
     const mode = url.searchParams.get('hub.mode');
     const suppliedToken = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
