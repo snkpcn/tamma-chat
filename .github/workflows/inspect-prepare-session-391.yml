@@ -1,0 +1,25 @@
+name: Inspect Prepare Session 391
+
+on:
+  push:
+    branches:
+      - agent-prepare-session-inspect-391
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Inspect saved Agent session
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx tsx scripts/inspect-prepare-session-391.ts
