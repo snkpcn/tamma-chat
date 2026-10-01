@@ -1,0 +1,24 @@
+name: Agent rollout 100 smoke
+
+on:
+  push:
+    branches:
+      - agent-canary/smoke-25-live
+
+jobs:
+  smoke100:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Verify newly eligible WEB guest
+        env:
+          PHASE7_GUEST_ID: 8b000c03-0cfe-5a31-af72-d7a261e171ba
+          PHASE7_LIMIT: "3"
+          PHASE7_CHANNEL: web
+        run: npm run certify:phase7:production
