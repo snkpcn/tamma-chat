@@ -70,6 +70,8 @@ import { processThongthaiOneMindTurnResilient, isTrustedZeroCostFactLookup } fro
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { processOneMindCustomerTurn, isTrustedBoundedNoTransactionContinuation } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
+import { runThongthaiAgentPrimaryTurn } from './_thongthai-agent-session';
+import { shouldUseThongthaiAgentPrimary } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
 import { deriveSemanticMeaning } from './_semantic-meaning';
@@ -4968,6 +4970,101 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // does not necessarily label as LOCATION_REQUEST.
   const preserveVerifiedLocationBeforeSupervision = !hasExplicitTransactionIntent(request.message)
     && classifyLocalConciergeQuestion(request.message)?.category === 'location';
+
+  // Thongthai Saved-Agent production canary.
+  //
+  // The first cutover is deliberately READ-ONLY and stable-bucketed. Existing
+  // transaction/weather/location executors remain authoritative until their
+  // own live cutovers are approved. Safety/service-feedback/escalation
+  // responders have already run above this point.
+  const primaryAgentEligible = shouldUseThongthaiAgentPrimary({
+    guestKey: request.guestId,
+    guestDbId,
+    channel,
+    explicitTransactionIntent:
+      topLevelSemanticIntent === 'BUSINESS_TRANSACTION'
+      || hasExplicitTransactionIntent(request.message),
+    weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+    locationRequest: preserveVerifiedLocationBeforeSupervision
+      || topLevelSemanticIntent === 'LOCATION_REQUEST',
+  });
+
+  if (primaryAgentEligible && guestDbId) {
+    try {
+      const agentTurn = await runThongthaiAgentPrimaryTurn({
+        guestDbId,
+        conversationId: request.guestId,
+        eventId: transportEventId,
+        channel,
+        message: request.message,
+      });
+
+      const primaryResponse = polishedResponse({
+        message: agentTurn.output,
+        intent: 'information',
+        contextUpdates: {},
+        journeyAction: { type: 'none', journey: null },
+        suggestedActions: [],
+        responseStyle: 'direct',
+        semanticMemoryUpdates: [],
+        toolCalls: [],
+      }, channel);
+
+      await persistBrainRuntime(guestDbId, channel, primaryResponse);
+      await persistAiResponseTurn({
+        conversationId: request.guestId,
+        eventId: transportEventId,
+        channel,
+        finalResponseSource: 'thongthai_agent_primary',
+        modelReplyUsed: true,
+        groundedKnowledgeSupplied: agentTurn.toolCalls.length > 0,
+        zeroCostTurn: false,
+        environment: 'live',
+        occurredAt: new Date().toISOString(),
+      }).catch(error => {
+        console.error(
+          'AGENT_PRIMARY_RESPONSE_TURN_PERSIST_ERROR',
+          error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+        );
+      });
+
+      console.log('THONGTHAI_AGENT_PRIMARY_RESPONSE', JSON.stringify({
+        channel,
+        toolCalls: agentTurn.toolCalls,
+        createdSession: agentTurn.createdSession,
+        turnCostThb: agentTurn.usage.costThb,
+        conversationCostThb: agentTurn.cumulativeCostThb,
+      }));
+
+      return coreResult(200, {
+        message: primaryResponse.message,
+        intent: primaryResponse.intent,
+        contextUpdates: primaryResponse.contextUpdates,
+        journeyAction: primaryResponse.journeyAction,
+        suggestedActions: primaryResponse.suggestedActions,
+      });
+    } catch (error) {
+      // Do not cascade into another paid LLM path after a primary-Agent
+      // attempt: that could double-spend the same customer turn. Fail over
+      // only to the existing deterministic degraded responder.
+      console.error(
+        'THONGTHAI_AGENT_PRIMARY_ERROR',
+        error instanceof Error ? error.message.slice(0, 260) : 'unknown',
+      );
+      const fallback = polishedResponse(
+        degradedFallbackResponse(categorizeDegradedFallback(request.message)),
+        channel,
+      );
+      await persistBrainRuntime(guestDbId, channel, fallback);
+      return coreResult(200, {
+        message: fallback.message,
+        intent: fallback.intent,
+        contextUpdates: fallback.contextUpdates,
+        journeyAction: fallback.journeyAction,
+        suggestedActions: fallback.suggestedActions,
+      });
+    }
+  }
 
   // Human Conversation Recovery: UNDERSTAND FIRST.
   //
