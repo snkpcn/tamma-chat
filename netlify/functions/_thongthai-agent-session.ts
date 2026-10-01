@@ -5,6 +5,7 @@ import type { ThongthaiAgentTransactionMode } from './_thongthai-agent-transacti
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { calculateAiCostUsd, usdToThb, aiCostPolicy, pricingForModel } from './_ai-cost-policy';
 import { persistAiCallCost } from './_ai-cost-store';
+import { readActiveAiLedgerSpendThb } from './_ai-cost-ledger';
 
 const API_BASE = 'https://api.openai.com/v1';
 const BETA_HEADER = 'agents=v1';
@@ -487,11 +488,16 @@ async function runThongthaiAgentTurn(input: AgentShadowTurnInput): Promise<Agent
   }
 
   const capThb = aiCostPolicy().maxConversationCostUsd * (usdToThb(1));
-  if (existing && existing.cumulativeCostThb >= capThb) {
+  const externalLegacySpendThb = runtime.mode === 'primary'
+    ? await readActiveAiLedgerSpendThb(input.guestDbId, input.conversationId)
+    : 0;
+  const agentSpendThb = existing?.cumulativeCostThb ?? 0;
+  const combinedSpendThb = agentSpendThb + externalLegacySpendThb;
+  if (combinedSpendThb >= capThb) {
     throw new Error('Thongthai Agent conversation cost cap reached.');
   }
-  if (existing && capThb - existing.cumulativeCostThb < AGENT_TURN_RESERVE_THB) {
-    throw new Error('Thongthai Agent remaining budget is below the safe per-turn reserve.');
+  if (capThb - combinedSpendThb < AGENT_TURN_RESERVE_THB) {
+    throw new Error('Thongthai Agent remaining combined budget is below the safe per-turn reserve.');
   }
 
   let sessionId: string;
