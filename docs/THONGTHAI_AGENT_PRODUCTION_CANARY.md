@@ -57,3 +57,5 @@ This file also records the environment-configuration deployment point so the Net
 
 
 - 2026-10-01 Phase 2 final rerun env refresh: production synthetic allowlist rotated to five fresh WEB guests ending 0201–0205 after PR #419. This docs-only commit forces a production Functions rebuild so the runtime env snapshot matches the current allowlist. Public prepare remains 0%; live commit remains OFF.
+
+- Phase 2 final Wave A certification redeploy: Activity + Stay synthetic guests only; public prepare remains 0%, live commit remains OFF.
