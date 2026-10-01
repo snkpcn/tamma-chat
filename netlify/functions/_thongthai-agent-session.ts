@@ -1,6 +1,7 @@
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { THONGTHAI_STAGING_AGENT_ID } from './_thongthai-agent-profile';
-import { executeThongthaiReadOnlyTool } from './_thongthai-agent-tools';
+import { executeThongthaiAgentTool } from './_thongthai-agent-tools';
+import type { ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { calculateAiCostUsd, usdToThb, aiCostPolicy, pricingForModel } from './_ai-cost-policy';
 import { persistAiCallCost } from './_ai-cost-store';
@@ -74,6 +75,7 @@ export type AgentShadowTurnInput = {
   channel: BrainChannel;
   message: string;
   environment?: 'live' | 'test';
+  transactionMode?: ThongthaiAgentTransactionMode;
 };
 
 export type AgentShadowTurnResult = {
@@ -226,10 +228,13 @@ async function submitToolResults(
       const cacheKey = `${action.name}:${JSON.stringify(parsedArgs)}`;
       let output = toolCache.get(cacheKey);
       if (output === undefined) {
-        output = await executeThongthaiReadOnlyTool(action.name, parsedArgs, {
+        output = await executeThongthaiAgentTool(action.name, parsedArgs, {
           guestDbId: input.guestDbId,
           channel: input.channel,
           environment: input.environment ?? 'live',
+          eventId: input.eventId,
+          message: input.message,
+          transactionMode: input.transactionMode ?? 'off',
         });
         toolCache.set(cacheKey, output);
       }
