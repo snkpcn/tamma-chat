@@ -51,4 +51,6 @@ Rollout history:
 
 - Phase 1 Prepare-only FINAL CERTIFICATION passed on a fresh synthetic WEB guest: first prepare response 9.821s, later confirmation response 3.517s, both HTTP 200; exact `ยืนยันจอง` phrase preserved; draft persisted in live guest state; both turns recorded as `agent_prepare_fastpath` with zero paid model calls; and 0 bookings were created. After certification the synthetic allowlist was cleared. Public prepare rollout remains 0%; live Agent commit remains OFF.
 
+- Phase 2 FINAL closeout certification window: five fresh synthetic WEB guests are temporarily allowlisted (f2f...0101–0105). Public prepare rollout remains 0%; live Agent commit remains OFF. Clear the allowlist immediately after the 5/5 production gauntlet.
+
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
