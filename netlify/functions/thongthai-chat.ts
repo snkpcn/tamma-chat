@@ -72,6 +72,7 @@ import { processOneMindCustomerTurn, isTrustedBoundedNoTransactionContinuation }
 import { recordOneMindTrace } from './_one-mind-observability';
 import { runThongthaiAgentPrimaryTurn } from './_thongthai-agent-session';
 import { executeThongthaiTransactionTool } from './_thongthai-agent-transactions';
+import { runPrepareOnlyMultiVerticalFastPath } from './_thongthai-prepare-fastpath-v2';
 import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
@@ -5066,7 +5067,18 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // same customer-safe prepare-only contract. Ambiguous/incomplete transaction
   // language still falls through to the Saved Agent for natural conversation.
   if (prepareOnlyAgentEligible && guestDbId) {
-    const preparedFast = await prepareOnlyActivityFastPath(
+    const preparedFast = await runPrepareOnlyMultiVerticalFastPath(
+      request,
+      guestDbId,
+      channel,
+      transportEventId,
+    ).catch(error => {
+      console.error(
+        'THONGTHAI_AGENT_PREPARE_MULTI_FASTPATH_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return null;
+    }) ?? await prepareOnlyActivityFastPath(
       request,
       guestDbId,
       channel,
