@@ -1,0 +1,19 @@
+name: One-time multi-turn Thongthai Agent smoke
+
+on:
+  push:
+    branches:
+      - test/run-multiturn-agent-smoke-20261001
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke fixed synthetic multi-turn smoke endpoint
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error             --max-time 120             https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-multiturn-smoke
