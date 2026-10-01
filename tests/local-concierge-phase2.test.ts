@@ -23,7 +23,7 @@ const NO_GENERIC_FAILURE = /ไม่มีข้อมูลที่ยืน�
 
 test('A. location questions: answers with the real owner-provided Maps link, never an invented address', async () => {
   await withHarness(async () => {
-    const messages = ['ทำมา-ชาติอยู่ที่ไหน', 'ขอโลเคชั่นหน่อย', 'ไปยังไง', 'ปักหมุดให้หน่อย', 'ใกล้อะไรบ้าง'];
+    const messages = ['ทำมา-ชาติอยู่ที่ไหน', 'ร้านอยู่แถวไหนคะ', 'ขอโลเคชั่นหน่อย', 'ไปยังไง', 'ปักหมุดให้หน่อย', 'ใกล้อะไรบ้าง'];
     for (const [i, message] of messages.entries()) {
       const r = await ask(`concierge-location-${i}`, message);
       assert.equal(r.statusCode, 200);
@@ -34,6 +34,7 @@ test('A. location questions: answers with the real owner-provided Maps link, nev
         message_.includes(TAMMA_CHART_LOCATION.mapsLink),
         `"${message}" must use the exact canonical Maps link, never a different/invented one`,
       );
+      assert.ok(message_.includes('https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic'), 'must use the owner-verified production Maps link');
     }
   });
 });
