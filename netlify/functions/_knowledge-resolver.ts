@@ -38,7 +38,7 @@ import {
 export type KnowledgeNeed =
   | 'catalog' | 'entity_details' | 'price' | 'availability' | 'schedule' | 'inventory'
   | 'ingredients' | 'recommendations_input' | 'promotion_eligibility' | 'booking_status'
-  | 'order_status' | 'membership_status' | 'stable_policy';
+  | 'order_status' | 'payment_status' | 'membership_status' | 'stable_policy';
 
 export type KnowledgeRequest = {
   domain: SemanticDomain;
@@ -85,6 +85,7 @@ export const SOURCE_REGISTRY: Record<KnowledgeNeed, readonly KnowledgeSourceType
   promotion_eligibility: ['promotion_runtime'],
   booking_status: ['booking_operational'],
   order_status: ['order_operational'],
+  payment_status: ['payment_operational'],
   membership_status: ['membership_operational'],
   stable_policy: ['bible'],
 };
@@ -94,7 +95,7 @@ export const SOURCE_REGISTRY: Record<KnowledgeNeed, readonly KnowledgeSourceType
  *  those needs -- Bible may describe what an activity IS, never what its
  *  live price/availability/inventory currently IS. Enforced by routeNeed()
  *  and proven by a dedicated test. */
-const NEVER_BIBLE_FOR: ReadonlySet<KnowledgeNeed> = new Set(['price', 'availability', 'schedule', 'inventory', 'promotion_eligibility', 'booking_status', 'order_status', 'membership_status']);
+const NEVER_BIBLE_FOR: ReadonlySet<KnowledgeNeed> = new Set(['price', 'availability', 'schedule', 'inventory', 'promotion_eligibility', 'booking_status', 'order_status', 'payment_status', 'membership_status']);
 
 // ---------------------------------------------------------------------------
 // Source precedence -- deterministic conflict resolution when the same fact

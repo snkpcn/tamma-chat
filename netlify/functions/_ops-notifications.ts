@@ -655,6 +655,7 @@ const FEEDBACK_BUSINESS_UNIT_TEAM: Record<string, OpsTeamCode> = {
 const FEEDBACK_TYPE_LABEL: Record<string, string> = {
   compliment: '💛 คำชม', complaint: '⚠️ ข้อร้องเรียน', suggestion: '💡 ข้อเสนอแนะ',
   safety_issue: '🚨 เรื่องความปลอดภัย', system_feedback: '💬 ฟีดแบ็กเรื่องทองไทย',
+  incident: '🔎 เหตุที่ต้องติดตาม',
 };
 const FEEDBACK_SEVERITY_LABEL: Record<string, string> = {
   low: 'ทั่วไป', normal: 'ปกติ', high: 'ต้องดูแลเร็ว', urgent: 'ด่วนมาก',
@@ -695,7 +696,7 @@ export type FeedbackTargetResult = { team: OpsTeamCode; status: FeedbackNotifySt
 // what this fixes.) 'urgent' severity keeps its own existing escalation
 // too, for any non-safety feedback type severe enough to need it.
 function needsOwnerEscalation(event: { feedback_type: string; severity: string }): boolean {
-  return event.feedback_type === 'safety_issue' || event.severity === 'urgent';
+  return event.feedback_type === 'safety_issue' || event.feedback_type === 'incident' || event.severity === 'urgent';
 }
 
 /**

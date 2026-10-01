@@ -105,6 +105,18 @@ function statusLabel(status: PaymentStatus): string {
   } as Record<PaymentStatus, string>)[status];
 }
 
+export function verifiedPaymentCustomerText(request: Pick<PaymentRequest, 'entity_code'|'amount'>): string {
+  return [
+    '✅ ทองไทยยืนยันการชำระเงินแล้วครับ',
+    `รายการ: ${request.entity_code}`,
+    `ยอด: ${money(request.amount)}`,
+    '',
+    'ขอบคุณที่ไว้วางใจทำมา-ชาติครับ 🙏',
+    'ทีมงานจะดำเนินการรายการ/การจองต่อจากสถานะนี้ และแจ้งความคืบหน้าให้ครับ',
+    'ถ้ามีอะไรให้ช่วยระหว่างนี้ บอกทองไทยได้เสมอครับ แล้วกลับมาใช้บริการกันอีกนะครับ 😊',
+  ].join('\n');
+}
+
 // Restaurant preorders carry real item-level detail (resolved from
 // restaurant_preorder_items — never hardcoded); other entity types
 // (booking/otop_order/cafe_order) keep the original single-line summary
@@ -517,12 +529,7 @@ export async function dispatchPaymentNotification(id: string): Promise<string> {
   if (request.status === 'verified') {
     const sent = await sendCustomer(request, [{
       type: 'text',
-      text: [
-        `✅ ทองไทยยืนยันการชำระเงินแล้วครับ`,
-        `รายการ: ${request.entity_code}`,
-        `ยอด: ${money(request.amount)}`,
-        'ทีมงานจะดำเนินการรายการ/การจองต่อจากสถานะนี้ครับ',
-      ].join('\n'),
+      text: verifiedPaymentCustomerText(request),
     }]);
     // "จ่ายเงินแล้ว" is not "ร้านรับงานแล้ว" — push the refreshed order-accept
     // card back into the same restaurant group right after verify, so staff

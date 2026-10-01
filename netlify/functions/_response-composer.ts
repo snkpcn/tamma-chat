@@ -892,8 +892,52 @@ function groundedIntro(input: ResponseComposerInput): string {
   return 'ตัวเลือกที่มีตอนนี้ครับ';
 }
 
+function renderPaymentStatusResponse(input: ResponseComposerInput): { message:string; usedFactKeys:string[] } | null {
+  if (!input.knowledgeBundles.some(bundle => bundle.domain === 'payment')) return null;
+  const facts=groundedValueMap(input);
+  const statusEntry=[...facts.entries()].find(([key,value])=>/^payment:[^:]+:status$/.test(key)&&typeof value==='string');
+  if(!statusEntry)return null;
+  const [statusKey,statusValue]=statusEntry;
+  const match=statusKey.match(/^payment:([^:]+):status$/);
+  if(!match)return null;
+  const entityCode=match[1]!;
+  const base=`payment:${entityCode}`;
+  const amountKey=`${base}:amount`;
+  const paymentCodeKey=`${base}:paymentCode`;
+  const methodKey=`${base}:method`;
+  const amount=facts.get(amountKey);
+  const amountText=typeof amount==='number'&&Number.isFinite(amount)
+    ? `${amount.toLocaleString('th-TH',{maximumFractionDigits:2})} บาท`
+    : 'รอทีมงานกำหนดยอด';
+  const used=[statusKey];
+  if(facts.has(amountKey))used.push(amountKey);
+  if(facts.has(paymentCodeKey))used.push(paymentCodeKey);
+  if(facts.has(methodKey))used.push(methodKey);
+
+  const status=String(statusValue);
+  if(input.language!=='th'){
+    const labels:Record<string,string>={
+      quote_required:'waiting for staff to set the amount',awaiting_payment:'awaiting payment',
+      proof_submitted:'receipt submitted and awaiting review',verified:'payment verified',
+      rejected:'receipt rejected; please submit a corrected receipt',cancelled:'cancelled',
+    };
+    return{message:`Payment ${entityCode}: ${labels[status]??status}. Amount: ${amountText}.`,usedFactKeys:used};
+  }
+
+  const message=({
+    quote_required:`💳 ${entityCode}\nตอนนี้รอทีมงานกำหนดยอดครับ ยังไม่ต้องโอน ทองไทยจะแจ้งทันทีเมื่อยอดพร้อม`,
+    awaiting_payment:`💳 ${entityCode}\nยอด ${amountText}\nสถานะ: รอชำระเงินครับ หากได้รับ QR แล้วสามารถโอนและส่งรูปสลิปกลับมาใน LINE ได้เลย`,
+    proof_submitted:`✅ ได้รับสลิปของ ${entityCode} แล้วครับ\nยอดที่รอตรวจ ${amountText}\nทีมงานกำลังตรวจสอบอยู่ ไม่ต้องส่งซ้ำครับ`,
+    verified:`✅ ยืนยันการชำระเงินแล้วครับ\nรายการ ${entityCode} · ${amountText}\n\nขอบคุณที่ไว้วางใจทำมา-ชาติครับ 🙏 ทีมงานจะดำเนินการต่อและแจ้งความคืบหน้าให้ครับ แล้วกลับมาใช้บริการกันอีกนะครับ 😊`,
+    rejected:`⚠️ สลิปของ ${entityCode} ยังตรวจสอบไม่ผ่านครับ\nยอดที่ต้องชำระ ${amountText}\nกรุณาตรวจสอบยอด/บัญชี แล้วส่งสลิปใหม่ใน LINE ได้เลยครับ`,
+    cancelled:`รายการชำระ ${entityCode} ถูกยกเลิกแล้วครับ`,
+  } as Record<string,string>)[status]??`สถานะชำระ ${entityCode}: ${status}`;
+  return{message,usedFactKeys:used};
+}
+
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
-  const humanGrounded = renderJourneyPlan(input)
+  const humanGrounded = renderPaymentStatusResponse(input)
+    ?? renderJourneyPlan(input)
     ?? renderStayResponse(input)
     ?? renderRestaurantRecommendation(input)
     ?? renderPromotionRecommendation(input)

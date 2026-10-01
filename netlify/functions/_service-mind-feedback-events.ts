@@ -1,5 +1,5 @@
 // Service Mind -- creates a feedback event row (compliment/complaint/
-// suggestion/safety_issue/system_feedback) and dispatches the staff
+// suggestion/safety_issue/system_feedback/incident) and dispatches the staff
 // notification. Same "never let infra failure break the customer's turn"
 // discipline as every other real adapter in this codebase
 // (_weather-provider.ts, _dialog-source-adapters.ts): every failure mode
@@ -7,16 +7,11 @@
 // crash, never a silently-dropped event that the customer is told
 // succeeded.
 //
-// Storage: the Supabase-CLI migration documenting the full intended
-// schema lives at supabase/migrations/<timestamp>_ops_feedback_events_v1.sql
-// -- NOT APPLIED, prepared for owner review only (see
-// THONGTHAI_HANDOFF.md's Service Mind section). Until it's applied,
-// every write here fails
-// gracefully (caught below) and the customer still gets a sincere reply;
-// nothing is silently dropped -- the failure is logged and the customer-
-// facing response is composed with notificationQueued:false, which
-// produces the honest "ทองไทยจะส่งต่อให้..." (future tense) wording rather
-// than falsely claiming it already happened.
+// Storage: the canonical schema and later taxonomy changes live in the
+// timestamped Supabase migrations under supabase/migrations. If deployment
+// is temporarily behind a migration, writes fail gracefully (caught below)
+// and the customer gets honest fallback wording rather than a false claim
+// that the case was stored or dispatched.
 import { notifyFeedbackEventTargets, type FeedbackTargetResult } from './_ops-notifications';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import type { ServiceFeedbackMatch } from './_service-mind-feedback-intent';

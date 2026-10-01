@@ -1540,6 +1540,55 @@ export interface BookingStatusSnapshot {
   updatedAt: string;
 }
 
+export interface PaymentStatusSnapshot {
+  paymentCode: string;
+  entityCode: string;
+  amount: number | null;
+  currency: string;
+  method: string;
+  status: 'quote_required' | 'awaiting_payment' | 'proof_submitted' | 'verified' | 'rejected' | 'cancelled';
+  sourceChannel: string;
+  updatedAt: string;
+}
+
+const PAYMENT_LOOKUP_CODE_RE = /^(?:PAY|BK|PO|OR)-\d{6}-[A-Z0-9]{8}$/i;
+
+/** Read-only payment truth for the canonical guest. The guest predicate is
+ * mandatory even when a code is supplied, so a customer can never enumerate
+ * or inspect another customer's payment by guessing a public-looking code. */
+export async function loadLatestPaymentStatus(
+  guestDbId: string | null,
+  code?: string | null,
+): Promise<PaymentStatusSnapshot | null> {
+  if (!guestDbId || !UUID_RE.test(guestDbId)) return null;
+  const normalized = typeof code === 'string' ? code.trim().toUpperCase() : '';
+  if (normalized && !PAYMENT_LOOKUP_CODE_RE.test(normalized)) return null;
+  const codeFilter = normalized
+    ? (normalized.startsWith('PAY-')
+      ? `&payment_code=eq.${encodeURIComponent(normalized)}`
+      : `&entity_code=eq.${encodeURIComponent(normalized)}`)
+    : '';
+  const res = await dbFetch(
+    `payment_requests?guest_id=eq.${encodeURIComponent(guestDbId)}${codeFilter}`
+    + '&select=payment_code,entity_code,amount,currency,method,status,source_channel,updated_at'
+    + '&order=created_at.desc&limit=1',
+  );
+  const row = (await res.json() as Array<{
+    payment_code:string;entity_code:string;amount:number|string|null;currency:string;method:string;
+    status:PaymentStatusSnapshot['status'];source_channel:string;updated_at:string;
+  }>)[0];
+  return row ? {
+    paymentCode:row.payment_code,
+    entityCode:row.entity_code,
+    amount:row.amount == null ? null : Number(row.amount),
+    currency:row.currency,
+    method:row.method,
+    status:row.status,
+    sourceChannel:row.source_channel,
+    updatedAt:row.updated_at,
+  } : null;
+}
+
 /** Read-only operational booking status. The caller must already hold the
  * canonical guest DB id; an optional booking code narrows the lookup without
  * ever exposing another guest's booking. */
