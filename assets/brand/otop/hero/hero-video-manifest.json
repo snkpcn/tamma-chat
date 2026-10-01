@@ -1,0 +1,48 @@
+{
+  "id": "otop-commerce-hero-owner-selected-v1",
+  "source": {
+    "label": "75E89A88-6183-4FB1-9C31-AD53428F8F09.mp4",
+    "width": 910,
+    "height": 512,
+    "fps": 30,
+    "durationSeconds": 10.433333,
+    "note": "Owner-selected OTOP production clip. Preserve shot order and content; enhancement only."
+  },
+  "variants": {
+    "desktop": {
+      "label": "OTOP_Hero_4K_Web.mp4",
+      "width": 3840,
+      "height": 2160,
+      "fps": 30,
+      "durationSeconds": 10.433333,
+      "url": "https://cdn.openart.ai/openart-uploads/production/attachment-transfers/4bc4632eded00cd1bedc367382c9c0f657b7edd5fc8bf534be2349345426f427.mp4"
+    },
+    "mobile": {
+      "label": "OTOP_Hero_Web_1080p_v2.mp4",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "durationSeconds": 10.433333,
+      "url": "https://cdn.openart.ai/openart-uploads/production/attachment-transfers/2b3d9b6fa28ba3cdff6e3742a3620a226014c1b87e222923b6eabe877fd46909.mp4"
+    }
+  },
+  "policy": {
+    "contentLocked": true,
+    "allowRegeneration": false,
+    "allowedChanges": [
+      "upscale",
+      "denoise",
+      "sharpen",
+      "web compression",
+      "responsive source selection"
+    ]
+  },
+  "poster": {
+    "sourceSecond": 0.5,
+    "width": 1920,
+    "height": 1080,
+    "format": "webp",
+    "url": "https://cdn.openart.ai/openart-uploads/production/attachment-transfers/58546ff88ea4a0a39ced38759b146e10d262513a32c2a3b332445b897173ed97.webp",
+    "note": "Frame extracted from the locked owner-selected source video; not concept art."
+  }
+}
