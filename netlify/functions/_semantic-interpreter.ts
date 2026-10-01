@@ -1362,7 +1362,10 @@ function omittedSingleActiveJourneyReference(
   references:SemanticReference[],
 ):SemanticReference | null {
   if (references.length > 0 || !message.trim() || !PRIOR_PLAN_DEICTIC_RE.test(message)) return null;
-  if (context.activeTask?.domain !== 'journey' || context.suspendedTask?.domain === 'journey') return null;
+  const hasSingleJourneyContext =
+    context.activeTask?.domain === 'journey'
+    || (!context.activeTask && context.activeDomain === 'journey');
+  if (!hasSingleJourneyContext || context.suspendedTask?.domain === 'journey') return null;
   if (!['ask','modify','correct_previous','provide_information'].includes(action)) return null;
   if (Object.keys(entities).length === 0) return null;
   return {
@@ -1474,8 +1477,11 @@ export function parseSemanticTurnResponse(
   // canonical state proves there is exactly one active journey plan. This
   // cannot create a booking/action proposal; it only gives the bounded prior-
   // plan reference resolver the concrete edit it requires.
-  if (
+  const hasSingleJourneyContext =
     context.activeTask?.domain === 'journey'
+    || (!context.activeTask && context.activeDomain === 'journey');
+  if (
+    hasSingleJourneyContext
     && context.suspendedTask?.domain !== 'journey'
     && PRIOR_PLAN_DEICTIC_RE.test(currentMessage)
     && entities.date === undefined
@@ -1491,7 +1497,21 @@ export function parseSemanticTurnResponse(
     entities,
     references,
   );
-  if (recoveredJourneyReference) references = [recoveredJourneyReference];
+  if (recoveredJourneyReference) {
+    references = [recoveredJourneyReference];
+    // Journey planning is bounded conversational state only; it has no
+    // business transaction executor. A deictic prior-plan reference plus an
+    // explicit current date is therefore a concrete edit, even if the model
+    // labelled the speech act as a generic ask.
+    if (
+      domain === 'journey'
+      && typeof entities.date === 'string'
+      && ['ask','provide_information'].includes(action)
+    ) {
+      action = 'modify';
+      reply = '';
+    }
+  }
 
   const currentPromotionSubject = Boolean(currentMessage)
     && currentMessagePromotionSubject(currentMessage);
@@ -2050,6 +2070,14 @@ export function parseSemanticTurnResponse(
     && informationNeed === 'recommendation'
     && !hasUnresolvedReference
     && !hasAmbiguousReference;
+  const structuredJourneyContinuationResolved =
+    domain === 'journey'
+    && action === 'modify'
+    && typeof entities.date === 'string'
+    && references.some(reference =>
+      reference.refersToPriorContext && reference.resolvedFromConversation === true)
+    && !hasUnresolvedReference
+    && !hasAmbiguousReference;
 
   return {
     normalizedMeaning: normalizedMeaning || undefined,
@@ -2067,10 +2095,10 @@ export function parseSemanticTurnResponse(
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation || structuredActivityRecommendationResolved)
+    needsClarification: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation || structuredActivityRecommendationResolved || structuredJourneyContinuationResolved)
       ? false
       : (parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification),
-    clarificationReason: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation || structuredActivityRecommendationResolved)
+    clarificationReason: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation || structuredActivityRecommendationResolved || structuredJourneyContinuationResolved)
       ? undefined
       : (typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
         ? parsed.clarificationReason.trim()
