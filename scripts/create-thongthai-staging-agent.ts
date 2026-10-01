@@ -56,23 +56,30 @@ async function findExistingAgent(): Promise<AgentRecord | null> {
   return null;
 }
 
-const config = thongthaiStagingAgentConfig();
-const existing = await findExistingAgent();
+async function main(): Promise<void> {
+  const config = thongthaiStagingAgentConfig();
+  const existing = await findExistingAgent();
 
-const agent = existing
-  ? await openai<AgentRecord>(`/agents/${existing.id}`, {
-      method: 'POST',
-      body: JSON.stringify(config),
-    })
-  : await openai<AgentRecord>('/agents', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
+  const agent = existing
+    ? await openai<AgentRecord>(`/agents/${existing.id}`, {
+        method: 'POST',
+        body: JSON.stringify(config),
+      })
+    : await openai<AgentRecord>('/agents', {
+        method: 'POST',
+        body: JSON.stringify(config),
+      });
 
-console.log(JSON.stringify({
-  action: existing ? 'updated' : 'created',
-  agent_id: agent.id,
-  name: agent.name,
-  model: config.model,
-  profile_version: THONGTHAI_STAGING_AGENT_METADATA.profile_version,
-}, null, 2));
+  console.log(JSON.stringify({
+    action: existing ? 'updated' : 'created',
+    agent_id: agent.id,
+    name: agent.name,
+    model: config.model,
+    profile_version: THONGTHAI_STAGING_AGENT_METADATA.profile_version,
+  }, null, 2));
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+});
