@@ -7,7 +7,8 @@ import {
   type MemberAddressInput,
   type ShippingSettings,
 } from './_member-delivery';
-import { publicOtopStory } from './_otop-store-story';
+import { resolveOtopStoreStory } from './_otop-store-story';
+import { ALL_OTOP_PRODUCTS } from '../../src/data/otop';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SKU_RE = /^[A-Z0-9][A-Z0-9_-]{2,79}$/;
@@ -250,25 +251,34 @@ export async function loadOtopStoreCatalog() {
     otop_product_images?: Array<Record<string, unknown>>;
   }>;
   return {
-    products: products.map(row => ({
-      sku: String(row.sku),
-      name: String(row.name),
-      description: typeof row.description === 'string' ? row.description : null,
-      price: Number(row.price),
-      stock: Number(row.stock_qty),
-      metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
-      story: publicOtopStory(row.metadata),
-      images: (Array.isArray(row.otop_product_images) ? row.otop_product_images : [])
-        .map(image => ({
-          url: typeof image.public_url === 'string' ? image.public_url : '',
-          alt: typeof image.alt_text === 'string' ? image.alt_text : String(row.name),
-          position: Number(image.sort_order),
-          primary: image.is_primary === true,
-        }))
-        .filter(image => /^https:\/\//i.test(image.url))
-        .sort((a, b) => Number(b.primary) - Number(a.primary) || a.position - b.position)
-        .slice(0, 4),
-    })),
+    products: products.map(row => {
+      const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata as Record<string, unknown> : {};
+      const resolvedStory = resolveOtopStoreStory(
+        { id: String(row.id), name: String(row.name), metadata },
+        ALL_OTOP_PRODUCTS,
+      );
+      return {
+        sku: String(row.sku),
+        name: String(row.name),
+        description: typeof row.description === 'string' ? row.description : null,
+        price: Number(row.price),
+        stock: Number(row.stock_qty),
+        metadata,
+        story: resolvedStory.story,
+        storySource: resolvedStory.source,
+        catalogProductId: resolvedStory.catalogProductId,
+        images: (Array.isArray(row.otop_product_images) ? row.otop_product_images : [])
+          .map(image => ({
+            url: typeof image.public_url === 'string' ? image.public_url : '',
+            alt: typeof image.alt_text === 'string' ? image.alt_text : String(row.name),
+            position: Number(image.sort_order),
+            primary: image.is_primary === true,
+          }))
+          .filter(image => /^https:\/\//i.test(image.url))
+          .sort((a, b) => Number(b.primary) - Number(a.primary) || a.position - b.position)
+          .slice(0, 4),
+      };
+    }),
     shipping: settings,
   };
 }
