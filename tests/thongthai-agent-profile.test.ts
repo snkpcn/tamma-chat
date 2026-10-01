@@ -23,7 +23,7 @@ test('Thongthai staging agent profile locks the owner-defined identity and trust
   assert.match(prompt, /Never claim a booking, order, payment, refund, notification, cancellation/i);
   assert.match(prompt, /Conversation and transaction are different/i);
   assert.match(prompt, /does not erase the prepared draft/i);
-  assert.match(prompt, /get_prepared_activity_booking/i);
+  assert.match(prompt, /get_prepared_\*/i);
   assert.match(prompt, /allergy and dietary constraints seriously/i);
 });
 
