@@ -219,7 +219,7 @@ test('initial G.2 gate still refuses a task turn that reaches an ActionProposal'
   assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'transactional_or_task_turn'});
 });
 
-test('G.2 gate allows membership/cafe/journey read-only turns but keeps payment/support on legacy', () => {
+test('G.2 gate allows membership/cafe/journey read-only turns but keeps generic payment/support on legacy', () => {
   for (const domain of ['membership','cafe','journey'] as const) {
     const r=result();
     r.semanticTurn={...r.semanticTurn,domain};
@@ -230,6 +230,22 @@ test('G.2 gate allows membership/cafe/journey read-only turns but keeps payment/
     r.semanticTurn={...r.semanticTurn,domain};
     assert.deepEqual(readOnlyCutoverEligibility(r), {eligible:false,reason:'domain_not_cut_over'});
   }
+});
+
+test('trusted canonical payment status passes the semantic-supervisor recovery gate without authorizing a write', () => {
+  const message='สถานะชำระเงินรายการ OR-260930-A0924DDC ตอนนี้เป็นยังไงครับ';
+  const semantic={
+    domain:'payment' as const,intent:'check_payment_status',action:'status' as const,
+    informationNeed:'transaction_status' as const,speechAct:'question' as const,
+    entities:{entityCode:'OR-260930-A0924DDC'},references:[],constraints:[],
+    confidence:.99,needsClarification:false,semanticSource:'deterministic_fallback' as const,
+  };
+  const r=result({semanticTurn:semantic,dialogSemanticTurn:semantic});
+  assert.equal(r.dialogDecision.actionProposal,undefined);
+  assert.deepEqual(
+    readOnlyCutoverEligibility(r,{requireSemanticSupervisor:true,message}),
+    {eligible:true},
+  );
 });
 
 test('initial G.2 gate allows read-only ecosystem turns (structurally transaction-proof, no task type exists for it)', () => {
