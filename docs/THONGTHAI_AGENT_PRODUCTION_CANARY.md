@@ -1,11 +1,11 @@
 # Thongthai Production Agent Canary
 
-Initial production rollout configuration (2026-10-01):
+Production rollout configuration (2026-10-01):
 
 - Saved Agent: `Thongthai-Production`
 - Model: `gpt-5.6-terra`
 - Primary channel: WEB only
-- Stable canary: 10% of guests
+- Stable canary: 25% of guests
 - Agent transaction tools: not exposed in the production saved Agent
 - Live Agent transaction flag: OFF
 - Weather, verified location, and transaction intents remain on the established core paths
@@ -13,4 +13,9 @@ Initial production rollout configuration (2026-10-01):
 - Primary Agent failures do not cascade into a second paid LLM call on the same turn
 - Owner cost ceiling remains 5 THB per customer conversation
 
-This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after the canary variables are installed.
+Rollout history:
+
+- 10% production canary: passed initial smoke verification with Agent responses persisted, telemetry marked `agent_primary_turn_aggregate`, no non-completed Agent cost events, and no conversation over the 5 THB cap.
+- 25% production canary: promoted after the 10% verification gate.
+
+This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
