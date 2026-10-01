@@ -2,7 +2,7 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { THONGTHAI_STAGING_AGENT_ID } from './_thongthai-agent-profile';
 import { executeThongthaiReadOnlyTool } from './_thongthai-agent-tools';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
-import { calculateAiCostUsd, usdToThb, aiCostPolicy } from './_ai-cost-policy';
+import { calculateAiCostUsd, usdToThb, aiCostPolicy, pricingForModel } from './_ai-cost-policy';
 import { persistAiCallCost } from './_ai-cost-store';
 
 const API_BASE = 'https://api.openai.com/v1';
@@ -11,6 +11,9 @@ const SESSION_STATE_KEY = 'thongthaiStagingAgentSession';
 const MAX_TOOL_ROUNDS = 4;
 const MAX_POLL_ROUNDS = 80;
 const POLL_MS = 150;
+const USAGE_SETTLE_ATTEMPTS = 12;
+const USAGE_SETTLE_MS = 400;
+const AGENT_TURN_RESERVE_THB = 3;
 
 type Usage = {
   input_tokens?: number;
@@ -58,6 +61,10 @@ type SessionState = {
   cumulativeCostThb: number;
   costAccountingIncomplete: boolean;
   lastTurnId?: string;
+  lastEventId?: string;
+  lastConversationId?: string;
+  lastChannel?: BrainChannel;
+  lastEnvironment?: 'live' | 'test';
 };
 
 export type AgentShadowTurnInput = {
@@ -124,6 +131,11 @@ function parseState(raw: unknown): SessionState | null {
     cumulativeCostThb: Math.max(0, Number(value.cumulativeCostThb) || 0),
     costAccountingIncomplete: value.costAccountingIncomplete === true,
     ...(typeof value.lastTurnId === 'string' && value.lastTurnId ? { lastTurnId: value.lastTurnId } : {}),
+    ...(typeof value.lastEventId === 'string' && value.lastEventId ? { lastEventId: value.lastEventId } : {}),
+    ...(typeof value.lastConversationId === 'string' && value.lastConversationId ? { lastConversationId: value.lastConversationId } : {}),
+    ...(value.lastChannel === 'line' || value.lastChannel === 'web' || value.lastChannel === 'facebook' || value.lastChannel === 'backoffice'
+      ? { lastChannel: value.lastChannel } : {}),
+    ...(value.lastEnvironment === 'test' ? { lastEnvironment: 'test' as const } : { lastEnvironment: 'live' as const }),
   };
 }
 
@@ -184,8 +196,8 @@ async function retrieveTurn(sessionId: string, turnId: string): Promise<AgentTur
 
 async function retrieveTurnWithSettledUsage(sessionId: string, turnId: string): Promise<AgentTurn> {
   let turn = await retrieveTurn(sessionId, turnId);
-  for (let attempt = 0; attempt < 6 && !turn.usage; attempt += 1) {
-    await sleep(250);
+  for (let attempt = 0; attempt < USAGE_SETTLE_ATTEMPTS && !turn.usage; attempt += 1) {
+    await sleep(USAGE_SETTLE_MS);
     turn = await retrieveTurn(sessionId, turnId);
   }
   return turn;
@@ -307,6 +319,18 @@ async function outputForTurn(sessionId: string, turnId: string): Promise<string>
   return output;
 }
 
+export function conservativeAgentCostUsd(model: string, usage: { inputTokens:number; cachedInputTokens:number; outputTokens:number }): number {
+  // Agents API usage does not expose cache-write tokens separately. GPT-5.6
+  // cache writes can cost 1.25x standard input, so treat ALL uncached input
+  // as cache-write eligible. This intentionally overestimates rather than
+  // letting the 5 THB owner cap depend on an unknowable cheaper assumption.
+  const base = calculateAiCostUsd(model, usage);
+  const pricing = pricingForModel(model);
+  const uncached = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
+  const possibleCacheWriteUplift = uncached * pricing.inputUsdPerMillion * 0.25 / 1_000_000;
+  return base + possibleCacheWriteUplift;
+}
+
 function usageFromTurn(turn: AgentTurn): AgentShadowTurnResult['usage'] {
   if (!turn.usage) {
     return {
@@ -322,7 +346,7 @@ function usageFromTurn(turn: AgentTurn): AgentShadowTurnResult['usage'] {
   const cachedInputTokens = Math.min(inputTokens, Math.max(0, Math.floor(Number(turn.usage.input_tokens_details?.cached_tokens) || 0)));
   const outputTokens = Math.max(0, Math.floor(Number(turn.usage.output_tokens) || 0));
   const model = process.env.THONGTHAI_AGENT_MODEL?.trim() || 'gpt-5.6-terra';
-  const costUsd = calculateAiCostUsd(model, { inputTokens, cachedInputTokens, outputTokens });
+  const costUsd = conservativeAgentCostUsd(model, { inputTokens, cachedInputTokens, outputTokens });
   return { available: true, inputTokens, cachedInputTokens, outputTokens, costUsd, costThb: usdToThb(costUsd) };
 }
 
@@ -354,16 +378,53 @@ async function persistShadowCost(input: AgentShadowTurnInput, turn: AgentTurn, u
   }).catch(() => {});
 }
 
+async function reconcilePendingUsage(
+  input: AgentShadowTurnInput,
+  state: SessionState,
+): Promise<SessionState> {
+  if (!state.costAccountingIncomplete) return state;
+  if (!state.lastTurnId || !state.lastEventId) {
+    throw new Error('Thongthai Agent shadow usage accounting is pending without a recoverable turn reference.');
+  }
+
+  const settledTurn = await retrieveTurnWithSettledUsage(state.sessionId, state.lastTurnId);
+  const usage = usageFromTurn(settledTurn);
+  if (!usage.available || usage.costThb === null) {
+    throw new Error('Thongthai Agent shadow usage accounting is still pending; refusing another paid turn.');
+  }
+
+  const priorInput: AgentShadowTurnInput = {
+    ...input,
+    conversationId: state.lastConversationId ?? input.conversationId,
+    eventId: state.lastEventId,
+    channel: state.lastChannel ?? input.channel,
+    environment: state.lastEnvironment ?? input.environment ?? 'live',
+  };
+  await persistShadowCost(priorInput, settledTurn, usage);
+
+  const reconciled: SessionState = {
+    ...state,
+    cumulativeCostThb: Math.round((state.cumulativeCostThb + usage.costThb) * 10_000) / 10_000,
+    costAccountingIncomplete: false,
+    lastUsedAt: new Date().toISOString(),
+  };
+  await saveSessionState(input.guestDbId, reconciled);
+  return reconciled;
+}
+
 export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): Promise<AgentShadowTurnResult> {
   if (!input.guestDbId || !input.message.trim()) throw new Error('guestDbId and message are required.');
 
-  const existing = await loadPersistedSession(input.guestDbId);
-  const capThb = aiCostPolicy().maxConversationCostUsd * (usdToThb(1));
+  let existing = await loadPersistedSession(input.guestDbId);
   if (existing?.costAccountingIncomplete) {
-    throw new Error('Thongthai Agent shadow usage accounting is still pending; refusing another paid turn.');
+    existing = await reconcilePendingUsage(input, existing);
   }
+  const capThb = aiCostPolicy().maxConversationCostUsd * (usdToThb(1));
   if (existing && existing.cumulativeCostThb >= capThb) {
     throw new Error('Thongthai Agent shadow conversation cost cap reached.');
+  }
+  if (existing && capThb - existing.cumulativeCostThb < AGENT_TURN_RESERVE_THB) {
+    throw new Error('Thongthai Agent shadow remaining budget is below the safe per-turn reserve.');
   }
 
   let sessionId: string;
@@ -383,6 +444,10 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
       turnCount: 0,
       cumulativeCostThb: 0,
       costAccountingIncomplete: false,
+      lastEventId: input.eventId,
+      lastConversationId: input.conversationId,
+      lastChannel: input.channel,
+      lastEnvironment: input.environment ?? 'live',
     });
   }
 
@@ -408,6 +473,10 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
     cumulativeCostThb,
     costAccountingIncomplete: !usage.available,
     lastTurnId: turn.id,
+    lastEventId: input.eventId,
+    lastConversationId: input.conversationId,
+    lastChannel: input.channel,
+    lastEnvironment: input.environment ?? 'live',
   });
 
   return {
