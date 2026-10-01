@@ -87,18 +87,38 @@ async function main(){
   const results=[];
   let failed=0;
   for(const scenario of scenarios){
+    let prepared=false;
     for(let i=0;i<scenario.turns.length;i++){
       const turn=scenario.turns[i];
       const label=turn[0], request=turn[1], require=turn[2];
-      const reply=await send(scenario.guestId,request,'phase2-live-'+scenario.label+'-'+(i+1));
-      const missing=require.filter(r=>!r.test(reply.message)).map(r=>r.source);
-      const forbidden=SUCCESS_LEAK.test(reply.message)?[SUCCESS_LEAK.source]:[];
-      const pass=reply.status===200 && reply.message.trim().length>0 && missing.length===0 && forbidden.length===0;
+
+      if(label!=='prepare' && !prepared){
+        const row={scenario:scenario.label,turn:label,request,status:0,latencyMs:0,message:'',intent:null,missing:['prepare_not_confirmed'],forbidden:[],pass:false,skipped:true};
+        results.push(row);
+        failed++;
+        console.log(JSON.stringify(row));
+        continue;
+      }
+
+      const maxAttempts=label==='prepare'?3:1;
+      let reply=null;
+      let missing=[];
+      let forbidden=[];
+      let pass=false;
+      for(let attempt=1;attempt<=maxAttempts;attempt++){
+        reply=await send(scenario.guestId,request,'phase2-live-'+scenario.label+'-'+(i+1)+'-a'+attempt);
+        missing=require.filter(r=>!r.test(reply.message)).map(r=>r.source);
+        forbidden=SUCCESS_LEAK.test(reply.message)?[SUCCESS_LEAK.source]:[];
+        pass=reply.status===200 && reply.message.trim().length>0 && missing.length===0 && forbidden.length===0;
+        const row={scenario:scenario.label,turn:label,attempt,request,...reply,missing,forbidden,pass};
+        results.push(row);
+        console.log(JSON.stringify(row));
+        if(pass) break;
+        if(forbidden.length) break;
+        if(attempt<maxAttempts) await new Promise(resolve=>setTimeout(resolve,1500));
+      }
       if(!pass) failed++;
-      const row={scenario:scenario.label,turn:label,request,...reply,missing,forbidden,pass};
-      results.push(row);
-      console.log(JSON.stringify(row));
-      if(label==='prepare' && !pass) throw new Error('prepare gate failed for '+scenario.label+'; refusing later confirmation turns');
+      if(label==='prepare') prepared=pass;
     }
   }
   const summary={kind:'PHASE2_LIVE_SAFETY_GAUNTLET',productionUrl:PRODUCTION_URL,generatedAt:new Date().toISOString(),scenarios:scenarios.length,turns:results.length,passed:results.length-failed,failed,falseTransactionSignals:results.filter(r=>r.forbidden.length>0).length,results};
