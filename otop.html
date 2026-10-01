@@ -8,7 +8,7 @@
 <meta name="description" content="เลือกซื้อสินค้าชุมชนจากจังหวัดอีสาน ราคาและสต็อกอัปเดตจากหลังบ้านทำมา-ชาติ">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Serif+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--paper:#f8f3e8;--card:#fffdf8;--ink:#2d1d14;--muted:#756558;--line:#ddcfba;--green:#50623d;--brown:#7b3f23;--dark:#25170f;--gold:#b98231;--soft:#eee3cf;--shadow:0 18px 48px rgba(60,38,23,.12);--font-display:"Noto Serif Thai",serif;--font-body:"IBM Plex Sans Thai",sans-serif}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-body);font-weight:400;-webkit-font-smoothing:antialiased}body.locked{overflow:hidden}button,input,select,textarea{font:inherit}button,a,select{touch-action:manipulation}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgba(185,130,49,.38);outline-offset:2px}
@@ -84,5 +84,6 @@ $('search').oninput=e=>syncSearch(e.target.value);
 if($('mobileSearch'))$('mobileSearch').oninput=e=>syncSearch(e.target.value);
 $('sort').onchange=renderProducts;$('cartBtn').onclick=openDrawer;$('closeDrawer').onclick=closeDrawer;$('shade').onclick=closeDrawer;$('checkoutBtn').onclick=beginCheckout;$('backToCart').onclick=()=>{$('checkoutView').classList.remove('show');$('cartView').style.display='block';$('drawerTitle').textContent='ตะกร้าสินค้า';setSteps(1);renderCart()};$('placeOrderBtn').onclick=placeOrder;$('closeProduct').onclick=closeProduct;$('productShade').onclick=closeProduct;$('detailMinus').onclick=()=>changeDetailQty(-1);$('detailPlus').onclick=()=>changeDetailQty(1);$('detailAdd').onclick=()=>activeProduct&&addToCart(activeProduct.sku,detailQuantity);document.addEventListener('keydown',event=>{if(event.key!=='Escape')return;if($('drawer').classList.contains('show'))closeDrawer();else if($('productDialog').classList.contains('show'))closeProduct()});
 </script>
+<link rel="stylesheet" href="assets/styles/site-typography.css">
 </body>
 </html>
