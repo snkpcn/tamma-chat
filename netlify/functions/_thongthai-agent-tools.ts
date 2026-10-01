@@ -23,7 +23,7 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
   {
     type: 'function',
     name: 'recommend_restaurant_menu',
-    description: 'Compact canonical restaurant recommendation tool for allergy, dietary, spice, budget, pairing, and recommendation questions. Pass the customer\'s full food request once. Prefer this over repeated get_restaurant_menu calls when the customer asks what to eat.',
+    description: 'Read-only. Compact canonical restaurant recommendation tool for allergy, dietary, spice, budget, pairing, and recommendation questions. Pass the customer\'s full food request once. Prefer this over repeated get_restaurant_menu calls when the customer asks what to eat.',
     parameters: objectSchema({
       query: { type: 'string', description: 'The customer\'s full food request, including allergy/diet/spice wording.' },
       constraints: {
