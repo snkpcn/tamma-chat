@@ -71,3 +71,6 @@ This file also records the environment-configuration deployment point so the Net
 
 
 - 2026-10-01 FINAL Phase 2 cleanup: all five production verticals passed (30/30 turns, 0 false transaction signals). Synthetic prepare allowlist cleared. This commit rebuilds Production with the empty allowlist. Public prepare remains 0%; live commit remains OFF.
+
+
+- 2026-10-01 final empty-allowlist redeploy marker: production environment now has an empty synthetic prepare allowlist, prepare percent 0%, and live transaction 0. Force Functions rebuild to seal the certified post-test state.
