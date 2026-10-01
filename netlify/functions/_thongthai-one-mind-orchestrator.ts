@@ -48,8 +48,9 @@ import {
 import { deriveDeterministicSemanticTurn, PRICE_MARKER } from './_deterministic-semantic-turn';
 import {
   matchLearnedConcept, loadActiveSemanticConcepts, recordSemanticConceptEvidence,
-  safeConceptEntities, companionConceptKeyForValue, MAX_MATCHABLE_MESSAGE_LENGTH,
-  SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS, claimWriteAttemptForEvent,
+  safeConceptOutcome, semanticConceptKeyForConfirmedMeaning,
+  MAX_MATCHABLE_MESSAGE_LENGTH, SEMANTIC_CONCEPT_MEMORY_WRITE_TIMEOUT_MS,
+  claimWriteAttemptForEvent, type SemanticConceptMatch,
 } from './_semantic-concept-memory';
 import { deriveSemanticMeaning, type SemanticMeaning } from './_semantic-meaning';
 import {
@@ -500,11 +501,69 @@ function mayContainMultipleClauses(message: string): boolean {
  *  refused to learn from exactly that shape. One predicate, not two
  *  divergent length/clause checks, so the two paths can never disagree
  *  again about what counts as a safe standalone candidate. */
-function isShortStandaloneConceptCandidate(message: string): boolean {
+export function isShortStandaloneConceptCandidate(message: string): boolean {
   const trimmed = message.trim();
   return trimmed.length > 0
     && trimmed.length <= MAX_MATCHABLE_MESSAGE_LENGTH
     && !mayContainMultipleClauses(message);
+}
+
+/** Convert one trusted learned concept into a closed, non-transactional
+ * SemanticTurn. Consider-only phrases are referential ("เอาอันนี้ไว้ก่อน")
+ * and may own the turn only when bounded conversation evidence identifies one
+ * unique entity. If not, return null and pay the real language supervisor
+ * rather than guessing the referent. */
+export function semanticTurnFromLearnedConcept(
+  match: SemanticConceptMatch,
+  context: SemanticContext,
+  taskState: TaskStateContainer,
+): SemanticTurn | null {
+  const outcome = safeConceptOutcome(match.conceptKey);
+  const baseDomain = taskState.activeTask?.domain ?? context.activeDomain ?? 'general';
+
+  if (outcome.requiresUniqueContextEntity) {
+    const sameDomain = context.recentEntities.filter(entity =>
+      baseDomain === 'general' || baseDomain === 'unknown' || entity.domain === baseDomain);
+    const recommendationMatches = context.lastRecommendationReference
+      ? sameDomain.filter(entity => context.lastRecommendationReference!.includes(entity.name))
+      : [];
+    const candidate = recommendationMatches.length === 1
+      ? recommendationMatches[0]!
+      : sameDomain.length === 1
+        ? sameDomain[0]!
+        : null;
+    if (!candidate) return null;
+    return {
+      semanticSource:'semantic_concept_memory',
+      domain:candidate.domain === 'unknown' ? baseDomain : candidate.domain,
+      intent:'semantic_concept_match',
+      action:'confirm',
+      speechAct:'selection',
+      entities:{...outcome.entities},
+      references:[{
+        type:'entity_selection',
+        value:candidate.name,
+        refersToPriorContext:true,
+        resolvedEntityId:candidate.id,
+      }],
+      constraints:[...outcome.constraints],
+      confidence:match.confidence,
+      needsClarification:false,
+    };
+  }
+
+  return {
+    semanticSource:'semantic_concept_memory',
+    domain:baseDomain,
+    intent:'semantic_concept_match',
+    action:'provide_information',
+    speechAct:'preference_update',
+    entities:{...outcome.entities},
+    references:[],
+    constraints:[...outcome.constraints],
+    confidence:match.confidence,
+    needsClarification:false,
+  };
 }
 
 const LANGUAGE_BRAIN_READ_ONLY_ACTIONS: ReadonlySet<SemanticTurn['action']> = new Set([
@@ -1067,26 +1126,24 @@ async function resolveSemanticTurn(
     const concepts = await loadActiveSemanticConcepts();
     const match = concepts.length ? matchLearnedConcept(message, concepts) : null;
     if (match) {
-      emitZeroCallTurn({ conversationId, eventId:input.eventId, channel:input.channel });
-      console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
-        semantic_owner: 'semantic_concept_memory',
-        deterministic_turn: false,
-        model_call_used: false,
-        concept_key: match.conceptKey,
-        concept_similarity: match.similarity,
-        concept_evidence_count: match.evidenceCount,
+      const learnedTurn = semanticTurnFromLearnedConcept(match, context, taskState);
+      if (learnedTurn) {
+        emitZeroCallTurn({ conversationId, eventId:input.eventId, channel:input.channel });
+        console.log('THONGTHAI_OBSERVABILITY', JSON.stringify({
+          semantic_owner: 'semantic_concept_memory',
+          deterministic_turn: false,
+          model_call_used: false,
+          concept_key: match.conceptKey,
+          concept_similarity: match.similarity,
+          concept_evidence_count: match.evidenceCount,
+          concept_tier: match.tier,
+        }));
+        return learnedTurn;
+      }
+      console.log('THONGTHAI_SEMANTIC_CONCEPT_MEMORY_OBSERVABILITY', JSON.stringify({
+        event:'context_miss',
+        concept_key:match.conceptKey,
       }));
-      return {
-        semanticSource: 'semantic_concept_memory',
-        domain: taskState.activeTask?.domain ?? context.activeDomain ?? 'general',
-        intent: 'semantic_concept_match',
-        action: 'provide_information',
-        entities: safeConceptEntities(match.conceptKey),
-        references: [],
-        constraints: [],
-        confidence: match.confidence,
-        needsClarification: false,
-      };
     }
     if (concepts.length) {
       // A genuine "miss" -- learned concepts exist, this turn's text was a
@@ -1302,8 +1359,10 @@ async function resolveSemanticTurn(
       && modelTurn.needsClarification !== true
       && !mutatingActions.has(modelTurn.action)
     ) {
-      const companionValue = modelTurn.entities.companion ?? modelTurn.entities.companionType;
-      const conceptKey = typeof companionValue === 'string' ? companionConceptKeyForValue(companionValue) : null;
+      const conceptKey = semanticConceptKeyForConfirmedMeaning({
+        entities:modelTurn.entities,
+        constraints:modelTurn.constraints,
+      });
       // Fix (found in review): without this claim, the SAME customer turn's
       // second resolveSemanticTurn invocation (see the comment above) would
       // start a SECOND independent timeout race, so a genuinely stuck write

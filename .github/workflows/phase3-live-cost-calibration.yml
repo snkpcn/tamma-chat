@@ -1,0 +1,36 @@
+name: Phase 3 Live Cost Calibration
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-cost-calibration:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[run phase3 live]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Require OpenAI credential
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "PHASE3_LIVE_NOT_RUN: OPENAI_API_KEY is not configured."
+            exit 2
+          fi
+      - name: Run real Phase 3 token and cost calibration
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
+          THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
+        run: npx tsx scripts/run-phase3-live-cost-calibration.ts

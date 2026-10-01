@@ -168,6 +168,8 @@ const SEMANTIC_SUPERVISOR_RESPONSE_SCHEMA: ModelResponseSchema = {
 // only a customer-facing message plus which supplied fact keys it actually
 // used. Never reuses the semantic supervisor's structured-understanding
 // schema, which has nothing to do with this call's job.
+export const RESPONSE_COMPOSER_MAX_OUTPUT_TOKENS = 900;
+
 export const RESPONSE_COMPOSER_RESPONSE_SCHEMA: ModelResponseSchema = {
   name:'thongthai_response_composer',
   schema:{
@@ -205,7 +207,9 @@ async function callOpenAIModel(
   }
 
   const policy = aiCostPolicy();
-  const maxOutputTokens = policy.semanticMaxOutputTokens;
+  const maxOutputTokens = responseSchema.name === RESPONSE_COMPOSER_RESPONSE_SCHEMA.name
+    ? RESPONSE_COMPOSER_MAX_OUTPUT_TOKENS
+    : policy.semanticMaxOutputTokens;
   let reservation:AiCallReservation | null = null;
   if (costContext) {
     const guardedContext:AiCallContext = { ...costContext, callerLabel };

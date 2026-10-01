@@ -12,7 +12,11 @@ export const DEFAULT_MAX_CONVERSATION_AI_COST_USD =
   DEFAULT_MAX_CONVERSATION_AI_COST_THB / DEFAULT_USD_TO_THB_RATE;
 export const DEFAULT_MAX_AI_CALLS_PER_TURN = 3;
 export const DEFAULT_MAX_AI_CALLS_PER_CONVERSATION = 2_000;
-export const DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS = 900;
+// Phase 3 live calibration (20 probes / 21 real calls) measured semantic
+// output p95=323 and max=499 tokens, including one Sol review. 700 keeps
+// ~40% headroom above the observed max while reducing the theoretical
+// per-call reservation that previously cut intelligence off early.
+export const DEFAULT_SEMANTIC_MAX_OUTPUT_TOKENS = 700;
 // Raised alongside the shared Thongthai human-service voice contract and
 // the reference-resolution rules added to the semantic-interpreter prompt
 // (see _thongthai-service-voice.ts) -- an owner-required persona block plus
