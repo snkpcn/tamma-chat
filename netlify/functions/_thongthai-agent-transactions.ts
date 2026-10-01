@@ -220,6 +220,34 @@ type PreparedStayBooking = {
   };
 };
 
+type PreparedRestaurantPreorder = {
+  version: 1;
+  kind: 'restaurant_preorder';
+  status: 'prepared' | 'committed';
+  confirmationId: string;
+  preparedEventId: string;
+  preparedAt: string;
+  expiresAt: string;
+  environment: 'live' | 'test';
+  payload: {
+    date: string;
+    time: string;
+    items: Array<{ name: string; quantity: number; unitPrice: number; lineTotal: number }>;
+    customerName: string;
+    phone: string;
+    email: string | null;
+    note: string | null;
+    expectedTotal: number;
+  };
+  result?: {
+    preorderId: string;
+    preorderCode: string;
+    status: string;
+    totalAmount: number;
+    notificationStatus: string;
+  };
+};
+
 function textArg(args: Record<string, unknown>, key: string, max = 240): string | null {
   const value = args[key];
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
