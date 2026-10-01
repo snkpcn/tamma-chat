@@ -147,6 +147,41 @@ type PreparedActivityBooking = {
   };
 };
 
+type PreparedStayBooking = {
+  version: 1;
+  kind: 'stay_booking';
+  status: 'prepared' | 'committed';
+  confirmationId: string;
+  preparedEventId: string;
+  preparedAt: string;
+  expiresAt: string;
+  environment: 'live' | 'test';
+  payload: {
+    resourceCode: string;
+    resourceName: string;
+    checkIn: string;
+    checkOut: string;
+    partySize: number;
+    quantity: number;
+    customerName: string;
+    phone: string;
+    email: string | null;
+    note: string | null;
+  };
+  preview: {
+    availabilityStatus: 'full_stay_available' | 'options_available' | 'staff_confirmation_required';
+    availableOptionCount: number;
+  };
+  result?: {
+    bookingId: string;
+    bookingCode: string;
+    status: string;
+    startAt: string | null;
+    endAt: string | null;
+    notificationStatus: string;
+  };
+};
+
 function textArg(args: Record<string, unknown>, key: string, max = 240): string | null {
   const value = args[key];
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
