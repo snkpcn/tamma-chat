@@ -65,3 +65,6 @@ This file also records the environment-configuration deployment point so the Net
 
 
 - 2026-10-01 Wave B forced redeploy marker 2: rebuild current main after Netlify remained on the prior Wave A deploy. No configuration change; Restaurant + OTOP synthetic allowlist remains ending 0401–0402.
+
+
+- 2026-10-01 Phase 2 Wave C certification: temporary production allowlist rotated to the single Café synthetic guest ending 0501. Docs-only Functions rebuild. Public prepare remains 0%; live commit remains OFF.
