@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { loadActivityWorldFacts } from './_activity-sot';
-import { createBooking, formatActivityAssetNote, listBookingOptions, listServiceResources, listStayBookingOptions, upsertCustomerAccount } from './_operations-db';
+import { createBooking, createOtopOrder, formatActivityAssetNote, listBookingOptions, listOtopProducts, listServiceResources, listStayBookingOptions, upsertCustomerAccount } from './_operations-db';
 import { createRestaurantPreorder, listRestaurantMenu } from './_restaurant-sot';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
@@ -28,6 +28,7 @@ export type ThongthaiAgentTransactionTool = {
 const STATE_KEY = 'thongthaiAgentPreparedTransactionV1';
 const STAY_STATE_KEY = 'thongthaiAgentPreparedStayBookingV1';
 const RESTAURANT_PREORDER_STATE_KEY = 'thongthaiAgentPreparedRestaurantPreorderV1';
+const OTOP_ORDER_STATE_KEY = 'thongthaiAgentPreparedOtopOrderV1';
 const PREPARED_TTL_MS = 30 * 60 * 1000;
 
 const objectSchema = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({
@@ -132,6 +133,35 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
     type: 'function',
     name: 'commit_prepared_restaurant_preorder',
     description: 'Submit the previously prepared restaurant preorder. Server-gated: it succeeds only on a later customer turn with explicit ordering confirmation. Pass the confirmation_id returned by prepare_restaurant_preorder. Never call in the same turn as prepare.',
+    parameters: objectSchema({
+      confirmation_id: { type: 'string' },
+    }, ['confirmation_id']),
+  },
+  {
+    type: 'function',
+    name: 'prepare_otop_order',
+    description: 'Prepare an OTOP product order for explicit customer review. This NEVER creates an order or changes stock. Validate product and stock from the canonical catalog, then ask the customer to reply exactly "ยืนยันสั่ง" to submit.',
+    parameters: objectSchema({
+      sku: { type: 'string', description: 'Canonical OTOP SKU from get_otop_catalog.' },
+      quantity: { type: 'integer', minimum: 1, maximum: 99 },
+      fulfillment_type: { type: 'string', enum: ['pickup','shipping'] },
+      shipping_address: { type: 'string' },
+      customer_name: { type: 'string' },
+      phone: { type: 'string' },
+      email: { type: 'string' },
+      note: { type: 'string' },
+    }, ['sku','quantity','fulfillment_type','customer_name','phone']),
+  },
+  {
+    type: 'function',
+    name: 'get_prepared_otop_order',
+    description: 'Read this guest\'s currently prepared OTOP order. This never creates an order or changes stock. Use it when the customer returns to a prepared order or explicitly confirms after saying not yet.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
+    name: 'commit_prepared_otop_order',
+    description: 'Submit the previously prepared OTOP order. Server-gated: succeeds only on a later customer turn with explicit ordering confirmation. Pass confirmation_id from prepare_otop_order. Never call in the same turn as prepare.',
     parameters: objectSchema({
       confirmation_id: { type: 'string' },
     }, ['confirmation_id']),
