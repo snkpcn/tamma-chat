@@ -88,6 +88,12 @@ test('customer and store pages expose member address book, live catalog and auth
   assert.match(store, /history\.replaceState/u);
   assert.match(store, /function productImages\(p\)/u);
   assert.match(store, /class="detailThumb/u);
+  assert.match(store, /id="showcase"/u);
+  assert.match(store, /function renderShowcase/u);
+  assert.match(store, /id="detailStory"/u);
+  assert.match(store, /story\.coreValue/u);
+  assert.match(store, /story\.craftProcess/u);
+  assert.match(store, /\.detailThumbs\{position:relative/u);
   assert.doesNotMatch(store, /ban-khwao-silk-weaving-4k\.webp/u);
   assert.doesNotMatch(store, /Sandbox/u);
 });
@@ -97,6 +103,10 @@ test('live OTOP catalog exposes the ordered four-image gallery from backoffice',
   assert.match(catalog, /otop_product_images\(public_url,alt_text,sort_order,is_primary\)/u);
   assert.match(catalog, /\.slice\(0, 4\)/u);
   assert.match(catalog, /Number\(b\.primary\) - Number\(a\.primary\)/u);
+  assert.match(catalog, /ALL_OTOP_PRODUCTS/u);
+  assert.match(catalog, /storyBySku/u);
+  assert.match(catalog, /coreValue: story\.coreValue/u);
+  assert.match(catalog, /craftProcess: story\.craftProcess/u);
 });
 
 test('OTOP staff can move shipping through the operational LINE group', () => {

@@ -16,6 +16,7 @@ export type OtopProvince = {
 
 export type OtopProduct = {
   id: string;
+  sku?: string;
   provinceId: string;
   provinceName: string;
 

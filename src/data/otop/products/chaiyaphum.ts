@@ -33,6 +33,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-001',
+    sku: 'OTOP-BK-001',
     productName: 'ผ้าไหมมัดหมี่',
     originPlace: 'บ้านเขว้า',
     makerType: 'ช่างทอผ้าชุมชน',
@@ -51,6 +52,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-002',
+    sku: 'OTOP-BK-002',
     productName: 'หมวกผ้าไหมจากเศษผ้าไหม',
     originPlace: 'บ้านเขว้า',
     makerType: 'กลุ่มงานผ้าชุมชน',
@@ -69,6 +71,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-003',
+    sku: 'OTOP-NB-003',
     productName: 'กล้วยกรอบแก้วตรานกกระจิบ',
     originPlace: 'บ้านหนองบ่อ',
     makerType: 'กลุ่มแปรรูปอาหารชุมชน',
@@ -87,6 +90,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-004',
+    sku: 'OTOP-NBD-004',
     productName: 'กระเป๋าผ้าเอนกประสงค์',
     originPlace: 'บ้านลาดวังม่วง หนองบัวแดง',
     makerType: 'กลุ่มงานผ้าชุมชน',
@@ -105,6 +109,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-005',
+    sku: 'OTOP-CT-005',
     productName: 'มะกรูดแห้งดับกลิ่น',
     originPlace: 'จัตุรัส',
     makerType: 'กลุ่มผลิตภัณฑ์สมุนไพรชุมชน',
@@ -123,6 +128,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-006',
+    sku: 'OTOP-CY-006',
     productName: 'หม่ำชัยภูมิ',
     originPlace: 'ชัยภูมิ',
     makerType: 'กลุ่มอาหารพื้นบ้าน',
@@ -142,6 +148,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-007',
+    sku: 'OTOP-CY-007',
     productName: 'ปลาร้าบอง / แจ่วบอง',
     originPlace: 'ชัยภูมิ',
     makerType: 'กลุ่มอาหารพื้นบ้าน',
@@ -160,6 +167,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-008',
+    sku: 'OTOP-CY-008',
     productName: 'ข้าวเพื่อสุขภาพ',
     originPlace: 'ชัยภูมิ',
     makerType: 'กลุ่มแปรรูปข้าวเพื่อสุขภาพชัยภูมิ',
@@ -178,6 +186,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-009',
+    sku: 'OTOP-CY-009',
     productName: 'กระติบข้าวเหนียวจักสาน',
     originPlace: 'ชัยภูมิ',
     makerType: 'กลุ่มจักสานชุมชน',
@@ -196,6 +205,7 @@ export const CHAIYAPHUM_OTOP_PRODUCTS: OtopProduct[] = [
   {
     ...CHAIYAPHUM_STORY_DEFAULTS,
     id: 'chaiyaphum-otop-010',
+    sku: 'OTOP-CY-010',
     productName: 'ยาหม่อง / น้ำมันนวดสมุนไพร',
     originPlace: 'ชัยภูมิ',
     makerType: 'กลุ่มสมุนไพรชุมชน',

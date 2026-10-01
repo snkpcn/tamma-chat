@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { ALL_OTOP_PRODUCTS } from '../../src/data/otop/products';
 import { decryptPii, encryptPii } from './_operations-db';
 import {
   addressSnapshot,
@@ -248,6 +249,11 @@ export async function loadOtopStoreCatalog() {
   const products = await productResponse.json() as Array<Record<string, unknown> & {
     otop_product_images?: Array<Record<string, unknown>>;
   }>;
+  const storyBySku = new Map(
+    ALL_OTOP_PRODUCTS
+      .filter(product => typeof product.sku === 'string' && product.publicClaimSafe)
+      .map(product => [product.sku as string, product]),
+  );
   return {
     products: products.map(row => ({
       sku: String(row.sku),
@@ -256,6 +262,23 @@ export async function loadOtopStoreCatalog() {
       price: Number(row.price),
       stock: Number(row.stock_qty),
       metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
+      story: (() => {
+        const story = storyBySku.get(String(row.sku));
+        if (!story) return null;
+        return {
+          originPlace: story.originPlace,
+          makerName: story.makerName ?? null,
+          makerType: story.makerType,
+          category: story.category,
+          coreValue: story.coreValue,
+          craftProcess: story.craftProcess,
+          materialOrIngredient: story.materialOrIngredient,
+          whyHere: story.whyHere,
+          shortDescription: story.shortDescription,
+          longStory: story.longStory ?? null,
+          imageCaption: story.imageCaption,
+        };
+      })(),
       images: (Array.isArray(row.otop_product_images) ? row.otop_product_images : [])
         .map(image => ({
           url: typeof image.public_url === 'string' ? image.public_url : '',
