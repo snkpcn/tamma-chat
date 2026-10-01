@@ -1,0 +1,25 @@
+name: Phase 3 Production Smoke
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  production-smoke:
+    if: contains(github.event.pull_request.title, '[run phase3 prod smoke]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run read-only production smoke against deployed Phase 3
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: npx tsx scripts/run-production-smoke.ts
