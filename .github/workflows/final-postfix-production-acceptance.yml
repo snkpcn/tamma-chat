@@ -1,0 +1,59 @@
+name: Final Postfix Production Acceptance
+on:
+  push:
+    branches:
+      - certification/final-postfix-20261001
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Live location male-voice and zero-cost visibility
+        env:
+          ENDPOINT: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: |
+          node <<'NODE'
+          const { randomUUID } = require('node:crypto');
+          const endpoint=process.env.ENDPOINT;
+          async function call(message, eventId, guestId=randomUUID()) {
+            const res=await fetch(endpoint,{
+              method:'POST',
+              headers:{'content-type':'application/json'},
+              body:JSON.stringify({
+                guestId,eventId,message,language:'th',chatHistory:[],
+                guestContext:{tripDuration:null,travelerType:null,group:{adults:null,children:null,elderly:null},interests:[],pace:null,budget:null,constraints:[]},
+                journeyContext:{currentPlan:null,savedPlan:null,visitedExperiences:[],favorites:[],journalEntries:[]},
+                pageContext:{section:'line'}
+              })
+            });
+            const body=await res.json();
+            console.log(JSON.stringify({guestId,eventId,status:res.status,intent:body.intent,message:body.message}));
+            if(!res.ok) throw new Error('HTTP '+res.status);
+            return {guestId,eventId,message:String(body.message||'')};
+          }
+          (async()=>{
+            const loc=await call('ร้านอยู่แถวไหนคะ','final-postfix-location-'+Date.now());
+            if(!loc.message.includes('https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic')) throw new Error('canonical Maps link missing: '+loc.message);
+            if(/ค่ะ|คะ/u.test(loc.message)) throw new Error('female particle leaked: '+loc.message);
+
+            const allergy=await call('แฟนแพ้กุ้ง มีอะไรกินได้บ้างคะ','final-postfix-allergy-'+Date.now());
+            if(/ค่ะ|คะ/u.test(allergy.message)) throw new Error('female particle leaked in grounded reply: '+allergy.message);
+
+            const zeroGuest=randomUUID();
+            const zero=await call('สวัสดีครับ','final-postfix-zero-cost-'+Date.now(),zeroGuest);
+            if(/ค่ะ|คะ/u.test(zero.message)) throw new Error('female particle leaked in zero-cost reply: '+zero.message);
+            console.log('FINAL_POSTFIX_ACCEPTANCE_PASS');
+            console.log('ZERO_COST_PROBE '+JSON.stringify({guestId:zero.guestId,eventId:zero.eventId}));
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
