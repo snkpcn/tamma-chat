@@ -1,4 +1,4 @@
-import type { BrainChannel, BrainRequest, BrainResponse } from './_thongthai-brain-v3';
+// Phase 2 Wave A certification redeploy marker — no behavior change.\nimport type { BrainChannel, BrainRequest, BrainResponse } from './_thongthai-brain-v3';
 import { listOtopProducts, listServiceResources } from './_operations-db';
 import { listRestaurantMenu } from './_restaurant-sot';
 import { executeThongthaiTransactionTool } from './_thongthai-agent-transactions';
