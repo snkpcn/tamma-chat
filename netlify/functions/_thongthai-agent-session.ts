@@ -1,5 +1,5 @@
 import type { BrainChannel } from './_thongthai-brain-v3';
-import { THONGTHAI_STAGING_AGENT_ID } from './_thongthai-agent-profile';
+import { THONGTHAI_PRODUCTION_AGENT_ID, THONGTHAI_STAGING_AGENT_ID } from './_thongthai-agent-profile';
 import { executeThongthaiAgentTool } from './_thongthai-agent-tools';
 import type { ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
@@ -8,7 +8,8 @@ import { persistAiCallCost } from './_ai-cost-store';
 
 const API_BASE = 'https://api.openai.com/v1';
 const BETA_HEADER = 'agents=v1';
-const SESSION_STATE_KEY = 'thongthaiStagingAgentSession';
+const STAGING_SESSION_STATE_KEY = 'thongthaiStagingAgentSession';
+const PRODUCTION_SESSION_STATE_KEY = 'thongthaiProductionAgentSession';
 export const AGENT_MAX_TOOL_ROUNDS = 8;
 export const AGENT_MAX_TOOL_CALLS = 12;
 const MAX_POLL_ROUNDS = 80;
@@ -69,6 +70,8 @@ type SessionState = {
   lastEnvironment?: 'live' | 'test';
 };
 
+export type AgentRuntimeMode = 'shadow' | 'primary';
+
 export type AgentShadowTurnInput = {
   guestDbId: string;
   conversationId: string;
@@ -77,6 +80,7 @@ export type AgentShadowTurnInput = {
   message: string;
   environment?: 'live' | 'test';
   transactionMode?: ThongthaiAgentTransactionMode;
+  runtimeMode?: AgentRuntimeMode;
 };
 
 export type AgentShadowTurnResult = {
@@ -121,10 +125,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function parseState(raw: unknown): SessionState | null {
+function parseState(raw: unknown, expectedAgentId: string): SessionState | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const value = raw as Partial<SessionState>;
-  if (value.agentId !== THONGTHAI_STAGING_AGENT_ID || typeof value.sessionId !== 'string' || !value.sessionId) return null;
+  if (value.agentId !== expectedAgentId || typeof value.sessionId !== 'string' || !value.sessionId) return null;
   return {
     agentId: value.agentId,
     sessionId: value.sessionId,
@@ -142,26 +146,63 @@ function parseState(raw: unknown): SessionState | null {
   };
 }
 
-async function loadPersistedSession(guestDbId: string): Promise<SessionState | null> {
-  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
-  return parseState(snapshot.state[SESSION_STATE_KEY]);
+type AgentRuntimeConfig = {
+  mode: AgentRuntimeMode;
+  agentId: string;
+  stateKey: string;
+  callPurpose: string;
+};
+
+function runtimeConfig(input: AgentShadowTurnInput): AgentRuntimeConfig {
+  if (input.runtimeMode === 'primary') {
+    if (!THONGTHAI_PRODUCTION_AGENT_ID) {
+      throw new Error('THONGTHAI_PRODUCTION_AGENT_ID is required for primary Agent mode.');
+    }
+    return {
+      mode: 'primary',
+      agentId: THONGTHAI_PRODUCTION_AGENT_ID,
+      stateKey: PRODUCTION_SESSION_STATE_KEY,
+      callPurpose: 'agent_primary_turn_aggregate',
+    };
+  }
+  return {
+    mode: 'shadow',
+    agentId: THONGTHAI_STAGING_AGENT_ID,
+    stateKey: STAGING_SESSION_STATE_KEY,
+    callPurpose: runtime.callPurpose,
+  };
 }
 
-async function saveSessionState(guestDbId: string, state: SessionState): Promise<void> {
-  const ok = await patchGuestAgentState(guestDbId, { set: { [SESSION_STATE_KEY]: state } });
+async function loadPersistedSession(
+  guestDbId: string,
+  runtime: AgentRuntimeConfig,
+): Promise<SessionState | null> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  return parseState(snapshot.state[runtime.stateKey], runtime.agentId);
+}
+
+async function saveSessionState(
+  guestDbId: string,
+  runtime: AgentRuntimeConfig,
+  state: SessionState,
+): Promise<void> {
+  const ok = await patchGuestAgentState(guestDbId, { set: { [runtime.stateKey]: state } });
   if (!ok) throw new Error('Could not persist Thongthai Agent session state.');
 }
 
-async function createSession(input: AgentShadowTurnInput): Promise<AgentSession> {
+async function createSession(
+  input: AgentShadowTurnInput,
+  runtime: AgentRuntimeConfig,
+): Promise<AgentSession> {
   return openai<AgentSession>('/agents/sessions', {
     method: 'POST',
     body: JSON.stringify({
-      agent_id: THONGTHAI_STAGING_AGENT_ID,
+      agent_id: runtime.agentId,
       environment: { type: 'none' },
       input: input.message,
       metadata: {
         app: 'thammachat',
-        mode: 'shadow',
+        mode: runtime.mode,
         guest_id: input.guestDbId.slice(0, 64),
         channel: input.channel,
       },
@@ -359,7 +400,7 @@ function usageFromTurn(turn: AgentTurn): AgentShadowTurnResult['usage'] {
   return { available: true, inputTokens, cachedInputTokens, outputTokens, costUsd, costThb: usdToThb(costUsd) };
 }
 
-async function persistShadowCost(input: AgentShadowTurnInput, turn: AgentTurn, usage: AgentShadowTurnResult['usage']): Promise<void> {
+async function persistAgentCost(input: AgentShadowTurnInput, runtime: AgentRuntimeConfig, turn: AgentTurn, usage: AgentShadowTurnResult['usage']): Promise<void> {
   if (!usage.available
       || usage.inputTokens === null
       || usage.cachedInputTokens === null
@@ -389,6 +430,7 @@ async function persistShadowCost(input: AgentShadowTurnInput, turn: AgentTurn, u
 
 async function reconcilePendingUsage(
   input: AgentShadowTurnInput,
+  runtime: AgentRuntimeConfig,
   state: SessionState,
 ): Promise<SessionState> {
   if (!state.costAccountingIncomplete) return state;
@@ -409,7 +451,7 @@ async function reconcilePendingUsage(
     channel: state.lastChannel ?? input.channel,
     environment: state.lastEnvironment ?? input.environment ?? 'live',
   };
-  await persistShadowCost(priorInput, settledTurn, usage);
+  await persistAgentCost(priorInput, runtime, settledTurn, usage);
 
   const reconciled: SessionState = {
     ...state,
@@ -417,23 +459,39 @@ async function reconcilePendingUsage(
     costAccountingIncomplete: false,
     lastUsedAt: new Date().toISOString(),
   };
-  await saveSessionState(input.guestDbId, reconciled);
+  await saveSessionState(input.guestDbId, runtime, reconciled);
   return reconciled;
 }
 
-export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): Promise<AgentShadowTurnResult> {
-  if (!input.guestDbId || !input.message.trim()) throw new Error('guestDbId and message are required.');
+export function shouldStartNewAgentConversation(
+  state: Pick<SessionState, 'lastUsedAt'|'lastConversationId'>,
+  conversationId: string,
+  now: Date = new Date(),
+): boolean {
+  if (state.lastConversationId && state.lastConversationId !== conversationId) return true;
+  const lastUsed = Date.parse(state.lastUsedAt);
+  if (!Number.isFinite(lastUsed)) return true;
+  return now.getTime() - lastUsed >= aiCostPolicy().conversationIdleMs;
+}
 
-  let existing = await loadPersistedSession(input.guestDbId);
+async function runThongthaiAgentTurn(input: AgentShadowTurnInput): Promise<AgentShadowTurnResult> {
+  if (!input.guestDbId || !input.message.trim()) throw new Error('guestDbId and message are required.');
+  const runtime = runtimeConfig(input);
+
+  let existing = await loadPersistedSession(input.guestDbId, runtime);
   if (existing?.costAccountingIncomplete) {
-    existing = await reconcilePendingUsage(input, existing);
+    existing = await reconcilePendingUsage(input, runtime, existing);
   }
+  if (existing && shouldStartNewAgentConversation(existing, input.conversationId)) {
+    existing = null;
+  }
+
   const capThb = aiCostPolicy().maxConversationCostUsd * (usdToThb(1));
   if (existing && existing.cumulativeCostThb >= capThb) {
-    throw new Error('Thongthai Agent shadow conversation cost cap reached.');
+    throw new Error('Thongthai Agent conversation cost cap reached.');
   }
   if (existing && capThb - existing.cumulativeCostThb < AGENT_TURN_RESERVE_THB) {
-    throw new Error('Thongthai Agent shadow remaining budget is below the safe per-turn reserve.');
+    throw new Error('Thongthai Agent remaining budget is below the safe per-turn reserve.');
   }
 
   let sessionId: string;
@@ -442,11 +500,11 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
     sessionId = existing.sessionId;
     await sendMessage(sessionId, input);
   } else {
-    const created = await createSession(input);
+    const created = await createSession(input, runtime);
     sessionId = created.id;
     createdSession = true;
-    await saveSessionState(input.guestDbId, {
-      agentId: THONGTHAI_STAGING_AGENT_ID,
+    await saveSessionState(input.guestDbId, runtime, {
+      agentId: runtime.agentId,
       sessionId,
       createdAt: new Date().toISOString(),
       lastUsedAt: new Date().toISOString(),
@@ -468,13 +526,13 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
   const output = await outputForTurn(sessionId, turn.id);
   const settledTurn = await retrieveTurnWithSettledUsage(sessionId, turn.id);
   const usage = usageFromTurn(settledTurn);
-  await persistShadowCost(input, settledTurn, usage);
+  await persistAgentCost(input, runtime, settledTurn, usage);
 
   const prior = existing?.cumulativeCostThb ?? 0;
   const turnCostThb = usage.costThb ?? 0;
   const cumulativeCostThb = Math.round((prior + turnCostThb) * 10_000) / 10_000;
-  await saveSessionState(input.guestDbId, {
-    agentId: THONGTHAI_STAGING_AGENT_ID,
+  await saveSessionState(input.guestDbId, runtime, {
+    agentId: runtime.agentId,
     sessionId,
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     lastUsedAt: new Date().toISOString(),
@@ -498,3 +556,21 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
     cumulativeCostThb,
   };
 }
+
+export async function runThongthaiAgentShadowTurn(
+  input: AgentShadowTurnInput,
+): Promise<AgentShadowTurnResult> {
+  return runThongthaiAgentTurn({ ...input, runtimeMode: 'shadow' });
+}
+
+export async function runThongthaiAgentPrimaryTurn(
+  input: Omit<AgentShadowTurnInput, 'environment'|'transactionMode'|'runtimeMode'>,
+): Promise<AgentShadowTurnResult> {
+  return runThongthaiAgentTurn({
+    ...input,
+    environment: 'live',
+    transactionMode: 'off',
+    runtimeMode: 'primary',
+  });
+}
+
