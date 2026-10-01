@@ -15,7 +15,7 @@ const MAX_POLL_ROUNDS = 80;
 const POLL_MS = 150;
 const USAGE_SETTLE_ATTEMPTS = 12;
 const USAGE_SETTLE_MS = 400;
-const AGENT_TURN_RESERVE_THB = 3;
+export const AGENT_TURN_RESERVE_THB = 2.75;
 
 type Usage = {
   input_tokens?: number;
