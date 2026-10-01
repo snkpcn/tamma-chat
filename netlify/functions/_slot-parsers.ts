@@ -180,6 +180,26 @@ const NEGATED_TRANSACTION_MENTION_RE =
   /(?:ยัง\s*)?(?:ไม่ได้(?:คิดจะ|คิด|จะ|ให้)?|ไม่(?:ได้|ต้อง|เอา|อยาก|จะ)?)\s*(?:ยืนยัน(?:การ)?)?\s*(?:จอง|สั่ง)/gu;
 const NEGATED_BEFORE_TRANSACTION_VERB_RE =
   /(?:ยัง\s*)?(?:ไม่ได้(?:คิดจะ|คิด|จะ|ให้)?|ไม่(?:ได้|ต้อง|เอา|อยาก|จะ)?)\s*(?:ยืนยัน(?:การ)?)?\s*$/u;
+
+function transactionVerbIsInsideProhibition(message:string,index:number):boolean {
+  const prefix=message.slice(Math.max(0,index-64),index);
+  const boundaries=[
+    prefix.lastIndexOf('แต่'),
+    prefix.lastIndexOf('แล้ว'),
+    prefix.lastIndexOf('จากนั้น'),
+    prefix.lastIndexOf(','),
+    prefix.lastIndexOf('，'),
+    prefix.lastIndexOf(';'),
+    prefix.lastIndexOf('\n'),
+    prefix.lastIndexOf('.'),
+    prefix.lastIndexOf('!'),
+    prefix.lastIndexOf('?'),
+    prefix.lastIndexOf('？'),
+  ];
+  const boundary=Math.max(...boundaries);
+  const clause=prefix.slice(boundary+1);
+  return /ห้าม[^\n,.!?？;]{0,48}$/u.test(clause);
+}
 // State-navigation wording must be adjacent to the transaction verb. The old
 // broad `(?:จอง|สั่ง).*ต่อ` shape also matched the `ต่อ` inside `ติดต่อ`,
 // incorrectly stripping consent from a cafe request such as "สั่งกาแฟ แล้ว
@@ -192,7 +212,8 @@ function lastAffirmativeTransactionVerbIndex(message: string): number {
     const index = match.index ?? -1;
     if (index < 0) continue;
     const before = message.slice(Math.max(0, index - 24), index);
-    if (NEGATED_BEFORE_TRANSACTION_VERB_RE.test(before)) continue;
+    if (NEGATED_BEFORE_TRANSACTION_VERB_RE.test(before)
+        || transactionVerbIsInsideProhibition(message,index)) continue;
 
     const around = message.slice(Math.max(0, index - 16), Math.min(message.length, index + 24));
     // Returning to an unfinished transaction conversation is state navigation,
@@ -214,6 +235,9 @@ function lastAffirmativeTransactionVerbIndex(message: string): number {
 function lastNoTransactionMarkerIndex(message: string): number {
   let last = -1;
   for (const match of message.matchAll(NEGATED_TRANSACTION_MENTION_RE)) {
+    last = Math.max(last, match.index ?? -1);
+  }
+  for (const match of message.matchAll(/ห้าม[^\n,.!?？;]{0,48}(?:ยืนยัน|จอง|สั่ง|ทำรายการ)/gu)) {
     last = Math.max(last, match.index ?? -1);
   }
   for (const match of message.matchAll(/ไว้ก่อน/gu)) {
