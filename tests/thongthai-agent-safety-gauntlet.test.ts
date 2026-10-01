@@ -10,6 +10,8 @@ import {
 import { thongthaiProductionAgentConfig } from '../netlify/functions/_thongthai-agent-profile';
 import { shouldUseThongthaiAgentTransactionPrepare } from '../netlify/functions/_thongthai-agent-primary';
 import { shouldBlockLegacyWriteForPrepareOnly } from '../netlify/functions/_thongthai-runtime-v3';
+import { hasExplicitNoTransactionMarker } from '../netlify/functions/_slot-parsers';
+import { emptySemanticContext, parseSemanticTurnResponse } from '../netlify/functions/_semantic-interpreter';
 
 const PREPARE_TOOLS = [
   'prepare_activity_booking',
@@ -242,4 +244,72 @@ test('prepare-only legacy write kill switch covers all five business verticals',
       }), true, toolName);
     }
   });
+});
+
+
+test('explicit whole-operation prohibitions are transaction vetoes, while a later affirmative choice still wins', () => {
+  assert.equal(
+    hasExplicitNoTransactionMarker('ยังไม่ต้องทำรายการอะไรทั้งนั้น แค่อยากรู้ว่าพรุ่งนี้ม้าตัวไหนว่างช่วง 16:30'),
+    true,
+  );
+  assert.equal(
+    hasExplicitNoTransactionMarker('ช่วยสรุปให้หน่อย แต่ห้ามกดยืนยันหรือจองให้'),
+    true,
+  );
+  assert.equal(
+    hasExplicitNoTransactionMarker('ห้ามจองอันนี้ แต่จองอีกอันเลย'),
+    false,
+    'a later explicit affirmative transaction must outrank an earlier rejected option',
+  );
+});
+
+test('semantic reconciliation cannot keep book/order when the same structured turn says no_transaction', () => {
+  const cases = [
+    {
+      message:'ยังไม่ต้องทำรายการอะไรทั้งนั้น แค่อยากรู้ว่าพรุ่งนี้ม้าตัวไหนว่างช่วง 16:30',
+      raw:{
+        normalizedMeaning:'ถามว่าม้าตัวไหนว่างพรุ่งนี้ 16:30 โดยยังไม่ทำรายการ',
+        reply:'',
+        speechAct:'transaction_request',
+        domain:'activity',
+        intent:'check_availability',
+        action:'book',
+        informationNeed:'none',
+        entities:{date:'2026-10-02',time:'16:30',activityCode:'horse'},
+        references:[],
+        constraints:['no_transaction'],
+        confidence:0.99,
+        needsClarification:false,
+      },
+    },
+    {
+      message:'ช่วยสรุปให้หน่อยว่าตอนนี้กูเลือกอะไรไปแล้วบ้าง แต่ห้ามกดยืนยันหรือจองให้',
+      raw:{
+        normalizedMeaning:'สรุปสิ่งที่เลือกไว้โดยห้ามทำรายการ',
+        reply:'',
+        speechAct:'transaction_request',
+        domain:'stay',
+        intent:'summarize_active_task',
+        action:'book',
+        informationNeed:'none',
+        entities:{},
+        references:[],
+        constraints:['no_transaction'],
+        confidence:0.99,
+        needsClarification:false,
+      },
+    },
+  ] as const;
+
+  for (const item of cases) {
+    const turn = parseSemanticTurnResponse(
+      JSON.stringify(item.raw),
+      emptySemanticContext(),
+      item.message,
+    );
+    assert.notEqual(turn.action, 'book', item.message);
+    assert.notEqual(turn.action, 'order', item.message);
+    assert.notEqual(turn.speechAct, 'transaction_request', item.message);
+    assert.equal(turn.constraints.includes('no_transaction'), true, item.message);
+  }
 });
