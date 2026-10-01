@@ -15,12 +15,12 @@
   <a class="skip-link" href="#isanMap" data-otop-i18n="map_skip">ข้ามไปยังแผนที่</a>
 
   <header class="map-header">
-    <a class="brand-lockup" href="index.html" aria-label="กลับหน้าหลักทำมา-ชาติ">
+    <a class="brand-lockup" href="index.html" aria-label="กลับหน้าหลักทำมา-ชาติ" data-otop-i18n-aria="home_aria">
       <img class="brand-main-logo" src="assets/brand/logos/tamma-chat-logo.svg" width="1051" height="404" alt="ทำมา-ชาติ">
       <span class="brand-divider" aria-hidden="true"></span>
       <img class="brand-otop-logo" src="assets/brand/logos/otop-logo-brown-trimmed.webp" width="352" height="347" alt="OTOP">
     </a>
-    <nav class="account-nav" aria-label="สมาชิก">
+    <nav class="account-nav" aria-label="สมาชิก" data-otop-i18n-aria="member_nav_aria">
       <div class="site-lang-picker">
         <label for="mapLanguage" data-otop-i18n="language">ภาษา</label>
         <select id="mapLanguage" data-otop-lang-select aria-label="Language">
@@ -42,7 +42,7 @@
             <h1 id="mapTitle" data-otop-i18n="map_title">เลือกจังหวัดที่อยากรู้จัก</h1>
             <p data-otop-i18n="map_intro">แตะบนแผนที่หรือเลือกชื่อจังหวัดด้านล่าง เพื่อเปิดเรื่องราวของผู้คน วิถีชีวิต และสิ่งที่ทำให้แต่ละพื้นที่ไม่เหมือนกัน</p>
           </div>
-          <div class="map-legend" aria-label="คำอธิบายแผนที่">
+          <div class="map-legend" aria-label="คำอธิบายแผนที่" data-otop-i18n-aria="map_legend_aria">
             <span><i class="legend-swatch legend-open"></i><span data-otop-i18n="map_selected">จังหวัดที่เลือก</span></span>
             <span><i class="legend-swatch legend-next"></i><span data-otop-i18n="map_other">จังหวัดอื่น</span></span>
           </div>
@@ -50,7 +50,7 @@
 
         <div class="map-canvas-wrap" id="mapCanvasWrap">
           <p class="map-loading" id="mapLoading" data-otop-i18n="map_loading">กำลังเปิดแผนที่อีสาน…</p>
-          <svg id="isanMap" class="isan-map" viewBox="0 0 760 870" role="group" aria-label="แผนที่ขอบเขตจริง 20 จังหวัดภาคอีสาน"></svg>
+          <svg id="isanMap" class="isan-map" viewBox="0 0 760 870" role="group" aria-label="แผนที่ขอบเขตจริง 20 จังหวัดภาคอีสาน" data-otop-i18n-aria="map_svg_aria"></svg>
           <div class="map-selected-label" id="mapSelectedLabel" aria-hidden="true">
             <span id="mapSelectedOrder">01</span>
             <strong id="mapSelectedName">ชัยภูมิ</strong>
