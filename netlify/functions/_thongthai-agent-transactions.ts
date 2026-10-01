@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { loadActivityWorldFacts } from './_activity-sot';
-import { createBooking, formatActivityAssetNote, listBookingOptions } from './_operations-db';
+import { createBooking, formatActivityAssetNote, listBookingOptions, listServiceResources, listStayBookingOptions } from './_operations-db';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { hasCancelMarker, hasCommitMarker, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
@@ -25,6 +25,7 @@ export type ThongthaiAgentTransactionTool = {
 };
 
 const STATE_KEY = 'thongthaiAgentPreparedTransactionV1';
+const STAY_STATE_KEY = 'thongthaiAgentPreparedStayBookingV1';
 const PREPARED_TTL_MS = 30 * 60 * 1000;
 
 const objectSchema = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({
@@ -62,6 +63,37 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
     type: 'function',
     name: 'commit_prepared_activity_booking',
     description: 'Submit the previously prepared activity booking request. This is consequential and is server-gated: it succeeds only on a later customer turn that explicitly confirms booking. Pass the confirmation_id returned by prepare_activity_booking. Never call in the same turn as prepare.',
+    parameters: objectSchema({
+      confirmation_id: { type: 'string' },
+    }, ['confirmation_id']),
+  },
+  {
+    type: 'function',
+    name: 'prepare_stay_booking',
+    description: 'Prepare a stay booking request for explicit customer review. This NEVER creates a booking. Resolve the exact stay resource first, then return a summary and ask the customer to reply exactly "ยืนยันจอง" to submit.',
+    parameters: objectSchema({
+      resource_code: { type: 'string', description: 'Canonical stay resource code from get_stay_catalog.' },
+      resource_name: { type: 'string', description: 'Optional canonical stay resource name.' },
+      check_in: { type: 'string', description: 'Local date YYYY-MM-DD.' },
+      check_out: { type: 'string', description: 'Local date YYYY-MM-DD.' },
+      party_size: { type: 'integer', minimum: 1, maximum: 50 },
+      quantity: { type: 'integer', minimum: 1, maximum: 6, description: 'Number of villas/rooms requested. Defaults to 1.' },
+      customer_name: { type: 'string' },
+      phone: { type: 'string' },
+      email: { type: 'string' },
+      note: { type: 'string' },
+    }, ['resource_code', 'check_in', 'check_out', 'party_size', 'customer_name', 'phone']),
+  },
+  {
+    type: 'function',
+    name: 'get_prepared_stay_booking',
+    description: 'Read the currently prepared stay booking for this guest. This never creates or modifies a booking. Use it when the customer returns to a prepared stay request or explicitly confirms after saying not yet.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
+    name: 'commit_prepared_stay_booking',
+    description: 'Submit the previously prepared stay booking request. Server-gated: it succeeds only on a later customer turn with explicit booking confirmation. Pass the confirmation_id returned by prepare_stay_booking. Never call in the same turn as prepare.',
     parameters: objectSchema({
       confirmation_id: { type: 'string' },
     }, ['confirmation_id']),
