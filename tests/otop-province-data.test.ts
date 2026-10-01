@@ -28,11 +28,16 @@ test('OTOP province registry contains the 20 unique required province IDs', () =
 test('Chaiyaphum owns 10 complete, story-only and public-safe products', () => {
   const products = getOtopProductsByProvince('chaiyaphum');
   assert.equal(products.length, 10);
+  assert.equal(new Set(products.map(product => product.sku)).size, 10);
   for (const product of products) {
     assert.equal(product.provinceId, 'chaiyaphum');
     assert.ok(product.id);
     assert.ok(product.productName);
     assert.ok(product.shortDescription);
+    assert.match(product.sku ?? '', /^OTOP-/u);
+    assert.ok(product.coreValue);
+    assert.ok(product.craftProcess);
+    assert.ok(product.whyHere);
     assert.ok(product.image);
     assert.equal(product.availableForSale, false);
     assert.equal(product.stockStatus, 'story-only');
