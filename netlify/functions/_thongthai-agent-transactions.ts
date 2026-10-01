@@ -251,6 +251,28 @@ async function savePrepared(guestDbId: string, value: PreparedActivityBooking): 
   if (!ok) throw new Error('prepared_transaction_state_unavailable');
 }
 
+async function loadPreparedStay(guestDbId: string): Promise<PreparedStayBooking | null> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const raw = snapshot.state[STAY_STATE_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Partial<PreparedStayBooking>;
+  if (value.version !== 1 || value.kind !== 'stay_booking' || typeof value.confirmationId !== 'string') return null;
+  return value as PreparedStayBooking;
+}
+
+async function savePreparedStay(guestDbId: string, value: PreparedStayBooking): Promise<void> {
+  const ok = await patchGuestAgentState(guestDbId, { set: { [STAY_STATE_KEY]: value } });
+  if (!ok) throw new Error('prepared_stay_transaction_state_unavailable');
+}
+
+function nightsBetween(checkIn: string, checkOut: string): number | null {
+  if (!validDate(checkIn) || !validDate(checkOut)) return null;
+  const start = new Date(`${checkIn}T12:00:00+07:00`).getTime();
+  const end = new Date(`${checkOut}T12:00:00+07:00`).getTime();
+  const nights = Math.round((end - start) / 86_400_000);
+  return Number.isInteger(nights) && nights >= 1 && nights <= 30 ? nights : null;
+}
+
 function modeAllowed(context: ThongthaiAgentTransactionContext): { ok: true; environment: 'live'|'test' } | { ok: false; error: string } {
   if (context.transactionMode === 'off') return { ok: false, error: 'transaction_tools_disabled' };
   if (context.transactionMode === 'test') return { ok: true, environment: 'test' };
