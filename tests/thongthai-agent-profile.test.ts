@@ -4,7 +4,9 @@ import {
   THONGTHAI_AGENT_INSTRUCTIONS,
   THONGTHAI_AGENT_PROFILE_VERSION,
   THONGTHAI_STAGING_AGENT_NAME,
+  THONGTHAI_PRODUCTION_AGENT_NAME,
   thongthaiStagingAgentConfig,
+  thongthaiProductionAgentConfig,
 } from '../netlify/functions/_thongthai-agent-profile';
 
 test('Thongthai staging agent profile locks the owner-defined identity and trust rules', () => {
@@ -40,4 +42,18 @@ test('Thongthai saved-agent config contains stable identity only and stays stagi
 
   // Mutable business truth belongs in backoffice/tools, not the saved persona.
   assert.doesNotMatch(config.instructions, /30 นาที\s*=\s*300|45 นาที\s*=\s*500|6 villas|15 Nov/i);
+});
+
+
+test('Thongthai production Agent is separate and read-only for the first canary', () => {
+  const staging = thongthaiStagingAgentConfig('test-model');
+  const production = thongthaiProductionAgentConfig('test-model');
+
+  assert.equal(THONGTHAI_PRODUCTION_AGENT_NAME, 'Thongthai-Production');
+  assert.equal(production.name, 'Thongthai-Production');
+  assert.equal(production.metadata.environment, 'production');
+  assert.equal(production.model, 'test-model');
+  assert.ok(production.tools.length > 0);
+  assert.ok(production.tools.every(tool => !/^prepare_|^commit_prepared_|^get_prepared_/.test(tool.name)));
+  assert.ok(staging.tools.some(tool => /^prepare_/.test(tool.name)));
 });
