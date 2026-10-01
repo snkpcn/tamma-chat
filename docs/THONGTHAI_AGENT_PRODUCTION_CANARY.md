@@ -6,8 +6,8 @@ Production rollout configuration (2026-10-01):
 - Model: `gpt-5.6-terra`
 - Primary channels: WEB, LINE, Facebook
 - WEB rollout: 100% of eligible guests
-- LINE rollout: 10% read-only canary
-- Facebook rollout: 10% read-only canary
+- LINE rollout: 25% read-only canary
+- Facebook rollout: 25% read-only canary
 - Legacy global rollout fallback: 10%
 - Agent transaction tools: not exposed in the production saved Agent
 - Live Agent transaction flag: OFF
@@ -26,6 +26,9 @@ Rollout history:
 - New 25-50% cohort verification: two fresh production guests in buckets 2590 and 4241 both routed to `thongthai_agent_primary`, both grounded, with matching cost rows of 1.1170 THB and 1.0268 THB.
 - 100% eligible WEB rollout: promoted after the new 50% cohort verification gate.
 - New >50% cohort verification: a fresh WEB guest in bucket 7344 passed 3/3 production turns; the two paid turns both routed to `thongthai_agent_primary`, both were grounded, with matching completed cost rows of 1.0272 THB and 0.3420 THB (1.3692 THB total), and no false transaction was detected.
-- Per-channel rollout support: WEB keeps 100% while LINE and Facebook begin at 10%, without reducing the proven WEB rollout.
+- Per-channel rollout support: WEB keeps 100% while LINE and Facebook begin independently, without reducing the proven WEB rollout.
+- LINE 10% read-only verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0298 THB and 0.3227 THB (1.3525 THB total).
+- Facebook 10% read-only verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0335 THB and 0.3266 THB (1.3601 THB total).
+- LINE and Facebook promoted to 25% read-only after the 10% cross-channel gate passed.
 
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
