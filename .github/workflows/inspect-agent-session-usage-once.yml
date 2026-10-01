@@ -1,0 +1,25 @@
+name: One-time inspect Thongthai Agent session usage
+
+on:
+  push:
+    branches:
+      - ops/inspect-agent-session-usage-20261001
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect session and turn usage only
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SESSION_ID: sess_03883d7ee71b62e4006abddd795b8481a19344924cd9480784
+        run: |
+          set -euo pipefail
+          echo "SESSION"
+          curl --silent --show-error             -H "Authorization: Bearer $OPENAI_API_KEY"             -H "OpenAI-Beta: agents=v1"             "https://api.openai.com/v1/agents/sessions/$SESSION_ID"             | jq '{id,status,usage}'
+          echo "TURNS"
+          curl --silent --show-error             -H "Authorization: Bearer $OPENAI_API_KEY"             -H "OpenAI-Beta: agents=v1"             "https://api.openai.com/v1/agents/sessions/$SESSION_ID/turns?order=asc&limit=20"             | jq '{data:[.data[]|{id,status,usage}],has_more,last_id}'
