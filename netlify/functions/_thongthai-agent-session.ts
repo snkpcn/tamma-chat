@@ -405,32 +405,41 @@ function usageFromTurn(turn: AgentTurn): AgentShadowTurnResult['usage'] {
   return { available: true, inputTokens, cachedInputTokens, outputTokens, costUsd, costThb: usdToThb(costUsd) };
 }
 
-async function persistAgentCost(input: AgentShadowTurnInput, runtime: AgentRuntimeConfig, turn: AgentTurn, usage: AgentShadowTurnResult['usage']): Promise<void> {
+async function persistAgentCost(input: AgentShadowTurnInput, runtime: AgentRuntimeConfig, turn: AgentTurn, usage: AgentShadowTurnResult['usage']): Promise<boolean> {
   if (!usage.available
       || usage.inputTokens === null
       || usage.cachedInputTokens === null
       || usage.outputTokens === null
       || usage.costUsd === null
-      || usage.costThb === null) return;
+      || usage.costThb === null) return false;
   const model = process.env.THONGTHAI_AGENT_MODEL?.trim() || 'gpt-5.6-terra';
-  await persistAiCallCost({
-    conversationId: input.conversationId,
-    eventId: input.eventId,
-    channel: input.channel,
-    model,
-    callPurpose: runtime.callPurpose,
-    inputTokens: usage.inputTokens,
-    cachedInputTokens: usage.cachedInputTokens,
-    outputTokens: usage.outputTokens,
-    costUsd: usage.costUsd,
-    costThb: usage.costThb,
-    callIndexTurn: 1,
-    callIndexConversation: 1,
-    status: turn.status === 'completed' ? 'completed' : 'failed',
-    latencyMs: 0,
-    certificationMode: input.environment === 'test',
-    occurredAt: new Date().toISOString(),
-  }).catch(() => {});
+  try {
+    await persistAiCallCost({
+      conversationId: input.conversationId,
+      eventId: input.eventId,
+      channel: input.channel,
+      model,
+      callPurpose: runtime.callPurpose,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      outputTokens: usage.outputTokens,
+      costUsd: usage.costUsd,
+      costThb: usage.costThb,
+      callIndexTurn: 1,
+      callIndexConversation: 1,
+      status: turn.status === 'completed' ? 'completed' : 'failed',
+      latencyMs: 0,
+      certificationMode: input.environment === 'test',
+      occurredAt: new Date().toISOString(),
+    });
+    return true;
+  } catch (error) {
+    console.error(
+      'THONGTHAI_AGENT_COST_PERSIST_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+    return false;
+  }
 }
 
 async function reconcilePendingUsage(
@@ -456,7 +465,10 @@ async function reconcilePendingUsage(
     channel: state.lastChannel ?? input.channel,
     environment: state.lastEnvironment ?? input.environment ?? 'live',
   };
-  await persistAgentCost(priorInput, runtime, settledTurn, usage);
+  const costPersisted = await persistAgentCost(priorInput, runtime, settledTurn, usage);
+  if (!costPersisted) {
+    throw new Error('Thongthai Agent usage cost persistence is still pending; refusing another paid turn.');
+  }
 
   const reconciled: SessionState = {
     ...state,
@@ -536,7 +548,7 @@ async function runThongthaiAgentTurn(input: AgentShadowTurnInput): Promise<Agent
   const output = await outputForTurn(sessionId, turn.id);
   const settledTurn = await retrieveTurnWithSettledUsage(sessionId, turn.id);
   const usage = usageFromTurn(settledTurn);
-  await persistAgentCost(input, runtime, settledTurn, usage);
+  const costPersisted = await persistAgentCost(input, runtime, settledTurn, usage);
 
   const prior = existing?.cumulativeCostThb ?? 0;
   const turnCostThb = usage.costThb ?? 0;
@@ -548,7 +560,7 @@ async function runThongthaiAgentTurn(input: AgentShadowTurnInput): Promise<Agent
     lastUsedAt: new Date().toISOString(),
     turnCount: (existing?.turnCount ?? 0) + 1,
     cumulativeCostThb,
-    costAccountingIncomplete: !usage.available,
+    costAccountingIncomplete: !usage.available || !costPersisted,
     lastTurnId: turn.id,
     lastEventId: input.eventId,
     lastConversationId: input.conversationId,
