@@ -34,6 +34,7 @@ test('Thongthai Agent keeps the original business fact tools bounded and read-on
 test('staging transaction surface is intentionally tiny and two-step', () => {
   assert.deepEqual(THONGTHAI_STAGING_TRANSACTION_TOOLS.map(tool => tool.name), [
     'prepare_activity_booking',
+    'get_prepared_activity_booking',
     'commit_prepared_activity_booking',
   ]);
   for (const tool of THONGTHAI_STAGING_TRANSACTION_TOOLS) {
