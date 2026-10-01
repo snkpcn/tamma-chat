@@ -1468,6 +1468,22 @@ export function parseSemanticTurnResponse(
     if (explicitCheckoutDate) entities.endDate = explicitCheckoutDate;
   }
 
+  // A compact "same plan, change to tomorrow" turn may be correctly
+  // recognized as journey continuation while the model omits the explicit
+  // date entity. Recover only the closed date slot from the current text when
+  // canonical state proves there is exactly one active journey plan. This
+  // cannot create a booking/action proposal; it only gives the bounded prior-
+  // plan reference resolver the concrete edit it requires.
+  if (
+    context.activeTask?.domain === 'journey'
+    && context.suspendedTask?.domain !== 'journey'
+    && PRIOR_PLAN_DEICTIC_RE.test(currentMessage)
+    && entities.date === undefined
+  ) {
+    const explicitJourneyDate = extractDate(currentMessage);
+    if (explicitJourneyDate) entities.date = explicitJourneyDate;
+  }
+
   const recoveredJourneyReference = omittedSingleActiveJourneyReference(
     currentMessage,
     context,
@@ -1744,6 +1760,7 @@ export function parseSemanticTurnResponse(
   // order even when a degraded model drifts into the Restaurant domain. The
   // product is still resolved against the live OTOP catalog before execution.
   const explicitOtopShippingPurchase = Boolean(currentMessage)
+    && !currentExplicitNoTransaction
     && /สั่งซื้อ/u.test(currentMessage)
     && /(?:จัดส่ง|ส่งถึง|ส่งไป)/u.test(currentMessage)
     && /ที่อยู่/u.test(currentMessage)
@@ -1774,6 +1791,7 @@ export function parseSemanticTurnResponse(
   // date/time the model omitted; menu lines and contact data remain model-
   // supplied and are still validated by the preorder task policy.
   const explicitRestaurantPreorder = domain === 'restaurant'
+    && !currentExplicitNoTransaction
     && action === 'order'
     && speechAct === 'transaction_request'
     && Array.isArray(entities.items)
@@ -1799,6 +1817,7 @@ export function parseSemanticTurnResponse(
   // the normal Restaurant task policy still refuses execution if anything
   // required remains missing.
   const explicitRestaurantTableBooking = domain === 'restaurant'
+    && !currentExplicitNoTransaction
     && Boolean(currentMessage)
     && /(?:โต๊ะ|ที่นั่ง)/u.test(currentMessage)
     && hasStandaloneTransactionRequest(currentMessage);
@@ -1820,7 +1839,8 @@ export function parseSemanticTurnResponse(
   // Thai customers commonly state a one-night stay as a compact range
   // ("17-18 ตุลาคม 2569").  Repair an omitted range on an explicit Stay
   // commit without guessing a property or availability.
-  if (domain === 'stay' && Boolean(currentMessage) && hasStandaloneTransactionRequest(currentMessage)) {
+  if (domain === 'stay' && !currentExplicitNoTransaction
+      && Boolean(currentMessage) && hasStandaloneTransactionRequest(currentMessage)) {
     action = 'book';
     speechAct = 'transaction_request';
     informationNeed = 'none';
@@ -1837,7 +1857,8 @@ export function parseSemanticTurnResponse(
   // pickup value override explicit current-turn shipping language.  Recover
   // only the address text after the explicit "ที่อยู่" label; executors still
   // validate SKU, quantity and stock from the authoritative live catalog.
-  if (domain === 'otop' && Boolean(currentMessage) && hasStandaloneTransactionRequest(currentMessage)
+  if (domain === 'otop' && !currentExplicitNoTransaction
+      && Boolean(currentMessage) && hasStandaloneTransactionRequest(currentMessage)
       && /(?:จัดส่ง|ส่งถึง|ส่งไป)/u.test(currentMessage)) {
     entities.fulfillmentType = 'shipping';
     if (entities.shippingAddress === undefined) {
@@ -1874,6 +1895,7 @@ export function parseSemanticTurnResponse(
   // incidental availability label must not route the turn back into the
   // intentionally unavailable cafe knowledge adapter.
   const explicitCafeInquiry = domain === 'cafe'
+    && !currentExplicitNoTransaction
     && action === 'order'
     && speechAct === 'transaction_request'
     && typeof entities.question === 'string'
