@@ -135,3 +135,25 @@ test('OTOP language hotfix covers visible credit and localized metadata', () => 
   assert.match(mapJs, /map_meta_desc/);
   assert.doesNotMatch(store, /id="storeLanguage"[^]*id="storeLanguage"/);
 });
+
+
+test('non-Thai OTOP dictionaries contain no accidental Thai-script leakage', () => {
+  const i18n = read('assets/scripts/otop-i18n.js');
+  const markers = [
+    ['en','    en:{','    zh:{'],
+    ['zh','    zh:{','    lo:{'],
+    ['lo','    lo:{','    vi:{'],
+    ['vi','    vi:{','  };'],
+  ] as const;
+  for (const [lang,startMarker,endMarker] of markers) {
+    const start = i18n.indexOf(startMarker);
+    const end = i18n.indexOf(endMarker, start + startMarker.length);
+    assert.ok(start >= 0 && end > start, `missing OTOP ${lang} dictionary`);
+    const block = i18n.slice(start, end).replaceAll('฿','');
+    assert.doesNotMatch(block, /[ก-๙]/, `${lang} OTOP dictionary contains Thai-script leakage`);
+  }
+
+  const mapJs = read('assets/scripts/otop-map.js');
+  assert.doesNotMatch(mapJs, /zh:'[^']*[ก-๙]/);
+  assert.doesNotMatch(mapJs, /lo:'[^']*[ก-๙]/);
+});
