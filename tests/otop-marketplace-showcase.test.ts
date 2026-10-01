@@ -48,7 +48,7 @@ test('luxury commerce hotfix adds smart header, merchandising rail and distinct 
   assert.ok(html.includes('function initSmartHeader()'));
   assert.ok(html.includes("header.classList.add('is-hidden')"));
   assert.ok(html.includes('id="merchRail"'));
-  assert.ok(html.includes('Selected by ทำมา-ชาติ'));
+  assert.ok(html.includes('คัดสรรโดย ทำมา-ชาติ'));
   assert.ok(html.includes("title:'สวมใส่ & งานผ้า'"));
   assert.ok(html.includes("title:'ของกิน & ของฝาก'"));
   assert.ok(html.includes("title:'บ้าน & การดูแลตัวเอง'"));
