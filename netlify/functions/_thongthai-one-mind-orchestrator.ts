@@ -1141,7 +1141,17 @@ async function resolveSemanticTurn(
     const hasJourneyPlan = taskState.activeTask?.type === 'journey_planning'
       || taskState.suspendedTask?.type === 'journey_planning'
       || context.activeDomain === 'journey';
-    const safeJourneyContinuation = Boolean(
+    const boundedJourneyDateContinuation = Boolean(
+      hasJourneyPlan
+      && modelTurn.domain === 'journey'
+      && modelTurn.action === 'modify'
+      && typeof modelTurn.entities.date === 'string'
+      && modelTurn.references.some(reference =>
+        reference.refersToPriorContext && reference.resolvedFromConversation === true)
+      && modelTurn.needsClarification === false
+      && modelTurn.speechAct !== 'transaction_request'
+    );
+    const safeJourneyContinuation = boundedJourneyDateContinuation || Boolean(
       hasJourneyPlan
       && modelTurn.domain === 'journey'
       && (modelTurn.action === 'modify' || modelTurn.action === 'correct_previous')
