@@ -1,0 +1,23 @@
+name: Phase 2 Wave B Live
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  wave-b:
+    if: contains(github.event.pull_request.title, '[run wave-b]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run Restaurant + OTOP real production safety gauntlet
+        run: npx tsx scripts/run-phase2-live-safety-gauntlet.ts
