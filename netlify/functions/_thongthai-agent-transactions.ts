@@ -1219,6 +1219,10 @@ async function getPreparedOtopOrder(
   };
 }
 
+export function agentOtopCheckoutIdempotencyKey(confirmationId: string): string {
+  return `thongthai-agent-otop:${confirmationId.trim()}`;
+}
+
 async function commitPreparedOtopOrder(
   args: Record<string, unknown>,
   context: ThongthaiAgentTransactionContext,
@@ -1264,6 +1268,7 @@ async function commitPreparedOtopOrder(
     shippingAddress:p.shippingAddress,
     note:p.note,
     environment:mode.environment,
+    checkoutIdempotencyKey:agentOtopCheckoutIdempotencyKey(prepared.confirmationId),
   });
   const notificationStatus=mode.environment==='live'
     ? await dispatchCreatedTransactionNotification('otop_order',created.id)
