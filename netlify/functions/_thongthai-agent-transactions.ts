@@ -816,6 +816,218 @@ async function commitPreparedStayBooking(
   };
 }
 
+async function loadPreparedRestaurantPreorder(guestDbId: string): Promise<PreparedRestaurantPreorder | null> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const raw = snapshot.state[RESTAURANT_PREORDER_STATE_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Partial<PreparedRestaurantPreorder>;
+  if (value.version !== 1 || value.kind !== 'restaurant_preorder' || typeof value.confirmationId !== 'string') return null;
+  return value as PreparedRestaurantPreorder;
+}
+
+async function savePreparedRestaurantPreorder(guestDbId: string, value: PreparedRestaurantPreorder): Promise<void> {
+  const ok = await patchGuestAgentState(guestDbId, { set: { [RESTAURANT_PREORDER_STATE_KEY]: value } });
+  if (!ok) throw new Error('prepared_restaurant_preorder_state_unavailable');
+}
+
+function normalizeMenuName(value: string): string {
+  return value.trim().replace(/\s+/g, '').toLowerCase();
+}
+
+async function prepareRestaurantPreorder(
+  args: Record<string, unknown>,
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok: false, error: 'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+
+  const date = textArg(args, 'date', 10);
+  const time = textArg(args, 'time', 5);
+  const customerName = textArg(args, 'customer_name', 160);
+  const phone = textArg(args, 'phone', 40);
+  const email = textArg(args, 'email', 200);
+  const note = textArg(args, 'note', 600);
+  const rawItems = Array.isArray(args.items) ? args.items : [];
+
+  const missing: string[] = [];
+  if (!validDate(date)) missing.push('date');
+  if (!validTime(time)) missing.push('time');
+  if (!customerName) missing.push('customer_name');
+  if (!validPhone(phone)) missing.push('phone');
+  if (!rawItems.length) missing.push('items');
+  if (missing.length) return { ok: false, error: 'missing_or_invalid_fields', missing_fields: missing };
+
+  const menu = await listRestaurantMenu();
+  const resolved: PreparedRestaurantPreorder['payload']['items'] = [];
+  for (const raw of rawItems.slice(0, 20)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return { ok: false, error: 'invalid_preorder_item' };
+    }
+    const row = raw as Record<string, unknown>;
+    const requestedName = textArg(row, 'name', 180);
+    const quantity = intArg(row, 'quantity', 1, 50);
+    if (!requestedName || !quantity) return { ok: false, error: 'invalid_preorder_item' };
+    const needle = normalizeMenuName(requestedName);
+    const exact = menu.find(item => normalizeMenuName(item.name) === needle);
+    const candidates = exact ? [exact] : menu.filter(item =>
+      normalizeMenuName(item.name).includes(needle) || needle.includes(normalizeMenuName(item.name))
+    );
+    if (candidates.length !== 1) {
+      return { ok: false, error: candidates.length ? 'menu_item_ambiguous' : 'menu_item_not_found', requested_name: requestedName };
+    }
+    const item = candidates[0]!;
+    if (!item.is_orderable || item.available_servings < quantity) {
+      return {
+        ok: false,
+        error: 'menu_item_unavailable',
+        menu_name: item.name,
+        requested_quantity: quantity,
+        available_servings: item.available_servings,
+      };
+    }
+    const unitPrice = Number(item.selling_price);
+    resolved.push({ name:item.name, quantity, unitPrice, lineTotal:unitPrice * quantity });
+  }
+
+  const now = new Date();
+  const prepared: PreparedRestaurantPreorder = {
+    version: 1,
+    kind: 'restaurant_preorder',
+    status: 'prepared',
+    confirmationId: randomUUID(),
+    preparedEventId: context.eventId,
+    preparedAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + PREPARED_TTL_MS).toISOString(),
+    environment: mode.environment,
+    payload: {
+      date: date!,
+      time: time!,
+      items: resolved,
+      customerName: customerName!,
+      phone: phone!,
+      email,
+      note,
+      expectedTotal: resolved.reduce((sum,item) => sum + item.lineTotal, 0),
+    },
+  };
+  await savePreparedRestaurantPreorder(context.guestDbId, prepared);
+
+  return {
+    ok: true,
+    prepared: true,
+    confirmation_id: prepared.confirmationId,
+    expires_at: prepared.expiresAt,
+    summary: {
+      date: prepared.payload.date,
+      time: prepared.payload.time,
+      items: prepared.payload.items,
+      expected_total: prepared.payload.expectedTotal,
+      currency: 'THB',
+      customer_name: prepared.payload.customerName,
+      phone: prepared.payload.phone,
+    },
+    confirmation_required: true,
+    exact_confirmation_phrase_th: 'ยืนยันสั่ง',
+    instruction: 'Do not call commit_prepared_restaurant_preorder in this same customer turn. Show the exact summary and ask for explicit confirmation.',
+  };
+}
+
+async function getPreparedRestaurantPreorder(
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok: false, error: 'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+  const prepared = await loadPreparedRestaurantPreorder(context.guestDbId);
+  if (!prepared) return { ok: true, prepared: false };
+  if (prepared.environment !== mode.environment) return { ok: true, prepared: false };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) return { ok: true, prepared: false, expired: true };
+  if (prepared.status === 'committed') {
+    return { ok:true, prepared:false, committed:true, confirmation_id:prepared.confirmationId, result:prepared.result ?? null };
+  }
+  return {
+    ok: true,
+    prepared: true,
+    confirmation_id: prepared.confirmationId,
+    expires_at: prepared.expiresAt,
+    summary: {
+      date: prepared.payload.date,
+      time: prepared.payload.time,
+      items: prepared.payload.items,
+      expected_total: prepared.payload.expectedTotal,
+      currency: 'THB',
+      customer_name: prepared.payload.customerName,
+      phone: prepared.payload.phone,
+    },
+    exact_confirmation_phrase_th: 'ยืนยันสั่ง',
+  };
+}
+
+async function commitPreparedRestaurantPreorder(
+  args: Record<string, unknown>,
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok: false, error: 'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+  const confirmationId = textArg(args, 'confirmation_id', 80);
+  if (!confirmationId) return { ok: false, error: 'confirmation_id_required' };
+  const prepared = await loadPreparedRestaurantPreorder(context.guestDbId);
+  if (!prepared || prepared.confirmationId !== confirmationId) return { ok:false, error:'prepared_restaurant_preorder_not_found' };
+  if (prepared.status === 'committed' && prepared.result) return { ok:true, committed:true, replayed:true, ...prepared.result };
+  if (prepared.environment !== mode.environment) return { ok:false, error:'prepared_transaction_environment_mismatch' };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) return { ok:false, error:'prepared_transaction_expired' };
+  if (prepared.preparedEventId === context.eventId) return { ok:false, error:'same_turn_commit_blocked' };
+  if (!currentTurnExplicitlyConfirmsPreparedBooking(context.message)) {
+    return { ok:false, error:'explicit_customer_confirmation_required', exact_confirmation_phrase_th:'ยืนยันสั่ง' };
+  }
+
+  if (mode.environment === 'test') {
+    await upsertCustomerAccount({
+      guestDbId: context.guestDbId,
+      fullName: prepared.payload.customerName,
+      phone: prepared.payload.phone,
+      email: prepared.payload.email,
+      isTest: true,
+      testLabel: 'Thongthai Agent restaurant transaction certification',
+    });
+  }
+
+  const created = await createRestaurantPreorder({
+    guestDbId: context.guestDbId,
+    channel: context.channel,
+    date: prepared.payload.date,
+    time: prepared.payload.time,
+    items: prepared.payload.items.map(item => ({ name:item.name, quantity:item.quantity })),
+    customerName: prepared.payload.customerName,
+    phone: prepared.payload.phone,
+    email: prepared.payload.email,
+    note: prepared.payload.note,
+  });
+
+  const result = {
+    preorderId: created.id,
+    preorderCode: created.preorderCode,
+    status: created.status,
+    totalAmount: Number(created.totalAmount),
+    notificationStatus: created.notificationStatus,
+  };
+  await savePreparedRestaurantPreorder(context.guestDbId, { ...prepared, status:'committed', result });
+  return {
+    ok: true,
+    committed: true,
+    replayed: Boolean(created.duplicate),
+    preorder_code: created.preorderCode,
+    preorder_status: created.status,
+    total_amount: created.totalAmount,
+    requested_for: created.requestedFor,
+    environment: created.environment,
+    notification_status: created.notificationStatus,
+    customer_copy_rule: 'This is a preorder created by operations. Do not say payment is verified unless payment status separately confirms it.',
+  };
+}
+
 export async function executeThongthaiTransactionTool(
   name: string,
   rawArgs: unknown,
@@ -838,6 +1050,12 @@ export async function executeThongthaiTransactionTool(
     result = await getPreparedStayBooking(context);
   } else if (name === 'commit_prepared_stay_booking') {
     result = await commitPreparedStayBooking(args, context);
+  } else if (name === 'prepare_restaurant_preorder') {
+    result = await prepareRestaurantPreorder(args, context);
+  } else if (name === 'get_prepared_restaurant_preorder') {
+    result = await getPreparedRestaurantPreorder(context);
+  } else if (name === 'commit_prepared_restaurant_preorder') {
+    result = await commitPreparedRestaurantPreorder(args, context);
   } else {
     result = { ok: false, error: 'unknown_transaction_tool' };
   }
