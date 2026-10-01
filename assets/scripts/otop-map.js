@@ -47,13 +47,22 @@
   function displayProvinceName(province) {
     return i18n()?.provinceName(province.provinceId) || province.provinceName;
   }
+  function localizedProvinceStory(province) {
+    const fallback = {
+      title: province.experienceTitle,
+      description: province.experienceDescription,
+    };
+    return window.OTOP_PROVINCE_TRANSLATIONS?.get(
+      province.provinceId,
+      i18n()?.lang() || 'th',
+      fallback,
+    ) || fallback;
+  }
   function displayExperienceTitle(province) {
-    if (!i18n() || i18n().lang() === 'th') return province.experienceTitle;
-    return tr('province_experience_title', { province: displayProvinceName(province) });
+    return localizedProvinceStory(province).title;
   }
   function displayExperienceDescription(province) {
-    if (!i18n() || i18n().lang() === 'th') return province.experienceDescription;
-    return tr('province_experience_desc', { province: displayProvinceName(province) });
+    return localizedProvinceStory(province).description;
   }
   function applyPageMeta() {
     const lang = i18n()?.lang() || 'th';
@@ -279,14 +288,16 @@
     }
   }
 
-  window.addEventListener('otop:i18n-change', () => {
+  function rerenderForLanguage() {
     applyPageMeta();
     if (state.provinces.length) {
       renderMap();
       renderQuickList();
       renderPanel();
     }
-  });
+  }
+  window.addEventListener('otop:i18n-ready', rerenderForLanguage);
+  window.addEventListener('otop:i18n-change', rerenderForLanguage);
   applyPageMeta();
   initialise();
 })();
