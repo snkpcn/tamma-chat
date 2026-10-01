@@ -23,11 +23,18 @@ test('showcase respects reduced motion and has a non-video fallback', () => {
   assert.ok(html.includes("const reduce=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches"));
 });
 
-test('mobile commerce cards keep the product image unobstructed', () => {
-  assert.ok(html.includes('.grid{grid-template-columns:1fr;gap:34px}'));
-  assert.ok(html.includes('.card{border:0;border-radius:0;background:transparent;overflow:visible;box-shadow:none}'));
-  assert.ok(html.includes('.photo{aspect-ratio:1/1;border-radius:20px'));
-  assert.ok(html.includes('.cardBody{padding:0 4px}'));
+test('mobile commerce keeps imagery dominant and removes the two-row hero navigation', () => {
+  assert.ok(html.includes('.nav{display:flex;align-items:center;padding:9px 14px;min-height:56px'));
+  assert.ok(html.includes('.provinceField,.searchField{display:none}'));
+  assert.ok(html.includes('.categoryGrid{grid-template-columns:1fr;gap:34px}'));
+  assert.ok(html.includes('.categoryGrid .featureCard .photo,.categoryGrid .card:not(.featureCard) .photo{aspect-ratio:1/1'));
+});
+
+test('product media is full-screen and thumbnails no longer overlay the image', () => {
+  assert.ok(html.includes('.productPanel{position:absolute;inset:0;width:100%;height:100%;max-height:none'));
+  assert.ok(html.includes('.detailMain>img.productImg{width:100%;height:100%;object-fit:contain}'));
+  assert.ok(html.includes('.detailThumbs{position:static;'));
+  assert.ok(html.includes('.detailMedia{height:88dvh;min-height:620px'));
 });
 
 test('product detail remains story-first after showcase redesign', () => {
@@ -35,4 +42,15 @@ test('product detail remains story-first after showcase redesign', () => {
   assert.ok(html.includes('VALUE OF THIS PIECE'));
   assert.ok(html.includes("item('วิธีทำ',s.craftProcess,true)"));
   assert.ok(html.includes("item('ทำไมต้องเป็นที่นี่',s.whyHere,true)"));
+});
+
+test('luxury commerce hotfix adds smart header, merchandising rail and distinct categories', () => {
+  assert.ok(html.includes('function initSmartHeader()'));
+  assert.ok(html.includes("header.classList.add('is-hidden')"));
+  assert.ok(html.includes('id="merchRail"'));
+  assert.ok(html.includes('Selected by ทำมา-ชาติ'));
+  assert.ok(html.includes("title:'สวมใส่ & งานผ้า'"));
+  assert.ok(html.includes("title:'ของกิน & ของฝาก'"));
+  assert.ok(html.includes("title:'บ้าน & การดูแลตัวเอง'"));
+  assert.ok(html.includes('Number(p.completedUnits||0)>0'));
 });

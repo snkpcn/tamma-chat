@@ -8,6 +8,7 @@ import {
   type ShippingSettings,
 } from './_member-delivery';
 import { resolveOtopStoreStory } from './_otop-store-story';
+import { completedUnitsByProduct } from './_otop-merchandising';
 import { ALL_OTOP_PRODUCTS } from '../../src/data/otop';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -238,14 +239,29 @@ export async function loadShippingSettings(): Promise<ShippingSettings> {
   };
 }
 
+async function loadOtopCompletedUnits(): Promise<Map<string, number>> {
+  const completedResponse = await dbFetch(
+    'otop_orders?environment=eq.live&status=eq.completed&select=id&limit=1000',
+  );
+  const completedOrders = await completedResponse.json() as Array<{ id: string }>;
+  const ids = completedOrders.map(order => order.id).filter(id => UUID_RE.test(id));
+  if (!ids.length) return new Map();
+  const itemResponse = await dbFetch(
+    `otop_order_items?order_id=in.(${ids.map(encodeURIComponent).join(',')})&select=order_id,product_id,quantity&limit=5000`,
+  );
+  const items = await itemResponse.json() as Array<{ order_id: string; product_id: string; quantity: number | string }>;
+  return completedUnitsByProduct(ids, items);
+}
+
 export async function loadOtopStoreCatalog() {
-  const [productResponse, settings] = await Promise.all([
+  const [productResponse, settings, completedUnits] = await Promise.all([
     dbFetch(
       'otop_products?environment=eq.live&active=eq.true&verified=eq.true&stock_qty=gt.0'
       + '&select=id,sku,name,description,price,stock_qty,metadata,otop_product_images(public_url,alt_text,sort_order,is_primary)'
       + '&order=sku.asc',
     ),
     loadShippingSettings(),
+    loadOtopCompletedUnits(),
   ]);
   const products = await productResponse.json() as Array<Record<string, unknown> & {
     otop_product_images?: Array<Record<string, unknown>>;
@@ -263,6 +279,7 @@ export async function loadOtopStoreCatalog() {
         description: typeof row.description === 'string' ? row.description : null,
         price: Number(row.price),
         stock: Number(row.stock_qty),
+        completedUnits: completedUnits.get(String(row.id)) ?? 0,
         metadata,
         story: resolvedStory.story,
         storySource: resolvedStory.source,
