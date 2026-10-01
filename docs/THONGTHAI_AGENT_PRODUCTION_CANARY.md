@@ -9,9 +9,10 @@ Production rollout configuration (2026-10-01):
 - LINE rollout: 100% read-only
 - Facebook rollout: 100% read-only
 - Legacy global rollout fallback: 10%
-- Agent transaction tools: not exposed in the production saved Agent
-- Live Agent transaction flag: OFF
-- Weather, verified location, and transaction intents remain on the established core paths
+- Agent transaction tools: `prepare_*` and `get_prepared_*` exposed; all `commit_prepared_*` tools absent
+- Prepare-only public rollout: 0%; one synthetic WEB certification guest allowlisted
+- Live Agent transaction/commit flag: OFF
+- Weather and verified location remain on established core paths; non-allowlisted transaction intents remain on established executors
 - Safety, escalation, and service-feedback guardrails run before Agent routing
 - Primary Agent failures do not cascade into a second paid LLM call on the same turn
 - Owner cost ceiling remains 5 THB per customer conversation
