@@ -1,15 +1,15 @@
 async function main(): Promise<void> {
   const PRODUCTION_URL = 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
-  const GUEST_ID = 'b5972d35-6d35-5334-b1d8-a3ef3727d39e';
+  const GUEST_ID = 'd6eac04f-2d29-5d32-8dcb-2f6cd4fcf0aa';
   
   type Turn = { message:string; eventId:string };
   const turns: Turn[] = [
     {
-      eventId:'agent-prepare-only-cert-1',
+      eventId:'agent-prepare-only-cert2-1',
       message:'ขอจองขี่ม้าน้องภาราดร 30 นาที วันที่ 16 ตุลาคม 2569 เวลา 10:00 จำนวน 1 คน ชื่อ PREPARE TEST โทร 0000000011 ขอให้เตรียมรายละเอียดให้ตรวจสอบก่อนครับ',
     },
     {
-      eventId:'agent-prepare-only-cert-2',
+      eventId:'agent-prepare-only-cert2-2',
       message:'ยืนยันจองครับ',
     },
   ];
@@ -61,8 +61,9 @@ async function main(): Promise<void> {
   
   const first=String(results[0]?.response??'');
   const second=String(results[1]?.response??'');
-  const firstPreparedSignal=/ยืนยันจอง|ตรวจสอบ|รายละเอียด|เตรียม/u.test(first);
-  const secondStillUnsubmitted=/ยัง.*ไม่.*(?:ส่ง|จอง)|ไม่ได้.*(?:ส่ง|จอง)|ยังไม่ได้.*เข้าระบบ|ยังไม่ถูกส่ง/u.test(second);
+  const firstPreparedSignal=/ยืนยันจอง|ร่าง|รายการ.*เตรียม|รายละเอียด.*ตรวจสอบ/u.test(first)
+    && !/ไม่สามารถสร้างร่าง|สร้างร่าง.*ไม่สำเร็จ|ระบบรับคำขอจองยังไม่พร้อม/u.test(first);
+  const secondStillUnsubmitted=/ยัง.*ไม่.*(?:ส่ง|จอง)|ไม่ได้.*(?:ส่ง|จอง)|ยังไม่ได้.*เข้าระบบ|ยังไม่ถูกส่ง|ไม่สามารถ.*ยืนยัน/u.test(second);
   const passed=results.every(result=>result.pass===true) && firstPreparedSignal && secondStillUnsubmitted;
   
   console.log(JSON.stringify({
