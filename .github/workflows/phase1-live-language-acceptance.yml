@@ -56,3 +56,7 @@ jobs:
           THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
           THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
         run: npx tsx scripts/run-real-line-16-turn-live-acceptance.ts
+
+      - name: Run Phase 2 final production Safety Gauntlet
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, 'Phase 2 Final Closeout')
+        run: npx tsx scripts/run-phase2-live-safety-gauntlet.ts
