@@ -158,7 +158,6 @@ async function sendMessage(sessionId: string, input: AgentShadowTurnInput): Prom
   await openai<void>(`/agents/sessions/${sessionId}/events`, {
     method: 'POST',
     body: JSON.stringify({
-      idempotency_key: `${input.eventId}:agent-shadow`.slice(0, 256),
       events: [{
         type: 'agent.session.input.message',
         input: [{
