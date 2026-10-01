@@ -46,7 +46,7 @@ if (heroStart < 0 || heroInner < 0) {
 const assetBlock = `  <div class="hero-bg">
     <picture>
       <source srcset="assets/brand/backgrounds/hero-aerial-estate-1920.avif" type="image/avif">
-      <img src="assets/brand/backgrounds/hero-aerial-estate-1920.webp" width="1920" height="1080" fetchpriority="high" decoding="async" alt="ภาพมุมสูงของทำมา-ชาติและภูมิทัศน์อีสานยามเย็น">
+      <img src="assets/brand/backgrounds/hero-aerial-estate-1920.webp" width="1920" height="1080" fetchpriority="high" decoding="async" alt="ภาพมุมสูงของทำมา-ชาติและภูมิทัศน์อีสานยามเย็น" data-i18n-alt="hero_image_alt">
     </picture>
   </div>
 `;
@@ -55,31 +55,31 @@ html = html.slice(0, heroStart) + assetBlock + html.slice(heroInner);
 
 replaceImageByAlt(
   'ตำมา-ชาติ พื้นที่รับประทานอาหารกลางแจ้งยามพลบค่ำ',
-  '<img src="assets/brand/backgrounds/dining-restaurant-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ตำมา-ชาติ พื้นที่รับประทานอาหารกลางแจ้งยามพลบค่ำ">',
+  '<img src="assets/brand/backgrounds/dining-restaurant-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ตำมา-ชาติ พื้นที่รับประทานอาหารกลางแจ้งยามพลบค่ำ" data-i18n-alt="dining_image_alt">',
 );
 replaceImageByAlt(
   'ทำมา-ชาติ เฮือนสเตย์ เรือนพักริมน้ำยามเย็น',
-  '<img src="assets/brand/backgrounds/stay-guest-room-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ทำมา-ชาติ เฮือนสเตย์ ห้องพักที่อบอุ่นและสงบ">',
+  '<img src="assets/brand/backgrounds/stay-guest-room-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ทำมา-ชาติ เฮือนสเตย์ ห้องพักที่อบอุ่นและสงบ" data-i18n-alt="stay_image_alt">',
 );
 replaceImageByAlt(
   'ทำมา-ชาติ ผจญภัย เส้นทางเดินชมท้องทุ่งยามเช้า',
-  '<img src="assets/brand/backgrounds/adventure-garden-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ทำมา-ชาติ ผจญภัย พื้นที่กลางแจ้งและสวนอีสาน">',
+  '<img src="assets/brand/backgrounds/adventure-garden-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ทำมา-ชาติ ผจญภัย พื้นที่กลางแจ้งและสวนอีสาน" data-i18n-alt="adventure_image_alt">',
 );
 replaceImageByAlt(
   'ร้านอินทนิลคอฟฟี่ ณ ทำมา-ชาติ ยามพลบค่ำ',
-  '<img src="assets/brand/backgrounds/inthanin-tadtone-boutique-grade-1536.webp" width="1536" height="1152" loading="lazy" decoding="async" alt="ร้านอินทนิล สาขาตาดโตน ณ ทำมา-ชาติ">',
+  '<img src="assets/brand/backgrounds/inthanin-tadtone-boutique-grade-1536.webp" width="1536" height="1152" loading="lazy" decoding="async" alt="ร้านอินทนิล สาขาตาดโตน ณ ทำมา-ชาติ" data-i18n-alt="inthanin_image_alt">',
 );
 replaceImageByAlt(
   'ผังพื้นที่ทำมา-ชาติจากมุมสูง แสดงจุดเชื่อมโยงประสบการณ์ต่าง ๆ',
-  '<img src="assets/brand/backgrounds/ecosystem-aerial-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ภาพมุมสูงของพื้นที่ทำมา-ชาติและเส้นทางรอบบึง">',
+  '<img src="assets/brand/backgrounds/ecosystem-aerial-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ภาพมุมสูงของพื้นที่ทำมา-ชาติและเส้นทางรอบบึง" data-i18n-alt="ecosystem_image_alt">',
 );
 replaceImageByAlt(
   'สมุดบันทึกวางอยู่บนโต๊ะไม้ริมสระน้ำยามเย็น',
-  '<img src="assets/brand/backgrounds/hero-lakeside-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="บ้านพักริมน้ำยามเย็นสำหรับเขียนบันทึกการเดินทาง">',
+  '<img src="assets/brand/backgrounds/hero-lakeside-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="บ้านพักริมน้ำยามเย็นสำหรับเขียนบันทึกการเดินทาง" data-i18n-alt="journal_image_alt">',
 );
 replaceImageByAlt(
   'มุมต้อนรับอบอุ่นภายในทำมา-ชาติ เฮือนสเตย์',
-  '<img src="assets/brand/backgrounds/rewards-pavilion-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ศาลากลางสวนสำหรับแขกที่กลับมาเยือนทำมา-ชาติ">',
+  '<img src="assets/brand/backgrounds/rewards-pavilion-1920.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="ศาลากลางสวนสำหรับแขกที่กลับมาเยือนทำมา-ชาติ" data-i18n-alt="rewards_image_alt">',
 );
 function removeImageContainer(className) {
   html = html.replace(
@@ -106,17 +106,17 @@ if (communityStart < 0 || communityTail < 0) {
 const communityBlock = `    <div class="community-map-gateway fade-up">
       <article class="community-feature community-story-feature">
         <div class="community-feature-media">
-          <img class="community-feature-bg" src="assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp" width="3840" height="2560" loading="lazy" decoding="async" alt="ช่างทอผ้าไหมบ้านเขว้ากำลังทอผ้าบนกี่">
-          <span class="community-photo-credit">ภาพต้นฉบับ Nation Photo · ปรับความละเอียด 4K</span>
+          <img class="community-feature-bg" src="assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp" width="3840" height="2560" loading="lazy" decoding="async" alt="ช่างทอผ้าไหมบ้านเขว้ากำลังทอผ้าบนกี่" data-i18n-alt="community_silk_alt">
+          <span class="community-photo-credit" data-i18n="otop_photo_credit">ภาพต้นฉบับ Nation Photo · ปรับความละเอียด 4K</span>
         </div>
         <div class="community-feature-copy">
           <img class="community-feature-logo" src="assets/brand/logos/otop-logo-brown-trimmed.webp" width="352" height="347" loading="lazy" decoding="async" alt="OTOP">
-          <div class="card-kicker">ของดีชัยภูมิ · บ้านเขว้า</div>
-          <h3>ผ้าไหมบ้านเขว้า งานฝีมือที่ยังทอจริง</h3>
-          <p>ชาวบ้านเขว้าสืบทอดการทอผ้าไหมมัดหมี่มาเกือบ 200 ปี ตั้งแต่การสาวไหม มัดลาย ย้อมสี จนถึงทอด้วยกี่ทีละเส้น ลายหมี่คั่นขอนารีจึงไม่ใช่แค่ลวดลายสวยงาม แต่เป็นฝีมือและเรื่องราวของคนชัยภูมิที่อยู่ในผ้าทุกผืน</p>
+          <div class="card-kicker" data-i18n="otop_empty_kicker">ของดีชัยภูมิ · บ้านเขว้า</div>
+          <h3 data-i18n="otop_empty_heading">ผ้าไหมบ้านเขว้า งานฝีมือที่ยังทอจริง</h3>
+          <p data-i18n="otop_empty_body">ชาวบ้านเขว้าสืบทอดการทอผ้าไหมมัดหมี่มาเกือบ 200 ปี ตั้งแต่การสาวไหม มัดลาย ย้อมสี จนถึงทอด้วยกี่ทีละเส้น ลายหมี่คั่นขอนารีจึงไม่ใช่แค่ลวดลายสวยงาม แต่เป็นฝีมือและเรื่องราวของคนชัยภูมิที่อยู่ในผ้าทุกผืน</p>
           <div class="community-map-actions">
-            <a class="btn btn-primary community-map-launch" href="otop-map.html">เปิดแผนที่ของดีอีสาน</a>
-            <a class="btn btn-outline" href="otop.html">ดูสินค้า OTOP ชัยภูมิ</a>
+            <a class="btn btn-primary community-map-launch" href="otop-map.html" data-i18n="otop_ask">เปิดแผนที่ของดีอีสาน</a>
+            <a class="btn btn-outline" href="otop.html" data-i18n="otop_view_journey">ดูสินค้า OTOP ชัยภูมิ</a>
           </div>
         </div>
       </article>
@@ -197,16 +197,19 @@ html = html.replace(
 );
 
 const hotspotLabels = new Map([
-  ['Inthanin', 'กาแฟ Inthanin'],
-  ['Reception', 'ต้อนรับ'],
-  ['Dining', 'ร้านอาหาร'],
-  ['Stay', 'บ้านพัก'],
-  ['Adventure', 'กิจกรรม'],
-  ['Journal', 'สมุดบันทึก'],
-  ['Rewards', 'สิทธิพิเศษ'],
+  ['Inthanin', ['กาแฟ Inthanin', 'hotspot_inthanin_label']],
+  ['Reception', ['ต้อนรับ', 'hotspot_reception_label']],
+  ['Dining', ['ร้านอาหาร', 'hotspot_dining_label']],
+  ['Stay', ['บ้านพัก', 'hotspot_stay_label']],
+  ['Adventure', ['กิจกรรม', 'hotspot_adventure_label']],
+  ['Journal', ['สมุดบันทึก', 'hotspot_journal_label']],
+  ['Rewards', ['สิทธิพิเศษ', 'hotspot_return_label']],
 ]);
-for (const [oldLabel, newLabel] of hotspotLabels) {
-  html = html.replace(`<span class="hotspot-label">${oldLabel}</span>`, `<span class="hotspot-label">${newLabel}</span>`);
+for (const [oldLabel, [newLabel, i18nKey]] of hotspotLabels) {
+  html = html.replace(
+    new RegExp(`<span class="hotspot-label"(?: data-i18n="[^"]+")?>${escapeRegExp(oldLabel)}</span>`, 'u'),
+    `<span class="hotspot-label" data-i18n="${i18nKey}">${newLabel}</span>`,
+  );
 }
 
 // Keep the Thai page readable even before the translation runtime hydrates.

@@ -20,4 +20,4 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run exact Netlify build command
-        run: node scripts/apply-chat-polish.mjs && node scripts/apply-restaurant-constraint-copy.mjs && node scripts/phase-o-build-gate.mjs && node --import tsx scripts/write-semantic-certification-artifact.ts
+        run: node scripts/apply-isan-boutique-phase1.mjs && node scripts/public-i18n-build-gate.mjs && node scripts/apply-chat-polish.mjs && node scripts/apply-restaurant-constraint-copy.mjs && node scripts/phase-o-build-gate.mjs && node --import tsx scripts/write-semantic-certification-artifact.ts
