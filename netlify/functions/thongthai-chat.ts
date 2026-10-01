@@ -4939,18 +4939,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  // Local-concierge questions must retain their deterministic verified-fact
-  // fast path BEFORE the semantic supervisor. Production proved the later
-  // cutover guard was too late: an available model could classify
-  // "ร้านอยู่แถวไหนคะ" as restaurant/request_location and immediately
-  // compose from restaurant-menu knowledge, never reaching the canonical
-  // owner-verified location responder below.
-  //
-  // Use the exact same predicate later used to preserve the local-concierge
-  // fast path, so supervision and final cutover cannot disagree.
-  const preserveLocalConciergeFastPath = !hasExplicitTransactionIntent(request.message)
-    && Boolean(classifyLocalConciergeQuestion(request.message));
-
   // Human Conversation Recovery: UNDERSTAND FIRST.
   //
   // Safety/escalation/service-feedback responders above may remain
@@ -4959,7 +4947,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // regex responders, or other legacy domain routers. If One-Mind says the
   // turn needs a real transaction executor, it returns legacy_required and
   // the unchanged executor path below still owns the write.
-  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1' && !preserveLocalConciergeFastPath) {
+  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
+      && topLevelSemanticIntent !== 'LOCATION_REQUEST'
+      && topLevelSemanticIntent !== 'WEATHER_REQUEST') {
     try {
       const oneMind = await processOneMindCustomerTurn({
         channel,
@@ -5786,6 +5776,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // deterministicLocalConciergeResponse itself uses (including its
   // explicit-transaction-intent yield), so this guard and that function
   // can never disagree about which messages this covers.
+  const preserveLocalConciergeFastPath = !hasExplicitTransactionIntent(request.message)
+    && Boolean(classifyLocalConciergeQuestion(request.message));
+
   // Phase 4 Cafe: the production One-Mind cutover runs before the legacy
   // deterministic responder. Preserve this read-only class exactly like
   // restaurant/local-concierge so the honest no-verified-data boundary cannot
