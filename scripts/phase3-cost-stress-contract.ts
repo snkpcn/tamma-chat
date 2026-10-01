@@ -22,6 +22,7 @@ import {
   reserveWorstCaseCostUsd,
   usdToThb,
 } from '../netlify/functions/_ai-cost-policy';
+import { reservationInputTokensForAiCall } from '../netlify/functions/_ai-cost-ledger';
 
 export type Phase3StressOwner='deterministic'|'learned_exact'|'learned_fuzzy'|'paid'|'budget_blocked';
 export type Phase3StressRow={
@@ -178,12 +179,6 @@ export function runPhase3CostStress(requestedTurns:number,sample=0):Phase3Stress
   let budgetBlockedTurns=0;
   let arbitraryCliffTurns=0;
   let accidentalLearnedTransactions=0;
-  const reserveUsd=reserveWorstCaseCostUsd(
-    'gpt-5.6-terra',
-    policy.absoluteInputTokens,
-    policy.semanticMaxOutputTokens,
-  );
-
   for(let turn=0;turn<requestedTurns;turn+=1){
     const entry=templates[(turn+sample*7)%templates.length]!;
     const classified=classify(entry);
@@ -197,6 +192,16 @@ export function runPhase3CostStress(requestedTurns:number,sample=0):Phase3Stress
       estimatedInputTokens=estimateInputTokens([prompt,entry.message]);
       inputTokens.push(estimatedInputTokens);
 
+      const reservationInputTokens=reservationInputTokensForAiCall(
+        {callerLabel:'semantic-interpreter'},
+        estimatedInputTokens,
+        policy.absoluteInputTokens,
+      );
+      const reserveUsd=reserveWorstCaseCostUsd(
+        'gpt-5.6-terra',
+        reservationInputTokens,
+        policy.semanticMaxOutputTokens,
+      );
       const wouldExceedCallCeiling=callCount>=policy.maxCallsPerConversation;
       const wouldExceedBudget=cumulativeCostUsd+reserveUsd>policy.maxConversationCostUsd+Number.EPSILON;
       if(wouldExceedCallCeiling||wouldExceedBudget){
