@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   THONGTHAI_AGENT_TOOLS,
+  THONGTHAI_PRODUCTION_PREPARE_TOOLS,
   THONGTHAI_READ_ONLY_TOOLS,
   executeThongthaiAgentTool,
   executeThongthaiReadOnlyTool,
@@ -152,4 +153,21 @@ test('cafe inquiry prepare also fails closed while transaction mode is off', asy
   }));
   assert.equal(result.ok, false);
   assert.equal(result.error, 'transaction_tools_disabled');
+});
+
+
+test('production prepare tool surface exposes drafts/readback but no commit tools', () => {
+  const names = THONGTHAI_PRODUCTION_PREPARE_TOOLS.map(tool => tool.name);
+  assert.ok(names.includes('prepare_activity_booking'));
+  assert.ok(names.includes('get_prepared_activity_booking'));
+  assert.ok(names.includes('prepare_stay_booking'));
+  assert.ok(names.includes('get_prepared_stay_booking'));
+  assert.ok(names.includes('prepare_restaurant_preorder'));
+  assert.ok(names.includes('get_prepared_restaurant_preorder'));
+  assert.ok(names.includes('prepare_otop_order'));
+  assert.ok(names.includes('get_prepared_otop_order'));
+  assert.ok(names.includes('prepare_cafe_inquiry'));
+  assert.ok(names.includes('get_prepared_cafe_inquiry'));
+  assert.ok(names.some(name => THONGTHAI_READ_ONLY_TOOLS.some(tool => tool.name === name)));
+  assert.ok(names.every(name => !name.startsWith('commit_prepared_')));
 });
