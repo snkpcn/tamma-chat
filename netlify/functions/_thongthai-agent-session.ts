@@ -8,7 +8,7 @@ import { persistAiCallCost } from './_ai-cost-store';
 const API_BASE = 'https://api.openai.com/v1';
 const BETA_HEADER = 'agents=v1';
 const SESSION_STATE_KEY = 'thongthaiStagingAgentSession';
-const MAX_TOOL_ROUNDS = 8;
+const MAX_TOOL_ROUNDS = 4;
 const MAX_POLL_ROUNDS = 80;
 const POLL_MS = 150;
 
@@ -56,6 +56,8 @@ type SessionState = {
   lastUsedAt: string;
   turnCount: number;
   cumulativeCostThb: number;
+  costAccountingIncomplete: boolean;
+  lastTurnId?: string;
 };
 
 export type AgentShadowTurnInput = {
@@ -74,11 +76,12 @@ export type AgentShadowTurnResult = {
   toolCalls: string[];
   createdSession: boolean;
   usage: {
-    inputTokens: number;
-    cachedInputTokens: number;
-    outputTokens: number;
-    costUsd: number;
-    costThb: number;
+    available: boolean;
+    inputTokens: number | null;
+    cachedInputTokens: number | null;
+    outputTokens: number | null;
+    costUsd: number | null;
+    costThb: number | null;
   };
   cumulativeCostThb: number;
 };
@@ -119,6 +122,8 @@ function parseState(raw: unknown): SessionState | null {
     lastUsedAt: String(value.lastUsedAt ?? new Date().toISOString()),
     turnCount: Math.max(0, Math.floor(Number(value.turnCount) || 0)),
     cumulativeCostThb: Math.max(0, Number(value.cumulativeCostThb) || 0),
+    costAccountingIncomplete: value.costAccountingIncomplete === true,
+    ...(typeof value.lastTurnId === 'string' && value.lastTurnId ? { lastTurnId: value.lastTurnId } : {}),
   };
 }
 
@@ -174,11 +179,25 @@ async function latestTurn(sessionId: string): Promise<AgentTurn | null> {
   return page.data?.[0] ?? null;
 }
 
+async function retrieveTurn(sessionId: string, turnId: string): Promise<AgentTurn> {
+  return openai<AgentTurn>(`/agents/sessions/${sessionId}/turns/${turnId}`);
+}
+
+async function retrieveTurnWithSettledUsage(sessionId: string, turnId: string): Promise<AgentTurn> {
+  let turn = await retrieveTurn(sessionId, turnId);
+  for (let attempt = 0; attempt < 6 && !turn.usage; attempt += 1) {
+    await sleep(250);
+    turn = await retrieveTurn(sessionId, turnId);
+  }
+  return turn;
+}
+
 async function submitToolResults(
   sessionId: string,
   actions: NonNullable<AgentSession['required_actions']>,
   input: AgentShadowTurnInput,
   toolCalls: string[],
+  toolCache: Map<string, string>,
 ): Promise<void> {
   const events = [];
   for (const action of actions) {
@@ -193,11 +212,16 @@ async function submitToolResults(
       parsedArgs = action.arguments;
     }
     try {
-      const output = await executeThongthaiReadOnlyTool(action.name, parsedArgs, {
-        guestDbId: input.guestDbId,
-        channel: input.channel,
-        environment: input.environment ?? 'live',
-      });
+      const cacheKey = `${action.name}:${JSON.stringify(parsedArgs)}`;
+      let output = toolCache.get(cacheKey);
+      if (output === undefined) {
+        output = await executeThongthaiReadOnlyTool(action.name, parsedArgs, {
+          guestDbId: input.guestDbId,
+          channel: input.channel,
+          environment: input.environment ?? 'live',
+        });
+        toolCache.set(cacheKey, output);
+      }
       events.push({
         type: 'agent.session.input.tool_result',
         turn_id: action.turn_id,
@@ -228,6 +252,7 @@ async function waitForCompletedTurn(
   input: AgentShadowTurnInput,
 ): Promise<{ turn: AgentTurn; toolCalls: string[] }> {
   const toolCalls: string[] = [];
+  const toolCache = new Map<string, string>();
   let toolRounds = 0;
   for (let poll = 0; poll < MAX_POLL_ROUNDS; poll += 1) {
     const session = await retrieveSession(sessionId);
@@ -237,7 +262,7 @@ async function waitForCompletedTurn(
     if (session.status === 'requires_action' || (session.required_actions?.length ?? 0) > 0) {
       toolRounds += 1;
       if (toolRounds > MAX_TOOL_ROUNDS) throw new Error('Agent tool loop exceeded safe shadow limit.');
-      await submitToolResults(sessionId, session.required_actions ?? [], input, toolCalls);
+      await submitToolResults(sessionId, session.required_actions ?? [], input, toolCalls, toolCache);
       continue;
     }
 
@@ -265,15 +290,31 @@ async function outputForTurn(sessionId: string, turnId: string): Promise<string>
 }
 
 function usageFromTurn(turn: AgentTurn): AgentShadowTurnResult['usage'] {
-  const inputTokens = Math.max(0, Math.floor(Number(turn.usage?.input_tokens) || 0));
-  const cachedInputTokens = Math.min(inputTokens, Math.max(0, Math.floor(Number(turn.usage?.input_tokens_details?.cached_tokens) || 0)));
-  const outputTokens = Math.max(0, Math.floor(Number(turn.usage?.output_tokens) || 0));
+  if (!turn.usage) {
+    return {
+      available: false,
+      inputTokens: null,
+      cachedInputTokens: null,
+      outputTokens: null,
+      costUsd: null,
+      costThb: null,
+    };
+  }
+  const inputTokens = Math.max(0, Math.floor(Number(turn.usage.input_tokens) || 0));
+  const cachedInputTokens = Math.min(inputTokens, Math.max(0, Math.floor(Number(turn.usage.input_tokens_details?.cached_tokens) || 0)));
+  const outputTokens = Math.max(0, Math.floor(Number(turn.usage.output_tokens) || 0));
   const model = process.env.THONGTHAI_AGENT_MODEL?.trim() || 'gpt-5.6-terra';
   const costUsd = calculateAiCostUsd(model, { inputTokens, cachedInputTokens, outputTokens });
-  return { inputTokens, cachedInputTokens, outputTokens, costUsd, costThb: usdToThb(costUsd) };
+  return { available: true, inputTokens, cachedInputTokens, outputTokens, costUsd, costThb: usdToThb(costUsd) };
 }
 
 async function persistShadowCost(input: AgentShadowTurnInput, turn: AgentTurn, usage: AgentShadowTurnResult['usage']): Promise<void> {
+  if (!usage.available
+      || usage.inputTokens === null
+      || usage.cachedInputTokens === null
+      || usage.outputTokens === null
+      || usage.costUsd === null
+      || usage.costThb === null) return;
   const model = process.env.THONGTHAI_AGENT_MODEL?.trim() || 'gpt-5.6-terra';
   await persistAiCallCost({
     conversationId: input.conversationId,
@@ -300,6 +341,9 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
 
   const existing = await loadPersistedSession(input.guestDbId);
   const capThb = aiCostPolicy().maxConversationCostUsd * (usdToThb(1));
+  if (existing?.costAccountingIncomplete) {
+    throw new Error('Thongthai Agent shadow usage accounting is still pending; refusing another paid turn.');
+  }
   if (existing && existing.cumulativeCostThb >= capThb) {
     throw new Error('Thongthai Agent shadow conversation cost cap reached.');
   }
@@ -320,16 +364,19 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
       lastUsedAt: new Date().toISOString(),
       turnCount: 0,
       cumulativeCostThb: 0,
+      costAccountingIncomplete: false,
     });
   }
 
   const { turn, toolCalls } = await waitForCompletedTurn(sessionId, input);
   const output = await outputForTurn(sessionId, turn.id);
-  const usage = usageFromTurn(turn);
-  await persistShadowCost(input, turn, usage);
+  const settledTurn = await retrieveTurnWithSettledUsage(sessionId, turn.id);
+  const usage = usageFromTurn(settledTurn);
+  await persistShadowCost(input, settledTurn, usage);
 
   const prior = existing?.cumulativeCostThb ?? 0;
-  const cumulativeCostThb = Math.round((prior + usage.costThb) * 10_000) / 10_000;
+  const turnCostThb = usage.costThb ?? 0;
+  const cumulativeCostThb = Math.round((prior + turnCostThb) * 10_000) / 10_000;
   await saveSessionState(input.guestDbId, {
     agentId: THONGTHAI_STAGING_AGENT_ID,
     sessionId,
@@ -337,6 +384,8 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
     lastUsedAt: new Date().toISOString(),
     turnCount: (existing?.turnCount ?? 0) + 1,
     cumulativeCostThb,
+    costAccountingIncomplete: !usage.available,
+    lastTurnId: turn.id,
   });
 
   return {
