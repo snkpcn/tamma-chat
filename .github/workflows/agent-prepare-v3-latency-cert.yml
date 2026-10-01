@@ -1,0 +1,23 @@
+name: Agent Prepare V3 Latency Certification
+
+on:
+  push:
+    branches:
+      - prepare-v3-live-smoke
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run fresh first-prepare latency certification
+        run: npx tsx scripts/run-agent-prepare-v3-latency-cert.ts
