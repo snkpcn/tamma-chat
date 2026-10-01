@@ -140,7 +140,7 @@ export function extractPartySize(message: string): number | null {
  *  question. Detection is structural (a small, closed set of correction
  *  markers), never a growing table of full phrases. */
 export function hasCorrectionMarker(message: string): boolean {
-  return /จริง\s*ๆ|ไม่ใช่|แก้เป็น|เปลี่ยนเป็น|เปลี่ยนใจ|ขอแก้/u.test(message);
+  return /จริง\s*ๆ|ไม่ใช่|แก้เป็น|เปลี่ยน(?:[^,\n]{0,24})?เป็น|เปลี่ยนใจ|ขอแก้/u.test(message);
 }
 
 /** A customer explicitly signalling "commit this now" ("จองเลย", "ยืนยันจอง",
