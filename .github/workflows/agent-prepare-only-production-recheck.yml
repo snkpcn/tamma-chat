@@ -1,0 +1,23 @@
+name: Agent Prepare-Only Production Recheck
+
+on:
+  push:
+    branches:
+      - agent-prepare-only-live-smoke
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Recheck prepare-only production flow
+        run: npx tsx scripts/run-agent-prepare-only-production-smoke.ts
