@@ -1,0 +1,46 @@
+name: Final Location Voice Production Acceptance
+on:
+  push:
+    branches:
+      - certification/location-final-20261001
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exercise deployed production endpoint
+        env:
+          ENDPOINT: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: |
+          node <<'NODE'
+          const {randomUUID}=require('node:crypto');
+          async function ask(message,label){
+            const guestId=randomUUID();
+            const eventId='final-'+label+'-'+Date.now();
+            const res=await fetch(process.env.ENDPOINT,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+              guestId,eventId,message,language:'th',chatHistory:[],
+              guestContext:{tripDuration:null,travelerType:null,group:{adults:null,children:null,elderly:null},interests:[],pace:null,budget:null,constraints:[]},
+              journeyContext:{currentPlan:null,savedPlan:null,visitedExperiences:[],favorites:[],journalEntries:[]},
+              pageContext:{section:'line'}
+            })});
+            const body=await res.json();
+            const reply=String(body.message||'');
+            console.log(JSON.stringify({label,guestId,eventId,status:res.status,intent:body.intent,reply}));
+            if(!res.ok) throw new Error(label+' HTTP '+res.status);
+            if(/ค่ะ|คะ/u.test(reply)) throw new Error(label+' female particle leak: '+reply);
+            return reply;
+          }
+          (async()=>{
+            for(const [label,message] of [
+              ['location-natural','ร้านอยู่แถวไหนคะ'],
+              ['location-direct','ขอโลเคชั่นร้านหน่อยค่ะ'],
+            ]){
+              const reply=await ask(message,label);
+              if(!reply.includes('https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic')) throw new Error(label+' canonical map missing: '+reply);
+            }
+            await ask('แฟนแพ้กุ้ง มีอะไรที่กินได้บ้างคะ','male-grounded');
+            console.log('FINAL_LOCATION_VOICE_PRODUCTION_PASS');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
