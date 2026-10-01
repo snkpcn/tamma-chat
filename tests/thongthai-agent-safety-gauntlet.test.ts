@@ -313,3 +313,19 @@ test('semantic reconciliation cannot keep book/order when the same structured tu
     assert.equal(turn.constraints.includes('no_transaction'), true, item.message);
   }
 });
+
+
+test('deploy-preview runs the real production five-vertical safety gauntlet', { timeout: 900_000 }, async () => {
+  if (process.env.CONTEXT !== 'deploy-preview') return;
+  const { spawn } = await import('node:child_process');
+  const child = spawn(
+    process.platform === 'win32' ? 'npx.cmd' : 'npx',
+    ['tsx', 'scripts/run-phase2-live-safety-gauntlet.ts'],
+    { stdio: 'inherit', env: process.env },
+  );
+  const code = await new Promise<number | null>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', resolve);
+  });
+  assert.equal(code, 0, 'live five-vertical safety gauntlet failed');
+});
