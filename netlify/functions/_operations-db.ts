@@ -1991,6 +1991,7 @@ export async function createOtopOrder(input: {
   shippingAddress?: string | null;
   note?: string | null;
   environment?: 'live' | 'test';
+  checkoutIdempotencyKey?: string | null;
 }): Promise<{ id: string; orderCode: string; total: number }> {
   const environment = input.environment ?? 'live';
   const productRes = await dbFetch(
@@ -2001,6 +2002,7 @@ export async function createOtopOrder(input: {
   if (!product) throw new Error('product_not_available');
   const quantity = Math.max(1, Math.min(99, Math.floor(input.quantity || 1)));
   if (product.stock_qty < quantity) throw new Error('insufficient_stock');
+
   const customerId = await upsertCustomerAccount({
     guestDbId: input.guestDbId,
     fullName: input.customerName,
@@ -2009,36 +2011,68 @@ export async function createOtopOrder(input: {
     preferredContact: input.phone ? 'phone' : input.email ? 'email' : null,
     isTest: environment === 'test',
   });
+
+  const idempotencyKey = input.checkoutIdempotencyKey?.trim() || null;
+  if (idempotencyKey && idempotencyKey.length < 16) throw new Error('otop_idempotency_key_too_short');
+
+  const loadReplay = async (): Promise<{ id:string; orderCode:string; total:number } | null> => {
+    if (!idempotencyKey) return null;
+    const replayRes = await dbFetch(
+      `otop_orders?customer_id=eq.${customerId}&checkout_idempotency_key=eq.${encodeURIComponent(idempotencyKey)}`
+      + `&environment=eq.${environment}&select=id,order_code,total_amount&limit=1`,
+    );
+    const replay = (await replayRes.json() as Array<{ id:string; order_code:string; total_amount:number|string }>)[0];
+    return replay ? { id:replay.id, orderCode:replay.order_code, total:Number(replay.total_amount) } : null;
+  };
+
+  const replay = await loadReplay();
+  if (replay) return replay;
+
   const total = Number(product.price) * quantity;
-  const orderRes = await dbFetch('otop_orders', {
-    method: 'POST',
-    headers: { Prefer: 'return=representation' },
-    body: JSON.stringify({
-      customer_id: customerId,
-      guest_id: input.guestDbId ?? null,
-      source_channel: input.channel,
-      fulfillment_type: input.fulfillmentType ?? 'pickup',
-      shipping_address_enc: input.shippingAddress ? encryptPii(input.shippingAddress) : null,
-      customer_note: input.note?.slice(0, 1000) ?? null,
-      total_amount: total,
-      environment,
-    }),
-  });
-  const orders = await orderRes.json() as Array<{ id: string; order_code: string }>;
-  const order = orders[0];
-  if (!order) throw new Error('order_not_created');
+  let order: { id:string; order_code:string };
   try {
+    const orderRes = await dbFetch('otop_orders', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({
+        customer_id: customerId,
+        guest_id: input.guestDbId ?? null,
+        source_channel: input.channel,
+        fulfillment_type: input.fulfillmentType ?? 'pickup',
+        shipping_address_enc: input.shippingAddress ? encryptPii(input.shippingAddress) : null,
+        customer_note: input.note?.slice(0, 1000) ?? null,
+        total_amount: total,
+        subtotal_amount: total,
+        shipping_fee: 0,
+        checkout_idempotency_key: idempotencyKey,
+        environment,
+      }),
+    });
+    const orders = await orderRes.json() as Array<{ id: string; order_code: string }>;
+    const created = orders[0];
+    if (!created) throw new Error('order_not_created');
+    order = created;
+  } catch (error) {
+    // The DB has a unique (customer_id, checkout_idempotency_key) index.
+    // If a webhook/Agent retry races the first insert, return that durable
+    // order instead of creating or decrementing stock twice.
+    const racedReplay = await loadReplay().catch(() => null);
+    if (racedReplay) return racedReplay;
+    throw error;
+  }
+
+  try {
+    // Stock is decremented atomically by the canonical
+    // otop_order_items_stock_guard trigger. Do NOT manually PATCH stock here:
+    // doing both would double-decrement every successful order.
     await dbFetch('otop_order_items', {
       method: 'POST',
       headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({ order_id: order.id, product_id: product.id, quantity, unit_price: product.price }),
     });
-    await dbFetch(`otop_products?id=eq.${product.id}&stock_qty=eq.${product.stock_qty}`, {
-      method: 'PATCH',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify({ stock_qty: product.stock_qty - quantity }),
-    });
   } catch (error) {
+    // Deleting the order item/order lets the stock trigger restore inventory
+    // if the item insert had succeeded before a later failure.
     await dbFetch(`otop_orders?id=eq.${order.id}`, { method: 'DELETE' }).catch(() => undefined);
     throw error;
   }
