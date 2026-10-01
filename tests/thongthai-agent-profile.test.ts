@@ -11,7 +11,7 @@ import {
 
 test('Thongthai staging agent profile locks the owner-defined identity and trust rules', () => {
   assert.equal(THONGTHAI_STAGING_AGENT_NAME, 'Thongthai-Staging');
-  assert.match(THONGTHAI_AGENT_PROFILE_VERSION, /^thongthai-agent-profile-v3-fast-prepare-/);
+  assert.match(THONGTHAI_AGENT_PROFILE_VERSION, /^thongthai-agent-profile-v4-prepare-final-/);
 
   const prompt = THONGTHAI_AGENT_INSTRUCTIONS;
   assert.match(prompt, /You are male\./);
@@ -58,6 +58,9 @@ test('Thongthai production Agent is separate and prepare-only before live commit
   assert.ok(production.tools.some(tool => /^get_prepared_/.test(tool.name)));
   assert.ok(production.tools.every(tool => !/^commit_prepared_/.test(tool.name)));
   assert.ok(staging.tools.some(tool => /^commit_prepared_/.test(tool.name)));
-  assert.match(production.instructions, /If no matching commit tool is available/i);
+  assert.match(production.instructions, /While the matching commit_prepared_\* tool is absent/i);
   assert.match(production.instructions, /call the matching prepare tool directly/i);
+  assert.match(production.instructions, /copy that phrase verbatim/i);
+  assert.match(production.instructions, /call the matching get_prepared_\* tool/i);
+  assert.match(production.instructions, /nothing has been sent\/created/i);
 });
