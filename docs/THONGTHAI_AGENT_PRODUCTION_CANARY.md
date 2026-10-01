@@ -43,4 +43,6 @@ Rollout history:
 - Fast-prepare latency fix: production Saved Agent profile v3 instructs direct self-validating `prepare_*` calls when all required fields are already present, avoiding redundant catalog/availability tool rounds.
 - Fresh latency certification uses one synthetic WEB guest while public prepare rollout remains 0% and live commit remains OFF.
 
+- Latency certification guest changed to an explicitly synthetic UUID-shaped WEB guest so the canonical guest/Agent identity path is exercised; public prepare rollout remains 0% and live commit remains OFF.
+
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
