@@ -1,8 +1,11 @@
 import type { Config, Context } from '@netlify/functions';
 import {
+  THONGTHAI_FACEBOOK_PERSONA_NAME,
+  THONGTHAI_FACEBOOK_PERSONA_PROFILE_URL,
   detectFacebookLanguage,
   extractFacebookTextEvents,
   facebookGuestId,
+  findThongthaiPersonaId,
   splitFacebookText,
   verifyFacebookSignature,
 } from './_facebook-messenger-adapter';
@@ -39,12 +42,63 @@ function emptyGuestContext() {
   };
 }
 
+async function resolveThongthaiPersona(
+  pageToken: string,
+  pageId: string,
+  graphVersion: string,
+): Promise<string | null> {
+  const endpoint = `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(pageId)}/personas`;
+  const listUrl = new URL(endpoint);
+  listUrl.searchParams.set('fields', 'id,name,profile_picture_url');
+  listUrl.searchParams.set('limit', '100');
+
+  const listed = await fetch(listUrl, {
+    headers: { Authorization: `Bearer ${pageToken}` },
+  });
+  if (!listed.ok) {
+    const body = await listed.text().catch(() => '');
+    console.error('FACEBOOK_PERSONA_LIST_ERROR', `${listed.status}: ${body.slice(0, 220)}`);
+    return null;
+  }
+
+  const listPayload = await listed.json().catch(() => null);
+  const existing = findThongthaiPersonaId(listPayload);
+  if (existing) return existing;
+
+  const created = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${pageToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name: THONGTHAI_FACEBOOK_PERSONA_NAME,
+      profile_picture_url: THONGTHAI_FACEBOOK_PERSONA_PROFILE_URL,
+    }),
+  });
+  if (!created.ok) {
+    const body = await created.text().catch(() => '');
+    console.error('FACEBOOK_PERSONA_CREATE_ERROR', `${created.status}: ${body.slice(0, 220)}`);
+    return null;
+  }
+
+  const payload = await created.json().catch(() => null) as { id?: unknown } | null;
+  const id = typeof payload?.id === 'string' ? payload.id.trim() : '';
+  if (!id) {
+    console.error('FACEBOOK_PERSONA_CREATE_EMPTY_ID');
+    return null;
+  }
+  console.log('FACEBOOK_PERSONA_READY', JSON.stringify({ name: THONGTHAI_FACEBOOK_PERSONA_NAME }));
+  return id;
+}
+
 async function sendFacebookText(
   recipientPsid: string,
   text: string,
   pageToken: string,
   pageId: string,
   graphVersion: string,
+  personaId: string | null,
 ): Promise<void> {
   const response = await fetch(`https://graph.facebook.com/${graphVersion}/${encodeURIComponent(pageId)}/messages`, {
     method: 'POST',
@@ -55,6 +109,7 @@ async function sendFacebookText(
     body: JSON.stringify({
       recipient: { id: recipientPsid },
       message_type: 'RESPONSE',
+      ...(personaId ? { persona_id: personaId } : {}),
       message: { text },
     }),
   });
@@ -71,9 +126,10 @@ async function sendFacebookTextReliably(
   pageToken: string,
   pageId: string,
   graphVersion: string,
+  personaId: string | null,
 ): Promise<void> {
   try {
-    await sendFacebookText(recipientPsid, text, pageToken, pageId, graphVersion);
+    await sendFacebookText(recipientPsid, text, pageToken, pageId, graphVersion, personaId);
     return;
   } catch (firstError) {
     console.error(
@@ -83,7 +139,7 @@ async function sendFacebookTextReliably(
   }
 
   await new Promise(resolve => setTimeout(resolve, 250));
-  await sendFacebookText(recipientPsid, text, pageToken, pageId, graphVersion);
+  await sendFacebookText(recipientPsid, text, pageToken, pageId, graphVersion, personaId);
 }
 
 async function askThongthai(message: string, psid: string, eventId: string): Promise<ThongthaiResponse> {
@@ -202,8 +258,15 @@ export default async (req: Request, _context: Context) => {
     }
 
     try {
+      const personaId = await resolveThongthaiPersona(pageToken, pageId, graphVersion).catch(error => {
+        console.error(
+          'FACEBOOK_PERSONA_RESOLVE_ERROR',
+          error instanceof Error ? error.message.slice(0, 260) : 'unknown',
+        );
+        return null;
+      });
       for (const chunk of splitFacebookText(reply)) {
-        await sendFacebookTextReliably(event.senderPsid, chunk, pageToken, pageId, graphVersion);
+        await sendFacebookTextReliably(event.senderPsid, chunk, pageToken, pageId, graphVersion, personaId);
       }
     } catch (error) {
       console.error(

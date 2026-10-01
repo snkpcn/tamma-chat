@@ -1,5 +1,25 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
+
+export const THONGTHAI_FACEBOOK_PERSONA_NAME = 'ทองไทย';
+export const THONGTHAI_FACEBOOK_PERSONA_PROFILE_URL =
+  'https://tamma-chat.netlify.app/assets/thongthai/thongthai-default.webp';
+
+export function findThongthaiPersonaId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = (payload as { data?: unknown }).data;
+  if (!Array.isArray(data)) return null;
+
+  for (const item of data) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { id?: unknown; name?: unknown };
+    if (row.name === THONGTHAI_FACEBOOK_PERSONA_NAME && typeof row.id === 'string' && row.id.trim()) {
+      return row.id.trim();
+    }
+  }
+  return null;
+}
+
 export type FacebookTextEvent = {
   senderPsid: string;
   pageId: string;
