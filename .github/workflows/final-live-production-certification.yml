@@ -1,0 +1,115 @@
+name: Final Live Production Certification 2026-10-01
+on:
+  push:
+    branches:
+      - certification/final-live-20261001
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Targeted live voice and location acceptance
+        id: hotfix
+        continue-on-error: true
+        env:
+          ENDPOINT: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: |
+          node <<'NODE'
+          const { randomUUID } = require('node:crypto');
+          const endpoint = process.env.ENDPOINT;
+          async function turn(message, eventId) {
+            const guestId = randomUUID();
+            const res = await fetch(endpoint, {
+              method: 'POST',
+              headers: {'content-type':'application/json'},
+              body: JSON.stringify({
+                guestId, eventId, message, language:'th', chatHistory:[],
+                guestContext:{tripDuration:null,travelerType:null,group:{adults:null,children:null,elderly:null},interests:[],pace:null,budget:null,constraints:[]},
+                journeyContext:{currentPlan:null,savedPlan:null,visitedExperiences:[],favorites:[],journalEntries:[]},
+                pageContext:{section:'line'}
+              })
+            });
+            const body = await res.json();
+            console.log(JSON.stringify({eventId,guestId,status:res.status,message:body.message,intent:body.intent}));
+            if (!res.ok) throw new Error('HTTP '+res.status);
+            return String(body.message||'');
+          }
+          (async()=>{
+            const location = await turn('ร้านอยู่แถวไหนคะ', 'final-live-location-'+Date.now());
+            if (!location.includes('https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic')) throw new Error('canonical location link missing');
+            if (/ค่ะ|คะ/u.test(location)) throw new Error('female particle leaked in location reply: '+location);
+            const food = await turn('แฟนแพ้กุ้ง มีอะไรที่กินได้บ้างคะ', 'final-live-voice-'+Date.now());
+            if (/ค่ะ|คะ/u.test(food)) throw new Error('female particle leaked in grounded reply: '+food);
+            console.log('TARGETED_LIVE_ACCEPTANCE_PASS');
+          })().catch(e=>{console.error(e); process.exit(1)});
+          NODE
+
+      - name: Phase 7 read-only production smoke
+        id: smoke
+        continue-on-error: true
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: npx tsx scripts/run-phase7-production-certification.ts
+
+      - name: Five guest live transaction certification
+        id: fiveguest
+        continue-on-error: true
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+          ALLOW_PRODUCTION_WRITES: '1'
+        run: npx tsx scripts/run-production-five-guest-transactions.ts
+
+      - name: TEST lost-property production incident
+        id: incident
+        continue-on-error: true
+        env:
+          ENDPOINT: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: |
+          node <<'NODE'
+          const { randomUUID } = require('node:crypto');
+          (async()=>{
+            const guestId=randomUUID();
+            const eventId='TEST-lost-property-'+Date.now();
+            const message='TEST ONLY — ทดสอบระบบแจ้งเหตุของหาย ห้ามตีความว่าเป็นเหตุจริง: ลืมหมวก TEST สีฟ้าไว้ที่คาเฟ่ Inthanin เมื่อเช้า ช่วยตามให้หน่อยครับ';
+            const res=await fetch(process.env.ENDPOINT,{
+              method:'POST',headers:{'content-type':'application/json'},
+              body:JSON.stringify({
+                guestId,eventId,message,language:'th',chatHistory:[],
+                guestContext:{tripDuration:null,travelerType:null,group:{adults:null,children:null,elderly:null},interests:[],pace:null,budget:null,constraints:[]},
+                journeyContext:{currentPlan:null,savedPlan:null,visitedExperiences:[],favorites:[],journalEntries:[]},
+                pageContext:{section:'line'}
+              })
+            });
+            const body=await res.json();
+            console.log(JSON.stringify({kind:'TEST_LOST_PROPERTY',guestId,eventId,status:res.status,message:body.message,intent:body.intent}));
+            const reply=String(body.message||'');
+            if(!res.ok) throw new Error('HTTP '+res.status);
+            if(!/รับเรื่องของหาย/u.test(reply)) throw new Error('incident acknowledgement missing');
+            if(/ค่ะ|คะ/u.test(reply)) throw new Error('female particle leaked in incident reply');
+            console.log('TEST_LOST_PROPERTY_PASS');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+
+      - name: Final gate
+        env:
+          HOTFIX: ${{ steps.hotfix.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+          FIVEGUEST: ${{ steps.fiveguest.outcome }}
+          INCIDENT: ${{ steps.incident.outcome }}
+        run: |
+          echo "hotfix=$HOTFIX smoke=$SMOKE fiveguest=$FIVEGUEST incident=$INCIDENT"
+          test "$HOTFIX" = success
+          test "$SMOKE" = success
+          test "$FIVEGUEST" = success
+          test "$INCIDENT" = success
