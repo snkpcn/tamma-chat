@@ -1,9 +1,9 @@
 name: OTOP Story Backfill Dry Run
 
 on:
-  push:
+  pull_request:
     branches:
-      - ops/otop-story-backfill-20261001
+      - main
 
 permissions:
   contents: read
