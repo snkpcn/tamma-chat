@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - feature/thongthai-staging-agent-20261001
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
   create-agent:
+    if: github.head_ref == 'feature/thongthai-staging-agent-20261001' || github.ref_name == 'feature/thongthai-staging-agent-20261001'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
