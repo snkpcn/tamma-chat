@@ -38,29 +38,30 @@ test('product media is full-screen and thumbnails no longer overlay the image', 
 });
 
 test('product detail remains story-first after showcase redesign', () => {
-  assert.ok(html.includes('เรื่องของชิ้นนี้'));
-  assert.ok(html.includes('VALUE OF THIS PIECE'));
-  assert.ok(html.includes("item('วิธีทำ',s.craftProcess,true)"));
-  assert.ok(html.includes("item('ทำไมต้องเป็นที่นี่',s.whyHere,true)"));
+  assert.ok(html.includes("tr('product_story')"));
+  assert.ok(html.includes("tr('value_piece')"));
+  assert.ok(html.includes("item(tr('process'),s.craftProcess,true)"));
+  assert.ok(html.includes("item(tr('why_here'),s.whyHere,true)"));
 });
 
-test('luxury commerce hotfix adds smart header, merchandising rail and distinct categories', () => {
+test('luxury commerce hotfix adds smart header, merchandising rail and localized distinct categories', () => {
   assert.ok(html.includes('function initSmartHeader()'));
   assert.ok(html.includes("header.classList.add('is-hidden')"));
   assert.ok(html.includes('id="merchRail"'));
-  assert.ok(html.includes('คัดสรรโดย ทำมา-ชาติ'));
-  assert.ok(html.includes("title:'สวมใส่ & งานผ้า'"));
-  assert.ok(html.includes("title:'ของกิน & ของฝาก'"));
-  assert.ok(html.includes("title:'บ้าน & การดูแลตัวเอง'"));
+  assert.ok(html.includes("tr('curated')"));
+  assert.ok(html.includes("titleKey:'category_wear'"));
+  assert.ok(html.includes("titleKey:'category_food'"));
+  assert.ok(html.includes("titleKey:'category_home'"));
   assert.ok(html.includes('Number(p.completedUnits||0)>0'));
 });
 
-test('Thai typography uses the Isan Boutique font system without Georgia fallback', () => {
-  assert.ok(html.includes('family=Noto+Serif+Thai'));
-  assert.ok(html.includes('--font-display:"Noto Serif Thai",serif'));
-  assert.ok(html.includes('--font-body:"IBM Plex Sans Thai",sans-serif'));
+test('Thai typography uses the locked sitewide IBM Plex Sans Thai family without display-font drift', () => {
+  assert.ok(html.includes('assets/styles/site-typography.css'));
+  assert.ok(html.includes('--font-display:var(--site-font-th)'));
+  assert.ok(html.includes('--font-body:var(--site-font-th)'));
+  assert.equal(html.includes('Noto Serif Thai'), false);
   assert.equal(html.includes('font-family:Georgia'), false);
-  assert.ok(html.includes('คัดสรรโดย ทำมา-ชาติ'));
+  assert.ok(html.includes("tr('curated')"));
 });
 
 test('cart header may hide over the hero but remains pinned once commerce begins', () => {

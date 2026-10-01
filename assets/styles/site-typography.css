@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+
+/*
+ * Thammachat sitewide typography contract.
+ * One family per writing system. Weight carries hierarchy; pages must not
+ * introduce alternate display/body font families.
+ */
+:root {
+  --site-font-th: "IBM Plex Sans Thai", sans-serif;
+  --site-font-en: "Noto Sans", sans-serif;
+  --site-font-zh: "Noto Sans SC", sans-serif;
+  --site-font-lo: "Noto Sans Lao", sans-serif;
+  --site-font-vi: "Noto Sans", sans-serif;
+
+  /* Backward-compatible aliases used by existing page CSS. */
+  --font-display: var(--site-font-th);
+  --font-body: var(--site-font-th);
+}
+
+html[lang="th"] {
+  --font-display: var(--site-font-th);
+  --font-body: var(--site-font-th);
+}
+html[lang="en"] {
+  --font-display: var(--site-font-en);
+  --font-body: var(--site-font-en);
+}
+html[lang="zh"] {
+  --font-display: var(--site-font-zh);
+  --font-body: var(--site-font-zh);
+}
+html[lang="lo"] {
+  --font-display: var(--site-font-lo);
+  --font-body: var(--site-font-lo);
+}
+html[lang="vi"] {
+  --font-display: var(--site-font-vi);
+  --font-body: var(--site-font-vi);
+}
+
+html[lang="th"] :where(body, body *),
+html[lang="th"] :where(input, button, select, textarea) {
+  font-family: var(--site-font-th) !important;
+}
+html[lang="en"] :where(body, body *),
+html[lang="en"] :where(input, button, select, textarea) {
+  font-family: var(--site-font-en) !important;
+}
+html[lang="zh"] :where(body, body *),
+html[lang="zh"] :where(input, button, select, textarea) {
+  font-family: var(--site-font-zh) !important;
+}
+html[lang="lo"] :where(body, body *),
+html[lang="lo"] :where(input, button, select, textarea) {
+  font-family: var(--site-font-lo) !important;
+}
+html[lang="vi"] :where(body, body *),
+html[lang="vi"] :where(input, button, select, textarea) {
+  font-family: var(--site-font-vi) !important;
+}
+
+/* A shared compact language selector used by OTOP Map and Store. */
+.site-lang-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+}
+.site-lang-picker label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.site-lang-picker select {
+  min-height: 40px;
+  max-width: 132px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 30px 0 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  cursor: pointer;
+}
+.site-lang-picker select option {
+  color: #2b1d13;
+  background: #fffaf0;
+}
+
+/* Language controls stay compact and legible over both hero and solid headers. */
+.top.is-over-hero .site-lang-picker { color: #fff; }
+.top.is-commerce .site-lang-picker { color: var(--ink, #2b1d13); }
+.top .site-lang-picker select { max-width: 88px; }
+.map-header .site-lang-picker select { max-width: 96px; }
+
+@media (max-width: 680px) {
+  .site-lang-picker { min-height: 36px; }
+  .site-lang-picker select {
+    min-height: 36px;
+    max-width: 76px;
+    padding-left: 9px;
+    padding-right: 22px;
+    font-size: 11px;
+  }
+}

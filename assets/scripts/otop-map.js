@@ -42,6 +42,40 @@
     project: null,
   };
 
+  function i18n() { return window.OTOP_I18N; }
+  function tr(key, vars = {}) { return i18n()?.t(key, vars) || key; }
+  function displayProvinceName(province) {
+    return i18n()?.provinceName(province.provinceId) || province.provinceName;
+  }
+  function localizedProvinceStory(province) {
+    const fallback = {
+      title: province.experienceTitle,
+      description: province.experienceDescription,
+    };
+    return window.OTOP_PROVINCE_TRANSLATIONS?.get(
+      province.provinceId,
+      i18n()?.lang() || 'th',
+      fallback,
+    ) || fallback;
+  }
+  function displayExperienceTitle(province) {
+    return localizedProvinceStory(province).title;
+  }
+  function displayExperienceDescription(province) {
+    return localizedProvinceStory(province).description;
+  }
+  function applyPageMeta() {
+    const lang = i18n()?.lang() || 'th';
+    const titles = {
+      th:'แผนที่ของดีอีสาน — ทำมา-ชาติ OTOP',
+      en:'Isan OTOP Map — Thammachat',
+      zh:'伊森 OTOP 地图 — ทำมา-ชาติ',
+      lo:'ແຜນທີ່ OTOP ອີສານ — ทำมา-ชาติ',
+      vi:'Bản đồ OTOP Isan — Thammachat'
+    };
+    document.title = titles[lang] || titles.th;
+  }
+
   function element(name, attributes = {}) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', name);
     Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, value));
@@ -138,12 +172,12 @@
         'fill-rule': 'evenodd',
         tabindex: '0',
         role: 'button',
-        'aria-label': `${province.provinceName}: ${province.experienceTitle}`,
+        'aria-label': `${displayProvinceName(province)}: ${displayExperienceTitle(province)}`,
         class: `province-shape${provinceId === state.selectedProvinceId ? ' is-selected' : ''}`,
         'data-province-id': provinceId
       });
       const title = element('title');
-      title.textContent = `${province.provinceName} — ${province.experienceTitle}`;
+      title.textContent = `${displayProvinceName(province)} — ${displayExperienceTitle(province)}`;
       path.append(title);
       path.addEventListener('click', () => selectProvince(provinceId));
       path.addEventListener('keydown', event => {
@@ -183,7 +217,7 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.className = `province-chip${province.provinceId === state.selectedProvinceId ? ' is-selected' : ''}`;
-      button.textContent = province.provinceName;
+      button.textContent = displayProvinceName(province);
       button.dataset.provinceId = province.provinceId;
       button.setAttribute('aria-pressed', province.provinceId === state.selectedProvinceId ? 'true' : 'false');
       button.addEventListener('click', () => selectProvince(province.provinceId));
@@ -197,15 +231,15 @@
     const paddedOrder = String(province.sortOrder).padStart(2, '0');
     panel.classList.add('is-changing');
     document.getElementById('provinceCount').textContent = paddedOrder;
-    document.getElementById('provinceEn').textContent = `ประสบการณ์จังหวัด · ${paddedOrder}`;
-    document.getElementById('provinceName').textContent = province.provinceName;
-    document.getElementById('provinceExperienceTitle').textContent = province.experienceTitle;
-    document.getElementById('provinceDescription').textContent = province.experienceDescription;
+    document.getElementById('provinceEn').textContent = tr('province_counter', { order: paddedOrder });
+    document.getElementById('provinceName').textContent = displayProvinceName(province);
+    document.getElementById('provinceExperienceTitle').textContent = displayExperienceTitle(province);
+    document.getElementById('provinceDescription').textContent = displayExperienceDescription(province);
     document.getElementById('mapSelectedOrder').textContent = paddedOrder;
-    document.getElementById('mapSelectedName').textContent = province.provinceName;
+    document.getElementById('mapSelectedName').textContent = displayProvinceName(province);
 
     const cta = document.getElementById('provinceCta');
-    cta.textContent = `ดูสินค้าจาก${province.provinceName}`;
+    cta.textContent = tr('map_cta', { province: displayProvinceName(province) });
     cta.href = `otop.html?provinceId=${encodeURIComponent(province.provinceId)}`;
     requestAnimationFrame(() => panel.classList.remove('is-changing'));
   }
@@ -249,10 +283,21 @@
       loading.hidden = true;
     } catch (error) {
       loading.hidden = false;
-      loading.textContent = 'ไม่สามารถเปิดแผนที่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง';
+      loading.textContent = tr('map_error');
       console.error(error);
     }
   }
 
+  function rerenderForLanguage() {
+    applyPageMeta();
+    if (state.provinces.length) {
+      renderMap();
+      renderQuickList();
+      renderPanel();
+    }
+  }
+  window.addEventListener('otop:i18n-ready', rerenderForLanguage);
+  window.addEventListener('otop:i18n-change', rerenderForLanguage);
+  applyPageMeta();
   initialise();
 })();
