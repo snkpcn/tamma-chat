@@ -1,0 +1,23 @@
+name: Phase 2 Wave C Live
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  wave-c:
+    if: contains(github.event.pull_request.title, '[run wave-c]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run Café real production safety gauntlet
+        run: npx tsx scripts/run-phase2-live-safety-gauntlet.ts
