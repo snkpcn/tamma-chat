@@ -6,8 +6,8 @@ Production rollout configuration (2026-10-01):
 - Model: `gpt-5.6-terra`
 - Primary channels: WEB, LINE, Facebook
 - WEB rollout: 100% of eligible guests
-- LINE rollout: 50% read-only canary
-- Facebook rollout: 50% read-only canary
+- LINE rollout: 100% read-only
+- Facebook rollout: 100% read-only
 - Legacy global rollout fallback: 10%
 - Agent transaction tools: not exposed in the production saved Agent
 - Live Agent transaction flag: OFF
@@ -18,16 +18,23 @@ Production rollout configuration (2026-10-01):
 
 Rollout history:
 
-- 10% production canary: passed initial smoke verification with Agent responses persisted, telemetry marked `agent_primary_turn_aggregate`, no non-completed Agent cost events, and no conversation over the 5 THB cap.
-- 25% production canary: promoted after the 10% verification gate.
-- During 25% verification, one successful Agent turn exposed a telemetry persistence gap: the Saved-Agent session had a real cost but `ai_api_cost_events` missed the row. PR #374 added retry plus fail-safe pending accounting before any further paid Agent turn.
-- Post-hotfix 25% verification recorded 4/4 fresh production Agent responses with matching cost rows, all grounded, 0 non-completed events, total 4.6809 THB and max 1.2898 THB for any tested turn.
-- 50% production canary: promoted after the post-hotfix 25% telemetry/cost gate.
-- New 25-50% cohort verification: two fresh production guests in buckets 2590 and 4241 both routed to `thongthai_agent_primary`, both grounded, with matching cost rows of 1.1170 THB and 1.0268 THB.
+- 10% production canary: passed initial WEB smoke verification with Agent responses persisted, telemetry marked `agent_primary_turn_aggregate`, no non-completed Agent cost events, and no conversation over the 5 THB cap.
+- 25% WEB production canary: promoted after the 10% verification gate.
+- During 25% WEB verification, one successful Agent turn exposed a telemetry persistence gap: the Saved-Agent session had a real cost but `ai_api_cost_events` missed the row. PR #374 added retry plus fail-safe pending accounting before any further paid Agent turn.
+- Post-hotfix 25% WEB verification recorded 4/4 fresh production Agent responses with matching cost rows, all grounded, 0 non-completed events, total 4.6809 THB and max 1.2898 THB for any tested turn.
+- 50% WEB production canary: promoted after the post-hotfix 25% telemetry/cost gate.
+- New WEB 25-50% cohort verification: two fresh production guests in buckets 2590 and 4241 both routed to `thongthai_agent_primary`, both grounded, with matching cost rows of 1.1170 THB and 1.0268 THB.
 - 100% eligible WEB rollout: promoted after the new 50% cohort verification gate.
-- New >50% cohort verification: a fresh WEB guest in bucket 7344 passed 3/3 production turns; the two paid turns both routed to `thongthai_agent_primary`, both were grounded, with matching completed cost rows of 1.0272 THB and 0.3420 THB (1.3692 THB total), and no false transaction was detected.
-- Per-channel rollout support: WEB keeps 100% while LINE and Facebook begin independently, without reducing the proven WEB rollout.
+- New WEB >50% cohort verification: a fresh guest in bucket 7344 passed 3/3 production turns; the two paid turns both routed to `thongthai_agent_primary`, both were grounded, with completed cost rows of 1.0272 THB and 0.3420 THB (1.3692 THB total), and no false transaction was detected.
+- Per-channel rollout support: WEB remains at 100% while LINE and Facebook can be rolled independently.
 - LINE 10% read-only verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0298 THB and 0.3227 THB (1.3525 THB total).
 - Facebook 10% read-only verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0335 THB and 0.3266 THB (1.3601 THB total).
-- LINE and Facebook promoted to 25% read-only after the 10% cross-channel gate passed.\n- LINE 10-25% cohort verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0257 THB and 0.3258 THB (1.3515 THB total).\n- Facebook 10-25% cohort verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0241 THB and 0.3281 THB (1.3522 THB total).\n- LINE and Facebook promoted to 50% read-only after the new 25% cohort gate passed.\n
+- LINE and Facebook promoted to 25% read-only after the 10% cross-channel gate passed.
+- LINE 10-25% cohort verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0257 THB and 0.3258 THB (1.3515 THB total).
+- Facebook 10-25% cohort verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0241 THB and 0.3281 THB (1.3522 THB total).
+- LINE and Facebook promoted to 50% read-only after the new 25% cohort gate passed.
+- LINE 25-50% cohort verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0276 THB and 0.3243 THB (1.3519 THB total).
+- Facebook 25-50% cohort verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0313 THB and 0.3208 THB (1.3521 THB total).
+- LINE and Facebook promoted to 100% read-only after the new 50% cohort gate passed.
+
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
