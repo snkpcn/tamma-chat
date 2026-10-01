@@ -98,6 +98,27 @@ function findActivityTopic(message: string): { nodeId: string; activityCode: str
 const QUESTION_MARKER_RE =
   /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
 
+// Payment status is a bounded operational lookup, not a language-model
+// judgement. Recognize the closed payment vocabulary and canonical public
+// codes so "สลิปถึงไหม / จ่ายแล้วหรือยัง / ขอ QR" always reaches the
+// guest-scoped payment source even when the provider is slow or unavailable.
+const PAYMENT_STATUS_TOPIC_RE = /ชำระเงิน|จ่ายเงิน|จ่ายแล้ว|โอนเงิน|โอนแล้ว|สลิป|คิวอาร์|qr|payment/iu;
+const PAYMENT_STATUS_ACTION_RE = /สถานะ|ถึงไหม|ถึงหรือยัง|เรียบร้อย|สำเร็จ|ตรวจ(?:สอบ|แล้ว)|ยืนยัน|รอ|ขอ|ส่ง|ได้ไหม|หรือยัง|ยังไง/iu;
+const PAYMENT_REFERENCE_CODE_RE = /\b(?:PAY|BK|PO|OR)-\d{6}-[A-Z0-9]{8}\b/iu;
+
+function paymentStatusTurn(message:string):SemanticTurn|null{
+  if(!PAYMENT_STATUS_TOPIC_RE.test(message)||!PAYMENT_STATUS_ACTION_RE.test(message))return null;
+  const code=message.match(PAYMENT_REFERENCE_CODE_RE)?.[0]?.toUpperCase();
+  return{
+    domain:'payment',intent:'check_payment_status',action:'status',
+    speechAct:'question',informationNeed:'transaction_status',
+    entities:code
+      ? (code.startsWith('PAY-')?{paymentCode:code}:{entityCode:code})
+      : {},
+    references:[],constraints:[],confidence:0.98,needsClarification:false,
+  };
+}
+
 // Same negation guard findEntityByName above uses -- see NEGATION_BEFORE_NAME_RE.
 const ASSET_NEGATION_BEFORE_NAME_RE = NEGATION_BEFORE_NAME_RE;
 
@@ -879,6 +900,12 @@ export function deriveDeterministicSemanticTurn(
     ? taskState.activeTask
     : null;
   const effectiveDomain = activeTask?.domain ?? context.activeDomain;
+
+  // Payment status must outrank an unfinished booking/order task. The
+  // customer is asking about the operational result of that task, not
+  // supplying another slot to it.
+  const paymentStatus=paymentStatusTurn(trimmed);
+  if(paymentStatus)return paymentStatus;
 
   // Explicit transaction commitment outranks every read-only topic shortcut.
   // The resource comes from the closed ecosystem activity graph; missing

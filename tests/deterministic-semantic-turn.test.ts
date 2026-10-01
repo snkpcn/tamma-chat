@@ -54,6 +54,40 @@ test('production read-only business domains derive deterministically instead of 
   }
 });
 
+test('payment status and QR questions route deterministically with canonical references', () => {
+  const cases = [
+    ['สถานะชำระเงินรายการ OR-260930-A0924DDC ตอนนี้เป็นยังไงครับ', 'entityCode', 'OR-260930-A0924DDC'],
+    ['สลิป PAY-260930-58342763 ถึงหรือยังครับ', 'paymentCode', 'PAY-260930-58342763'],
+    ['ขอ QR จ่ายเงินได้ไหมครับ', null, null],
+  ] as const;
+  for(const [message,key,value] of cases){
+    const turn=deriveDeterministicSemanticTurn(message,emptySemanticContext(),emptyTaskStateContainer(),NOW);
+    assert.ok(turn,message);
+    assert.equal(turn!.domain,'payment',message);
+    assert.equal(turn!.action,'status',message);
+    assert.equal(turn!.informationNeed,'transaction_status',message);
+    if(key)assert.equal(turn!.entities[key],value,message);
+  }
+});
+
+test('payment status outranks a still-open order task', () => {
+  const taskState:TaskStateContainer={
+    ...emptyTaskStateContainer(),
+    activeTask:createActiveTask({
+      type:'otop_order',sourceChannel:'line',now:NOW,
+      initialSlots:{productName:'ผ้าไหม',quantity:1},
+    }),
+  };
+  const turn=deriveDeterministicSemanticTurn(
+    'จ่ายเงินรายการ OR-260930-A0924DDC เรียบร้อยหรือยังครับ',
+    {activeDomain:'otop',recentEntities:[]},taskState,NOW,
+  );
+  assert.ok(turn);
+  assert.equal(turn!.domain,'payment');
+  assert.equal(turn!.action,'status');
+  assert.equal(turn!.entities.entityCode,'OR-260930-A0924DDC');
+});
+
 test('short follow-ups reuse the active read-only domain when structurally clear', () => {
   const otopContext: SemanticContext = { activeDomain: 'otop', recentEntities: [] };
   const otop = deriveDeterministicSemanticTurn('อันไหนดี', otopContext, emptyTaskStateContainer());
