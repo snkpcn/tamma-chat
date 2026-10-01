@@ -58,7 +58,7 @@ test('English OTOP map/store/product translations contain no Thai-script copy', 
   assert.notEqual(uiEnStart, -1);
   assert.notEqual(uiZhStart, -1);
   const uiEn = ui.slice(uiEnStart, uiZhStart);
-  assert.doesNotMatch(uiEn, /[ก-๙]/);
+  assert.doesNotMatch(uiEn.replaceAll('฿',''), /[ก-๙]/);
 
   for (const path of ['assets/scripts/otop-product-translations.js','assets/scripts/otop-province-translations.js']) {
     const source = read(path);
@@ -66,7 +66,7 @@ test('English OTOP map/store/product translations contain no Thai-script copy', 
     const end = source.indexOf('\n    zh:', start);
     assert.notEqual(start, -1, `missing EN block in ${path}`);
     assert.notEqual(end, -1, `missing ZH block in ${path}`);
-    assert.doesNotMatch(source.slice(start, end), /[ก-๙]/, `Thai leaked into EN block in ${path}`);
+    assert.doesNotMatch(source.slice(start, end).replaceAll('฿',''), /[ก-๙]/, `Thai leaked into EN block in ${path}`);
   }
 });
 
