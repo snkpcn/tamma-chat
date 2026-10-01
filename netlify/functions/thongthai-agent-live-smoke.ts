@@ -56,10 +56,6 @@ function readSmokeState(raw: unknown): SmokeState | null {
 
 export const handler: Handler = async event => {
   if (event.httpMethod !== 'GET') return json(405, { ok: false, error: 'method_not_allowed' });
-  if (process.env.THONGTHAI_AGENT_LIVE_SMOKE_ENABLED !== '1') {
-    return json(404, { ok: false, error: 'live_smoke_disabled' });
-  }
-
   const customer = await loadCustomerMemory(SMOKE_ANONYMOUS_ID, 'th', emptyGuestContext());
   if (!customer?.guestDbId) {
     return json(503, { ok: false, error: 'synthetic_guest_unavailable' });
