@@ -3,9 +3,9 @@ import { loadCustomerMemory } from './_customer-db';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { runThongthaiAgentShadowTurn } from './_thongthai-agent-session';
 
-const SYNTHETIC_GUEST = '1b68fc8b-9abb-4a3d-83e2-c337ba5bc23b';
-const STATE_KEY = 'thongthaiAgentActivityTransactionSmokeV3';
-const CONVERSATION_ID = 'thongthai-agent-activity-transaction-smoke-v3-20261001';
+const SYNTHETIC_GUEST = 'e7f29fd4-8c9f-48b6-b88c-624a53c93957';
+const STATE_KEY = 'thongthaiAgentActivityTransactionSmokeV4';
+const CONVERSATION_ID = 'thongthai-agent-activity-transaction-smoke-v4-20261001';
 const TURNS = [
   'อยากจองขี่ม้าน้องภาราดร วันที่ 3 ตุลาคม 2569 เวลา 15:00 45 นาที 1 คน ชื่อ ทดสอบเอเจนต์ เบอร์ 0800000000 ครับ',
   'เอาไว้ก่อนนะ ยังไม่จองครับ',
