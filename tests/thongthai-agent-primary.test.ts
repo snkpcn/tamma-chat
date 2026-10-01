@@ -199,3 +199,25 @@ test('prepare percentage supports channel-specific rollout overrides', () => {
     assert.equal(configuredAgentPreparePercent('facebook'),50);
   });
 });
+
+
+test('prepare-only synthetic guest allowlist works while public percentage is zero', () => {
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_ENABLED:'1',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_CHANNELS:'web',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT:'0',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_GUESTS:'cert-guest-a,cert-guest-b',
+  }, () => {
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:'cert-guest-a',guestDbId:'db-a',channel:'web',
+    }),true);
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:'ordinary-guest',guestDbId:'db-a',channel:'web',
+    }),false);
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:'cert-guest-a',guestDbId:'db-a',channel:'line',
+    }),false);
+  });
+});
