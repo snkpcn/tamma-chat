@@ -5,7 +5,7 @@ import { createBooking, createCafeInquiry, createOtopOrder, formatActivityAssetN
 import { createRestaurantPreorder, listRestaurantMenu } from './_restaurant-sot';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
-import { hasCancelMarker, hasCommitMarker, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
+import { hasCancelMarker, hasCommitMarker, hasCorrectionMarker, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
 
 export type ThongthaiAgentTransactionMode = 'off' | 'prepare' | 'test' | 'live';
 
@@ -474,7 +474,7 @@ function modeAllowed(context: ThongthaiAgentTransactionContext): { ok: true; env
 }
 
 export function currentTurnExplicitlyConfirmsPreparedBooking(message: string): boolean {
-  if (hasExplicitNoTransactionMarker(message) || hasCancelMarker(message)) return false;
+  if (hasExplicitNoTransactionMarker(message) || hasCancelMarker(message) || hasCorrectionMarker(message)) return false;
   return hasCommitMarker(message) || hasStandaloneTransactionRequest(message);
 }
 
@@ -1366,7 +1366,7 @@ async function savePreparedCafeInquiry(guestDbId: string, value: PreparedCafeInq
 }
 
 export function currentTurnExplicitlyConfirmsCafeInquiry(message: string): boolean {
-  if (hasCancelMarker(message) || /ยังไม่ส่ง|ไม่ต้องส่ง|เอาไว้ก่อน|ไว้ก่อน/u.test(message)) return false;
+  if (hasCancelMarker(message) || hasCorrectionMarker(message) || /ยังไม่ส่ง|ไม่ต้องส่ง|เอาไว้ก่อน|ไว้ก่อน/u.test(message)) return false;
   if (/[?？]|ไหม|มั้ย|หรือเปล่า|รึเปล่า|ได้ไหม|ได้มั้ย/u.test(message)) return false;
   return /ยืนยัน\s*ส่ง\s*(?:คำถาม|เรื่อง|ให้ทีม)?|ส่ง\s*(?:คำถาม|เรื่องนี้)?\s*ให้ทีม(?:เลย)?|ส่งให้ทีมเลย/u.test(message);
 }
