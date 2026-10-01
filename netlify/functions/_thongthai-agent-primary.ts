@@ -27,6 +27,11 @@ function configuredPrepareChannels(): Set<BrainChannel> {
   return parseChannels(process.env.THONGTHAI_AGENT_TRANSACTION_PREPARE_CHANNELS, 'web');
 }
 
+function configuredPrepareGuestKeys(): Set<string> {
+  const raw = process.env.THONGTHAI_AGENT_TRANSACTION_PREPARE_GUESTS?.trim() || '';
+  return new Set(raw.split(',').map(value => value.trim()).filter(Boolean));
+}
+
 export function configuredAgentPrimaryPercent(channel: BrainChannel): number {
   const channelSpecific = channel === 'web'
     ? process.env.THONGTHAI_AGENT_PRIMARY_PERCENT_WEB
@@ -80,6 +85,12 @@ export function shouldUseThongthaiAgentTransactionPrepare(input: {
   if (!SUPPORTED_CHANNELS.has(input.channel)) return false;
   if (!configuredChannels().has(input.channel)) return false;
   if (!configuredPrepareChannels().has(input.channel)) return false;
+
+  // Exact guest allowlisting is a production-certification escape hatch:
+  // it lets us prove prepare-only behavior against a synthetic guest while
+  // the public percentage remains zero. It never bypasses the master enable
+  // switch or channel allowlists.
+  if (configuredPrepareGuestKeys().has(input.guestKey)) return true;
 
   const percent = configuredAgentPreparePercent(input.channel);
   if (percent <= 0) return false;
