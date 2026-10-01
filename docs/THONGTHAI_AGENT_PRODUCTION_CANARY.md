@@ -22,5 +22,6 @@ Rollout history:
 - 50% production canary: promoted after the post-hotfix 25% telemetry/cost gate.
 - New 25-50% cohort verification: two fresh production guests in buckets 2590 and 4241 both routed to `thongthai_agent_primary`, both grounded, with matching cost rows of 1.1170 THB and 1.0268 THB.
 - 100% eligible WEB rollout: promoted after the new 50% cohort verification gate.
+- New >50% cohort verification: a fresh WEB guest in bucket 7344 passed 3/3 production turns; the two paid turns both routed to `thongthai_agent_primary`, both were grounded, with matching completed cost rows of 1.0272 THB and 0.3420 THB (1.3692 THB total), and no false transaction was detected.
 
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
