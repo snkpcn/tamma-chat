@@ -1,5 +1,5 @@
 [build]
-  command = "node scripts/apply-isan-boutique-phase1.mjs && node scripts/apply-chat-polish.mjs && node scripts/apply-restaurant-constraint-copy.mjs && node scripts/phase-o-build-gate.mjs && node --import tsx scripts/write-semantic-certification-artifact.ts"
+  command = "node scripts/apply-isan-boutique-phase1.mjs && node scripts/apply-chat-polish.mjs && node scripts/apply-restaurant-constraint-copy.mjs && node scripts/phase-o-build-gate.mjs && node --import tsx scripts/write-semantic-certification-artifact.ts && npm test"
   publish = "."
   functions = "netlify/functions"
 
