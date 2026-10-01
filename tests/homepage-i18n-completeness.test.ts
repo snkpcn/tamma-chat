@@ -57,7 +57,7 @@ test('English strings exist for the homepage blocks seen in the mobile recording
 
 test('document title follows the selected language', () => {
   assert.ok(html.includes("document.title = t('page_title')"));
-  assert.ok(html.includes('page_title:"Tamma-Chat — Experiences of Isan"'));
+  assert.ok(html.includes('page_title:"Thammachat — Experiences of Isan"'));
 });
 
 
