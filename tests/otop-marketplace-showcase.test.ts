@@ -70,3 +70,11 @@ test('cart header may hide over the hero but remains pinned once commerce begins
   assert.ok(html.includes('.top.is-commerce'));
   assert.ok(html.includes('id="cartBtn"'));
 });
+
+test('hero gives restrained credit to the original film source and featured silk craft', () => {
+  assert.ok(html.includes('@banklocalwisdom9238'));
+  assert.ok(html.includes('https://youtu.be/v3hPPvDiGzM?si=ZOkUb-QSdnANjAbI'));
+  assert.ok(html.includes('ศูนย์ส่งเสริมผ้าไหม จ.ชัยภูมิ'));
+  assert.ok(html.includes('.showcaseNote a{'));
+  assert.ok(html.includes('font-size:8px'));
+});
