@@ -1476,13 +1476,17 @@ async function commitPreparedCafeInquiry(
   };
   await savePreparedCafeInquiry(context.guestDbId, { ...prepared, status:'committed', result });
 
+  const staffNotified = notificationStatus === 'sent' || notificationStatus === 'duplicate';
   return {
     ok:true,
     committed:true,
     replayed:false,
     inquiry_code:created.inquiryCode,
     notification_status:notificationStatus,
-    customer_copy_rule:'This confirms only that the cafe inquiry was recorded. Do not imply a cafe order, payment, reservation, or staff response has been completed.',
+    staff_notified:staffNotified,
+    customer_copy_rule: staffNotified
+      ? 'The inquiry is recorded and staff notification was delivered. Do not imply a cafe order, payment, reservation, or staff response has been completed.'
+      : 'The inquiry is recorded, but staff delivery is NOT confirmed. Do not say the team received it. Do not imply a cafe order, payment, reservation, or staff response has been completed.',
   };
 }
 
