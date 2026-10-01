@@ -69,8 +69,8 @@
     const titles = {
       th:'แผนที่ของดีอีสาน — ทำมา-ชาติ OTOP',
       en:'Isan OTOP Map — Thammachat',
-      zh:'伊森 OTOP 地图 — ทำมา-ชาติ',
-      lo:'ແຜນທີ່ OTOP ອີສານ — ทำมา-ชาติ',
+      zh:'伊森 OTOP 地图 — Thammachat',
+      lo:'ແຜນທີ່ OTOP ອີສານ — Thammachat',
       vi:'Bản đồ OTOP Isan — Thammachat'
     };
     document.title = titles[lang] || titles.th;
