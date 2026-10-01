@@ -2,6 +2,7 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { buildRealKnowledgeSourceAdapters } from './_dialog-source-adapters';
 import { resolveKnowledge, type GroundedFact, type KnowledgeNeed, type KnowledgeRequest } from './_knowledge-resolver';
 import type { SemanticDomain } from './_semantic-interpreter';
+import { restaurantMenuAdvice } from './_restaurant-sot';
 import { THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 
 export type ThongthaiAgentFunctionTool = {
@@ -19,6 +20,20 @@ const objectSchema = (properties: Record<string, unknown>, required: string[] = 
 });
 
 export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = [
+  {
+    type: 'function',
+    name: 'recommend_restaurant_menu',
+    description: 'Compact canonical restaurant recommendation tool for allergy, dietary, spice, budget, pairing, and recommendation questions. Pass the customer\'s full food request once. Prefer this over repeated get_restaurant_menu calls when the customer asks what to eat.',
+    parameters: objectSchema({
+      query: { type: 'string', description: 'The customer\'s full food request, including allergy/diet/spice wording.' },
+      constraints: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional canonical remembered constraints, e.g. shrimp_allergy, no_spicy.',
+      },
+      limit: { type: 'integer', minimum: 1, maximum: 5, description: 'Maximum recommendation rows to return. Defaults to 3.' },
+    }, ['query']),
+  },
   {
     type: 'function',
     name: 'get_restaurant_menu',
@@ -184,12 +199,80 @@ function safeResult(bundle: Awaited<ReturnType<typeof resolveKnowledge>>, facts:
   });
 }
 
+function compactRestaurantAdviceResult(raw: Awaited<ReturnType<typeof restaurantMenuAdvice>>, limit: number): string {
+  const recommendations = Array.isArray(raw.recommendations)
+    ? raw.recommendations.slice(0, limit).map(item => ({
+        name: item.name,
+        category: item.category,
+        price: item.price,
+        ingredients: item.ingredients,
+        allergenFlags: item.allergenFlags,
+        spiceLevel: item.spiceLevel,
+        reasons: 'reasons' in item && Array.isArray(item.reasons) ? item.reasons.slice(0, 2) : [],
+      }))
+    : [];
+
+  const itemSafety = raw.itemSafety
+    ? {
+        safe: raw.itemSafety.safe,
+        item: {
+          name: raw.itemSafety.item.name,
+          category: raw.itemSafety.item.category,
+          price: raw.itemSafety.item.price,
+          ingredients: raw.itemSafety.item.ingredients,
+          allergenFlags: raw.itemSafety.item.allergenFlags,
+          spiceLevel: raw.itemSafety.item.spiceLevel,
+        },
+      }
+    : null;
+
+  const comparison = Array.isArray(raw.comparison)
+    ? raw.comparison.slice(0, Math.min(4, limit)).map(item => ({
+        name: item.name,
+        category: item.category,
+        price: item.price,
+        ingredients: item.ingredients,
+        allergenFlags: item.allergenFlags,
+        spiceLevel: item.spiceLevel,
+      }))
+    : null;
+
+  return JSON.stringify({
+    ok: true,
+    mode: raw.mode,
+    parsed: {
+      spice: raw.parsed.spice,
+      vegetarian: raw.parsed.vegetarian,
+      avoidProteins: raw.parsed.avoidProteins,
+      avoidIngredients: raw.parsed.avoidIngredients,
+      allergenFlags: raw.parsed.allergenFlags,
+    },
+    notices: raw.notices,
+    recommendations,
+    itemSafety,
+    comparison,
+    set: raw.set,
+  });
+}
+
 export async function executeThongthaiReadOnlyTool(
   name: string,
   rawArgs: unknown,
   context: ThongthaiAgentToolContext,
 ): Promise<string> {
   const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
+  if (name === 'recommend_restaurant_menu') {
+    const query = stringArg(args, 'query');
+    if (!query) return JSON.stringify({ ok: false, error: 'query_required' });
+    const constraints = Array.isArray(args.constraints)
+      ? args.constraints.filter((value): value is string => typeof value === 'string').slice(0, 12)
+      : [];
+    const requestedLimit = Math.floor(Number(args.limit) || 3);
+    const limit = Math.max(1, Math.min(5, requestedLimit));
+    const advice = await restaurantMenuAdvice({ query, constraints });
+    return compactRestaurantAdviceResult(advice, limit);
+  }
+
   const adapters = buildRealKnowledgeSourceAdapters(context.channel, {
     guestDbId: context.guestDbId,
     environment: context.environment ?? 'live',
