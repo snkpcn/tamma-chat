@@ -45,57 +45,9 @@
 <div id="drawer" class="overlay drawer" aria-hidden="true"><div id="shade" class="shade"></div><aside class="sheet" aria-label="ตะกร้าสินค้าและชำระเงิน"><div class="sheetHead"><h2 id="drawerTitle">ตะกร้าสินค้า</h2><button id="closeDrawer" class="close" type="button">ปิด</button></div><div id="steps" class="steps"><span class="active">ตะกร้า</span><span>ที่อยู่จัดส่ง</span><span>ยืนยัน</span></div><div id="cartView"><div id="cartLines"></div><div id="cartSummary" class="summary"></div><button id="checkoutBtn" class="primary" type="button">ดำเนินการต่อ</button></div><div id="checkoutView" class="checkout"><h3 id="chooseAddressTitle">เลือกที่อยู่จัดส่ง</h3><div id="checkoutNotice"></div><div id="addressChoices"></div><label for="orderNote">หมายเหตุถึงทีมงาน</label><textarea id="orderNote" rows="3" maxlength="1000" placeholder="เช่น แพ็กเป็นของขวัญ"></textarea><div id="checkoutSummary" class="summary"></div><button id="placeOrderBtn" class="primary" type="button">ยืนยันคำสั่งซื้อ</button><button id="backToCart" class="secondary" type="button">กลับไปแก้ตะกร้า</button></div><div id="successView" class="checkout"></div></aside></div>
 <script src="assets/scripts/otop-i18n.js"></script>
 <script src="assets/scripts/otop-product-translations.js"></script>
-<script src="assets/scripts/otop-i18n.js"></script>
-<script src="assets/scripts/otop-product-translations.js"></script>
 <script>
 const API='/.netlify/functions/otop-store',ADDRESS_API='/.netlify/functions/customer-addresses',SUPABASE_URL='https://upaokrprawzhgzeqsdke.supabase.co',SUPABASE_KEY='sb_publishable_RhUfQ8ZqUx9PYQWaEvV6Yw_Z8oB5zN_';
 const $=id=>document.getElementById(id);const PROVINCE_NAMES={chaiyaphum:'ชัยภูมิ',khonkaen:'ขอนแก่น',buriram:'บุรีรัมย์',surin:'สุรินทร์',sisaket:'ศรีสะเกษ',nakhonratchasima:'นครราชสีมา',roiet:'ร้อยเอ็ด',mahasarakham:'มหาสารคาม',kalasin:'กาฬสินธุ์',sakonnakhon:'สกลนคร',nakhonphanom:'นครพนม',mukdahan:'มุกดาหาร',yasothon:'ยโสธร',amnatcharoen:'อำนาจเจริญ',ubonratchathani:'อุบลราชธานี',udonthani:'อุดรธานี',nongkhai:'หนองคาย',buengkan:'บึงกาฬ',loei:'เลย',nongbualamphu:'หนองบัวลำภู'};const requestedProvince=new URLSearchParams(location.search).get('provinceId')||'chaiyaphum';let selectedProvinceId=PROVINCE_NAMES[requestedProvince]?requestedProvince:'chaiyaphum';let products=[],shipping=null,addresses=[],checkoutKey=null,activeProduct=null,detailQuantity=1;let cart=(()=>{try{return JSON.parse(localStorage.getItem('tamma_otop_cart')||'{}')}catch{return {}}})();
-function currentLang(){return window.OTOP_I18N?.lang?.()||'th'}
-function tr(key,vars={}){return window.OTOP_I18N?.t?.(key,vars)||key}
-function localizedProduct(product){
-  if(!product||currentLang()==='th')return product;
-  const merged=window.OTOP_PRODUCT_TRANSLATIONS?.get?.(String(product.catalogProductId||''),currentLang(),product.story||{})||product.story||{};
-  const name=merged.name||product.name;
-  const story={...merged};delete story.name;delete story.longStory;
-  return {...product,name,description:story.shortDescription||product.description,story};
-}
-function selectedProvinceName(){return window.OTOP_I18N?.provinceName?.(selectedProvinceId)||PROVINCE_NAMES[selectedProvinceId]}
-function categoryGroups(){return[
-  {id:'wear',kicker:'WEAR / TEXTILES',title:tr('category_wear'),subtitle:tr('category_wear_sub')},
-  {id:'food',kicker:'FOOD / PANTRY',title:tr('category_food'),subtitle:tr('category_food_sub')},
-  {id:'home',kicker:'HOME / WELLNESS',title:tr('category_home'),subtitle:tr('category_home_sub')}
-]}
-function applyStoreStatic(){
-  const provinceLabel=document.querySelector('.provinceField span');if(provinceLabel)provinceLabel.textContent=tr('shop_province');
-  if($('search'))$('search').placeholder=tr('shop_search');if($('mobileSearch'))$('mobileSearch').placeholder=tr('shop_search');
-  if($('accountLink'))$('accountLink').textContent=tr('shop_account');
-  if($('cartBtn')?.firstChild)$('cartBtn').firstChild.nodeValue=tr('shop_cart')+' ';
-  const kicker=document.querySelector('.showcaseKicker');if(kicker)kicker.textContent=tr('hero_kicker');
-  if($('showcaseTitle'))$('showcaseTitle').textContent=tr('hero_title');
-  const lead=document.querySelector('.showcaseLead');if(lead)lead.textContent=tr('hero_lead');
-  const mapLink=document.querySelector('.showcaseSecondary');if(mapLink)mapLink.textContent=tr('hero_map');
-  if($('provinceEyebrow'))$('provinceEyebrow').textContent=tr('province_eyebrow');
-  const collectionKicker=document.querySelector('#catalogCollection .sectionKicker');if(collectionKicker)collectionKicker.textContent=tr('collections');
-  if($('sort')){
-    const opts=$('sort').options;if(opts[0])opts[0].textContent=tr('sort_featured');if(opts[1])opts[1].textContent=tr('sort_low_high');if(opts[2])opts[2].textContent=tr('sort_high_low');
-  }
-  if($('closeDrawer'))$('closeDrawer').textContent=tr('close');
-  if($('closeProduct'))$('closeProduct').setAttribute('aria-label',tr('close'));
-  if($('detailAdd'))$('detailAdd').textContent=tr('add_cart');
-  if($('checkoutBtn'))$('checkoutBtn').textContent=tr('continue');
-  const checkoutHeading=document.querySelector('#checkoutView h3');if(checkoutHeading)checkoutHeading.textContent=tr('choose_address');
-  const noteLabel=document.querySelector('label[for="orderNote"]');if(noteLabel)noteLabel.textContent=tr('note_team');
-  if($('orderNote'))$('orderNote').placeholder=tr('note_ph');
-  if($('placeOrderBtn'))$('placeOrderBtn').textContent=tr('place_order');
-  if($('backToCart'))$('backToCart').textContent=tr('back_cart');
-}
-function updateShippingBadge(){
-  if(!$('shippingBadge'))return;
-  if(!shipping){$('shippingBadge').textContent=tr('shipping_loading');return}
-  const vars={fee:money(shipping.domesticBaseFee),threshold:money(shipping.freeShippingThreshold),min:shipping.estimatedMinDays,max:shipping.estimatedMaxDays};
-  $('shippingBadge').textContent=shipping.freeShippingThreshold!=null?tr('shipping_free_line',vars):tr('shipping_line',vars);
-}
-
 const oi=()=>window.OTOP_I18N;
 const tr=(key,vars={})=>oi()?.t(key,vars)||key;
 const currentLang=()=>oi()?.lang()||'th';
