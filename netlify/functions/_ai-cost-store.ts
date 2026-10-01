@@ -35,62 +35,75 @@ function config():{url:string;key:string}|null{
   return url&&key?{url:url.replace(/\/$/,''),key}:null;
 }
 
-async function post(table:string,onConflict:string,payload:Record<string,unknown>):Promise<void>{
+const POST_TIMEOUT_MS=2500;
+const POST_ATTEMPTS=2;
+const POST_RETRY_DELAY_MS=120;
+
+function sleep(ms:number):Promise<void>{
+  return new Promise(resolve=>setTimeout(resolve,ms));
+}
+
+async function postWithPreference(
+  table:string,
+  onConflict:string,
+  payload:Record<string,unknown>,
+  prefer:string,
+):Promise<void>{
   const c=config();
   if(!c)return;
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),900);
-  try{
-    const r=await fetch(
-      `${c.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
-      {
-        method:'POST',
-        signal:controller.signal,
-        headers:{
-          apikey:c.key,
-          Authorization:`Bearer ${c.key}`,
-          'Content-Type':'application/json',
-          Prefer:'resolution=merge-duplicates,return=minimal',
+
+  let lastError:unknown=null;
+  for(let attempt=0;attempt<POST_ATTEMPTS;attempt+=1){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),POST_TIMEOUT_MS);
+    try{
+      const r=await fetch(
+        `${c.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
+        {
+          method:'POST',
+          signal:controller.signal,
+          headers:{
+            apikey:c.key,
+            Authorization:`Bearer ${c.key}`,
+            'Content-Type':'application/json',
+            Prefer:prefer,
+          },
+          body:JSON.stringify(payload),
         },
-        body:JSON.stringify(payload),
-      },
-    );
-    if(!r.ok){
-      const body=await r.text().catch(()=>'');
-      throw new Error(`AI cost store ${table} failed ${r.status}: ${body.slice(0,180)}`);
+      );
+      if(!r.ok){
+        const body=await r.text().catch(()=>'');
+        throw new Error(`AI cost store ${table} failed ${r.status}: ${body.slice(0,180)}`);
+      }
+      return;
+    }catch(error){
+      lastError=error;
+      if(attempt+1<POST_ATTEMPTS)await sleep(POST_RETRY_DELAY_MS);
+    }finally{
+      clearTimeout(timer);
     }
-  }finally{
-    clearTimeout(timer);
   }
+
+  if(lastError instanceof Error)throw lastError;
+  throw new Error(`AI cost store ${table} failed after retry`);
+}
+
+async function post(table:string,onConflict:string,payload:Record<string,unknown>):Promise<void>{
+  await postWithPreference(
+    table,
+    onConflict,
+    payload,
+    'resolution=merge-duplicates,return=minimal',
+  );
 }
 
 async function postIfAbsent(table:string,onConflict:string,payload:Record<string,unknown>):Promise<void>{
-  const c=config();
-  if(!c)return;
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),900);
-  try{
-    const r=await fetch(
-      `${c.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
-      {
-        method:'POST',
-        signal:controller.signal,
-        headers:{
-          apikey:c.key,
-          Authorization:`Bearer ${c.key}`,
-          'Content-Type':'application/json',
-          Prefer:'resolution=ignore-duplicates,return=minimal',
-        },
-        body:JSON.stringify(payload),
-      },
-    );
-    if(!r.ok){
-      const body=await r.text().catch(()=>'');
-      throw new Error(`AI cost store ${table} failed ${r.status}: ${body.slice(0,180)}`);
-    }
-  }finally{
-    clearTimeout(timer);
-  }
+  await postWithPreference(
+    table,
+    onConflict,
+    payload,
+    'resolution=ignore-duplicates,return=minimal',
+  );
 }
 
 /**
