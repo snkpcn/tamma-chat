@@ -23,6 +23,7 @@ type Payload = Record<string, unknown> & { message?: unknown; intent?: unknown }
 function productionGuestId(): string {
   const configured = process.env.PHASE7_GUEST_ID?.trim();
   if (configured) return configured;
+  if (process.env.CONTEXT === 'deploy-preview') return 'cbdbeb76-a6b0-5721-a9f8-5c243673b09c';
   const suffix = BigInt(Date.now()).toString(16).slice(-12).padStart(12, '0');
   return `f7f7f7f7-0251-4f7f-8f7f-${suffix}`;
 }
@@ -33,11 +34,16 @@ async function main(): Promise<void> {
   }
 
   const guestId = productionGuestId();
-  const requestedLimit = Number(process.env.PHASE7_LIMIT ?? PHASE7_MESSAGES.length);
+  const requestedLimit = Number(
+    process.env.PHASE7_LIMIT
+      ?? (process.env.CONTEXT === 'deploy-preview' ? 3 : PHASE7_MESSAGES.length)
+  );
   const turnLimit = Number.isFinite(requestedLimit)
     ? Math.max(1, Math.min(PHASE7_MESSAGES.length, Math.floor(requestedLimit)))
     : PHASE7_MESSAGES.length;
-  const pageSection = process.env.PHASE7_CHANNEL === 'web' ? null : 'line';
+  const pageSection = process.env.PHASE7_CHANNEL === 'web' || process.env.CONTEXT === 'deploy-preview'
+    ? null
+    : 'line';
   const history: ChatMessage[] = [];
   const results: Array<Record<string, unknown> & { pass: boolean }> = [];
 
