@@ -1,9 +1,7 @@
 name: Agent Prepare-Only Production Smoke
 
 on:
-  push:
-    branches:
-      - agent-prepare-only-live-smoke
+  workflow_dispatch:
 
 permissions:
   contents: read

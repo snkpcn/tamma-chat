@@ -1,0 +1,25 @@
+name: Inspect Agent Prepare Session
+
+on:
+  push:
+    branches:
+      - agent-prepare-only-live-smoke
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Inspect synthetic prepare session
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx tsx scripts/inspect-agent-prepare-session.ts
