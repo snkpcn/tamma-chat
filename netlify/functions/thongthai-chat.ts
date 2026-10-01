@@ -71,6 +71,7 @@ import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agen
 import { processOneMindCustomerTurn, isTrustedBoundedNoTransactionContinuation } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import { runThongthaiAgentPrimaryTurn } from './_thongthai-agent-session';
+import { executeThongthaiTransactionTool } from './_thongthai-agent-transactions';
 import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
@@ -3846,6 +3847,117 @@ function missingActivityFallbackFields(draft: Record<string, unknown>): string[]
   if (!draft.customerName) missing.push('ชื่อผู้จอง');
   if (!draft.phone) missing.push('เบอร์โทร');
   return missing;
+}
+
+
+export function activityPrepareOnlyToolArgs(
+  draft: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (missingActivityFallbackFields(draft).length) return null;
+  const horseName = typeof draft.horseName === 'string' ? draft.horseName.trim() : '';
+  const date = typeof draft.date === 'string' ? draft.date.trim() : '';
+  const time = typeof draft.time === 'string' ? draft.time.trim() : '';
+  const durationMinutes = Number(draft.durationMinutes);
+  const partySize = Number(draft.partySize);
+  const customerName = typeof draft.customerName === 'string' ? draft.customerName.trim() : '';
+  const phone = typeof draft.phone === 'string' ? draft.phone.trim() : '';
+  if (!horseName || !date || !time || !Number.isInteger(durationMinutes)
+      || !Number.isInteger(partySize) || !customerName || !phone) return null;
+  return {
+    activity_code: 'horse',
+    asset_name: horseName,
+    date,
+    time,
+    duration_minutes: durationMinutes,
+    party_size: partySize,
+    customer_name: customerName,
+    phone,
+  };
+}
+
+function displayHorseName(value: unknown): string {
+  const name = typeof value === 'string' ? value.trim().replace(/^น้อง/u, '') : '';
+  return name ? `น้อง${name}` : 'ม้าที่เลือก';
+}
+
+export function composeActivityPrepareOnlyResponse(
+  value: Record<string, unknown>,
+  confirmedTurn = false,
+): BrainResponse | null {
+  if (value.ok !== true || value.prepared !== true) return null;
+  const summary = value.summary && typeof value.summary === 'object' && !Array.isArray(value.summary)
+    ? value.summary as Record<string, unknown>
+    : {};
+  if (confirmedTurn) {
+    return {
+      message:'รับการยืนยันแล้วครับ แต่ตอนนี้ระบบยังไม่เปิดให้ส่งคำขอจองจริง รายการยังเป็นแบบร่างและยังไม่มีการสร้างการจองครับ',
+      intent:'booking',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+  const exactPhrase = typeof value.exact_confirmation_phrase_th === 'string'
+    && value.exact_confirmation_phrase_th.trim()
+    ? value.exact_confirmation_phrase_th.trim()
+    : 'ยืนยันจอง';
+  const details = [
+    `เตรียมรายการจองไว้แล้วครับ (ยังไม่ได้ส่งจองจริง)`,
+    `• ขี่ม้า: ${displayHorseName(summary.asset)}`,
+    summary.date ? `• วันที่ ${summary.date}${summary.time ? ` เวลา ${summary.time}` : ''}` : '',
+    summary.duration_minutes ? `• ${summary.duration_minutes} นาที · ${summary.party_size ?? 1} ท่าน` : '',
+    summary.expected_price != null ? `• ราคา ${summary.expected_price} บาท` : '',
+    summary.customer_name ? `• ชื่อ ${summary.customer_name}${summary.phone ? ` · โทร ${summary.phone}` : ''}` : '',
+    `หากรายละเอียดถูกต้อง พิมพ์ “${exactPhrase}” ครับ`,
+  ].filter(Boolean);
+  return {
+    message:details.join('\n'),
+    intent:'booking',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
+async function prepareOnlyActivityFastPath(
+  request: BrainRequest,
+  guestDbId: string,
+  channel: BrainChannel,
+  eventId: string,
+): Promise<BrainResponse | null> {
+  const context = {
+    guestDbId,
+    channel,
+    environment:'live' as const,
+    eventId,
+    message:request.message,
+    transactionMode:'prepare' as const,
+  };
+
+  // A later explicit confirmation in Gate 0 only re-reads the draft. Commit
+  // tools are absent and the prepare runtime independently rejects commits.
+  if (hasCommitMarker(request.message)) {
+    const raw = await executeThongthaiTransactionTool('get_prepared_activity_booking', {}, context);
+    let value: Record<string, unknown> = {};
+    try { value = JSON.parse(raw) as Record<string, unknown>; } catch { return null; }
+    const response = composeActivityPrepareOnlyResponse(value, true);
+    if (response) return response;
+  }
+
+  const draft = activityBookingFallbackDraft(request);
+  const args = draft ? activityPrepareOnlyToolArgs(draft) : null;
+  if (!args || !hasStandaloneTransactionRequest(request.message)) return null;
+
+  const raw = await executeThongthaiTransactionTool('prepare_activity_booking', args, context);
+  let value: Record<string, unknown> = {};
+  try { value = JSON.parse(raw) as Record<string, unknown>; } catch { return null; }
+  return composeActivityPrepareOnlyResponse(value, false);
 }
 
 function activityBookingFallbackPrompt(request: BrainRequest): BrainResponse | null {
