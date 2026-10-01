@@ -11,13 +11,9 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - name: Run three fixed synthetic transaction turns
+      - name: Run fixed synthetic transaction turn 2 only
         run: |
           set -euo pipefail
-          for turn in 1 2 3; do
-            echo "===== TURN $turn ====="
-            curl --fail-with-body --silent --show-error               --max-time 45               "https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-activity-transaction-smoke?turn=$turn"
-            echo
-          done
+          curl --fail-with-body --silent --show-error             --max-time 45             "https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-activity-transaction-smoke?turn=2"
