@@ -249,6 +249,7 @@ async function submitToolResults(
 async function waitForCompletedTurn(
   sessionId: string,
   input: AgentShadowTurnInput,
+  previousTurnId: string | null,
 ): Promise<{ turn: AgentTurn; toolCalls: string[] }> {
   const toolCalls: string[] = [];
   const toolCache = new Map<string, string>();
@@ -266,6 +267,14 @@ async function waitForCompletedTurn(
     }
 
     const turn = await latestTurn(sessionId);
+    // POST /events is accepted asynchronously. Immediately after sending a
+    // new message, the session can still be idle and /turns?order=desc can
+    // still return the PREVIOUS completed turn. Never mistake that stale
+    // turn for completion of the newly-submitted customer message.
+    if (turn?.id && previousTurnId && turn.id === previousTurnId) {
+      await sleep(POLL_MS);
+      continue;
+    }
     if (turn?.status === 'completed') return { turn, toolCalls };
     if (turn?.status === 'failed' || turn?.status === 'cancelled') {
       throw new Error(`Agent turn ${turn.status}: ${turn.error?.message ?? turn.error?.code ?? 'unknown'}`);
@@ -367,7 +376,11 @@ export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): 
     });
   }
 
-  const { turn, toolCalls } = await waitForCompletedTurn(sessionId, input);
+  const { turn, toolCalls } = await waitForCompletedTurn(
+    sessionId,
+    input,
+    existing?.lastTurnId ?? null,
+  );
   const output = await outputForTurn(sessionId, turn.id);
   const settledTurn = await retrieveTurnWithSettledUsage(sessionId, turn.id);
   const usage = usageFromTurn(settledTurn);
