@@ -2,9 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import {
+  THONGTHAI_FACEBOOK_PERSONA_NAME,
+  THONGTHAI_FACEBOOK_PERSONA_PROFILE_URL,
   detectFacebookLanguage,
   extractFacebookTextEvents,
   facebookGuestId,
+  findThongthaiPersonaId,
   splitFacebookText,
   verifyFacebookSignature,
 } from '../netlify/functions/_facebook-messenger-adapter';
@@ -70,4 +73,23 @@ test('language detection and message splitting stay within transport limits', ()
   assert.equal(chunks.length, 3);
   assert.ok(chunks.every(chunk => chunk.length <= 1900));
   assert.equal(chunks.join('').length, 4300);
+});
+
+
+test('Thongthai Messenger persona uses the locked Thongthai profile asset', () => {
+  assert.equal(THONGTHAI_FACEBOOK_PERSONA_NAME, 'ทองไทย');
+  assert.equal(
+    THONGTHAI_FACEBOOK_PERSONA_PROFILE_URL,
+    'https://tamma-chat.netlify.app/assets/thongthai/thongthai-default.webp',
+  );
+  assert.equal(
+    findThongthaiPersonaId({
+      data: [
+        { id: 'persona-other', name: 'Staff' },
+        { id: 'persona-thongthai', name: 'ทองไทย' },
+      ],
+    }),
+    'persona-thongthai',
+  );
+  assert.equal(findThongthaiPersonaId({ data: [] }), null);
 });
