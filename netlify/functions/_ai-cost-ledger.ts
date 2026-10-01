@@ -160,6 +160,30 @@ function effectiveBudgetCapUsd(context: AiCallContext, customerCapUsd: number): 
       : customerCapUsd;
 }
 
+export const PHASE3_SEMANTIC_INPUT_RESERVE_MULTIPLIER = 1.5;
+
+export function reservationInputTokensForAiCall(
+  context: Pick<AiCallContext,'callerLabel'>,
+  estimatedInputTokens: number,
+  absoluteInputTokens = aiCostPolicy().absoluteInputTokens,
+): number {
+  const estimate=Math.max(1,Math.ceil(estimatedInputTokens));
+  // Live Phase 3 calibration proved the canonical byte-based estimator was
+  // conservative on every real call: actual/estimate max=0.6359. Reserve
+  // 1.5x the already-conservative estimate for semantic interpretation /
+  // review (~2.35x the largest observed actual input) while retaining the
+  // old absolute worst-case reservation for grounded response composition
+  // and every other caller. If a future semantic prompt itself grows, the
+  // reservation grows with it up to the unchanged absolute ceiling.
+  if (/^semantic(?:-|$)/u.test(context.callerLabel)) {
+    return Math.min(
+      absoluteInputTokens,
+      Math.max(estimate,Math.ceil(estimate*PHASE3_SEMANTIC_INPUT_RESERVE_MULTIPLIER)),
+    );
+  }
+  return absoluteInputTokens;
+}
+
 export async function reserveAiCall(
   context: AiCallContext,
   model: string,
@@ -195,8 +219,13 @@ export async function reserveAiCall(
   // Reserve against the configured absolute input ceiling, not the average
   // estimate. Correctness never depends on prompt caching or optimistic token
   // estimation; a request that could cross the cap is blocked before fetch.
+  const reservationInputTokens=reservationInputTokensForAiCall(
+    context,
+    estimatedInputTokens,
+    policy.absoluteInputTokens,
+  );
   const reservedCostUsd = roundUsd(
-    reserveWorstCaseCostUsd(model, policy.absoluteInputTokens, maxOutputTokens),
+    reserveWorstCaseCostUsd(model, reservationInputTokens, maxOutputTokens),
   );
 
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
@@ -229,6 +258,7 @@ export async function reserveAiCall(
         call_purpose:context.callerLabel,
         ai_budget_block:1, reason:'budget',
         reserved_cost_usd:reservedCostUsd, reserved_cost_thb:usdToThb(reservedCostUsd),
+        reservation_input_tokens:reservationInputTokens, estimated_input_tokens:estimatedInputTokens,
         conversation_cost_usd:roundUsd(ledger.cumulativeCostUsd + externalPrimaryAgentCostUsd),
         conversation_cost_thb:usdToThb(ledger.cumulativeCostUsd + externalPrimaryAgentCostUsd),
         external_primary_agent_cost_usd:roundUsd(externalPrimaryAgentCostUsd),
