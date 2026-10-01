@@ -1,0 +1,24 @@
+name: Agent canary 25 smoke
+
+on:
+  push:
+    branches:
+      - agent-canary/smoke-25-live
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run live WEB canary certification
+        env:
+          PHASE7_GUEST_ID: cbdbeb76-a6b0-5721-a9f8-5c243673b09c
+          PHASE7_LIMIT: "3"
+          PHASE7_CHANNEL: web
+        run: npm run certify:phase7:production
