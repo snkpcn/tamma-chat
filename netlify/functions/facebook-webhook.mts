@@ -22,7 +22,7 @@ type ThongthaiResponse = {
   suggestedActions?: unknown[];
 };
 
-function env(name: string): string {
+// Meta verification/runtime secrets are resolved from Netlify environment variables.\n// Redeploy production after changing their scopes or contexts so the live function sees the new values.\nfunction env(name: string): string {
   return Netlify.env.get(name)?.trim() ?? '';
 }
 
