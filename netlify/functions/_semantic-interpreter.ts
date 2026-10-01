@@ -1427,6 +1427,29 @@ export function parseSemanticTurnResponse(
   let references = resolveReferences(normalizeReferences(parsed.references), context);
   const entities = canonicalizeEntityAliases(asRecord(parsed.entities), domain);
 
+  // Closed-entity domain reconciliation. A live supervisor can understand a
+  // horse request correctly (activityCode/horse criterion/horse selection)
+  // while still emitting domain=unknown on a compound sentence. These fields
+  // are already structured model output, so repairing UNKNOWN from them is a
+  // shape-consistency check, not a second raw-text language classifier.
+  let activityDomainRecoveredFromEntities = false;
+  if (
+    domain === 'unknown'
+    && (
+      typeof entities.activityCode === 'string'
+      || typeof entities.horseName === 'string'
+      || typeof entities.primaryHorseName === 'string'
+      || typeof entities.fallbackHorseName === 'string'
+      || typeof entities.preferredHorseTrait === 'string'
+    )
+  ) {
+    domain = 'activity';
+    activityDomainRecoveredFromEntities = true;
+    // The old reply may be a clarification written under the now-repaired
+    // UNKNOWN assumption. Re-render from structured meaning + grounded facts.
+    reply = '';
+  }
+
   // An explicit checkout-date answer is a closed task-slot update, not an
   // open-ended language inference.  Live supervision can correctly keep the
   // Stay domain/action while omitting `endDate` from a short answer such as
@@ -2000,6 +2023,14 @@ export function parseSemanticTurnResponse(
     canonicalConstraints.push('no_new_membership');
   }
 
+  const structuredActivityRecommendationResolved =
+    activityDomainRecoveredFromEntities
+    && domain === 'activity'
+    && action === 'recommend'
+    && informationNeed === 'recommendation'
+    && !hasUnresolvedReference
+    && !hasAmbiguousReference;
+
   return {
     normalizedMeaning: normalizedMeaning || undefined,
     reply: reply || undefined,
@@ -2016,10 +2047,10 @@ export function parseSemanticTurnResponse(
     // something, but nothing in the real context matches) forces clarification
     // even if the model itself didn't flag needsClarification -- this is the
     // deterministic-validation layer catching a case the model may miss.
-    needsClarification: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
+    needsClarification: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation || structuredActivityRecommendationResolved)
       ? false
       : (parsed.needsClarification === true || hasUnresolvedReference || ambiguousReferenceRequiresClarification),
-    clarificationReason: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation)
+    clarificationReason: (explicitCafeStaffInquiryAuthorization || isActiveTaskSummary || resolvedSelectionClarification || taskBacksEllipticPriceQuestion || resolvedConversationContinuation || structuredActivityRecommendationResolved)
       ? undefined
       : (typeof parsed.clarificationReason === 'string' && parsed.clarificationReason.trim()
         ? parsed.clarificationReason.trim()
