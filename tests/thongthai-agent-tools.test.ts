@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { THONGTHAI_READ_ONLY_TOOLS, executeThongthaiReadOnlyTool } from '../netlify/functions/_thongthai-agent-tools';
+import {
+  THONGTHAI_AGENT_TOOLS,
+  THONGTHAI_READ_ONLY_TOOLS,
+  executeThongthaiAgentTool,
+  executeThongthaiReadOnlyTool,
+} from '../netlify/functions/_thongthai-agent-tools';
+import { THONGTHAI_STAGING_TRANSACTION_TOOLS } from '../netlify/functions/_thongthai-agent-transactions';
 import { thongthaiStagingAgentConfig, THONGTHAI_STAGING_AGENT_ID } from '../netlify/functions/_thongthai-agent-profile';
 
-test('Thongthai Agent exposes only bounded read-only business tools', () => {
+test('Thongthai Agent keeps the original business fact tools bounded and read-only', () => {
   const names = THONGTHAI_READ_ONLY_TOOLS.map(tool => tool.name);
   assert.deepEqual(names, [
     'get_restaurant_menu',
@@ -25,10 +31,21 @@ test('Thongthai Agent exposes only bounded read-only business tools', () => {
   }
 });
 
-test('saved-agent config carries the read-only tool set and low-cost response settings', () => {
+test('staging transaction surface is intentionally tiny and two-step', () => {
+  assert.deepEqual(THONGTHAI_STAGING_TRANSACTION_TOOLS.map(tool => tool.name), [
+    'prepare_activity_booking',
+    'commit_prepared_activity_booking',
+  ]);
+  for (const tool of THONGTHAI_STAGING_TRANSACTION_TOOLS) {
+    assert.equal(tool.type, 'function');
+    assert.equal(tool.parameters.additionalProperties, false);
+  }
+});
+
+test('saved-agent config carries read-only plus staged transaction tools and low-cost response settings', () => {
   const config = thongthaiStagingAgentConfig('test-model');
   assert.equal(THONGTHAI_STAGING_AGENT_ID.startsWith('agent_'), true);
-  assert.deepEqual(config.tools.map(tool => tool.name), THONGTHAI_READ_ONLY_TOOLS.map(tool => tool.name));
+  assert.deepEqual(config.tools.map(tool => tool.name), THONGTHAI_AGENT_TOOLS.map(tool => tool.name));
   assert.equal(config.reasoning.effort, 'low');
   assert.equal(config.text.verbosity, 'low');
   assert.equal(config.text.format.type, 'text');
@@ -42,4 +59,17 @@ test('unknown read-only tool fails closed without touching a business source', a
   }));
   assert.equal(result.ok, false);
   assert.equal(result.error, 'unknown_read_only_tool');
+});
+
+test('transaction tools fail closed by default before any business write', async () => {
+  const result = JSON.parse(await executeThongthaiAgentTool('prepare_activity_booking', {}, {
+    guestDbId: 'synthetic-guest',
+    channel: 'web',
+    environment: 'test',
+    eventId: 'evt-1',
+    message: 'จองเลย',
+    transactionMode: 'off',
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'transaction_tools_disabled');
 });

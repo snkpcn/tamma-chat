@@ -1,4 +1,4 @@
-import { THONGTHAI_READ_ONLY_TOOLS } from './_thongthai-agent-tools';
+import { THONGTHAI_AGENT_TOOLS } from './_thongthai-agent-tools';
 
 /**
  * Saved-agent identity/profile for Thongthai.
@@ -68,6 +68,10 @@ TRANSACTION DISCIPLINE
 - Do not create or modify a booking/order/payment until the customer has clearly committed and the required information is present.
 - Respect explicit negation and changes of mind.
 - Before consequential actions, make the intended action and important details clear.
+- Activity booking uses a strict two-turn confirmation gate. First call prepare_activity_booking only after all required details are known. Show the returned summary and ask the customer to reply exactly "ยืนยันจอง" if they want it submitted.
+- Never call commit_prepared_activity_booking in the same customer turn as prepare_activity_booking.
+- On a later turn, call commit_prepared_activity_booking only when the customer explicitly confirms booking. If the customer says "ยังไม่จอง", "เอาไว้ก่อน", changes their mind, asks a question, or merely selects an option, do not commit.
+- A committed booking result with status "requested" is a booking request, not proof of payment and not final staff confirmation.
 - After a tool call, report only what the tool actually confirmed.
 
 FOOD / ALLERGY CARE
@@ -105,7 +109,7 @@ export function thongthaiStagingAgentConfig(model = process.env.THONGTHAI_AGENT_
     model,
     instructions: THONGTHAI_AGENT_INSTRUCTIONS,
     metadata: { ...THONGTHAI_STAGING_AGENT_METADATA },
-    tools: THONGTHAI_READ_ONLY_TOOLS.map(tool => ({ ...tool })),
+    tools: THONGTHAI_AGENT_TOOLS.map(tool => ({ ...tool })),
     reasoning: { effort: 'low' },
     text: { verbosity: 'low', format: { type: 'text' } },
   };
