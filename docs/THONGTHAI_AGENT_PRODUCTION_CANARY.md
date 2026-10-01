@@ -35,6 +35,5 @@ Rollout history:
 - LINE and Facebook promoted to 50% read-only after the new 25% cohort gate passed.
 - LINE 25-50% cohort verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0276 THB and 0.3243 THB (1.3519 THB total).
 - Facebook 25-50% cohort verification: 3/3 production turns passed; the two paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0313 THB and 0.3208 THB (1.3521 THB total).
-- LINE and Facebook promoted to 100% read-only after the new 50% cohort gate passed.
-
+- LINE and Facebook promoted to 100% read-only after the new 50% cohort gate passed.\n- Final LINE >50% cohort verification: a fresh guest in bucket 8381 passed 3/3 production turns; both paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0302 THB and 0.3300 THB (1.3602 THB total).\n- Final Facebook >50% cohort verification: a fresh guest in bucket 5301 passed 3/3 production turns; both paid turns were grounded `thongthai_agent_primary` responses with completed cost rows of 1.0309 THB and 0.3299 THB (1.3608 THB total).\n- Read-only Saved Agent rollout is now verified at 100% for WEB, LINE, and Facebook; live Agent transactions remain OFF.\n
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
