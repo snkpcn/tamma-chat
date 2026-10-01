@@ -4645,6 +4645,8 @@ export type ThongthaiChatCoreResult = { statusCode: number; payload: Record<stri
 // x-nf-request-id/x-request-id header), or null if transport gave us nothing
 // stable for this turn.
 export async function processThongthaiChatCore(request: BrainRequest, eventId: string | null): Promise<ThongthaiChatCoreResult> {
+  let explicitAiResponseTurnPersisted = false;
+
   async function coreResult(statusCode: number, payload: unknown): Promise<ThongthaiChatCoreResult> {
     const typed = payload as Record<string, unknown>;
     if (statusCode === 200 && typeof typed?.message === 'string') {
@@ -4665,7 +4667,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         console.error('THONGTHAI_BOT_QUALITY_EVENT_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
       });
     }
-    if (statusCode === 200 && typeof typed?.message === 'string') {
+    if (!explicitAiResponseTurnPersisted && statusCode === 200 && typeof typed?.message === 'string') {
       const telemetryConversationId=String(request.guestId ?? guestDbId ?? '').trim();
       if(telemetryConversationId){
         // Every successful customer-facing reply must leave a turn row so
@@ -5033,23 +5035,29 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         toolCalls: [],
       }, channel);
 
-      await persistBrainRuntime(guestDbId, channel, primaryResponse);
-      await persistAiResponseTurn({
-        conversationId: request.guestId,
-        eventId: transportEventId,
-        channel,
-        finalResponseSource: 'thongthai_agent_primary',
-        modelReplyUsed: true,
-        groundedKnowledgeSupplied: agentTurn.toolCalls.length > 0,
-        zeroCostTurn: false,
-        environment: 'live',
-        occurredAt: new Date().toISOString(),
-      }).catch(error => {
+      // runThongthaiAgentPrimaryTurn already persists the primary session and
+      // minimal legacy runtime fields in one CAS write. Do not repeat the full
+      // persistBrainRuntime path here (another CAS read/write plus guest-event
+      // insert) on the customer-response critical path.
+      try {
+        await persistAiResponseTurn({
+          conversationId: request.guestId,
+          eventId: transportEventId,
+          channel,
+          finalResponseSource: 'thongthai_agent_primary',
+          modelReplyUsed: true,
+          groundedKnowledgeSupplied: agentTurn.toolCalls.length > 0,
+          zeroCostTurn: false,
+          environment: 'live',
+          occurredAt: new Date().toISOString(),
+        });
+        explicitAiResponseTurnPersisted = true;
+      } catch (error) {
         console.error(
           'AGENT_PRIMARY_RESPONSE_TURN_PERSIST_ERROR',
           error instanceof Error ? error.message.slice(0, 180) : 'unknown',
         );
-      });
+      }
 
       console.log('THONGTHAI_AGENT_PRIMARY_RESPONSE', JSON.stringify({
         channel,
