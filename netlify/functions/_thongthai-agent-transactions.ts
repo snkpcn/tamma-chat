@@ -7,7 +7,7 @@ import { dispatchCreatedTransactionNotification } from './_transaction-notificat
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { hasCancelMarker, hasCommitMarker, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
 
-export type ThongthaiAgentTransactionMode = 'off' | 'test' | 'live';
+export type ThongthaiAgentTransactionMode = 'off' | 'prepare' | 'test' | 'live';
 
 export type ThongthaiAgentTransactionContext = {
   guestDbId: string | null;
@@ -193,6 +193,17 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
     }, ['confirmation_id']),
   },
 ] as const;
+
+export const THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS: readonly ThongthaiAgentTransactionTool[] =
+  THONGTHAI_STAGING_TRANSACTION_TOOLS.filter(tool =>
+    tool.name.startsWith('prepare_') || tool.name.startsWith('get_prepared_')
+  );
+
+const COMMIT_TRANSACTION_TOOL_NAMES = new Set(
+  THONGTHAI_STAGING_TRANSACTION_TOOLS
+    .map(tool => tool.name)
+    .filter(name => name.startsWith('commit_prepared_')),
+);
 
 type ActivityCatalog = {
   activityCode: string;
@@ -450,6 +461,12 @@ function nightsBetween(checkIn: string, checkOut: string): number | null {
 function modeAllowed(context: ThongthaiAgentTransactionContext): { ok: true; environment: 'live'|'test' } | { ok: false; error: string } {
   if (context.transactionMode === 'off') return { ok: false, error: 'transaction_tools_disabled' };
   if (context.transactionMode === 'test') return { ok: true, environment: 'test' };
+  if (context.transactionMode === 'prepare') {
+    if (context.environment !== 'live' || process.env.THONGTHAI_AGENT_TRANSACTION_PREPARE_ENABLED !== '1') {
+      return { ok: false, error: 'transaction_prepare_tools_not_enabled' };
+    }
+    return { ok: true, environment: 'live' };
+  }
   if (process.env.THONGTHAI_AGENT_LIVE_TRANSACTION_ENABLED !== '1') {
     return { ok: false, error: 'live_transaction_tools_not_enabled' };
   }
@@ -1498,6 +1515,18 @@ export async function executeThongthaiTransactionTool(
   const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)
     ? rawArgs as Record<string, unknown>
     : {};
+
+  // Production prepare-only mode may persist a non-consequential draft for
+  // customer review, but it must be impossible to cross the business-write
+  // boundary even if an Agent somehow asks for a commit tool by name.
+  if (context.transactionMode === 'prepare' && COMMIT_TRANSACTION_TOOL_NAMES.has(name)) {
+    return JSON.stringify({
+      ok: false,
+      error: 'transaction_commit_disabled',
+      prepared_only: true,
+      instruction: 'Keep the prepared draft pending. Do not claim a booking/order/inquiry was submitted.',
+    });
+  }
 
   let result: Record<string, unknown>;
   if (name === 'prepare_activity_booking') {

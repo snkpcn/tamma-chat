@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   configuredAgentPrimaryPercent,
+  configuredAgentPreparePercent,
   shouldUseThongthaiAgentPrimary,
+  shouldUseThongthaiAgentTransactionPrepare,
   stableAgentCanaryBucket,
+  stableAgentPrepareCanaryBucket,
 } from '../netlify/functions/_thongthai-agent-primary';
 
 function withEnv(values: Record<string,string|undefined>, fn: () => void) {
@@ -127,5 +130,94 @@ test('channel-specific percentage falls back to the legacy global value when uns
     assert.equal(configuredAgentPrimaryPercent('web'),37);
     assert.equal(configuredAgentPrimaryPercent('line'),37);
     assert.equal(configuredAgentPrimaryPercent('facebook'),37);
+  });
+});
+
+
+test('prepare-only transaction canary is separately gated and stable', () => {
+  const inPrepareTen = (() => {
+    for (let i=0;i<50_000;i+=1) {
+      const key=`prepare-guest-${i}`;
+      if (stableAgentPrepareCanaryBucket(key) < 1_000) return key;
+    }
+    throw new Error('no prepare canary guest found');
+  })();
+  const outsidePrepareTen = (() => {
+    for (let i=0;i<50_000;i+=1) {
+      const key=`prepare-outside-${i}`;
+      if (stableAgentPrepareCanaryBucket(key) >= 1_000) return key;
+    }
+    throw new Error('no outside prepare guest found');
+  })();
+
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_ENABLED:'1',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_CHANNELS:'web',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT:'10',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT_WEB:undefined,
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT_LINE:undefined,
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT_FACEBOOK:undefined,
+  }, () => {
+    assert.equal(configuredAgentPreparePercent('web'),10);
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:inPrepareTen,guestDbId:'db-a',channel:'web',
+    }),true);
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:outsidePrepareTen,guestDbId:'db-a',channel:'web',
+    }),false);
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:inPrepareTen,guestDbId:'db-a',channel:'line',
+    }),false);
+  });
+});
+
+test('prepare-only transaction canary is disabled unless its explicit flag is on', () => {
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_ENABLED:undefined,
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_CHANNELS:'web',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT:'100',
+  }, () => {
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:'guest-a',guestDbId:'db-a',channel:'web',
+    }),false);
+  });
+});
+
+test('prepare percentage supports channel-specific rollout overrides', () => {
+  withEnv({
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT:'5',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT_WEB:'10',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT_LINE:'25',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT_FACEBOOK:'50',
+  }, () => {
+    assert.equal(configuredAgentPreparePercent('web'),10);
+    assert.equal(configuredAgentPreparePercent('line'),25);
+    assert.equal(configuredAgentPreparePercent('facebook'),50);
+  });
+});
+
+
+test('prepare-only synthetic guest allowlist works while public percentage is zero', () => {
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_ENABLED:'1',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_CHANNELS:'web',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT:'0',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_GUESTS:'cert-guest-a,cert-guest-b',
+  }, () => {
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:'cert-guest-a',guestDbId:'db-a',channel:'web',
+    }),true);
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:'ordinary-guest',guestDbId:'db-a',channel:'web',
+    }),false);
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:'cert-guest-a',guestDbId:'db-a',channel:'line',
+    }),false);
   });
 });

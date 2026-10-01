@@ -11,7 +11,7 @@ import {
 
 test('Thongthai staging agent profile locks the owner-defined identity and trust rules', () => {
   assert.equal(THONGTHAI_STAGING_AGENT_NAME, 'Thongthai-Staging');
-  assert.match(THONGTHAI_AGENT_PROFILE_VERSION, /^thongthai-agent-profile-v1-/);
+  assert.match(THONGTHAI_AGENT_PROFILE_VERSION, /^thongthai-agent-profile-v2-prepare-only-/);
 
   const prompt = THONGTHAI_AGENT_INSTRUCTIONS;
   assert.match(prompt, /You are male\./);
@@ -45,7 +45,7 @@ test('Thongthai saved-agent config contains stable identity only and stays stagi
 });
 
 
-test('Thongthai production Agent is separate and read-only for the first canary', () => {
+test('Thongthai production Agent is separate and prepare-only before live commit cutover', () => {
   const staging = thongthaiStagingAgentConfig('test-model');
   const production = thongthaiProductionAgentConfig('test-model');
 
@@ -54,6 +54,9 @@ test('Thongthai production Agent is separate and read-only for the first canary'
   assert.equal(production.metadata.environment, 'production');
   assert.equal(production.model, 'test-model');
   assert.ok(production.tools.length > 0);
-  assert.ok(production.tools.every(tool => !/^prepare_|^commit_prepared_|^get_prepared_/.test(tool.name)));
-  assert.ok(staging.tools.some(tool => /^prepare_/.test(tool.name)));
+  assert.ok(production.tools.some(tool => /^prepare_/.test(tool.name)));
+  assert.ok(production.tools.some(tool => /^get_prepared_/.test(tool.name)));
+  assert.ok(production.tools.every(tool => !/^commit_prepared_/.test(tool.name)));
+  assert.ok(staging.tools.some(tool => /^commit_prepared_/.test(tool.name)));
+  assert.match(production.instructions, /If no matching commit tool is available/i);
 });

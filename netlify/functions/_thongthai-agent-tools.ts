@@ -2,7 +2,7 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { buildRealKnowledgeSourceAdapters } from './_dialog-source-adapters';
 import { resolveKnowledge, type GroundedFact, type KnowledgeNeed, type KnowledgeRequest } from './_knowledge-resolver';
 import type { SemanticDomain } from './_semantic-interpreter';
-import { THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
+import { THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS, THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 
 export type ThongthaiAgentFunctionTool = {
@@ -308,6 +308,11 @@ export async function executeThongthaiReadOnlyTool(
   return safeResult(bundle, facts);
 }
 
+
+export const THONGTHAI_PRODUCTION_PREPARE_TOOLS: readonly ThongthaiAgentFunctionTool[] = [
+  ...THONGTHAI_READ_ONLY_TOOLS,
+  ...THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS,
+];
 
 export const THONGTHAI_AGENT_TOOLS: readonly ThongthaiAgentFunctionTool[] = [
   ...THONGTHAI_READ_ONLY_TOOLS,

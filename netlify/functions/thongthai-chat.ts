@@ -71,7 +71,7 @@ import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agen
 import { processOneMindCustomerTurn, isTrustedBoundedNoTransactionContinuation } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import { runThongthaiAgentPrimaryTurn } from './_thongthai-agent-session';
-import { shouldUseThongthaiAgentPrimary } from './_thongthai-agent-primary';
+import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
 import { deriveSemanticMeaning } from './_semantic-meaning';
@@ -4921,13 +4921,24 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  // A complete, explicitly-authorized transaction must reach its executor
-  // before the conversation-first composer can turn it back into a generic
-  // "please add more details" reply. Both branches remain fail-closed:
-  // Activity requires every operational slot plus a current-turn commit;
-  // Stay requires one exact live property match plus every booking slot.
+  const explicitTransactionIntent =
+    topLevelSemanticIntent === 'BUSINESS_TRANSACTION'
+    || hasExplicitTransactionIntent(request.message);
+  const prepareOnlyAgentEligible = explicitTransactionIntent
+    && shouldUseThongthaiAgentTransactionPrepare({
+      guestKey: request.guestId,
+      guestDbId,
+      channel,
+    });
+
+  // A complete, explicitly-authorized transaction normally reaches its
+  // established executor before the conversation-first composer. A guest in
+  // the Agent prepare-only canary is the deliberate exception: suppress the
+  // legacy write path so the Agent can prepare/review a draft while commit
+  // remains impossible.
   const committedActivityDraft = activityBookingFallbackDraft(request);
-  if (committedActivityDraft
+  if (!prepareOnlyAgentEligible
+      && committedActivityDraft
       && authorizedActivityBookingCommit(request)
       && missingActivityFallbackFields(committedActivityDraft).length === 0) {
     const executed = await executeDeterministicActivityBooking(
@@ -4947,10 +4958,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  const committedExactStay = await explicitStayBookingFallback(request, guestDbId, channel).catch(error => {
-    console.error('THONGTHAI_PRE_SUPERVISION_STAY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return null;
-  });
+  const committedExactStay = prepareOnlyAgentEligible
+    ? null
+    : await explicitStayBookingFallback(request, guestDbId, channel).catch(error => {
+        console.error('THONGTHAI_PRE_SUPERVISION_STAY_FALLBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+        return null;
+      });
   if (committedExactStay) {
     const polished = polishedResponse(committedExactStay, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
@@ -4971,23 +4984,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const preserveVerifiedLocationBeforeSupervision = !hasExplicitTransactionIntent(request.message)
     && classifyLocalConciergeQuestion(request.message)?.category === 'location';
 
-  // Thongthai Saved-Agent production canary.
+  // Thongthai Saved-Agent production routing.
   //
-  // The first cutover is deliberately READ-ONLY and stable-bucketed. Existing
-  // transaction/weather/location executors remain authoritative until their
-  // own live cutovers are approved. Safety/service-feedback/escalation
-  // responders have already run above this point.
-  const primaryAgentEligible = shouldUseThongthaiAgentPrimary({
+  // Ordinary turns follow the proven read-only rollout. Explicit transaction
+  // turns may enter only through the separate prepare-only canary. In that
+  // mode the Agent may persist a review draft but cannot cross the commit
+  // boundary. Weather/location stay on their established paths.
+  const readOnlyPrimaryAgentEligible = shouldUseThongthaiAgentPrimary({
     guestKey: request.guestId,
     guestDbId,
     channel,
-    explicitTransactionIntent:
-      topLevelSemanticIntent === 'BUSINESS_TRANSACTION'
-      || hasExplicitTransactionIntent(request.message),
+    explicitTransactionIntent,
     weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
     locationRequest: preserveVerifiedLocationBeforeSupervision
       || topLevelSemanticIntent === 'LOCATION_REQUEST',
   });
+  const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
 
   if (primaryAgentEligible && guestDbId) {
     try {
@@ -4997,6 +5009,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         eventId: transportEventId,
         channel,
         message: request.message,
+        transactionMode: prepareOnlyAgentEligible ? 'prepare' : 'off',
       });
 
       const primaryResponse = polishedResponse({

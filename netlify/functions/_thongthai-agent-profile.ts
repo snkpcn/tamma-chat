@@ -1,4 +1,4 @@
-import { THONGTHAI_AGENT_TOOLS, THONGTHAI_READ_ONLY_TOOLS } from './_thongthai-agent-tools';
+import { THONGTHAI_AGENT_TOOLS, THONGTHAI_PRODUCTION_PREPARE_TOOLS } from './_thongthai-agent-tools';
 
 /**
  * Saved-agent identity/profile for Thongthai.
@@ -11,7 +11,7 @@ import { THONGTHAI_AGENT_TOOLS, THONGTHAI_READ_ONLY_TOOLS } from './_thongthai-a
  * - Production customer routing is NOT cut over by this file.
  */
 
-export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v1-2026-10-01';
+export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v2-prepare-only-2026-10-01';
 export const THONGTHAI_STAGING_AGENT_NAME = 'Thongthai-Staging';
 export const THONGTHAI_STAGING_AGENT_ID = process.env.THONGTHAI_STAGING_AGENT_ID?.trim() || 'agent_a206e3b43ad44226ac8af3a7e57dff195a9866595cb0417a92';
 export const THONGTHAI_PRODUCTION_AGENT_NAME = 'Thongthai-Production';
@@ -77,7 +77,8 @@ TRANSACTION DISCIPLINE
 - Cafe handoffs are inquiries, not orders. Use prepare_cafe_inquiry only when the customer wants the cafe team to follow up on a question or special request that cannot be answered from verified data. Ask for the exact phrase "ยืนยันส่งคำถาม" before creating the inquiry, and never describe a cafe inquiry as an order, reservation, or payment.
 - For a committed cafe inquiry, distinguish "recorded" from "staff notified". Only say the cafe team received it when the tool returns staff_notified=true (or notification_status is sent/duplicate). If staff_notified=false, say only that the inquiry was recorded and delivery is not yet confirmed.
 - Never call a commit_prepared_* tool in the same customer turn as its prepare_* tool. This also applies to cafe inquiry prepare/commit.
-- On a later turn, call the matching commit_prepared_* tool only when the customer explicitly confirms the transaction. If the customer says "ยังไม่จอง", "ยังไม่สั่ง", "เอาไว้ก่อน", asks a question, or merely selects an option, do not commit.
+- Production may intentionally expose only prepare_* and get_prepared_* tools while live commits remain disabled. If no matching commit tool is available, keep the draft pending, clearly say it has NOT been submitted, and never hand-wave or imply a booking/order/inquiry exists.
+- On a later turn, call the matching commit_prepared_* tool only when that tool is actually available AND the customer explicitly confirms the transaction. If the customer says "ยังไม่จอง", "ยังไม่สั่ง", "เอาไว้ก่อน", asks a question, or merely selects an option, do not commit.
 - Saying "ยังไม่จอง", "ยังไม่สั่ง", or "เอาไว้ก่อน" with no changed transaction details WITHHOLDS execution but does not erase the prepared draft. If the same customer later explicitly confirms within the draft expiry and the details have not changed, use the matching get_prepared_* tool if needed and commit that existing draft; do not force them to repeat all details.
 - If the customer changes any material transaction detail after a draft was prepared, prepare a NEW draft with the matching prepare tool and ask for confirmation again before committing.
 - A committed booking result with status "requested" is a booking request, not proof of payment and not final staff confirmation.
@@ -138,9 +139,10 @@ export function thongthaiProductionAgentConfig(model = process.env.THONGTHAI_AGE
     model,
     instructions: THONGTHAI_AGENT_INSTRUCTIONS,
     metadata: { ...THONGTHAI_PRODUCTION_AGENT_METADATA },
-    // Production canary is intentionally READ-ONLY. Transaction tools are
-    // added only after the separate live-transaction cutover is approved.
-    tools: THONGTHAI_READ_ONLY_TOOLS.map(tool => ({ ...tool })),
+    // Production may prepare transaction drafts for explicit customer
+    // review, but commit tools are deliberately absent until the separate
+    // live-write cutover is approved.
+    tools: THONGTHAI_PRODUCTION_PREPARE_TOOLS.map(tool => ({ ...tool })),
     reasoning: { effort: 'low' },
     text: { verbosity: 'low', format: { type: 'text' } },
   };
