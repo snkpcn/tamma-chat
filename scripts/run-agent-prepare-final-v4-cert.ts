@@ -1,5 +1,5 @@
 const PRODUCTION_URL = 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
-const GUEST_ID = 'f7f7f7f7-0251-4f7f-8f7f-000000000392';
+const GUEST_ID = 'f7f7f7f7-0251-4f7f-8f7f-000000000391';
 
 type Result = {
   turn:number;
@@ -51,12 +51,12 @@ async function send(eventId:string,message:string,history:Array<{role:'user'|'as
 async function main():Promise<void>{
   const history:Array<{role:'user'|'assistant';content:string}>=[];
   const firstMessage='ขอจองขี่ม้าน้องภาราดร 30 นาที วันที่ 21 ตุลาคม 2569 เวลา 10:00 จำนวน 1 คน ชื่อ PREPARE FINAL TEST โทร 0000000013 ขอให้เตรียมรายละเอียดให้ตรวจสอบก่อนครับ';
-  const first=await send('agent-prepare-final-v4-1',firstMessage,history);
+  const first=await send('agent-prepare-final-v4fresh-1',firstMessage,history);
   console.log(JSON.stringify(first));
   history.push({role:'user',content:firstMessage},{role:'assistant',content:first.response});
 
   const secondMessage='ยืนยันจองครับ';
-  const second=await send('agent-prepare-final-v4-2',secondMessage,history);
+  const second=await send('agent-prepare-final-v4fresh-2',secondMessage,history);
   console.log(JSON.stringify(second));
 
   const firstHasExactConfirmation=/ยืนยันจอง/u.test(first.response);
