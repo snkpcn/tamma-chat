@@ -77,7 +77,7 @@ function baseResponse(message:string,intent:'booking'|'order'='booking'):BrainRe
   };
 }
 
-function compose(family:Family,value:Record<string,unknown>,mode:'prepared'|'confirmed'|'held'):BrainResponse|null {
+function compose(family:Family,value:Record<string,unknown>,mode:'prepared'|'confirmed'|'held'|'status'):BrainResponse|null {
   if(value.ok!==true || value.prepared!==true) return null;
   const s=summary(value);
   const exact=typeof value.exact_confirmation_phrase_th==='string' && value.exact_confirmation_phrase_th.trim()
@@ -100,7 +100,22 @@ function compose(family:Family,value:Record<string,unknown>,mode:'prepared'|'con
     return baseResponse('ได้ครับ เก็บรายการแบบร่างไว้ก่อน ยังไม่ได้สร้างหรือส่งคำขอจองจริงครับ');
   }
 
+  if(mode==='status'){
+    if(family==='cafe') return baseResponse('ใช่ครับ รายการนี้ยังเป็นแบบร่าง และยังไม่มีคำถามจริงถูกส่งให้ทีมคาเฟ่ครับ');
+    if(family==='restaurant'||family==='otop') {
+      return baseResponse('ใช่ครับ รายการนี้ยังเป็นแบบร่าง และยังไม่มีออเดอร์จริงถูกสร้างหรือส่งครับ','order');
+    }
+    return baseResponse('ใช่ครับ รายการนี้ยังเป็นแบบร่าง และยังไม่มีการจองจริงถูกสร้างหรือส่งครับ');
+  }
+
   const lines:string[]=['เตรียมรายการไว้แล้วครับ (ยังไม่ได้ส่งรายการจริง)'];
+  if(family==='activity'){
+    const asset=s.asset ?? s.asset_name;
+    if(asset) lines.push('• ขี่ม้า: น้อง'+String(asset).replace(/^น้อง/u,''));
+    if(s.date) lines.push('• วันที่ '+String(s.date)+(s.time?' เวลา '+String(s.time):''));
+    if(s.duration_minutes) lines.push('• '+String(s.duration_minutes)+' นาที · '+String(s.party_size??1)+' ท่าน');
+    if(s.expected_price!=null) lines.push('• ราคา '+String(s.expected_price)+' บาท');
+  }
   if(family==='stay'){
     if(s.stay) lines.push('• ที่พัก: '+String(s.stay));
     if(s.check_in) lines.push('• เช็กอิน '+String(s.check_in)+(s.check_out?' · เช็กเอาต์ '+String(s.check_out):''));
@@ -134,11 +149,11 @@ async function loadPrepared(family:Family,ctx:TxContext):Promise<Record<string,u
 }
 
 function candidateFamilies(message:string):Family[] {
-  if(/ยืนยัน\s*ส่ง\s*คำถาม/u.test(message)||/(?:Inthanin|อินทนิล|คาเฟ่|cafe)/iu.test(message)) return ['cafe'];
-  if(/OTOP|โอทอป|ของฝาก/iu.test(message)) return ['otop','restaurant'];
-  if(/ร้าน|อาหาร|เมนู/u.test(message)) return ['restaurant','otop'];
-  if(/ที่พัก|เฮือนสเตย์|โฮมสเตย์|ห้องนอน/u.test(message)) return ['stay','activity'];
-  if(/ม้า|ขี่/u.test(message)) return ['activity','stay'];
+  if(/ยืนยัน\s*ส่ง\s*คำถาม|ยังไม่ส่ง|ไม่ต้องส่ง/u.test(message)||/(?:Inthanin|อินทนิล|คาเฟ่|cafe)/iu.test(message)) return ['cafe'];
+  if(/OTOP|โอทอป|ของฝาก|สินค้า|ชิ้น|จัดส่ง/iu.test(message)) return ['otop','restaurant'];
+  if(/ร้าน|อาหาร|เมนู|จาน/u.test(message)) return ['restaurant','otop'];
+  if(/ที่พัก|เฮือนสเตย์|โฮมสเตย์|ห้องนอน|วันออก|วันเข้า|เช็กอิน|เช็กเอาต์|check.?in|check.?out/iu.test(message)) return ['stay','activity'];
+  if(/ม้า|ขี่|นาที/u.test(message)) return ['activity','stay'];
   if(/สั่ง/u.test(message)) return ['restaurant','otop'];
   if(/จอง/u.test(message)) return ['activity','stay'];
   return ['activity','stay','restaurant','otop','cafe'];
@@ -153,7 +168,7 @@ async function existing(message:string,ctx:TxContext):Promise<{family:Family;val
 }
 
 async function initialStayArgs(message:string):Promise<Record<string,unknown>|null> {
-  if(!/(?:เฮือนสเตย์|โฮมสเตย์|ที่พัก|ห้องนอน)/u.test(message)) return null;
+  if(!/จอง/u.test(message) || !/(?:เฮือนสเตย์|โฮมสเตย์|ที่พัก|ห้องนอน)/u.test(message)) return null;
   const c=contact(message);
   const range=extractDateRange(message);
   const partySize=extractPartySize(message);
@@ -180,7 +195,7 @@ async function initialStayArgs(message:string):Promise<Record<string,unknown>|nu
 }
 
 async function initialRestaurantArgs(message:string):Promise<Record<string,unknown>|null> {
-  if(!/(?:สั่งอาหาร|สั่งเมนู|ร้านตำมา-ชาติ|ร้านอาหาร)/u.test(message)) return null;
+  if(!/สั่ง/u.test(message) || !/(?:สั่งอาหาร|สั่งเมนู|ร้านตำมา-ชาติ|ร้านอาหาร)/u.test(message)) return null;
   const c=contact(message);
   const date=extractDate(message);
   const time=extractTime(message);
@@ -203,7 +218,7 @@ async function initialRestaurantArgs(message:string):Promise<Record<string,unkno
 }
 
 async function initialOtopArgs(message:string):Promise<Record<string,unknown>|null> {
-  if(!/(?:OTOP|โอทอป|ของฝาก|สั่งซื้อ|จัดส่ง)/iu.test(message)) return null;
+  if(!/(?:สั่ง|ซื้อ)/u.test(message) || !/(?:OTOP|โอทอป|ของฝาก|สั่งซื้อ|จัดส่ง)/iu.test(message)) return null;
   const c=contact(message);
   if(!c) return null;
   const products=await listOtopProducts('live');
@@ -334,16 +349,25 @@ export async function runPrepareOnlyMultiVerticalFastPath(
     message:request.message,transactionMode:'prepare',
   };
   const cafeConfirm=/ยืนยัน\s*ส่ง\s*คำถาม/u.test(request.message);
-  if(hasCommitMarker(request.message)||cafeConfirm||hasExplicitNoTransactionMarker(request.message)){
+  const cafeHold=/ยังไม่ส่ง|ไม่ต้องส่ง/u.test(request.message);
+  const preparedStatus=/(?:ตอนนี้|ขณะนี้)?.{0,24}(?:ยังไม่มี|ยังไม่ได้|ไม่ได้).{0,28}(?:จอง|ออเดอร์|คำถาม|ส่ง|สร้าง).{0,28}(?:จริง|ใช่ไหม|ใช่มั้ย|หรือยัง)/u.test(request.message);
+
+  if(preparedStatus){
+    const found=await existing(request.message,ctx);
+    if(found) return compose(found.family,found.value,'status');
+  }
+
+  if(hasCommitMarker(request.message)||cafeConfirm||hasExplicitNoTransactionMarker(request.message)||cafeHold){
     const found=await existing(request.message,ctx);
     if(found){
-      if(hasExplicitNoTransactionMarker(request.message)) return compose(found.family,found.value,'held');
+      if(hasExplicitNoTransactionMarker(request.message)||cafeHold) return compose(found.family,found.value,'held');
       if(hasCorrectionMarker(request.message)){
         const args=await correctedArgs(found.family,found.value,request.message);
         if(args){
           const value=parse(await executeThongthaiTransactionTool(TOOLS[found.family].prepare,args,ctx));
-          if(value) return compose(found.family,value,'prepared');
+          if(value?.ok===true && value.prepared===true) return compose(found.family,value,'prepared');
         }
+        return baseResponse('รับคำขอแก้ไขแล้วครับ แต่ยังเตรียมแบบร่างใหม่ไม่สำเร็จ จึงยังไม่ยืนยันหรือส่งรายการเดิมครับ');
       }
       return compose(found.family,found.value,'confirmed');
     }
