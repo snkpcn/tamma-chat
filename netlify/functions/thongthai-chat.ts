@@ -4939,6 +4939,32 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Authoritative semantic gate: location/weather are bounded, read-only
+  // concierge facts and must resolve BEFORE the language-first One-Mind
+  // composer. Otherwise a correctly understood restaurant/location question
+  // can still query restaurant-menu knowledge and invent a "location unknown"
+  // answer even while the owner-verified Maps fact is available locally.
+  // Safety/escalation/service feedback and explicit committed transactions
+  // remain above this block, so this cannot swallow those higher-priority flows.
+  if (topLevelSemanticIntent === 'LOCATION_REQUEST' || topLevelSemanticIntent === 'WEATHER_REQUEST') {
+    const semanticConcierge = await deterministicLocalConciergeResponse(request).catch(error => {
+      console.error('THONGTHAI_SEMANTIC_GATE_CONCIERGE_ERROR', error instanceof Error ? redactWeatherUrl(error.message.slice(0, 220)) : 'unknown');
+      return null;
+    });
+    if (semanticConcierge) {
+      console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'semanticGateLocalConcierge', intent: topLevelSemanticIntent }));
+      const polished = polishedResponse(semanticConcierge, channel);
+      await persistBrainRuntime(guestDbId, channel, polished);
+      return coreResult(200, {
+        message: polished.message,
+        intent: polished.intent,
+        contextUpdates: polished.contextUpdates,
+        journeyAction: polished.journeyAction,
+        suggestedActions: polished.suggestedActions,
+      });
+    }
+  }
+
   // Human Conversation Recovery: UNDERSTAND FIRST.
   //
   // Safety/escalation/service-feedback responders above may remain
@@ -5347,29 +5373,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
     });
-  }
-
-  // Phase 2 stabilization — meaning-first semantic gate. Explicit location
-  // and weather questions are answered BEFORE any horse/activity continuation
-  // can inspect entity tokens or stale task state. Safety/escalation and
-  // service feedback remain above this block and keep higher precedence.
-  if (topLevelSemanticIntent === 'LOCATION_REQUEST' || topLevelSemanticIntent === 'WEATHER_REQUEST') {
-    const semanticConcierge = await deterministicLocalConciergeResponse(request).catch(error => {
-      console.error('THONGTHAI_SEMANTIC_GATE_CONCIERGE_ERROR', error instanceof Error ? redactWeatherUrl(error.message.slice(0, 220)) : 'unknown');
-      return null;
-    });
-    if (semanticConcierge) {
-      console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'semanticGateLocalConcierge', intent: topLevelSemanticIntent }));
-      const polished = polishedResponse(semanticConcierge, channel);
-      await persistBrainRuntime(guestDbId, channel, polished);
-      return coreResult(200, {
-        message: polished.message,
-        intent: polished.intent,
-        contextUpdates: polished.contextUpdates,
-        journeyAction: polished.journeyAction,
-        suggestedActions: polished.suggestedActions,
-      });
-    }
   }
 
   const botAddress = deterministicBotAddressResponse(request);
