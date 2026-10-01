@@ -1587,8 +1587,18 @@ export function parseSemanticTurnResponse(
   const explicitSelectionReference = references.some(reference =>
     (reference.type === 'previous_selection' || reference.type === 'entity_selection')
     && Boolean(reference.resolvedEntityId));
-  const currentExplicitNoTransaction = Boolean(currentMessage)
-    && hasExplicitNoTransactionMarker(currentMessage);
+
+  // Transaction permission is fail-closed.  Raw CURRENT wording is the
+  // strongest boundary, but a model that itself emits the closed
+  // `no_transaction` constraint must also never be allowed to contradict
+  // that structure with action=book/order or speechAct=transaction_request.
+  // Treating the model's own veto as authoritative can only DE-escalate a
+  // turn; it can never create write permission.
+  const structuredNoTransactionConstraint = canonicalizeSemanticConstraints(parsed.constraints, entities)
+    .some(constraint => /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint));
+  const currentExplicitNoTransaction = (Boolean(currentMessage)
+    && hasExplicitNoTransactionMarker(currentMessage))
+    || structuredNoTransactionConstraint;
 
   // A fully named business transaction owns the domain even when the model
   // is distracted by a colliding proper noun.  Production example:
