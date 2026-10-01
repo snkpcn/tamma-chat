@@ -1,4 +1,4 @@
-const sessionId='sess_0838d363a2bec480006abe3a2d1f6481a08a99353d26b41c56';
+const sessionId='sess_0a1f474bb61a5216006abe4600f4f4819ca7b227ddc82cdbb2';
 const key=process.env.OPENAI_API_KEY?.trim();
 if(!key) throw new Error('OPENAI_API_KEY missing');
 const headers={Authorization:`Bearer ${key}`,'OpenAI-Beta':'agents=v1'};
