@@ -226,6 +226,32 @@ export function isTrustedBoundedNoTransactionContinuation(turn: OneMindTurnResul
   return entityKeys.every(key => Object.is(after.slots[key], semantic.entities[key]));
 }
 
+export function isTrustedBoundedCorrectionContinuation(turn: OneMindTurnResult): boolean {
+  const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
+  if (turn.dialogDecision.actionProposal) return false;
+  if (!(
+    semantic.action === 'correct_previous'
+    || semantic.action === 'modify'
+    || semantic.speechAct === 'correction'
+  )) return false;
+  if (['book','order','cancel'].includes(semantic.action)) return false;
+  if ((semantic.informationNeed ?? 'none') !== 'none') return false;
+
+  const before = turn.taskStateBefore.activeTask;
+  const after = turn.taskStateAfter.activeTask;
+  const task = after ?? before;
+  if (!task || task.domain !== semantic.domain) return false;
+  if (before && after && before.taskId !== after.taskId) return false;
+  if (before?.commitmentIntent || after?.commitmentIntent) return false;
+
+  const selectionKeys = ['horseName','resourceName','roomType','itemName','productName','promotionName','name'];
+  const hasStructuredCorrection = selectionKeys.some(key =>
+    typeof semantic.entities[key] === 'string' && String(semantic.entities[key]).trim().length > 0)
+    || semantic.references.some(reference =>
+      Boolean(reference.resolvedEntityId) || (reference.resolvedEntityIds?.length ?? 0) === 1);
+  return hasStructuredCorrection;
+}
+
 export function readOnlyCutoverEligibility(
   turn: OneMindTurnResult,
   options: ReadOnlyCutoverEligibilityOptions = {},
@@ -258,7 +284,8 @@ export function readOnlyCutoverEligibility(
     // degradation from bouncing a clear "keep this one, don't book" choice
     // into a legacy clarification loop.
     const trustedBoundedNoTransaction = isTrustedBoundedNoTransactionContinuation(turn);
-    if (!trustedZeroCostBypass && !trustedBoundedNoTransaction) {
+    const trustedBoundedCorrection = isTrustedBoundedCorrectionContinuation(turn);
+    if (!trustedZeroCostBypass && !trustedBoundedNoTransaction && !trustedBoundedCorrection) {
       return { eligible:false, reason:'transactional_or_task_turn' };
     }
   }
@@ -369,6 +396,9 @@ export function readOnlyCutoverEligibility(
   // never reaches an ActionProposal -- checked above -- so it carries none of
   // the transaction-executor equivalence risk that keeps propose_action/
   // execute_tool on legacy. See TASK_CONTINUATION_SAFE_MODES.
+  if (isTrustedBoundedCorrectionContinuation(turn)) {
+    return { eligible:true };
+  }
   if (isSafeTaskContinuationTurn(turn)) {
     return { eligible:true };
   }
