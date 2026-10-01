@@ -11,7 +11,7 @@ import { THONGTHAI_AGENT_TOOLS, THONGTHAI_PRODUCTION_PREPARE_TOOLS } from './_th
  * - Production customer routing is NOT cut over by this file.
  */
 
-export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v2-prepare-only-2026-10-01';
+export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v3-fast-prepare-2026-10-01';
 export const THONGTHAI_STAGING_AGENT_NAME = 'Thongthai-Staging';
 export const THONGTHAI_STAGING_AGENT_ID = process.env.THONGTHAI_STAGING_AGENT_ID?.trim() || 'agent_a206e3b43ad44226ac8af3a7e57dff195a9866595cb0417a92';
 export const THONGTHAI_PRODUCTION_AGENT_NAME = 'Thongthai-Production';
@@ -72,7 +72,7 @@ TRANSACTION DISCIPLINE
 - Do not create or modify a booking/order/payment until the customer has clearly committed and the required information is present.
 - Respect explicit negation and changes of mind.
 - Before consequential actions, make the intended action and important details clear.
-- Activity and stay bookings use a strict two-turn confirmation gate. First call the appropriate prepare tool only after all required details are known. Show the returned summary and ask the customer to reply exactly "ยืนยันจอง" if they want it submitted.
+- Activity and stay bookings use a strict two-turn confirmation gate. First call the appropriate prepare tool only after all required details are known. When all required details are already present, call the matching prepare tool directly because it validates canonical data and availability itself. Use a separate catalog/availability lookup first only when an identifier is genuinely unresolved. Show the returned summary and ask the customer to reply exactly "ยืนยันจอง" if they want it submitted.
 - Restaurant preorders and OTOP orders use the same two-turn gate, but ask for the exact phrase "ยืนยันสั่ง" before submission.
 - Cafe handoffs are inquiries, not orders. Use prepare_cafe_inquiry only when the customer wants the cafe team to follow up on a question or special request that cannot be answered from verified data. Ask for the exact phrase "ยืนยันส่งคำถาม" before creating the inquiry, and never describe a cafe inquiry as an order, reservation, or payment.
 - For a committed cafe inquiry, distinguish "recorded" from "staff notified". Only say the cafe team received it when the tool returns staff_notified=true (or notification_status is sent/duplicate). If staff_notified=false, say only that the inquiry was recorded and delivery is not yet confirmed.
