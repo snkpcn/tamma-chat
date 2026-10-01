@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { loadActivityWorldFacts } from './_activity-sot';
-import { createBooking, formatActivityAssetNote, listBookingOptions, listServiceResources, listStayBookingOptions } from './_operations-db';
+import { createBooking, formatActivityAssetNote, listBookingOptions, listServiceResources, listStayBookingOptions, upsertCustomerAccount } from './_operations-db';
+import { createRestaurantPreorder, listRestaurantMenu } from './_restaurant-sot';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { hasCancelMarker, hasCommitMarker, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
@@ -26,6 +27,7 @@ export type ThongthaiAgentTransactionTool = {
 
 const STATE_KEY = 'thongthaiAgentPreparedTransactionV1';
 const STAY_STATE_KEY = 'thongthaiAgentPreparedStayBookingV1';
+const RESTAURANT_PREORDER_STATE_KEY = 'thongthaiAgentPreparedRestaurantPreorderV1';
 const PREPARED_TTL_MS = 30 * 60 * 1000;
 
 const objectSchema = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({
@@ -94,6 +96,42 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
     type: 'function',
     name: 'commit_prepared_stay_booking',
     description: 'Submit the previously prepared stay booking request. Server-gated: it succeeds only on a later customer turn with explicit booking confirmation. Pass the confirmation_id returned by prepare_stay_booking. Never call in the same turn as prepare.',
+    parameters: objectSchema({
+      confirmation_id: { type: 'string' },
+    }, ['confirmation_id']),
+  },
+  {
+    type: 'function',
+    name: 'prepare_restaurant_preorder',
+    description: 'Prepare a restaurant preorder for explicit customer review. This NEVER creates an order or payment request. Validate every item against the live menu and stock, then ask the customer to reply exactly "ยืนยันสั่ง" to submit.',
+    parameters: objectSchema({
+      date: { type: 'string', description: 'Local date YYYY-MM-DD.' },
+      time: { type: 'string', description: 'Local time HH:MM.' },
+      items: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 20,
+        items: objectSchema({
+          name: { type: 'string' },
+          quantity: { type: 'integer', minimum: 1, maximum: 50 },
+        }, ['name','quantity']),
+      },
+      customer_name: { type: 'string' },
+      phone: { type: 'string' },
+      email: { type: 'string' },
+      note: { type: 'string' },
+    }, ['date','time','items','customer_name','phone']),
+  },
+  {
+    type: 'function',
+    name: 'get_prepared_restaurant_preorder',
+    description: 'Read this guest\'s currently prepared restaurant preorder. This never creates or modifies an order. Use it when the customer returns to a prepared preorder or explicitly confirms after saying not yet.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
+    name: 'commit_prepared_restaurant_preorder',
+    description: 'Submit the previously prepared restaurant preorder. Server-gated: it succeeds only on a later customer turn with explicit ordering confirmation. Pass the confirmation_id returned by prepare_restaurant_preorder. Never call in the same turn as prepare.',
     parameters: objectSchema({
       confirmation_id: { type: 'string' },
     }, ['confirmation_id']),
