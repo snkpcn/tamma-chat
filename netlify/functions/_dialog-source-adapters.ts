@@ -210,18 +210,24 @@ function promotionEligibilityAdapter(channel: BrainChannel): (now?: Date) => Pro
   };
 }
 
-/** Reuses listOtopProducts() exactly. */
-async function otopCatalogAdapter(now: Date = new Date()): Promise<SourceResult> {
+/** Reuses listOtopProducts() exactly and respects the caller's environment.
+ * This is critical for certification: test Agent sessions must never read live
+ * stock while their transaction tools are constrained to test rows. */
+async function otopCatalogAdapter(
+  environment: 'live' | 'test' = 'live',
+  now: Date = new Date(),
+): Promise<SourceResult> {
+  const sourceId = environment === 'test' ? 'otop_products_test' : 'otop_products_live';
   try {
-    const products = await listOtopProducts('live');
+    const products = await listOtopProducts(environment);
     const facts: GroundedFact[] = products.flatMap(product => [
-      { key: `otop:${product.sku}:name`, value: product.name, domain: 'otop' as const, sourceId: 'otop_products_live', sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
-      { key: `otop:${product.sku}:description`, value: product.description, domain: 'otop' as const, sourceId: 'otop_products_live', sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
-      { key: `otop:${product.sku}:price`, value: product.price, domain: 'otop' as const, sourceId: 'otop_products_live', sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
-      { key: `otop:${product.sku}:stock`, value: product.stock, domain: 'otop' as const, sourceId: 'otop_products_live', sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
+      { key: `otop:${product.sku}:name`, value: product.name, domain: 'otop' as const, sourceId, sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
+      { key: `otop:${product.sku}:description`, value: product.description, domain: 'otop' as const, sourceId, sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
+      { key: `otop:${product.sku}:price`, value: product.price, domain: 'otop' as const, sourceId, sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
+      { key: `otop:${product.sku}:stock`, value: product.stock, domain: 'otop' as const, sourceId, sourceType: 'otop_live' as const, authoritative: true, fetchedAt: now.toISOString() },
     ]);
-    return ok('otop_products_live', 'otop_live', facts, now);
-  } catch (error) { return unavailable('otop_products_live', 'otop_live', error, now); }
+    return ok(sourceId, 'otop_live', facts, now);
+  } catch (error) { return unavailable(sourceId, 'otop_live', error, now); }
 }
 
 function requestValue(request: KnowledgeRequest, key: string): unknown {
@@ -406,6 +412,6 @@ export function buildRealKnowledgeSourceAdapters(
     bookingStatus: { lookup: request => bookingStatusAdapter(options.guestDbId)(request) },
     paymentStatus: { lookup: request => paymentStatusAdapter(options.guestDbId)(request) },
     membership: { status: request => membershipStatusAdapter(options.guestDbId)(request) },
-    otop: { catalog: request => otopCatalogAdapter() },
+    otop: { catalog: request => otopCatalogAdapter(environment) },
   };
 }
