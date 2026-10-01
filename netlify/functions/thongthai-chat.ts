@@ -5054,20 +5054,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     request.message,
     topLevelSemanticIntent,
   );
-  const prepareOnlyAgentEligible = explicitTransactionIntent
-    && shouldUseThongthaiAgentTransactionPrepare({
-      guestKey: request.guestId,
-      guestDbId,
-      channel,
-    });
+  const prepareOnlyGateSelected = shouldUseThongthaiAgentTransactionPrepare({
+    guestKey: request.guestId,
+    guestDbId,
+    channel,
+  });
+  const prepareOnlyAgentEligible = explicitTransactionIntent && prepareOnlyGateSelected;
 
-  // Gate 0 latency guarantee: a fully-specified horse booking does not need
-  // an LLM round trip merely to invoke the self-validating prepare tool.
-  // Execute the non-consequential draft operation directly, then return the
-  // same customer-safe prepare-only contract. Ambiguous/incomplete transaction
-  // language still falls through to the Saved Agent for natural conversation.
-  if (prepareOnlyAgentEligible && guestDbId) {
-    const preparedFast = await runPrepareOnlyMultiVerticalFastPath(
+  // Gate 0 continuation guarantee: once a guest is selected for prepare-only
+  // certification, prepared-draft hold/correction/confirmation/status turns
+  // must stay on the same zero-model fail-closed path even when the CURRENT
+  // wording is not itself a fresh transaction request (e.g. "ยังไม่ส่ง",
+  // "ยืนยันส่งคำถาม", or "ยังไม่มีออเดอร์จริงใช่ไหม"). The multi-vertical
+  // fast path returns null for unrelated turns, so normal read-only routing
+  // remains unchanged.
+  if (prepareOnlyGateSelected && guestDbId) {
+    const multiPreparedFast = await runPrepareOnlyMultiVerticalFastPath(
       request,
       guestDbId,
       channel,
@@ -5078,18 +5080,21 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
       );
       return null;
-    }) ?? await prepareOnlyActivityFastPath(
-      request,
-      guestDbId,
-      channel,
-      transportEventId,
-    ).catch(error => {
-      console.error(
-        'THONGTHAI_AGENT_PREPARE_FASTPATH_ERROR',
-        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
-      );
-      return null;
     });
+    const preparedFast = multiPreparedFast ?? (prepareOnlyAgentEligible
+      ? await prepareOnlyActivityFastPath(
+        request,
+        guestDbId,
+        channel,
+        transportEventId,
+      ).catch(error => {
+        console.error(
+          'THONGTHAI_AGENT_PREPARE_FASTPATH_ERROR',
+          error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+        );
+        return null;
+      })
+      : null);
     if (preparedFast) {
       const polished = polishedResponse(preparedFast, channel);
       try {
