@@ -17,6 +17,24 @@ function configuredChannels(): Set<BrainChannel> {
   ));
 }
 
+export function configuredAgentPrimaryPercent(channel: BrainChannel): number {
+  const channelSpecific = channel === 'web'
+    ? process.env.THONGTHAI_AGENT_PRIMARY_PERCENT_WEB
+    : channel === 'line'
+      ? process.env.THONGTHAI_AGENT_PRIMARY_PERCENT_LINE
+      : channel === 'facebook'
+        ? process.env.THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK
+        : undefined;
+
+  // Channel-specific rollout values let WEB remain fully cut over while
+  // LINE/Facebook start as small read-only canaries. The legacy global value
+  // remains the fallback for backwards compatibility and emergency rollback.
+  const selected = channelSpecific?.trim()
+    ? channelSpecific
+    : process.env.THONGTHAI_AGENT_PRIMARY_PERCENT;
+  return boundedPercent(selected);
+}
+
 export function stableAgentCanaryBucket(guestKey: string): number {
   const digest = createHash('sha256').update(`thongthai-agent-primary:${guestKey}`, 'utf8').digest('hex');
   return parseInt(digest.slice(0, 8), 16) % 10_000;
@@ -35,12 +53,12 @@ export function shouldUseThongthaiAgentPrimary(input: {
   if (!SUPPORTED_CHANNELS.has(input.channel)) return false;
   if (!configuredChannels().has(input.channel)) return false;
 
-  // First production cutover is read-only. Existing, already-proven legacy
+  // Cross-channel Agent rollout remains read-only. Existing, already-proven
   // executors continue to own writes/weather/location until those verticals
   // are explicitly cut over.
   if (input.explicitTransactionIntent || input.weatherRequest || input.locationRequest) return false;
 
-  const percent = boundedPercent(process.env.THONGTHAI_AGENT_PRIMARY_PERCENT);
+  const percent = configuredAgentPrimaryPercent(input.channel);
   if (percent <= 0) return false;
   if (percent >= 100) return true;
 
