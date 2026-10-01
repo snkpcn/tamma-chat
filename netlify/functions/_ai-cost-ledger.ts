@@ -285,11 +285,16 @@ export async function finalizeAiCall(
   semanticOutput: string | null,
   succeeded: boolean,
   now: Date = new Date(),
+  chargedCostUsdOverride?: number,
 ): Promise<void> {
   const { context } = reservation;
   if (!context.guestDbId) return;
   const chargedCostUsd = roundUsd(
-    usage ? calculateAiCostUsd(reservation.model, usage) : reservation.reservedCostUsd,
+    Number.isFinite(chargedCostUsdOverride)
+      ? Math.max(0, Number(chargedCostUsdOverride))
+      : usage
+        ? calculateAiCostUsd(reservation.model, usage)
+        : reservation.reservedCostUsd,
   );
 
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
