@@ -24,7 +24,7 @@ export type TammaLocation = {
 };
 
 export const TAMMA_CHART_LOCATION: TammaLocation = {
-  mapsLink: 'https://maps.app.goo.gl/1Zm9D9uxyezX373J6?g_st=ic',
+  mapsLink: 'https://maps.app.goo.gl/67eqn5vGvqJjfxZCA?g_st=ic',
   source: 'owner_provided_maps_link',
   latitude: null,
   longitude: null,
