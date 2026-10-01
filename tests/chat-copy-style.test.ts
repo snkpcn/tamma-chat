@@ -66,3 +66,13 @@ test('callers cannot inflate ordinary LINE bubbles past the phone readability ca
 test('short LINE replies stay one bubble', () => {
   assert.deepEqual(splitCustomerMessageForLine('เรียบร้อยครับ ✅\nรอร้านรับออเดอร์'), ['เรียบร้อยครับ ✅\nรอร้านรับออเดอร์']);
 });
+
+
+test('Thongthai always uses male Thai polite particles even when a customer-facing draft contains feminine particles', () => {
+  const input = 'ตอนนี้ยังไม่มีที่อยู่ร้านที่ยืนยันได้ค่ะ เดี๋ยวขอให้ทีมงานส่งพิกัดร้านให้นะคะ 📍';
+  const expected = 'ตอนนี้ยังไม่มีที่อยู่ร้านที่ยืนยันได้ครับ เดี๋ยวขอให้ทีมงานส่งพิกัดร้านให้นะครับ 📍';
+  assert.equal(polishCustomerMessage(input, 'line'), expected);
+  assert.equal(polishCustomerMessage(input, 'web'), expected);
+  assert.equal(polishCustomerMessage(input, 'facebook'), expected);
+  assert.doesNotMatch(polishCustomerMessage(input, 'line'), /ค่ะ|คะ/u);
+});
