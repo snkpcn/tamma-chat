@@ -42,6 +42,9 @@ test('staging transaction surface is intentionally tiny and two-step', () => {
     'prepare_restaurant_preorder',
     'get_prepared_restaurant_preorder',
     'commit_prepared_restaurant_preorder',
+    'prepare_otop_order',
+    'get_prepared_otop_order',
+    'commit_prepared_otop_order',
   ]);
   for (const tool of THONGTHAI_STAGING_TRANSACTION_TOOLS) {
     assert.equal(tool.type, 'function');
@@ -103,6 +106,20 @@ test('restaurant transaction prepare also fails closed while transaction mode is
     environment: 'test',
     eventId: 'evt-restaurant-1',
     message: 'สั่งอาหาร',
+    transactionMode: 'off',
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'transaction_tools_disabled');
+});
+
+
+test('OTOP transaction prepare also fails closed while transaction mode is off', async () => {
+  const result = JSON.parse(await executeThongthaiAgentTool('prepare_otop_order', {}, {
+    guestDbId: 'synthetic-guest',
+    channel: 'web',
+    environment: 'test',
+    eventId: 'evt-otop-1',
+    message: 'สั่งสินค้า',
     transactionMode: 'off',
   }));
   assert.equal(result.ok, false);
