@@ -68,3 +68,6 @@ This file also records the environment-configuration deployment point so the Net
 
 
 - 2026-10-01 Phase 2 Wave C certification: temporary production allowlist rotated to the single Café synthetic guest ending 0501. Docs-only Functions rebuild. Public prepare remains 0%; live commit remains OFF.
+
+
+- 2026-10-01 FINAL Phase 2 cleanup: all five production verticals passed (30/30 turns, 0 false transaction signals). Synthetic prepare allowlist cleared. This commit rebuilds Production with the empty allowlist. Public prepare remains 0%; live commit remains OFF.
