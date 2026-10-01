@@ -180,6 +180,28 @@ const NEGATED_TRANSACTION_MENTION_RE =
   /(?:ยัง\s*)?(?:ไม่ได้(?:คิดจะ|คิด|จะ|ให้)?|ไม่(?:ได้|ต้อง|เอา|อยาก|จะ)?)\s*(?:ยืนยัน(?:การ)?)?\s*(?:จอง|สั่ง)/gu;
 const NEGATED_BEFORE_TRANSACTION_VERB_RE =
   /(?:ยัง\s*)?(?:ไม่ได้(?:คิดจะ|คิด|จะ|ให้)?|ไม่(?:ได้|ต้อง|เอา|อยาก|จะ)?)\s*(?:ยืนยัน(?:การ)?)?\s*$/u;
+
+// Structural safety vocabulary for an explicit CURRENT prohibition.  This is
+// deliberately small and transaction-shaped: it recognizes "ห้าม/อย่า ... จอง|สั่ง"
+// without making ordinary negation a business-intent router.
+const PROHIBITED_TRANSACTION_MENTION_RE =
+  /(?:ห้าม|อย่า)[^\n.!?？]{0,40}?(?:จอง|สั่ง)/gu;
+
+// A customer can also veto the whole operation without repeating the concrete
+// verb ("ยังไม่ต้องทำรายการอะไรทั้งนั้น").  Keep this bounded to explicit
+// operation nouns so casual "ไม่ต้องทำ..." language is not over-classified.
+const GENERAL_TRANSACTION_HOLD_RE =
+  /(?:ยัง\s*)?(?:ไม่ต้อง|ห้าม|อย่า)\s*(?:(?:กด|ทำ|ดำเนิน(?:การ)?|ส่ง)\s*)?(?:รายการ|ธุรกรรม|การจอง|การสั่ง(?:ซื้อ)?)/gu;
+
+function transactionVerbFallsInsideExplicitProhibition(message: string, verbIndex: number): boolean {
+  for (const match of message.matchAll(PROHIBITED_TRANSACTION_MENTION_RE)) {
+    const start = match.index ?? -1;
+    if (start < 0) continue;
+    const end = start + match[0].length;
+    if (verbIndex >= start && verbIndex < end) return true;
+  }
+  return false;
+}
 // State-navigation wording must be adjacent to the transaction verb. The old
 // broad `(?:จอง|สั่ง).*ต่อ` shape also matched the `ต่อ` inside `ติดต่อ`,
 // incorrectly stripping consent from a cafe request such as "สั่งกาแฟ แล้ว
@@ -192,7 +214,8 @@ function lastAffirmativeTransactionVerbIndex(message: string): number {
     const index = match.index ?? -1;
     if (index < 0) continue;
     const before = message.slice(Math.max(0, index - 24), index);
-    if (NEGATED_BEFORE_TRANSACTION_VERB_RE.test(before)) continue;
+    if (NEGATED_BEFORE_TRANSACTION_VERB_RE.test(before)
+        || transactionVerbFallsInsideExplicitProhibition(message, index)) continue;
 
     const around = message.slice(Math.max(0, index - 16), Math.min(message.length, index + 24));
     // Returning to an unfinished transaction conversation is state navigation,
@@ -214,6 +237,12 @@ function lastAffirmativeTransactionVerbIndex(message: string): number {
 function lastNoTransactionMarkerIndex(message: string): number {
   let last = -1;
   for (const match of message.matchAll(NEGATED_TRANSACTION_MENTION_RE)) {
+    last = Math.max(last, match.index ?? -1);
+  }
+  for (const match of message.matchAll(PROHIBITED_TRANSACTION_MENTION_RE)) {
+    last = Math.max(last, match.index ?? -1);
+  }
+  for (const match of message.matchAll(GENERAL_TRANSACTION_HOLD_RE)) {
     last = Math.max(last, match.index ?? -1);
   }
   for (const match of message.matchAll(/ไว้ก่อน/gu)) {
