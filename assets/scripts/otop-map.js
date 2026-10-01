@@ -74,6 +74,8 @@
       vi:'Bản đồ OTOP Isan — Thammachat'
     };
     document.title = titles[lang] || titles.th;
+    const metaDescription = document.querySelector('meta[name="description"]');
+    if (metaDescription) metaDescription.content = tr('map_meta_desc');
   }
 
   function element(name, attributes = {}) {
