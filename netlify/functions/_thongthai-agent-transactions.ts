@@ -43,9 +43,9 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
   {
     type: 'function',
     name: 'prepare_activity_booking',
-    description: 'Prepare an activity booking for explicit customer review. This NEVER creates a booking. After this tool returns, summarize the exact details and ask the customer to reply with the exact phrase "ยืนยันจอง" if they want the booking request submitted.',
+    description: 'Prepare an activity booking for explicit customer review. This NEVER creates a booking. IMPORTANT: this prepare tool already validates the canonical activity/asset, offered duration, live availability/options, and price. If the customer message already contains the required booking fields, call this tool DIRECTLY; do NOT call get_activity_catalog or check_activity_availability first. After it returns, summarize the exact details and ask for "ยืนยันจอง".',
     parameters: objectSchema({
-      activity_code: { type: 'string', description: 'Canonical activity code from get_activity_catalog, for example horse.' },
+      activity_code: { type: 'string', description: 'Canonical activity code, for example horse. For an obvious named activity, use the known canonical code directly; no separate catalog call is required.' },
       asset_name: { type: 'string', description: 'Optional canonical named asset, for example ภาราดร. Required for horse booking.' },
       date: { type: 'string', description: 'Local date YYYY-MM-DD.' },
       time: { type: 'string', description: 'Optional local time HH:MM.' },
@@ -74,7 +74,7 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
   {
     type: 'function',
     name: 'prepare_stay_booking',
-    description: 'Prepare a stay booking request for explicit customer review. This NEVER creates a booking. Resolve the exact stay resource first, then return a summary and ask the customer to reply exactly "ยืนยันจอง" to submit.',
+    description: 'Prepare a stay booking request for explicit customer review. This NEVER creates a booking. This prepare tool itself validates the canonical stay resource and checks live stay options. If the customer already identified an unambiguous stay resource and supplied all required fields, call this tool directly; use get_stay_catalog first only when resource identity/code is genuinely unresolved. Then summarize and ask for "ยืนยันจอง".',
     parameters: objectSchema({
       resource_code: { type: 'string', description: 'Canonical stay resource code from get_stay_catalog.' },
       resource_name: { type: 'string', description: 'Optional canonical stay resource name.' },
@@ -105,7 +105,7 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
   {
     type: 'function',
     name: 'prepare_restaurant_preorder',
-    description: 'Prepare a restaurant preorder for explicit customer review. This NEVER creates an order or payment request. Validate every item against the live menu and stock, then ask the customer to reply exactly "ยืนยันสั่ง" to submit.',
+    description: 'Prepare a restaurant preorder for explicit customer review. This NEVER creates an order or payment request. This prepare tool itself validates every item against the live menu/orderability and calculates the total. If the customer already supplied the complete item list, date/time, name and phone, call this tool directly rather than pre-reading the menu again. Then ask for "ยืนยันสั่ง".',
     parameters: objectSchema({
       date: { type: 'string', description: 'Local date YYYY-MM-DD.' },
       time: { type: 'string', description: 'Local time HH:MM.' },
@@ -141,7 +141,7 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
   {
     type: 'function',
     name: 'prepare_otop_order',
-    description: 'Prepare an OTOP product order for explicit customer review. This NEVER creates an order or changes stock. Validate product and stock from the canonical catalog, then ask the customer to reply exactly "ยืนยันสั่ง" to submit.',
+    description: 'Prepare an OTOP product order for explicit customer review. This NEVER creates an order or changes stock. This prepare tool itself validates the SKU, current stock and price. If the SKU is already known from the conversation/tool context, call this tool directly; use get_otop_catalog first only when SKU/product identity is genuinely unresolved. Then ask for "ยืนยันสั่ง".',
     parameters: objectSchema({
       sku: { type: 'string', description: 'Canonical OTOP SKU from get_otop_catalog.' },
       quantity: { type: 'integer', minimum: 1, maximum: 99 },
@@ -170,7 +170,7 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
   {
     type: 'function',
     name: 'prepare_cafe_inquiry',
-    description: 'Prepare a cafe service inquiry/handoff for explicit customer review. This NEVER sends anything to staff. Use when the customer wants the cafe team to follow up on a question, special request, group arrangement, or matter not answerable from verified data. Ask the customer to reply exactly "ยืนยันส่งคำถาม" to send it.',
+    description: 'Prepare a cafe service inquiry/handoff for explicit customer review. This NEVER sends anything to staff. When the customer already supplied the inquiry text, name and phone, call this tool directly; no preliminary catalog/status tool is needed. Ask the customer to reply exactly "ยืนยันส่งคำถาม" to send it.',
     parameters: objectSchema({
       question: { type: 'string', description: 'The exact customer question/request to send to the cafe team.' },
       customer_name: { type: 'string' },

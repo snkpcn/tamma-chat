@@ -11,7 +11,7 @@ import {
 
 test('Thongthai staging agent profile locks the owner-defined identity and trust rules', () => {
   assert.equal(THONGTHAI_STAGING_AGENT_NAME, 'Thongthai-Staging');
-  assert.match(THONGTHAI_AGENT_PROFILE_VERSION, /^thongthai-agent-profile-v2-prepare-only-/);
+  assert.match(THONGTHAI_AGENT_PROFILE_VERSION, /^thongthai-agent-profile-v3-fast-prepare-/);
 
   const prompt = THONGTHAI_AGENT_INSTRUCTIONS;
   assert.match(prompt, /You are male\./);
@@ -59,4 +59,5 @@ test('Thongthai production Agent is separate and prepare-only before live commit
   assert.ok(production.tools.every(tool => !/^commit_prepared_/.test(tool.name)));
   assert.ok(staging.tools.some(tool => /^commit_prepared_/.test(tool.name)));
   assert.match(production.instructions, /If no matching commit tool is available/i);
+  assert.match(production.instructions, /call the matching prepare tool directly/i);
 });

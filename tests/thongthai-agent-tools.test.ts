@@ -171,3 +171,17 @@ test('production prepare tool surface exposes drafts/readback but no commit tool
   assert.ok(names.some(name => THONGTHAI_READ_ONLY_TOOLS.some(tool => tool.name === name)));
   assert.ok(names.every(name => !name.startsWith('commit_prepared_')));
 });
+
+
+test('prepare tool descriptions tell the Agent to avoid redundant preflight lookups', () => {
+  const activity = THONGTHAI_PRODUCTION_PREPARE_TOOLS.find(tool => tool.name === 'prepare_activity_booking');
+  const restaurant = THONGTHAI_PRODUCTION_PREPARE_TOOLS.find(tool => tool.name === 'prepare_restaurant_preorder');
+  const cafe = THONGTHAI_PRODUCTION_PREPARE_TOOLS.find(tool => tool.name === 'prepare_cafe_inquiry');
+  assert.ok(activity);
+  assert.match(activity.description, /call this tool DIRECTLY/i);
+  assert.match(activity.description, /do NOT call get_activity_catalog or check_activity_availability first/i);
+  assert.ok(restaurant);
+  assert.match(restaurant.description, /call this tool directly/i);
+  assert.ok(cafe);
+  assert.match(cafe.description, /call this tool directly/i);
+});
