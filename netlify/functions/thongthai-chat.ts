@@ -367,6 +367,15 @@ export function deterministicBotAddressResponse(request: BrainRequest): BrainRes
 // booking, a saved feedback note) that did not actually happen.
 type DegradedFallbackCategory = 'weather' | 'booking' | 'feedback' | 'casual';
 
+export function isAgentTransactionPrepareIntent(
+  message: string,
+  topLevelSemanticIntent: string,
+): boolean {
+  return topLevelSemanticIntent === 'BUSINESS_TRANSACTION'
+    || hasExplicitTransactionIntent(message)
+    || hasStandaloneTransactionRequest(message);
+}
+
 export function categorizeDegradedFallback(message: string): DegradedFallbackCategory {
   if (classifyServiceFeedback(message)) return 'feedback';
   if (classifyLocalConciergeQuestion(message)?.category === 'weather_condition') return 'weather';
@@ -4921,10 +4930,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  const explicitTransactionIntent =
-    topLevelSemanticIntent === 'BUSINESS_TRANSACTION'
-    || hasExplicitTransactionIntent(request.message)
-    || hasStandaloneTransactionRequest(request.message);
+  const explicitTransactionIntent = isAgentTransactionPrepareIntent(
+    request.message,
+    topLevelSemanticIntent,
+  );
   const prepareOnlyAgentEligible = explicitTransactionIntent
     && shouldUseThongthaiAgentTransactionPrepare({
       guestKey: request.guestId,
