@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Run final acceptance turn 1 only
+      - name: Run final acceptance turn 2 only
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error             --max-time 50             "https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-cross-business-final?turn=1"
+          curl --fail-with-body --silent --show-error             --max-time 50             "https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-cross-business-final?turn=2"
