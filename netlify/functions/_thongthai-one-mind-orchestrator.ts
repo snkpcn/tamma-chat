@@ -551,6 +551,21 @@ const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
 // re-phrase what canonical data already answers, never invents a fact the
 // deterministic composer couldn't already produce on its own.
 export function isTrustedZeroCostFactLookup(turn: SemanticTurn, message: string): boolean {
+  // Payment status is a guest-scoped, read-only lookup against the canonical
+  // payment_requests row.  The deterministic turn carries an optional
+  // canonical reference code and the adapter still enforces guest ownership,
+  // so there is no language ambiguity for a model to resolve and no mutation
+  // a model could authorize.  Keeping this on the trusted path also means a
+  // slow model provider can never hide a real payment state behind the generic
+  // booking fallback.
+  if (
+    turn.intent === 'check_payment_status'
+    && turn.domain === 'payment'
+    && turn.action === 'status'
+    && turn.informationNeed === 'transaction_status'
+  ) {
+    return true;
+  }
   // A conditional horse fallback with an explicit do-not-book consequence is
   // an exact read-only availability lookup. The deterministic deriver emits
   // this intent only after resolving two distinct, explicitly named current-

@@ -235,6 +235,14 @@ test('F6: an idle deterministic-only conversation is reported with an exact zero
     assert.deepEqual(delivery?.payload && (delivery.payload as any).channels,[
       {channel:'web',cost:0,calls:0,turns:1},
     ]);
+    const push=harness.postsTo('line_push')[0] as {messages?:Array<{text?:string}>}|undefined;
+    const text=push?.messages?.[0]?.text??'';
+    assert.match(text,/ต้นทุนจริงต่อบทสนทนา/u);
+    assert.match(text,/สรุป: ไม่เสียค่า AI/u);
+    assert.match(text,/ช่องทางลูกค้า: เว็บไซต์/u);
+    assert.match(text,/ต้นทุนรวม: 0\.00 บาท/u);
+    assert.match(text,/ตอบจากข้อมูล\/กติกาในระบบโดยไม่เรียก OpenAI: 1 ข้อความ/u);
+    assert.doesNotMatch(text,/Zero-cost turns|OpenAI calls|Channels \(/u,'owner LINE notification must not expose unreadable engineering labels');
   });
 });
 
@@ -264,5 +272,12 @@ test('F7: one cross-channel conversation reports a per-channel cost breakdown', 
       {channel:'line',cost:0.3,calls:1,turns:1},
       {channel:'web',cost:0.2,calls:1,turns:1},
     ]);
+    const push=harness.postsTo('line_push')[0] as {messages?:Array<{text?:string}>}|undefined;
+    const text=push?.messages?.[0]?.text??'';
+    assert.match(text,/• LINE — 0\.30 บาท/u);
+    assert.match(text,/• เว็บไซต์ — 0\.20 บาท/u);
+    assert.match(text,/ต้นทุนเกิดจาก/u);
+    assert.match(text,/ทำความเข้าใจข้อความลูกค้า: 1 ครั้ง — 0\.20 บาท/u);
+    assert.match(text,/เรียบเรียงคำตอบจากข้อมูลที่ตรวจสอบแล้ว: 1 ครั้ง — 0\.30 บาท/u);
   });
 });
