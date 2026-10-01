@@ -54,6 +54,12 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
   },
   {
     type: 'function',
+    name: 'get_prepared_activity_booking',
+    description: 'Read the currently prepared activity booking for this guest, including its confirmation_id and exact details. This never creates or modifies a booking. Use it when the customer returns to a previously prepared booking or explicitly confirms after saying not yet.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
     name: 'commit_prepared_activity_booking',
     description: 'Submit the previously prepared activity booking request. This is consequential and is server-gated: it succeeds only on a later customer turn that explicitly confirms booking. Pass the confirmation_id returned by prepare_activity_booking. Never call in the same turn as prepare.',
     parameters: objectSchema({
@@ -314,6 +320,51 @@ async function prepareActivityBooking(
   };
 }
 
+async function getPreparedActivityBooking(
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok: false, error: 'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+
+  const prepared = await loadPrepared(context.guestDbId);
+  if (!prepared) return { ok: true, prepared: false };
+  if (prepared.environment !== mode.environment) return { ok: true, prepared: false };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) {
+    return { ok: true, prepared: false, expired: true };
+  }
+  if (prepared.status === 'committed') {
+    return {
+      ok: true,
+      prepared: false,
+      committed: true,
+      confirmation_id: prepared.confirmationId,
+      result: prepared.result ?? null,
+    };
+  }
+  return {
+    ok: true,
+    prepared: true,
+    confirmation_id: prepared.confirmationId,
+    expires_at: prepared.expiresAt,
+    summary: {
+      activity_code: prepared.payload.activityCode,
+      resource_code: prepared.payload.resourceCode,
+      asset_name: prepared.payload.assetName,
+      date: prepared.payload.date,
+      time: prepared.payload.time,
+      duration_minutes: prepared.payload.durationMinutes,
+      party_size: prepared.payload.partySize,
+      customer_name: prepared.payload.customerName,
+      phone: prepared.payload.phone,
+      expected_price: prepared.payload.expectedPrice,
+      currency: prepared.payload.currency,
+      availability_status: prepared.preview.availabilityStatus,
+    },
+    exact_confirmation_phrase_th: 'ยืนยันจอง',
+  };
+}
+
 async function commitPreparedActivityBooking(
   args: Record<string, unknown>,
   context: ThongthaiAgentTransactionContext,
@@ -403,6 +454,8 @@ export async function executeThongthaiTransactionTool(
   let result: Record<string, unknown>;
   if (name === 'prepare_activity_booking') {
     result = await prepareActivityBooking(args, context);
+  } else if (name === 'get_prepared_activity_booking') {
+    result = await getPreparedActivityBooking(context);
   } else if (name === 'commit_prepared_activity_booking') {
     result = await commitPreparedActivityBooking(args, context);
   } else {
