@@ -24,6 +24,19 @@
     nongkhai:'Nong Khai', buengkan:'Bueng Kan', loei:'Loei', nongbualamphu:'Nong Bua Lam Phu'
   };
 
+  const PRODUCT_NAME_FALLBACKS = {
+    'chaiyaphum-otop-001':{en:'Mudmee Ikat Silk',zh:'Mudmee 伊卡特丝绸',lo:'ຜ້າໄໝມັດໝີ',vi:'Lụa ikat Mudmee'},
+    'chaiyaphum-otop-002':{en:'Upcycled Silk Hat',zh:'边角丝绸再造帽',lo:'ໝວກຜ້າໄໝຈາກເສດຜ້າໄໝ',vi:'Mũ lụa tái chế từ vải vụn'},
+    'chaiyaphum-otop-003':{en:'Nok Krajib Crispy Banana Chips',zh:'Nok Krajib 脆香蕉片',lo:'ກ້ວຍກອບແກ້ວ Nok Krajib',vi:'Chuối giòn Nok Krajib'},
+    'chaiyaphum-otop-004':{en:'Multi-purpose Fabric Bag',zh:'多用途布包',lo:'ກະເປົາຜ້າອະເນກປະສົງ',vi:'Túi vải đa năng'},
+    'chaiyaphum-otop-005':{en:'Dried Makrut Lime Deodorizer',zh:'干燥青柠除味包',lo:'ໝາກຂີ້ຫູດແຫ້ງດັບກິ່ນ',vi:'Chanh makrut sấy khô khử mùi'},
+    'chaiyaphum-otop-006':{en:'Chaiyaphum Mam · Local Fermented Sausage',zh:'Chaiyaphum Mam · 地方发酵香肠',lo:'ໝ່ຳ ໄຊຍະພູມ',vi:'Mam Chaiyaphum · xúc xích lên men địa phương'},
+    'chaiyaphum-otop-007':{en:'Pla Ra Bong / Jaew Bong',zh:'Pla Ra Bong / Jaew Bong 发酵鱼辣酱',lo:'ປາແດກບອງ / ແຈ່ວບອງ',vi:'Pla Ra Bong / Jaew Bong'},
+    'chaiyaphum-otop-008':{en:'Health Rice',zh:'健康米',lo:'ເຂົ້າເພື່ອສຸຂະພາບ',vi:'Gạo tốt cho sức khỏe'},
+    'chaiyaphum-otop-009':{en:'Handwoven Sticky Rice Basket',zh:'手工编织糯米篮',lo:'ກະຕິບເຂົ້າໜຽວສານ',vi:'Giỏ đan đựng xôi'},
+    'chaiyaphum-otop-010':{en:'Herbal Balm / Massage Oil',zh:'草本香膏 / 按摩油',lo:'ຢາໝ່ອງ / ນ້ຳມັນນວດສະໝຸນໄພ',vi:'Dầu cù là / dầu massage thảo mộc'}
+  };
+
   const D = {
     th:{
       switch_language:'เปลี่ยนภาษา',
@@ -253,7 +266,12 @@
   }
   function productName(product) {
     const tr = product?.metadata?.translations?.[current] || product?.metadata?.i18n?.[current];
-    return typeof tr?.name === 'string' && tr.name.trim() ? tr.name.trim() : String(product?.name || '');
+    if (typeof tr?.name === 'string' && tr.name.trim()) return tr.name.trim();
+    if (current !== 'th') {
+      const fallback = PRODUCT_NAME_FALLBACKS[String(product?.catalogProductId || '')]?.[current];
+      if (fallback) return fallback;
+    }
+    return String(product?.name || '');
   }
   function productStory(product) {
     if (current === 'th') return product?.story || null;
@@ -316,6 +334,9 @@
       wrap.classList.toggle('is-open');
     });
     wrap.append(toggle, menu);
+    toggle.textContent = LANGUAGE_LABELS[current][1];
+    toggle.setAttribute('aria-label', t('switch_language'));
+    menu.querySelectorAll('button[data-lang]').forEach(btn => btn.classList.toggle('is-active', btn.dataset.lang === current));
     slot.prepend(wrap);
     document.addEventListener('click', e => {
       if (!wrap.contains(e.target)) wrap.classList.remove('is-open');
