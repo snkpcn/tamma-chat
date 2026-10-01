@@ -58,6 +58,8 @@ const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','statu
 // read-only composition/task-state continuation remains inside One-Mind while
 // any future real transaction proposal would still be rejected by the gate.
 // Payment/support remain on legacy until their own equivalence is proven.
+// The one narrow payment-status exception lives directly in the eligibility
+// gate below, where it is constrained to a canonical read-only lookup.
 const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe','journey','general','local','incident']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
 const FOOD_SAFETY_CONSTRAINTS = new Set([
@@ -293,7 +295,13 @@ export function readOnlyCutoverEligibility(
   if (turn.semanticTurn.domain === 'unknown' && isSafeConversationalMode && hasReplyToShow) {
     return { eligible:true };
   }
-  if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)) {
+  const semantic=turn.dialogSemanticTurn??turn.semanticTurn;
+  const canonicalPaymentStatusLookup = semantic.domain === 'payment'
+    && semantic.intent === 'check_payment_status'
+    && semantic.action === 'status'
+    && semantic.informationNeed === 'transaction_status'
+    && !turn.dialogDecision.actionProposal;
+  if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain) && !canonicalPaymentStatusLookup) {
     return { eligible:false, reason:'domain_not_cut_over' };
   }
   const suspendedTask = turn.taskStateAfter.suspendedTask ?? turn.taskStateBefore.suspendedTask;
