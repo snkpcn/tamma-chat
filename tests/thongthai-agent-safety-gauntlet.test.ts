@@ -63,6 +63,8 @@ test('booking/order confirmation gate rejects hold, cancellation, change-of-mind
     'เอาไว้ก่อน เดี๋ยวค่อยยืนยัน',
     'แก้เป็นพรุ่งนี้ก่อน ยังไม่จอง',
     'เปลี่ยนจำนวนเป็น 2 ชิ้นก่อน ยังไม่สั่ง',
+    'ยืนยันจอง แต่ขอแก้เป็น 45 นาที',
+    'ยืนยันสั่ง แต่เปลี่ยนเป็น 2 ชิ้น',
   ]) {
     assert.equal(
       currentTurnExplicitlyConfirmsPreparedBooking(message),
@@ -81,6 +83,7 @@ test('cafe confirmation gate rejects hold, cancellation, questions, and correcti
     'แก้คำถามเป็นเรื่องเวลาเปิดก่อน ยังไม่ส่ง',
     'ส่งให้ทีมได้ไหม',
     'ยืนยันส่งคำถามได้ไหม',
+    'ยืนยันส่งคำถาม แต่ขอแก้เป็นถามเรื่องห้องประชุม',
   ]) {
     assert.equal(
       currentTurnExplicitlyConfirmsCafeInquiry(message),
@@ -142,7 +145,7 @@ test('duplicate/retry commit attempts remain fail-closed in prepare-only mode', 
     const retry = JSON.parse(await executeThongthaiTransactionTool(
       name,
       { confirmation_id: 'same-confirmation-id' },
-      context,
+      { ...context, eventId: 'safety-gauntlet-retry-event-2' },
     )) as Record<string, unknown>;
 
     assert.deepEqual(retry, first, `retry changed fail-closed result for ${name}`);
