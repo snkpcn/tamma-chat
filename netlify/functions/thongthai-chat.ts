@@ -5055,6 +5055,55 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       channel,
     });
 
+  // Gate 0 latency guarantee: a fully-specified horse booking does not need
+  // an LLM round trip merely to invoke the self-validating prepare tool.
+  // Execute the non-consequential draft operation directly, then return the
+  // same customer-safe prepare-only contract. Ambiguous/incomplete transaction
+  // language still falls through to the Saved Agent for natural conversation.
+  if (prepareOnlyAgentEligible && guestDbId) {
+    const preparedFast = await prepareOnlyActivityFastPath(
+      request,
+      guestDbId,
+      channel,
+      transportEventId,
+    ).catch(error => {
+      console.error(
+        'THONGTHAI_AGENT_PREPARE_FASTPATH_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return null;
+    });
+    if (preparedFast) {
+      const polished = polishedResponse(preparedFast, channel);
+      try {
+        await persistAiResponseTurn({
+          conversationId:request.guestId,
+          eventId:transportEventId,
+          channel,
+          finalResponseSource:'agent_prepare_fastpath',
+          modelReplyUsed:false,
+          groundedKnowledgeSupplied:true,
+          zeroCostTurn:true,
+          environment:'live',
+          occurredAt:new Date().toISOString(),
+        });
+        explicitAiResponseTurnPersisted = true;
+      } catch (error) {
+        console.error(
+          'AGENT_PREPARE_FASTPATH_RESPONSE_TURN_PERSIST_ERROR',
+          error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+        );
+      }
+      return coreResult(200, {
+        message:polished.message,
+        intent:polished.intent,
+        contextUpdates:polished.contextUpdates,
+        journeyAction:polished.journeyAction,
+        suggestedActions:polished.suggestedActions,
+      });
+    }
+  }
+
   // A complete, explicitly-authorized transaction normally reaches its
   // established executor before the conversation-first composer. A guest in
   // the Agent prepare-only canary is the deliberate exception: suppress the
