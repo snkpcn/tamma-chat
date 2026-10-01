@@ -49,4 +49,6 @@ Rollout history:
 
 - Primary Agent latency hotfix PR #395 removes redundant post-turn persistence and avoids re-fetching settled usage when the completed Agent turn already includes it. A fresh synthetic WEB guest is allowlisted for the final first-prepare latency certification; public prepare rollout remains 0% and live commit remains OFF.\n\n- Final Gate 0 safety hotfix PR #398 removes the legacy-only resourceCode requirement from complete horse prepare drafts and centrally blocks all legacy consequential write tools for prepare-only guests. The accidental synthetic booking created during certification was cancelled/closed. Public prepare rollout remains 0%, only one fresh synthetic WEB guest is allowlisted for the final certification, and live Agent commit remains OFF.
 
+- PR #398 fail-closed Gate 0 fix is merged. Final synthetic WEB certification guest: `f7f7f7f7-0251-4f7f-8f7f-000000000398`; public prepare rollout remains 0% and live commit remains OFF.
+
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
