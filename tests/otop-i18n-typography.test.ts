@@ -41,9 +41,11 @@ test('OTOP map and store share the existing five-language preference', () => {
 
 test('OTOP dynamic UI rerenders on language changes', () => {
   const mapJs = read('assets/scripts/otop-map.js');
+  assert.match(mapJs, /otop:i18n-ready/);
   assert.match(mapJs, /otop:i18n-change/);
   assert.match(mapJs, /provinceName\(province\.provinceId\)/);
-  assert.match(mapJs, /province_experience_title/);
+  assert.match(mapJs, /OTOP_PROVINCE_TRANSLATIONS/);
+  assert.match(read('otop-map.html'), /assets\/scripts\/otop-province-translations\.js/);
 
   const store = read('otop.html');
   assert.match(store, /assets\/scripts\/otop-product-translations\.js/);
@@ -74,4 +76,14 @@ test('OTOP store remains one valid HTML document after localization wiring', () 
   assert.equal((store.match(/<\/html>/gi) || []).length, 1);
   assert.equal((store.match(/<\/body>/gi) || []).length, 1);
   assert.equal((store.match(/const currentLang/g) || []).length, 1);
+});
+
+
+test('all 20 province stories have four non-Thai translations', () => {
+  const translations = read('assets/scripts/otop-province-translations.js');
+  const provinces = ['chaiyaphum','khonkaen','buriram','surin','sisaket','nakhonratchasima','roiet','mahasarakham','kalasin','sakonnakhon','nakhonphanom','mukdahan','yasothon','amnatcharoen','ubonratchathani','udonthani','nongkhai','buengkan','loei','nongbualamphu'];
+  for (const province of provinces) {
+    const occurrences = translations.split(`${province}:{title:`).length - 1;
+    assert.equal(occurrences, 4, `${province} must have EN/ZH/LO/VI story copy`);
+  }
 });
