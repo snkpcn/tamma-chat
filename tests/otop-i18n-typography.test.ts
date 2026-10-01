@@ -49,6 +49,7 @@ test('OTOP dynamic UI rerenders on language changes', () => {
   assert.match(store, /assets\/scripts\/otop-product-translations\.js/);
   assert.match(store, /localizedProduct\(/);
   assert.match(store, /otop:i18n-change/);
+  assert.match(store, /otop:i18n-ready/);
   assert.match(store, /currentLocale\(\)/);
   assert.doesNotMatch(store, /toLocaleString\('th-TH'\)/);
 });
@@ -64,4 +65,13 @@ test('all ten currently live Chaiyaphum story records have four non-Thai transla
     const occurrences = translations.split(id).length - 1;
     assert.equal(occurrences, 4, `${id} must be translated into en/zh/lo/vi`);
   }
+});
+
+
+test('OTOP store remains one valid HTML document after localization wiring', () => {
+  const store = read('otop.html');
+  assert.equal((store.match(/<!doctype html>/gi) || []).length, 1);
+  assert.equal((store.match(/<\/html>/gi) || []).length, 1);
+  assert.equal((store.match(/<\/body>/gi) || []).length, 1);
+  assert.equal((store.match(/const currentLang/g) || []).length, 1);
 });
