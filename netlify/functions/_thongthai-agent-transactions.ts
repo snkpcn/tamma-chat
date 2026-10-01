@@ -334,6 +334,28 @@ type PreparedOtopOrder = {
   };
 };
 
+type PreparedCafeInquiry = {
+  version: 1;
+  kind: 'cafe_inquiry';
+  status: 'prepared' | 'committed';
+  confirmationId: string;
+  preparedEventId: string;
+  preparedAt: string;
+  expiresAt: string;
+  environment: 'live' | 'test';
+  payload: {
+    question: string;
+    customerName: string;
+    phone: string;
+    email: string | null;
+  };
+  result?: {
+    inquiryId: string;
+    inquiryCode: string;
+    notificationStatus: string;
+  };
+};
+
 function textArg(args: Record<string, unknown>, key: string, max = 240): string | null {
   const value = args[key];
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
