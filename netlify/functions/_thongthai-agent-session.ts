@@ -1,0 +1,351 @@
+import type { BrainChannel } from './_thongthai-brain-v3';
+import { THONGTHAI_STAGING_AGENT_ID } from './_thongthai-agent-profile';
+import { executeThongthaiReadOnlyTool } from './_thongthai-agent-tools';
+import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
+import { calculateAiCostUsd, usdToThb, aiCostPolicy } from './_ai-cost-policy';
+import { persistAiCallCost } from './_ai-cost-store';
+
+const API_BASE = 'https://api.openai.com/v1';
+const BETA_HEADER = 'agents=v1';
+const SESSION_STATE_KEY = 'thongthaiStagingAgentSession';
+const MAX_TOOL_ROUNDS = 8;
+const MAX_POLL_ROUNDS = 80;
+const POLL_MS = 150;
+
+type Usage = {
+  input_tokens?: number;
+  input_tokens_details?: { cached_tokens?: number };
+  output_tokens?: number;
+};
+
+type AgentSession = {
+  id: string;
+  status: 'idle' | 'in_progress' | 'requires_action' | 'failed' | string;
+  required_actions?: Array<{
+    type?: string;
+    turn_id?: string;
+    call_id?: string;
+    name?: string;
+    arguments?: unknown;
+  }>;
+  error?: unknown;
+};
+
+type AgentTurn = {
+  id: string;
+  agent_id?: string;
+  status: string;
+  completed_at?: number | null;
+  error?: { code?: string; message?: string } | null;
+  usage?: Usage | null;
+};
+
+type SessionItem = {
+  id?: string;
+  type?: string;
+  role?: string;
+  turn_id?: string;
+  status?: string;
+  content?: Array<{ type?: string; text?: string }>;
+};
+
+type SessionState = {
+  agentId: string;
+  sessionId: string;
+  createdAt: string;
+  lastUsedAt: string;
+  turnCount: number;
+  cumulativeCostThb: number;
+};
+
+export type AgentShadowTurnInput = {
+  guestDbId: string;
+  conversationId: string;
+  eventId: string;
+  channel: BrainChannel;
+  message: string;
+  environment?: 'live' | 'test';
+};
+
+export type AgentShadowTurnResult = {
+  sessionId: string;
+  turnId: string;
+  output: string;
+  toolCalls: string[];
+  createdSession: boolean;
+  usage: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    costThb: number;
+  };
+  cumulativeCostThb: number;
+};
+
+function apiKey(): string {
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) throw new Error('OPENAI_API_KEY is required for Thongthai Agent shadow mode.');
+  return key;
+}
+
+async function openai<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${apiKey()}`,
+      'Content-Type': 'application/json',
+      'OpenAI-Beta': BETA_HEADER,
+      ...(init.headers ?? {}),
+    },
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error(`OpenAI Agents API ${response.status} ${path}: ${body.slice(0, 500)}`);
+  return body ? JSON.parse(body) as T : ({} as T);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function parseState(raw: unknown): SessionState | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Partial<SessionState>;
+  if (value.agentId !== THONGTHAI_STAGING_AGENT_ID || typeof value.sessionId !== 'string' || !value.sessionId) return null;
+  return {
+    agentId: value.agentId,
+    sessionId: value.sessionId,
+    createdAt: String(value.createdAt ?? new Date().toISOString()),
+    lastUsedAt: String(value.lastUsedAt ?? new Date().toISOString()),
+    turnCount: Math.max(0, Math.floor(Number(value.turnCount) || 0)),
+    cumulativeCostThb: Math.max(0, Number(value.cumulativeCostThb) || 0),
+  };
+}
+
+async function loadPersistedSession(guestDbId: string): Promise<SessionState | null> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  return parseState(snapshot.state[SESSION_STATE_KEY]);
+}
+
+async function saveSessionState(guestDbId: string, state: SessionState): Promise<void> {
+  const ok = await patchGuestAgentState(guestDbId, { set: { [SESSION_STATE_KEY]: state } });
+  if (!ok) throw new Error('Could not persist Thongthai Agent session state.');
+}
+
+async function createSession(input: AgentShadowTurnInput): Promise<AgentSession> {
+  return openai<AgentSession>('/agents/sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      agent_id: THONGTHAI_STAGING_AGENT_ID,
+      environment: { type: 'none' },
+      input: input.message,
+      metadata: {
+        app: 'thammachat',
+        mode: 'shadow',
+        guest_id: input.guestDbId.slice(0, 64),
+        channel: input.channel,
+      },
+    }),
+  });
+}
+
+async function sendMessage(sessionId: string, input: AgentShadowTurnInput): Promise<void> {
+  await openai<void>(`/agents/sessions/${sessionId}/events`, {
+    method: 'POST',
+    body: JSON.stringify({
+      idempotency_key: `${input.eventId}:agent-shadow`.slice(0, 256),
+      events: [{
+        type: 'agent.session.input.message',
+        input: [{
+          role: 'user',
+          content: [{ type: 'input_text', text: input.message }],
+        }],
+      }],
+    }),
+  });
+}
+
+async function retrieveSession(sessionId: string): Promise<AgentSession> {
+  return openai<AgentSession>(`/agents/sessions/${sessionId}`);
+}
+
+async function latestTurn(sessionId: string): Promise<AgentTurn | null> {
+  const page = await openai<{ data?: AgentTurn[] }>(`/agents/sessions/${sessionId}/turns?order=desc&limit=1`);
+  return page.data?.[0] ?? null;
+}
+
+async function submitToolResults(
+  sessionId: string,
+  actions: NonNullable<AgentSession['required_actions']>,
+  input: AgentShadowTurnInput,
+  toolCalls: string[],
+): Promise<void> {
+  const events = [];
+  for (const action of actions) {
+    if (action.type !== 'function_call' || !action.turn_id || !action.call_id || !action.name) {
+      throw new Error(`Unsupported Agent required action: ${String(action.type ?? 'unknown')}`);
+    }
+    toolCalls.push(action.name);
+    let parsedArgs: unknown = {};
+    if (typeof action.arguments === 'string') {
+      try { parsedArgs = JSON.parse(action.arguments); } catch { parsedArgs = {}; }
+    } else if (action.arguments && typeof action.arguments === 'object') {
+      parsedArgs = action.arguments;
+    }
+    try {
+      const output = await executeThongthaiReadOnlyTool(action.name, parsedArgs, {
+        guestDbId: input.guestDbId,
+        channel: input.channel,
+        environment: input.environment ?? 'live',
+      });
+      events.push({
+        type: 'agent.session.input.tool_result',
+        turn_id: action.turn_id,
+        call_id: action.call_id,
+        success: true,
+        output,
+      });
+    } catch (error) {
+      events.push({
+        type: 'agent.session.input.tool_result',
+        turn_id: action.turn_id,
+        call_id: action.call_id,
+        success: false,
+        error: error instanceof Error ? error.message.slice(0, 300) : 'tool_failed',
+      });
+    }
+  }
+  if (events.length) {
+    await openai<void>(`/agents/sessions/${sessionId}/events`, {
+      method: 'POST',
+      body: JSON.stringify({ events }),
+    });
+  }
+}
+
+async function waitForCompletedTurn(
+  sessionId: string,
+  input: AgentShadowTurnInput,
+): Promise<{ turn: AgentTurn; toolCalls: string[] }> {
+  const toolCalls: string[] = [];
+  let toolRounds = 0;
+  for (let poll = 0; poll < MAX_POLL_ROUNDS; poll += 1) {
+    const session = await retrieveSession(sessionId);
+    if (session.status === 'failed') {
+      throw new Error(`Agent session failed: ${JSON.stringify(session.error ?? 'unknown').slice(0, 300)}`);
+    }
+    if (session.status === 'requires_action' || (session.required_actions?.length ?? 0) > 0) {
+      toolRounds += 1;
+      if (toolRounds > MAX_TOOL_ROUNDS) throw new Error('Agent tool loop exceeded safe shadow limit.');
+      await submitToolResults(sessionId, session.required_actions ?? [], input, toolCalls);
+      continue;
+    }
+
+    const turn = await latestTurn(sessionId);
+    if (turn?.status === 'completed') return { turn, toolCalls };
+    if (turn?.status === 'failed' || turn?.status === 'cancelled') {
+      throw new Error(`Agent turn ${turn.status}: ${turn.error?.message ?? turn.error?.code ?? 'unknown'}`);
+    }
+    await sleep(POLL_MS);
+  }
+  throw new Error('Agent shadow turn timed out before completion.');
+}
+
+async function outputForTurn(sessionId: string, turnId: string): Promise<string> {
+  const page = await openai<{ data?: SessionItem[] }>(`/agents/sessions/${sessionId}/items?order=asc&limit=100`);
+  const messages = (page.data ?? []).filter(item =>
+    item.type === 'message' && item.role === 'assistant' && item.turn_id === turnId
+  );
+  const parts = messages.flatMap(item => item.content ?? [])
+    .filter(part => part.type === 'output_text' && typeof part.text === 'string')
+    .map(part => part.text!.trim())
+    .filter(Boolean);
+  if (!parts.length) throw new Error('Agent completed without customer-facing output text.');
+  return parts.join('\n').trim();
+}
+
+function usageFromTurn(turn: AgentTurn): AgentShadowTurnResult['usage'] {
+  const inputTokens = Math.max(0, Math.floor(Number(turn.usage?.input_tokens) || 0));
+  const cachedInputTokens = Math.min(inputTokens, Math.max(0, Math.floor(Number(turn.usage?.input_tokens_details?.cached_tokens) || 0)));
+  const outputTokens = Math.max(0, Math.floor(Number(turn.usage?.output_tokens) || 0));
+  const model = process.env.THONGTHAI_AGENT_MODEL?.trim() || 'gpt-5.6-terra';
+  const costUsd = calculateAiCostUsd(model, { inputTokens, cachedInputTokens, outputTokens });
+  return { inputTokens, cachedInputTokens, outputTokens, costUsd, costThb: usdToThb(costUsd) };
+}
+
+async function persistShadowCost(input: AgentShadowTurnInput, turn: AgentTurn, usage: AgentShadowTurnResult['usage']): Promise<void> {
+  const model = process.env.THONGTHAI_AGENT_MODEL?.trim() || 'gpt-5.6-terra';
+  await persistAiCallCost({
+    conversationId: input.conversationId,
+    eventId: input.eventId,
+    channel: input.channel,
+    model,
+    callPurpose: 'agent_shadow_turn_aggregate',
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    outputTokens: usage.outputTokens,
+    costUsd: usage.costUsd,
+    costThb: usage.costThb,
+    callIndexTurn: 1,
+    callIndexConversation: 1,
+    status: turn.status === 'completed' ? 'completed' : 'failed',
+    latencyMs: 0,
+    certificationMode: input.environment === 'test',
+    occurredAt: new Date().toISOString(),
+  }).catch(() => {});
+}
+
+export async function runThongthaiAgentShadowTurn(input: AgentShadowTurnInput): Promise<AgentShadowTurnResult> {
+  if (!input.guestDbId || !input.message.trim()) throw new Error('guestDbId and message are required.');
+
+  const existing = await loadPersistedSession(input.guestDbId);
+  const capThb = aiCostPolicy().maxConversationCostUsd * (usdToThb(1));
+  if (existing && existing.cumulativeCostThb >= capThb) {
+    throw new Error('Thongthai Agent shadow conversation cost cap reached.');
+  }
+
+  let sessionId: string;
+  let createdSession = false;
+  if (existing) {
+    sessionId = existing.sessionId;
+    await sendMessage(sessionId, input);
+  } else {
+    const created = await createSession(input);
+    sessionId = created.id;
+    createdSession = true;
+    await saveSessionState(input.guestDbId, {
+      agentId: THONGTHAI_STAGING_AGENT_ID,
+      sessionId,
+      createdAt: new Date().toISOString(),
+      lastUsedAt: new Date().toISOString(),
+      turnCount: 0,
+      cumulativeCostThb: 0,
+    });
+  }
+
+  const { turn, toolCalls } = await waitForCompletedTurn(sessionId, input);
+  const output = await outputForTurn(sessionId, turn.id);
+  const usage = usageFromTurn(turn);
+  await persistShadowCost(input, turn, usage);
+
+  const prior = existing?.cumulativeCostThb ?? 0;
+  const cumulativeCostThb = Math.round((prior + usage.costThb) * 10_000) / 10_000;
+  await saveSessionState(input.guestDbId, {
+    agentId: THONGTHAI_STAGING_AGENT_ID,
+    sessionId,
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+    lastUsedAt: new Date().toISOString(),
+    turnCount: (existing?.turnCount ?? 0) + 1,
+    cumulativeCostThb,
+  });
+
+  return {
+    sessionId,
+    turnId: turn.id,
+    output,
+    toolCalls,
+    createdSession,
+    usage,
+    cumulativeCostThb,
+  };
+}

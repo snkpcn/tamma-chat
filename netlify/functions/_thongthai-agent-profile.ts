@@ -1,3 +1,5 @@
+import { THONGTHAI_READ_ONLY_TOOLS } from './_thongthai-agent-tools';
+
 /**
  * Saved-agent identity/profile for Thongthai.
  *
@@ -11,6 +13,7 @@
 
 export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v1-2026-10-01';
 export const THONGTHAI_STAGING_AGENT_NAME = 'Thongthai-Staging';
+export const THONGTHAI_STAGING_AGENT_ID = process.env.THONGTHAI_STAGING_AGENT_ID?.trim() || 'agent_a206e3b43ad44226ac8af3a7e57dff195a9866595cb0417a92';
 
 export const THONGTHAI_AGENT_INSTRUCTIONS = `
 You are "ทองไทย" (Thongthai), the male AI concierge and service representative of ทำมา-ชาติ (Thammachat), an Isan wellness/community experience.
@@ -99,5 +102,8 @@ export function thongthaiStagingAgentConfig(model = process.env.THONGTHAI_AGENT_
     model,
     instructions: THONGTHAI_AGENT_INSTRUCTIONS,
     metadata: { ...THONGTHAI_STAGING_AGENT_METADATA },
+    tools: THONGTHAI_READ_ONLY_TOOLS.map(tool => ({ ...tool })),
+    reasoning: { effort: 'low' },
+    text: { verbosity: 'low', format: { type: 'text' } },
   };
 }
