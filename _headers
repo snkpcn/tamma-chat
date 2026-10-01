@@ -1,0 +1,29 @@
+/
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/index.html
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/account.html
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/chess.html
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/menu.html
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/otop-map.html
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/otop.html
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/assets/scripts/otop-i18n.js
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/assets/scripts/otop-product-translations.js
+  Cache-Control: no-cache, max-age=0, must-revalidate
+
+/assets/scripts/otop-province-translations.js
+  Cache-Control: no-cache, max-age=0, must-revalidate
