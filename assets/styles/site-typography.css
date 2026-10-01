@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
 
 /*
  * Thammachat sitewide typography contract.
@@ -7,10 +7,10 @@
  */
 :root {
   --site-font-th: "IBM Plex Sans Thai", sans-serif;
-  --site-font-en: "IBM Plex Sans", sans-serif;
+  --site-font-en: "Noto Sans", sans-serif;
   --site-font-zh: "Noto Sans SC", sans-serif;
   --site-font-lo: "Noto Sans Lao", sans-serif;
-  --site-font-vi: "IBM Plex Sans", sans-serif;
+  --site-font-vi: "Noto Sans", sans-serif;
 
   /* Backward-compatible aliases used by existing page CSS. */
   --font-display: var(--site-font-th);
