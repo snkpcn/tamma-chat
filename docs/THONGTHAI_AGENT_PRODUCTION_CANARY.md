@@ -45,4 +45,6 @@ Rollout history:
 
 - Latency certification guest changed to an explicitly synthetic UUID-shaped WEB guest so the canonical guest/Agent identity path is exercised; public prepare rollout remains 0% and live commit remains OFF.
 
+- Final prepare-only latency check uses two synthetic WEB test guests: one routing probe and one fresh first-prepare run. Public prepare rollout remains 0% and live commit remains OFF.
+
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
