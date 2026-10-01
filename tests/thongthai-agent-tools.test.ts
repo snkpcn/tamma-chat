@@ -6,7 +6,7 @@ import {
   executeThongthaiAgentTool,
   executeThongthaiReadOnlyTool,
 } from '../netlify/functions/_thongthai-agent-tools';
-import { THONGTHAI_STAGING_TRANSACTION_TOOLS } from '../netlify/functions/_thongthai-agent-transactions';
+import { THONGTHAI_STAGING_TRANSACTION_TOOLS, agentOtopCheckoutIdempotencyKey } from '../netlify/functions/_thongthai-agent-transactions';
 import { thongthaiStagingAgentConfig, THONGTHAI_STAGING_AGENT_ID } from '../netlify/functions/_thongthai-agent-profile';
 
 test('Thongthai Agent keeps the original business fact tools bounded and read-only', () => {
@@ -124,4 +124,14 @@ test('OTOP transaction prepare also fails closed while transaction mode is off',
   }));
   assert.equal(result.ok, false);
   assert.equal(result.error, 'transaction_tools_disabled');
+});
+
+
+test('Agent OTOP checkout idempotency key is deterministic and durable-length', () => {
+  const confirmationId = '11111111-2222-4333-8444-555555555555';
+  const first = agentOtopCheckoutIdempotencyKey(confirmationId);
+  const second = agentOtopCheckoutIdempotencyKey(confirmationId);
+  assert.equal(first, second);
+  assert.equal(first, 'thongthai-agent-otop:11111111-2222-4333-8444-555555555555');
+  assert.ok(first.length >= 16);
 });
