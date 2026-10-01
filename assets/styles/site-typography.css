@@ -92,3 +92,20 @@ html[lang="vi"] :where(input, button, select, textarea) {
   color: #2b1d13;
   background: #fffaf0;
 }
+
+/* Language controls stay compact and legible over both hero and solid headers. */
+.top.is-over-hero .site-lang-picker { color: #fff; }
+.top.is-commerce .site-lang-picker { color: var(--ink, #2b1d13); }
+.top .site-lang-picker select { max-width: 88px; }
+.map-header .site-lang-picker select { max-width: 96px; }
+
+@media (max-width: 680px) {
+  .site-lang-picker { min-height: 36px; }
+  .site-lang-picker select {
+    min-height: 36px;
+    max-width: 76px;
+    padding-left: 9px;
+    padding-right: 22px;
+    font-size: 11px;
+  }
+}
