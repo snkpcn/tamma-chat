@@ -115,7 +115,7 @@ async function askThongthai(message: string, psid: string, eventId: string): Pro
 export default async (req: Request, _context: Context) => {
   const verifyToken = env('FACEBOOK_VERIFY_TOKEN');
   const pageToken = env('FACEBOOK_PAGE_ACCESS_TOKEN');
-  const pageId = env('FACEBOOK_PAGE_ID');
+  const pageId = env('FACEBOOK_PAGE_ID'); // production Page binding ready
   const appSecret = env('FACEBOOK_APP_SECRET');
   const graphVersion = env('FACEBOOK_GRAPH_VERSION') || 'v26.0';
 
