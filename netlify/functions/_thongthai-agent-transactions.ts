@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { loadActivityWorldFacts } from './_activity-sot';
-import { createBooking, createOtopOrder, formatActivityAssetNote, listBookingOptions, listOtopProducts, listServiceResources, listStayBookingOptions, upsertCustomerAccount } from './_operations-db';
+import { createBooking, createCafeInquiry, createOtopOrder, formatActivityAssetNote, listBookingOptions, listOtopProducts, listServiceResources, listStayBookingOptions, upsertCustomerAccount } from './_operations-db';
 import { createRestaurantPreorder, listRestaurantMenu } from './_restaurant-sot';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
@@ -29,6 +29,7 @@ const STATE_KEY = 'thongthaiAgentPreparedTransactionV1';
 const STAY_STATE_KEY = 'thongthaiAgentPreparedStayBookingV1';
 const RESTAURANT_PREORDER_STATE_KEY = 'thongthaiAgentPreparedRestaurantPreorderV1';
 const OTOP_ORDER_STATE_KEY = 'thongthaiAgentPreparedOtopOrderV1';
+const CAFE_INQUIRY_STATE_KEY = 'thongthaiAgentPreparedCafeInquiryV1';
 const PREPARED_TTL_MS = 30 * 60 * 1000;
 
 const objectSchema = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({
@@ -162,6 +163,31 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
     type: 'function',
     name: 'commit_prepared_otop_order',
     description: 'Submit the previously prepared OTOP order. Server-gated: succeeds only on a later customer turn with explicit ordering confirmation. Pass confirmation_id from prepare_otop_order. Never call in the same turn as prepare.',
+    parameters: objectSchema({
+      confirmation_id: { type: 'string' },
+    }, ['confirmation_id']),
+  },
+  {
+    type: 'function',
+    name: 'prepare_cafe_inquiry',
+    description: 'Prepare a cafe service inquiry/handoff for explicit customer review. This NEVER sends anything to staff. Use when the customer wants the cafe team to follow up on a question, special request, group arrangement, or matter not answerable from verified data. Ask the customer to reply exactly "ยืนยันส่งคำถาม" to send it.',
+    parameters: objectSchema({
+      question: { type: 'string', description: 'The exact customer question/request to send to the cafe team.' },
+      customer_name: { type: 'string' },
+      phone: { type: 'string' },
+      email: { type: 'string' },
+    }, ['question','customer_name','phone']),
+  },
+  {
+    type: 'function',
+    name: 'get_prepared_cafe_inquiry',
+    description: 'Read this guest\'s currently prepared cafe inquiry. This never sends or modifies the inquiry.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
+    name: 'commit_prepared_cafe_inquiry',
+    description: 'Send the previously prepared cafe inquiry to operations. Server-gated: succeeds only on a later customer turn explicitly saying "ยืนยันส่งคำถาม" (or an equivalent explicit send-to-team confirmation). Pass confirmation_id from prepare_cafe_inquiry. Never call in the same turn as prepare.',
     parameters: objectSchema({
       confirmation_id: { type: 'string' },
     }, ['confirmation_id']),
