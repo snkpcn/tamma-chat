@@ -36,5 +36,13 @@
       "web compression",
       "responsive source selection"
     ]
+  },
+  "poster": {
+    "sourceSecond": 0.5,
+    "width": 1920,
+    "height": 1080,
+    "format": "webp",
+    "url": "https://cdn.openart.ai/openart-uploads/production/attachment-transfers/58546ff88ea4a0a39ced38759b146e10d262513a32c2a3b332445b897173ed97.webp",
+    "note": "Frame extracted from the locked owner-selected source video; not concept art."
   }
 }
