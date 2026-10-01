@@ -3,9 +3,9 @@ import { loadCustomerMemory } from './_customer-db';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { runThongthaiAgentShadowTurn } from './_thongthai-agent-session';
 
-const SMOKE_ANONYMOUS_ID = 'a11e7c58-6c4f-4a4d-9e2d-202610010006';
-const SMOKE_STATE_KEY = 'thongthaiAgentMultiTurnSmokeV5';
-const CONVERSATION_ID = 'thongthai-agent-multiturn-smoke-v5-20261001';
+const SMOKE_ANONYMOUS_ID = 'a11e7c58-6c4f-4a4d-9e2d-202610010007';
+const SMOKE_STATE_KEY = 'thongthaiAgentMultiTurnSmokeV6';
+const CONVERSATION_ID = 'thongthai-agent-multiturn-smoke-v6-20261001';
 
 const TURNS = [
   'ขี่ม้ามีกี่ตัว แต่ละตัวชื่ออะไร แล้วราคาเท่าไหร่ครับ',
