@@ -10,7 +10,7 @@ Production rollout configuration (2026-10-01):
 - Facebook rollout: 100% read-only
 - Legacy global rollout fallback: 10%
 - Agent transaction tools: `prepare_*` and `get_prepared_*` exposed; all `commit_prepared_*` tools absent
-- Prepare-only public rollout: 0%; one synthetic WEB certification guest allowlisted
+- Prepare-only public rollout: 0%; five synthetic WEB Phase 2 Safety Gauntlet guests temporarily allowlisted
 - Live Agent transaction/commit flag: OFF
 - Weather and verified location remain on established core paths; non-allowlisted transaction intents remain on established executors
 - Safety, escalation, and service-feedback guardrails run before Agent routing
