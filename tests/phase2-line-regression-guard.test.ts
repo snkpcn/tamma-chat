@@ -243,3 +243,31 @@ test('same-plan journey continuation recovers an explicit date when the model om
   assert.equal(turn.references.some(ref=>ref.resolvedFromConversation===true),true);
   assert.equal(turn.needsClarification,false);
 });
+
+
+test('same-plan journey continuation also resolves from active journey conversation context without a journey task', () => {
+  const context=emptySemanticContext();
+  context.activeDomain='journey';
+
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'ใช้แผนเดิมแต่เปลี่ยนเป็นพรุ่งนี้',
+    reply:'หมายถึงแผนทริปที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ',
+    speechAct:'request',
+    domain:'journey',
+    intent:'update_previous_plan_date',
+    action:'ask',
+    informationNeed:'none',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.55,
+    needsClarification:true,
+  }),context,'เอาอันเดิม แต่เปลี่ยนเป็นพรุ่งนี้');
+
+  assert.equal(turn.domain,'journey');
+  assert.equal(turn.action,'modify');
+  assert.equal(typeof turn.entities.date,'string');
+  assert.equal(turn.references.some(ref=>ref.resolvedFromConversation===true),true);
+  assert.equal(turn.needsClarification,false);
+  assert.equal(turn.reply,undefined);
+});
