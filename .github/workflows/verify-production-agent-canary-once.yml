@@ -1,0 +1,19 @@
+name: Verify Thongthai production Agent canary once
+
+on:
+  push:
+    branches:
+      - test/verify-production-agent-canary-20261001
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Send one harmless canary-bucket web turn
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error             --max-time 45             -X POST             -H 'Content-Type: application/json'             -d '{"guestId":"45fa6d3b-c71d-425c-a2ca-dd556407d130","eventId":"prod-agent-canary-verify-20261001","message":"ขี่ม้า 45 นาทีราคาเท่าไหร่ครับ","language":"th","pageContext":{"section":"web"}}'             https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
