@@ -240,11 +240,14 @@ export async function loadOtopStoreCatalog() {
   const [productResponse, settings] = await Promise.all([
     dbFetch(
       'otop_products?environment=eq.live&active=eq.true&verified=eq.true&stock_qty=gt.0'
-      + '&select=sku,name,description,price,stock_qty,metadata&order=sku.asc',
+      + '&select=id,sku,name,description,price,stock_qty,metadata,otop_product_images(public_url,alt_text,sort_order,is_primary)'
+      + '&order=sku.asc',
     ),
     loadShippingSettings(),
   ]);
-  const products = await productResponse.json() as Array<Record<string, unknown>>;
+  const products = await productResponse.json() as Array<Record<string, unknown> & {
+    otop_product_images?: Array<Record<string, unknown>>;
+  }>;
   return {
     products: products.map(row => ({
       sku: String(row.sku),
@@ -253,6 +256,16 @@ export async function loadOtopStoreCatalog() {
       price: Number(row.price),
       stock: Number(row.stock_qty),
       metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
+      images: (Array.isArray(row.otop_product_images) ? row.otop_product_images : [])
+        .map(image => ({
+          url: typeof image.public_url === 'string' ? image.public_url : '',
+          alt: typeof image.alt_text === 'string' ? image.alt_text : String(row.name),
+          position: Number(image.sort_order),
+          primary: image.is_primary === true,
+        }))
+        .filter(image => /^https:\/\//i.test(image.url))
+        .sort((a, b) => Number(b.primary) - Number(a.primary) || a.position - b.position)
+        .slice(0, 4),
     })),
     shipping: settings,
   };
