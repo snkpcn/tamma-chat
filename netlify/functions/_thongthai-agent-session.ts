@@ -585,13 +585,17 @@ export async function runThongthaiAgentShadowTurn(
   return runThongthaiAgentTurn({ ...input, runtimeMode: 'shadow' });
 }
 
+export type AgentPrimaryTurnInput =
+  Omit<AgentShadowTurnInput, 'environment'|'transactionMode'|'runtimeMode'>
+  & { transactionMode?: 'off'|'prepare' };
+
 export async function runThongthaiAgentPrimaryTurn(
-  input: Omit<AgentShadowTurnInput, 'environment'|'transactionMode'|'runtimeMode'>,
+  input: AgentPrimaryTurnInput,
 ): Promise<AgentShadowTurnResult> {
   return runThongthaiAgentTurn({
     ...input,
     environment: 'live',
-    transactionMode: 'off',
+    transactionMode: input.transactionMode ?? 'off',
     runtimeMode: 'primary',
   });
 }
