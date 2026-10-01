@@ -8,6 +8,8 @@ import {
   executeThongthaiTransactionTool,
 } from '../netlify/functions/_thongthai-agent-transactions';
 import { thongthaiProductionAgentConfig } from '../netlify/functions/_thongthai-agent-profile';
+import { shouldUseThongthaiAgentTransactionPrepare } from '../netlify/functions/_thongthai-agent-primary';
+import { shouldBlockLegacyWriteForPrepareOnly } from '../netlify/functions/_thongthai-runtime-v3';
 
 const PREPARE_TOOLS = [
   'prepare_activity_booking',
@@ -32,6 +34,22 @@ const COMMIT_TOOLS = [
   'commit_prepared_otop_order',
   'commit_prepared_cafe_inquiry',
 ] as const;
+
+function withEnv(values: Record<string,string|undefined>, fn: () => void) {
+  const before = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+  try {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fn();
+  } finally {
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
 
 test('Gate 0 production transaction surface exposes prepare/get for all five verticals and no commit tool', () => {
   const prepareOnlyNames = new Set(THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS.map(tool => tool.name));
@@ -179,4 +197,49 @@ test('material-change-looking commit attempts still cannot cross Gate 0', async 
     assert.equal(result.ok, false, name);
     assert.equal(result.error, 'transaction_commit_disabled', name);
   }
+});
+
+
+test('public prepare rollout remains zero unless an exact synthetic guest is allowlisted', () => {
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_ENABLED:'1',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_CHANNELS:'web',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT:'0',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT_WEB:'0',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_GUESTS:'',
+  }, () => {
+    assert.equal(shouldUseThongthaiAgentTransactionPrepare({
+      guestKey:'ordinary-production-guest',
+      guestDbId:'ordinary-db-id',
+      channel:'web',
+    }), false);
+  });
+});
+
+test('prepare-only legacy write kill switch covers all five business verticals', () => {
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_ENABLED:'1',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_CHANNELS:'web',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT:'0',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT_WEB:'0',
+    THONGTHAI_AGENT_TRANSACTION_PREPARE_GUESTS:'safety-gauntlet-guest',
+  }, () => {
+    for (const toolName of [
+      'create_booking',
+      'create_restaurant_preorder',
+      'create_otop_order',
+      'create_cafe_inquiry',
+    ]) {
+      assert.equal(shouldBlockLegacyWriteForPrepareOnly({
+        toolName,
+        guestKey:'safety-gauntlet-guest',
+        guestDbId:'safety-gauntlet-db',
+        channel:'web',
+      }), true, toolName);
+    }
+  });
 });
