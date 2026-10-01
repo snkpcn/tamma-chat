@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { loadActivityWorldFacts } from './_activity-sot';
-import { createBooking, formatActivityAssetNote, listBookingOptions, listServiceResources, listStayBookingOptions, upsertCustomerAccount } from './_operations-db';
+import { createBooking, createOtopOrder, formatActivityAssetNote, listBookingOptions, listOtopProducts, listServiceResources, listStayBookingOptions, upsertCustomerAccount } from './_operations-db';
 import { createRestaurantPreorder, listRestaurantMenu } from './_restaurant-sot';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
@@ -28,6 +28,7 @@ export type ThongthaiAgentTransactionTool = {
 const STATE_KEY = 'thongthaiAgentPreparedTransactionV1';
 const STAY_STATE_KEY = 'thongthaiAgentPreparedStayBookingV1';
 const RESTAURANT_PREORDER_STATE_KEY = 'thongthaiAgentPreparedRestaurantPreorderV1';
+const OTOP_ORDER_STATE_KEY = 'thongthaiAgentPreparedOtopOrderV1';
 const PREPARED_TTL_MS = 30 * 60 * 1000;
 
 const objectSchema = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({
@@ -132,6 +133,35 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
     type: 'function',
     name: 'commit_prepared_restaurant_preorder',
     description: 'Submit the previously prepared restaurant preorder. Server-gated: it succeeds only on a later customer turn with explicit ordering confirmation. Pass the confirmation_id returned by prepare_restaurant_preorder. Never call in the same turn as prepare.',
+    parameters: objectSchema({
+      confirmation_id: { type: 'string' },
+    }, ['confirmation_id']),
+  },
+  {
+    type: 'function',
+    name: 'prepare_otop_order',
+    description: 'Prepare an OTOP product order for explicit customer review. This NEVER creates an order or changes stock. Validate product and stock from the canonical catalog, then ask the customer to reply exactly "ยืนยันสั่ง" to submit.',
+    parameters: objectSchema({
+      sku: { type: 'string', description: 'Canonical OTOP SKU from get_otop_catalog.' },
+      quantity: { type: 'integer', minimum: 1, maximum: 99 },
+      fulfillment_type: { type: 'string', enum: ['pickup','shipping'] },
+      shipping_address: { type: 'string' },
+      customer_name: { type: 'string' },
+      phone: { type: 'string' },
+      email: { type: 'string' },
+      note: { type: 'string' },
+    }, ['sku','quantity','fulfillment_type','customer_name','phone']),
+  },
+  {
+    type: 'function',
+    name: 'get_prepared_otop_order',
+    description: 'Read this guest\'s currently prepared OTOP order. This never creates an order or changes stock. Use it when the customer returns to a prepared order or explicitly confirms after saying not yet.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
+    name: 'commit_prepared_otop_order',
+    description: 'Submit the previously prepared OTOP order. Server-gated: succeeds only on a later customer turn with explicit ordering confirmation. Pass confirmation_id from prepare_otop_order. Never call in the same turn as prepare.',
     parameters: objectSchema({
       confirmation_id: { type: 'string' },
     }, ['confirmation_id']),
@@ -244,6 +274,36 @@ type PreparedRestaurantPreorder = {
     preorderCode: string;
     status: string;
     totalAmount: number;
+    notificationStatus: string;
+  };
+};
+
+type PreparedOtopOrder = {
+  version: 1;
+  kind: 'otop_order';
+  status: 'prepared' | 'committed';
+  confirmationId: string;
+  preparedEventId: string;
+  preparedAt: string;
+  expiresAt: string;
+  environment: 'live' | 'test';
+  payload: {
+    sku: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    expectedTotal: number;
+    fulfillmentType: 'pickup' | 'shipping';
+    shippingAddress: string | null;
+    customerName: string;
+    phone: string;
+    email: string | null;
+    note: string | null;
+  };
+  result?: {
+    orderId: string;
+    orderCode: string;
+    total: number;
     notificationStatus: string;
   };
 };
@@ -1028,6 +1088,199 @@ async function commitPreparedRestaurantPreorder(
   };
 }
 
+async function loadPreparedOtopOrder(guestDbId: string): Promise<PreparedOtopOrder | null> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const raw = snapshot.state[OTOP_ORDER_STATE_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Partial<PreparedOtopOrder>;
+  if (value.version !== 1 || value.kind !== 'otop_order' || typeof value.confirmationId !== 'string') return null;
+  return value as PreparedOtopOrder;
+}
+
+async function savePreparedOtopOrder(guestDbId: string, value: PreparedOtopOrder): Promise<void> {
+  const ok = await patchGuestAgentState(guestDbId, { set: { [OTOP_ORDER_STATE_KEY]: value } });
+  if (!ok) throw new Error('prepared_otop_order_state_unavailable');
+}
+
+async function prepareOtopOrder(
+  args: Record<string, unknown>,
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok:false, error:'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+
+  const sku = textArg(args, 'sku', 120);
+  const quantity = intArg(args, 'quantity', 1, 99);
+  const fulfillmentRaw = textArg(args, 'fulfillment_type', 16);
+  const fulfillmentType = fulfillmentRaw === 'shipping' ? 'shipping' : fulfillmentRaw === 'pickup' ? 'pickup' : null;
+  const shippingAddress = textArg(args, 'shipping_address', 800);
+  const customerName = textArg(args, 'customer_name', 160);
+  const phone = textArg(args, 'phone', 40);
+  const email = textArg(args, 'email', 200);
+  const note = textArg(args, 'note', 600);
+
+  const missing:string[] = [];
+  if (!sku) missing.push('sku');
+  if (!quantity) missing.push('quantity');
+  if (!fulfillmentType) missing.push('fulfillment_type');
+  if (fulfillmentType === 'shipping' && !shippingAddress) missing.push('shipping_address');
+  if (!customerName) missing.push('customer_name');
+  if (!validPhone(phone)) missing.push('phone');
+  if (missing.length) return { ok:false, error:'missing_or_invalid_fields', missing_fields:missing };
+
+  const products = await listOtopProducts(mode.environment);
+  const product = products.find(item => item.sku === sku);
+  if (!product) return { ok:false, error:'product_not_available' };
+  if (product.stock < quantity!) {
+    return { ok:false, error:'insufficient_stock', available_stock:product.stock, requested_quantity:quantity };
+  }
+
+  const now = new Date();
+  const prepared:PreparedOtopOrder = {
+    version:1,
+    kind:'otop_order',
+    status:'prepared',
+    confirmationId:randomUUID(),
+    preparedEventId:context.eventId,
+    preparedAt:now.toISOString(),
+    expiresAt:new Date(now.getTime()+PREPARED_TTL_MS).toISOString(),
+    environment:mode.environment,
+    payload:{
+      sku:product.sku,
+      productName:product.name,
+      quantity:quantity!,
+      unitPrice:Number(product.price),
+      expectedTotal:Number(product.price)*quantity!,
+      fulfillmentType:fulfillmentType!,
+      shippingAddress:fulfillmentType==='shipping' ? shippingAddress : null,
+      customerName:customerName!,
+      phone:phone!,
+      email,
+      note,
+    },
+  };
+  await savePreparedOtopOrder(context.guestDbId, prepared);
+  return {
+    ok:true,
+    prepared:true,
+    confirmation_id:prepared.confirmationId,
+    expires_at:prepared.expiresAt,
+    summary:{
+      sku:prepared.payload.sku,
+      product_name:prepared.payload.productName,
+      quantity:prepared.payload.quantity,
+      unit_price:prepared.payload.unitPrice,
+      expected_total:prepared.payload.expectedTotal,
+      currency:'THB',
+      fulfillment_type:prepared.payload.fulfillmentType,
+      shipping_address:prepared.payload.shippingAddress,
+      customer_name:prepared.payload.customerName,
+      phone:prepared.payload.phone,
+      stock_checked:true,
+    },
+    confirmation_required:true,
+    exact_confirmation_phrase_th:'ยืนยันสั่ง',
+    instruction:'Do not call commit_prepared_otop_order in this same customer turn. Show the exact summary and ask for explicit confirmation.',
+  };
+}
+
+async function getPreparedOtopOrder(
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok:false, error:'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+  const prepared = await loadPreparedOtopOrder(context.guestDbId);
+  if (!prepared) return { ok:true, prepared:false };
+  if (prepared.environment !== mode.environment) return { ok:true, prepared:false };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) return { ok:true, prepared:false, expired:true };
+  if (prepared.status === 'committed') {
+    return { ok:true, prepared:false, committed:true, confirmation_id:prepared.confirmationId, result:prepared.result ?? null };
+  }
+  return {
+    ok:true,
+    prepared:true,
+    confirmation_id:prepared.confirmationId,
+    expires_at:prepared.expiresAt,
+    summary:{
+      sku:prepared.payload.sku,
+      product_name:prepared.payload.productName,
+      quantity:prepared.payload.quantity,
+      unit_price:prepared.payload.unitPrice,
+      expected_total:prepared.payload.expectedTotal,
+      currency:'THB',
+      fulfillment_type:prepared.payload.fulfillmentType,
+      shipping_address:prepared.payload.shippingAddress,
+      customer_name:prepared.payload.customerName,
+      phone:prepared.payload.phone,
+    },
+    exact_confirmation_phrase_th:'ยืนยันสั่ง',
+  };
+}
+
+async function commitPreparedOtopOrder(
+  args: Record<string, unknown>,
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok:false, error:'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+  const confirmationId = textArg(args, 'confirmation_id', 80);
+  if (!confirmationId) return { ok:false, error:'confirmation_id_required' };
+  const prepared = await loadPreparedOtopOrder(context.guestDbId);
+  if (!prepared || prepared.confirmationId !== confirmationId) return { ok:false, error:'prepared_otop_order_not_found' };
+  if (prepared.status === 'committed' && prepared.result) return { ok:true, committed:true, replayed:true, ...prepared.result };
+  if (prepared.environment !== mode.environment) return { ok:false, error:'prepared_transaction_environment_mismatch' };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) return { ok:false, error:'prepared_transaction_expired' };
+  if (prepared.preparedEventId === context.eventId) return { ok:false, error:'same_turn_commit_blocked' };
+  if (!currentTurnExplicitlyConfirmsPreparedBooking(context.message)) {
+    return { ok:false, error:'explicit_customer_confirmation_required', exact_confirmation_phrase_th:'ยืนยันสั่ง' };
+  }
+
+  const p=prepared.payload;
+  const latestProducts=await listOtopProducts(mode.environment);
+  const latest=latestProducts.find(item=>item.sku===p.sku);
+  if (!latest) return { ok:false, error:'product_not_available' };
+  if (latest.stock < p.quantity) return { ok:false, error:'insufficient_stock', available_stock:latest.stock };
+  if (Number(latest.price)!==p.unitPrice) {
+    return {
+      ok:false,
+      error:'product_price_changed_reprepare_required',
+      previous_unit_price:p.unitPrice,
+      current_unit_price:Number(latest.price),
+    };
+  }
+
+  const created=await createOtopOrder({
+    guestDbId:context.guestDbId,
+    channel:context.channel,
+    sku:p.sku,
+    quantity:p.quantity,
+    customerName:p.customerName,
+    phone:p.phone,
+    email:p.email,
+    fulfillmentType:p.fulfillmentType,
+    shippingAddress:p.shippingAddress,
+    note:p.note,
+    environment:mode.environment,
+  });
+  const notificationStatus=mode.environment==='live'
+    ? await dispatchCreatedTransactionNotification('otop_order',created.id)
+    : 'ignored_test_mode';
+  const result={orderId:created.id,orderCode:created.orderCode,total:created.total,notificationStatus};
+  await savePreparedOtopOrder(context.guestDbId,{...prepared,status:'committed',result});
+  return {
+    ok:true,
+    committed:true,
+    replayed:false,
+    order_code:created.orderCode,
+    total:created.total,
+    notification_status:notificationStatus,
+    customer_copy_rule:'This is an OTOP order created by operations. Do not say payment is verified or shipping has begun unless later status tools confirm it.',
+  };
+}
+
 export async function executeThongthaiTransactionTool(
   name: string,
   rawArgs: unknown,
@@ -1056,6 +1309,12 @@ export async function executeThongthaiTransactionTool(
     result = await getPreparedRestaurantPreorder(context);
   } else if (name === 'commit_prepared_restaurant_preorder') {
     result = await commitPreparedRestaurantPreorder(args, context);
+  } else if (name === 'prepare_otop_order') {
+    result = await prepareOtopOrder(args, context);
+  } else if (name === 'get_prepared_otop_order') {
+    result = await getPreparedOtopOrder(context);
+  } else if (name === 'commit_prepared_otop_order') {
+    result = await commitPreparedOtopOrder(args, context);
   } else {
     result = { ok: false, error: 'unknown_transaction_tool' };
   }
