@@ -9,7 +9,8 @@ import { persistAiCallCost } from './_ai-cost-store';
 const API_BASE = 'https://api.openai.com/v1';
 const BETA_HEADER = 'agents=v1';
 const SESSION_STATE_KEY = 'thongthaiStagingAgentSession';
-const MAX_TOOL_ROUNDS = 4;
+export const AGENT_MAX_TOOL_ROUNDS = 8;
+export const AGENT_MAX_TOOL_CALLS = 12;
 const MAX_POLL_ROUNDS = 80;
 const POLL_MS = 150;
 const USAGE_SETTLE_ATTEMPTS = 12;
@@ -217,6 +218,9 @@ async function submitToolResults(
     if (action.type !== 'function_call' || !action.turn_id || !action.call_id || !action.name) {
       throw new Error(`Unsupported Agent required action: ${String(action.type ?? 'unknown')}`);
     }
+    if (toolCalls.length >= AGENT_MAX_TOOL_CALLS) {
+      throw new Error('Agent tool call count exceeded safe shadow limit.');
+    }
     toolCalls.push(action.name);
     let parsedArgs: unknown = {};
     if (typeof action.arguments === 'string') {
@@ -278,7 +282,7 @@ async function waitForCompletedTurn(
     }
     if (session.status === 'requires_action' || (session.required_actions?.length ?? 0) > 0) {
       toolRounds += 1;
-      if (toolRounds > MAX_TOOL_ROUNDS) throw new Error('Agent tool loop exceeded safe shadow limit.');
+      if (toolRounds > AGENT_MAX_TOOL_ROUNDS) throw new Error('Agent tool loop exceeded safe shadow limit.');
       await submitToolResults(sessionId, session.required_actions ?? [], input, toolCalls, toolCache);
       continue;
     }
