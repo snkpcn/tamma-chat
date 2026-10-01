@@ -7,6 +7,7 @@ import {
   readOnlyCutoverEligibility,
 } from '../netlify/functions/_thongthai-one-mind-response';
 import { renderActivityRecommendation } from '../netlify/functions/_human-grounded-response';
+import { hasExplicitNoTransactionMarker } from '../netlify/functions/_slot-parsers';
 
 test('compound calm-horse + rain recommendation repairs structured activity domain and does not clarify', () => {
   const turn=parseSemanticTurnResponse(JSON.stringify({
@@ -171,4 +172,74 @@ test('bounded active-task horse correction stays inside One Mind without creatin
     {eligible:true},
   );
   assert.equal(turn.dialogDecision.actionProposal,undefined);
+});
+
+
+test('explicit prohibition clause blocks transaction verbs without blocking a later affirmative alternative', () => {
+  assert.equal(
+    hasExplicitNoTransactionMarker('ช่วยสรุปให้หน่อยว่าตอนนี้เลือกอะไรไปแล้วบ้าง แต่ห้ามกดยืนยันหรือจองให้'),
+    true,
+  );
+  assert.equal(
+    hasExplicitNoTransactionMarker('ห้ามจองอันนี้ แต่จองอีกอันเลย'),
+    false,
+    'a later affirmative transaction after a contrast boundary must still win',
+  );
+});
+
+test('summary no-transaction constraint cannot be re-escalated into a stay booking', () => {
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'ขอสรุปรายการที่เลือกไว้และห้ามยืนยันหรือจอง',
+    reply:'',
+    speechAct:'transaction_request',
+    domain:'stay',
+    intent:'summarize_active_task',
+    action:'book',
+    informationNeed:'none',
+    entities:{summaryScope:'current_selections'},
+    references:[],
+    constraints:['no_transaction'],
+    confidence:0.99,
+    needsClarification:false,
+  }),emptySemanticContext(),'ช่วยสรุปให้หน่อยว่าตอนนี้กูเลือกอะไรไปแล้วบ้าง แต่ห้ามกดยืนยันหรือจองให้');
+
+  assert.notEqual(turn.action,'book');
+  assert.notEqual(turn.action,'order');
+  assert.notEqual(turn.speechAct,'transaction_request');
+  assert.equal(turn.constraints.includes('no_transaction'),true);
+  assert.equal(turn.needsClarification,false);
+});
+
+test('same-plan journey continuation recovers an explicit date when the model omits the date entity', () => {
+  const context=emptySemanticContext();
+  context.activeDomain='journey';
+  context.activeTask={
+    type:'journey_planning',
+    domain:'journey',
+    status:'collecting',
+    knownSlots:{nights:2},
+    missingFields:[],
+    selectedEntities:[],
+    constraints:[],
+  };
+
+  const turn=parseSemanticTurnResponse(JSON.stringify({
+    normalizedMeaning:'ใช้แผนเดิมแต่เปลี่ยนเป็นพรุ่งนี้',
+    reply:'หมายถึงแผนทริปที่คุยไว้ก่อนหน้านี้ใช่ไหมครับ',
+    speechAct:'request',
+    domain:'journey',
+    intent:'update_previous_plan_date',
+    action:'ask',
+    informationNeed:'none',
+    entities:{},
+    references:[],
+    constraints:[],
+    confidence:0.86,
+    needsClarification:true,
+  }),context,'เอาอันเดิม แต่เปลี่ยนเป็นพรุ่งนี้');
+
+  assert.equal(turn.domain,'journey');
+  assert.equal(typeof turn.entities.date,'string');
+  assert.equal(turn.references.some(ref=>ref.resolvedFromConversation===true),true);
+  assert.equal(turn.needsClarification,false);
 });
