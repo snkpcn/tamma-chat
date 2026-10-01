@@ -39,6 +39,34 @@ test('A. location questions: answers with the real owner-provided Maps link, nev
   });
 });
 
+test('A2. production cutover: verified location fast path runs before an available semantic supervisor', async () => {
+  await withHarness(async harness => {
+    // Script the exact production misclassification that used to win first.
+    // A correct implementation must not consume this model reply at all.
+    harness.programGeminiReply({
+      normalizedMeaning: 'customer asks where the restaurant is located',
+      reply: 'ตอนนี้ยังไม่มีพิกัดร้านที่ยืนยันได้ครับ',
+      speechAct: 'question',
+      domain: 'restaurant',
+      intent: 'request_location',
+      action: 'ask',
+      informationNeed: 'none',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.99,
+      needsClarification: false,
+    });
+
+    const r = await ask('concierge-location-live-cutover', 'ร้านอยู่แถวไหนคะ');
+    assert.equal(r.statusCode, 200);
+    const message = msg(r.payload);
+    assert.ok(message.includes(TAMMA_CHART_LOCATION.mapsLink), 'must answer from the canonical owner-verified location');
+    assert.doesNotMatch(message, /ไม่มีพิกัด|ไม่มี.*ที่อยู่ร้าน/u, 'must not use the model-generated unknown-location fallback');
+    assert.equal(harness.modelCallCount(), 0, 'location must be answered before semantic supervision and incur no model call');
+  });
+});
+
 test('C. region/weather casual-phrasing and typo tolerance: gets a real concierge answer, not a non-answer', async () => {
   await withHarness(async () => {
     const messages = ['อีสานมีไรดี', 'อิสานมีอะไรดี', 'แถวนี้มีไรบ้าง', 'ฝนตกขี่ม้าได้ไหม', 'แดดแรงปะ'];

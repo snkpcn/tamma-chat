@@ -4939,6 +4939,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Location is an owner-verified deterministic fact class. Preserve it
+  // before semantic supervision using the same local-concierge classifier
+  // that owns the final response. This specifically covers natural phrasing
+  // such as "ร้านอยู่แถวไหนคะ", which the top-level semantic intent parser
+  // does not necessarily label as LOCATION_REQUEST.
+  const preserveVerifiedLocationBeforeSupervision = !hasExplicitTransactionIntent(request.message)
+    && classifyLocalConciergeQuestion(request.message)?.category === 'location';
+
   // Human Conversation Recovery: UNDERSTAND FIRST.
   //
   // Safety/escalation/service-feedback responders above may remain
@@ -4947,7 +4955,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // regex responders, or other legacy domain routers. If One-Mind says the
   // turn needs a real transaction executor, it returns legacy_required and
   // the unchanged executor path below still owns the write.
-  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1') {
+  if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
+      && !preserveVerifiedLocationBeforeSupervision
+      && topLevelSemanticIntent !== 'WEATHER_REQUEST') {
     try {
       const oneMind = await processOneMindCustomerTurn({
         channel,
