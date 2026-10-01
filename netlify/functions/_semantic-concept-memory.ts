@@ -9,10 +9,12 @@
 // SCOPE OF THIS INCREMENT (deliberately narrow -- see
 // THONGTHAI_KERNEL_V2_HANDOFF.md for what remains):
 //
-// This module only learns COMPANION context ("มากับแฟน" -> companion:
-// 'partner'), the worked example from the owner's own mandate. Pace and
-// consider-only markers are explicitly deferred to a later increment rather
-// than bundled in here unreviewed.
+// This module learns a deliberately CLOSED set of low-risk conversational
+// concepts: companion context, relaxed pace, and consider-only / not-yet-
+// transaction intent. These outcomes can only update bounded conversation
+// memory or DE-ESCALATE transaction authority; none can create a business
+// action. True unseen cross-vocabulary paraphrases still fall through to the
+// real semantic supervisor and become new confirmed exemplars afterwards.
 //
 // SAFETY BY CONSTRUCTION, not by runtime checking alone:
 // - SAFE_CONCEPT_OUTCOMES is a CLOSED map. A matched concept can only ever
@@ -79,6 +81,10 @@ export type CompanionConceptKey =
   | 'companion_friends'
   | 'companion_solo';
 
+export type PaceConceptKey = 'pace_relaxed';
+export type ConsiderOnlyConceptKey = 'consider_only';
+export type SemanticConceptKey = CompanionConceptKey | PaceConceptKey | ConsiderOnlyConceptKey;
+
 const COMPANION_VALUE_BY_CONCEPT_KEY: Readonly<Record<CompanionConceptKey, string>> = {
   companion_partner: 'partner',
   companion_family: 'family',
@@ -86,21 +92,84 @@ const COMPANION_VALUE_BY_CONCEPT_KEY: Readonly<Record<CompanionConceptKey, strin
   companion_solo: 'solo',
 };
 
+type SafeConceptOutcome = {
+  entities: Record<string, string>;
+  constraints: readonly string[];
+  /** A referential consider-only phrase may skip the model only when bounded
+   * conversation state proves one unique entity to keep. Otherwise the
+   * orchestrator falls through to OpenAI rather than guessing "this one". */
+  requiresUniqueContextEntity?: boolean;
+};
+
+const SAFE_CONCEPT_OUTCOMES: Readonly<Record<SemanticConceptKey, SafeConceptOutcome>> = {
+  companion_partner:{ entities:{companion:'partner'}, constraints:[] },
+  companion_family:{ entities:{companion:'family'}, constraints:[] },
+  companion_friends:{ entities:{companion:'friends'}, constraints:[] },
+  companion_solo:{ entities:{companion:'solo'}, constraints:[] },
+  pace_relaxed:{ entities:{pace:'relaxed'}, constraints:[] },
+  consider_only:{
+    entities:{},
+    constraints:['consider_only','no_transaction'],
+    requiresUniqueContextEntity:true,
+  },
+};
+
 export function isCompanionConceptKey(value: string): value is CompanionConceptKey {
   return Object.prototype.hasOwnProperty.call(COMPANION_VALUE_BY_CONCEPT_KEY, value);
 }
 
-/** The ONLY outcome a matched concept may ever produce. Closed by
- *  construction: there is no action/domain field here for a bad match to
- *  escalate into. */
-export function safeConceptEntities(conceptKey: CompanionConceptKey): Record<string, string> {
-  return { companion: COMPANION_VALUE_BY_CONCEPT_KEY[conceptKey] };
+export function isSemanticConceptKey(value: string): value is SemanticConceptKey {
+  return Object.prototype.hasOwnProperty.call(SAFE_CONCEPT_OUTCOMES, value);
+}
+
+export function semanticConceptFamily(
+  conceptKey: SemanticConceptKey,
+): 'companion' | 'pace' | 'consider_only' {
+  if (isCompanionConceptKey(conceptKey)) return 'companion';
+  return conceptKey === 'pace_relaxed' ? 'pace' : 'consider_only';
+}
+
+/** Closed, non-transactional learned outcome. No concept can produce an
+ * action, domain, tool name, booking/order flag, money, or operational fact. */
+export function safeConceptOutcome(conceptKey: SemanticConceptKey): SafeConceptOutcome {
+  return SAFE_CONCEPT_OUTCOMES[conceptKey];
+}
+
+export function safeConceptEntities(conceptKey: SemanticConceptKey): Record<string, string> {
+  return { ...SAFE_CONCEPT_OUTCOMES[conceptKey].entities };
+}
+
+export function safeConceptConstraints(conceptKey: SemanticConceptKey): string[] {
+  return [...SAFE_CONCEPT_OUTCOMES[conceptKey].constraints];
 }
 
 export function companionConceptKeyForValue(value: string): CompanionConceptKey | null {
   const entry = (Object.entries(COMPANION_VALUE_BY_CONCEPT_KEY) as Array<[CompanionConceptKey, string]>)
     .find(([, mapped]) => mapped === value);
   return entry ? entry[0] : null;
+}
+
+/** Derive a learnable key ONLY from canonical structured model output. If a
+ * turn expresses more than one learnable family, return null: a compound
+ * meaning must never be collapsed into one reusable cross-customer concept. */
+export function semanticConceptKeyForConfirmedMeaning(input: {
+  entities: Record<string, unknown>;
+  constraints: readonly string[];
+}): SemanticConceptKey | null {
+  const candidates: SemanticConceptKey[] = [];
+  const companionValue = input.entities.companion ?? input.entities.companionType;
+  if (typeof companionValue === 'string') {
+    const companion = companionConceptKeyForValue(companionValue);
+    if (companion) candidates.push(companion);
+  }
+  const paceValue = input.entities.pace ?? input.entities.exertionPreference;
+  if (paceValue === 'relaxed') candidates.push('pace_relaxed');
+  if (input.constraints.some(value =>
+    /^(?:consider_only|not_yet_booking|no_transaction|not_booking)$/iu.test(value))) {
+    candidates.push('consider_only');
+  }
+  const unique=[...new Set(candidates)];
+  return unique.length === 1 ? unique[0]! : null;
 }
 
 // A short, closed set of Thai politeness/filler particles this module strips
@@ -219,7 +288,7 @@ export function conceptSimilarity(normalizedA: string, normalizedB: string): num
 
 export type StoredSemanticConcept = {
   id: string;
-  conceptKey: CompanionConceptKey;
+  conceptKey: SemanticConceptKey;
   normalizedSignature: string;
   confidence: number;
   evidenceCount: number;
@@ -230,7 +299,7 @@ export type StoredSemanticConcept = {
 export type SemanticConceptTrustTier = 'exact_replay' | 'fuzzy_generalized';
 
 export type SemanticConceptMatch = {
-  conceptKey: CompanionConceptKey;
+  conceptKey: SemanticConceptKey;
   matchedId: string;
   confidence: number;
   evidenceCount: number;
@@ -384,7 +453,7 @@ type SemanticConceptRow = {
 };
 
 function parseRow(row: SemanticConceptRow): StoredSemanticConcept | null {
-  if (!isCompanionConceptKey(row.concept_key)) return null;
+  if (!isSemanticConceptKey(row.concept_key)) return null;
   if (row.status !== 'active' && row.status !== 'superseded' && row.status !== 'retracted') return null;
   return {
     id: row.id,
@@ -504,32 +573,48 @@ function containsDirectIdentifier(message: string): boolean {
 // no guest_id column at all (found in review: "มากับแฟนชื่อหนิง" carries no
 // phone/email/URL/handle, so containsDirectIdentifier alone would let the
 // name "หนิง" through verbatim).
-const SAFE_COMPANION_TOKENS = new RegExp(
-  [
-    'มากับ', 'พามา', 'ไปด้วย', 'อยู่ด้วย', 'มาด้วย',
-    'สองคน', 'สามคน', 'สี่คน', 'ห้าคน', 'หกคน', 'กี่คน', 'หลายคน', 'คนเดียว', 'ทั้งครอบครัว',
-    'แฟนสาว', 'แฟนหนุ่ม', 'แฟน', 'คนรัก', 'คนรู้ใจ', 'กิ๊ก',
-    'ครอบครัว', 'พ่อแม่', 'พ่อ', 'แม่', 'ลูก', 'ญาติ', 'พี่น้อง', 'เพื่อนๆ', 'เพื่อน', 'สามี', 'ภรรยา',
-    'มา', 'กับ', 'พา', 'ด้วย', 'ไป', 'อยู่',
-  ].join('|'),
-  'gu',
-);
+const SAFE_CONCEPT_TOKENS: Readonly<Record<'companion'|'pace'|'consider_only', RegExp>> = {
+  companion:new RegExp(
+    [
+      'มากับ', 'พามา', 'ไปด้วย', 'อยู่ด้วย', 'มาด้วย',
+      'สองคน', 'สามคน', 'สี่คน', 'ห้าคน', 'หกคน', 'กี่คน', 'หลายคน', 'คนเดียว', 'ทั้งครอบครัว',
+      'แฟนสาว', 'แฟนหนุ่ม', 'แฟน', 'คนรัก', 'คนรู้ใจ', 'กิ๊ก',
+      'ครอบครัว', 'พ่อแม่', 'พ่อ', 'แม่', 'ลูก', 'ญาติ', 'พี่น้อง', 'เพื่อนๆ', 'เพื่อน', 'สามี', 'ภรรยา',
+      'มา', 'กับ', 'พา', 'ด้วย', 'ไป', 'อยู่',
+    ].join('|'),
+    'gu',
+  ),
+  // Privacy allowlists are NOT semantic classifiers. OpenAI has already
+  // confirmed the canonical meaning before this code runs; these tokens only
+  // prove the stored exemplar contains no extra personal payload.
+  pace:new RegExp(
+    [
+      'ไม่อยากเหนื่อย', 'ไม่เหนื่อย', 'เหนื่อยน้อย', 'ไม่หนัก', 'เบาๆ', 'เบา', 'ชิลๆ', 'ชิล',
+      'สบายๆ', 'สบาย', 'เรื่อยๆ', 'ช้าๆ', 'เอาแบบ', 'ขอแบบ', 'อยาก', 'มาก', 'เกิน', 'หน่อย',
+    ].join('|'),
+    'gu',
+  ),
+  consider_only:new RegExp(
+    [
+      'ยังไม่ต้อง', 'ยังไม่', 'ไม่ต้อง', 'ไม่', 'เอาอันนี้', 'เอาตัวนี้', 'เอาอันนั้น', 'เอาตัวนั้น',
+      'เอา', 'สนใจอันนี้', 'สนใจตัวนี้', 'สนใจ', 'จำไว้ก่อน', 'เก็บไว้ก่อน', 'ไว้ก่อน',
+      'ขอ', 'จำ', 'เก็บ', 'จอง', 'สั่ง', 'ทำรายการ', 'ตอนนี้', 'ก่อน', 'อยู่',
+    ].join('|'),
+    'gu',
+  ),
+};
 
-/** FAIL-SAFE, NOT FAIL-OPEN: strips every recognized companion-domain token
- *  and returns whatever is left. It never removes text it does not
- *  recognize, so a non-empty residual reliably means "this sentence carries
- *  something beyond the closed companion vocabulary" -- a name, an address,
- *  a number, anything. A genuine companion phrase using an unlisted synonym
- *  is merely under-learned (falls through to a fresh OpenAI call every time,
- *  the correct conservative failure direction); it can never cause a
- *  personal detail to be persisted, because unrecognized text is always the
- *  reason to reject, never the thing that gets stored. */
-function containsUnrecognizedPersonalDetail(normalizedSignature: string): boolean {
-  return normalizedSignature.replace(SAFE_COMPANION_TOKENS, '').length > 0;
+/** FAIL-SAFE, NOT FAIL-OPEN. Any residual outside the concept family's
+ * closed generic vocabulary rejects the cross-customer learning write. */
+function containsUnrecognizedPersonalDetail(
+  conceptKey: SemanticConceptKey,
+  normalizedSignature: string,
+): boolean {
+  return normalizedSignature.replace(SAFE_CONCEPT_TOKENS[semanticConceptFamily(conceptKey)], '').length > 0;
 }
 
 export async function recordSemanticConceptEvidence(
-  conceptKey: CompanionConceptKey,
+  conceptKey: SemanticConceptKey,
   message: string,
 ): Promise<void> {
   try {
@@ -547,7 +632,7 @@ export async function recordSemanticConceptEvidence(
     const normalizedSignature = normalizeForConceptMatching(message);
     if (!normalizedSignature || normalizedSignature.length > MAX_MATCHABLE_MESSAGE_LENGTH) return;
 
-    if (containsUnrecognizedPersonalDetail(normalizedSignature)) {
+    if (containsUnrecognizedPersonalDetail(conceptKey, normalizedSignature)) {
       // Reject outright -- same policy as containsDirectIdentifier above.
       // Whatever this unrecognized content is (a name, an address, anything
       // else), it must never enter a cross-customer table with no guest_id.
@@ -578,6 +663,11 @@ export async function recordSemanticConceptEvidence(
     // matches count), and never touches the row being written for X itself.
     for (const other of allActiveRows) {
       if (other.conceptKey === conceptKey) continue;
+      // Only keys in the SAME semantic family are mutually exclusive.
+      // Companion partner/family/friends/solo can contradict one another;
+      // pace and consider-only can legitimately co-exist with companion or
+      // with each other and must never retract across families.
+      if (semanticConceptFamily(other.conceptKey) !== semanticConceptFamily(conceptKey)) continue;
       if (conceptSimilarity(normalizedSignature, other.normalizedSignature) < MIN_SIMILARITY) continue;
       const nextContradictionCount = other.contradictionCount + 1;
       const shouldRetract = nextContradictionCount >= CONTRADICTION_RETRACT_THRESHOLD;
