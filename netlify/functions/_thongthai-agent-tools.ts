@@ -3,6 +3,7 @@ import { buildRealKnowledgeSourceAdapters } from './_dialog-source-adapters';
 import { resolveKnowledge, type GroundedFact, type KnowledgeNeed, type KnowledgeRequest } from './_knowledge-resolver';
 import type { SemanticDomain } from './_semantic-interpreter';
 import { THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
+import { restaurantMenuAdvice } from './_restaurant-sot';
 
 export type ThongthaiAgentFunctionTool = {
   type: 'function';
@@ -21,11 +22,26 @@ const objectSchema = (properties: Record<string, unknown>, required: string[] = 
 export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = [
   {
     type: 'function',
-    name: 'get_restaurant_menu',
-    description: 'Read the canonical live restaurant menu, prices, ingredients, allergy flags, and customization facts. Read-only.',
+    name: 'recommend_restaurant_menu',
+    description: 'Get a compact canonical restaurant recommendation for the customer\'s FULL food request, including allergy, dietary, spice, party-size, and budget constraints. Prefer ONE call to this tool for recommendation/safety requests instead of repeatedly calling get_restaurant_menu. Read-only.',
     parameters: objectSchema({
-      query: { type: 'string', description: 'Optional menu-name keyword.' },
-      allergen: { type: 'string', description: 'Optional allergen key or keyword, for example shrimp, peanut, seafood.' },
+      query: { type: 'string', description: 'The customer\'s full food request, preserving all allergy, diet, spice, party, and budget wording.' },
+      constraints: {
+        type: 'array',
+        items: { type: 'string' },
+        maxItems: 12,
+        description: 'Optional remembered canonical constraints, e.g. shrimp_allergy, no_spicy, no_pork.',
+      },
+      max_results: { type: 'integer', minimum: 1, maximum: 5, description: 'Maximum recommendations to return. Default 3.' },
+    }, ['query']),
+  },
+  {
+    type: 'function',
+    name: 'get_restaurant_menu',
+    description: 'Read exact canonical facts for a specific named restaurant menu item: price, ingredients, allergy flags, and customization. Use this for named-item detail/customization, not general recommendations. Read-only.',
+    parameters: objectSchema({
+      query: { type: 'string', description: 'Menu-name keyword.' },
+      allergen: { type: 'string', description: 'Optional allergen key when checking this named item.' },
     }),
   },
   {
@@ -184,12 +200,46 @@ function safeResult(bundle: Awaited<ReturnType<typeof resolveKnowledge>>, facts:
   });
 }
 
+async function executeRestaurantRecommendation(args: JsonObject): Promise<string> {
+  const query = stringArg(args, 'query');
+  if (!query) return JSON.stringify({ ok:false, error:'query_required' });
+  const constraints = Array.isArray(args.constraints)
+    ? args.constraints.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).slice(0, 12)
+    : [];
+  const requestedMax = Math.floor(Number(args.max_results) || 3);
+  const maxResults = Math.max(1, Math.min(5, requestedMax));
+  const advice = await restaurantMenuAdvice({ query, constraints });
+
+  const recommendations = Array.isArray(advice.recommendations)
+    ? advice.recommendations.slice(0, maxResults).map(item => ({
+        name:item.name,
+        price:item.price,
+        category:item.category,
+        summary:item.summary,
+        ingredients:item.ingredients,
+        allergenFlags:item.allergenFlags,
+        spiceLevel:item.spiceLevel,
+        reasons:'reasons' in item ? item.reasons : undefined,
+      }))
+    : [];
+  return JSON.stringify({
+    ok:true,
+    mode:advice.mode,
+    notices:advice.notices,
+    recommendations,
+    comparison:advice.comparison,
+    itemSafety:'itemSafety' in advice ? advice.itemSafety : undefined,
+    set:advice.set,
+  });
+}
+
 export async function executeThongthaiReadOnlyTool(
   name: string,
   rawArgs: unknown,
   context: ThongthaiAgentToolContext,
 ): Promise<string> {
   const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
+  if (name === 'recommend_restaurant_menu') return executeRestaurantRecommendation(args);
   const adapters = buildRealKnowledgeSourceAdapters(context.channel, {
     guestDbId: context.guestDbId,
     environment: context.environment ?? 'live',
