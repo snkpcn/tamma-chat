@@ -194,10 +194,10 @@ export async function executeThongthaiReadOnlyTool(
   let req: KnowledgeRequest;
   switch (name) {
     case 'get_restaurant_menu':
-      req = request('restaurant', ['catalog', 'price', 'ingredients']);
+      req = request('restaurant', ['catalog']);
       break;
     case 'get_activity_catalog':
-      req = request('activity', ['catalog', 'price', 'inventory'], {
+      req = request('activity', ['catalog'], {
         activityCode: stringArg(args, 'activity_code'),
       });
       break;
@@ -210,7 +210,7 @@ export async function executeThongthaiReadOnlyTool(
       });
       break;
     case 'get_stay_catalog':
-      req = request('stay', ['catalog', 'price'], {
+      req = request('stay', ['catalog'], {
         resourceCode: stringArg(args, 'resource_code'),
       });
       break;
@@ -223,7 +223,7 @@ export async function executeThongthaiReadOnlyTool(
       });
       break;
     case 'get_otop_catalog':
-      req = request('otop', ['catalog', 'price', 'inventory']);
+      req = request('otop', ['catalog']);
       break;
     case 'get_active_promotions':
       req = request('promotion', ['promotion_eligibility']);
