@@ -23,11 +23,16 @@ test('showcase respects reduced motion and has a non-video fallback', () => {
   assert.ok(html.includes("const reduce=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches"));
 });
 
-test('mobile commerce keeps imagery dominant and removes the two-row hero navigation', () => {
+test('mobile commerce keeps imagery dominant with one orderly full-width product column', () => {
   assert.ok(html.includes('.nav{display:flex;align-items:center;padding:9px 14px;min-height:56px'));
   assert.ok(html.includes('.provinceField,.searchField{display:none}'));
-  assert.ok(html.includes('.categoryGrid{grid-template-columns:1fr;gap:34px}'));
+  assert.ok(html.includes('.productRail{grid-auto-columns:100%;gap:20px;margin-right:0;padding-right:0;scroll-padding-inline:0}'));
+  assert.ok(html.includes('.categoryGrid{grid-template-columns:1fr;gap:40px}'));
+  assert.ok(html.includes('.cardFoot{width:100%;padding-top:0;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:8px}'));
+  assert.ok(html.includes('.railMeta{flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:4px}'));
   assert.ok(html.includes('.categoryGrid .featureCard .photo,.categoryGrid .card:not(.featureCard) .photo{aspect-ratio:1/1'));
+  assert.equal(html.includes('grid-auto-columns:78vw'), false);
+  assert.equal(html.includes('margin-right:-20px'), false);
 });
 
 test('product media is full-screen and thumbnails no longer overlay the image', () => {
