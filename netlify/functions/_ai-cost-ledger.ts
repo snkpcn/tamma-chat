@@ -219,17 +219,26 @@ export async function reserveAiCall(
     if (turnCalls >= policy.maxCallsPerTurn) throw new AiBudgetBlockedError('turn_call_limit');
     if (ledger.callCount >= policy.maxCallsPerConversation) throw new AiBudgetBlockedError('conversation_call_limit');
 
-    const projected = roundUsd(ledger.cumulativeCostUsd + ledger.reservedCostUsd + reservedCostUsd);
+    const externalPrimaryAgentCostUsd = activePrimaryAgentSpendUsdFromSnapshot(snapshot, context, now);
+    const projected = roundUsd(
+      ledger.cumulativeCostUsd + ledger.reservedCostUsd + externalPrimaryAgentCostUsd + reservedCostUsd,
+    );
     if (projected > budgetCapUsd + Number.EPSILON) {
       emitCostMetric({
         conversation_id:context.conversationId, event_id:context.eventId, model,
         call_purpose:context.callerLabel,
         ai_budget_block:1, reason:'budget',
         reserved_cost_usd:reservedCostUsd, reserved_cost_thb:usdToThb(reservedCostUsd),
-        conversation_cost_usd:ledger.cumulativeCostUsd,
-        conversation_cost_thb:usdToThb(ledger.cumulativeCostUsd),
-        budget_remaining_usd:roundUsd(budgetCapUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd),
-        budget_remaining_thb:usdToThb(budgetCapUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd),
+        conversation_cost_usd:roundUsd(ledger.cumulativeCostUsd + externalPrimaryAgentCostUsd),
+        conversation_cost_thb:usdToThb(ledger.cumulativeCostUsd + externalPrimaryAgentCostUsd),
+        external_primary_agent_cost_usd:roundUsd(externalPrimaryAgentCostUsd),
+        external_primary_agent_cost_thb:usdToThb(externalPrimaryAgentCostUsd),
+        budget_remaining_usd:roundUsd(
+          budgetCapUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd - externalPrimaryAgentCostUsd,
+        ),
+        budget_remaining_thb:usdToThb(
+          budgetCapUsd - ledger.cumulativeCostUsd - ledger.reservedCostUsd - externalPrimaryAgentCostUsd,
+        ),
       });
       throw new AiBudgetBlockedError('budget');
     }
@@ -361,6 +370,42 @@ export async function finalizeAiCall(
       return;
     }
   }
+}
+
+export async function readActiveAiLedgerSpendThb(
+  guestDbId: string,
+  conversationId: string,
+  now: Date = new Date(),
+): Promise<number> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const context: AiCallContext = {
+    conversationId,
+    guestDbId,
+    channel: 'agent_primary',
+    eventId: 'agent-primary-budget-read',
+    callerLabel: 'agent_primary_budget_read',
+  };
+  const ledger = parseLedger(snapshot.state[STATE_KEY], context, now);
+  return usdToThb(ledger.cumulativeCostUsd + ledger.reservedCostUsd);
+}
+
+function activePrimaryAgentSpendUsdFromSnapshot(
+  snapshot: GuestAgentStateSnapshot,
+  context: AiCallContext,
+  now: Date,
+): number {
+  const raw = snapshot.state.thongthaiProductionAgentSession;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 0;
+  const value = raw as {
+    cumulativeCostThb?: unknown;
+    lastConversationId?: unknown;
+    lastUsedAt?: unknown;
+  };
+  if (String(value.lastConversationId ?? '') !== context.conversationId.slice(0,180)) return 0;
+  const lastUsed = Date.parse(String(value.lastUsedAt ?? ''));
+  if (!Number.isFinite(lastUsed) || now.getTime() - lastUsed >= aiCostPolicy().conversationIdleMs) return 0;
+  const thb = Math.max(0, Number(value.cumulativeCostThb) || 0);
+  return thb / Math.max(0.000001, usdToThb(1));
 }
 
 export function emitZeroCallTurn(context: Pick<AiCallContext, 'conversationId'|'eventId'|'channel'>): void {
