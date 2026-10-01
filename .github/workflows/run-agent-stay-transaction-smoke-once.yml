@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Run stay transaction turn 1 only
+      - name: Run stay transaction turn 2 only
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error             --max-time 45             "https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-stay-transaction-smoke?turn=1"
+          curl --fail-with-body --silent --show-error             --max-time 45             "https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-stay-transaction-smoke?turn=2"
