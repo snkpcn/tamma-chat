@@ -3853,7 +3853,12 @@ function missingActivityFallbackFields(draft: Record<string, unknown>): string[]
 export function activityPrepareOnlyToolArgs(
   draft: Record<string, unknown>,
 ): Record<string, unknown> | null {
-  if (missingActivityFallbackFields(draft).length) return null;
+  // Prepare mode needs only the fields consumed by prepare_activity_booking.
+  // Legacy activity execution additionally expects resourceCode, but the
+  // prepare tool resolves the canonical horse resource itself. Reusing the
+  // legacy missing-field gate here made complete customer requests fall
+  // through to transaction-capable legacy routing.
+
   const horseName = typeof draft.horseName === 'string' ? draft.horseName.trim() : '';
   const date = typeof draft.date === 'string' ? draft.date.trim() : '';
   const time = typeof draft.time === 'string' ? draft.time.trim() : '';

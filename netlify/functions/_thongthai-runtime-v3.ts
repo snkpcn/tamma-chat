@@ -11,11 +11,35 @@ import { loadActivePromotionsWorldFact, redeemPromotion } from './_promotions-ru
 import { loadActivityWorldFacts } from './_activity-sot';
 import { patchGuestAgentState } from './_guest-agent-state-store';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
+import { shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 
 export const SAFE_MEMORY_KEYS = new Set([
   'discovery_style','preferred_moods','experience_preferences','stay_preferences','activity_preferences','avoid_experiences',
 ]);
 const EXPERIENCE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,119}$/i;
+
+const PREPARE_ONLY_BLOCKED_WRITE_TOOLS = new Set([
+  'create_booking',
+  'create_restaurant_preorder',
+  'create_cafe_inquiry',
+  'create_otop_order',
+  'redeem_promotion',
+]);
+
+export function shouldBlockLegacyWriteForPrepareOnly(input: {
+  toolName: string;
+  guestKey: string | undefined;
+  guestDbId: string | null;
+  channel: BrainChannel;
+}): boolean {
+  if (!PREPARE_ONLY_BLOCKED_WRITE_TOOLS.has(input.toolName)) return false;
+  if (!input.guestKey || !input.guestDbId) return false;
+  return shouldUseThongthaiAgentTransactionPrepare({
+    guestKey: input.guestKey,
+    guestDbId: input.guestDbId,
+    channel: input.channel,
+  });
+}
 type WorldFactRow = { fact_key: string; category: string; fact_value: unknown; source: string | null; updated_at: string };
 type SemanticMemoryRow = { memory_key: string; memory_value: unknown; confidence: number; source_channel: string; evidence_count: number; last_observed_at: string };
 
@@ -139,6 +163,19 @@ export async function executeBrainTools(
   if (!guestDbId || !configuration()) return calls.map(call => ({ name:call.name,ok:false,detail:'customer_state_unavailable' }));
   const results: BrainToolResult[] = [];
   for (const call of calls.slice(0,4)) {
+    if (shouldBlockLegacyWriteForPrepareOnly({
+      toolName: call.name,
+      guestKey: request.guestId,
+      guestDbId,
+      channel,
+    })) {
+      results.push({
+        name: call.name,
+        ok: false,
+        detail: 'transaction_commit_disabled_prepare_only',
+      });
+      continue;
+    }
     try {
       if (call.name === 'save_journey') {
         const candidate = firstResponse.journeyAction.journey ?? request.journeyContext.currentPlan ?? request.journeyContext.savedPlan;
