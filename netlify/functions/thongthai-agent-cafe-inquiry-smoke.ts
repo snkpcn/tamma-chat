@@ -3,9 +3,9 @@ import { loadCustomerMemory } from './_customer-db';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { runThongthaiAgentShadowTurn } from './_thongthai-agent-session';
 
-const SYNTHETIC_GUEST='98f25137-c242-4a2a-a33e-fbe27e64f207';
-const STATE_KEY='thongthaiAgentCafeInquirySmokeV1';
-const CONVERSATION_ID='thongthai-agent-cafe-inquiry-smoke-20261001';
+const SYNTHETIC_GUEST='dc8b3cc4-caa9-4764-bc85-7f967a44f902';
+const STATE_KEY='thongthaiAgentCafeInquirySmokeV2';
+const CONVERSATION_ID='thongthai-agent-cafe-inquiry-smoke-v2-20261001';
 const TURNS=[
   'อยากให้ทีมอินทนิลติดต่อกลับเรื่องจัดกาแฟสำหรับกลุ่ม 20 คน ชื่อ ทดสอบคาเฟ่ เบอร์ 0844444444 ครับ',
   'เอาไว้ก่อนนะ ยังไม่ส่งครับ',
