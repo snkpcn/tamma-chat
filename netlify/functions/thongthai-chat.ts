@@ -4923,7 +4923,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
 
   const explicitTransactionIntent =
     topLevelSemanticIntent === 'BUSINESS_TRANSACTION'
-    || hasExplicitTransactionIntent(request.message);
+    || hasExplicitTransactionIntent(request.message)
+    || hasStandaloneTransactionRequest(request.message);
   const prepareOnlyAgentEligible = explicitTransactionIntent
     && shouldUseThongthaiAgentTransactionPrepare({
       guestKey: request.guestId,
