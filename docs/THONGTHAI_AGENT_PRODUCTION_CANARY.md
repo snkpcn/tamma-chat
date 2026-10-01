@@ -5,7 +5,7 @@ Production rollout configuration (2026-10-01):
 - Saved Agent: `Thongthai-Production`
 - Model: `gpt-5.6-terra`
 - Primary channel: WEB only
-- Stable canary: 50% of guests
+- Stable canary: 100% of eligible WEB guests
 - Agent transaction tools: not exposed in the production saved Agent
 - Live Agent transaction flag: OFF
 - Weather, verified location, and transaction intents remain on the established core paths
@@ -20,5 +20,7 @@ Rollout history:
 - During 25% verification, one successful Agent turn exposed a telemetry persistence gap: the Saved-Agent session had a real cost but `ai_api_cost_events` missed the row. PR #374 added retry plus fail-safe pending accounting before any further paid Agent turn.
 - Post-hotfix 25% verification recorded 4/4 fresh production Agent responses with matching cost rows, all grounded, 0 non-completed events, total 4.6809 THB and max 1.2898 THB for any tested turn.
 - 50% production canary: promoted after the post-hotfix 25% telemetry/cost gate.
+- New 25-50% cohort verification: two fresh production guests in buckets 2590 and 4241 both routed to `thongthai_agent_primary`, both grounded, with matching cost rows of 1.1170 THB and 1.0268 THB.
+- 100% eligible WEB rollout: promoted after the new 50% cohort verification gate.
 
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
