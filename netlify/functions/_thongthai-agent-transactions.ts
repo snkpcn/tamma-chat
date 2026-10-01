@@ -278,6 +278,36 @@ type PreparedRestaurantPreorder = {
   };
 };
 
+type PreparedOtopOrder = {
+  version: 1;
+  kind: 'otop_order';
+  status: 'prepared' | 'committed';
+  confirmationId: string;
+  preparedEventId: string;
+  preparedAt: string;
+  expiresAt: string;
+  environment: 'live' | 'test';
+  payload: {
+    sku: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    expectedTotal: number;
+    fulfillmentType: 'pickup' | 'shipping';
+    shippingAddress: string | null;
+    customerName: string;
+    phone: string;
+    email: string | null;
+    note: string | null;
+  };
+  result?: {
+    orderId: string;
+    orderCode: string;
+    total: number;
+    notificationStatus: string;
+  };
+};
+
 function textArg(args: Record<string, unknown>, key: string, max = 240): string | null {
   const value = args[key];
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
