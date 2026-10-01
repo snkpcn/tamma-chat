@@ -21,6 +21,8 @@ type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type Payload = Record<string, unknown> & { message?: unknown; intent?: unknown };
 
 function productionGuestId(): string {
+  const configured = process.env.PHASE7_GUEST_ID?.trim();
+  if (configured) return configured;
   const suffix = BigInt(Date.now()).toString(16).slice(-12).padStart(12, '0');
   return `f7f7f7f7-0251-4f7f-8f7f-${suffix}`;
 }
@@ -31,10 +33,15 @@ async function main(): Promise<void> {
   }
 
   const guestId = productionGuestId();
+  const requestedLimit = Number(process.env.PHASE7_LIMIT ?? PHASE7_MESSAGES.length);
+  const turnLimit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(PHASE7_MESSAGES.length, Math.floor(requestedLimit)))
+    : PHASE7_MESSAGES.length;
+  const pageSection = process.env.PHASE7_CHANNEL === 'web' ? null : 'line';
   const history: ChatMessage[] = [];
   const results: Array<Record<string, unknown> & { pass: boolean }> = [];
 
-  for (let index = 0; index < PHASE7_MESSAGES.length; index += 1) {
+  for (let index = 0; index < turnLimit; index += 1) {
     const userMessage = PHASE7_MESSAGES[index]!;
     try {
       const response = await fetch(PRODUCTION_URL, {
@@ -55,7 +62,7 @@ async function main(): Promise<void> {
             currentPlan: null, savedPlan: null,
             visitedExperiences: [], favorites: [], journalEntries: [],
           },
-          pageContext: { section: 'line' },
+          pageContext: { section: pageSection },
         }),
       });
       const payload = await response.json().catch(() => ({})) as Payload;
