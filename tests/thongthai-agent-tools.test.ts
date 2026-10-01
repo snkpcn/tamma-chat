@@ -12,6 +12,7 @@ import { thongthaiStagingAgentConfig, THONGTHAI_STAGING_AGENT_ID } from '../netl
 test('Thongthai Agent keeps the original business fact tools bounded and read-only', () => {
   const names = THONGTHAI_READ_ONLY_TOOLS.map(tool => tool.name);
   assert.deepEqual(names, [
+    'recommend_restaurant_menu',
     'get_restaurant_menu',
     'get_activity_catalog',
     'check_activity_availability',
