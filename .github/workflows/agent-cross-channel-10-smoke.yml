@@ -18,7 +18,7 @@ jobs:
       - run: npm ci
       - name: LINE read-only canary
         env:
-          PHASE7_GUEST_ID: c5a38b89-87e7-5ed9-8a21-aaade28d324c
+          PHASE7_GUEST_ID: 2b5d9055-59b8-5f55-b721-38407ebb855e
           PHASE7_LIMIT: "3"
           PHASE7_CHANNEL: line
         run: npm run certify:phase7:production
@@ -35,7 +35,7 @@ jobs:
       - run: npm ci
       - name: Facebook read-only canary
         env:
-          PHASE7_GUEST_ID: b85f2f67-2c16-5f3f-a341-6eb9b893f0a3
+          PHASE7_GUEST_ID: 44a29788-76af-55c3-aac9-2322c6b2c8a0
           PHASE7_LIMIT: "3"
           PHASE7_CHANNEL: facebook
         run: npm run certify:phase7:production
