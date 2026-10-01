@@ -2,6 +2,7 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { buildRealKnowledgeSourceAdapters } from './_dialog-source-adapters';
 import { resolveKnowledge, type GroundedFact, type KnowledgeNeed, type KnowledgeRequest } from './_knowledge-resolver';
 import type { SemanticDomain } from './_semantic-interpreter';
+import { THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 
 export type ThongthaiAgentFunctionTool = {
   type: 'function';
@@ -104,10 +105,13 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
   },
 ] as const;
 
-type ToolContext = {
+export type ThongthaiAgentToolContext = {
   guestDbId: string | null;
   channel: BrainChannel;
   environment?: 'live' | 'test';
+  eventId?: string;
+  message?: string;
+  transactionMode?: ThongthaiAgentTransactionMode;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -183,7 +187,7 @@ function safeResult(bundle: Awaited<ReturnType<typeof resolveKnowledge>>, facts:
 export async function executeThongthaiReadOnlyTool(
   name: string,
   rawArgs: unknown,
-  context: ToolContext,
+  context: ThongthaiAgentToolContext,
 ): Promise<string> {
   const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
   const adapters = buildRealKnowledgeSourceAdapters(context.channel, {
@@ -252,4 +256,30 @@ export async function executeThongthaiReadOnlyTool(
   if (name === 'get_stay_catalog') facts = filterByPrefix(facts, stringArg(args, 'resource_code'));
   if (name === 'get_otop_catalog') facts = filterByPrefix(facts, stringArg(args, 'sku'));
   return safeResult(bundle, facts);
+}
+
+
+export const THONGTHAI_AGENT_TOOLS: readonly ThongthaiAgentFunctionTool[] = [
+  ...THONGTHAI_READ_ONLY_TOOLS,
+  ...THONGTHAI_STAGING_TRANSACTION_TOOLS,
+];
+
+const TRANSACTION_TOOL_NAMES = new Set(THONGTHAI_STAGING_TRANSACTION_TOOLS.map(tool => tool.name));
+
+export async function executeThongthaiAgentTool(
+  name: string,
+  rawArgs: unknown,
+  context: ThongthaiAgentToolContext,
+): Promise<string> {
+  if (TRANSACTION_TOOL_NAMES.has(name)) {
+    return executeThongthaiTransactionTool(name, rawArgs, {
+      guestDbId: context.guestDbId,
+      channel: context.channel,
+      environment: context.environment ?? 'live',
+      eventId: context.eventId ?? '',
+      message: context.message ?? '',
+      transactionMode: context.transactionMode ?? 'off',
+    });
+  }
+  return executeThongthaiReadOnlyTool(name, rawArgs, context);
 }
