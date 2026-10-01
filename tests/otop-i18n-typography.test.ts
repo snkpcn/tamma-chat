@@ -110,14 +110,14 @@ test('OTOP store has exactly one language selector and every static i18n key exi
     'map_legend_aria','map_svg_aria','member_nav_aria'
   ]) attrKeys.add(required);
 
-  const markers = ['th:{','en:{','zh:{','lo:{','vi:{'];
+  const markers = ['    th:{','    en:{','    zh:{','    lo:{','    vi:{'];
   const blocks = new Map<string,string>();
   for (let i = 0; i < markers.length; i += 1) {
-    const lang = markers[i].slice(0,2).replace(':','');
+    const lang = markers[i].trim().slice(0,2);
     const start = i18n.indexOf(markers[i]);
     const end = i + 1 < markers.length ? i18n.indexOf(markers[i + 1]) : i18n.indexOf('  };', start);
     assert.ok(start >= 0 && end > start, `missing dictionary block for ${markers[i]}`);
-    blocks.set(markers[i].split(':')[0], i18n.slice(start, end));
+    blocks.set(lang, i18n.slice(start, end));
   }
 
   for (const [lang, block] of blocks) {
