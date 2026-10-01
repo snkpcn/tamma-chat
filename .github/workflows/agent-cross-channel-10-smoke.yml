@@ -1,0 +1,41 @@
+name: Cross-channel Agent 10 smoke
+
+on:
+  push:
+    branches:
+      - agent-cross-channel-smoke-10
+
+jobs:
+  line:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: LINE read-only canary
+        env:
+          PHASE7_GUEST_ID: c5a38b89-87e7-5ed9-8a21-aaade28d324c
+          PHASE7_LIMIT: "3"
+          PHASE7_CHANNEL: line
+        run: npm run certify:phase7:production
+
+  facebook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Facebook read-only canary
+        env:
+          PHASE7_GUEST_ID: b85f2f67-2c16-5f3f-a341-6eb9b893f0a3
+          PHASE7_LIMIT: "3"
+          PHASE7_CHANNEL: facebook
+        run: npm run certify:phase7:production
