@@ -39,6 +39,36 @@ test('A. location questions: answers with the real owner-provided Maps link, nev
   });
 });
 
+test('B. live-cutover regression: authoritative location wins before a successful semantic supervisor can route to restaurant knowledge', async () => {
+  await withHarness(async harness => {
+    harness.programGeminiReply({
+      normalizedMeaning: 'customer asks where the restaurant is located',
+      reply: 'ตอนนี้ยังไม่มีพิกัดหรือที่อยู่ร้านที่ยืนยันได้ครับ',
+      speechAct: 'question',
+      domain: 'restaurant',
+      intent: 'ask_location',
+      action: 'ask',
+      informationNeed: 'none',
+      entities: {},
+      references: [],
+      constraints: [],
+      confidence: 0.99,
+      needsClarification: false,
+    });
+
+    const before = harness.modelCallCount();
+    const r = await ask('concierge-live-location-authority', 'ร้านอยู่แถวไหนคะ');
+    const used = harness.modelCallCount() - before;
+    const message = msg(r.payload);
+
+    assert.equal(r.statusCode, 200);
+    assert.equal(used, 0, 'owner-verified location is bounded authoritative knowledge and must not spend a semantic-model call first');
+    assert.ok(message.includes(TAMMA_CHART_LOCATION.mapsLink), 'must return the owner-verified Maps link');
+    assert.doesNotMatch(message, /ไม่มีพิกัด|ไม่มีที่อยู่ร้านที่ยืนยันได้/u);
+    assert.doesNotMatch(message, /ค่ะ|คะ/u, 'Thongthai customer-facing voice must remain male');
+  });
+});
+
 test('C. region/weather casual-phrasing and typo tolerance: gets a real concierge answer, not a non-answer', async () => {
   await withHarness(async () => {
     const messages = ['อีสานมีไรดี', 'อิสานมีอะไรดี', 'แถวนี้มีไรบ้าง', 'ฝนตกขี่ม้าได้ไหม', 'แดดแรงปะ'];
