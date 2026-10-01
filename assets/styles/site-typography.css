@@ -1,0 +1,32 @@
+/* Sitewide typography lock.
+ * Thai: IBM Plex Sans Thai only.
+ * English/Latin: Noto Sans only.
+ * Chinese/Lao use script-specific Noto Sans fallbacks so the 5-language UI renders correctly.
+ * Weight, size and spacing may vary; font family must not.
+ */
+:root{
+  --site-font-th:"IBM Plex Sans Thai",sans-serif;
+  --site-font-latin:"Noto Sans",sans-serif;
+  --site-font-zh:"Noto Sans SC","Noto Sans",sans-serif;
+  --site-font-lo:"Noto Sans Lao","Noto Sans",sans-serif;
+  --site-font:var(--site-font-th);
+  --font-body:var(--site-font);
+  --font-display:var(--site-font);
+}
+
+html[lang="th"]{--site-font:var(--site-font-th)}
+html[lang="en"],html[lang="vi"]{--site-font:var(--site-font-latin)}
+html[lang="zh"]{--site-font:var(--site-font-zh)}
+html[lang="lo"]{--site-font:var(--site-font-lo)}
+
+html,body,
+button,input,select,textarea,
+h1,h2,h3,h4,h5,h6,
+p,a,span,label,small,strong,b,
+div,section,article,nav,header,footer,aside{
+  font-family:var(--site-font) !important;
+}
+
+code,pre,kbd,samp{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace !important;
+}
