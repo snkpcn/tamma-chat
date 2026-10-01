@@ -153,6 +153,10 @@ type AgentRuntimeConfig = {
   callPurpose: string;
 };
 
+export function agentRuntimeCallPurpose(mode: AgentRuntimeMode): string {
+  return mode === 'primary' ? 'agent_primary_turn_aggregate' : 'agent_shadow_turn_aggregate';
+}
+
 function runtimeConfig(input: AgentShadowTurnInput): AgentRuntimeConfig {
   if (input.runtimeMode === 'primary') {
     if (!THONGTHAI_PRODUCTION_AGENT_ID) {
@@ -162,14 +166,14 @@ function runtimeConfig(input: AgentShadowTurnInput): AgentRuntimeConfig {
       mode: 'primary',
       agentId: THONGTHAI_PRODUCTION_AGENT_ID,
       stateKey: PRODUCTION_SESSION_STATE_KEY,
-      callPurpose: 'agent_primary_turn_aggregate',
+      callPurpose: agentRuntimeCallPurpose('primary'),
     };
   }
   return {
     mode: 'shadow',
     agentId: THONGTHAI_STAGING_AGENT_ID,
     stateKey: STAGING_SESSION_STATE_KEY,
-    callPurpose: runtime.callPurpose,
+    callPurpose: agentRuntimeCallPurpose('shadow'),
   };
 }
 
@@ -413,7 +417,7 @@ async function persistAgentCost(input: AgentShadowTurnInput, runtime: AgentRunti
     eventId: input.eventId,
     channel: input.channel,
     model,
-    callPurpose: 'agent_shadow_turn_aggregate',
+    callPurpose: runtime.callPurpose,
     inputTokens: usage.inputTokens,
     cachedInputTokens: usage.cachedInputTokens,
     outputTokens: usage.outputTokens,
