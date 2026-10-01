@@ -36,6 +36,9 @@ test('staging transaction surface is intentionally tiny and two-step', () => {
     'prepare_activity_booking',
     'get_prepared_activity_booking',
     'commit_prepared_activity_booking',
+    'prepare_stay_booking',
+    'get_prepared_stay_booking',
+    'commit_prepared_stay_booking',
   ]);
   for (const tool of THONGTHAI_STAGING_TRANSACTION_TOOLS) {
     assert.equal(tool.type, 'function');
@@ -69,6 +72,20 @@ test('transaction tools fail closed by default before any business write', async
     environment: 'test',
     eventId: 'evt-1',
     message: 'จองเลย',
+    transactionMode: 'off',
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'transaction_tools_disabled');
+});
+
+
+test('stay transaction prepare also fails closed while transaction mode is off', async () => {
+  const result = JSON.parse(await executeThongthaiAgentTool('prepare_stay_booking', {}, {
+    guestDbId: 'synthetic-guest',
+    channel: 'web',
+    environment: 'test',
+    eventId: 'evt-stay-1',
+    message: 'จองที่พัก',
     transactionMode: 'off',
   }));
   assert.equal(result.ok, false);

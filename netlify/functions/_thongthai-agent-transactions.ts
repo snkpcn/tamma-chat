@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { loadActivityWorldFacts } from './_activity-sot';
-import { createBooking, formatActivityAssetNote, listBookingOptions } from './_operations-db';
+import { createBooking, formatActivityAssetNote, listBookingOptions, listServiceResources, listStayBookingOptions } from './_operations-db';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { hasCancelMarker, hasCommitMarker, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
@@ -25,6 +25,7 @@ export type ThongthaiAgentTransactionTool = {
 };
 
 const STATE_KEY = 'thongthaiAgentPreparedTransactionV1';
+const STAY_STATE_KEY = 'thongthaiAgentPreparedStayBookingV1';
 const PREPARED_TTL_MS = 30 * 60 * 1000;
 
 const objectSchema = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({
@@ -66,6 +67,37 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
       confirmation_id: { type: 'string' },
     }, ['confirmation_id']),
   },
+  {
+    type: 'function',
+    name: 'prepare_stay_booking',
+    description: 'Prepare a stay booking request for explicit customer review. This NEVER creates a booking. Resolve the exact stay resource first, then return a summary and ask the customer to reply exactly "ยืนยันจอง" to submit.',
+    parameters: objectSchema({
+      resource_code: { type: 'string', description: 'Canonical stay resource code from get_stay_catalog.' },
+      resource_name: { type: 'string', description: 'Optional canonical stay resource name.' },
+      check_in: { type: 'string', description: 'Local date YYYY-MM-DD.' },
+      check_out: { type: 'string', description: 'Local date YYYY-MM-DD.' },
+      party_size: { type: 'integer', minimum: 1, maximum: 50 },
+      quantity: { type: 'integer', minimum: 1, maximum: 6, description: 'Number of villas/rooms requested. Defaults to 1.' },
+      customer_name: { type: 'string' },
+      phone: { type: 'string' },
+      email: { type: 'string' },
+      note: { type: 'string' },
+    }, ['resource_code', 'check_in', 'check_out', 'party_size', 'customer_name', 'phone']),
+  },
+  {
+    type: 'function',
+    name: 'get_prepared_stay_booking',
+    description: 'Read the currently prepared stay booking for this guest. This never creates or modifies a booking. Use it when the customer returns to a prepared stay request or explicitly confirms after saying not yet.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
+    name: 'commit_prepared_stay_booking',
+    description: 'Submit the previously prepared stay booking request. Server-gated: it succeeds only on a later customer turn with explicit booking confirmation. Pass the confirmation_id returned by prepare_stay_booking. Never call in the same turn as prepare.',
+    parameters: objectSchema({
+      confirmation_id: { type: 'string' },
+    }, ['confirmation_id']),
+  },
 ] as const;
 
 type ActivityCatalog = {
@@ -103,6 +135,41 @@ type PreparedActivityBooking = {
   };
   preview: {
     availabilityStatus: 'slot_found' | 'options_available' | 'staff_confirmation_required';
+    availableOptionCount: number;
+  };
+  result?: {
+    bookingId: string;
+    bookingCode: string;
+    status: string;
+    startAt: string | null;
+    endAt: string | null;
+    notificationStatus: string;
+  };
+};
+
+type PreparedStayBooking = {
+  version: 1;
+  kind: 'stay_booking';
+  status: 'prepared' | 'committed';
+  confirmationId: string;
+  preparedEventId: string;
+  preparedAt: string;
+  expiresAt: string;
+  environment: 'live' | 'test';
+  payload: {
+    resourceCode: string;
+    resourceName: string;
+    checkIn: string;
+    checkOut: string;
+    partySize: number;
+    quantity: number;
+    customerName: string;
+    phone: string;
+    email: string | null;
+    note: string | null;
+  };
+  preview: {
+    availabilityStatus: 'full_stay_available' | 'options_available' | 'staff_confirmation_required';
     availableOptionCount: number;
   };
   result?: {
@@ -182,6 +249,28 @@ async function loadPrepared(guestDbId: string): Promise<PreparedActivityBooking 
 async function savePrepared(guestDbId: string, value: PreparedActivityBooking): Promise<void> {
   const ok = await patchGuestAgentState(guestDbId, { set: { [STATE_KEY]: value } });
   if (!ok) throw new Error('prepared_transaction_state_unavailable');
+}
+
+async function loadPreparedStay(guestDbId: string): Promise<PreparedStayBooking | null> {
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const raw = snapshot.state[STAY_STATE_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = raw as Partial<PreparedStayBooking>;
+  if (value.version !== 1 || value.kind !== 'stay_booking' || typeof value.confirmationId !== 'string') return null;
+  return value as PreparedStayBooking;
+}
+
+async function savePreparedStay(guestDbId: string, value: PreparedStayBooking): Promise<void> {
+  const ok = await patchGuestAgentState(guestDbId, { set: { [STAY_STATE_KEY]: value } });
+  if (!ok) throw new Error('prepared_stay_transaction_state_unavailable');
+}
+
+function nightsBetween(checkIn: string, checkOut: string): number | null {
+  if (!validDate(checkIn) || !validDate(checkOut)) return null;
+  const start = new Date(`${checkIn}T12:00:00+07:00`).getTime();
+  const end = new Date(`${checkOut}T12:00:00+07:00`).getTime();
+  const nights = Math.round((end - start) / 86_400_000);
+  return Number.isInteger(nights) && nights >= 1 && nights <= 30 ? nights : null;
 }
 
 function modeAllowed(context: ThongthaiAgentTransactionContext): { ok: true; environment: 'live'|'test' } | { ok: false; error: string } {
@@ -442,6 +531,225 @@ async function commitPreparedActivityBooking(
   };
 }
 
+async function prepareStayBooking(
+  args: Record<string, unknown>,
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok: false, error: 'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+
+  const resourceCode = textArg(args, 'resource_code', 120);
+  const requestedResourceName = textArg(args, 'resource_name', 160);
+  const checkIn = textArg(args, 'check_in', 10);
+  const checkOut = textArg(args, 'check_out', 10);
+  const partySize = intArg(args, 'party_size', 1, 50);
+  const quantity = intArg(args, 'quantity', 1, 6) ?? 1;
+  const customerName = textArg(args, 'customer_name', 160);
+  const phone = textArg(args, 'phone', 40);
+  const email = textArg(args, 'email', 200);
+  const note = textArg(args, 'note', 600);
+
+  const missing: string[] = [];
+  if (!resourceCode) missing.push('resource_code');
+  if (!validDate(checkIn)) missing.push('check_in');
+  if (!validDate(checkOut)) missing.push('check_out');
+  if (checkIn && checkOut && !nightsBetween(checkIn, checkOut)) missing.push('valid_stay_date_range');
+  if (!partySize) missing.push('party_size');
+  if (!customerName) missing.push('customer_name');
+  if (!validPhone(phone)) missing.push('phone');
+  if (missing.length) return { ok: false, error: 'missing_or_invalid_fields', missing_fields: missing };
+
+  const resources = await listServiceResources('stay');
+  const resource = resources.find(item => item.code === resourceCode);
+  if (!resource) return { ok: false, error: 'stay_resource_not_found' };
+  if (requestedResourceName && normalizeName(resource.name) !== normalizeName(requestedResourceName)) {
+    return { ok: false, error: 'stay_resource_name_mismatch', canonical_name: resource.name };
+  }
+  if (resource.defaultCapacity != null && partySize! > resource.defaultCapacity) {
+    return {
+      ok: false,
+      error: 'stay_party_exceeds_resource_capacity',
+      resource_name: resource.name,
+      capacity: resource.defaultCapacity,
+    };
+  }
+
+  const nights = nightsBetween(checkIn!, checkOut!)!;
+  const options = await listStayBookingOptions(
+    checkIn!,
+    checkOut!,
+    mode.environment,
+    resource.code,
+    partySize,
+  ).catch(() => []);
+  const fullStayAvailable = options.length === nights
+    && options.every(option => option.resourceCode === resource.code && option.available >= quantity);
+  const availabilityStatus: PreparedStayBooking['preview']['availabilityStatus'] =
+    fullStayAvailable ? 'full_stay_available' : options.length ? 'options_available' : 'staff_confirmation_required';
+
+  const now = new Date();
+  const prepared: PreparedStayBooking = {
+    version: 1,
+    kind: 'stay_booking',
+    status: 'prepared',
+    confirmationId: randomUUID(),
+    preparedEventId: context.eventId,
+    preparedAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + PREPARED_TTL_MS).toISOString(),
+    environment: mode.environment,
+    payload: {
+      resourceCode: resource.code,
+      resourceName: resource.name,
+      checkIn: checkIn!,
+      checkOut: checkOut!,
+      partySize: partySize!,
+      quantity,
+      customerName: customerName!,
+      phone: phone!,
+      email,
+      note,
+    },
+    preview: {
+      availabilityStatus,
+      availableOptionCount: options.length,
+    },
+  };
+  await savePreparedStay(context.guestDbId, prepared);
+
+  return {
+    ok: true,
+    prepared: true,
+    confirmation_id: prepared.confirmationId,
+    expires_at: prepared.expiresAt,
+    summary: {
+      stay: resource.name,
+      resource_code: resource.code,
+      check_in: prepared.payload.checkIn,
+      check_out: prepared.payload.checkOut,
+      nights,
+      party_size: prepared.payload.partySize,
+      quantity: prepared.payload.quantity,
+      customer_name: prepared.payload.customerName,
+      phone: prepared.payload.phone,
+      availability_status: prepared.preview.availabilityStatus,
+    },
+    confirmation_required: true,
+    exact_confirmation_phrase_th: 'ยืนยันจอง',
+    instruction: 'Do not call the commit tool in this same customer turn. Show the summary and ask for explicit confirmation.',
+  };
+}
+
+async function getPreparedStayBooking(
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok: false, error: 'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+
+  const prepared = await loadPreparedStay(context.guestDbId);
+  if (!prepared) return { ok: true, prepared: false };
+  if (prepared.environment !== mode.environment) return { ok: true, prepared: false };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) return { ok: true, prepared: false, expired: true };
+  if (prepared.status === 'committed') {
+    return {
+      ok: true,
+      prepared: false,
+      committed: true,
+      confirmation_id: prepared.confirmationId,
+      result: prepared.result ?? null,
+    };
+  }
+  return {
+    ok: true,
+    prepared: true,
+    confirmation_id: prepared.confirmationId,
+    expires_at: prepared.expiresAt,
+    summary: {
+      stay: prepared.payload.resourceName,
+      resource_code: prepared.payload.resourceCode,
+      check_in: prepared.payload.checkIn,
+      check_out: prepared.payload.checkOut,
+      party_size: prepared.payload.partySize,
+      quantity: prepared.payload.quantity,
+      customer_name: prepared.payload.customerName,
+      phone: prepared.payload.phone,
+      availability_status: prepared.preview.availabilityStatus,
+    },
+    exact_confirmation_phrase_th: 'ยืนยันจอง',
+  };
+}
+
+async function commitPreparedStayBooking(
+  args: Record<string, unknown>,
+  context: ThongthaiAgentTransactionContext,
+): Promise<Record<string, unknown>> {
+  if (!context.guestDbId) return { ok: false, error: 'guest_identity_required' };
+  const mode = modeAllowed(context);
+  if (!mode.ok) return mode;
+
+  const confirmationId = textArg(args, 'confirmation_id', 80);
+  if (!confirmationId) return { ok: false, error: 'confirmation_id_required' };
+  const prepared = await loadPreparedStay(context.guestDbId);
+  if (!prepared || prepared.confirmationId !== confirmationId) {
+    return { ok: false, error: 'prepared_stay_transaction_not_found' };
+  }
+  if (prepared.status === 'committed' && prepared.result) {
+    return { ok: true, committed: true, replayed: true, ...prepared.result };
+  }
+  if (prepared.environment !== mode.environment) return { ok: false, error: 'prepared_transaction_environment_mismatch' };
+  if (Date.parse(prepared.expiresAt) <= Date.now()) return { ok: false, error: 'prepared_transaction_expired' };
+  if (prepared.preparedEventId === context.eventId) {
+    return { ok: false, error: 'same_turn_commit_blocked', instruction: 'Wait for a later customer message that explicitly confirms.' };
+  }
+  if (!currentTurnExplicitlyConfirmsPreparedBooking(context.message)) {
+    return { ok: false, error: 'explicit_customer_confirmation_required', exact_confirmation_phrase_th: 'ยืนยันจอง' };
+  }
+
+  const p = prepared.payload;
+  const booking = await createBooking({
+    guestDbId: context.guestDbId,
+    channel: context.channel,
+    serviceType: 'stay',
+    resourceCode: p.resourceCode,
+    date: p.checkIn,
+    endDate: p.checkOut,
+    partySize: p.partySize,
+    quantity: p.quantity,
+    customerName: p.customerName,
+    phone: p.phone,
+    email: p.email,
+    note: p.note,
+    environment: mode.environment,
+  });
+
+  const notificationStatus = mode.environment === 'live'
+    ? await dispatchCreatedTransactionNotification('booking', booking.id)
+    : 'ignored_test_mode';
+
+  const result = {
+    bookingId: booking.id,
+    bookingCode: booking.bookingCode,
+    status: booking.status,
+    startAt: booking.startAt ?? null,
+    endAt: booking.endAt ?? null,
+    notificationStatus,
+  };
+  await savePreparedStay(context.guestDbId, { ...prepared, status: 'committed', result });
+
+  return {
+    ok: true,
+    committed: true,
+    replayed: false,
+    booking_code: booking.bookingCode,
+    booking_status: booking.status,
+    start_at: booking.startAt,
+    end_at: booking.endAt,
+    notification_status: notificationStatus,
+    customer_copy_rule: 'This is a stay booking request returned by operations. Do not call it room-confirmed, paid, or staff-confirmed unless separately verified.',
+  };
+}
+
 export async function executeThongthaiTransactionTool(
   name: string,
   rawArgs: unknown,
@@ -458,6 +766,12 @@ export async function executeThongthaiTransactionTool(
     result = await getPreparedActivityBooking(context);
   } else if (name === 'commit_prepared_activity_booking') {
     result = await commitPreparedActivityBooking(args, context);
+  } else if (name === 'prepare_stay_booking') {
+    result = await prepareStayBooking(args, context);
+  } else if (name === 'get_prepared_stay_booking') {
+    result = await getPreparedStayBooking(context);
+  } else if (name === 'commit_prepared_stay_booking') {
+    result = await commitPreparedStayBooking(args, context);
   } else {
     result = { ok: false, error: 'unknown_transaction_tool' };
   }
