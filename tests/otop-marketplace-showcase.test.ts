@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const html = await readFile(new URL('../otop.html', import.meta.url), 'utf8');
-const manifest = JSON.parse(await readFile(new URL('../assets/brand/otop/hero/hero-video-manifest.json', import.meta.url), 'utf8'));
+const html = readFileSync(new URL('../otop.html', import.meta.url), 'utf8');
+const manifest = JSON.parse(readFileSync(new URL('../assets/brand/otop/hero/hero-video-manifest.json', import.meta.url), 'utf8'));
 
 test('OTOP marketplace opens with the locked owner-selected hero film', () => {
   assert.ok(html.includes('id="showcase"'));
@@ -18,7 +18,7 @@ test('OTOP marketplace opens with the locked owner-selected hero film', () => {
 });
 
 test('showcase respects reduced motion and has a non-video fallback', () => {
-  assert.ok(html.includes('poster="assets/brand/backgrounds/ban-khwao-silk-weaving-4k.webp"'));
+  assert.ok(html.includes(manifest.poster.url));
   assert.ok(html.includes('prefers-reduced-motion:reduce'));
   assert.ok(html.includes("const reduce=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches"));
 });
