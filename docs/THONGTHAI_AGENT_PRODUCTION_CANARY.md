@@ -54,3 +54,6 @@ Rollout history:
 - Phase 2 FINAL closeout certification window: five fresh synthetic WEB guests are temporarily allowlisted (f2f...0101–0105). Public prepare rollout remains 0%; live Agent commit remains OFF. Clear the allowlist immediately after the 5/5 production gauntlet.
 
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
+
+
+- 2026-10-01 Phase 2 final rerun env refresh: production synthetic allowlist rotated to five fresh WEB guests ending 0201–0205 after PR #419. This docs-only commit forces a production Functions rebuild so the runtime env snapshot matches the current allowlist. Public prepare remains 0%; live commit remains OFF.
