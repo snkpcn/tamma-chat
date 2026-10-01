@@ -40,4 +40,7 @@ Rollout history:
 - Production certification exposed a prepare-routing bug: an ordinary affirmative `ขอจอง...` request reached the Saved Agent but runtime kept transaction mode OFF. PR #388 fixed the gate by reusing the existing fail-closed standalone transaction-request parser; booking questions and `ยังไม่จอง` remain excluded.
 - Synthetic prepare certification guest rotated before re-test; public prepare rollout remains 0% and live commit remains OFF.
 
+- Fast-prepare latency fix: production Saved Agent profile v3 instructs direct self-validating `prepare_*` calls when all required fields are already present, avoiding redundant catalog/availability tool rounds.
+- Fresh latency certification uses one synthetic WEB guest while public prepare rollout remains 0% and live commit remains OFF.
+
 This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
