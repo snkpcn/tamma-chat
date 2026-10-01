@@ -62,3 +62,6 @@ This file also records the environment-configuration deployment point so the Net
 
 
 - 2026-10-01 Phase 2 Wave B certification: temporary production allowlist rotated to Restaurant + OTOP synthetic guests ending 0401–0402. This docs-only marker rebuilds Functions with the new env snapshot. Public prepare remains 0%; live commit remains OFF.
+
+
+- 2026-10-01 Wave B forced redeploy marker 2: rebuild current main after Netlify remained on the prior Wave A deploy. No configuration change; Restaurant + OTOP synthetic allowlist remains ending 0401–0402.
