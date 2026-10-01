@@ -1,0 +1,451 @@
+/*
+ * Pre-Worldwide production layout contract
+ * Scope: public OTOP commerce + the OTOP gateway on the main site.
+ * Goal: one visual rail, one spacing system, no alternating/masonry behavior.
+ */
+
+:root {
+  --otop-shell: 1180px;
+  --otop-gutter: 24px;
+  --otop-section-gap: 72px;
+  --otop-card-gap: 28px;
+}
+
+/* ---------- OTOP STORE ---------- */
+body > .top .nav,
+.showcaseContent,
+.wrap {
+  width: 100%;
+  max-width: var(--otop-shell);
+  margin-inline: auto;
+}
+
+body > .top .nav,
+.showcaseContent,
+.wrap {
+  padding-inline: var(--otop-gutter);
+}
+
+.wrap {
+  padding-top: 56px;
+  padding-bottom: 96px;
+}
+
+.intro,
+.toolbar,
+.sectionHead,
+.categoryHead {
+  text-align: left;
+}
+
+.intro {
+  align-items: start;
+  column-gap: 48px;
+}
+
+.sectionHead,
+.categoryHead {
+  align-items: start;
+}
+
+.merchSection {
+  margin-block: 56px 72px;
+}
+
+.productRail {
+  grid-auto-columns: minmax(260px, 31%);
+  gap: 20px;
+  padding-bottom: 14px;
+}
+
+.productRail .railMeta {
+  align-items: flex-start;
+}
+
+.categorySection {
+  margin-block: 64px 84px;
+}
+
+.categoryGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 40px 22px;
+}
+
+/* Kill the old featured-card asymmetry. The catalog is a real commerce grid. */
+.categoryGrid .card.featureCard,
+.categoryGrid .card:not(.featureCard) {
+  grid-column: auto;
+}
+
+.categoryGrid .featureCard .photo,
+.categoryGrid .card:not(.featureCard) .photo {
+  aspect-ratio: 4 / 5;
+  border-radius: 16px;
+}
+
+.categoryGrid .featureCard .cardBody,
+.categoryGrid .cardBody {
+  display: flex;
+  padding: 14px 1px 0;
+}
+
+.cardBody,
+.productOpen {
+  text-align: left;
+}
+
+.cardFoot {
+  align-items: flex-start;
+}
+
+.photo {
+  border-radius: 16px;
+}
+
+.title {
+  max-width: 28ch;
+}
+
+.desc {
+  max-width: 44ch;
+}
+
+/* ---------- TABLET ---------- */
+@media (max-width: 1023.98px) {
+  :root {
+    --otop-gutter: 20px;
+    --otop-section-gap: 64px;
+  }
+
+  .categoryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 36px 20px;
+  }
+
+  .intro {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shipping {
+    width: 100%;
+    max-width: none;
+    margin-top: 18px;
+  }
+}
+
+/* ---------- MOBILE ---------- */
+@media (max-width: 680px) {
+  :root {
+    --otop-gutter: 16px;
+    --otop-section-gap: 56px;
+    --otop-card-gap: 42px;
+  }
+
+  body > .top .nav,
+  .showcaseContent,
+  .wrap {
+    padding-inline: var(--otop-gutter);
+  }
+
+  .top .nav {
+    flex-wrap: nowrap;
+    min-height: 58px;
+    gap: 10px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .top .logo img {
+    width: 104px;
+  }
+
+  .top .tools {
+    display: flex !important;
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
+    gap: 7px;
+    align-items: center;
+  }
+
+  .top .provinceField,
+  .top .searchField,
+  .top .account {
+    display: none !important;
+  }
+
+  .top .cartBtn {
+    position: static !important;
+    width: auto !important;
+    grid-column: auto !important;
+    height: 38px;
+    padding-inline: 12px;
+    font-size: 12px;
+  }
+
+  .showcaseContent {
+    padding-top: 120px;
+    padding-bottom: 44px;
+  }
+
+  .showcase h1 {
+    max-width: 12ch;
+    font-size: clamp(34px, 9.2vw, 42px);
+    line-height: 1.16;
+  }
+
+  .showcaseLead {
+    max-width: 32ch;
+    font-size: 14px;
+    line-height: 1.72;
+  }
+
+  .showcaseActions {
+    gap: 10px;
+  }
+
+  .wrap {
+    padding-top: 38px;
+    padding-bottom: 80px;
+  }
+
+  .intro,
+  .toolbar,
+  .sectionHead,
+  .categoryHead {
+    display: block;
+    width: 100%;
+    text-align: left;
+  }
+
+  .intro {
+    padding-bottom: 28px;
+  }
+
+  .intro h1 {
+    max-width: none;
+    font-size: 32px;
+  }
+
+  .intro p,
+  .sectionHead p,
+  .categoryHead p {
+    max-width: 100%;
+  }
+
+  .shipping {
+    margin-top: 18px;
+    width: 100%;
+  }
+
+  .mobileCatalogTools {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin: 22px 0 6px;
+  }
+
+  .mobileCatalogTools select,
+  .mobileCatalogTools input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .merchSection {
+    margin-block: 42px 58px;
+  }
+
+  .sectionHead {
+    margin-bottom: 18px;
+  }
+
+  .sectionHead h2,
+  .categoryHead h2 {
+    font-size: 28px;
+    line-height: 1.22;
+  }
+
+  /* Horizontal movement is intentional only for curated / best-seller rail. */
+  .productRail {
+    grid-auto-columns: 82vw;
+    gap: 14px;
+    margin-inline: calc(var(--otop-gutter) * -1);
+    padding-inline: var(--otop-gutter);
+    padding-bottom: 14px;
+    scroll-padding-left: var(--otop-gutter);
+  }
+
+  .productRail .photo {
+    aspect-ratio: 4 / 5;
+    border-radius: 16px;
+  }
+
+  .productRail .cardBody {
+    padding: 14px 0 0;
+  }
+
+  .productRail .railMeta {
+    display: block;
+  }
+
+  .productRail .railBadge {
+    display: inline-block;
+    margin-top: 6px;
+  }
+
+  .toolbar {
+    padding: 30px 0 16px;
+  }
+
+  .sort {
+    width: 100%;
+    margin-top: 16px;
+  }
+
+  .categoryNav {
+    margin-inline: calc(var(--otop-gutter) * -1);
+    padding-inline: var(--otop-gutter);
+    padding-bottom: 18px;
+    scroll-padding-left: var(--otop-gutter);
+  }
+
+  .categorySection {
+    margin-block: 52px 72px;
+    scroll-margin-top: 82px;
+  }
+
+  .categoryHead {
+    margin-bottom: 20px;
+    padding-top: 0;
+  }
+
+  .categoryHead .stock {
+    display: block;
+    margin-top: 10px;
+  }
+
+  .categoryGrid {
+    grid-template-columns: 1fr;
+    gap: var(--otop-card-gap);
+  }
+
+  .categoryGrid .card,
+  .categoryGrid .card.featureCard {
+    width: 100%;
+    margin: 0;
+  }
+
+  .categoryGrid .featureCard .photo,
+  .categoryGrid .card:not(.featureCard) .photo {
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    border-radius: 16px;
+  }
+
+  .categoryGrid .featureCard .cardBody,
+  .categoryGrid .cardBody {
+    display: flex;
+    padding: 14px 0 0;
+  }
+
+  .productOpen {
+    gap: 0;
+  }
+
+  .provinceTag {
+    font-size: 10px;
+  }
+
+  .title {
+    margin-top: 7px;
+    font-size: 19px;
+    max-width: none;
+  }
+
+  .desc {
+    margin: 7px 0 12px;
+    max-width: none;
+    -webkit-line-clamp: 3;
+    line-height: 1.65;
+  }
+
+  /* Keep product actions on the same left rail; no random left/right rhythm. */
+  .cardFoot {
+    display: block;
+    padding-top: 0;
+  }
+
+  .price {
+    font-size: 22px;
+  }
+
+  .view {
+    display: inline-block;
+    margin-top: 10px;
+  }
+
+  .detailMedia {
+    height: 62dvh;
+    min-height: 430px;
+    padding: 12px 16px;
+  }
+
+  .detailInfo {
+    padding: 34px 20px calc(104px + env(safe-area-inset-bottom));
+  }
+
+  .detailInfo h2 {
+    font-size: 30px;
+  }
+
+  .sheet {
+    padding: 18px 16px calc(22px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------- MAIN-SITE OTOP GATEWAY ---------- */
+@media (max-width: 767.98px) {
+  html.isan-boutique .community-map-gateway .community-feature {
+    grid-template-columns: 1fr;
+    border-radius: 20px;
+  }
+
+  html.isan-boutique .community-story-feature .community-feature-media {
+    min-height: 260px;
+  }
+
+  html.isan-boutique .community-feature-copy {
+    align-items: flex-start !important;
+    text-align: left !important;
+    padding: 30px 20px 26px;
+  }
+
+  html.isan-boutique .community-story-feature .community-feature-logo,
+  html.isan-boutique .community-feature-logo {
+    width: 120px;
+    height: 120px;
+    margin: 0 0 18px;
+  }
+
+  html.isan-boutique .community-feature .card-kicker,
+  html.isan-boutique .community-feature h3,
+  html.isan-boutique .community-feature p {
+    width: 100%;
+    max-width: none;
+    text-align: left;
+  }
+
+  html.isan-boutique .community-map-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 24px;
+  }
+
+  html.isan-boutique .community-map-actions .btn {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+}
