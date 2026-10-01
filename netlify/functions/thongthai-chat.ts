@@ -5054,19 +5054,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     request.message,
     topLevelSemanticIntent,
   );
-  const prepareOnlyAgentEligible = explicitTransactionIntent
-    && shouldUseThongthaiAgentTransactionPrepare({
-      guestKey: request.guestId,
-      guestDbId,
-      channel,
-    });
+  // Selection of the prepare-only canary is independent of the CURRENT
+  // sentence's transaction wording. A later "ยืนยันส่งคำถาม", "เอาไว้ก่อน",
+  // or status readback may contain no fresh จอง/สั่ง verb at all, but it still
+  // belongs to the already-prepared draft. Probe that bounded draft state
+  // before any model path; the probe returns null for unrelated turns.
+  const prepareOnlyAgentSelected = shouldUseThongthaiAgentTransactionPrepare({
+    guestKey: request.guestId,
+    guestDbId,
+    channel,
+  });
+  const prepareOnlyAgentEligible = explicitTransactionIntent && prepareOnlyAgentSelected;
 
-  // Gate 0 latency guarantee: a fully-specified horse booking does not need
-  // an LLM round trip merely to invoke the self-validating prepare tool.
-  // Execute the non-consequential draft operation directly, then return the
-  // same customer-safe prepare-only contract. Ambiguous/incomplete transaction
-  // language still falls through to the Saved Agent for natural conversation.
-  if (prepareOnlyAgentEligible && guestDbId) {
+  // Gate 0 latency guarantee: prepare and prepared-draft continuation turns
+  // never need an LLM round trip. The runtime remains prepare-only: commit
+  // tools are absent and independently hard-blocked server-side.
+  if (prepareOnlyAgentSelected && guestDbId) {
     const preparedFast = await runPrepareOnlyMultiVerticalFastPath(
       request,
       guestDbId,
@@ -5078,7 +5081,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
       );
       return null;
-    }) ?? await prepareOnlyActivityFastPath(
+    }) ?? (prepareOnlyAgentEligible ? await prepareOnlyActivityFastPath(
       request,
       guestDbId,
       channel,
@@ -5089,7 +5092,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
       );
       return null;
-    });
+    }) : null);
     if (preparedFast) {
       const polished = polishedResponse(preparedFast, channel);
       try {

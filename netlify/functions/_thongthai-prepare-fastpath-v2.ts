@@ -152,6 +152,14 @@ async function existing(message:string,ctx:TxContext):Promise<{family:Family;val
   return null;
 }
 
+export function isPreparedTransactionStatusCheck(message:string):boolean {
+  const text=message.trim();
+  if(!/[?？]|ใช่ไหม|ใช่มั้ย|หรือเปล่า|รึเปล่า/u.test(text)) return false;
+  const namesTransaction=/(?:การจอง|จอง|ออเดอร์|คำสั่งซื้อ|คำถาม|รายการ)/u.test(text);
+  const asksExistence=/(?:ยังไม่มี|ยังไม่ได้|ไม่มี|ไม่ได้).{0,60}(?:สร้าง|ส่ง|ทำรายการ|จอง)|(?:สร้าง|ส่ง|ทำรายการ|จอง).{0,60}(?:หรือยัง|ไหม|มั้ย)/u.test(text);
+  return namesTransaction && asksExistence;
+}
+
 async function initialStayArgs(message:string):Promise<Record<string,unknown>|null> {
   if(!/(?:เฮือนสเตย์|โฮมสเตย์|ที่พัก|ห้องนอน)/u.test(message)) return null;
   const c=contact(message);
@@ -334,9 +342,11 @@ export async function runPrepareOnlyMultiVerticalFastPath(
     message:request.message,transactionMode:'prepare',
   };
   const cafeConfirm=/ยืนยัน\s*ส่ง\s*คำถาม/u.test(request.message);
-  if(hasCommitMarker(request.message)||cafeConfirm||hasExplicitNoTransactionMarker(request.message)){
+  const statusCheck=isPreparedTransactionStatusCheck(request.message);
+  if(hasCommitMarker(request.message)||cafeConfirm||hasExplicitNoTransactionMarker(request.message)||statusCheck){
     const found=await existing(request.message,ctx);
     if(found){
+      if(statusCheck) return compose(found.family,found.value,'held');
       if(hasExplicitNoTransactionMarker(request.message)) return compose(found.family,found.value,'held');
       if(hasCorrectionMarker(request.message)){
         const args=await correctedArgs(found.family,found.value,request.message);
