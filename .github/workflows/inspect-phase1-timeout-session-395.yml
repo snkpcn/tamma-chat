@@ -1,0 +1,25 @@
+name: Inspect Phase 1 Timeout Session 395
+
+on:
+  push:
+    branches:
+      - inspect-phase1-timeout-session-395
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Inspect timed-out saved Agent session
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx tsx scripts/inspect-phase1-timeout-session-395.ts
