@@ -47,4 +47,4 @@ Rollout history:
 
 - Final prepare-only latency check uses two synthetic WEB test guests: one routing probe and one fresh first-prepare run. Public prepare rollout remains 0% and live commit remains OFF.
 
-This file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
+- Primary Agent latency hotfix PR #395 removes redundant post-turn persistence and avoids re-fetching settled usage when the completed Agent turn already includes it. A fresh synthetic WEB guest is allowlisted for the final first-prepare latency certification; public prepare rollout remains 0% and live commit remains OFF.\n\nThis file also records the environment-configuration deployment point so the Netlify production functions are rebuilt after each canary percentage change.
