@@ -14,7 +14,7 @@
 // (that's _service-mind-feedback-events.ts).
 import { hasCommitMarker } from './_slot-parsers';
 
-export type FeedbackType = 'compliment' | 'complaint' | 'suggestion' | 'safety_issue' | 'system_feedback';
+export type FeedbackType = 'compliment' | 'complaint' | 'suggestion' | 'safety_issue' | 'system_feedback' | 'incident';
 export type BusinessUnit = 'restaurant' | 'activity' | 'stay' | 'cafe' | 'membership' | 'system' | 'general' | 'unknown';
 export type Severity = 'low' | 'normal' | 'high' | 'urgent';
 export type PersonMentionKind = 'named' | 'role';
@@ -22,7 +22,7 @@ export type PersonMention = { label: string; kind: PersonMentionKind };
 export type IssueKeyword =
   | 'service' | 'delay' | 'cleanliness' | 'safety' | 'food_quality' | 'staff_behavior'
   | 'pricing' | 'booking' | 'payment' | 'communication' | 'system_error'
-  | 'activity_condition' | 'accessibility' | 'child_safety' | 'elderly_comfort';
+  | 'activity_condition' | 'accessibility' | 'child_safety' | 'elderly_comfort' | 'lost_property';
 
 export type ServiceFeedbackMatch = {
   feedbackType: FeedbackType;
@@ -63,6 +63,11 @@ const URGENT_SAFETY_MARKER = /ไฟไหม้|ไฟลุก|ไฟช็อ
 // concern; a problem reported with no such context is an equipment/
 // service complaint.
 const SAFETY_CONCERN_MARKER = /พื้นลื่น(?:มาก)?|น่ากลัว|เกือบ(?:ล้ม|ตก|ชน)|ไม่ปลอดภัย|เสี่ยงอันตราย|อันตรายมาก|มีปัญหาระหว่างทาง|ดูเหนื่อย/u;
+
+// A lost-property report is an operational incident, not casual local chat.
+// It must open a durable case and alert a human immediately even when the
+// customer has not yet supplied the exact time/location/item description.
+const LOST_PROPERTY_MARKER = /ของหาย|ทำ(?:ของ|กระเป๋า|โทรศัพท์|มือถือ|กุญแจ|หมวก|กระเป๋าสตางค์|กระเป๋าตังค์).*หาย|ลืม(?:ของ|กระเป๋า|โทรศัพท์|มือถือ|กุญแจ|หมวก|กระเป๋าสตางค์|กระเป๋าตังค์)|หา(?:ของ|กระเป๋า|โทรศัพท์|มือถือ|กุญแจ|หมวก|กระเป๋าสตางค์|กระเป๋าตังค์).*ไม่เจอ|(?:กระเป๋า|โทรศัพท์|มือถือ|กุญแจ|หมวก|กระเป๋าสตางค์|กระเป๋าตังค์)หาย/u;
 
 const COMPLAINT_MARKER = /แย่มาก|แย่จัง|ห่วย|รอนาน|นานมาก|ช้า|ไม่พอใจ|ผิดหวัง|ไม่ประทับใจ|บริการแย่|ไม่(?:ค่อย)?สะอาด|สกปรก|เย็นชา|หยาบคาย|ไม่สุภาพ|พูดไม่ดี|ทำไม่ดี|นิสัยไม่ดี|ตำหนิ|ร้องเรียน|มีปัญหา|ไม่โอเค|ตอบมั่ว|ไม่ตรง|ไม่ขึ้น|ควรแก้|ช่วยปรับ/u;
 const COMPLIMENT_MARKER = /ดูแลดีมาก|ดูแลดี|ประทับใจ|ชื่นชม|ขอชม|เก่งมาก|น่ารัก|บริการดี(?:มาก)?|ดีมากเลย|ยอดเยี่ยม|อร่อย|ตอบดี|ช่วยดี/u;
@@ -193,7 +198,9 @@ const ISSUE_KEYWORD_MARKERS: ReadonlyArray<{ issue: IssueKeyword; pattern: RegEx
   { issue: 'elderly_comfort', pattern: /ผู้สูงอายุ|เดินไม่สะดวก|เดินไม่ไหว/u },
   { issue: 'safety', pattern: /ปลอดภัย|อันตราย|ไฟไหม้|ไฟรั่ว|บาดเจ็บ|เกือบล้ม|เกือบตก/u },
   { issue: 'cleanliness', pattern: /สะอาด|สกปรก/u },
-  { issue: 'delay', pattern: /รอนาน|นานมาก|ช้า/u },
+  // Never match the time-of-day word "เช้า" as a delay merely because it
+  // contains a similar vowel/consonant sequence. Require a real delay shape.
+  { issue: 'delay', pattern: /รอนาน|นานมาก|(?:อาหาร|บริการ|ระบบ|ตอบ|ทำงาน)ช้า|(?:^|\s)ช้า(?:มาก|เกินไป|จัง|นะ|ครับ|ค่ะ|คะ|$)/u },
   { issue: 'food_quality', pattern: /อาหาร|เมนู|รสชาติ|อร่อย/u },
   { issue: 'staff_behavior', pattern: /พูดไม่ดี|ทำไม่ดี|นิสัยไม่ดี|หยาบคาย|ไม่สุภาพ|เย็นชา|ดูแลดี|น่ารัก/u },
   { issue: 'pricing', pattern: /ราคา|แพง|ไม่ตรง(?:ราคา)?/u },
@@ -204,6 +211,7 @@ const ISSUE_KEYWORD_MARKERS: ReadonlyArray<{ issue: IssueKeyword; pattern: RegEx
   { issue: 'activity_condition', pattern: /พื้นลื่น|สภาพพื้น|มีปัญหาระหว่างทาง|ดูเหนื่อย/u },
   { issue: 'accessibility', pattern: /ทางลาด|วีลแชร์|เดินไม่สะดวก/u },
   { issue: 'service', pattern: /บริการ/u },
+  { issue: 'lost_property', pattern: LOST_PROPERTY_MARKER },
 ];
 
 // Horse names/activity assets -- a small closed list, the SAME horses
@@ -289,6 +297,7 @@ export function classifyServiceFeedback(message: string): ServiceFeedbackMatch |
   // Urgent safety always wins, regardless of what else the message says.
   if (URGENT_SAFETY_MARKER.test(text)) return withExtraction('safety_issue', 'urgent');
   if (SAFETY_CONCERN_MARKER.test(text)) return withExtraction('safety_issue', 'high');
+  if (LOST_PROPERTY_MARKER.test(text)) return withExtraction('incident', 'high');
 
   // Compliments about Thongthai's own answers are checked BEFORE the
   // negative-only SYSTEM_FEEDBACK_MARKER, so "ทองไทยตอบดี" is a compliment,

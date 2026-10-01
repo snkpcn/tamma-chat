@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { choosePaymentForReceipt, shouldAttachRestaurantFollowUpCard, type PaymentRequest } from '../netlify/functions/_payments';
+import { choosePaymentForReceipt, shouldAttachRestaurantFollowUpCard, verifiedPaymentCustomerText, type PaymentRequest } from '../netlify/functions/_payments';
 
 function fakeRequest(overrides: Partial<PaymentRequest>): PaymentRequest {
   return {
@@ -142,4 +142,15 @@ test('C. fuel/reimbursement workflow is untouched: its own handlers are still wi
   assert.match(lineWebhookSource, /handleLineFuelImage/);
   assert.match(lineWebhookSource, /handleLineFuelText/);
   assert.match(lineWebhookSource, /hasPendingLineFuelSession/);
+});
+
+test('verified payment closes the service loop with confirmation, gratitude, next step, and a return invitation', () => {
+  const text = verifiedPaymentCustomerText(fakeRequest({ entity_code:'OR-260930-A0924DDC', amount:2500 }));
+  assert.match(text,/ยืนยันการชำระเงินแล้ว/u);
+  assert.match(text,/OR-260930-A0924DDC/u);
+  assert.match(text,/2,500 บาท/u);
+  assert.match(text,/ขอบคุณที่ไว้วางใจทำมา-ชาติ/u);
+  assert.match(text,/แจ้งความคืบหน้า/u);
+  assert.match(text,/กลับมาใช้บริการ.*อีก/u);
+  assert.doesNotMatch(text,/ยืนยันการจองแล้ว/u,'verified payment must not falsely claim the booking/order itself is confirmed');
 });

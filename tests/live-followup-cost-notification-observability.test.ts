@@ -215,3 +215,54 @@ test('F5: two separate ledger sessions may end at the same call index without su
     assert.equal(harness.notificationDeliveries().filter(d=>d.deliveryType==='ai_cost_conversation').length,2);
   });
 });
+
+test('F6: an idle deterministic-only conversation is reported with an exact zero cost instead of disappearing', async () => {
+  await withHarness(async harness => {
+    harness.programOpsChannel('ai_cost', 'ai-cost-group-1');
+    harness.programAiCostRows([], [
+      {
+        conversation_id:'conv-zero-cost',event_id:'zero-turn-1',channel:'web',
+        model_reply_used:false,grounded_knowledge_supplied:true,zero_cost_turn:true,
+        final_response_source:'grounded_deterministic_fallback',occurred_at:iso(20),
+      },
+    ]);
+
+    const results=await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(results.length,1);
+    assert.equal(results[0]!.status,'sent');
+    assert.equal(results[0]!.costThb,0);
+    const delivery=harness.postsTo('ops_notification_deliveries').find(row=>row.delivery_type==='ai_cost_conversation');
+    assert.deepEqual(delivery?.payload && (delivery.payload as any).channels,[
+      {channel:'web',cost:0,calls:0,turns:1},
+    ]);
+  });
+});
+
+test('F7: one cross-channel conversation reports a per-channel cost breakdown', async () => {
+  await withHarness(async harness => {
+    harness.programOpsChannel('ai_cost', 'ai-cost-group-1');
+    harness.programAiCostRows([
+      {
+        conversation_id:'conv-cross-channel',event_id:'web-1',channel:'web',model:'gpt-5.6-sol',
+        call_purpose:'semantic-interpreter',input_tokens:100,cached_input_tokens:0,output_tokens:20,
+        cost_thb:0.2,call_index_conversation:1,occurred_at:iso(22),
+      },
+      {
+        conversation_id:'conv-cross-channel',event_id:'line-1',channel:'line',model:'gpt-5.6-sol',
+        call_purpose:'grounded-response-composition',input_tokens:200,cached_input_tokens:0,output_tokens:30,
+        cost_thb:0.3,call_index_conversation:2,occurred_at:iso(21),
+      },
+    ],[
+      {conversation_id:'conv-cross-channel',event_id:'web-1',channel:'web',model_reply_used:true,grounded_knowledge_supplied:false,zero_cost_turn:false,occurred_at:iso(22)},
+      {conversation_id:'conv-cross-channel',event_id:'line-1',channel:'line',model_reply_used:true,grounded_knowledge_supplied:true,zero_cost_turn:false,occurred_at:iso(21)},
+    ]);
+
+    const results=await sendIdleAiCostConversationSummaries(NOW);
+    assert.equal(results[0]!.costThb,0.5);
+    const delivery=harness.postsTo('ops_notification_deliveries').find(row=>row.delivery_type==='ai_cost_conversation');
+    assert.deepEqual(delivery?.payload && (delivery.payload as any).channels,[
+      {channel:'line',cost:0.3,calls:1,turns:1},
+      {channel:'web',cost:0.2,calls:1,turns:1},
+    ]);
+  });
+});

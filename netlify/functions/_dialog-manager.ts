@@ -913,6 +913,16 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
     case 'cafe':
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'cafe', needs: ['catalog'] }];
       return [];
+    case 'payment':
+      // Payment truth is mutable operational state. A customer asking for a
+      // QR, whether a slip arrived, or whether payment was verified must
+      // always read the guest-scoped canonical payment request; never answer
+      // from conversational memory or a model-generated status.
+      if (turn.action === 'ask' || turn.action === 'status'
+          || turn.informationNeed === 'transaction_status') {
+        return [{ ...base, domain:'payment', needs:['payment_status'] }];
+      }
+      return [];
     case 'ecosystem':
       if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'ecosystem', needs: ['catalog'] }];
       return [];

@@ -1,13 +1,15 @@
 import { sendAiCostLineNotification } from './_ops-notifications';
 import { aiCostPolicy } from './_ai-cost-policy';
 
+const COST_REPORT_IDLE_MS=10*60_000;
+
 type CostRow={
   conversation_id:string;event_id:string;channel:string;model:string;call_purpose:string;
   input_tokens:number;cached_input_tokens:number;output_tokens:number;cost_thb:number|string;
   call_index_conversation:number;occurred_at:string;
 };
 type TurnRow={
-  conversation_id:string;model_reply_used:boolean;grounded_knowledge_supplied:boolean;
+  conversation_id:string;event_id:string;channel:string;model_reply_used:boolean;grounded_knowledge_supplied:boolean;
   zero_cost_turn:boolean;occurred_at:string;
 };
 
@@ -39,20 +41,30 @@ function dayBounds(d:string){
     end:new Date(`${nextDate(d)}T00:00:00+07:00`).toISOString(),
   };
 }
-function latestLedgerSession(rows:CostRow[]):CostRow[]{
-  if(!rows.length)return[];
-  const ordered=[...rows].sort((a,b)=>a.occurred_at.localeCompare(b.occurred_at));
+function latestConversationSession(costRows:CostRow[],turnRows:TurnRow[]):{calls:CostRow[];turns:TurnRow[]}{
+  const activity=[
+    ...costRows.map(row=>({kind:'cost' as const,at:row.occurred_at,row})),
+    ...turnRows.map(row=>({kind:'turn' as const,at:row.occurred_at,row})),
+  ].sort((a,b)=>a.at.localeCompare(b.at));
+  if(!activity.length)return{calls:[],turns:[]};
   const ledgerIdleMs=aiCostPolicy().conversationIdleMs;
-  let start=0;
-  for(let i=1;i<ordered.length;i+=1){
-    const previous=ordered[i-1]!,current=ordered[i]!;
-    const previousIndex=n(previous.call_index_conversation),currentIndex=n(current.call_index_conversation);
-    const previousAt=Date.parse(previous.occurred_at),currentAt=Date.parse(current.occurred_at);
-    const indexReset=previousIndex>0&&currentIndex>0&&currentIndex<=previousIndex;
+  let startAt=activity[0]!.at;
+  let previousAt=Date.parse(activity[0]!.at);
+  let previousCallIndex=activity[0]!.kind==='cost'?n(activity[0]!.row.call_index_conversation):0;
+  for(let i=1;i<activity.length;i+=1){
+    const current=activity[i]!;
+    const currentAt=Date.parse(current.at);
+    const currentIndex=current.kind==='cost'?n(current.row.call_index_conversation):0;
+    const indexReset=current.kind==='cost'&&previousCallIndex>0&&currentIndex>0&&currentIndex<=previousCallIndex;
     const idleReset=Number.isFinite(previousAt)&&Number.isFinite(currentAt)&&currentAt-previousAt>=ledgerIdleMs;
-    if(indexReset||idleReset)start=i;
+    if(indexReset||idleReset)startAt=current.at;
+    previousAt=currentAt;
+    if(current.kind==='cost')previousCallIndex=currentIndex;
   }
-  return ordered.slice(start);
+  return{
+    calls:costRows.filter(row=>row.occurred_at>=startAt).sort((a,b)=>a.occurred_at.localeCompare(b.occurred_at)),
+    turns:turnRows.filter(row=>row.occurred_at>=startAt).sort((a,b)=>a.occurred_at.localeCompare(b.occurred_at)),
+  };
 }
 
 function summarize(rows:CostRow[],turns:TurnRow[]){
@@ -70,86 +82,96 @@ function summarize(rows:CostRow[],turns:TurnRow[]){
   };
 }
 
+function channelBreakdown(rows:CostRow[],turns:TurnRow[]){
+  const channels=new Map<string,{cost:number;calls:number;turns:number}>();
+  const ensure=(channel:string)=>{
+    const key=(channel||'unknown').toLowerCase();
+    const value=channels.get(key)??{cost:0,calls:0,turns:0};
+    channels.set(key,value);
+    return value;
+  };
+  for(const row of rows){
+    const value=ensure(row.channel);
+    value.cost+=n(row.cost_thb);
+    value.calls+=1;
+  }
+  for(const row of turns)ensure(row.channel).turns+=1;
+  return [...channels.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([channel,value])=>({
+    channel,cost:Math.max(0,value.cost),calls:value.calls,turns:value.turns,
+  }));
+}
+
 export async function sendIdleAiCostConversationSummaries(now=new Date()){
   // Look back far enough that a temporarily unavailable scheduled invocation
   // does not permanently lose a conversation summary. Delivery idempotency
   // prevents repeat sends; actual idleness is checked against BOTH model
   // calls and final customer-response turns below.
   const oldest=new Date(now.getTime()-24*60*60_000).toISOString();
-  const newest=new Date(now.getTime()-10*60_000).toISOString();
-  const rows=await get<CostRow>(
-    'ai_api_cost_events?environment=eq.live&occurred_at=gte.'+enc(oldest)
-    +'&occurred_at=lte.'+enc(newest)
-    +'&select=conversation_id,event_id,channel,model,call_purpose,input_tokens,cached_input_tokens,output_tokens,cost_thb,call_index_conversation,occurred_at'
-    +'&order=occurred_at.asc&limit=2000',
-  );
-  const byConversation=new Map<string,CostRow[]>();
-  for(const row of rows){
-    const list=byConversation.get(row.conversation_id)??[];list.push(row);byConversation.set(row.conversation_id,list);
-  }
+  const newest=new Date(now.getTime()-COST_REPORT_IDLE_MS).toISOString();
+  const [rows,turnRows]=await Promise.all([
+    get<CostRow>(
+      'ai_api_cost_events?environment=eq.live&occurred_at=gte.'+enc(oldest)
+      +'&occurred_at=lte.'+enc(now.toISOString())
+      +'&select=conversation_id,event_id,channel,model,call_purpose,input_tokens,cached_input_tokens,output_tokens,cost_thb,call_index_conversation,occurred_at'
+      +'&order=occurred_at.asc&limit=5000',
+    ),
+    get<TurnRow>(
+      'ai_response_turns?environment=eq.live&occurred_at=gte.'+enc(oldest)
+      +'&occurred_at=lte.'+enc(now.toISOString())
+      +'&select=conversation_id,event_id,channel,model_reply_used,grounded_knowledge_supplied,zero_cost_turn,occurred_at'
+      +'&order=occurred_at.asc&limit=5000',
+    ),
+  ]);
+  const conversationIds=new Set([...rows.map(row=>row.conversation_id),...turnRows.map(row=>row.conversation_id)]);
   const results:Array<{conversationId:string;status:string;costThb:number}>=[];
-  for(const [conversationId,allCalls] of byConversation){
+  for(const conversationId of conversationIds){
+    const allCalls=rows.filter(row=>row.conversation_id===conversationId);
+    const allTurns=turnRows.filter(row=>row.conversation_id===conversationId);
     // conversation_id is a stable customer/thread identifier, not a unique
     // AI-cost ledger session. The ledger intentionally resets its call index
     // after its idle window, so a 24h notifier scan can contain several
     // separate conversations for the same LINE user. Summarize only the
     // latest ledger session; otherwise old + new sessions are aggregated and
     // the old max call index can reuse a previous idempotency key forever.
-    const calls=latestLedgerSession(allCalls);
-    if(!calls.length)continue;
-    const latest=calls[calls.length-1]!;
-    // Only notify a conversation whose latest call is itself idle >=10 min.
-    // If it resumed after our query window, a cheap existence lookup catches
-    // that and skips this pass.
-    const newer=await get<{id:string}>(
-      'ai_api_cost_events?environment=eq.live&conversation_id=eq.'+enc(conversationId)
-      +'&occurred_at=gt.'+enc(latest.occurred_at)+'&select=id&limit=1',
-    );
-    if(newer.length){
-      console.log('AI_COST_IDLE_NOTIFY_SKIP',JSON.stringify({conversationId,reason:'newer_cost_event_pending'}));
-      continue;
-    }
-    // Real production bug this closes: a long-lived, multi-session
-    // conversation_id (the same customer testing across many hours/days) can
-    // accumulate MANY turns. Fetching turns ascending with a bounded limit and
-    // reading the LAST array entry silently returns the OLDEST turn within
-    // that limit once the conversation exceeds it -- never the actual most
-    // recent one -- which can make a genuinely idle conversation look
-    // permanently "still active" (or the reverse) depending on where the
-    // stale cutoff happens to land. Fetch only the single latest turn,
-    // descending, directly.
-    const turns=await get<TurnRow>(
-      'ai_response_turns?environment=eq.live&conversation_id=eq.'+enc(conversationId)
-      +'&select=conversation_id,model_reply_used,grounded_knowledge_supplied,zero_cost_turn,occurred_at&order=occurred_at.desc&limit=1',
-    );
-    const lastTurnAt=turns.length ? turns[0]!.occurred_at : latest.occurred_at;
-    const lastActivityAt=lastTurnAt > latest.occurred_at ? lastTurnAt : latest.occurred_at;
+    const {calls,turns}=latestConversationSession(allCalls,allTurns);
+    if(!calls.length&&!turns.length)continue;
+    const latestCallAt=calls.at(-1)?.occurred_at??'';
+    const latestTurnAt=turns.at(-1)?.occurred_at??'';
+    const lastActivityAt=latestTurnAt>latestCallAt?latestTurnAt:latestCallAt;
     if(lastActivityAt>newest){
       console.log('AI_COST_IDLE_NOTIFY_SKIP',JSON.stringify({conversationId,reason:'recent_turn_activity',lastActivityAt}));
       continue;
     }
     const s=summarize(calls,turns);
     const models=[...new Set(calls.map(x=>x.model))].join(', ');
+    const breakdown=channelBreakdown(calls,turns);
+    const channelLines=breakdown.map(item=>
+      `• ${item.channel.toUpperCase()}: ${baht(item.cost)} THB · ${item.calls} calls · ${item.turns} turns`,
+    );
     const text=[
       '💰 Thongthai AI Cost',
       '',
       `Conversation: ${conversationId.slice(0,18)}…`,
-      `Channel: ${latest.channel.toUpperCase()}`,
+      `Channels (${breakdown.length}):`,
+      ...channelLines,
       `OpenAI calls: ${s.calls}`,
-      models?`Model: ${models}`:'',
+      models?`Model: ${models}`:'Model: none (deterministic)',
       '',
       `Input: ${s.input.toLocaleString('th-TH')} tokens`,
       `Cached: ${s.cached.toLocaleString('th-TH')} tokens`,
       `Output: ${s.output.toLocaleString('th-TH')} tokens`,
       '',
       `Cost: ${baht(s.cost)} THB`,
+      `Turns: ${turns.length}`,
       `Direct AI replies: ${s.direct}`,
       `Grounded AI replies: ${s.grounded}`,
       `Zero-cost turns: ${s.zero}`,
     ].filter(Boolean).join('\n');
-    const maxIndex=Math.max(...calls.map(x=>n(x.call_index_conversation)));
-    const sessionStart=calls[0]!.occurred_at;
-    const sessionEvent=calls[0]!.event_id || sessionStart;
+    const maxIndex=calls.length?Math.max(...calls.map(x=>n(x.call_index_conversation))):0;
+    const sessionStart=[calls[0]?.occurred_at,turns[0]?.occurred_at].filter(Boolean).sort()[0]??lastActivityAt;
+    const firstCall=calls.find(row=>row.occurred_at===sessionStart);
+    const firstTurn=turns.find(row=>row.occurred_at===sessionStart);
+    const sessionEvent=firstCall?.event_id||firstTurn?.event_id||sessionStart;
     const status=await sendAiCostLineNotification({
       // call_index_conversation resets for every ledger session. It therefore
       // cannot be the sole idempotency discriminator for a stable LINE
@@ -157,7 +179,7 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
       idempotencyKey:`ai_cost_conversation:${conversationId}:${sessionEvent}:${maxIndex}`,
       deliveryType:'ai_cost_conversation',
       text,
-      payload:{conversation_id:conversationId,cost_thb:s.cost,calls:s.calls,session_start_at:sessionStart,session_end_at:latest.occurred_at,max_call_index:maxIndex},
+      payload:{conversation_id:conversationId,cost_thb:s.cost,calls:s.calls,turns:turns.length,channels:breakdown,session_start_at:sessionStart,session_end_at:lastActivityAt,max_call_index:maxIndex},
     });
     if(status==='not_bound'){
       // No error is thrown here (sendTeamMessage returns a status, not a

@@ -21,6 +21,7 @@ import {
   listOtopProducts,
   listServiceResources,
   loadLatestBookingStatus,
+  loadLatestPaymentStatus,
   loadMembershipStatus,
 } from './_operations-db';
 import type {
@@ -354,6 +355,30 @@ function membershipStatusAdapter(guestDbId: string | null | undefined) {
   };
 }
 
+function paymentStatusAdapter(guestDbId: string | null | undefined) {
+  return async (request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> => {
+    const sourceId = 'payments_operational';
+    if (!guestDbId) return unavailable(sourceId, 'payment_operational', new Error('guest_identity_required'), now);
+    try {
+      const code = stringValue(request, 'paymentCode')
+        ?? stringValue(request, 'entityCode')
+        ?? stringValue(request, 'bookingCode')
+        ?? stringValue(request, 'orderCode');
+      const payment = await loadLatestPaymentStatus(guestDbId, code);
+      if (!payment) return { status:'empty', sourceId, sourceType:'payment_operational', fetchedAt:now.toISOString() };
+      const base = `payment:${payment.entityCode}`;
+      return ok(sourceId, 'payment_operational', [
+        { key:`${base}:paymentCode`, value:payment.paymentCode, domain:'payment', sourceId, sourceType:'payment_operational', authoritative:true, fetchedAt:now.toISOString(), updatedAt:payment.updatedAt },
+        { key:`${base}:status`, value:payment.status, domain:'payment', sourceId, sourceType:'payment_operational', authoritative:true, fetchedAt:now.toISOString(), updatedAt:payment.updatedAt },
+        { key:`${base}:amount`, value:payment.amount, domain:'payment', sourceId, sourceType:'payment_operational', authoritative:true, fetchedAt:now.toISOString(), updatedAt:payment.updatedAt },
+        { key:`${base}:currency`, value:payment.currency, domain:'payment', sourceId, sourceType:'payment_operational', authoritative:true, fetchedAt:now.toISOString(), updatedAt:payment.updatedAt },
+        { key:`${base}:method`, value:payment.method, domain:'payment', sourceId, sourceType:'payment_operational', authoritative:true, fetchedAt:now.toISOString(), updatedAt:payment.updatedAt },
+        { key:`${base}:sourceChannel`, value:payment.sourceChannel, domain:'payment', sourceId, sourceType:'payment_operational', authoritative:true, fetchedAt:now.toISOString(), updatedAt:payment.updatedAt },
+      ], now);
+    } catch (error) { return unavailable(sourceId, 'payment_operational', error, now); }
+  };
+}
+
 export type RealKnowledgeAdapterOptions = {
   guestDbId?: string | null;
   environment?: 'live' | 'test';
@@ -379,6 +404,7 @@ export function buildRealKnowledgeSourceAdapters(
     },
     promotion: { eligibility: request => promotionEligibilityAdapter(channel)() },
     bookingStatus: { lookup: request => bookingStatusAdapter(options.guestDbId)(request) },
+    paymentStatus: { lookup: request => paymentStatusAdapter(options.guestDbId)(request) },
     membership: { status: request => membershipStatusAdapter(options.guestDbId)(request) },
     otop: { catalog: request => otopCatalogAdapter() },
   };

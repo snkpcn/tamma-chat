@@ -56,8 +56,49 @@ function input(overrides: Partial<ResponseComposerInput> = {}): ResponseComposer
   };
 }
 
+function paymentBundle(status: string, amount: number | null = 390): KnowledgeBundle {
+  const base='payment:BK-261001-ABC12345';
+  return {
+    domain:'payment',
+    sources:[{need:'payment_status',sourceId:'payments_operational',sourceType:'payment_operational',status:'ok'}],
+    facts:[
+      {key:`${base}:paymentCode`,value:'PAY-261001-1234ABCD',domain:'payment',sourceId:'payments_operational',sourceType:'payment_operational',authoritative:true,fetchedAt:NOW},
+      {key:`${base}:status`,value:status,domain:'payment',sourceId:'payments_operational',sourceType:'payment_operational',authoritative:true,fetchedAt:NOW},
+      {key:`${base}:amount`,value:amount,domain:'payment',sourceId:'payments_operational',sourceType:'payment_operational',authoritative:true,fetchedAt:NOW},
+      {key:`${base}:currency`,value:'THB',domain:'payment',sourceId:'payments_operational',sourceType:'payment_operational',authoritative:true,fetchedAt:NOW},
+      {key:`${base}:method`,value:'promptpay_qr',domain:'payment',sourceId:'payments_operational',sourceType:'payment_operational',authoritative:true,fetchedAt:NOW},
+    ],
+    entities:[],missing:[],warnings:[],freshness:'live',
+  };
+}
+
 test('Response Composer version is explicit', () => {
   assert.equal(RESPONSE_COMPOSER_VERSION, 'response-composer-v2');
+});
+
+test('verified payment response closes the service loop without falsely confirming the booking', () => {
+  const composed=composeGroundedDeterministicResponse(input({
+    userMessage:'จ่ายแล้วหรือยัง',
+    knowledgeBundles:[paymentBundle('verified')],
+  }));
+  assert.ok(composed);
+  assert.equal(composed!.mode,'deterministic');
+  assert.match(composed!.message,/ยืนยันการชำระเงินแล้ว/u);
+  assert.match(composed!.message,/390\s*บาท/u);
+  assert.match(composed!.message,/ขอบคุณ/u);
+  assert.match(composed!.message,/กลับมาใช้บริการ/u);
+  assert.doesNotMatch(composed!.message,/ยืนยันการจองแล้ว/u);
+});
+
+test('submitted payment proof is acknowledged but never called verified', () => {
+  const composed=composeGroundedDeterministicResponse(input({
+    userMessage:'สลิปถึงไหม',
+    knowledgeBundles:[paymentBundle('proof_submitted')],
+  }));
+  assert.ok(composed);
+  assert.match(composed!.message,/ได้รับสลิป/u);
+  assert.match(composed!.message,/กำลังตรวจสอบ/u);
+  assert.doesNotMatch(composed!.message,/ยืนยันการชำระเงินแล้ว/u);
 });
 
 test('prompt consumes canonical Bible doctrine and grounded facts, not raw DB implementation', () => {

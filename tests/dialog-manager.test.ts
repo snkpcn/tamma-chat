@@ -35,6 +35,19 @@ test('pure discovery/ask with no existing task never creates one', () => {
   assert.ok(plan.reasons.includes('discovery_only'));
 });
 
+test('payment status questions always request guest-scoped operational payment truth', () => {
+  const plan = planDialogTurn(input({
+    semanticTurn: turn({
+      domain:'payment', intent:'check_payment_status', action:'status',
+      informationNeed:'transaction_status', entities:{paymentCode:'PAY-261001-ABC12345'},
+    }),
+  }));
+  assert.deepEqual(plan.knowledgeRequests.map(request => ({domain:request.domain, needs:request.needs})), [
+    {domain:'payment', needs:['payment_status']},
+  ]);
+  assert.equal(plan.taskStateContainer.activeTask, null);
+});
+
 test('compare action alone never creates a task', () => {
   const plan = planDialogTurn(input({ semanticTurn: turn({ domain: 'activity', action: 'compare' }) }));
   assert.equal(plan.taskStateContainer.activeTask, null);

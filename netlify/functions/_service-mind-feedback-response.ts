@@ -127,6 +127,27 @@ export function composeSystemFeedbackResponse(notificationQueued: boolean): stri
   ].join(' ');
 }
 
+export function composeIncidentResponse(
+  match: ServiceFeedbackMatch,
+  eventStored: boolean,
+  targets: FeedbackTargetResult[],
+): string {
+  const opener = 'รับเรื่องของหายไว้ให้แล้วครับ ทองไทยจะช่วยประสานทีมตรวจสอบให้ 🙏';
+  if (!eventStored) {
+    return composeLineShortReply([
+      opener,
+      'ตอนนี้ระบบบันทึกเคสไม่สำเร็จ รบกวนแจ้งพนักงานหน้างานทันทีเพื่อไม่ให้เสียเวลาค้นหาครับ',
+    ]);
+  }
+  const domainLabel = match.businessUnit !== 'unknown' && match.businessUnit !== 'general'
+    ? BUSINESS_UNIT_LABEL_TH[match.businessUnit] : null;
+  return composeLineShortReply([
+    opener,
+    composeNotificationStatusLine(domainLabel, targets),
+    'ช่วยบอกของที่หาย จุดที่เห็นครั้งสุดท้าย และเวลาประมาณให้ทองไทยเพิ่มอีกนิดครับ',
+  ]);
+}
+
 export function composeServiceFeedbackResponse(
   match: ServiceFeedbackMatch,
   notificationQueued: boolean,
@@ -138,6 +159,7 @@ export function composeServiceFeedbackResponse(
     case 'suggestion': return composeSuggestionResponse(notificationQueued);
     case 'safety_issue': return composeSafetyIssueResponse(match, eventResult?.eventId != null, eventResult?.targets ?? []);
     case 'system_feedback': return composeSystemFeedbackResponse(notificationQueued);
+    case 'incident': return composeIncidentResponse(match, eventResult?.eventId != null, eventResult?.targets ?? []);
   }
 }
 

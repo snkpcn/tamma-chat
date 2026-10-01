@@ -94,7 +94,7 @@ test('booking_status need routes to the operational booking source', async () =>
 test('payment domain routes to the payment operational source', async () => {
   const paymentLookup = spy(async () => okResult('payments', 'payment_operational', [fact('payment:PAY1:status', 'settled', 'payment', 'payments', 'payment_operational')]));
   const adapters: KnowledgeSourceAdapters = { paymentStatus: { lookup: paymentLookup } };
-  const bundle = await resolveKnowledge(baseRequest({ domain: 'payment', needs: ['booking_status'] }), adapters, NOW);
+  const bundle = await resolveKnowledge(baseRequest({ domain: 'payment', needs: ['payment_status'] }), adapters, NOW);
   assert.equal(paymentLookup.calls, 1);
   assert.equal(bundle.facts[0]?.sourceType, 'payment_operational');
 });
