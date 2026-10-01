@@ -13,7 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Invoke fixed synthetic multi-turn smoke endpoint
+      - name: Invoke four fixed synthetic Agent turns sequentially
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error             --max-time 120             https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-multiturn-smoke
+          for turn in 1 2 3 4; do
+            echo "===== TURN $turn ====="
+            curl --fail-with-body --silent --show-error               --max-time 45               "https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-multiturn-smoke?turn=$turn"
+            echo
+          done
