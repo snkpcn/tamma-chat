@@ -1,3 +1,6 @@
+import type { OtopProduct } from '../../src/data/otop/types';
+import { matchOtopStory, storyMetadataFromCatalog, type OtopDbProductForStory } from '../../src/data/otop/story-sync';
+
 export type PublicOtopStory = {
   originPlace?: string;
   makerName?: string;
@@ -60,4 +63,38 @@ export function otopStorySearchText(story: PublicOtopStory | null): string {
     story.craftProcess, story.materialOrIngredient, story.whyHere, story.shortDescription,
     story.longStory, story.imageCaption, ...(story.storyKeywords ?? []),
   ].filter(Boolean).join(' ');
+}
+
+export type ResolvedOtopStoreStory = {
+  story: PublicOtopStory | null;
+  source: 'product-metadata' | 'catalog-fallback' | null;
+  catalogProductId: string | null;
+};
+
+export function resolveOtopStoreStory(
+  row: OtopDbProductForStory,
+  catalog: OtopProduct[],
+): ResolvedOtopStoreStory {
+  const metadataStory = publicOtopStory(row.metadata);
+  const existingMeta = record(row.metadata);
+  if (metadataStory) {
+    return {
+      story: metadataStory,
+      source: 'product-metadata',
+      catalogProductId: typeof existingMeta.catalogProductId === 'string' ? existingMeta.catalogProductId : null,
+    };
+  }
+
+  const match = matchOtopStory(row, catalog);
+  if (!match.product || match.ambiguous || match.product.publicClaimSafe !== true) {
+    return { story: null, source: null, catalogProductId: null };
+  }
+
+  const fallbackMetadata = storyMetadataFromCatalog(row.metadata, match.product);
+  const fallbackStory = publicOtopStory(fallbackMetadata);
+  return {
+    story: fallbackStory,
+    source: fallbackStory ? 'catalog-fallback' : null,
+    catalogProductId: fallbackStory ? match.product.id : null,
+  };
 }
