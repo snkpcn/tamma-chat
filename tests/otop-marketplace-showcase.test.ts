@@ -48,9 +48,25 @@ test('luxury commerce hotfix adds smart header, merchandising rail and distinct 
   assert.ok(html.includes('function initSmartHeader()'));
   assert.ok(html.includes("header.classList.add('is-hidden')"));
   assert.ok(html.includes('id="merchRail"'));
-  assert.ok(html.includes('Selected by ทำมา-ชาติ'));
+  assert.ok(html.includes('คัดสรรโดย ทำมา-ชาติ'));
   assert.ok(html.includes("title:'สวมใส่ & งานผ้า'"));
   assert.ok(html.includes("title:'ของกิน & ของฝาก'"));
   assert.ok(html.includes("title:'บ้าน & การดูแลตัวเอง'"));
   assert.ok(html.includes('Number(p.completedUnits||0)>0'));
+});
+
+test('Thai typography uses the Isan Boutique font system without Georgia fallback', () => {
+  assert.ok(html.includes('family=Noto+Serif+Thai'));
+  assert.ok(html.includes('--font-display:"Noto Serif Thai",serif'));
+  assert.ok(html.includes('--font-body:"IBM Plex Sans Thai",sans-serif'));
+  assert.equal(html.includes('font-family:Georgia'), false);
+  assert.ok(html.includes('คัดสรรโดย ทำมา-ชาติ'));
+});
+
+test('cart header may hide over the hero but remains pinned once commerce begins', () => {
+  assert.ok(html.includes("header.classList.toggle('is-commerce',!overHero)"));
+  assert.ok(html.includes("if(overHero){"));
+  assert.ok(html.includes("else{header.classList.remove('is-hidden')}"));
+  assert.ok(html.includes('.top.is-commerce'));
+  assert.ok(html.includes('id="cartBtn"'));
 });
