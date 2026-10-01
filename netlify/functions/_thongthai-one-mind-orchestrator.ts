@@ -501,7 +501,7 @@ function mayContainMultipleClauses(message: string): boolean {
  *  refused to learn from exactly that shape. One predicate, not two
  *  divergent length/clause checks, so the two paths can never disagree
  *  again about what counts as a safe standalone candidate. */
-function isShortStandaloneConceptCandidate(message: string): boolean {
+export function isShortStandaloneConceptCandidate(message: string): boolean {
   const trimmed = message.trim();
   return trimmed.length > 0
     && trimmed.length <= MAX_MATCHABLE_MESSAGE_LENGTH
