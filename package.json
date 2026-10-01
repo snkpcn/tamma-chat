@@ -10,7 +10,8 @@
     "certify:phase7:production": "tsx scripts/run-phase7-production-certification.ts",
     "agent:thongthai:staging": "tsx scripts/create-thongthai-staging-agent.ts",
     "otop:story:backfill": "tsx scripts/backfill-otop-product-stories.ts",
-    "otop:story:backfill:apply": "tsx scripts/backfill-otop-product-stories.ts --apply"
+    "otop:story:backfill:apply": "tsx scripts/backfill-otop-product-stories.ts --apply",
+    "agent:thongthai:production": "tsx scripts/create-thongthai-production-agent.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0"
