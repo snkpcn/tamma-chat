@@ -1,0 +1,19 @@
+name: One-time Thongthai Agent live smoke
+
+on:
+  push:
+    branches:
+      - test/run-agent-live-smoke-20261001
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Invoke fixed synthetic read-only smoke endpoint
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error             --max-time 40             https://tamma-chat.netlify.app/.netlify/functions/thongthai-agent-live-smoke
