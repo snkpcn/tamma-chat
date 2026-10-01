@@ -1350,7 +1350,8 @@ async function savePreparedCafeInquiry(guestDbId: string, value: PreparedCafeInq
 
 export function currentTurnExplicitlyConfirmsCafeInquiry(message: string): boolean {
   if (hasCancelMarker(message) || /ยังไม่ส่ง|ไม่ต้องส่ง|เอาไว้ก่อน|ไว้ก่อน/u.test(message)) return false;
-  return /ยืนยันs*ส่งs*(?:คำถาม|เรื่อง|ให้ทีม)?|ส่งs*(?:คำถาม|เรื่องนี้)?s*ให้ทีม(?:เลย)?|ส่งให้ทีมเลย/u.test(message);
+  if (/[?？]|ไหม|มั้ย|หรือเปล่า|รึเปล่า|ได้ไหม|ได้มั้ย/u.test(message)) return false;
+  return /ยืนยัน\s*ส่ง\s*(?:คำถาม|เรื่อง|ให้ทีม)?|ส่ง\s*(?:คำถาม|เรื่องนี้)?\s*ให้ทีม(?:เลย)?|ส่งให้ทีมเลย/u.test(message);
 }
 
 async function prepareCafeInquiry(
