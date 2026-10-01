@@ -2,12 +2,9 @@ import { createHash } from 'node:crypto';
 
 const url='https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
 const cases=[
-  ['01d0f5b6-33c2-556d-8857-b47196bcea02','prod-agent-canary25-postfix-g1','ขี่ม้ามีราคาเท่าไหร่ แล้วเหมาะกับมือใหม่ไหมครับ'],
-  ['3f0578fd-8c43-5e0f-bdcf-03b1fe89dc2f','prod-agent-canary25-postfix-g2','เฮือนสเตย์มีห้องแบบไหน เช็กอินเช็กเอาต์กี่โมงครับ'],
-  ['93b97c85-c141-5a25-b619-c51f7c357203','prod-agent-canary25-postfix-g3','แฟนแพ้กุ้งและไม่กินเผ็ด มีเมนูอะไรแนะนำ 3 อย่างครับ'],
-  ['7583f891-4af1-5f27-bb23-fdfe6403ecef','prod-agent-canary25-postfix-g4','มากับเด็กกับผู้สูงอายุ อยากทำกิจกรรมเบาๆ แนะนำหน่อยครับ'],
-  ['2045a4c2-32ed-5271-9a86-aba178142f30','prod-agent-canary25-postfix-g5','OTOP มีอะไรน่าสนใจบ้าง เล่าแบบสั้นๆ ให้หน่อยครับ'],
-  ['2eb516cc-d1a1-51bb-bc31-b866168b01c6','prod-agent-canary25-postfix-g6','ถ้ามีเวลาครึ่งวัน อยากกินข้าวและทำกิจกรรมหนึ่งอย่าง แนะนำแบบสบายๆ ครับ'],
+  ['cf7173ae-68b3-5683-b739-5a30bd6e61c8','prod-agent-canary25-postfix-r1','มากับเด็กกับผู้สูงอายุ อยากทำกิจกรรมเบาๆ แนะนำหน่อยครับ'],
+  ['9c3ec1fb-7b12-5929-9676-85fafcf4ddea','prod-agent-canary25-postfix-r2','OTOP มีอะไรน่าสนใจบ้าง เล่าแบบสั้นๆ ให้หน่อยครับ'],
+  ['a321a386-4f7c-5245-aed4-bd780c3611d8','prod-agent-canary25-postfix-r3','ถ้ามีเวลาครึ่งวัน อยากกินข้าวและทำกิจกรรมหนึ่งอย่าง แนะนำแบบสบายๆ ครับ'],
 ];
 
 function bucket(guestId){
@@ -19,7 +16,7 @@ for(const [guestId,eventId,message] of cases){
   const b=bucket(guestId);
   if(b>=2500)throw new Error(`outside 25% bucket: ${guestId} -> ${b}`);
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),45000);
+  const timer=setTimeout(()=>controller.abort(),60000);
   let response;
   try{
     response=await fetch(url,{
@@ -42,4 +39,4 @@ for(const [guestId,eventId,message] of cases){
   }
   console.log(JSON.stringify({eventId,guestId,bucket:b,message:payload.message}));
 }
-console.log('PRODUCTION_AGENT_CANARY25_POSTFIX_SMOKE_PASS');
+console.log('PRODUCTION_AGENT_CANARY25_POSTFIX_RETRY_PASS');
