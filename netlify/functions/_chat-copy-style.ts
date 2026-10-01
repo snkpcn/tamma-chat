@@ -39,6 +39,19 @@ const BULLET_LINE = /^\s*•\s+/;
 const EMOJI_RE = /[\p{Extended_Pictographic}\uFE0F]/u;
 const LINE_PLATFORM_TEXT_LIMIT = 4900;
 
+/**
+ * Owner-locked Thongthai voice: customer-facing Thai uses the male polite
+ * particle consistently. This is a last-mile guard for model-composed copy,
+ * so a customer's own ค่ะ/คะ never causes Thongthai to mirror it back.
+ * Only particle-shaped occurrences are changed; Thai words that merely
+ * contain these characters remain untouched.
+ */
+export function enforceThongthaiMaleThaiParticles(input: string): string {
+  return String(input ?? '')
+    .replace(/ค่ะ(?![\u0E00-\u0E7F])/gu, 'ครับ')
+    .replace(/คะ(?![\u0E00-\u0E7F])/gu, 'ครับ');
+}
+
 function plainInlineMarkdown(value: string): string {
   return value
     .replace(/\*\*(.*?)\*\*/gs, '$1')
@@ -118,7 +131,7 @@ export function polishCustomerMessage(
   input: string,
   channel: CustomerChatChannel,
 ): string {
-  const normalized = String(input ?? '')
+  const normalized = enforceThongthaiMaleThaiParticles(String(input ?? ''))
     .replace(/\r\n?/g, '\n')
     .replace(/\u00a0/g, ' ')
     .replace(/[ \t]+$/gm, '')
