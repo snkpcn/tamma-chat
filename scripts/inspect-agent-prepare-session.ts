@@ -19,6 +19,8 @@ async function main(){
     name:item.name,
     arguments:item.arguments,
     status:item.status,
+    output:typeof item.output==='string'?item.output.slice(0,4000):item.output,
+    error:item.error,
     content:Array.isArray(item.content)?item.content.map((p:any)=>({type:p.type,text:p.text})):undefined,
   }));
   console.log(JSON.stringify({turns:turns.data??[],items:safeItems},null,2));
