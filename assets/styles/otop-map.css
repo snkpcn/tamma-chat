@@ -9,8 +9,8 @@
   --map-paper-strong: #fffaf0;
   --map-muted: #746254;
   --map-line: rgba(73, 43, 24, .16);
-  --font-display: "Noto Serif Thai", serif;
-  --font-body: "IBM Plex Sans Thai", sans-serif;
+  --font-display:var(--site-font);
+  --font-body:var(--site-font);
 }
 
 *, *::before, *::after { box-sizing: border-box; }

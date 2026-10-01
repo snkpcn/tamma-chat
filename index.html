@@ -6,7 +6,7 @@
 <title>ทำมา-ชาติ — Experiences of Isan</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Thai:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Sans+Lao:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* ============================================================
    0. DESIGN TOKENS
@@ -32,8 +32,8 @@
   --radius-md: 16px;
   --radius-sm: 10px;
   --container: 1300px;
-  --font-display: "Noto Serif Thai", "Noto Sans SC", "Noto Sans Lao", "Noto Serif", serif;
-  --font-body: "IBM Plex Sans Thai", "Noto Sans SC", "Noto Sans Lao", "Noto Sans", "IBM Plex Sans", sans-serif;
+  --font-display:var(--site-font);
+  --font-body:var(--site-font);
   --ease: cubic-bezier(.22,.61,.36,1);
 }
 
@@ -101,6 +101,7 @@ p{ margin:0; }
 :focus-visible{ outline:2.5px solid var(--terracotta); outline-offset:3px; border-radius:4px; }
 </style>
 <link rel="stylesheet" href="assets/styles/isan-boutique-phase1.css">
+<link rel="stylesheet" href="assets/styles/site-typography.css">
 </head>
 <body>
 <style>

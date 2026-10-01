@@ -30,6 +30,20 @@
     'Nong Bua Lam Phu Province': 'nongbualamphu',
   };
 
+  const i18n = window.OtopI18n;
+  const t = (key, vars) => i18n ? i18n.t(key, vars) : key;
+  const provinceLabel = province => i18n ? i18n.provinceName(province.provinceId) : province.provinceName;
+  const localizedExperience = province => {
+    if (!i18n || i18n.lang() === 'th') {
+      return { title: province.experienceTitle, description: province.experienceDescription };
+    }
+    const name = provinceLabel(province);
+    return {
+      title: t('map_generic_title', { name }),
+      description: t('map_generic_desc', { name }),
+    };
+  };
+
   const svg = document.getElementById('isanMap');
   const loading = document.getElementById('mapLoading');
   const quickList = document.getElementById('provinceQuickList');
@@ -112,6 +126,31 @@
     return hero ? DATA_ROOT + 'province-hero/' + hero.web : (province.heroProductImage || province.heroImage || '');
   }
 
+  function applyStaticCopy() {
+    if (!i18n) return;
+    document.title = t('map_page_title');
+    const meta = document.querySelector('meta[name="description"]');
+    if (meta) meta.content = t('map_meta');
+    const skip = document.querySelector('.skip-link'); if (skip) skip.textContent = t('map_skip');
+    const brand = document.querySelector('.brand-lockup'); if (brand) brand.setAttribute('aria-label', t('map_back'));
+    const login = document.getElementById('loginLink'); if (login) login.textContent = t('login');
+    const signup = document.getElementById('signupLink'); if (signup) signup.textContent = t('signup');
+    const account = document.getElementById('accountLink'); if (account) account.textContent = t('account');
+    const overline = document.querySelector('.map-overline'); if (overline) overline.textContent = t('map_overline');
+    const title = document.getElementById('mapTitle'); if (title) title.textContent = t('map_title');
+    const intro = document.querySelector('.map-card-head > div:first-child > p'); if (intro) intro.textContent = t('map_intro');
+    const legend = document.querySelector('.map-legend'); if (legend) legend.setAttribute('aria-label', t('map_legend_aria'));
+    const legendSpans = document.querySelectorAll('.map-legend > span');
+    if (legendSpans[0]) legendSpans[0].lastChild.textContent = t('map_selected');
+    if (legendSpans[1]) legendSpans[1].lastChild.textContent = t('map_other');
+    if (!loading.hidden) loading.textContent = t('map_loading');
+    svg.setAttribute('aria-label', t('map_aria'));
+    quickList.setAttribute('aria-label', t('map_quick_aria'));
+    const story = document.querySelector('.province-story-label'); if (story) story.textContent = t('map_story_label');
+    const concept = document.querySelector('.concept-note'); if (concept) concept.textContent = t('map_concept');
+    const footer = document.querySelector('.map-footer p'); if (footer) footer.textContent = t('map_footer');
+  }
+
   function renderMap() {
     svg.replaceChildren();
     const selectedFeature = featureFor(state.selectedProvinceId);
@@ -138,12 +177,12 @@
         'fill-rule': 'evenodd',
         tabindex: '0',
         role: 'button',
-        'aria-label': `${province.provinceName}: ${province.experienceTitle}`,
+        'aria-label': `${provinceLabel(province)}: ${localizedExperience(province).title}`,
         class: `province-shape${provinceId === state.selectedProvinceId ? ' is-selected' : ''}`,
         'data-province-id': provinceId
       });
       const title = element('title');
-      title.textContent = `${province.provinceName} — ${province.experienceTitle}`;
+      title.textContent = `${provinceLabel(province)} — ${localizedExperience(province).title}`;
       path.append(title);
       path.addEventListener('click', () => selectProvince(provinceId));
       path.addEventListener('keydown', event => {
@@ -183,7 +222,7 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.className = `province-chip${province.provinceId === state.selectedProvinceId ? ' is-selected' : ''}`;
-      button.textContent = province.provinceName;
+      button.textContent = provinceLabel(province);
       button.dataset.provinceId = province.provinceId;
       button.setAttribute('aria-pressed', province.provinceId === state.selectedProvinceId ? 'true' : 'false');
       button.addEventListener('click', () => selectProvince(province.provinceId));
@@ -197,15 +236,17 @@
     const paddedOrder = String(province.sortOrder).padStart(2, '0');
     panel.classList.add('is-changing');
     document.getElementById('provinceCount').textContent = paddedOrder;
-    document.getElementById('provinceEn').textContent = `ประสบการณ์จังหวัด · ${paddedOrder}`;
-    document.getElementById('provinceName').textContent = province.provinceName;
-    document.getElementById('provinceExperienceTitle').textContent = province.experienceTitle;
-    document.getElementById('provinceDescription').textContent = province.experienceDescription;
+    const name = provinceLabel(province);
+    const experience = localizedExperience(province);
+    document.getElementById('provinceEn').textContent = t('map_province_header', { order: paddedOrder });
+    document.getElementById('provinceName').textContent = name;
+    document.getElementById('provinceExperienceTitle').textContent = experience.title;
+    document.getElementById('provinceDescription').textContent = experience.description;
     document.getElementById('mapSelectedOrder').textContent = paddedOrder;
-    document.getElementById('mapSelectedName').textContent = province.provinceName;
+    document.getElementById('mapSelectedName').textContent = name;
 
     const cta = document.getElementById('provinceCta');
-    cta.textContent = `ดูสินค้าจาก${province.provinceName}`;
+    cta.textContent = t('map_cta', { name });
     cta.href = `otop.html?provinceId=${encodeURIComponent(province.provinceId)}`;
     requestAnimationFrame(() => panel.classList.remove('is-changing'));
   }
@@ -228,6 +269,10 @@
 
   async function initialise() {
     syncAccountNavigation();
+    if (i18n) {
+      i18n.mountSwitcher(document.querySelector('.account-nav'));
+      applyStaticCopy();
+    }
     try {
       const [geoResponse, manifestResponse, catalogResponse] = await Promise.all([
         fetch(MAP_URL),
@@ -249,9 +294,20 @@
       loading.hidden = true;
     } catch (error) {
       loading.hidden = false;
-      loading.textContent = 'ไม่สามารถเปิดแผนที่ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง';
+      loading.textContent = t('map_error');
       console.error(error);
     }
+  }
+
+  if (i18n) {
+    i18n.onChange(() => {
+      applyStaticCopy();
+      if (state.provinces.length) {
+        renderMap();
+        renderQuickList();
+        renderPanel();
+      }
+    });
   }
 
   initialise();

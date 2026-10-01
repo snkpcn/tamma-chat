@@ -1,0 +1,44 @@
+/* Sitewide typography lock.
+ * Thai: IBM Plex Sans Thai only.
+ * English/Latin: Noto Sans only.
+ * Chinese/Lao use script-specific Noto Sans fallbacks so the 5-language UI renders correctly.
+ * Weight, size and spacing may vary; font family must not.
+ */
+:root{
+  --site-font-th:"IBM Plex Sans Thai",sans-serif;
+  --site-font-latin:"Noto Sans",sans-serif;
+  --site-font-zh:"Noto Sans SC","Noto Sans",sans-serif;
+  --site-font-lo:"Noto Sans Lao","Noto Sans",sans-serif;
+  --site-font:var(--site-font-th);
+  --font-body:var(--site-font);
+  --font-display:var(--site-font);
+}
+
+html[lang="th"]{--site-font:var(--site-font-th)}
+html[lang="en"],html[lang="vi"]{--site-font:var(--site-font-latin)}
+html[lang="zh"]{--site-font:var(--site-font-zh)}
+html[lang="lo"]{--site-font:var(--site-font-lo)}
+
+html,body,
+button,input,select,textarea,
+h1,h2,h3,h4,h5,h6,
+p,a,span,label,small,strong,b,
+div,section,article,nav,header,footer,aside{
+  font-family:var(--site-font) !important;
+}
+
+code,pre,kbd,samp{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace !important;
+}
+
+
+/* Shared five-language control used by OTOP map/store. */
+.site-lang-switch{position:relative;display:inline-flex;align-items:center;z-index:80}
+.site-lang-toggle{display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:40px;padding:0 12px;border:1px solid currentColor;border-color:color-mix(in srgb,currentColor 24%,transparent);border-radius:999px;background:rgba(255,255,255,.08);color:inherit;font-weight:600;font-size:12px;cursor:pointer}
+.site-lang-menu{position:absolute;top:calc(100% + 8px);right:0;display:none;min-width:178px;padding:6px;border:1px solid rgba(60,40,25,.14);border-radius:14px;background:#fffaf2;color:#2d1d14;box-shadow:0 20px 50px rgba(30,18,10,.2)}
+.site-lang-switch.is-open .site-lang-menu{display:block}
+.site-lang-menu button{display:flex;align-items:center;justify-content:space-between;width:100%;padding:9px 11px;border:0;border-radius:9px;background:transparent;color:inherit;font-size:13px;text-align:left;cursor:pointer}
+.site-lang-menu button:hover,.site-lang-menu button:focus-visible{background:#f2e8d8}
+.site-lang-menu button.is-active{background:#e9dfcc;font-weight:700}
+.site-lang-code{opacity:.62;font-size:11px}
+@media(max-width:680px){.site-lang-toggle{min-width:42px;height:38px;padding-inline:10px}.site-lang-menu{position:fixed;top:64px;right:12px}}
