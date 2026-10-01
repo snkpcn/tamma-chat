@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldUseThongthaiAgentPrimary, stableAgentCanaryBucket } from '../netlify/functions/_thongthai-agent-primary';
+import {
+  configuredAgentPrimaryPercent,
+  shouldUseThongthaiAgentPrimary,
+  stableAgentCanaryBucket,
+} from '../netlify/functions/_thongthai-agent-primary';
 
 function withEnv(values: Record<string,string|undefined>, fn: () => void) {
   const before = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
@@ -18,10 +22,22 @@ function withEnv(values: Record<string,string|undefined>, fn: () => void) {
   }
 }
 
+function guestInBucket(minInclusive: number, maxExclusive: number): string {
+  for (let i=0;i<50_000;i+=1) {
+    const key=`guest-${i}`;
+    const bucket=stableAgentCanaryBucket(key);
+    if (bucket>=minInclusive && bucket<maxExclusive) return key;
+  }
+  throw new Error(`No guest found in bucket range ${minInclusive}-${maxExclusive}`);
+}
+
 test('production Agent canary is disabled by default', () => {
   withEnv({
     THONGTHAI_AGENT_PRIMARY_ENABLED: undefined,
     THONGTHAI_AGENT_PRIMARY_PERCENT: '100',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_WEB: undefined,
+    THONGTHAI_AGENT_PRIMARY_PERCENT_LINE: undefined,
+    THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK: undefined,
     THONGTHAI_AGENT_PRIMARY_CHANNELS: 'web',
   }, () => {
     assert.equal(shouldUseThongthaiAgentPrimary({
@@ -35,6 +51,9 @@ test('production Agent canary stays read-only and excludes weather/location', ()
   withEnv({
     THONGTHAI_AGENT_PRIMARY_ENABLED: '1',
     THONGTHAI_AGENT_PRIMARY_PERCENT: '100',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_WEB: undefined,
+    THONGTHAI_AGENT_PRIMARY_PERCENT_LINE: undefined,
+    THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK: undefined,
     THONGTHAI_AGENT_PRIMARY_CHANNELS: 'web,line,facebook',
   }, () => {
     const base={guestKey:'guest-a',guestDbId:'db-a',channel:'web' as const};
@@ -56,11 +75,57 @@ test('channel allowlist blocks non-enabled channels', () => {
   withEnv({
     THONGTHAI_AGENT_PRIMARY_ENABLED: '1',
     THONGTHAI_AGENT_PRIMARY_PERCENT: '100',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_WEB: undefined,
+    THONGTHAI_AGENT_PRIMARY_PERCENT_LINE: undefined,
+    THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK: undefined,
     THONGTHAI_AGENT_PRIMARY_CHANNELS: 'web',
   }, () => {
     assert.equal(shouldUseThongthaiAgentPrimary({
       guestKey:'guest-a',guestDbId:'db-a',channel:'line',
       explicitTransactionIntent:false,weatherRequest:false,locationRequest:false,
     }), false);
+  });
+});
+
+test('channel-specific percentages override the global rollout independently', () => {
+  const inTenPercent=guestInBucket(0,1_000);
+  const outsideTenButInsideHundred=guestInBucket(1_000,10_000);
+
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED: '1',
+    THONGTHAI_AGENT_PRIMARY_PERCENT: '100',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_WEB: '100',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_LINE: '10',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK: '10',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS: 'web,line,facebook',
+  }, () => {
+    assert.equal(configuredAgentPrimaryPercent('web'),100);
+    assert.equal(configuredAgentPrimaryPercent('line'),10);
+    assert.equal(configuredAgentPrimaryPercent('facebook'),10);
+
+    const shared={
+      guestDbId:'db-a',
+      explicitTransactionIntent:false,
+      weatherRequest:false,
+      locationRequest:false,
+    };
+    assert.equal(shouldUseThongthaiAgentPrimary({...shared,guestKey:outsideTenButInsideHundred,channel:'web'}),true);
+    assert.equal(shouldUseThongthaiAgentPrimary({...shared,guestKey:outsideTenButInsideHundred,channel:'line'}),false);
+    assert.equal(shouldUseThongthaiAgentPrimary({...shared,guestKey:outsideTenButInsideHundred,channel:'facebook'}),false);
+    assert.equal(shouldUseThongthaiAgentPrimary({...shared,guestKey:inTenPercent,channel:'line'}),true);
+    assert.equal(shouldUseThongthaiAgentPrimary({...shared,guestKey:inTenPercent,channel:'facebook'}),true);
+  });
+});
+
+test('channel-specific percentage falls back to the legacy global value when unset', () => {
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_PERCENT: '37',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_WEB: undefined,
+    THONGTHAI_AGENT_PRIMARY_PERCENT_LINE: undefined,
+    THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK: undefined,
+  }, () => {
+    assert.equal(configuredAgentPrimaryPercent('web'),37);
+    assert.equal(configuredAgentPrimaryPercent('line'),37);
+    assert.equal(configuredAgentPrimaryPercent('facebook'),37);
   });
 });
