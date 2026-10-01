@@ -45,7 +45,7 @@ export const THONGTHAI_STAGING_TRANSACTION_TOOLS: readonly ThongthaiAgentTransac
     name: 'prepare_activity_booking',
     description: 'Prepare an activity booking for explicit customer review. This NEVER creates a booking. IMPORTANT: this prepare tool already validates the canonical activity/asset, offered duration, live availability/options, and price. If the customer message already contains the required booking fields, call this tool DIRECTLY; do NOT call get_activity_catalog or check_activity_availability first. After it returns, summarize the exact details and ask for "ยืนยันจอง".',
     parameters: objectSchema({
-      activity_code: { type: 'string', description: 'Canonical activity code from get_activity_catalog, for example horse.' },
+      activity_code: { type: 'string', description: 'Canonical activity code, for example horse. For an obvious named activity, use the known canonical code directly; no separate catalog call is required.' },
       asset_name: { type: 'string', description: 'Optional canonical named asset, for example ภาราดร. Required for horse booking.' },
       date: { type: 'string', description: 'Local date YYYY-MM-DD.' },
       time: { type: 'string', description: 'Optional local time HH:MM.' },
