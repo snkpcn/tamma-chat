@@ -157,5 +157,9 @@ test('Phase 3: migration only expands the existing concept-key constraint', () =
   assert.match(sql,/alter table public\.semantic_concept_memory/u);
   assert.match(sql,/pace_relaxed/u);
   assert.match(sql,/consider_only/u);
-  assert.doesNotMatch(sql,/create table|vector\(|pgvector|create extension/iu);
+  const executable=sql
+    .split('\n')
+    .filter(line=>!line.trim().startsWith('--'))
+    .join('\n');
+  assert.doesNotMatch(executable,/create table|vector\(|pgvector|create extension/iu);
 });
