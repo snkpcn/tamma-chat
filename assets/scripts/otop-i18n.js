@@ -30,6 +30,7 @@
 
   const COPY = {
     th:{
+      brand_name:'ทำมา-ชาติ',
       language:'ภาษา', login:'เข้าสู่ระบบ', signup:'สมัครสมาชิก', account:'บัญชีของฉัน',
       home_aria:'กลับหน้าหลักทำมา-ชาติ', member_nav_aria:'สมาชิก', map_legend_aria:'คำอธิบายแผนที่', map_svg_aria:'แผนที่ขอบเขตจริง 20 จังหวัดภาคอีสาน',
       shop_nav_aria:'หน้าร้าน OTOP', choose_province_aria:'เลือกจังหวัด', open_cart_aria:'เปิดตะกร้าสินค้า',
@@ -83,6 +84,7 @@
       detail_fallback:'สินค้าชุมชนจาก{province}'
     },
     en:{
+      brand_name:'Thammachat',
       language:'Language', login:'Sign in', signup:'Join', account:'My account',
       home_aria:'Back to the Thammachat home page', member_nav_aria:'Member navigation', map_legend_aria:'Map legend', map_svg_aria:'Map of the 20 provinces of Northeast Thailand',
       shop_nav_aria:'OTOP store navigation', choose_province_aria:'Choose province', open_cart_aria:'Open shopping cart',
@@ -136,6 +138,7 @@
       detail_fallback:'Community-made product from {province}'
     },
     zh:{
+      brand_name:'Thammachat',
       language:'语言', login:'登录', signup:'注册', account:'我的账户',
       home_aria:'返回做玛察主页', member_nav_aria:'会员导航', map_legend_aria:'地图图例', map_svg_aria:'泰国东北部 20 府地图',
       shop_nav_aria:'OTOP 商店导航', choose_province_aria:'选择府', open_cart_aria:'打开购物车',
@@ -144,7 +147,7 @@
       quantity_aria:'商品数量', qty_decrease:'减少数量', qty_increase:'增加数量', drawer_aria:'购物车与结账',
       product_gallery_aria:'{name} 商品图片', view_image_aria:'查看第 {index} 张图片',
       map_meta_desc:'探索伊森 20 府的人、手艺与地方故事，再认识来自社区的产品。',
-      store_meta_desc:'选购伊森社区商品，了解制作者故事，并查看ทำมา-ชาติ后台的最新价格与库存。',
+      store_meta_desc:'选购伊森社区商品，了解制作者故事，并查看 Thammachat 后台的最新价格与库存。',
       map_skip:'跳到地图', map_overline:'泰国东北部 20 府',
       map_title:'选择一个府开始探索', map_intro:'点击地图或下方府名，了解当地的人、手艺、生活方式与独特故事。',
       map_selected:'已选择', map_other:'其他府', map_loading:'正在打开东北部地图…',
@@ -161,7 +164,7 @@
       hero_shop:'探索{province} ↓', hero_map:'打开 20 府地图',
       province_eyebrow:'OTOP · 来自真正的制作者', shop_title:'挑选{province}好物',
       province_intro:'查看商品细节，认识它的来处，准备好后再加入购物车。本页商品均来自{province}。',
-      shipping_loading:'正在加载配送信息', curated:'ทำมา-ชาติ 精选', curated_sub:'值得先认识的作品',
+      shipping_loading:'正在加载配送信息', curated:'Thammachat 精选', curated_sub:'值得先认识的作品',
       best_seller:'热销商品', best_seller_sub:'按真实完成订单排序',
       collections:'系列', catalog_heading:'{province} OTOP 商品', catalog_loading:'正在加载商品…',
       sort_featured:'推荐商品', sort_low_high:'价格从低到高', sort_high_low:'价格从高到低',
@@ -189,8 +192,9 @@
       detail_fallback:'来自{province}的社区商品'
     },
     lo:{
+      brand_name:'Thammachat',
       language:'ພາສາ', login:'ເຂົ້າລະບົບ', signup:'ສະໝັກສະມາຊິກ', account:'ບັນຊີຂອງຂ້ອຍ',
-      home_aria:'ກັບໄປໜ້າຫຼັກ ทำมา-ชาติ', member_nav_aria:'ເມນູສະມາຊິກ', map_legend_aria:'ຄຳອະທິບາຍແຜນທີ່', map_svg_aria:'ແຜນທີ່ 20 ແຂວງພາກອີສານ',
+      home_aria:'ກັບໄປໜ້າຫຼັກ Thammachat', member_nav_aria:'ເມນູສະມາຊິກ', map_legend_aria:'ຄຳອະທິບາຍແຜນທີ່', map_svg_aria:'ແຜນທີ່ 20 ແຂວງພາກອີສານ',
       shop_nav_aria:'ເມນູຮ້ານ OTOP', choose_province_aria:'ເລືອກແຂວງ', open_cart_aria:'ເປີດກະຕ່າສິນຄ້າ',
       film_source_aria:'ເບິ່ງວິດີໂອຕົ້ນສະບັບໃນ YouTube', film_credit_craft:'ງານຝີມື — ສູນສົ່ງເສີມຜ້າໄໝ ໄຊຍະພູມ',
       catalog_sort_aria:'ຈັດລຽງສິນຄ້າ', category_nav_aria:'ໝວດສິນຄ້າ', product_close_aria:'ປິດລາຍລະອຽດສິນຄ້າ',
@@ -214,7 +218,7 @@
       hero_shop:'ເບິ່ງຂອງດີຈາກ{province} ↓', hero_map:'ເປີດແຜນທີ່ 20 ແຂວງ',
       province_eyebrow:'OTOP · ຂອງດີຈາກຄົນເຮັດຈິງ', shop_title:'ເລືອກຂອງດີຈາກ{province}',
       province_intro:'ເບິ່ງລາຍລະອຽດ ຮູ້ທີ່ມາ ແລ້ວໃສ່ກະຕ່າເມື່ອພ້ອມ. ສິນຄ້າໜ້ານີ້ມາຈາກ{province}.',
-      shipping_loading:'ກຳລັງໂຫຼດຂໍ້ມູນການຈັດສົ່ງ', curated:'ຄັດເລືອກໂດຍ ทำมา-ชาติ', curated_sub:'ຂອງທີ່ຢາກໃຫ້ຮູ້ຈັກກ່ອນ',
+      shipping_loading:'ກຳລັງໂຫຼດຂໍ້ມູນການຈັດສົ່ງ', curated:'ຄັດເລືອກໂດຍ Thammachat', curated_sub:'ຂອງທີ່ຢາກໃຫ້ຮູ້ຈັກກ່ອນ',
       best_seller:'ສິນຄ້າຂາຍດີ', best_seller_sub:'ຮຽງຕາມຍອດຂາຍທີ່ສຳເລັດແລ້ວ',
       collections:'COLLECTIONS', catalog_heading:'ສິນຄ້າ OTOP {province}', catalog_loading:'ກຳລັງໂຫຼດສິນຄ້າ…',
       sort_featured:'ສິນຄ້າແນະນຳ', sort_low_high:'ລາຄາຕ່ຳ–ສູງ', sort_high_low:'ລາຄາສູງ–ຕ່ຳ',
@@ -242,6 +246,7 @@
       detail_fallback:'ສິນຄ້າຊຸມຊົນຈາກ{province}'
     },
     vi:{
+      brand_name:'Thammachat',
       language:'Ngôn ngữ', login:'Đăng nhập', signup:'Đăng ký', account:'Tài khoản của tôi',
       home_aria:'Về trang chủ Thammachat', member_nav_aria:'Điều hướng thành viên', map_legend_aria:'Chú giải bản đồ', map_svg_aria:'Bản đồ 20 tỉnh vùng Đông Bắc Thái Lan',
       shop_nav_aria:'Điều hướng cửa hàng OTOP', choose_province_aria:'Chọn tỉnh', open_cart_aria:'Mở giỏ hàng',
