@@ -1,0 +1,26 @@
+name: Create Thongthai Staging Agent
+
+on:
+  push:
+    branches:
+      - feature/thongthai-staging-agent-20261001
+
+permissions:
+  contents: read
+
+jobs:
+  create-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Create or update Thongthai-Staging in OpenAI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THONGTHAI_AGENT_MODEL: gpt-5.6-terra
+        run: npm run agent:thongthai:staging
