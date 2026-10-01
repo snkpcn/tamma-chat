@@ -8,7 +8,6 @@ import {
 test('activity prepare fast path maps a complete structured draft without an LLM/tool preflight', () => {
   assert.deepEqual(activityPrepareOnlyToolArgs({
     serviceType:'activity',
-    resourceCode:'activity-horse',
     horseName:'ภาราดร',
     date:'2026-10-22',
     time:'10:00',
@@ -69,4 +68,20 @@ test('confirmation during prepare-only Gate 0 stays pending and never claims a b
   assert.match(response.message,/ยังไม่เปิดให้ส่งคำขอจองจริง/u);
   assert.match(response.message,/ยังไม่มีการสร้างการจอง/u);
   assert.doesNotMatch(response.message,/จองสำเร็จ|ยืนยันการจองแล้ว/u);
+});
+
+
+test('activity prepare fast path does not require the legacy resourceCode slot', () => {
+  const args=activityPrepareOnlyToolArgs({
+    horseName:'ภาราดร',
+    date:'2026-10-24',
+    time:'10:00',
+    durationMinutes:30,
+    partySize:1,
+    customerName:'PREPARE ONLY',
+    phone:'0000000099',
+  });
+  assert.ok(args);
+  assert.equal(args.activity_code,'horse');
+  assert.equal(args.asset_name,'ภาราดร');
 });
