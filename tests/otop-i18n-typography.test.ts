@@ -87,3 +87,51 @@ test('all 20 province stories have four non-Thai translations', () => {
     assert.equal(occurrences, 4, `${province} must have EN/ZH/LO/VI story copy`);
   }
 });
+
+
+test('OTOP store has exactly one language selector and every static i18n key exists in all five dictionaries', () => {
+  const map = read('otop-map.html');
+  const store = read('otop.html');
+  const i18n = read('assets/scripts/otop-i18n.js');
+
+  assert.equal((store.match(/id="storeLanguage"/g) || []).length, 1, 'storeLanguage id must be unique');
+  assert.equal((map.match(/id="mapLanguage"/g) || []).length, 1, 'mapLanguage id must be unique');
+
+  const attrKeys = new Set<string>();
+  for (const html of [map, store]) {
+    for (const match of html.matchAll(/data-otop-i18n(?:-placeholder|-aria)?="([^"]+)"/g)) {
+      attrKeys.add(match[1]);
+    }
+  }
+  for (const required of [
+    'film_credit_craft','film_source_aria','shop_nav_aria','home_aria',
+    'choose_province_aria','open_cart_aria','catalog_sort_aria','category_nav_aria',
+    'product_close_aria','quantity_aria','qty_decrease','qty_increase','drawer_aria',
+    'map_legend_aria','map_svg_aria','member_nav_aria'
+  ]) attrKeys.add(required);
+
+  const markers = ['th:{','en:{','zh:{','lo:{','vi:{'];
+  const blocks = new Map<string,string>();
+  for (let i = 0; i < markers.length; i += 1) {
+    const lang = markers[i].slice(0,2).replace(':','');
+    const start = i18n.indexOf(markers[i]);
+    const end = i + 1 < markers.length ? i18n.indexOf(markers[i + 1]) : i18n.indexOf('  };', start);
+    assert.ok(start >= 0 && end > start, `missing dictionary block for ${markers[i]}`);
+    blocks.set(markers[i].split(':')[0], i18n.slice(start, end));
+  }
+
+  for (const [lang, block] of blocks) {
+    for (const key of attrKeys) {
+      assert.match(block, new RegExp(`\\b${key}:`), `${lang} missing i18n key ${key}`);
+    }
+  }
+});
+
+test('OTOP language hotfix covers visible credit and localized metadata', () => {
+  const store = read('otop.html');
+  const mapJs = read('assets/scripts/otop-map.js');
+  assert.match(store, /data-otop-i18n="film_credit_craft"/);
+  assert.match(store, /store_meta_desc/);
+  assert.match(mapJs, /map_meta_desc/);
+  assert.doesNotMatch(store, /id="storeLanguage"[^]*id="storeLanguage"/);
+});
