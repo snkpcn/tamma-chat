@@ -35,7 +35,7 @@ import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import { emptyConversationContextState } from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
-import { persistAiResponseTurn } from './_ai-cost-store';
+import { persistAiResponseTurn, persistAiResponseTurnIfAbsent } from './_ai-cost-store';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
@@ -4653,6 +4653,28 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       }))).catch(error => {
         console.error('THONGTHAI_BOT_QUALITY_EVENT_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
       });
+    }
+    if (statusCode === 200 && typeof typed?.message === 'string') {
+      const telemetryConversationId=String(request.guestId ?? guestDbId ?? '').trim();
+      if(telemetryConversationId){
+        // Every successful customer-facing reply must leave a turn row so
+        // the idle cost notifier can report the exact conversation even
+        // when this path used zero OpenAI calls. One-Mind already writes a
+        // richer row; this insert is deliberately ignore-on-conflict.
+        await persistAiResponseTurnIfAbsent({
+          conversationId:telemetryConversationId,
+          eventId:transportEventId,
+          channel,
+          finalResponseSource:'legacy_or_unclassified',
+          modelReplyUsed:false,
+          groundedKnowledgeSupplied:false,
+          zeroCostTurn:false,
+          environment:'live',
+          occurredAt:new Date().toISOString(),
+        }).catch(error=>{
+          console.error('AI_RESPONSE_TURN_FALLBACK_PERSIST_ERROR',error instanceof Error?error.message.slice(0,180):'unknown');
+        });
+      }
     }
     return { statusCode, payload: typed };
   }

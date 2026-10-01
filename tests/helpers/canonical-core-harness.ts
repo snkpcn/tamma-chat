@@ -499,6 +499,17 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
       const limit = Number(query.get('limit') ?? 0);
       return jsonResponse(limit > 0 ? rows.slice(0, limit) : rows);
     }
+    if (path.startsWith('ai_response_turns') && method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      const duplicate = aiResponseTurns.some(row =>
+        row.conversation_id === body.conversation_id && row.event_id === body.event_id
+      );
+      if (!duplicate) {
+        aiResponseTurns.push(body);
+        recordPost('ai_response_turns', body);
+      }
+      return jsonResponse([]);
+    }
 
     // --- ops_notification_deliveries (_ops-notifications.ts's
     // beginDelivery/finishDelivery -- idempotency-keyed delivery ledger) ---

@@ -492,3 +492,19 @@ test('TEST 11 -- pedal boat price answers correctly (TRUE zero-cost) even with a
     ],
   });
 });
+
+
+test('TEST 12 -- every successful deterministic reply leaves a response-turn row so a 0.00 THB conversation cannot disappear from idle cost reporting', async () => {
+  await withHarness(async harness => {
+    const gid = harnessGuestId('e2e-zero-cost-telemetry');
+    const result = await processThongthaiChatCore(brainRequest('สวัสดีครับ', gid, 'line'), 'e2e-zero-cost-telemetry-1');
+    assert.equal(result.statusCode, 200);
+    assert.equal(harness.modelCallCount(), 0, 'greeting remains genuinely zero-cost');
+
+    const rows = harness.postsTo('ai_response_turns').filter(row =>
+      row.conversation_id === gid && row.event_id === 'e2e-zero-cost-telemetry-1'
+    );
+    assert.equal(rows.length, 1, 'the customer-visible turn must exist in ai_response_turns even with zero API calls');
+    assert.equal(rows[0]?.channel, 'line');
+  });
+});
