@@ -5162,6 +5162,11 @@ async function verifiedBookingStatusReadbackBeforePrimary(
   request: BrainRequest,
   guestDbId: string | null,
 ): Promise<BrainResponse | null> {
+  // A mixed request such as "สรุป...แล้วตอนนี้ยังไม่ได้จองใช่ไหม" is a
+  // summary first, not a status-only lookup. Let One-Mind/Response Composer
+  // preserve the full grounded working state and include the no-booking
+  // boundary in that summary instead of collapsing it to one DB sentence.
+  if (/สรุป/u.test(request.message)) return null;
   if (!guestDbId || hasExplicitTransactionIntent(request.message) || !BOOKING_STATUS_READBACK_RE.test(request.message)) return null;
   const latest = await loadLatestBookingStatus(guestDbId);
   const message = latest
