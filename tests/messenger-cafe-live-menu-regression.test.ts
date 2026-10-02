@@ -90,7 +90,7 @@ test('owner screenshot regression: recommendation for a couple is compact, not a
   const r=cafeGroundedAnswer(req('ที่ร้านมีไรแนะนำบ้างคับจะไปกับแฟน') as any,items,modifiers);
   assert.ok(r);
   assert.equal(r?.grounded,true);
-  assert.match(r!.answer,/แฟน/u);
+  assert.match(r!.answer,/สองคน|คนละแนว/u);
   assert.match(r!.answer,/คาเฟ่ลาเต้|ชาไทยลาเต้/u);
   assert.doesNotMatch(r!.answer,/•\s*กาแฟ|•\s*ชา/u);
   assert.doesNotMatch(r!.answer,/อเมริกาโน่.*คาเฟ่ลาเต้.*ชาไทยลาเต้.*โกโก้/u);

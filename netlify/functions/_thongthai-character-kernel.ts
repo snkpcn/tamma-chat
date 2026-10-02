@@ -4,9 +4,7 @@ const EMOJI_RE = /[\p{Extended_Pictographic}\uFE0F]/gu;
 const CRITICAL_RE = /(?:บาดเจ็บ|เลือดออก|หมดสติ|อุบัติเหตุ|จมน้ำ|ไฟไหม้|ไฟลุก|ไฟดูด|ไฟช็อต|อันตราย|เด็กหาย|คนหาย|คุกคาม|ข่มขู่|ทำร้าย|1669|191|199)/u;
 const SOURCE_QUESTION_RE = /(?:ข้อมูล.*จากไหน|แหล่งข้อมูล|source|provider|ใช้.*(?:openweather|openai|gemini|supabase))/iu;
 const SOURCE_JARGON_RE = /(?:จากข้อมูลล่าสุด\s*)?\((?:openweathermap|openweather|supabase|openai|gemini)\)\s*[:：]?\s*/giu;
-const ISAN_SAFE_CONTEXT_RE = /(?:สวัสดี|ขอบคุณ|แนะนำ|อยากกิน|อยากเที่ยว|อยากพัก|ขอดูรูป|ดูรูป|มีรูป)/u;
 const ISAN_BLOCK_RE = /(?:บาดเจ็บ|อุบัติเหตุ|ปลอดภัย|เด็ก|ผู้สูงอายุ|แพ้|ชำระ|จ่ายเงิน|คืนเงิน|เคลม|ชดเชย|ส่วนลดพิเศษ|รับผิด|คุกคาม|ข่มขู่|ของหาย|คนหาย)/u;
-const ISAN_ALREADY_RE = /(?:เบิ่ง|เด้อ|ม่วน|ได้อยู่)/u;
 
 function protectCanonicalNames(value: string): string {
   return value
@@ -33,23 +31,17 @@ function restrainDecorativeEmoji(value: string): string {
 
 function softenRoboticThaiOpeners(value:string, customerMessage:string):string {
   if (ISAN_BLOCK_RE.test(customerMessage)) return value;
-  return value
-    .replace(/^รับทราบครับ\s*/u, 'ได้ครับ ')
+  let next = value
     .replace(/^จากข้อความที่คุยกันรอบนี้\s*/u, '')
     .replace(/^จากข้อมูลที่เช็กได้ตอนนี้\s*[:：-]?\s*/u, '');
-}
 
-function applyLightIsanFlavor(value: string, customerMessage: string): string {
-  if (!ISAN_SAFE_CONTEXT_RE.test(customerMessage) || ISAN_BLOCK_RE.test(customerMessage) || ISAN_ALREADY_RE.test(value)) {
-    return value;
+  // A redundant acknowledgement before a substantive answer sounds canned.
+  // Remove it rather than replacing it with another canned opener. Preserve a
+  // genuine acknowledgement-only reply.
+  if (/^รับทราบครับ(?:\s+|[,，]\s*)\S/u.test(next)) {
+    next = next.replace(/^รับทราบครับ(?:\s+|[,，]\s*)/u, '');
   }
-  if (/สวัสดี/u.test(customerMessage)) {
-    return value.replace(/บอก(?:ทองไทย)?ได้เลยครับ/u, 'บอกทองไทยได้เลยเด้อครับ');
-  }
-  if (/แนะนำ/u.test(customerMessage)) {
-    return value.replace(/ลองดู/u, 'ลองเบิ่ง');
-  }
-  return value;
+  return next;
 }
 
 function paragraphizeDenseThai(value: string): string {
@@ -75,10 +67,12 @@ function ensureThaiMaleEnding(value: string): string {
 }
 
 /**
- * Character Kernel: the final personality contract shared by every public
- * customer channel. It never changes prices, availability, transaction state
- * or business facts. It only protects identity, reading rhythm, source jargon,
- * emoji restraint and the owner-locked male Thai voice.
+ * Character Kernel: the final guardrail shared by every public customer
+ * channel. The language model/composer owns prose and personality; this layer
+ * must not compete by injecting canned warmth or dialect. It never changes
+ * prices, availability, transaction state or business facts. It only protects
+ * canonical names, reading rhythm, source jargon, emoji restraint and the
+ * owner-locked male Thai voice.
  */
 export function applyThongthaiCharacterKernel(input: {
   message: string;
@@ -97,7 +91,6 @@ export function applyThongthaiCharacterKernel(input: {
       ? emergencyPlainText(value)
       : restrainDecorativeEmoji(value);
     value = softenRoboticThaiOpeners(value,input.customerMessage);
-    value = applyLightIsanFlavor(value,input.customerMessage);
     value = paragraphizeDenseThai(value);
     value = ensureThaiMaleEnding(value);
   }
