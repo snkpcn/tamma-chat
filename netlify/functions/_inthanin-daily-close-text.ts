@@ -134,7 +134,7 @@ function amountFromLine(lines:string[],patterns:RegExp[],exclude:RegExp[]=[]):nu
   return null;
 }
 
-function expenseCategory(label:string):InthaninExpenseCategory{
+export function expenseCategory(label:string):InthaninExpenseCategory{
   const value=label.toLowerCase();
   if(/นม|กาแฟ|เมล็ด|ไซรัป|ผง|วัตถุดิบ|น้ำแข็ง/u.test(value)) return 'ingredients';
   if(/น้ำดื่ม|น้ำถัง|โซดา|เครื่องดื่ม/u.test(value)) return 'beverages';
