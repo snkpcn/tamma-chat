@@ -104,3 +104,43 @@ Phase 6.1 closes only when:
 - post-deploy production E2E workflow passes every case;
 - synthetic guest IDs are checked read-only against transaction tables and show zero transactions;
 - final checkpoint is persisted on `main`.
+
+
+## Production certification RED #2 — global egress bypass
+
+Certification PR #471 tested exact production deploy `6abf4d7a4c017d00086e1874`.
+
+Result:
+
+- total: **12**
+- passed: **8**
+- failed: **4**
+- false transactions detected: **0**
+- English price parity across LINE/Web/Facebook remained **300**
+
+Failed customer replies:
+
+- English LINE price appended Thai `ครับ`
+- English Web price appended Thai `ครับ`
+- English Facebook price appended Thai `ครับ`
+- Chinese Facebook stay clarification appended Thai `ครับ`
+
+Read-only database verification for all 12 synthetic guests showed:
+
+- bookings = **0**
+- cafe_inquiries = **0**
+- otop_orders = **0**
+- otop_order_sessions = **0**
+- payment_requests = **0**
+
+### Root cause
+
+The Response Composer's Phase 6.1 surface normalization was correct but not globally terminal.
+Several production response paths return directly through `thongthai-chat.ts` without passing
+through Response Composer parsing.
+
+The canonical `coreResult()` function is the one final gateway shared by every successful
+customer-facing path. Phase 6.2 therefore applies `normalizeResponseLanguageSurface()` inside
+`coreResult()`, before bot-quality telemetry, response persistence, and public return.
+
+This makes the language guard a true egress invariant rather than a composer-specific feature.
