@@ -1,38 +1,52 @@
 name: Phase 7 Final Production Certification
 
-# Human Core final certification: exercises the REAL deployed Netlify
-# production customer endpoint from a runner with real network access
-# (this repository's own sandbox/dev environments may have none). Manual
-# trigger only -- this is a certification gate, not a per-commit check, and
-# must never run automatically on every push.
-#
-# Safety contract: every message scripts/run-production-smoke.ts sends is
-# read-only/discovery/status/correction. No case authorizes a transaction,
-# so no real booking/order/payment/redemption is ever created. See that
-# script's own header comment for the full safety contract.
+# Temporary, owner-requested certification only. Do not merge this trigger.
+# Runs once on opening this dedicated PR, never on subsequent pushes.
+# The contract and runtime source are checked out at the deployed commit.
 on:
+  pull_request:
+    branches: [main]
+    types: [opened]
   workflow_dispatch:
-    inputs:
-      production_url:
-        description: 'Production endpoint to test (defaults to the real deployed URL)'
-        required: false
-        default: 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat'
 
 permissions:
   contents: read
 
+concurrency:
+  group: phase7-final-production-certification-cp16
+  cancel-in-progress: false
+
 jobs:
   production-smoke:
+    if: github.event_name == 'workflow_dispatch' || (github.head_ref == 'phase7-production-final-cp16-20261002' && contains(github.event.pull_request.title, '[run phase7 prod]'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: f8c00bebe2b34f2baa1801289a4dae3c37225b58
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Run Phase 7 final production certification (read-only, no transactions)
+      - name: Verify certification source identity
+        run: |
+          test "$(git rev-parse HEAD)" = "f8c00bebe2b34f2baa1801289a4dae3c37225b58"
+          mkdir -p artifacts/phase7
+          printf '%s\n' '{"runtimeCommit":"f8c00bebe2b34f2baa1801289a4dae3c37225b58","productionDeploy":"6abf6af0136abd0008e7d223","siteId":"8c1f4d60-68c9-4940-9152-89e9c967e22c","productionAlias":"https://tamma-chat.netlify.app","runtimePR":485}' | tee artifacts/phase7/deployment.json
+      - name: Run unchanged Phase 7 production contract (read-only, no transactions)
         env:
-          THONGTHAI_PRODUCTION_URL: ${{ inputs.production_url }}
-        run: npx tsx scripts/run-phase7-production-certification.ts
+          THONGTHAI_PRODUCTION_URL: https://6abf6af0136abd0008e7d223--tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tsx scripts/run-phase7-production-certification.ts 2>&1 | tee artifacts/phase7/certification.log
+      - name: Preserve production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase7-production-cp16-${{ github.run_id }}
+          path: artifacts/phase7/
+          if-no-files-found: error
+          retention-days: 30
