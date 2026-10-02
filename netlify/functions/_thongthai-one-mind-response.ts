@@ -614,6 +614,32 @@ export async function processOneMindCustomerTurn(
   );
   const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptionsWithMessage);
 
+  // Phase 5 incident handoff: once trusted structured semantics identify an
+  // operational INCIDENT, stop BEFORE Response Composer. The customer-level
+  // chat core owns durable incident persistence + notification and will render
+  // the delivery-truth-aware deterministic acknowledgement. Letting an
+  // incident continue into composeThongthaiResponse can spend a second paid
+  // model call and, worse, draft an incident-status claim before the durable
+  // case/LINE dispatch has actually happened.
+  const operationalMeaning = deriveSemanticMeaning(turn.dialogSemanticTurn);
+  const trustedIncidentMeaning = operationalMeaning.conversationalMode === 'INCIDENT'
+    && (
+      turn.dialogSemanticTurn.semanticSource === 'openai_supervisor'
+      || turn.dialogSemanticTurn.semanticSource === 'semantic_concept_memory'
+    );
+  if (trustedIncidentMeaning) {
+    return {
+      status:'legacy_required',
+      turn,
+      reason:'domain_not_cut_over',
+      observability:buildOneMindTraceEnvelope({
+        turn,
+        response:null,
+        totalMs:Date.now() - totalStartedAt,
+      }),
+    };
+  }
+
   // Never acknowledge a state-mutating conversational decision unless the
   // authoritative state write actually succeeded. This matters for cancel /
   // suspend / resume / correction turns: a pretty reply with statePersisted
