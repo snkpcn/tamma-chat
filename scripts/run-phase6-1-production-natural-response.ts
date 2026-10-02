@@ -54,7 +54,10 @@ function guestId(runId:string,index:number):string{
 }
 
 function languagePass(language:Language,message:string):{pass:boolean;reason:string|null}{
-  const clean=message.replace(THAI_CANONICAL_NAME,'');
+  // U+0E3F (฿) lives inside the Unicode Thai block but is an international
+  // currency symbol, not Thai-language leakage. Remove it before the Thai
+  // script purity check; Thai words/particles remain fully detectable.
+  const clean=message.replace(THAI_CANONICAL_NAME,'').replace(/฿/gu,'');
   if(language!=='th' && THAI_SCRIPT.test(clean)){
     return {pass:false,reason:'thai_language_leak'};
   }
