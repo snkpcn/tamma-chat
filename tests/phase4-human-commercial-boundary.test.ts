@@ -10,7 +10,7 @@ import {
 import { isAgentTransactionPrepareIntent } from '../netlify/functions/thongthai-chat';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
 import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
-import { reconcileReadOnlyActivityPreferenceRefinement } from '../netlify/functions/_thongthai-one-mind-orchestrator';
+import { reconcileCommercialQuestionRefinement, reconcileReadOnlyActivityPreferenceRefinement } from '../netlify/functions/_thongthai-one-mind-orchestrator';
 import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
 import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
 import { planDialogTurn, resolveDialogDecision } from '../netlify/functions/_dialog-manager';
@@ -416,4 +416,80 @@ test('Phase 4 structural English cafe handoff remains explicit prepare-capable o
   assert.equal(d.mode,'COMMIT');
   assert.equal(d.currentTurnCommit,true);
   assert.equal(d.prepareEligible,true);
+});
+
+
+test('Phase 4 commercial question reconciliation de-escalates an English false model commit',()=>{
+  const model=semantic({
+    domain:'unknown',
+    intent:'book_unspecified',
+    action:'book',
+    speechAct:'transaction_request',
+    informationNeed:'availability',
+    confidence:0.93,
+    needsClarification:true,
+    clarificationReason:'item not specified',
+  });
+  const reconciled=reconcileCommercialQuestionRefinement(model,'Can I book this?');
+  assert.equal(reconciled.domain,'support');
+  assert.equal(reconciled.action,'ask');
+  assert.equal(reconciled.speechAct,'question');
+  assert.equal(reconciled.informationNeed,'policy');
+  assert.equal(reconciled.needsClarification,false);
+  assert.ok(reconciled.constraints.includes('no_transaction'));
+  assert.equal(classifyCommercialBoundarySemantic(reconciled).currentTurnCommit,false);
+});
+
+test('Phase 4 commercial question reconciliation preserves known domain/entities while stripping commit authority',()=>{
+  const model=semantic({
+    domain:'activity',
+    intent:'book_named_horse',
+    action:'book',
+    speechAct:'transaction_request',
+    informationNeed:'availability',
+    entities:{horseName:'ภาราดร',date:'2026-10-03'},
+    references:[],
+    confidence:0.96,
+    needsClarification:false,
+  });
+  const reconciled=reconcileCommercialQuestionRefinement(model,'ภาราดรจองได้ไหมครับ');
+  assert.equal(reconciled.domain,'activity');
+  assert.equal(reconciled.entities.horseName,'ภาราดร');
+  assert.equal(reconciled.entities.date,'2026-10-03');
+  assert.equal(reconciled.action,'ask');
+  assert.equal(reconciled.speechAct,'question');
+  assert.equal(reconciled.informationNeed,'availability');
+  assert.ok(reconciled.constraints.includes('no_transaction'));
+  assert.equal(classifyCommercialBoundarySemantic(reconciled).mode,'WITHHOLD');
+});
+
+test('Phase 4 commercial reconciliation never de-escalates a real non-question commit',()=>{
+  const model=semantic({
+    domain:'activity',
+    intent:'book_service',
+    action:'book',
+    speechAct:'transaction_request',
+    informationNeed:'none',
+    confidence:0.99,
+  });
+  const reconciled=reconcileCommercialQuestionRefinement(model,'จองเลยครับ');
+  assert.equal(reconciled.action,'book');
+  assert.equal(reconciled.speechAct,'transaction_request');
+  assert.equal(classifyCommercialBoundarySemantic(reconciled).currentTurnCommit,true);
+});
+
+test('Phase 4 commercial reconciliation is a no-op for model results that are already read-only',()=>{
+  const model=semantic({
+    domain:'support',
+    intent:'booking_confirmation_process',
+    action:'ask',
+    speechAct:'question',
+    informationNeed:'policy',
+    confidence:0.98,
+    needsClarification:false,
+  });
+  assert.deepEqual(
+    reconcileCommercialQuestionRefinement(model,'How do I confirm a booking?'),
+    model,
+  );
 });
