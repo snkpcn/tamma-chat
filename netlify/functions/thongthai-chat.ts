@@ -30,7 +30,14 @@ import {
   persistBrainRuntime,
   registerGuestIdentity,
 } from './_thongthai-runtime-v3';
-import { activityAssetFromText, formatActivityAssetNote, listServiceResources, resetLineBookingPlanningSession } from './_operations-db';
+import {
+  activityAssetFromText,
+  activityDurationFromText,
+  activityDurationOptionsForResource,
+  formatActivityAssetNote,
+  listServiceResources,
+  resetLineBookingPlanningSession,
+} from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import {
@@ -257,6 +264,46 @@ async function hasConversationContextBeforePrimary(guestDbId: string | null): Pr
     );
     return false;
   }
+}
+
+/**
+ * Phase 7 verified-slot guard for a held horse selection.
+ *
+ * Syntax parsing may recognize any sensible duration, but business validity
+ * belongs to the live activity_offerings table. When a customer already has
+ * a horse in bounded "considering" state, reject an unsupported duration
+ * before any model can persist or echo it back as accepted.
+ */
+async function boundedConsideredHorseDurationResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (!guestDbId) return null;
+  const durationMinutes = activityDurationFromText(request.message);
+  if (!durationMinutes) return null;
+
+  const context = await loadConversationContext(guestDbId);
+  const heldHorse = context.workingMemory.consideredSelections.find(selection =>
+    selection.domain === 'activity'
+    && selection.status === 'considering'
+    && /(?:ทองไทย|ภาราดร)/u.test(selection.name)
+  );
+  if (!heldHorse) return null;
+
+  const options = await activityDurationOptionsForResource('activity-horse');
+  if (!options.length || options.includes(durationMinutes)) return null;
+
+  const optionText = options.map(minutes => `${minutes} นาที`).join(' หรือ ');
+  return {
+    message: `น้อง${heldHorse.name.replace(/^น้อง/u,'')} มีรอบให้เลือก ${optionText}ครับ ยังไม่มีรอบ ${durationMinutes} นาทีครับ`,
+    intent: 'information',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -5188,6 +5235,28 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   );
   const explicitTransactionIntent = commercialBoundary.currentTurnCommit;
   const transactionPrepareIntent = commercialBoundary.prepareEligible;
+
+  const boundedDurationGuard = await boundedConsideredHorseDurationResponse(
+    request,
+    guestDbId,
+  ).catch(error => {
+    console.error(
+      'THONGTHAI_BOUNDED_DURATION_GUARD_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+    return null;
+  });
+  if (boundedDurationGuard) {
+    const polished = polishedResponse(boundedDurationGuard, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
 
   // Selection of the prepare-only canary is independent of the CURRENT
   // sentence's transaction wording. A later "ยืนยันส่งคำถาม", "เอาไว้ก่อน",
