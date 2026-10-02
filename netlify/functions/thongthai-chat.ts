@@ -33,7 +33,11 @@ import {
 import { activityAssetFromText, formatActivityAssetNote, listServiceResources, resetLineBookingPlanningSession } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
-import { emptyConversationContextState } from './_conversation-context';
+import {
+  emptyConversationContextState,
+  loadConversationContext,
+  type ConversationContextState,
+} from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
 import { persistAiResponseTurn, persistAiResponseTurnIfAbsent } from './_ai-cost-store';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
@@ -203,6 +207,28 @@ export function activeTaskOwnsConversationBeforePrimary(container: TaskStateCont
   );
 }
 
+/**
+ * Phase 7 bounded-conversation authority.
+ *
+ * Production proved that a clear "keep Pharadon for now, don't book" path
+ * can be represented in ConversationContext working memory even when there
+ * is no ActiveTask row yet. That state is still a bounded, durable
+ * continuation contract: a considered selection plus explicit no-transaction
+ * memory must survive side-topic switches/resume/summary without being
+ * re-routed into the Saved Agent and spending the remaining conversation
+ * budget.
+ */
+export function conversationContextOwnsConversationBeforePrimary(
+  state: ConversationContextState,
+): boolean {
+  const hasConsideredSelection = state.workingMemory.consideredSelections.some(
+    selection => selection.status === 'considering',
+  );
+  const hasCurrentTaskReference = typeof state.currentTaskReference === 'string'
+    && state.currentTaskReference.trim().length > 0;
+  return hasConsideredSelection || hasCurrentTaskReference;
+}
+
 async function hasActiveTaskBeforePrimary(guestDbId: string | null): Promise<boolean> {
   if (!guestDbId) return false;
   try {
@@ -212,6 +238,21 @@ async function hasActiveTaskBeforePrimary(guestDbId: string | null): Promise<boo
     // Existing Agent/One-Mind routing can still degrade honestly.
     console.error(
       'THONGTHAI_PRE_PRIMARY_TASK_STATE_ERROR',
+      error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+    );
+    return false;
+  }
+}
+
+async function hasConversationContextBeforePrimary(guestDbId: string | null): Promise<boolean> {
+  if (!guestDbId) return false;
+  try {
+    return conversationContextOwnsConversationBeforePrimary(
+      await loadConversationContext(guestDbId),
+    );
+  } catch (error) {
+    console.error(
+      'THONGTHAI_PRE_PRIMARY_CONVERSATION_CONTEXT_ERROR',
       error instanceof Error ? error.message.slice(0, 180) : 'unknown',
     );
     return false;
@@ -5290,13 +5331,18 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
 
   const activeTaskBeforePrimary = !prepareOnlyAgentEligible
     && await hasActiveTaskBeforePrimary(guestDbId);
+  const boundedConversationBeforePrimary = !prepareOnlyAgentEligible
+    && await hasConversationContextBeforePrimary(guestDbId);
 
-  // Phase 7 adds a second independent boundary: a non-terminal ActiveTask is
-  // already a bounded, persisted conversation contract. One-Mind/Dialog
-  // Manager owns its continuation before read-only Agent Primary.
+  // Phase 7 continuation authority:
+  // - non-terminal ActiveTask, OR
+  // - bounded ConversationContext carrying a considered selection/task ref
+  // owns the turn before read-only Agent Primary.
+  // Prepare-only routing remains separately authorized and unchanged.
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
     && !phase4CommercialBoundaryEligible
     && !activeTaskBeforePrimary
+    && !boundedConversationBeforePrimary
     && shouldUseThongthaiAgentPrimary({
     guestKey: request.guestId,
     guestDbId,
