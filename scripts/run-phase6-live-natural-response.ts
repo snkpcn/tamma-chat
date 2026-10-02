@@ -33,7 +33,7 @@ const probes:Probe[]=[
     language:'en',
     message:'How much is a 30-minute horse ride?',
     activityName:'horse riding',
-    languagePattern:/(?:horse|ride|baht|THB|price)/iu,
+    languagePattern:/(?:horse|ride|baht|THB|price)/iu,
     forbidden:[/[ก-๙]/u,/AUTHORITATIVE|sourceId|intent|domain/iu],
   },
   {
@@ -42,7 +42,7 @@ const probes:Probe[]=[
     message:'骑马30分钟多少钱？',
     activityName:'骑马',
     languagePattern:/[㐀-鿿]/u,
-    forbidden:[/I can|The price|According to/iu,/AUTHORITATIVE|sourceId|intent|domain/iu],
+    forbidden:[/(?:I can|The price|According to)/iu,/AUTHORITATIVE|sourceId|intent|domain/iu],
   },
   {
     id:'lao',
@@ -50,7 +50,7 @@ const probes:Probe[]=[
     message:'ຂີ່ມ້າ 30 ນາທີ ລາຄາເທົ່າໃດ?',
     activityName:'ຂີ່ມ້າ',
     languagePattern:/[຀-໿]/u,
-    forbidden:[/I can|The price|According to/iu,/AUTHORITATIVE|sourceId|intent|domain/iu],
+    forbidden:[/(?:I can|The price|According to)/iu,/AUTHORITATIVE|sourceId|intent|domain/iu],
   },
   {
     id:'vietnamese',
@@ -58,7 +58,7 @@ const probes:Probe[]=[
     message:'Cưỡi ngựa 30 phút giá bao nhiêu?',
     activityName:'cưỡi ngựa',
     languagePattern:/[ăâđêôơưàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]/iu,
-    forbidden:[/I can|The price|According to/iu,/AUTHORITATIVE|sourceId|intent|domain/iu],
+    forbidden:[/(?:I can|The price|According to)/iu,/AUTHORITATIVE|sourceId|intent|domain/iu],
   },
 ];
 
@@ -147,6 +147,8 @@ async function main(){
     const parsed=parseComposedResponse(raw,composerInput);
     const response=parsed.message;
     const forbidden=probe.forbidden.filter(pattern=>pattern.test(response)).map(pattern=>pattern.source);
+    const languageLeak=probe.language!=='th' && /[ก-๙]/u.test(response);
+    if(languageLeak) forbidden.push('thai_language_leak');
     const falseTransaction=/booked|reserved|confirmed|submitted|ordered|จองเรียบร้อย|ยืนยันการจองแล้ว|已预订|已确认预订|đã đặt|đã xác nhận đặt|ຈອງແລ້ວ/iu.test(response);
     const pass=
       /300/u.test(response)
