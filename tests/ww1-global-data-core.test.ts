@@ -29,7 +29,7 @@ const thaiBundle: MarketDataBundle = {
   market: {
     marketCode: 'TH',
     countryCode: 'TH',
-    settlementCurrencyCode: 'THB',
+    defaultCurrencyCode: 'THB',
     defaultLocaleCode: 'th',
     status: 'live',
     isDomestic: true,
