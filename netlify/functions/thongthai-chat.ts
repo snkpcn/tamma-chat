@@ -277,6 +277,7 @@ async function hasConversationContextBeforePrimary(guestDbId: string | null): Pr
 async function boundedConsideredHorseDurationResponse(
   request: BrainRequest,
   guestDbId: string | null,
+  channel: BrainChannel,
 ): Promise<BrainResponse | null> {
   if (!guestDbId) return null;
   const durationMinutes = activityDurationFromText(request.message);
@@ -292,6 +293,23 @@ async function boundedConsideredHorseDurationResponse(
 
   const options = await activityDurationOptionsForResource('activity-horse');
   if (!options.length || options.includes(durationMinutes)) return null;
+
+  // Materialize the already-held selection into canonical task state before
+  // returning the business-truth rejection. The rejected duration itself is
+  // intentionally NOT written.
+  const taskState = await loadTaskState(guestDbId);
+  if (!taskState.activeTask || isTerminalTaskStatus(taskState.activeTask.status)) {
+    const next = startNewActiveTask(taskState, {
+      type:'activity_booking',
+      sourceChannel:channel,
+      initialSlots:{
+        resourceCode:'activity-horse',
+        horseName:heldHorse.name.replace(/^น้อง/u,''),
+      },
+      requiredFields:['durationMinutes','date','time','partySize'],
+    });
+    await persistTaskState(guestDbId,next);
+  }
 
   const optionText = options.map(minutes => `${minutes} นาที`).join(' หรือ ');
   return {
@@ -5239,6 +5257,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const boundedDurationGuard = await boundedConsideredHorseDurationResponse(
     request,
     guestDbId,
+    channel,
   ).catch(error => {
     console.error(
       'THONGTHAI_BOUNDED_DURATION_GUARD_ERROR',
