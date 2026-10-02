@@ -64,7 +64,7 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
     removeConstraints.push('no_spicy', 'mild_spice');
   } else {
     if (/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้|ไม่ใส่พริก/u.test(text)) addConstraints.push('no_spicy');
-    else if (/(?:กิน|ทาน)เผ็ดไม่เก่ง|ไม่ค่อย(?:กิน|ทาน)?เผ็ด|(?:กิน|ทาน)เผ็ดได้นิดหน่อย/u.test(text)) addConstraints.push('mild_spice');
+    else if (/(?:กิน|ทาน)เผ็ดไม่เก่ง|ไม่ค่อย(?:กิน|ทาน)?เผ็ด|(?:กิน|ทาน)เผ็ดได้นิดหน่อย|ไม่เผ็ดมาก/u.test(text)) addConstraints.push('mild_spice');
   }
 
   // Plain protein/ingredient avoidance -- a PREFERENCE ("ไม่กินไก่"), not
@@ -134,7 +134,7 @@ export function extractIntelligenceSignals(message: string): IntelligenceSignal[
   if (/กลัวตก/u.test(text)) signals.push({ eventType: 'risk', category: 'fear_of_falling', domain: 'activity' });
   if (/กลัวเร็ว/u.test(text)) signals.push({ eventType: 'risk', category: 'fear_of_speed', domain: 'activity' });
   if (/เดินไม่ไหว|เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้/u.test(text)) signals.push({ eventType: 'risk', category: 'mobility_need', domain: 'general' });
-  if (/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้|ไม่ใส่พริก/u.test(text)) signals.push({ eventType: 'phrase', category: 'low_spice', domain: 'restaurant' });
+  if (/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้|ไม่ใส่พริก|ไม่เผ็ดมาก/u.test(text)) signals.push({ eventType: 'phrase', category: 'low_spice', domain: 'restaurant' });
   if (/ไม่กินไก่|ไม่เอาไก่|งดไก่/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_chicken', domain: 'restaurant' });
   if (/ไม่กินหมู|ไม่เอาหมู|งดหมู/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_pork', domain: 'restaurant' });
   if (/ไม่กินเนื้อ(?:วัว)?|ไม่เอาเนื้อ(?:วัว)?|งดเนื้อ(?:วัว)?/u.test(text)) signals.push({ eventType: 'phrase', category: 'no_beef', domain: 'restaurant' });
