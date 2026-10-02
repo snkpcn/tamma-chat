@@ -21,6 +21,19 @@ test('explicit confirmation remains eligible to revisit a prepared draft', () =>
   assert.equal(isAgentTransactionPrepareIntent('ยืนยันจองครับ', 'GENERAL'), true);
 });
 
-test('semantic business transaction classification can route prepare even without a literal booking verb', () => {
-  assert.equal(isAgentTransactionPrepareIntent('เอาตามที่คุยไว้ครับ', 'BUSINESS_TRANSACTION'), true);
+test('routing-only business classification never becomes commercial authority by itself', () => {
+  assert.equal(isAgentTransactionPrepareIntent('เอาตามที่คุยไว้ครับ', 'BUSINESS_TRANSACTION'), false);
+  assert.equal(isAgentTransactionPrepareIntent('จองห้องได้ไหมครับ', 'BUSINESS_TRANSACTION'), false);
+  assert.equal(isAgentTransactionPrepareIntent('สั่งอาหารได้ไหมครับ', 'BUSINESS_TRANSACTION'), false);
+  assert.equal(isAgentTransactionPrepareIntent('เอาชุดนี้ครับ', 'BUSINESS_TRANSACTION'), false);
+});
+
+test('explicit current-turn commercial requests remain eligible for prepare-only routing', () => {
+  assert.equal(isAgentTransactionPrepareIntent('ขอจองที่พักวันที่ 16 ตุลาคมครับ', 'BUSINESS_TRANSACTION'), true);
+  assert.equal(isAgentTransactionPrepareIntent('สั่งอาหารชุดนี้ 1 ชุดครับ', 'BUSINESS_TRANSACTION'), true);
+});
+
+test('cafe staff handoff needs an explicit send request, not an availability question', () => {
+  assert.equal(isAgentTransactionPrepareIntent('ส่งคำถามนี้ให้ทีมเลยครับ', 'BUSINESS_TRANSACTION'), true);
+  assert.equal(isAgentTransactionPrepareIntent('ส่งคำถามนี้ให้ทีมได้ไหมครับ', 'BUSINESS_TRANSACTION'), false);
 });
