@@ -73,6 +73,7 @@ const ROUTE_TARGET: Record<ServiceFeedbackMatch['businessUnit'], string> = {
   activity: 'activity_group',
   stay: 'stay_group',
   cafe: 'cafe_group',
+  otop: 'otop_group',
   membership: 'admin_group',
   system: 'admin_group',
   general: 'owner_general',
