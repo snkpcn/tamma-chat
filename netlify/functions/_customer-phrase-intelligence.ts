@@ -119,7 +119,7 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   // transport channels.
   if (/ไม่(?:กิน|ดื่ม)กาแฟ|ไม่เอากาแฟ/u.test(text)) addConstraints.push('no_coffee');
   if (/(?:กลับมา|ดู|เอา).{0,10}กาแฟ(?:ก็ได้|ได้)|กินกาแฟได้|ดื่มกาแฟได้/u.test(text)) removeConstraints.push('no_coffee');
-  if (/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน/u.test(text)) addConstraints.push('low_sweet');
+  if (/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน|ไม่ชอบหวาน(?:มาก)?/u.test(text)) addConstraints.push('low_sweet');
   if (/ไม่ขมมาก|ไม่เอาขมมาก|ไม่ค่อยขม/u.test(text)) addConstraints.push('low_bitter');
   if (/ไม่เอานมวัว|ไม่ค่อยอยาก(?:กิน|ดื่ม)นมวัว|งดนมวัว/u.test(text)) addConstraints.push('no_cow_milk');
   if (/ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล/u.test(text)) addConstraints.push('no_sugar');
@@ -143,7 +143,7 @@ const GUEST_MEMORY_SELF_RE = /(?:ผม|ฉัน|หนู|ดิฉัน|เ�
 
 const GUEST_SCOPED_CONSTRAINT_PATTERNS: Partial<Record<string,RegExp>> = {
   no_coffee:/ไม่(?:กิน|ดื่ม)กาแฟ|ไม่เอากาแฟ/u,
-  low_sweet:/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน/u,
+  low_sweet:/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน|ไม่ชอบหวาน(?:มาก)?/u,
   low_bitter:/ไม่ขมมาก|ไม่เอาขมมาก|ไม่ค่อยขม/u,
   no_cow_milk:/ไม่เอานมวัว|ไม่ค่อยอยาก(?:กิน|ดื่ม)นมวัว|งดนมวัว/u,
   no_sugar:/ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล/u,
@@ -241,7 +241,7 @@ export function extractIntelligenceSignals(message: string): IntelligenceSignal[
     signals.push({ eventType: 'demand', category: 'interest_cafe', domain: 'cafe' });
   }
   if (/ไม่(?:กิน|ดื่ม)กาแฟ|ไม่เอากาแฟ/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_no_coffee', domain:'cafe' });
-  if (/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_low_sweet', domain:'cafe' });
+  if (/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน|ไม่ชอบหวาน(?:มาก)?/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_low_sweet', domain:'cafe' });
   if (/ไม่ขมมาก|ไม่เอาขมมาก|ไม่ค่อยขม/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_low_bitter', domain:'cafe' });
   if (/ไม่เอานมวัว|ไม่ค่อยอยาก(?:กิน|ดื่ม)นมวัว|งดนมวัว/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_no_cow_milk', domain:'cafe' });
   if (/ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_no_sugar', domain:'cafe' });
