@@ -144,3 +144,25 @@ customer-facing path. Phase 6.2 therefore applies `normalizeResponseLanguageSurf
 `coreResult()`, before bot-quality telemetry, response persistence, and public return.
 
 This makes the language guard a true egress invariant rather than a composer-specific feature.
+
+
+## Phase 6.2 production deployment checkpoint
+
+Global egress implementation PR #472 merged as:
+
+`14cbf1578dea4383955138967ea008c3ac821d34`
+
+Netlify production deploy:
+
+`6abf501de1d34800080a9588`
+
+Verified before re-certification:
+
+- state: **READY**
+- context: **production**
+- branch: **main**
+- deploy `commit_ref` matches the Phase 6.2 merge exactly
+- deploy validation status: **ready**
+- secret scan matches: **0**
+
+The same 12-case production matrix will now be replayed unchanged.
