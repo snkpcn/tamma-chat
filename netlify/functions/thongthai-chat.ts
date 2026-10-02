@@ -4969,7 +4969,12 @@ async function durableRestaurantRecommendationBeforeSemantic(
 ): Promise<BrainResponse | null> {
   if (!guestDbId || !hasDurableRestaurantConstraint(request)) return null;
   const intent = classifyRestaurantDietaryIntent(request.message);
-  if (intent !== 'RECOMMENDATION_ONLY' && intent !== 'CONSTRAINT_AND_RECOMMENDATION') return null;
+  // This fast path is ONLY for a follow-up recommendation whose dietary
+  // constraints are already durable. A current-turn constraint +
+  // recommendation must stay on the established restaurant/local-concierge
+  // path so the current declaration is captured/acknowledged normally and
+  // existing safety tests keep their intended source boundary.
+  if (intent !== 'RECOMMENDATION_ONLY') return null;
   const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(() => null);
   const agentState = snapshot && isObject(snapshot.state) ? snapshot.state : {};
   if (!isRestaurantAdvisorTurn(request, { agentState })) return null;
