@@ -5129,7 +5129,7 @@ async function boundedHorseComparisonBeforePrimary(
   };
 }
 
-const HORSE_CORRECTION_SIGNAL_RE = /(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจ|อีกตัว|ตัวอื่น|ตัวที่เหลือ|เอาแทน|แทน)/u;
+const HORSE_CORRECTION_SIGNAL_RE = /(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจ|อีกตัว|ตัวอื่น|ตัวที่เหลือ|เอาแทน|แทน)/u;
 
 /**
  * A bounded correction among the owner-verified horse assets never needs a
