@@ -37,8 +37,8 @@ test('a TEST cafe lost-property incident stays inside the dedicated cafe test LI
     const first = await processThongthaiChatCore(request, 'lost-item-event-2');
     const replay = await processThongthaiChatCore(request, 'lost-item-event-2');
 
-    assert.doesNotMatch(message(first.payload), /เจ้าของ/u);
-    assert.doesNotMatch(message(replay.payload), /เจ้าของ/u);
+    assert.match(message(first.payload), /รับเรื่องของหาย/u);
+    assert.match(message(replay.payload), /รับเรื่องของหาย/u);
     assert.equal(harness.postsTo('ops_feedback_events').length, 2, 'both transport attempts are observable');
     const deliveries = harness.notificationDeliveries().filter(row => row.deliveryType.startsWith('feedback_incident'));
     assert.equal(deliveries.length, 1, 'TEST cafe incidents notify only the isolated cafe_test channel');
