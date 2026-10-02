@@ -566,7 +566,7 @@ async function saveLineBookingSession(guestDbId: string, environment: 'live' | '
   });
 }
 
-async function activityDurationOptionsForResource(resourceCode: string): Promise<number[]> {
+export async function activityDurationOptionsForResource(resourceCode: string): Promise<number[]> {
   const resourceResponse = await dbFetch(
     `service_resources?code=eq.${encodeURIComponent(resourceCode)}&active=eq.true&select=code,metadata&limit=1`,
   );
