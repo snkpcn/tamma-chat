@@ -24,7 +24,7 @@ test('Agent and semantic call-index resets inside one active conversation stay i
     const results=await sendIdleAiCostConversationSummaries(NOW);
     assert.equal(results.length,1);
     assert.equal(results[0]!.status,'sent');
-    assert.equal(results[0]!.costThb,3.176);
+    assert.ok(Math.abs(results[0]!.costThb-3.176)<1e-9);
     const delivery=harness.postsTo('ops_notification_deliveries').find(row=>row.delivery_type==='ai_cost_conversation');
     assert.equal((delivery?.payload as any)?.calls,6);
   });
