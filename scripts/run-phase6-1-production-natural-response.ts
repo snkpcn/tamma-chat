@@ -142,10 +142,6 @@ async function main(){
     };
     results.push(row);
     console.log(JSON.stringify(row));
-    if(!pass){
-      console.error(JSON.stringify({kind:'PHASE6_1_PRODUCTION_E2E_FAILED',...row},null,2));
-      process.exit(1);
-    }
   }
 
   const englishPrice=results.filter(row=>row.kind==='price'&&row.language==='en');
@@ -163,7 +159,10 @@ async function main(){
     guestIds:results.map(row=>row.guestId),
   };
   console.log(JSON.stringify(summary,null,2));
-  if(!parity) process.exit(1);
+  if(summary.failed>0 || !parity){
+    console.error('PHASE6_1_PRODUCTION_E2E_FAILED');
+    process.exit(1);
+  }
 }
 
 main().catch(error=>{
