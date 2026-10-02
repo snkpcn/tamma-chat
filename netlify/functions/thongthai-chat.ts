@@ -114,6 +114,7 @@ import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-
 import {
   composeDeterministicResponse,
   composeGroundedDeterministicResponse,
+  normalizeResponseLanguageSurface,
   type ComposedResponse,
 } from './_response-composer';
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
@@ -619,6 +620,18 @@ function restaurantAdvisorContextUpdate(
 function polishedResponse(response: BrainResponse, channel: BrainChannel): BrainResponse {
   const message = polishCustomerMessage(response.message, channel);
   return { ...response, message: message || response.message.trim() };
+}
+
+/** Canonical last-mile customer egress for every public brain path. */
+export function normalizeFinalCustomerMessage(
+  message:string,
+  language:BrainRequest['language'],
+  channel:BrainChannel,
+):string {
+  const languageNormalized=normalizeResponseLanguageSurface(message,language);
+  return polishCustomerMessage(languageNormalized,channel)
+    || languageNormalized
+    || message.trim();
 }
 
 function duplicateRestaurantPreorderMessage(
@@ -4778,6 +4791,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
 
   async function coreResult(statusCode: number, payload: unknown): Promise<ThongthaiChatCoreResult> {
     const typed = payload as Record<string, unknown>;
+
+    // Phase 6.2 canonical final-language egress.
+    //
+    // Every customer path -- Agent Primary, One-Mind, grounded composer,
+    // deterministic responders, incident/guardrail responders and legacy
+    // compatibility paths -- eventually returns through coreResult. The
+    // Response Composer's own language guard is necessary but not sufficient:
+    // real production proved several valid reply paths never pass through
+    // that composer and could still append Thai politeness to English/Chinese
+    // ("...per personครับ", "有的ครับ"). Normalize the surface ONCE here,
+    // immediately before telemetry/persistence/public return, so no path can
+    // bypass the requested response language.
+    if (statusCode === 200 && typeof typed?.message === 'string') {
+      typed.message = normalizeFinalCustomerMessage(typed.message,request.language,channel);
+    }
+
     if (statusCode === 200 && typeof typed?.message === 'string') {
       const signals = evaluateBotQualitySignals({
         customerMessage: request.message,
