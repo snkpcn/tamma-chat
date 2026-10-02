@@ -45,6 +45,7 @@ type Probe={
   context:SemanticContext;
   expected:CommercialBoundaryMode[];
   mustCommit:boolean;
+  mustWithhold?:boolean;
 };
 
 const probes:Probe[]=[
@@ -58,13 +59,13 @@ const probes:Probe[]=[
   {id:'consider-hold',message:'เอาอันนี้ไว้ก่อน เดี๋ยวค่อยตัดสินใจครับ',context:activityPlanning,expected:['WITHHOLD','CONSIDER'],mustCommit:false},
   {id:'consider-resume',message:'กลับไปเรื่องจองต่อครับ แต่ยังไม่จองนะ',context:activityPlanning,expected:['WITHHOLD','CONSIDER','MANAGE'],mustCommit:false},
   {id:'consider-correction',message:'เปลี่ยนเป็นทองไทยก่อนครับ ยังไม่จอง',context:activityPlanning,expected:['WITHHOLD','MANAGE','CONSIDER'],mustCommit:false},
-  {id:'revoke-late',message:'จองเลยครับ แต่เดี๋ยวก่อน ยังไม่จอง',context:activityPlanning,expected:['WITHHOLD'],mustCommit:false},
+  {id:'revoke-late',message:'จองเลยครับ แต่เดี๋ยวก่อน ยังไม่จอง',context:activityPlanning,expected:['MANAGE'],mustCommit:false,mustWithhold:true},
 
   {id:'commit-book',message:'เอาภาราดร พรุ่งนี้ห้าโมง 30 นาที จองเลยครับ',context:activityPlanning,expected:['COMMIT'],mustCommit:true},
   {id:'commit-order',message:'ขอสั่งตำลาว 1 จานครับ',context:empty,expected:['COMMIT'],mustCommit:true},
 
-  {id:'manage-cancel',message:'ยกเลิกอันที่คุยไว้ก่อนครับ',context:activityPlanning,expected:['MANAGE'],mustCommit:false},
-  {id:'manage-correct',message:'เมื่อกี้ภาราดร เปลี่ยนเป็นทองไทยครับ',context:activityPlanning,expected:['MANAGE','CONSIDER'],mustCommit:false},
+  {id:'manage-cancel',message:'ยกเลิกอันที่คุยไว้ก่อนครับ',context:activityPlanning,expected:['MANAGE'],mustCommit:false,mustWithhold:true},
+  {id:'manage-correct',message:'เมื่อกี้ภาราดร เปลี่ยนเป็นทองไทยครับ',context:activityPlanning,expected:['MANAGE'],mustCommit:false,mustWithhold:true},
 
   {id:'incident-staff',message:'เจิดพูดไม่ดีมากครับ อยากให้ช่วยดูหน่อย',context:empty,expected:['INCIDENT'],mustCommit:false},
   {id:'incident-safety',message:'ช่วยด้วยครับ ล้มตอนเล่น ATV เจ็บอยู่',context:empty,expected:['INCIDENT'],mustCommit:false},
@@ -82,6 +83,7 @@ async function main(){
     const boundary=classifyCommercialBoundarySemantic(turn);
     const pass=probe.expected.includes(boundary.mode)
       && boundary.currentTurnCommit===probe.mustCommit
+      && (probe.mustWithhold !== true || boundary.withholdsExecution === true)
       && (probe.mustCommit || !boundary.prepareEligible || boundary.mode!=='COMMIT');
     const row={
       id:probe.id,
@@ -99,6 +101,7 @@ async function main(){
       boundary,
       expected:probe.expected,
       mustCommit:probe.mustCommit,
+      mustWithhold:probe.mustWithhold??false,
       pass,
     };
     results.push(row);
