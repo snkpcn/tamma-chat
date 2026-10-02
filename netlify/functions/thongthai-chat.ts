@@ -5968,7 +5968,17 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
   const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
+  // Explicit read-only restaurant discovery/recommendation should use the
+  // live restaurant SOT before the generic Saved Agent. This is especially
+  // important immediately after a cafe conversation: once stale cafe context
+  // correctly yields, the turn must land on the verified menu advisor rather
+  // than fall into a generic model/provider fallback.
+  const restaurantReadOnlyBeforePrimary =
+    !explicitTransactionIntent
+    && isRestaurantAdvisorTurn(request, { agentState:{} });
+
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+    && !restaurantReadOnlyBeforePrimary
     && !completeVisitorJourneyBeforeSupervision
     && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
@@ -5999,6 +6009,32 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         contextUpdates: polished.contextUpdates,
         journeyAction: polished.journeyAction,
         suggestedActions: polished.suggestedActions,
+      });
+    }
+  }
+
+  if (restaurantReadOnlyBeforePrimary) {
+    const restaurantResponse = await deterministicRestaurantResponse(
+      request,
+      { agentState:{} },
+      guestDbId,
+      channel,
+    ).catch(error => {
+      console.error(
+        'THONGTHAI_PRE_PRIMARY_RESTAURANT_ERROR',
+        error instanceof Error ? error.message.slice(0,220) : 'unknown',
+      );
+      return null;
+    });
+    if (restaurantResponse) {
+      const polished = polishedResponse(restaurantResponse, channel);
+      await persistBrainRuntime(guestDbId, channel, polished);
+      return coreResult(200, {
+        message:polished.message,
+        intent:polished.intent,
+        contextUpdates:polished.contextUpdates,
+        journeyAction:polished.journeyAction,
+        suggestedActions:polished.suggestedActions,
       });
     }
   }
