@@ -10,7 +10,10 @@ test('high-confidence financial evidence attaches by document date while preserv
   assert.match(sql,/v_attach_date/);
   assert.match(sql,/v_confidence>=0\.80/);
   assert.match(sql,/v_effective_date/);
-  assert.match(sql,/values\(v_branch_id,v_attach_date,'test','draft','line'\)/);
+  assert.match(sql,/values\(v_branch_id,v_received_date,''test'',''draft'',''line''\)/);
+  assert.match(sql,/values\(v_branch_id,v_attach_date,''test'',''draft'',''line''\)/);
+  assert.match(sql,/and c\.local_date=v_received_date/);
+  assert.match(sql,/and c\.local_date=v_attach_date/);
   assert.match(sql,/received_local_date/);
   assert.match(sql,/attached_local_date/);
 });
