@@ -37,5 +37,5 @@ jobs:
       - run: npm ci
       - name: Run Phase 7 final production certification (read-only, no transactions)
         env:
-          THONGTHAI_PRODUCTION_URL: ${{ inputs.production_url }}
+          THONGTHAI_PRODUCTION_URL: ${{ inputs.production_url || 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat' }}
         run: npx tsx scripts/run-phase7-production-certification.ts
