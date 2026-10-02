@@ -1355,6 +1355,38 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
   const task = input.dialogDecision.taskStateContainer.activeTask;
   const noCommitment = !task?.commitmentIntent;
 
+  // Phase 3 learned-semantic acknowledgement. Learned concepts are a CLOSED,
+  // non-operational set; render a short human acknowledgement directly
+  // instead of falling through to the generic "cannot answer accurately"
+  // fallback merely because a zero-call SemanticTurn has no model reply.
+  if (
+    turn.semanticSource === 'semantic_concept_memory'
+    && !input.dialogDecision.actionProposal
+    && (turn.informationNeed ?? 'none') === 'none'
+  ) {
+    if (turn.entities.pace === 'relaxed') {
+      return 'รับทราบครับ เดี๋ยวผมเน้นตัวเลือกสบาย ๆ ใช้แรงไม่มากให้ครับ';
+    }
+
+    const companion = typeof turn.entities.companion === 'string'
+      ? turn.entities.companion
+      : null;
+    if (companion) {
+      const label = companion === 'partner' ? 'มากับคนรัก'
+        : companion === 'family' ? 'มากับครอบครัว'
+          : companion === 'friends' ? 'มากับเพื่อน'
+            : companion === 'solo' ? 'มาคนเดียว'
+              : null;
+      if (label) return `รับทราบครับ ${label} เดี๋ยวผมช่วยแนะนำให้เหมาะกับบริบทนี้ครับ`;
+    }
+
+    const noTransaction = turn.constraints.some(constraint =>
+      /^(?:consider_only|not_yet_booking|no_transaction|not_booking)$/iu.test(constraint));
+    if (noTransaction) {
+      return 'ได้ครับ เก็บตัวเลือกนี้ไว้พิจารณาก่อน ตอนนี้ยังไม่ได้จองหรือส่งรายการครับ';
+    }
+  }
+
   // An explicit return to a suspended task is a working-memory readback, not
   // a fresh discovery question. Render the complete restored task state so a
   // correct slot cannot disappear from the customer-facing answer merely
