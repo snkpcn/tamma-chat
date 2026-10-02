@@ -42,9 +42,9 @@ import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseIn
 import { composeLocalConciergeResponse } from './_local-concierge-response';
 import { redactWeatherUrl } from './_weather-provider';
 import { classifyServiceFeedback, mentionsThongthaiResponse, type ServiceFeedbackMatch, type IssueKeyword } from './_service-mind-feedback-intent';
-import { composeServiceFeedbackResponse, composeEscalationResponse } from './_service-mind-feedback-response';
+import { composeServiceFeedbackResponse, composeEscalationResponse, composeSemanticIncidentResponse } from './_service-mind-feedback-response';
 import { createFeedbackEvent } from './_service-mind-feedback-events';
-import { classifyEscalationBoundary, type EscalationCategory } from './_boundary-classifier';
+import { classifyEscalationBoundary, type EscalationCategory, type EscalationMatch } from './_boundary-classifier';
 import {
   classifyActivityIntentQualifier,
   composeActivityIntentStartResponse,
@@ -79,6 +79,11 @@ import { executeThongthaiTransactionTool } from './_thongthai-agent-transactions
 import { runPrepareOnlyMultiVerticalFastPath } from './_thongthai-prepare-fastpath-v2';
 import { isPhase3SemanticLearningCandidate } from './_semantic-concept-memory';
 import { classifyCommercialBoundaryText } from './_commercial-intent-boundary';
+import {
+  classifyRawBusinessIncidentRoute,
+  classifySemanticBusinessIncidentRoute,
+  semanticIncidentFeedbackMatch,
+} from './_business-incident-router';
 import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
@@ -4513,8 +4518,9 @@ async function deterministicEscalationResponse(
   channel: BrainChannel,
   guestDbId: string | null,
   sourceEventKey: string,
+  preclassified?: EscalationMatch | null,
 ): Promise<BrainResponse | null> {
-  const match = classifyEscalationBoundary(request.message);
+  const match = preclassified ?? classifyEscalationBoundary(request.message);
   if (!match) return null;
 
   const respond = (message: string): BrainResponse => ({
@@ -4557,8 +4563,9 @@ async function deterministicServiceFeedbackResponse(
   channel: BrainChannel,
   guestDbId: string | null,
   sourceEventKey: string,
+  preclassified?: ServiceFeedbackMatch | null,
 ): Promise<BrainResponse | null> {
-  const match = classifyServiceFeedback(request.message);
+  const match = preclassified ?? classifyServiceFeedback(request.message);
   if (!match) return null;
   const eventResult = await createFeedbackEvent({
     match, message: request.message, channel, guestDbId, sourceEventKey,
@@ -4999,16 +5006,31 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Phase 5 Business + Incident Router: one pre-model classification pass
+  // owns the deterministic authority/feedback precedence. The individual
+  // responders below receive the already-classified object so they cannot
+  // disagree by re-running separate language matchers.
+  const rawBusinessIncidentRoute = classifyRawBusinessIncidentRoute(request.message);
+  if (rawBusinessIncidentRoute) {
+    console.log('THONGTHAI_BUSINESS_INCIDENT_ROUTE', JSON.stringify({
+      stage:'raw',
+      kind:rawBusinessIncidentRoute.kind,
+      lane:rawBusinessIncidentRoute.lane,
+      businessUnit:rawBusinessIncidentRoute.businessUnit,
+    }));
+  }
+
   // Master Roadmap Phase 1 -- Escalation Boundary Policy. Checked BEFORE
-  // deterministicServiceFeedbackResponse (see deterministicEscalationResponse's
-  // own header comment for exactly why: two of its categories would
-  // otherwise be misclassified by classifyServiceFeedback's own
-  // URGENT_SAFETY_MARKER first). Same "active context must never swallow
-  // this" ordering discipline as the block immediately below.
-  const escalation = await deterministicEscalationResponse(request, channel, guestDbId, transportEventId).catch(error => {
-    console.error('THONGTHAI_ESCALATION_BOUNDARY_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return null;
-  });
+  // deterministicServiceFeedbackResponse. Phase 5 preserves the exact
+  // deterministic guardrail wording and only centralizes the routing decision.
+  const escalation = rawBusinessIncidentRoute?.kind === 'authority_boundary'
+    ? await deterministicEscalationResponse(
+        request, channel, guestDbId, transportEventId, rawBusinessIncidentRoute.escalation,
+      ).catch(error => {
+        console.error('THONGTHAI_ESCALATION_BOUNDARY_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+        return null;
+      })
+    : null;
   if (escalation) {
     const polished = polishedResponse(escalation, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
@@ -5038,10 +5060,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // system-quality comment -- this is now enforced by ORDER, not by each
   // downstream responder having to individually remember to yield to
   // feedback (which is exactly what silently broke before).
-  const serviceFeedback = await deterministicServiceFeedbackResponse(request, channel, guestDbId, transportEventId).catch(error => {
-    console.error('THONGTHAI_SERVICE_FEEDBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-    return null;
-  });
+  const serviceFeedback = rawBusinessIncidentRoute?.kind === 'service_feedback'
+    ? await deterministicServiceFeedbackResponse(
+        request, channel, guestDbId, transportEventId, rawBusinessIncidentRoute.feedback,
+      ).catch(error => {
+        console.error('THONGTHAI_SERVICE_FEEDBACK_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+        return null;
+      })
+    : null;
   if (serviceFeedback) {
     const polished = polishedResponse(serviceFeedback, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
@@ -5328,6 +5354,61 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       // interpretSemanticTurn a second time for the same request.
       earlyOneMind = oneMind;
       await recordOneMindTrace(oneMind.observability);
+
+      // Phase 5 post-understanding router. This closes the gap where OpenAI
+      // correctly understood a complaint/help/incident phrased outside the
+      // narrow raw deterministic vocabulary, but the composed answer returned
+      // before any durable ops_feedback_events case was created. Structured
+      // INCIDENT meaning now becomes an operational case BEFORE any business
+      // or transaction continuation. Phase 4's commercial boundary is not
+      // changed; this is an even earlier incident-precedence guard.
+      const routedMeaning = oneMind.turn.semanticMeaning
+        ?? deriveSemanticMeaning(oneMind.turn.dialogSemanticTurn);
+      const semanticBusinessIncidentRoute = classifySemanticBusinessIncidentRoute(routedMeaning);
+      console.log('THONGTHAI_BUSINESS_INCIDENT_ROUTE', JSON.stringify({
+        stage:'semantic',
+        kind:semanticBusinessIncidentRoute.kind,
+        lane:semanticBusinessIncidentRoute.lane,
+        businessUnit:semanticBusinessIncidentRoute.businessUnit,
+        domain:routedMeaning.domain,
+        speechAct:routedMeaning.speechAct,
+      }));
+      const semanticIncidentSourceTrusted = oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor'
+        || oneMind.turn.semanticTurn.semanticSource === 'semantic_concept_memory';
+      if (semanticBusinessIncidentRoute.kind === 'semantic_incident' && semanticIncidentSourceTrusted) {
+        const incidentMatch = semanticIncidentFeedbackMatch(routedMeaning);
+        const eventResult = await createFeedbackEvent({
+          match:incidentMatch,
+          message:request.message,
+          channel,
+          guestDbId,
+          sourceEventKey:transportEventId,
+        });
+        const incidentResponse = polishedResponse({
+          message:composeSemanticIncidentResponse(
+            incidentMatch,
+            eventResult.eventId != null,
+            eventResult.targets,
+            request.language,
+          ),
+          intent:'information',
+          contextUpdates:{},
+          journeyAction:{type:'none',journey:null},
+          suggestedActions:[],
+          responseStyle:'direct',
+          semanticMemoryUpdates:[],
+          toolCalls:[],
+        }, channel);
+        await persistBrainRuntime(guestDbId, channel, incidentResponse);
+        return coreResult(200, {
+          message:incidentResponse.message,
+          intent:incidentResponse.intent,
+          contextUpdates:incidentResponse.contextUpdates,
+          journeyAction:incidentResponse.journeyAction,
+          suggestedActions:incidentResponse.suggestedActions,
+        });
+      }
+
       // Only a real OpenAI-owned interpretation consumes the early semantic
       // slot. If the supervisor is unavailable, leave the later proven
       // deterministic One-Mind compatibility cutover available.
