@@ -157,22 +157,9 @@ async function sendFacebookTextReliably(
   graphVersion: string,
   personaId: string | null,
 ): Promise<void> {
-  try {
-    await sendFacebookText(recipientPsid, text, pageToken, pageId, graphVersion, personaId);
-    return;
-  } catch (firstError) {
-    console.error(
-      'FACEBOOK_SEND_FIRST_ATTEMPT_ERROR',
-      firstError instanceof Error ? firstError.message.slice(0, 260) : 'unknown',
-    );
-    // A network exception is ambiguous: Meta may already have accepted the
-    // message. Retrying that blindly can duplicate the customer reply. Retry
-    // only explicit HTTP 429/5xx responses where the Send API confirmed a
-    // failure response.
-    if (!(firstError instanceof FacebookSendHttpError) || !firstError.retryable) throw firstError;
-  }
-
-  await new Promise(resolve => setTimeout(resolve, 250));
+  // Meta/network outcomes can be ambiguous. Re-sending the same text here can
+  // create duplicate customer bubbles, so a webhook delivery makes one Send
+  // API attempt only.
   await sendFacebookText(recipientPsid, text, pageToken, pageId, graphVersion, personaId);
 }
 

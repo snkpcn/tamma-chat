@@ -132,6 +132,7 @@ export function polishCustomerMessage(
   channel: CustomerChatChannel,
 ): string {
   const normalized = enforceThongthaiMaleThaiParticles(String(input ?? ''))
+    .replace(/(?:ตอนนี้)?ความชอบที่จำไว้คือ\s*ยังไม่ได้(?:ล็อก|เลือก)รสชาติหรือเมนูครับ/gu, 'ตอนนี้คุณยังไม่ได้บอกรสชาติหรือเมนูที่ชอบไว้ครับ')
     .replace(/\r\n?/g, '\n')
     .replace(/\u00a0/g, ' ')
     .replace(/[ \t]+$/gm, '')
