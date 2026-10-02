@@ -15,6 +15,7 @@ test('Thongthai Agent keeps the original business fact tools bounded and read-on
   assert.deepEqual(names, [
     'recommend_restaurant_menu',
     'get_restaurant_menu',
+    'get_cafe_menu',
     'get_activity_catalog',
     'check_activity_availability',
     'get_stay_catalog',
