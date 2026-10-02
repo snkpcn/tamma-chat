@@ -5588,6 +5588,37 @@ function horseCorrectionRoutesBeforePrimary(request: BrainRequest): boolean {
   return Boolean(findKnownActivityAssetSelection(request.message));
 }
 
+function directOtherHorseCorrectionResponse(request: BrainRequest): BrainResponse | null {
+  const text=request.message.trim();
+  if(hasExplicitTransactionIntent(text) || !/(?:อีกตัว|ตัวอื่น|ตัวที่เหลือ)/u.test(text))return null;
+
+  const rejectsThongthai=/(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจจาก).{0,12}(?:น้อง)?ทองไทย/u.test(text);
+  const rejectsPharadon=/(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจจาก).{0,12}(?:น้อง)?ภาราดร/u.test(text);
+  if(rejectsThongthai===rejectsPharadon)return null;
+
+  const selected=rejectsThongthai?HORSE_FACTS.pharadon:HORSE_FACTS.thongthai;
+  const rejected=rejectsThongthai?HORSE_FACTS.thongthai:HORSE_FACTS.pharadon;
+  const lines=[
+    `ได้ครับ งั้นตัด${rejected.name}ออก เหลือ${selected.name}ครับ`,
+    `ข้อมูลที่ยืนยันได้คือ ${selected.name}${selected.rideFeelTh} แต่ทองไทยยังไม่ใช้จุดนี้ฟันธงเรื่องความเหมาะสมเฉพาะคนครับ`,
+  ];
+  if(/กลัวตก|กลัวล้ม|มือใหม่|ไม่เคยขี่/u.test(text)){
+    lines.push('ถ้ากังวลเรื่องตกหรือยังไม่เคยขี่ ให้ทีมหน้างานช่วยดูความมั่นใจและความเหมาะสมก่อนขึ้นม้าครับ');
+  }
+  lines.push('ตอนนี้ยังเป็นแค่การเลือกไว้ ยังไม่ได้จองหรือส่งรายการครับ');
+  return {
+    message:lines.join('\n\n'),
+    intent:'recommendation',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    agentStateUpdate:{activeTopic:'activity'},
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 const BOOKING_STATUS_READBACK_RE =
   /(?:ยังไม่ได้จอง.{0,20}(?:ใช่ไหม|ใช่มั้ย|หรือยัง|ไหม|มั้ย)|มี(?:รายการ)?จอง.{0,16}(?:ไหม|มั้ย|หรือยัง)|จองอะไร(?:ไว้)?.{0,12}(?:ไหม|มั้ย|หรือยัง)|จองไปหรือยัง|จองแล้วหรือยัง|ได้จอง.{0,12}หรือยัง)/u;
 
@@ -6319,6 +6350,19 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // - bounded ConversationContext carrying a considered selection/task ref
   // owns the turn before read-only Agent Primary.
   // Prepare-only routing remains separately authorized and unchanged.
+  const directHorseAlternative = directOtherHorseCorrectionResponse(request);
+  if (directHorseAlternative) {
+    const polished = polishedResponse(directHorseAlternative, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
   const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
   const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
