@@ -421,7 +421,13 @@ function usageFromTurn(turn: AgentTurn): AgentShadowTurnResult['usage'] {
   return { available: true, inputTokens, cachedInputTokens, outputTokens, costUsd, costThb: usdToThb(costUsd) };
 }
 
-async function persistAgentCost(input: AgentShadowTurnInput, runtime: AgentRuntimeConfig, turn: AgentTurn, usage: AgentShadowTurnResult['usage']): Promise<boolean> {
+async function persistAgentCost(
+  input: AgentShadowTurnInput,
+  runtime: AgentRuntimeConfig,
+  turn: AgentTurn,
+  usage: AgentShadowTurnResult['usage'],
+  callIndexConversation: number,
+): Promise<boolean> {
   if (!usage.available
       || usage.inputTokens === null
       || usage.cachedInputTokens === null
@@ -442,7 +448,7 @@ async function persistAgentCost(input: AgentShadowTurnInput, runtime: AgentRunti
       costUsd: usage.costUsd,
       costThb: usage.costThb,
       callIndexTurn: 1,
-      callIndexConversation: 1,
+      callIndexConversation: Math.max(1, Math.floor(callIndexConversation)),
       status: turn.status === 'completed' ? 'completed' : 'failed',
       latencyMs: 0,
       certificationMode: input.environment === 'test',
@@ -481,7 +487,13 @@ async function reconcilePendingUsage(
     channel: state.lastChannel ?? input.channel,
     environment: state.lastEnvironment ?? input.environment ?? 'live',
   };
-  const costPersisted = await persistAgentCost(priorInput, runtime, settledTurn, usage);
+  const costPersisted = await persistAgentCost(
+    priorInput,
+    runtime,
+    settledTurn,
+    usage,
+    Math.max(1, state.turnCount),
+  );
   if (!costPersisted) {
     throw new Error('Thongthai Agent usage cost persistence is still pending; refusing another paid turn.');
   }
@@ -567,7 +579,13 @@ async function runThongthaiAgentTurn(input: AgentShadowTurnInput): Promise<Agent
   // critical path; only re-fetch when usage is genuinely absent.
   const settledTurn = turn.usage ? turn : await retrieveTurnWithSettledUsage(sessionId, turn.id);
   const usage = usageFromTurn(settledTurn);
-  const costPersisted = await persistAgentCost(input, runtime, settledTurn, usage);
+  const costPersisted = await persistAgentCost(
+    input,
+    runtime,
+    settledTurn,
+    usage,
+    (existing?.turnCount ?? 0) + 1,
+  );
 
   const prior = existing?.cumulativeCostThb ?? 0;
   const turnCostThb = usage.costThb ?? 0;
