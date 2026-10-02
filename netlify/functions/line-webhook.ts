@@ -8,6 +8,7 @@ import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
 import { handleStaffBookingPostback, type LineMessage } from './_ops-line-ui';
 import { handleRestaurantPreorderPostback, handleRestaurantStockText } from './_restaurant-sot';
 import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
+import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
@@ -333,6 +334,17 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   });
   if (dailyCloseReply) {
     await replyToLine(event.replyToken, dailyCloseReply, accessToken);
+    return;
+  }
+
+  const dailyCloseConfirmReply = await handleCafeTestDailyCloseConfirmText({
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+    timestamp: event.timestamp,
+  });
+  if (dailyCloseConfirmReply) {
+    await replyToLine(event.replyToken, dailyCloseConfirmReply, accessToken);
     return;
   }
 
