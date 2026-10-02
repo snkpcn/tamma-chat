@@ -185,7 +185,7 @@ test('Messenger topic switch: restaurant topic switch outranks stale cafe contex
       assert.match(cafeReply,/Inthanin|อินทนิน/u);
       assert.doesNotMatch(cafeReply,/^รับทราบครับ/u);
       assert.doesNotMatch(cafeReply,/ความชอบที่จำไว้คือ|ตอนนี้คุณยังไม่ได้บอกรสชาติ/u);
-      assert.match(cafeReply,/ยังไม่มีข้อมูลเมนู|ยังแนะนำชื่อเมนูให้ตรงไม่ได้/u);
+      assert.match(cafeReply,/ยังไม่มีข้อมูลยืนยันเรื่องเมนู|ไม่ขอเดาชื่อเมนู/u);
 
       const restaurant=await processThongthaiChatCore(
         facebookRequest('แล้วที่ร้านอาหารมีเมนูอะไรแนะนำครับ',gid),
