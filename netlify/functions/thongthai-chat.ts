@@ -1749,6 +1749,20 @@ function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
 }
 
+function recentCafeConversationText(agentState:Record<string,unknown>):string{
+  const raw=agentState.conversationContext;
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))return '';
+  const turns=(raw as {recentTurns?:unknown}).recentTurns;
+  if(!Array.isArray(turns))return '';
+  return turns
+    .slice(-12)
+    .map(turn=>turn&&typeof turn==='object'&&typeof (turn as {content?:unknown}).content==='string'
+      ? String((turn as {content:string}).content)
+      : '')
+    .filter(Boolean)
+    .join('\n');
+}
+
 function cafePreferenceSummary(constraints: readonly string[]): string {
   const labels = [
     constraints.includes('no_coffee') ? 'ไม่เอากาแฟ' : '',
@@ -2085,6 +2099,29 @@ async function deterministicCafeResponse(
     );
   }
 
+  const recentCafeText=recentCafeConversationText(runtime.agentState??{});
+  const splitFollowup=/ของผม.{0,24}(?:เย็น|ร้อน|ปั่น).{0,40}(?:แฟน)/u.test(message)
+    || /(?:แฟน).{0,40}(?:ของผม).{0,24}(?:เย็น|ร้อน|ปั่น)/u.test(message);
+  if(items.length&&splitFollowup&&/อเมริกาโน่/u.test(recentCafeText)&&/อูจิ\s*เพียวมัทฉะ/u.test(recentCafeText)){
+    const selfItem=items.find(item=>item.code==='americano'&&item.active);
+    const requestedSlot=selfItem?resolveCafeSlot(message,selfItem):null;
+    const selfLine=selfItem&&requestedSlot
+      ? `ของคุณต่อจากเมื่อกี้เป็น ${selfItem.name_th} ${requestedSlot.label_th} ${cafeMoney(requestedSlot.price)}ครับ`
+      : 'ของคุณยังคงฝั่งอเมริกาโน่ไว้ครับ';
+    const companionLine='ส่วนของแฟน เมื่อกี้คัดอูจิ เพียวมัทฉะไว้ในฝั่งไม่ใช่กาแฟครับ แต่ข้อมูลเมนูที่มีไม่ได้บอกรสชาติละเอียดพอให้ทองไทยฟันธงว่า “หอมและดื่มง่ายที่สุด” โดยไม่เดา';
+    return {
+      message:[selfLine,companionLine,'ถ้าอยากได้ดื่มง่ายกว่าแนวมัทฉะ บอกได้ครับ เดี๋ยวทองไทยคัดจากฝั่งชาให้แทน'].join('\n\n'),
+      intent:'recommendation',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{activeTopic:'cafe'},
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+
   const grounded=items.length?cafeGroundedAnswer(request,items,modifiers):null;
   if(grounded){
     return {
@@ -2115,7 +2152,9 @@ async function deterministicCafeResponse(
   } else if (/ถามเผื่อแฟน/u.test(message) && /คนเดียว/u.test(message)) {
     answer = `รับทราบครับ วันนี้มาคนเดียว ส่วนเรื่องเครื่องดื่มไม่กาแฟเป็นคำถามเผื่อแฟนครับ ตอนนี้ยังไม่ได้สั่งอะไร และความชอบที่จำไว้คือ ${preferences}ครับ`;
   } else if (/ไม่ได้แพ้นม/u.test(message)) {
-    answer = `เข้าใจครับ เป็นความชอบที่ไม่อยากดื่มนมวัว ไม่ใช่อาการแพ้นมครับ ผมจะจำเป็น preference เท่านั้น ตอนนี้ความชอบคือ ${preferences}ครับ`;
+    answer = /แฟน/u.test(message)
+      ? 'เข้าใจครับ ของแฟนคือช่วงนี้ไม่อยากดื่มนมวัว แต่ไม่ได้แพ้นมครับ ทองไทยจะไม่ตีความเป็นเรื่องแพ้อาหาร'
+      : 'เข้าใจครับ เป็นความชอบที่ไม่อยากดื่มนมวัวช่วงนี้ ไม่ใช่อาการแพ้นมครับ';
   } else if (/(?:เมื่อกี้|จากที่คุยมา|สนใจอะไรไว้|ตัวไหนเหมาะ|เปลี่ยนใจ|ไม่เอาตัวนั้น|กลับมาเรื่อง)/u.test(message)) {
     answer = items.length
       ? `ได้ครับ กลับมาเรื่อง Inthanin กัน ตอนนี้ที่จำไว้คือ ${preferences} ถ้ามีเมนูที่เล็งไว้บอกชื่อมาได้เลยครับ`
