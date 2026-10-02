@@ -179,10 +179,13 @@ function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
     };
     const companionAt=lastIndex(before,companionRe);
     const selfAt=lastIndex(before,selfRe);
-    const around=message.slice(Math.max(0,index-28),index+match[0].length+28);
+    const subjectWindow=message.slice(Math.max(0,index-28),index);
 
-    // Explicit shared wording means the customer includes themself.
-    if(/เราสองคน|เราทั้งคู่|ทั้งคู่|พวกเรา/u.test(around))continue;
+    // Shared wording must actually GOVERN this constraint occurrence. Only
+    // look to the left of the phrase. A later clause such as
+    // "แฟนไม่กินกาแฟ แล้วเราสองคนไม่ชอบหวาน" must not retroactively turn the
+    // companion's no-coffee preference into a shared one.
+    if(/เราสองคน|เราทั้งคู่|ทั้งคู่|พวกเรา/u.test(subjectWindow))continue;
     if(companionAt>=0&&companionAt>selfAt)return true;
   }
   return false;
