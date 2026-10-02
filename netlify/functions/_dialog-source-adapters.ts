@@ -13,6 +13,7 @@
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { listRestaurantMenu } from './_restaurant-sot';
 import { loadActivityWorldFacts } from './_activity-sot';
+import { listCafeMasterMenu, listCafeBranchModifiers } from './_cafe-sot';
 import { ACTIVITY_ASSET_ATTRIBUTE_KEYS } from './_activity-catalog-policy';
 import { loadActivePromotionsWorldFact } from './_promotions-runtime';
 import {
@@ -230,6 +231,53 @@ async function otopCatalogAdapter(
   } catch (error) { return unavailable(sourceId, 'otop_live', error, now); }
 }
 
+async function cafeFactsAdapter(now: Date = new Date()): Promise<SourceResult> {
+  const sourceId='cafe_menu_live';
+  try{
+    const [items,modifiers]=await Promise.all([
+      listCafeMasterMenu(),
+      listCafeBranchModifiers('inthanin_tadtone'),
+    ]);
+    const fetchedAt=now.toISOString();
+    const facts:GroundedFact[]=[];
+    for(const item of items){
+      const base={
+        domain:'cafe' as const,
+        sourceId,
+        sourceType:'cafe_live' as const,
+        authoritative:true,
+        fetchedAt,
+        updatedAt:item.updated_at,
+      };
+      facts.push({...base,key:`cafe:${item.code}:name`,value:item.name_th});
+      facts.push({...base,key:`cafe:${item.code}:name_en`,value:item.name_en});
+      facts.push({...base,key:`cafe:${item.code}:category`,value:item.category});
+      facts.push({...base,key:`cafe:${item.code}:prices`,value:item.prices});
+      facts.push({...base,key:`cafe:${item.code}:available_all_branches`,value:item.available_all_branches});
+      for(const [style,price] of Object.entries(item.prices)){
+        facts.push({...base,key:`cafe:${item.code}:price:${style}`,value:Number(price)});
+      }
+    }
+    for(const mod of modifiers){
+      const base={
+        domain:'cafe' as const,
+        sourceId,
+        sourceType:'cafe_live' as const,
+        authoritative:true,
+        fetchedAt,
+        updatedAt:mod.updated_at,
+      };
+      facts.push({...base,key:`cafe_modifier:${mod.modifier_code}:name`,value:mod.name_th});
+      facts.push({...base,key:`cafe_modifier:${mod.modifier_code}:surcharge`,value:mod.surcharge});
+      facts.push({...base,key:`cafe_modifier:${mod.modifier_code}:applies_to`,value:mod.applies_to});
+      facts.push({...base,key:`cafe_modifier:${mod.modifier_code}:styles`,value:mod.styles});
+    }
+    return ok(sourceId,'cafe_live',facts,now);
+  }catch(error){
+    return unavailable(sourceId,'cafe_live',error,now);
+  }
+}
+
 function requestValue(request: KnowledgeRequest, key: string): unknown {
   return request.entities[key] ?? request.task?.slots?.[key];
 }
@@ -413,5 +461,6 @@ export function buildRealKnowledgeSourceAdapters(
     paymentStatus: { lookup: request => paymentStatusAdapter(options.guestDbId)(request) },
     membership: { status: request => membershipStatusAdapter(options.guestDbId)(request) },
     otop: { catalog: request => otopCatalogAdapter(environment) },
+    cafe: { facts: request => cafeFactsAdapter() },
   };
 }
