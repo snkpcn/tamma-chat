@@ -69,7 +69,7 @@ type LocaleRow = {
 type MarketRow = {
   market_code: string;
   country_code: string;
-  settlement_currency_code: string;
+  default_currency_code: string;
   default_locale_code: string;
   status: 'draft' | 'certification' | 'live' | 'suspended';
   is_domestic: boolean;
@@ -119,7 +119,7 @@ function market(row: MarketRow): CommerceMarket {
   return {
     marketCode: row.market_code,
     countryCode: row.country_code,
-    settlementCurrencyCode: row.settlement_currency_code,
+    defaultCurrencyCode: row.default_currency_code,
     defaultLocaleCode: canonicalLocaleCode(row.default_locale_code) ?? row.default_locale_code,
     status: row.status,
     isDomestic: row.is_domestic,
@@ -142,7 +142,7 @@ export async function loadWorldwideMarketContext(
 
   const marketRes = await dbFetch(
     'commerce_markets?country_code=eq.' + encodeURIComponent(countryCode)
-    + '&select=market_code,country_code,settlement_currency_code,default_locale_code,status,is_domestic&limit=1',
+    + '&select=market_code,country_code,default_currency_code,default_locale_code,status,is_domestic&limit=1',
   );
   const marketRows = await marketRes.json() as MarketRow[];
   const marketRow = marketRows[0];
@@ -154,7 +154,7 @@ export async function loadWorldwideMarketContext(
       + '&select=country_code,name_en,default_currency_code,active&limit=1',
     ),
     dbFetch(
-      'commerce_currencies?currency_code=eq.' + encodeURIComponent(marketRow.settlement_currency_code)
+      'commerce_currencies?currency_code=eq.' + encodeURIComponent(marketRow.default_currency_code)
       + '&select=currency_code,name_en,symbol,minor_unit,active&limit=1',
     ),
     dbFetch(
