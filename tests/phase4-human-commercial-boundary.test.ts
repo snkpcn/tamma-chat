@@ -9,6 +9,10 @@ import {
 } from '../netlify/functions/_commercial-intent-boundary';
 import { isAgentTransactionPrepareIntent } from '../netlify/functions/thongthai-chat';
 import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
+import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
+import { reconcileReadOnlyActivityPreferenceRefinement } from '../netlify/functions/_thongthai-one-mind-orchestrator';
+import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
+import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
 
 function semantic(overrides:Partial<SemanticTurn>):SemanticTurn{
   return {
@@ -205,4 +209,92 @@ test('Phase 4 semantic manage intent can independently veto execution',()=>{
   }));
   assert.equal(correction.mode,'MANAGE');
   assert.equal(correction.withholdsExecution,true);
+});
+
+
+test('Phase 4 compound horse preference fallback preserves exclusion/calm/rain structure',()=>{
+  const message='อยากขี่ม้าพรุ่งนี้ช่วงเย็น แต่ไม่เอาทองไทยนะ เอาตัวที่นิสัยนิ่งกว่า แล้วถ้าฝนตกมีอะไรให้ทำแทนได้บ้าง';
+  const deterministic=deriveDeterministicSemanticTurn(
+    message,
+    emptyConversationContextState(new Date('2026-10-02T08:00:00+07:00')) as any,
+    emptyTaskStateContainer(),
+    new Date('2026-10-02T08:00:00+07:00'),
+  );
+  assert.ok(deterministic);
+  assert.equal(deterministic!.domain,'activity');
+  assert.equal(deterministic!.action,'recommend');
+  assert.equal(deterministic!.informationNeed,'recommendation');
+  assert.equal(deterministic!.entities.excludedHorse,'ทองไทย');
+  assert.equal(deterministic!.entities.preferredHorseTrait,'calm');
+  assert.equal(deterministic!.entities.weatherCondition,'rain');
+  assert.ok(deterministic!.constraints.includes('exclude_thongthai'));
+  assert.ok(deterministic!.constraints.includes('preferred_horse_trait:calm'));
+  assert.ok(deterministic!.constraints.includes('weather_fallback_requested'));
+});
+
+test('Phase 4 read-only activity preference reconciliation keeps rich model structure but removes false selection authority',()=>{
+  const deterministic=semantic({
+    domain:'activity',
+    intent:'activity_preference_recommendation_fallback',
+    action:'recommend',
+    speechAct:'question',
+    informationNeed:'recommendation',
+    entities:{
+      activityCode:'horse',
+      excludedHorse:'ทองไทย',
+      preferredHorseTrait:'calm',
+      weatherCondition:'rain',
+    },
+    constraints:['exclude_thongthai','preferred_horse_trait:calm','weather_fallback_requested'],
+    confidence:0.86,
+  });
+  const model=semantic({
+    domain:'activity',
+    intent:'recommend_calm_horse_with_rain_fallback',
+    action:'confirm',
+    speechAct:'selection',
+    informationNeed:'recommendation',
+    entities:{
+      activityCode:'horse',
+      preferredHorseTrait:'calm',
+      weatherCondition:'rain',
+    },
+    constraints:['exclude_thongthai','weather_fallback_requested'],
+    confidence:0.94,
+  });
+
+  const reconciled=reconcileReadOnlyActivityPreferenceRefinement(model,deterministic);
+  assert.equal(reconciled.action,'recommend');
+  assert.equal(reconciled.speechAct,'question');
+  assert.equal(reconciled.informationNeed,'recommendation');
+  assert.equal(reconciled.entities.excludedHorse,'ทองไทย');
+  assert.equal(reconciled.entities.preferredHorseTrait,'calm');
+  assert.ok(reconciled.constraints.includes('exclude_thongthai'));
+  assert.equal(classifyCommercialBoundarySemantic(reconciled).currentTurnCommit,false);
+});
+
+test('Phase 4 activity preference reconciliation never de-escalates an explicit transaction request',()=>{
+  const deterministic=semantic({
+    domain:'activity',
+    intent:'activity_preference_recommendation_fallback',
+    action:'recommend',
+    speechAct:'question',
+    informationNeed:'recommendation',
+    entities:{activityCode:'horse',preferredHorseTrait:'calm'},
+    constraints:['preferred_horse_trait:calm'],
+    confidence:0.86,
+  });
+  const explicit=semantic({
+    domain:'activity',
+    intent:'book_calm_horse',
+    action:'book',
+    speechAct:'transaction_request',
+    entities:{activityCode:'horse',preferredHorseTrait:'calm'},
+    constraints:[],
+    confidence:0.99,
+  });
+  const reconciled=reconcileReadOnlyActivityPreferenceRefinement(explicit,deterministic);
+  assert.equal(reconciled.action,'book');
+  assert.equal(reconciled.speechAct,'transaction_request');
+  assert.equal(classifyCommercialBoundarySemantic(reconciled).currentTurnCommit,true);
 });
