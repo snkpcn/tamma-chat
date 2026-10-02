@@ -80,3 +80,10 @@ its existing executor boundary.
 8. Final production deploy READY and evidence recorded.
 
 No schema migration is planned for Phase 4.
+
+
+## Live certification trigger
+
+PR title carries `[run phase4 live]`. This checkpoint commit intentionally
+re-triggers CI so the real OpenAI human-intent matrix runs on the same final
+Phase 4 head after all static contracts are already green.
