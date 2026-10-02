@@ -6016,32 +6016,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     }
   }
 
-  if (restaurantTopicSwitchBeforePrimary) {
-    const restaurantResponse = await deterministicRestaurantResponse(
-      request,
-      { agentState:{} },
-      guestDbId,
-      channel,
-    ).catch(error => {
-      console.error(
-        'THONGTHAI_PRE_PRIMARY_RESTAURANT_ERROR',
-        error instanceof Error ? error.message.slice(0,220) : 'unknown',
-      );
-      return null;
-    });
-    if (restaurantResponse) {
-      const polished = polishedResponse(restaurantResponse, channel);
-      await persistBrainRuntime(guestDbId, channel, polished);
-      return coreResult(200, {
-        message:polished.message,
-        intent:polished.intent,
-        contextUpdates:polished.contextUpdates,
-        journeyAction:polished.journeyAction,
-        suggestedActions:polished.suggestedActions,
-      });
-    }
-  }
-
   if (primaryAgentEligible && guestDbId) {
     try {
       const agentTurn = await runThongthaiAgentPrimaryTurn({
@@ -6163,6 +6137,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
       && !preserveVerifiedLocationBeforeSupervision
       && !completeVisitorJourneyBeforeSupervision
+      && !restaurantTopicSwitchBeforePrimary
       && topLevelSemanticIntent !== 'WEATHER_REQUEST') {
     try {
       const oneMind = await processOneMindCustomerTurn({
