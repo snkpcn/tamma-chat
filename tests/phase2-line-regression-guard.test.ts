@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 
 import { emptySemanticContext, parseSemanticTurnResponse } from '../netlify/functions/_semantic-interpreter';
 import {
+  isTrustedBoundedActivityPreferenceRecommendation,
   isTrustedBoundedCorrectionContinuation,
   readOnlyCutoverEligibility,
 } from '../netlify/functions/_thongthai-one-mind-response';
+import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
+import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
 import { renderActivityRecommendation } from '../netlify/functions/_human-grounded-response';
 
 test('compound calm-horse + rain recommendation repairs structured activity domain and does not clarify', () => {
@@ -168,6 +171,52 @@ test('bounded active-task horse correction stays inside One Mind without creatin
   assert.equal(isTrustedBoundedCorrectionContinuation(turn),true);
   assert.deepEqual(
     readOnlyCutoverEligibility(turn,{requireSemanticSupervisor:true,message:'เมื่อกี้บอกว่าเอาภาราดร เปลี่ยนใจละ เอาทองไทยเหมือนเดิม แต่เวลาเดิมนะ'}),
+    {eligible:true},
+  );
+  assert.equal(turn.dialogDecision.actionProposal,undefined);
+});
+
+
+test('provider-unusable fallback preserves horse exclusion + calm preference + rain fallback and stays read-only',()=>{
+  const message='อยากขี่ม้าพรุ่งนี้ช่วงเย็น แต่ไม่เอาทองไทยนะ เอาตัวที่นิสัยนิ่งกว่า แล้วถ้าฝนตกมีอะไรให้ทำแทนได้บ้าง';
+  const semantic=deriveDeterministicSemanticTurn(
+    message,
+    emptySemanticContext(),
+    emptyTaskStateContainer(),
+    new Date('2026-10-02T08:00:00+07:00'),
+  );
+  assert.ok(semantic);
+  assert.equal(semantic!.domain,'activity');
+  assert.equal(semantic!.intent,'activity_preference_recommendation_fallback');
+  assert.equal(semantic!.action,'recommend');
+  assert.equal(semantic!.informationNeed,'recommendation');
+  assert.equal(semantic!.entities.activityCode,'horse');
+  assert.equal(semantic!.entities.excludedHorse,'ทองไทย');
+  assert.equal(semantic!.entities.preferredHorseTrait,'calm');
+  assert.equal(semantic!.entities.weatherCondition,'rain');
+  assert.ok(semantic!.constraints.includes('exclude_thongthai'));
+  assert.ok(semantic!.constraints.includes('preferred_horse_trait:calm'));
+  assert.ok(semantic!.constraints.includes('weather_fallback_requested'));
+
+  const container=emptyTaskStateContainer();
+  const turn:any={
+    semanticTurn:{...semantic,semanticSource:'deterministic_fallback'},
+    dialogSemanticTurn:{...semantic,semanticSource:'deterministic_fallback'},
+    taskStateBefore:container,
+    taskStateAfter:container,
+    dialogDecision:{
+      mode:'query_knowledge',
+      taskStateContainer:container,
+      knowledgeRequests:[],
+      missingFields:[],
+      responseIntent:'grounded_answer',
+      reasons:[],
+    },
+    groundedKnowledge:[],
+  };
+  assert.equal(isTrustedBoundedActivityPreferenceRecommendation(turn),true);
+  assert.deepEqual(
+    readOnlyCutoverEligibility(turn,{requireSemanticSupervisor:true,message}),
     {eligible:true},
   );
   assert.equal(turn.dialogDecision.actionProposal,undefined);
