@@ -5086,6 +5086,121 @@ async function boundedActivityAvailabilityClarification(
   };
 }
 
+const HORSE_COMPARISON_FOLLOWUP_RE = /(?:ต่างกัน|เปรียบเทียบ|ตัวไหนดี|เลือกตัวไหน|เลือกตัวไหนดี)/u;
+
+/**
+ * Phase 7 latency boundary for a contextual two-horse comparison.
+ *
+ * A follow-up such as "สองตัวนี้ต่างกันยังไง" contains no horse name on its
+ * own, so read-only Agent Primary previously took first refusal and could hit
+ * the 30s gateway timeout. Resolve it deterministically only when prior bounded
+ * context proves BOTH canonical horses were the subject of the conversation.
+ */
+async function boundedHorseComparisonBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (hasExplicitTransactionIntent(request.message) || !HORSE_COMPARISON_FOLLOWUP_RE.test(request.message)) return null;
+
+  const priorText = request.chatHistory.slice(-10).map(turn => turn.content).join('\n');
+  let hasBothHorseContext = /ทองไทย/u.test(priorText) && /ภาราดร/u.test(priorText);
+
+  if (!hasBothHorseContext && guestDbId) {
+    const context = await loadConversationContext(guestDbId).catch(() => null);
+    if (context) {
+      const boundedText = context.recentTurns.map(turn => turn.content).join('\n');
+      const entityIds = new Set(context.recentEntities.map(entity => entity.id));
+      hasBothHorseContext =
+        (/ทองไทย/u.test(boundedText) && /ภาราดร/u.test(boundedText))
+        || (entityIds.has('activity_asset:horse-thongthai') && entityIds.has('activity_asset:horse-pharadon'));
+    }
+  }
+
+  if (!hasBothHorseContext) return null;
+  return {
+    message: await composeLocalConciergeResponse({ category:'horse_comparison' }, request.message),
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
+const HORSE_CORRECTION_SIGNAL_RE = /(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจ|อีกตัว|ตัวอื่น|ตัวที่เหลือ|เอาแทน|แทน)/u;
+
+/**
+ * A bounded correction among the owner-verified horse assets never needs a
+ * model round-trip. The shared semantic helper already handles negation and
+ * "the other one" safely; this function only persists that canonical result.
+ */
+async function boundedHorseCorrectionBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  if (hasExplicitTransactionIntent(request.message) || !HORSE_CORRECTION_SIGNAL_RE.test(request.message)) return null;
+  const selected = findKnownActivityAssetSelection(request.message);
+  if (!selected) return null;
+
+  await persistHorseSelection(guestDbId, channel, selected.name);
+  const displayName = selected.name.startsWith('น้อง') ? selected.name : `น้อง${selected.name}`;
+  return {
+    message:`ได้ครับ เปลี่ยนเป็น${displayName}ไว้เป็นตัวเลือกครับ ตอนนี้ยังไม่ได้จองหรือส่งรายการครับ`,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
+const BOOKING_STATUS_READBACK_RE =
+  /(?:ยังไม่ได้จอง|จองอะไร(?:ไว้)?|มี(?:รายการ)?จอง|จองไปหรือยัง|จองแล้วหรือยัง|ได้จอง.{0,12}หรือยัง)/u;
+
+function publicBookingStatusLabel(status: string): string {
+  if (status === 'confirmed') return 'ยืนยันแล้ว';
+  if (status === 'cancelled') return 'ยกเลิกแล้ว';
+  if (status === 'completed') return 'เสร็จสมบูรณ์';
+  if (status === 'no_show') return 'ปิดรายการแล้ว';
+  return 'รอทีมงานตรวจสอบ';
+}
+
+/**
+ * Transaction-status questions are answered from guest-scoped booking truth,
+ * not from working task/catalog state. This closes the Phase 7 failure where
+ * an empty booking result was rendered as "ไม่มีตัวเลือกที่ตรง".
+ */
+async function verifiedBookingStatusReadbackBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (!guestDbId || hasExplicitTransactionIntent(request.message) || !BOOKING_STATUS_READBACK_RE.test(request.message)) return null;
+  const latest = await loadLatestBookingStatus(guestDbId);
+  const message = latest
+    ? [
+        'มีรายการจองที่ส่งเข้าระบบแล้วครับ',
+        `เลขที่คำขอ: ${latest.bookingCode}`,
+        `สถานะ: ${publicBookingStatusLabel(latest.status)}`,
+      ].join('\n')
+    : 'ใช่ครับ ตอนนี้ยังไม่มีรายการจองที่ถูกส่งเข้าระบบสำหรับบัญชีนี้ครับ สิ่งที่คุยหรือเลือกไว้ยังไม่ได้จองหรือส่งรายการครับ';
+
+  return {
+    message,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 // The single canonical entry point into Thongthai's shared brain -- called by
 // BOTH the web HTTP handler below and LINE's adapter (_line-webhook-core.ts).
 // LINE used to reach this over HTTP (a self-fetch to this same site's own
