@@ -13,6 +13,13 @@ type RematchResult = {
   ambiguous_count?: number;
 };
 
+type TransferDedupeResult = {
+  ok?: boolean;
+  deduped_count?: number | string;
+  purchase_cash_outflow?: number | string;
+  expense_cash_outflow?: number | string;
+};
+
 type IngestResult = {
   ok?: boolean;
   duplicate?: boolean;
@@ -171,6 +178,8 @@ function successReply(
   environment:'test'|'live',
   rematch?:RematchResult|null,
   cashSweepAmount:number|null=null,
+  transferDedupeCount=0,
+  effectiveCashOutflow:number|null=null,
 ):string{
   if(result.duplicate){
     return [
@@ -180,9 +189,11 @@ function successReply(
   }
 
   const variance=n(result.sales_payment_variance);
-  const directCashExpense=parsed.expenses
-    .filter(exp=>exp.funding==='company_cash')
-    .reduce((sum,exp)=>sum+exp.amount,0);
+  const directCashExpense=effectiveCashOutflow===null
+    ?parsed.expenses
+      .filter(exp=>exp.funding==='company_cash')
+      .reduce((sum,exp)=>sum+exp.amount,0)
+    :Math.max(0,effectiveCashOutflow);
   const cashAfter=n(result.payment_cash)-directCashExpense;
   const cups=n(result.cup_count);
   const averagePerCup=cups>0?n(result.net_sales)/cups:null;
@@ -205,6 +216,9 @@ function successReply(
     parsed.billCount!==null?'จำนวนบิล: '+parsed.billCount+' บิล':'',
     'สิทธิ/แต้ม/โปร: '+benefitSummary(parsed),
     '',
+    transferDedupeCount>0
+      ? '🔗 จับคู่กับรายการจากสลิปที่ส่งไว้ก่อนหน้า '+transferDedupeCount+' รายการ และไม่นับค่าใช้จ่ายซ้ำครับ'
+      : '',
     rematch && Number(rematch.matched_count||0)>0
       ? '📎 จับคู่รูป/สลิปที่ส่งมาก่อนหน้าเพิ่มได้ '+Number(rematch.matched_count||0)+' รายการ'
       : '',
@@ -255,13 +269,37 @@ export async function handleCafeTestDailyCloseText(input:{
   const result=Array.isArray(raw)?raw[0]:raw;
   if(!result?.ok)throw new Error('financial_daily_close_text_ingest_failed');
 
+  let transferDedupe:TransferDedupeResult|null=null;
+  if(result.daily_close_id){
+    try{
+      const dedupeResponse=await dbFetch('rpc/financial_dedupe_transfer_followup_expenses_v1',{
+        method:'POST',
+        body:JSON.stringify({p_daily_close_id:result.daily_close_id}),
+      });
+      const dedupeRaw=await dedupeResponse.json() as TransferDedupeResult|TransferDedupeResult[];
+      transferDedupe=Array.isArray(dedupeRaw)?dedupeRaw[0]??null:dedupeRaw;
+    }catch(error){
+      console.error(
+        'INTHANIN_TRANSFER_FOLLOWUP_DEDUPE_ERROR',
+        error instanceof Error?error.message.slice(0,220):'unknown',
+      );
+    }
+  }
+
+  const effectivePurchaseCash=transferDedupe?.purchase_cash_outflow!==undefined
+    ?n(transferDedupe.purchase_cash_outflow)
+    :n(result.purchase_cash_outflow);
+  const effectiveExpenseCash=transferDedupe?.expense_cash_outflow!==undefined
+    ?n(transferDedupe.expense_cash_outflow)
+    :n(result.expense_cash_outflow);
+
   let cashSweepAmount:number|null=null;
   if(environment==='live'&&result.daily_close_id){
     const hasCashCounts=result.cash_opening_float!==null&&result.cash_opening_float!==undefined
       &&result.cash_counted_closing!==null&&result.cash_counted_closing!==undefined;
     const candidate=hasCashCounts
       ?n(result.cash_opening_float)+n(result.payment_cash)
-        -n(result.purchase_cash_outflow)-n(result.expense_cash_outflow)-n(result.cash_counted_closing)
+        -effectivePurchaseCash-effectiveExpenseCash-n(result.cash_counted_closing)
       :0;
     const keepFloat=hasCashCounts
       &&Math.abs(n(result.cash_opening_float)-n(result.cash_counted_closing))<0.01;
@@ -316,7 +354,16 @@ export async function handleCafeTestDailyCloseText(input:{
     hasBillCount:parsed.billCount!==null,
     rematchedEvidence:Number(rematch?.matched_count||0),
     ambiguousEvidence:Number(rematch?.ambiguous_count||0),
+    transferPurposeDeduped:Number(transferDedupe?.deduped_count||0),
   }));
 
-  return successReply(parsed,result,environment,rematch,cashSweepAmount);
+  return successReply(
+    parsed,
+    result,
+    environment,
+    rematch,
+    cashSweepAmount,
+    Number(transferDedupe?.deduped_count||0),
+    effectivePurchaseCash+effectiveExpenseCash,
+  );
 }
