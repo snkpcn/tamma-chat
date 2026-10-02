@@ -22,7 +22,7 @@ test('payroll privacy is hard-routed to owner_general and separate storage',()=>
 
   assert.match(payroll,/team!=='owner_general'/);
   assert.match(payroll,/owner-payroll-evidence/);
-  assert.match(payroll,/privacy_scope','owner_only'/);
+  assert.match(migration,/privacy_scope','owner_only'/);
   assert.match(webhook,/handleOwnerPayrollImage/);
   assert.match(webhook,/handleOwnerPayrollText/);
   assert.match(migration,/financial_employee_payroll_events/);
