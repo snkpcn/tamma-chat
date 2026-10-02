@@ -566,6 +566,12 @@ export function categorizeDegradedFallback(message: string): DegradedFallbackCat
   return 'casual';
 }
 
+function isAgentPreflightBudgetGuard(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.includes('conversation cost cap reached')
+    || message.includes('remaining combined budget is below the safe per-turn reserve');
+}
+
 export function degradedFallbackResponse(category: DegradedFallbackCategory): BrainResponse {
   const message = category === 'weather'
     ? 'ตอนนี้ทองไทยเช็กสภาพอากาศไม่ทันครับ ลองถามอีกครั้งในอีกสักครู่ หรือเช็กแอปพยากรณ์อากาศคู่กันไปก่อนนะครับ'
@@ -6020,6 +6026,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         conversationCostThb: agentTurn.cumulativeCostThb,
       }));
 
+      // Messenger/LINE do not send chatHistory on the next webhook. Mirror
+      // every successful Agent turn into the same bounded server-side
+      // ConversationContext used by One-Mind so a later budget/provider
+      // fallback still knows what the customer and Agent just discussed.
+      try {
+        const currentContext = await loadConversationContext(guestDbId);
+        const nextContext = applyConversationContextUpdate(currentContext, {
+          eventId: transportEventId,
+          channel,
+          userMessage: request.message,
+          assistantMessage: primaryResponse.message,
+        });
+        await persistConversationContext(guestDbId, nextContext);
+      } catch (error) {
+        console.error(
+          'THONGTHAI_AGENT_CONTEXT_MIRROR_ERROR',
+          error instanceof Error ? error.message.slice(0,180) : 'unknown',
+        );
+      }
+
       return coreResult(200, {
         message: primaryResponse.message,
         intent: primaryResponse.intent,
@@ -6028,25 +6054,31 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         suggestedActions: primaryResponse.suggestedActions,
       });
     } catch (error) {
-      // Do not cascade into another paid LLM path after a primary-Agent
-      // attempt: that could double-spend the same customer turn. Fail over
-      // only to the existing deterministic degraded responder.
-      console.error(
-        'THONGTHAI_AGENT_PRIMARY_ERROR',
-        error instanceof Error ? error.message.slice(0, 260) : 'unknown',
-      );
-      const fallback = polishedResponse(
-        degradedFallbackResponse(categorizeDegradedFallback(request.message)),
-        channel,
-      );
-      await persistBrainRuntime(guestDbId, channel, fallback);
-      return coreResult(200, {
-        message: fallback.message,
-        intent: fallback.intent,
-        contextUpdates: fallback.contextUpdates,
-        journeyAction: fallback.journeyAction,
-        suggestedActions: fallback.suggestedActions,
-      });
+      const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+      console.error('THONGTHAI_AGENT_PRIMARY_ERROR', detail.slice(0,260));
+
+      // These two failures happen before a new paid Agent turn is sent. Do not
+      // punish the customer with the old "คิดช้า ลองใหม่" loop: safely fall
+      // through to One-Mind/deterministic responders, whose own cost ledger
+      // still enforces the same <=5 THB conversation cap.
+      if (isAgentPreflightBudgetGuard(error)) {
+        console.log('THONGTHAI_AGENT_PRIMARY_BUDGET_FALLTHROUGH', JSON.stringify({ channel }));
+      } else {
+        // For provider/tool failures after an Agent attempt, keep the
+        // no-double-spend rule: do not launch another paid model path.
+        const fallback = polishedResponse(
+          degradedFallbackResponse(categorizeDegradedFallback(request.message)),
+          channel,
+        );
+        await persistBrainRuntime(guestDbId, channel, fallback);
+        return coreResult(200, {
+          message: fallback.message,
+          intent: fallback.intent,
+          contextUpdates: fallback.contextUpdates,
+          journeyAction: fallback.journeyAction,
+          suggestedActions: fallback.suggestedActions,
+        });
+      }
     }
   }
 
