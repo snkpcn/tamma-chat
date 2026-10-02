@@ -284,7 +284,21 @@ export function parseInthaninDailyCloseText(text:string):ParsedInthaninDailyClos
     other:benefit(lines,[/โปร\s*\/\s*สิทธิอื่น/u,/สิทธิอื่น/u]),
   };
 
-  const expenses=expenseSection(lines);
+  let expenses=expenseSection(lines);
+  const unknownExpenseTotal=expenses
+    .filter(exp=>exp.funding==='unknown')
+    .reduce((sum,exp)=>sum+exp.amount,0);
+  const explicitFundingTotal=expenses
+    .filter(exp=>exp.funding!=='unknown')
+    .reduce((sum,exp)=>sum+exp.amount,0);
+  const legacyCanExplainUnknownExpenses=
+    legacyCash.deduction!==null
+    && explicitFundingTotal===0
+    && unknownExpenseTotal>0
+    && Math.abs(unknownExpenseTotal-legacyCash.deduction)<0.009;
+  if(legacyCanExplainUnknownExpenses){
+    expenses=expenses.map(exp=>exp.funding==='unknown'?{...exp,funding:'company_cash'}:exp);
+  }
   const cupCount=amountFromLine(lines,[/จำนวนแก้ว/u]);
   const billCount=amountFromLine(lines,[/จำนวนบิล/u]);
   const cashOpeningFloat=amountFromLine(lines,[/เงินสดตั้งต้น/u]);
@@ -296,6 +310,7 @@ export function parseInthaninDailyCloseText(text:string):ParsedInthaninDailyClos
   const grossSales=reportedPosNetSales===null?null:reportedPosNetSales+discounts+refunds;
 
   const warnings:string[]=[];
+  if(legacyCanExplainUnknownExpenses)warnings.push('legacy_cash_deduction_inferred_expense_funding');
   const cashExpenses=expenses.filter(exp=>exp.funding==='company_cash').reduce((sum,exp)=>sum+exp.amount,0);
   if(legacyCash.deduction!==null && Math.abs(legacyCash.deduction-cashExpenses)>0.009){
     warnings.push('cash_deduction_does_not_match_itemized_cash_expenses');
