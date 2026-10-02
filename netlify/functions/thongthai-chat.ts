@@ -6405,6 +6405,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     if (cafeResponse) {
       const polished = polishedResponse(cafeResponse, channel);
       await persistBrainRuntime(guestDbId, channel, polished);
+      try {
+        const currentContext = await loadConversationContext(guestDbId);
+        const nextContext = applyConversationContextUpdate(currentContext, {
+          eventId: transportEventId,
+          channel,
+          userMessage: request.message,
+          assistantMessage: polished.message,
+          activeDomain: 'cafe',
+          activeTopic: 'cafe',
+        });
+        await persistConversationContext(guestDbId, nextContext);
+      } catch (error) {
+        console.error(
+          'THONGTHAI_CAFE_CONTEXT_MIRROR_ERROR',
+          error instanceof Error ? error.message.slice(0,180) : 'unknown',
+        );
+      }
       return coreResult(200, {
         message: polished.message,
         intent: polished.intent,
