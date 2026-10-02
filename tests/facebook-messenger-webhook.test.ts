@@ -8,6 +8,7 @@ import {
   extractFacebookTextEvents,
   facebookGuestId,
   findThongthaiPersonaId,
+  isFacebookPageGreetingOnly,
   splitFacebookText,
   verifyFacebookSignature,
 } from '../netlify/functions/_facebook-messenger-adapter';
@@ -108,4 +109,13 @@ test('Thongthai Messenger persona uses the locked Thongthai profile asset', () =
     'persona-thongthai',
   );
   assert.equal(findThongthaiPersonaId({ data: [] }), null);
+});
+
+
+test('Messenger Page greeting owns bare hello but never a real help request', () => {
+  assert.equal(isFacebookPageGreetingOnly('ดีคับ'), true);
+  assert.equal(isFacebookPageGreetingOnly('สวัสดีครับ'), true);
+  assert.equal(isFacebookPageGreetingOnly('hi'), true);
+  assert.equal(isFacebookPageGreetingOnly('สวัสดีครับ มีลาเต้ไหม'), false);
+  assert.equal(isFacebookPageGreetingOnly('ที่ร้านมีอะไรแนะนำบ้างครับ'), false);
 });
