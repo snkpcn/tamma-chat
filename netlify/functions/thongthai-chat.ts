@@ -5686,6 +5686,28 @@ const HORSE_COMPARISON_FOLLOWUP_RE = /(?:ต่างกัน|เปรีย�
  * the 30s gateway timeout. Resolve it deterministically only when prior bounded
  * context proves BOTH canonical horses were the subject of the conversation.
  */
+async function boundedBeginnerHorseSuitabilityBeforePrimary(
+  request: BrainRequest,
+): Promise<BrainResponse | null> {
+  if (hasExplicitTransactionIntent(request.message)) return null;
+  if (!/(?:ม้า|ขี่ม้า)/u.test(request.message)) return null;
+  if (!/(?:มือใหม่|ไม่เคยขี่|หัดขี่|ครั้งแรก|เริ่มต้น)/u.test(request.message)) return null;
+  if (!/(?:เหมาะ|ตัวไหน|แนะนำ|ไหนดี|ได้ไหม)/u.test(request.message)) return null;
+  return {
+    message:await composeLocalConciergeResponse(
+      {category:'activity_suitability',activityNodeId:'activity-horse'},
+      request.message,
+    ),
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 async function boundedHorseComparisonBeforePrimary(
   request: BrainRequest,
   guestDbId: string | null,
@@ -6328,6 +6350,24 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (availabilityClarification) {
     const polished = polishedResponse(availabilityClarification, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const beginnerHorseSuitability = await boundedBeginnerHorseSuitabilityBeforePrimary(
+    request,
+  ).catch(error => {
+    console.error('THONGTHAI_BOUNDED_BEGINNER_HORSE_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (beginnerHorseSuitability) {
+    const polished = polishedResponse(beginnerHorseSuitability, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message:polished.message,
