@@ -2646,6 +2646,42 @@ async function persistHorseSelection(guestDbId: string | null, channel: BrainCha
   }
 }
 
+
+/**
+ * Phase 7 final WITHHOLD authority.
+ *
+ * "เอาภาราดรไว้ก่อน แต่ยังไม่จอง" is a bounded planning-state update,
+ * never a booking request. The commercial boundary has already proven
+ * WITHHOLD before this runs. Persist only the selected horse into the
+ * non-committed activity task and answer as information, so a later duration
+ * turn can be validated against the verified activity catalog without ever
+ * creating booking intent or an operational write.
+ */
+export async function explicitHorseHoldWithoutBookingResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+  boundaryMode: string,
+): Promise<BrainResponse | null> {
+  if (boundaryMode !== 'WITHHOLD') return null;
+  if (!/(?:ไว้ก่อน|ยังไม่จอง|ไม่จอง)/u.test(request.message)) return null;
+  const asset = activityAssetFromText(request.message);
+  if (!asset || asset.resourceCode !== 'activity-horse') return null;
+
+  await persistHorseSelection(guestDbId, channel, asset.name);
+  const displayName = asset.name.startsWith('น้อง') ? asset.name : `น้อง${asset.name}`;
+  return {
+    message:`ได้ครับ เก็บ${displayName}ไว้เป็นตัวเลือกก่อนนะครับ ยังไม่ได้จองหรือส่งรายการครับ`,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{ type:'none', journey:null },
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 // Once a horse-booking conversation is already established (chatHistory
 // showing explicit riding intent, OR -- for LINE, where chatHistory never
 // carries prior turns -- a persisted activity-domain task from an earlier
@@ -5254,6 +5290,30 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const explicitTransactionIntent = commercialBoundary.currentTurnCommit;
   const transactionPrepareIntent = commercialBoundary.prepareEligible;
 
+  const explicitHorseHold = await explicitHorseHoldWithoutBookingResponse(
+    request,
+    guestDbId,
+    channel,
+    commercialBoundary.mode,
+  ).catch(error => {
+    console.error(
+      'THONGTHAI_EXPLICIT_HORSE_HOLD_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+    return null;
+  });
+  if (explicitHorseHold) {
+    const polished = polishedResponse(explicitHorseHold, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
   const boundedDurationGuard = await boundedConsideredHorseDurationResponse(
     request,
     guestDbId,
@@ -5275,6 +5335,57 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
     });
+  }
+
+  // Phase 7 final grounded restaurant precedence.
+  //
+  // The established restaurant advisor already owns explicit dietary/menu
+  // declarations and recommendation requests from live restaurant data. Do
+  // not let the earlier general One-Mind composer return FACT_UNKNOWN before
+  // that specialized grounded renderer gets a chance. This is intentionally
+  // keyed to the existing semantic class + existing advisor gate, not a new
+  // phrase table. Rich restaurant status/availability/process questions remain
+  // outside this class and continue through One-Mind.
+  const earlyRestaurantIntentClass = classifyRestaurantDietaryIntent(request.message);
+  const groundedRestaurantBeforeSupervision =
+    earlyRestaurantIntentClass !== 'OTHER'
+    && isRestaurantAdvisorTurn(request, { agentState:{} });
+  if (groundedRestaurantBeforeSupervision) {
+    const snapshot = guestDbId
+      ? await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+          console.error(
+            'THONGTHAI_RESTAURANT_EARLY_STATE_ERROR',
+            error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+          );
+          return { state:null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
+        })
+      : null;
+    const restaurantRuntime = {
+      agentState: isObject(snapshot?.state) ? snapshot!.state : {},
+    };
+    const groundedRestaurant = await deterministicRestaurantResponse(
+      request,
+      restaurantRuntime,
+      guestDbId,
+      channel,
+    ).catch(error => {
+      console.error(
+        'THONGTHAI_RESTAURANT_EARLY_GROUNDED_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
+      return null;
+    });
+    if (groundedRestaurant) {
+      const polished = polishedResponse(groundedRestaurant, channel);
+      await persistBrainRuntime(guestDbId, channel, polished);
+      return coreResult(200, {
+        message:polished.message,
+        intent:polished.intent,
+        contextUpdates:polished.contextUpdates,
+        journeyAction:polished.journeyAction,
+        suggestedActions:polished.suggestedActions,
+      });
+    }
   }
 
   // Selection of the prepare-only canary is independent of the CURRENT
