@@ -162,6 +162,10 @@ export async function executeBrainTools(
   if (!calls.length) return [];
   if (!guestDbId || !configuration()) return calls.map(call => ({ name:call.name,ok:false,detail:'customer_state_unavailable' }));
   const results: BrainToolResult[] = [];
+  // TEST traffic reads the same canonical business facts, but every durable
+  // write must stay in the TEST partition. The HTTP/core gateway sanitizes
+  // which synthetic guests are allowed to request TEST before we get here.
+  const writeEnvironment: 'live' | 'test' = request.environment === 'test' ? 'test' : 'live';
   for (const call of calls.slice(0,4)) {
     if (shouldBlockLegacyWriteForPrepareOnly({
       toolName: call.name,
@@ -220,7 +224,7 @@ export async function executeBrainTools(
             phone:typeof call.args.phone === 'string' ? call.args.phone : null,
             email:typeof call.args.email === 'string' ? call.args.email : null,
             note:typeof call.args.note === 'string' ? call.args.note : null,
-            environment:'live',
+            environment:writeEnvironment,
           });
           const notificationStatus = await dispatchCreatedTransactionNotification('booking', created.id);
           await insertEvent(guestDbId,'agent_action','booking',{action:'create_booking',bookingCode:created.bookingCode,channel});
@@ -282,7 +286,7 @@ export async function executeBrainTools(
           customerName:typeof call.args.customerName === 'string' ? call.args.customerName : null,
           phone:typeof call.args.phone === 'string' ? call.args.phone : null,
           email:typeof call.args.email === 'string' ? call.args.email : null,
-          environment:'live',
+          environment:writeEnvironment,
         });
         const notificationStatus = await dispatchCreatedTransactionNotification('cafe_inquiry', created.id);
         await insertEvent(guestDbId,'agent_action','customer_service',{action:'create_cafe_inquiry',inquiryCode:created.inquiryCode,channel});
@@ -293,6 +297,13 @@ export async function executeBrainTools(
         results.push({name:call.name,ok:true,detail:JSON.stringify({products:products.slice(0,20)})}); continue;
       }
       if (call.name === 'redeem_promotion') {
+        // Promotion redemption mutates a LIVE campaign counter/reservation.
+        // Until campaigns have a separate TEST inventory, synthetic traffic
+        // must never consume a real customer's live redemption capacity.
+        if (writeEnvironment === 'test') {
+          results.push({name:call.name,ok:false,detail:'test_promotion_redemption_blocked'});
+          continue;
+        }
         try {
           const created = await redeemPromotion({
             guestDbId, channel, campaignId: String(call.args.campaignId ?? ''),
@@ -317,7 +328,7 @@ export async function executeBrainTools(
           fulfillmentType:String(call.args.fulfillmentType) === 'shipping' ? 'shipping' : 'pickup',
           shippingAddress:typeof call.args.shippingAddress === 'string' ? call.args.shippingAddress : null,
           note:typeof call.args.note === 'string' ? call.args.note : null,
-          environment:'live',
+          environment:writeEnvironment,
         });
         const notificationStatus = await dispatchCreatedTransactionNotification('otop_order', created.id);
         await insertEvent(guestDbId,'agent_action','order',{action:'create_otop_order',orderCode:created.orderCode,channel});
