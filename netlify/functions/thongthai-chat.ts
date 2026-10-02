@@ -1695,8 +1695,8 @@ export async function promotionDiscoveryFallbackResponse(
 }
 
 
-const CAFE_EXPLICIT_MARKER = /(?:คาเฟ่|กาแฟ|ลาเต้|อเมริกาโน่|คาปูชิโน่|เอสเปรสโซ่|อินทนิน|inthanin)/iu;
-const CAFE_READ_ONLY_FOLLOWUP_MARKER = /^(?:ราคาเท่าไหร่|ราคาเท่าไร|กี่บาท|เปิดกี่โมง|ปิดกี่โมง|เปิดถึงกี่โมง|มีอะไรบ้าง|มีเมนูอะไร)(?:ครับ|คะ|ค่ะ)?[\s?？!.]*$/u;
+const CAFE_EXPLICIT_MARKER = /(?:คาเฟ่|กาแฟ|เครื่องดื่ม|ลาเต้|อเมริกาโน่|คาปูชิโน่|เอสเปรสโซ่|อินทนิน|inthanin)/iu;
+const CAFE_READ_ONLY_FOLLOWUP_MARKER = /(?:ราคา|กี่บาท|เปิด|ปิด|กี่โมง|เมนู|มีอะไร|แนะนำ|ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอานมวัว|นมวัว|หวาน|ขม|เย็น|น้ำตาล|เมื่อกี้|ตัวไหน|เปลี่ยนใจ|ไม่เอาตัวนั้น|เอาไว้ก่อน|ยังไม่สั่ง|ยังไม่ต้องทำรายการ|ส่งไปที่ร้าน|ถึงร้านแล้วค่อย|ที่จอดรถ|อีกประมาณ.*ชั่วโมง|แฟน|คนเดียว|กลับมาเรื่อง)/u;
 
 function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   const text = message.trim();
@@ -1705,18 +1705,42 @@ function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
 }
 
+function cafePreferenceSummary(constraints: readonly string[]): string {
+  const labels = [
+    constraints.includes('no_coffee') ? 'ไม่เอากาแฟ' : '',
+    constraints.includes('low_sweet') ? 'หวานน้อย' : '',
+    constraints.includes('low_bitter') ? 'ไม่ขมมาก' : '',
+    constraints.includes('no_cow_milk') ? 'ไม่เอานมวัว' : '',
+    constraints.includes('no_sugar') ? 'ไม่ใส่น้ำตาล' : '',
+  ].filter(Boolean);
+  return labels.length ? labels.join(' · ') : 'ยังไม่ได้ล็อกรสชาติหรือเมนู';
+}
+
 function deterministicCafeResponse(
   request: BrainRequest,
-  runtime: BrainRuntimeContext,
+  runtime: Pick<BrainRuntimeContext,'agentState'>,
 ): BrainResponse | null {
   const message = request.message.trim();
   if (!isCafeReadOnlyTurn(message, runtime.agentState?.active_topic)) return null;
 
-  // There is currently no verified live cafe menu / price / hours source in
-  // production. Stay useful without fabricating operational facts: acknowledge
-  // the cafe domain, be explicit about the information boundary, and offer a
-  // real next step within the ecosystem.
-  const answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเมนู ราคา หรือเวลาเปิดปิดของคาเฟ่ที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิด แต่ถ้าอยากวางทริปสายชิล ทองไทยช่วยต่อคาเฟ่กับร้านอาหารหรือที่พักให้ได้ครับ';
+  const preferences = cafePreferenceSummary(request.guestContext.constraints ?? []);
+  let answer = '';
+
+  if (/(?:ยังไม่(?:สั่ง|ต้องทำรายการ)|เอาไว้ก่อน|เลือกไว้ก่อน)/u.test(message)) {
+    answer = `รับทราบครับ ตอนนี้เก็บไว้แค่ความชอบ: ${preferences} ยังไม่ได้สั่งและยังไม่ได้ส่งรายการไปที่ Inthanin Café ตาดโตนครับ`;
+  } else if (/(?:รายการ.*ส่ง.*ร้าน|ส่งไปที่ร้าน.*หรือยัง)/u.test(message)) {
+    answer = 'จากข้อความที่คุยกันรอบนี้ ยังไม่มีคำสั่งให้ส่งรายการไปที่ Inthanin Café ตาดโตนครับ ตอนนี้ยังเป็นการเลือกและถามข้อมูลเท่านั้นครับ';
+  } else if (/(?:เปิด|ปิด|กี่โมง|อีกประมาณ.*ชั่วโมง|ที่จอดรถ)/u.test(message)) {
+    answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเวลาเปิดปิดหรือข้อมูลที่จอดรถของ Inthanin Café ตาดโตนที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิดครับ';
+  } else if (/ถามเผื่อแฟน/u.test(message) && /คนเดียว/u.test(message)) {
+    answer = `รับทราบครับ วันนี้มาคนเดียว ส่วนเรื่องเครื่องดื่มไม่กาแฟเป็นคำถามเผื่อแฟนครับ ตอนนี้ยังไม่ได้สั่งอะไร และความชอบที่จำไว้คือ ${preferences}ครับ`;
+  } else if (/ไม่ได้แพ้นม/u.test(message)) {
+    answer = `เข้าใจครับ เป็นความชอบที่ไม่อยากดื่มนมวัว ไม่ใช่อาการแพ้นมครับ ผมจะจำเป็น preference เท่านั้น ตอนนี้ความชอบคือ ${preferences}ครับ`;
+  } else if (/(?:เมื่อกี้|จากที่คุยมา|สนใจอะไรไว้|ตัวไหนเหมาะ|เปลี่ยนใจ|ไม่เอาตัวนั้น|กลับมาเรื่อง)/u.test(message)) {
+    answer = `ที่คุยกันไว้ตอนนี้เป็นความชอบเรื่องเครื่องดื่ม: ${preferences}ครับ แต่ยังไม่ได้เลือกชื่อเมนูจริง เพราะระบบยังไม่มีเมนู Inthanin Café ตาดโตนที่ยืนยันให้ผมอ้างอิงครับ`;
+  } else {
+    answer = `รับทราบครับ ตอนนี้ความชอบที่จำไว้คือ ${preferences}ครับ แต่ระบบยังไม่มีเมนู ราคา หรือสต็อกเครื่องดื่มของ Inthanin Café ตาดโตนที่ยืนยัน จึงยังไม่ควรเดาชื่อเมนูให้ครับ`;
+  }
 
   return {
     message: answer,
