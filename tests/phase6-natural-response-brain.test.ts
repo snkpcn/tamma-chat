@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildResponseComposerPrompt,
   composeDeterministicResponse,
+  normalizeResponseLanguageSurface,
   type ResponseComposerInput,
   type ResponseLanguage,
 } from '../netlify/functions/_response-composer';
@@ -210,4 +211,19 @@ test('Phase 6 grounded model prompt preserves natural response doctrine and expl
 test('Phase 6 last-mile Thai voice keeps male polite particles',()=>{
   const polished=polishCustomerMessage('ได้ค่ะ เดี๋ยวเช็กให้คะ','line');
   assert.equal(polished,'ได้ครับ เดี๋ยวเช็กให้ครับ');
+});
+
+test('Phase 6.1 non-Thai final surface strips Thai politeness/currency residue without changing numeric truth',()=>{
+  assert.equal(
+    normalizeResponseLanguageSurface('A 30-minute horse ride is ฿300 per personครับ.','en'),
+    'A 30-minute horse ride is ฿300 per person.',
+  );
+  assert.equal(
+    normalizeResponseLanguageSurface('Cưỡi ngựa 30 นาที ราคา 300 บาทครับ','vi'),
+    'Cưỡi ngựa 30 phút ราคา 300 baht',
+  );
+  assert.equal(
+    normalizeResponseLanguageSurface('骑马30นาที 300บาทครับ。','zh'),
+    '骑马30分钟 300泰铢。',
+  );
 });
