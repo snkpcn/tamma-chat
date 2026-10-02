@@ -147,6 +147,15 @@ test('requested operational result may say submitted but may NOT claim confirmed
   assert.throws(() => assertOperationalClaimSafety('ยืนยันการจองแล้วครับ BK123', requested), /composer_false_confirmation_claim/);
 });
 
+test('truthful English negation is not mistaken for an operational success claim', () => {
+  assert.doesNotThrow(() => assertOperationalClaimSafety('Nothing has been submitted yet.', null));
+  assert.doesNotThrow(() => assertOperationalClaimSafety('The booking has not been confirmed.', null));
+  assert.throws(
+    () => assertOperationalClaimSafety('The booking has been confirmed.', null),
+    /composer_false_operational_success_claim/,
+  );
+});
+
 test('real confirmed operational outcome permits confirmed wording', () => {
   assert.doesNotThrow(() => assertOperationalClaimSafety('ยืนยันการจองแล้วครับ BK123', {
     executed:true,success:true,status:'confirmed',referenceCode:'BK123',

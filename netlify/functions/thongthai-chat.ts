@@ -4537,7 +4537,7 @@ async function deterministicEscalationResponse(
   if (!match.escalates) {
     // The one non-escalating instance (bare, generic safety-guarantee
     // question) -- honest answer only, no feedback event, no notification.
-    return respond(composeEscalationResponse(match, true, []));
+    return respond(composeEscalationResponse(match, true, [], request.language));
   }
 
   const serviceFeedbackMatch: ServiceFeedbackMatch = {
@@ -4555,7 +4555,7 @@ async function deterministicEscalationResponse(
   const eventResult = await createFeedbackEvent({
     match: serviceFeedbackMatch, message: request.message, channel, guestDbId, sourceEventKey,
   });
-  return respond(composeEscalationResponse(match, eventResult.eventId != null, eventResult.targets));
+  return respond(composeEscalationResponse(match, eventResult.eventId != null, eventResult.targets, request.language));
 }
 
 async function deterministicServiceFeedbackResponse(
@@ -4571,7 +4571,7 @@ async function deterministicServiceFeedbackResponse(
     match, message: request.message, channel, guestDbId, sourceEventKey,
   });
   return {
-    message: composeServiceFeedbackResponse(match, eventResult.notificationQueued, eventResult),
+    message: composeServiceFeedbackResponse(match, eventResult.notificationQueued, eventResult, request.language),
     intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
