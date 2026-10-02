@@ -622,6 +622,18 @@ function polishedResponse(response: BrainResponse, channel: BrainChannel): Brain
   return { ...response, message: message || response.message.trim() };
 }
 
+/** Canonical last-mile customer egress for every public brain path. */
+export function normalizeFinalCustomerMessage(
+  message:string,
+  language:BrainRequest['language'],
+  channel:BrainChannel,
+):string {
+  const languageNormalized=normalizeResponseLanguageSurface(message,language);
+  return polishCustomerMessage(languageNormalized,channel)
+    || languageNormalized
+    || message.trim();
+}
+
 function duplicateRestaurantPreorderMessage(
   language: BrainRequest['language'],
   toolResults: Array<{ name: string; ok: boolean; detail: string }>,
@@ -4792,9 +4804,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     // immediately before telemetry/persistence/public return, so no path can
     // bypass the requested response language.
     if (statusCode === 200 && typeof typed?.message === 'string') {
-      const languageNormalized = normalizeResponseLanguageSurface(typed.message, request.language);
-      const presentationNormalized = polishCustomerMessage(languageNormalized, channel);
-      typed.message = presentationNormalized || languageNormalized || typed.message.trim();
+      typed.message = normalizeFinalCustomerMessage(typed.message,request.language,channel);
     }
 
     if (statusCode === 200 && typeof typed?.message === 'string') {
