@@ -5907,9 +5907,21 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const preserveVerifiedLocationBeforeSupervision = !hasExplicitTransactionIntent(request.message)
     && classifyLocalConciergeQuestion(request.message)?.category === 'location';
 
+  // The entire Local Concierge family already has an owner-reviewed,
+  // non-transactional deterministic responder backed only by canonical
+  // ecosystem facts (plus live weather where applicable). Preserve that
+  // responder BEFORE Agent Primary and the early "understand first" One-Mind
+  // return, not only at the later G.2 cutover. Otherwise a perfectly
+  // understood local recommendation can still be returned as the generic
+  // response-composer fallback when no mutable recommendation facts were
+  // fetched -- exactly what happened in real Messenger production.
+  const preserveLocalConciergeBeforeSupervision = !hasExplicitTransactionIntent(request.message)
+    && Boolean(classifyLocalConciergeQuestion(request.message));
+
   const phase3SemanticLearningEligible = !explicitTransactionIntent
     && topLevelSemanticIntent !== 'WEATHER_REQUEST'
     && !preserveVerifiedLocationBeforeSupervision
+    && !preserveLocalConciergeBeforeSupervision
     && isShortStandaloneConceptCandidate(request.message)
     && isPhase3SemanticLearningCandidate(request.message);
 
@@ -5939,6 +5951,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+    && !preserveLocalConciergeBeforeSupervision
     && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
     && !horseCorrectionBeforePrimary
@@ -6092,6 +6105,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // the unchanged executor path below still owns the write.
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
       && !preserveVerifiedLocationBeforeSupervision
+      && !preserveLocalConciergeBeforeSupervision
       && topLevelSemanticIntent !== 'WEATHER_REQUEST') {
     try {
       const oneMind = await processOneMindCustomerTurn({
@@ -7030,8 +7044,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // deterministicLocalConciergeResponse itself uses (including its
   // explicit-transaction-intent yield), so this guard and that function
   // can never disagree about which messages this covers.
-  const preserveLocalConciergeFastPath = !hasExplicitTransactionIntent(request.message)
-    && Boolean(classifyLocalConciergeQuestion(request.message));
+  const preserveLocalConciergeFastPath = preserveLocalConciergeBeforeSupervision;
 
   // Phase 4 Cafe: the production One-Mind cutover runs before the legacy
   // deterministic responder. Preserve this read-only class exactly like
