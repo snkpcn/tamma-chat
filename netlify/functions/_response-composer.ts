@@ -26,6 +26,7 @@ import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } fro
 import { extractTime } from './_slot-parsers';
 import {
   classifyCommercialBoundarySemantic,
+  classifyCommercialBoundaryText,
 } from './_commercial-intent-boundary';
 import {
   renderActivityAvailability,
@@ -1534,6 +1535,44 @@ function conversationalStateUpdateMessage(input: ResponseComposerInput): string 
   return null;
 }
 
+function commercialReadOnlyClarificationMessage(input: ResponseComposerInput): string | null {
+  const turn=input.semanticTurn;
+  if (!turn || input.dialogDecision.actionProposal) return null;
+
+  const rawBoundary=classifyCommercialBoundaryText(input.userMessage ?? '','OTHER');
+  const semanticBoundary=classifyCommercialBoundarySemantic(turn);
+  if (
+    rawBoundary.mode !== 'READ_ONLY'
+    || rawBoundary.reason !== 'commercial_question_not_consent'
+    || semanticBoundary.mode !== 'READ_ONLY'
+    || !turn.needsClarification
+    || !['ask','status'].includes(turn.action)
+  ) return null;
+
+  const need=turn.informationNeed ?? 'none';
+  if (need === 'availability') {
+    switch (input.language) {
+      case 'th':
+        return 'ต้องการเช็กความว่างของบริการ กิจกรรม หรือที่พักรายการไหนครับ จะได้ตรวจให้ตรงรายการ';
+      case 'en':
+        return 'Which service, activity, or stay would you like me to check availability for?';
+      case 'zh':
+        return '想查询哪一项服务、活动或住宿的空位情况？告诉我具体项目，我就能准确核对。';
+      case 'lo':
+        return 'ຕ້ອງການໃຫ້ເຊັກວ່າງຂອງບໍລິການ ກິດຈະກຳ ຫຼື ທີ່ພັກລາຍການໃດ ບອກລາຍການໄດ້ເລີຍ';
+      case 'vi':
+        return 'Bạn muốn kiểm tra chỗ trống của dịch vụ, hoạt động hay chỗ nghỉ nào? Hãy cho tôi biết mục cụ thể.';
+      default:
+        return null;
+    }
+  }
+
+  if (need === 'policy' || need === 'none') {
+    return commercialSupportProcessMessage(input);
+  }
+  return null;
+}
+
 function specificClarificationMessage(input: ResponseComposerInput): string | null {
   if (input.language !== 'th' || !input.semanticTurn) return null;
   const turn = input.semanticTurn;
@@ -1632,7 +1671,9 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     // Meaning is already known upstream; ask the narrowest bounded question
     // supported by structured references/task state instead of a generic
     // "more details" fallback whenever possible.
-    message = specificClarificationMessage(input) ?? copy.clarify;
+    message = commercialReadOnlyClarificationMessage(input)
+      ?? specificClarificationMessage(input)
+      ?? copy.clarify;
   } else if (input.dialogDecision.mode === 'collect_field') {
     const missing = input.dialogDecision.missingFields.slice(0, 2);
     const durationChoice = missing.includes('durationMinutes')

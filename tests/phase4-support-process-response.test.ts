@@ -83,3 +83,43 @@ test('Phase 4 support renderer is not a generic support-domain takeover',()=>{
   );
   assert.doesNotMatch(response.message,/ถามขั้นตอนได้ครับ การถามหรือเลือกยังไม่ทำรายการจริง/u);
 });
+
+
+test('Phase 4 unknown-domain commercial availability question gets bounded Thai clarification',()=>{
+  const input=inputFor('ช่วยยืนยันหน่อยว่าพรุ่งนี้ว่างไหมครับ','th',{
+    domain:'unknown',
+    intent:'check_availability',
+    action:'status',
+    speechAct:'question',
+    informationNeed:'availability',
+    entities:{date:'2026-10-03'},
+    needsClarification:true,
+    clarificationReason:'service unspecified',
+  });
+  input.dialogDecision.mode='clarify';
+  input.dialogDecision.responseIntent='clarify_ambiguous_entity';
+  const response=composeDeterministicResponse(input);
+  assert.equal(response.mode,'deterministic');
+  assert.match(response.message,/เช็กความว่าง/u);
+  assert.match(response.message,/บริการ|กิจกรรม|ที่พัก/u);
+  assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้|คิดช้ากว่าปกติ/u);
+  assert.doesNotMatch(response.message,/จองสำเร็จ|ยืนยันการจองแล้ว/u);
+});
+
+test('Phase 4 unknown-domain commercial availability question has bounded English clarification',()=>{
+  const input=inputFor('Can you confirm whether tomorrow is available?','en',{
+    domain:'unknown',
+    intent:'check_availability',
+    action:'status',
+    speechAct:'question',
+    informationNeed:'availability',
+    entities:{date:'2026-10-03'},
+    needsClarification:true,
+  });
+  input.dialogDecision.mode='clarify';
+  input.dialogDecision.responseIntent='clarify_ambiguous_entity';
+  const response=composeDeterministicResponse(input);
+  assert.equal(response.mode,'deterministic');
+  assert.match(response.message,/which service|activity|stay/i);
+  assert.match(response.message,/availability/i);
+});
