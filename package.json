@@ -13,7 +13,8 @@
     "agent:thongthai:staging": "tsx scripts/create-thongthai-staging-agent.ts",
     "otop:story:backfill": "tsx scripts/backfill-otop-product-stories.ts",
     "otop:story:backfill:apply": "tsx scripts/backfill-otop-product-stories.ts --apply",
-    "agent:thongthai:production": "tsx scripts/create-thongthai-production-agent.ts"
+    "agent:thongthai:production": "tsx scripts/create-thongthai-production-agent.ts",
+    "audit:ww1": "node --import tsx --test tests/ww1-global-data-core.test.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0"
