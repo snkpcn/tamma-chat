@@ -51,7 +51,7 @@ test('F1: a genuinely idle conversation with real usage gets notified exactly on
     );
 
     const firstPass = await sendIdleAiCostConversationSummaries(NOW);
-    assert.equal(firstPass.length, 1, 'usage accounted and idle >=10 min must be accumulated into exactly one notification attempt');
+    assert.equal(firstPass.length, 1, 'usage accounted and idle >=3 min must be accumulated into exactly one notification attempt');
     assert.equal(firstPass[0]!.status, 'sent', 'the configured cost notification path must actually fire, not just compute a summary');
     assert.ok(firstPass[0]!.costThb > 0, 'the accumulated conversation cost must be the real recorded amount, not zero');
 
@@ -68,7 +68,7 @@ test('F1: a genuinely idle conversation with real usage gets notified exactly on
   });
 });
 
-test('F2: a conversation with a turn in the last 10 minutes is correctly treated as still active and skipped, even for a long-lived conversation_id with many prior turns', async () => {
+test('F2: a conversation with a turn inside the 3-minute idle window is correctly treated as still active and skipped, even for a long-lived conversation_id with many prior turns', async () => {
   await withHarness(async harness => {
     harness.programOpsChannel('ai_cost', 'ai-cost-group-1');
     // Models the owner's own real usage pattern: the SAME conversation_id
@@ -92,12 +92,12 @@ test('F2: a conversation with a turn in the last 10 minutes is correctly treated
       ],
       [
         ...oldTurns,
-        // The genuinely latest turn: inside the 10-minute idle window, so
+        // The genuinely latest turn: inside the 3-minute idle window, so
         // this conversation must be treated as still active right now.
         {
           conversation_id: 'conv-long-lived', model_reply_used: false, grounded_knowledge_supplied: false,
           zero_cost_turn: true, final_response_source: 'deterministic_or_grounded_local',
-          occurred_at: iso(3),
+          occurred_at: iso(2),
         },
       ],
     );

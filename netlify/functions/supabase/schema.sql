@@ -127,7 +127,7 @@ alter table public.guest_memory add constraint guest_memory_value_allowed check 
       and memory_value <@ '["food","nature","adventure","rest","culture","coffee","local_community","family","photography","wellness"]'::jsonb
     when 'constraints' then
       jsonb_typeof(memory_value) = 'array'
-      and memory_value <@ '["limited_walking","wheelchair_access","elderly_friendly","child_friendly","vegetarian","no_spicy","rain_sensitive","no_pork","no_beef","no_chicken","no_fish","no_egg","no_plara","no_peanut","no_shrimp","mild_spice","peanut_allergy","shrimp_allergy","fish_allergy","egg_allergy","authentic_isan","beginner_friendly","kid_friendly","low_intensity","fear_of_falling","fear_of_speed","food_allergy","prefers_short_replies","prior_safety_concern"]'::jsonb
+      and memory_value <@ '["limited_walking","wheelchair_access","elderly_friendly","child_friendly","vegetarian","no_spicy","rain_sensitive","no_pork","no_beef","no_chicken","no_fish","no_egg","no_plara","no_peanut","no_shrimp","mild_spice","peanut_allergy","shrimp_allergy","fish_allergy","egg_allergy","authentic_isan","beginner_friendly","kid_friendly","low_intensity","fear_of_falling","fear_of_speed","food_allergy","prefers_short_replies","prior_safety_concern","no_coffee","low_sweet","low_bitter","no_cow_milk","no_sugar"]'::jsonb
     when 'group' then
       jsonb_typeof(memory_value) = 'object'
       and memory_value - 'adults' - 'children' - 'elderly' = '{}'::jsonb

@@ -54,7 +54,7 @@ test('Phase 4 continuity: a specific cafe question overrides a stale ecosystem c
     const answer = text(second.payload);
     assert.match(answer, /ไม่มีข้อมูล.*ยืนยัน|ไม่ขอเดา/u);
     assert.doesNotMatch(answer, /65\s*บาท|07:00|18:00/u);
-    assert.equal(harness.modelCallCount(), 2, 'both ordinary turns must be language-supervised once; cafe handling stays grounded afterward');
+    assert.equal(harness.modelCallCount(), 1, 'only the generic host opener is supervised; explicit Cafe fact handling stays pre-Agent, grounded, and zero-cost');
   });
 });
 

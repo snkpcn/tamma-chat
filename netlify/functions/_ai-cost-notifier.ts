@@ -1,7 +1,7 @@
 import { sendAiCostLineNotification } from './_ops-notifications';
 import { aiCostPolicy } from './_ai-cost-policy';
 
-const COST_REPORT_IDLE_MS=10*60_000;
+const COST_REPORT_IDLE_MS=3*60_000;
 
 type CostRow={
   conversation_id:string;event_id:string;channel:string;model:string;call_purpose:string;
@@ -27,7 +27,7 @@ function enc(v:string){return encodeURIComponent(v)}
 function n(v:unknown){const x=Number(v);return Number.isFinite(x)?x:0}
 function baht(v:number){return v.toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:4})}
 function channelLabel(channel:string){
-  const labels:Record<string,string>={line:'LINE',web:'เว็บไซต์',facebook:'Facebook',messenger:'Messenger',unknown:'ไม่ทราบช่องทาง'};
+  const labels:Record<string,string>={line:'LINE',web:'เว็บไซต์',facebook:'Messenger',messenger:'Messenger',unknown:'ไม่ทราบช่องทาง'};
   return labels[channel.toLowerCase()]??channel.toUpperCase();
 }
 function purposeLabel(purpose:string){

@@ -88,6 +88,7 @@ export function extractFacebookTextEvents(payload: unknown, targetPageId: string
   if (body.object !== 'page' || !Array.isArray(body.entry)) return [];
 
   const events: FacebookTextEvent[] = [];
+  const seenEventIds = new Set<string>();
   for (const entry of body.entry) {
     const pageId = typeof entry.id === 'string' ? entry.id : '';
     if (!pageId || pageId !== targetPageId || !Array.isArray(entry.messaging)) continue;
@@ -104,6 +105,8 @@ export function extractFacebookTextEvents(payload: unknown, targetPageId: string
         ? item.message.mid.trim().slice(0, 180)
         : `facebook:${facebookGuestId(psid)}:${timestamp ?? Date.now()}`;
 
+      if (seenEventIds.has(eventId)) continue;
+      seenEventIds.add(eventId);
       events.push({
         senderPsid: psid,
         pageId,

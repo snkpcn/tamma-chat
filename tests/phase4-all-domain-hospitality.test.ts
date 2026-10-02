@@ -34,7 +34,7 @@ test('Phase 4: cafe stays helpful but never invents menu, price or hours without
     assert.match(text, /ไม่มีข้อมูล.*ยืนยัน|ไม่ขอเดา/u);
     assert.match(text, /คาเฟ่|ร้านอาหาร|ที่พัก/u, 'must still offer a useful next step inside the ecosystem');
     assert.doesNotMatch(text, /65\s*บาท|07:00|18:00/u);
-    assert.equal(harness.modelCallCount(), 1, 'known information boundary must still be language-supervised once before grounded handling');
+    assert.equal(harness.modelCallCount(), 0, 'known Cafe information boundary must stay pre-Agent and zero-cost so it cannot leak another domain');
   });
 });
 

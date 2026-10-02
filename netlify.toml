@@ -24,9 +24,9 @@
 
 
 # AI/API cost operations. Schedules are UTC.
-# Every 15 minutes: notify only conversations idle 10-45 minutes.
+# Every 5 minutes: notify conversations idle at least 3 minutes.
 [functions."ai-cost-notify-idle"]
-  schedule = "*/15 * * * *"
+  schedule = "*/5 * * * *"
 
 # 17:05 UTC = 00:05 Asia/Bangkok: report the complete PREVIOUS local day.
 [functions."ai-cost-notify-daily"]

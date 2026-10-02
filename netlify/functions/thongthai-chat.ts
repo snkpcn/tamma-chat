@@ -278,6 +278,27 @@ async function hasConversationContextBeforePrimary(guestDbId: string | null): Pr
   }
 }
 
+async function cafeStateBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<Record<string, unknown> | null> {
+  if (isCafeReadOnlyTurn(request.message)) return {};
+  if (!guestDbId) return null;
+  try {
+    const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+    if (!isObject(snapshot.state)) return null;
+    return isCafeReadOnlyTurn(request.message, snapshot.state.active_topic)
+      ? snapshot.state
+      : null;
+  } catch (error) {
+    console.error(
+      'THONGTHAI_PRE_PRIMARY_CAFE_STATE_ERROR',
+      error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+    );
+    return null;
+  }
+}
+
 /**
  * Phase 7 verified-slot guard for a held horse selection.
  *
@@ -543,6 +564,12 @@ export function categorizeDegradedFallback(message: string): DegradedFallbackCat
   if (classifyLocalConciergeQuestion(message)?.category === 'weather_condition') return 'weather';
   if (hasExplicitTransactionIntent(message) || OPERATIONAL_TOPIC_RE.test(message)) return 'booking';
   return 'casual';
+}
+
+function isAgentPreflightBudgetGuard(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.includes('conversation cost cap reached')
+    || message.includes('remaining combined budget is below the safe per-turn reserve');
 }
 
 export function degradedFallbackResponse(category: DegradedFallbackCategory): BrainResponse {
@@ -1696,7 +1723,7 @@ export async function promotionDiscoveryFallbackResponse(
 
 
 const CAFE_EXPLICIT_MARKER = /(?:คาเฟ่|กาแฟ|ลาเต้|อเมริกาโน่|คาปูชิโน่|เอสเปรสโซ่|อินทนิน|inthanin)/iu;
-const CAFE_READ_ONLY_FOLLOWUP_MARKER = /^(?:ราคาเท่าไหร่|ราคาเท่าไร|กี่บาท|เปิดกี่โมง|ปิดกี่โมง|เปิดถึงกี่โมง|มีอะไรบ้าง|มีเมนูอะไร)(?:ครับ|คะ|ค่ะ)?[\s?？!.]*$/u;
+const CAFE_READ_ONLY_FOLLOWUP_MARKER = /(?:เครื่องดื่ม|ราคา|กี่บาท|เปิด|ปิด|กี่โมง|เมนู|มีอะไร|แนะนำ|ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอานมวัว|นมวัว|หวาน|ขม|เย็น|น้ำตาล|เมื่อกี้|ตัวไหน|เปลี่ยนใจ|ไม่เอาตัวนั้น|เอาไว้ก่อน|ยังไม่สั่ง|ยังไม่ต้องทำรายการ|ส่งไปที่ร้าน|ถึงร้านแล้วค่อย|ที่จอดรถ|อีกประมาณ.*ชั่วโมง|แฟน|คนเดียว|กลับมาเรื่อง)/u;
 
 function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   const text = message.trim();
@@ -1705,18 +1732,42 @@ function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
 }
 
+function cafePreferenceSummary(constraints: readonly string[]): string {
+  const labels = [
+    constraints.includes('no_coffee') ? 'ไม่เอากาแฟ' : '',
+    constraints.includes('low_sweet') ? 'หวานน้อย' : '',
+    constraints.includes('low_bitter') ? 'ไม่ขมมาก' : '',
+    constraints.includes('no_cow_milk') ? 'ไม่เอานมวัว' : '',
+    constraints.includes('no_sugar') ? 'ไม่ใส่น้ำตาล' : '',
+  ].filter(Boolean);
+  return labels.length ? labels.join(' · ') : 'ยังไม่ได้ล็อกรสชาติหรือเมนู';
+}
+
 function deterministicCafeResponse(
   request: BrainRequest,
-  runtime: BrainRuntimeContext,
+  runtime: Pick<BrainRuntimeContext,'agentState'>,
 ): BrainResponse | null {
   const message = request.message.trim();
   if (!isCafeReadOnlyTurn(message, runtime.agentState?.active_topic)) return null;
 
-  // There is currently no verified live cafe menu / price / hours source in
-  // production. Stay useful without fabricating operational facts: acknowledge
-  // the cafe domain, be explicit about the information boundary, and offer a
-  // real next step within the ecosystem.
-  const answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเมนู ราคา หรือเวลาเปิดปิดของคาเฟ่ที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิด แต่ถ้าอยากวางทริปสายชิล ทองไทยช่วยต่อคาเฟ่กับร้านอาหารหรือที่พักให้ได้ครับ';
+  const preferences = cafePreferenceSummary(request.guestContext.constraints ?? []);
+  let answer = '';
+
+  if (/(?:ยังไม่(?:สั่ง|ต้องทำรายการ)|เอาไว้ก่อน|เลือกไว้ก่อน)/u.test(message)) {
+    answer = `รับทราบครับ ตอนนี้เก็บไว้แค่ความชอบ: ${preferences} ยังไม่ได้สั่งและยังไม่ได้ส่งรายการไปที่ Inthanin Café ตาดโตนครับ`;
+  } else if (/(?:รายการ.*ส่ง.*ร้าน|ส่งไปที่ร้าน.*หรือยัง)/u.test(message)) {
+    answer = 'จากข้อความที่คุยกันรอบนี้ ยังไม่มีคำสั่งให้ส่งรายการไปที่ Inthanin Café ตาดโตนครับ ตอนนี้ยังเป็นการเลือกและถามข้อมูลเท่านั้นครับ';
+  } else if (/(?:เปิด|ปิด|กี่โมง|อีกประมาณ.*ชั่วโมง|ที่จอดรถ)/u.test(message)) {
+    answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเวลาเปิดปิดหรือข้อมูลที่จอดรถของ Inthanin Café ตาดโตนที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิดครับ';
+  } else if (/ถามเผื่อแฟน/u.test(message) && /คนเดียว/u.test(message)) {
+    answer = `รับทราบครับ วันนี้มาคนเดียว ส่วนเรื่องเครื่องดื่มไม่กาแฟเป็นคำถามเผื่อแฟนครับ ตอนนี้ยังไม่ได้สั่งอะไร และความชอบที่จำไว้คือ ${preferences}ครับ`;
+  } else if (/ไม่ได้แพ้นม/u.test(message)) {
+    answer = `เข้าใจครับ เป็นความชอบที่ไม่อยากดื่มนมวัว ไม่ใช่อาการแพ้นมครับ ผมจะจำเป็น preference เท่านั้น ตอนนี้ความชอบคือ ${preferences}ครับ`;
+  } else if (/(?:เมื่อกี้|จากที่คุยมา|สนใจอะไรไว้|ตัวไหนเหมาะ|เปลี่ยนใจ|ไม่เอาตัวนั้น|กลับมาเรื่อง)/u.test(message)) {
+    answer = `ที่คุยกันไว้ตอนนี้เป็นความชอบเรื่องเครื่องดื่ม: ${preferences}ครับ แต่ยังไม่ได้เลือกชื่อเมนูจริง เพราะระบบยังไม่มีเมนู Inthanin Café ตาดโตนที่ยืนยันให้ผมอ้างอิงครับ`;
+  } else {
+    answer = `รับทราบครับ ตอนนี้ความชอบที่จำไว้คือ ${preferences}ครับ แต่ระบบยังไม่มีข้อมูลเมนู ราคา หรือสต็อกเครื่องดื่มของคาเฟ่ Inthanin ตาดโตนที่ยืนยันครับ จึงไม่ขอเดาชื่อเมนูให้ผิดครับ ถ้ามีรสชาติที่ชอบ ผมช่วยจำเงื่อนไขไว้ก่อนได้ครับ`;
+  }
 
   return {
     message: answer,
@@ -5884,8 +5935,11 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // owns the turn before read-only Agent Primary.
   // Prepare-only routing remains separately authorized and unchanged.
   const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
+  const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
+  const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+    && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
     && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
@@ -5900,6 +5954,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       || topLevelSemanticIntent === 'LOCATION_REQUEST',
   });
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
+
+  if (cafeReadOnlyBeforePrimary) {
+    const cafeResponse = deterministicCafeResponse(request, {
+      agentState: cafeStateForPrePrimary ?? {},
+    });
+    if (cafeResponse) {
+      const polished = polishedResponse(cafeResponse, channel);
+      await persistBrainRuntime(guestDbId, channel, polished);
+      return coreResult(200, {
+        message: polished.message,
+        intent: polished.intent,
+        contextUpdates: polished.contextUpdates,
+        journeyAction: polished.journeyAction,
+        suggestedActions: polished.suggestedActions,
+      });
+    }
+  }
 
   if (primaryAgentEligible && guestDbId) {
     try {
@@ -5955,6 +6026,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         conversationCostThb: agentTurn.cumulativeCostThb,
       }));
 
+      // Messenger/LINE do not send chatHistory on the next webhook. Mirror
+      // every successful Agent turn into the same bounded server-side
+      // ConversationContext used by One-Mind so a later budget/provider
+      // fallback still knows what the customer and Agent just discussed.
+      try {
+        const currentContext = await loadConversationContext(guestDbId);
+        const nextContext = applyConversationContextUpdate(currentContext, {
+          eventId: transportEventId,
+          channel,
+          userMessage: request.message,
+          assistantMessage: primaryResponse.message,
+        });
+        await persistConversationContext(guestDbId, nextContext);
+      } catch (error) {
+        console.error(
+          'THONGTHAI_AGENT_CONTEXT_MIRROR_ERROR',
+          error instanceof Error ? error.message.slice(0,180) : 'unknown',
+        );
+      }
+
       return coreResult(200, {
         message: primaryResponse.message,
         intent: primaryResponse.intent,
@@ -5963,25 +6054,31 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         suggestedActions: primaryResponse.suggestedActions,
       });
     } catch (error) {
-      // Do not cascade into another paid LLM path after a primary-Agent
-      // attempt: that could double-spend the same customer turn. Fail over
-      // only to the existing deterministic degraded responder.
-      console.error(
-        'THONGTHAI_AGENT_PRIMARY_ERROR',
-        error instanceof Error ? error.message.slice(0, 260) : 'unknown',
-      );
-      const fallback = polishedResponse(
-        degradedFallbackResponse(categorizeDegradedFallback(request.message)),
-        channel,
-      );
-      await persistBrainRuntime(guestDbId, channel, fallback);
-      return coreResult(200, {
-        message: fallback.message,
-        intent: fallback.intent,
-        contextUpdates: fallback.contextUpdates,
-        journeyAction: fallback.journeyAction,
-        suggestedActions: fallback.suggestedActions,
-      });
+      const detail = error instanceof Error ? error.message : String(error ?? 'unknown');
+      console.error('THONGTHAI_AGENT_PRIMARY_ERROR', detail.slice(0,260));
+
+      // These two failures happen before a new paid Agent turn is sent. Do not
+      // punish the customer with the old "คิดช้า ลองใหม่" loop: safely fall
+      // through to One-Mind/deterministic responders, whose own cost ledger
+      // still enforces the same <=5 THB conversation cap.
+      if (isAgentPreflightBudgetGuard(error)) {
+        console.log('THONGTHAI_AGENT_PRIMARY_BUDGET_FALLTHROUGH', JSON.stringify({ channel }));
+      } else {
+        // For provider/tool failures after an Agent attempt, keep the
+        // no-double-spend rule: do not launch another paid model path.
+        const fallback = polishedResponse(
+          degradedFallbackResponse(categorizeDegradedFallback(request.message)),
+          channel,
+        );
+        await persistBrainRuntime(guestDbId, channel, fallback);
+        return coreResult(200, {
+          message: fallback.message,
+          intent: fallback.intent,
+          contextUpdates: fallback.contextUpdates,
+          journeyAction: fallback.journeyAction,
+          suggestedActions: fallback.suggestedActions,
+        });
+      }
     }
   }
 
