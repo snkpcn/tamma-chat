@@ -162,18 +162,24 @@ test('Phase 6 production-smoke repair: bad model output cannot promote selection
 
     await send('แฟนแพ้กุ้งครับ');
     await send('ผมกินเผ็ดไม่เก่งด้วยครับ');
-    harness.programGeminiReply({
-      normalizedMeaning:'customer asks for menu recommendations matching prior dietary constraints',
-      reply:'แนะนำต้มยำกุ้งกับผัดไทยกุ้งสดครับ',
-      speechAct:'question',domain:'restaurant',intent:'recommend_menu',action:'recommend',
-      informationNeed:'recommendation',entities:{},references:[],constraints:[],
-      confidence:0.99,needsClarification:false,
-    });
+    // Phase 7 final boundary: this explicit "ตามที่บอกไป" restaurant
+    // follow-up is now owned by the grounded deterministic fast path. That is
+    // intentionally STRONGER than the old bad-model-output test: known live
+    // menu facts + already-durable constraints must not spend a semantic/model
+    // call at all. Leaving a scripted model completion queued here would make
+    // the test harness feed that stale completion to the NEXT (horse-resume)
+    // turn, which is not production behavior and falsely looks like restaurant
+    // context stole the resume.
+    const modelCallsBeforeMenu = harness.modelCallCount();
     const menu = await send('มีเมนูไหนเหมาะกับที่บอกไปบ้างครับ');
+    assert.equal(
+      harness.modelCallCount(),
+      modelCallsBeforeMenu,
+      'explicit prior-constraint menu follow-up must stay zero-model and grounded',
+    );
     assert.match(text(menu),/ข้าวผัดหมู/u,'grounded response must select the catalog item compatible with remembered constraints');
     assert.match(text(menu),/กุ้ง/u,'response must explicitly apply the remembered shrimp constraint');
     assert.match(text(menu),/เผ็ด/u,'response must explicitly apply the remembered mild-spice preference');
-    assert.doesNotMatch(text(menu),/แนะนำต้มยำกุ้งกับผัดไทยกุ้งสด/u);
 
     const resumed = await send('กลับมาเรื่องม้าที่เลือกไว้เมื่อกี้ครับ');
     assert.match(text(resumed),/ภาราดร/u);
