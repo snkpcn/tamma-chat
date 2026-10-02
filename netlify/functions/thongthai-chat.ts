@@ -1908,14 +1908,13 @@ function cafeRecommendationMessage(
 ):string{
   const active=items.filter(item=>item.active);
   const constraints=new Set(request.guestContext.constraints??[]);
-  const selfNoCoffee=constraints.has('no_coffee')
-    || /(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง).{0,20}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
+  // The guest-scoped preference classifier already separates the customer
+  // from companions before this function runs. Never re-infer "self" with a
+  // cross-clause regex here: "ผมชอบกาแฟ...แต่แฟนไม่กินกาแฟ" used to match
+  // from ผม all the way to แฟนไม่กินกาแฟ and wrongly remove coffee from the
+  // customer's own recommendation.
+  const noCoffee=constraints.has('no_coffee');
   const companionNoCoffee=/(?:แฟน|ภรรยา|สามี|เพื่อน|ลูก).{0,24}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
-  const sharedNoCoffee=/(?:เราสองคน|เราทั้งคู่|ทั้งคู่).{0,24}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
-  const genericNoCoffee=/(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|no\s*coffee)/iu.test(request.message)
-    && !companionNoCoffee
-    && !/(?:ผม|ฉัน|หนู|ดิฉัน).{0,26}(?:ชอบ|เอา|อยากได้).{0,12}กาแฟ/u.test(request.message);
-  const noCoffee=selfNoCoffee||sharedNoCoffee||genericNoCoffee;
   const couple=/(?:แฟน|คู่รัก|สองคน|2\s*คน|couple)/iu.test(request.message);
   const selfStrongCoffee=/(?:ผม|ฉัน|หนู|ดิฉัน).{0,26}(?:ชอบ|เอา|อยากได้).{0,12}กาแฟ.{0,12}(?:เข้ม|แรง)/u.test(request.message);
   const sharedLowSweet=/(?:เราสองคน|เราทั้งคู่|ทั้งคู่).{0,30}(?:ไม่ชอบหวาน|ไม่หวานมาก|หวานน้อย)/u.test(request.message)
