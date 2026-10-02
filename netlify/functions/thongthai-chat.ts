@@ -6194,6 +6194,49 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  const deterministicActivityPlanning = earlyOneMind
+    ? resolveDeterministicActivityPlanningCutover(earlyOneMind, channel, request.language)
+    : null;
+  if (deterministicActivityPlanning?.kind === 'respond') {
+    const semantic = earlyOneMind!.turn.dialogSemanticTurn;
+    const polished = polishedResponse({
+      message:deterministicActivityPlanning.response.message,
+      intent:'information',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    }, channel);
+
+    // legacy_required does not persist One-Mind state. Preserve this safe
+    // consider/correction turn explicitly in ConversationContext so LINE
+    // continuity survives the provider outage without opening a booking task.
+    if (guestDbId) {
+      const currentContext = await loadConversationContext(guestDbId);
+      const nextContext = applyConversationContextUpdate(currentContext, {
+        eventId:transportEventId,
+        channel,
+        userMessage:request.message,
+        assistantMessage:polished.message,
+        activeDomain:'activity',
+        lastAction:semantic.action,
+        semanticTurn:semantic,
+      });
+      await persistConversationContext(guestDbId, nextContext);
+    }
+
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
   // Human Core PR E: the equivalent terminal boundary for Stay. A usable
   // OpenAI-owned Stay meaning cannot reach homestayFactsResponse, any other
   // raw-text Stay responder, or runThongthaiBrain below this point.
