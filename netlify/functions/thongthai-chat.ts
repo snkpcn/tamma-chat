@@ -1893,9 +1893,16 @@ function cafeRecommendationMessage(
   items:readonly CafeMasterMenuItem[],
 ):string{
   const active=items.filter(item=>item.active);
-  const preferredCodes=/แฟน|คู่รัก|couple/iu.test(request.message)
-    ? ['cafe_latte','caramel_macchiato','uji_pure_matcha','thai_tea_latte']
-    : ['cafe_latte','americano','thai_tea_latte','uji_pure_matcha'];
+  const constraints=new Set(request.guestContext.constraints??[]);
+  const noCoffee=constraints.has('no_coffee')
+    || /(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|no\s*coffee)/iu.test(request.message);
+  const couple=/(?:แฟน|คู่รัก|สองคน|2\s*คน|couple)/iu.test(request.message);
+
+  const preferredCodes=noCoffee
+    ? ['uji_pure_matcha','thai_tea_latte','green_tea_latte','cocoa','lemon_tea']
+    : couple
+      ? ['cafe_latte','uji_pure_matcha','thai_tea_latte','caramel_macchiato']
+      : ['americano','cafe_latte','uji_pure_matcha','thai_tea_latte'];
 
   const picked:CafeMasterMenuItem[]=[];
   for(const code of preferredCodes){
@@ -1905,22 +1912,39 @@ function cafeRecommendationMessage(
   }
   if(picked.length<3){
     for(const item of active){
+      if(noCoffee&&item.category==='coffee')continue;
       if(!picked.includes(item))picked.push(item);
       if(picked.length>=3)break;
     }
   }
 
-  const names=picked.slice(0,3).map(item=>item.name_th);
-  if(!names.length)return 'ตอนนี้ทองไทยยังคัดเมนูแนะนำให้ไม่ได้ครับ';
+  if(!picked.length)return 'ตอนนี้ทองไทยยังคัดเมนูแนะนำให้ไม่ได้ครับ';
 
-  const intro=/แฟน|คู่รัก|couple/iu.test(request.message)
-    ? 'ถ้าไปกับแฟน ทองไทยคัดให้สั้น ๆ ก่อนครับ'
-    : 'ถ้าอยากให้แนะนำแบบเลือกง่าย ๆ ทองไทยคัดให้ก่อนครับ';
+  if(noCoffee){
+    return [
+      'ถ้าไม่เอากาแฟ ตัดฝั่งกาแฟออกได้เลยครับ',
+      picked.map(item=>item.name_th).join(' · '),
+      '',
+      'อยากไปทางชา/มัทฉะ หรือเครื่องดื่มไม่กาแฟแบบอื่นมากกว่ากันครับ เดี๋ยวทองไทยคัดให้แคบลงอีก',
+    ].join('\n');
+  }
+
+  if(couple){
+    const coffee=picked.filter(item=>item.category==='coffee').slice(0,1);
+    const alternatives=picked.filter(item=>item.category!=='coffee').slice(0,2);
+    const lines=['ถ้าไปกันสองคน ทองไทยคัดให้คนละแนวก่อน จะเลือกง่ายกว่าดูทั้งเมนูครับ'];
+    if(coffee.length)lines.push(`ฝั่งกาแฟ: ${coffee.map(item=>item.name_th).join(' · ')}`);
+    if(alternatives.length)lines.push(`ฝั่งชา/มัทฉะหรือไม่กาแฟ: ${alternatives.map(item=>item.name_th).join(' · ')}`);
+    const remaining=picked.filter(item=>!coffee.includes(item)&&!alternatives.includes(item));
+    if(remaining.length)lines.push(`อีกตัวที่น่าดู: ${remaining.map(item=>item.name_th).join(' · ')}`);
+    lines.push('', 'ถ้าสองคนชอบคนละแบบ บอกแค่ว่าใครเอากาแฟหรือไม่กาแฟกับหวานประมาณไหนครับ เดี๋ยวทองไทยจับคู่ให้');
+    return lines.join('\n');
+  }
+
   return [
-    intro,
-    names.join(' · '),
+    `ถ้าอยากเลือกง่าย ๆ ทองไทยคัดไว้ 3 ตัวต่างแนวก่อนครับ — ${picked.map(item=>item.name_th).join(' · ')}`,
     '',
-    'ชอบกาแฟหรือไม่กาแฟ แล้วเอาหวานประมาณไหนครับ เดี๋ยวทองไทยคัดให้เหลือ 2 ตัว',
+    'อยากเริ่มจากกาแฟหรือไม่กาแฟก่อนครับ เดี๋ยวทองไทยตัดให้เหลือ 1–2 ตัวที่ตรงกว่านี้',
   ].join('\n');
 }
 
