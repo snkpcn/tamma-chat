@@ -162,6 +162,7 @@ export async function executeBrainTools(
   if (!calls.length) return [];
   if (!guestDbId || !configuration()) return calls.map(call => ({ name:call.name,ok:false,detail:'customer_state_unavailable' }));
   const results: BrainToolResult[] = [];
+  const environment: 'live' | 'test' = request.environment === 'test' ? 'test' : 'live';
   for (const call of calls.slice(0,4)) {
     if (shouldBlockLegacyWriteForPrepareOnly({
       toolName: call.name,
@@ -202,7 +203,7 @@ export async function executeBrainTools(
       const resourceCode = typeof call.args.resourceCode === 'string' ? call.args.resourceCode : null;
       const durationMinutes = typeof call.args.durationMinutes === 'number' ? call.args.durationMinutes : null;
       const partySize = typeof call.args.partySize === 'number' ? call.args.partySize : null;
-      const options = await listBookingOptions(serviceType,date,'live',resourceCode,durationMinutes,partySize);
+      const options = await listBookingOptions(serviceType,date,environment,resourceCode,durationMinutes,partySize);
       results.push({ name:call.name, ok:true, detail:JSON.stringify({ date, serviceType, resourceCode, durationMinutes, partySize, options:options.slice(0,24) }) });
       continue;
     }
@@ -220,7 +221,7 @@ export async function executeBrainTools(
             phone:typeof call.args.phone === 'string' ? call.args.phone : null,
             email:typeof call.args.email === 'string' ? call.args.email : null,
             note:typeof call.args.note === 'string' ? call.args.note : null,
-            environment:'live',
+            environment,
           });
           const notificationStatus = await dispatchCreatedTransactionNotification('booking', created.id);
           await insertEvent(guestDbId,'agent_action','booking',{action:'create_booking',bookingCode:created.bookingCode,channel});
@@ -233,7 +234,7 @@ export async function executeBrainTools(
             const options = await listBookingOptions(
     serviceType,
     date,
-    'live',
+    environment,
     typeof call.args.resourceCode === 'string' ? call.args.resourceCode : null,
     typeof call.args.durationMinutes === 'number' ? call.args.durationMinutes : null,
     typeof call.args.partySize === 'number' ? call.args.partySize : null,
@@ -270,6 +271,7 @@ export async function executeBrainTools(
             phone:typeof call.args.phone==='string' ? call.args.phone : null,
             email:typeof call.args.email==='string' ? call.args.email : null,
             note:typeof call.args.note==='string' ? call.args.note : null,
+            environment,
           });
           await insertEvent(guestDbId,'agent_action','order',{action:'create_restaurant_preorder',preorderCode:created.preorderCode,channel});
           results.push({name:call.name,ok:true,detail:JSON.stringify(created)});
@@ -282,14 +284,14 @@ export async function executeBrainTools(
           customerName:typeof call.args.customerName === 'string' ? call.args.customerName : null,
           phone:typeof call.args.phone === 'string' ? call.args.phone : null,
           email:typeof call.args.email === 'string' ? call.args.email : null,
-          environment:'live',
+          environment,
         });
         const notificationStatus = await dispatchCreatedTransactionNotification('cafe_inquiry', created.id);
         await insertEvent(guestDbId,'agent_action','customer_service',{action:'create_cafe_inquiry',inquiryCode:created.inquiryCode,channel});
         results.push({name:call.name,ok:true,detail:JSON.stringify({...created,notificationStatus})}); continue;
       }
       if (call.name === 'list_otop_products') {
-        const products = await listOtopProducts('live');
+        const products = await listOtopProducts(environment);
         results.push({name:call.name,ok:true,detail:JSON.stringify({products:products.slice(0,20)})}); continue;
       }
       if (call.name === 'redeem_promotion') {
@@ -317,7 +319,7 @@ export async function executeBrainTools(
           fulfillmentType:String(call.args.fulfillmentType) === 'shipping' ? 'shipping' : 'pickup',
           shippingAddress:typeof call.args.shippingAddress === 'string' ? call.args.shippingAddress : null,
           note:typeof call.args.note === 'string' ? call.args.note : null,
-          environment:'live',
+          environment,
         });
         const notificationStatus = await dispatchCreatedTransactionNotification('otop_order', created.id);
         await insertEvent(guestDbId,'agent_action','order',{action:'create_otop_order',orderCode:created.orderCode,channel});
