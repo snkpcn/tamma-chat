@@ -1,6 +1,7 @@
-// Destructive production certification: creates five clearly-labelled test
-// records through the public Thongthai gateway. It is deliberately gated so
-// CI and an accidental local invocation can never mutate production.
+// Production-path E2E certification: exercises the public Thongthai gateway
+// against canonical LIVE business facts while forcing all durable synthetic
+// records into environment=TEST. It remains deliberately gated so CI and an
+// accidental local invocation cannot create even TEST transaction records.
 
 const PRODUCTION_URL = process.env.THONGTHAI_PRODUCTION_URL
   ?? 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
       body: JSON.stringify({
         guestId: guest,
         eventId,
+        environment: 'test',
         message: item.message,
         language: 'th',
         chatHistory: [],
