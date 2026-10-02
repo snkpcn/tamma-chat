@@ -6225,6 +6225,16 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     // consider/correction turn explicitly in ConversationContext so LINE
     // continuity survives the provider outage without opening a booking task.
     if (guestDbId) {
+      const selectedHorse = typeof semantic.entities.horseName === 'string'
+        ? semantic.entities.horseName.trim().replace(/^น้อง/u, '')
+        : '';
+      if (selectedHorse) {
+        // Preserve the same bounded planning-state contract every other horse
+        // selection uses. persistHorseSelection writes only non-committed task
+        // slots; it does not create a booking or authorize a transaction.
+        await persistHorseSelection(guestDbId, channel, selectedHorse);
+      }
+
       const currentContext = await loadConversationContext(guestDbId);
       const nextContext = applyConversationContextUpdate(currentContext, {
         eventId:transportEventId,
