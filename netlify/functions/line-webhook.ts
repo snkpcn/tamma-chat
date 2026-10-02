@@ -11,6 +11,7 @@ import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
+import { handleTransferPurposeText } from './_inthanin-transfer-followup';
 import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
   handleCustomerPaymentSlip,
@@ -377,6 +378,17 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   });
   if (dailyCloseConfirmReply) {
     await replyToLine(event.replyToken, dailyCloseConfirmReply, accessToken);
+    return;
+  }
+
+  const transferPurposeReply = await handleTransferPurposeText({
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+    messageId: event.message.id ?? null,
+  });
+  if (transferPurposeReply) {
+    await replyToLine(event.replyToken, transferPurposeReply, accessToken);
     return;
   }
 
