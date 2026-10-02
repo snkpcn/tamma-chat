@@ -7,6 +7,12 @@ import {
   type ParsedInthaninDailyClose,
 } from './_inthanin-daily-close-text';
 
+type RematchResult = {
+  ok?: boolean;
+  matched_count?: number;
+  ambiguous_count?: number;
+};
+
 type IngestResult = {
   ok?: boolean;
   duplicate?: boolean;
@@ -155,7 +161,7 @@ function missingReply(parsed:ParsedInthaninDailyClose):string{
   ].join('\n');
 }
 
-function successReply(parsed:ParsedInthaninDailyClose,result:IngestResult):string{
+function successReply(parsed:ParsedInthaninDailyClose,result:IngestResult,rematch?:RematchResult|null):string{
   if(result.duplicate){
     return [
       '🧪 Café TEST — รายการนี้รับไว้แล้วครับ',
@@ -188,6 +194,12 @@ function successReply(parsed:ParsedInthaninDailyClose,result:IngestResult):strin
     parsed.billCount!==null?'จำนวนบิล: '+parsed.billCount+' บิล':'',
     'สิทธิ/แต้ม/โปร: '+benefitSummary(parsed),
     '',
+    rematch && Number(rematch.matched_count||0)>0
+      ? '📎 จับคู่รูป/สลิปที่ส่งมาก่อนหน้าเพิ่มได้ '+Number(rematch.matched_count||0)+' รายการ'
+      : '',
+    rematch && Number(rematch.ambiguous_count||0)>0
+      ? '⚠️ ยังมีหลักฐานยอดซ้ำที่ต้องตรวจ '+Number(rematch.ambiguous_count||0)+' รายการ'
+      : '',
     warnings.length?'ยังมีข้อมูลที่ควรเติมก่อนยืนยันปิดวัน:\n'+warnings.join('\n'):'',
     'สถานะ: DRAFT — ยังไม่ใช่การยืนยันปิดวันครับ',
   ].filter(Boolean);
@@ -228,6 +240,23 @@ export async function handleCafeTestDailyCloseText(input:{
   const result=Array.isArray(raw)?raw[0]:raw;
   if(!result?.ok)throw new Error('financial_daily_close_text_ingest_failed');
 
+  let rematch:RematchResult|null=null;
+  if(result.daily_close_id){
+    try{
+      const rematchResponse=await dbFetch('rpc/financial_rematch_cafe_test_day_evidence_v1',{
+        method:'POST',
+        body:JSON.stringify({p_daily_close_id:result.daily_close_id}),
+      });
+      const rematchRaw=await rematchResponse.json() as RematchResult|RematchResult[];
+      rematch=Array.isArray(rematchRaw)?rematchRaw[0]??null:rematchRaw;
+    }catch(error){
+      console.error(
+        'INTHANIN_DAILY_CLOSE_EVIDENCE_REMATCH_ERROR',
+        error instanceof Error?error.message.slice(0,220):'unknown',
+      );
+    }
+  }
+
   console.log('INTHANIN_DAILY_CLOSE_TEXT_INGESTED',JSON.stringify({
     environment:'test',
     localDate:parsed.localDate,
@@ -237,7 +266,9 @@ export async function handleCafeTestDailyCloseText(input:{
     expenseCount:parsed.expenses.length,
     cupCount:parsed.cupCount,
     hasBillCount:parsed.billCount!==null,
+    rematchedEvidence:Number(rematch?.matched_count||0),
+    ambiguousEvidence:Number(rematch?.ambiguous_count||0),
   }));
 
-  return successReply(parsed,result);
+  return successReply(parsed,result,rematch);
 }
