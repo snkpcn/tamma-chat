@@ -125,78 +125,133 @@ Calibrated guard:
 - grounded-response composer stays at 900 + old absolute reservation;
 - owner hard cap remains <= 5 THB.
 
-## Current Production Saved-Agent path
+## Current Production routing after final Phase 3 bridge
 
-Architecture changed after the original Kernel-V2 roadmap: ordinary
-Web/LINE/Facebook traffic now enters the Saved Agent at 100% before the older
-One-Mind semantic path.
+Production Saved Agent remains at 100% rollout on WEB / LINE / Facebook.
 
-Phase 3 therefore **does not** force learned semantic shortcuts ahead of the
-Saved Agent. Doing that would make the Agent miss the skipped customer turn in
-its own session context and could reduce conversation quality. The learned
-concept mechanism remains a safe fallback capability rather than a forced
-primary shortcut.
+Phase 3 does **not** disable or roll back that Agent rollout. Instead, one
+narrow pre-Agent bridge now exists for the three CLOSED semantic-learning
+families only:
 
-Real production Agent cost audit:
-- 123 completed primary-Agent turns measured
-- 68 active sessions after splitting >=30-minute idle gaps
-- avg cost/call: 0.6446 THB
-- p95 cost/call: 1.3191 THB
-- p99 cost/call: 1.4502 THB
-- max cost/call: 1.4644 THB
-- avg active-session cost: 1.1946 THB
-- p95 active-session cost: 2.0147 THB
-- max active-session cost: 2.3712 THB
-- max calls in one active session: 6
-- sessions above 5 THB: 0
+- companion
+- relaxed pace
+- consider-only / no-transaction
 
-The Agent's existing 2.75-THB pre-turn reserve remains unchanged. It is
-conservative, but lowering it from observational data alone would weaken the
-hard 5-THB guarantee without a true provider-side worst-case bound.
+The bridge is routing-only. Raw marker text never decides the meaning. A short
+standalone candidate is sent to One-Mind first, where either:
 
-## Final live gates
+1. trusted semantic_concept_memory owns the turn at zero paid-call; or
+2. the real semantic supervisor pays once, confirms a closed concept, and may
+   write one safe exemplar.
 
-All passed on PR #438 final head:
-- One Mind full CI
-- Netlify Build Guard
-- Formal Phase 3 20/50/100 cost stress
-- Phase 3 real OpenAI cost calibration
-- OpenAI regression acceptance
-- frozen hidden open-world holdout
-- Phase 6 live multi-turn semantic acceptance
-- real LINE 16-turn human-conversation acceptance
+Mixed / multi-clause transaction language, weather, location, and ordinary
+business turns remain on their existing routes.
 
-Production deployed the merged SHA and is READY.
+The learned-source cutover gate is additionally constrained so it can never
+own:
+- transaction_request
+- book / order / cancel
+- any turn with ActionProposal
+- unresolved consider-only references
+
+A learned consider-only confirm requires both:
+- explicit no-transaction constraint; and
+- exactly one resolved prior entity.
+
+## Final real Production learning proof
+
+Production deployed the final runtime line through:
+- PR #445 — production low-exertion canonical mapping
+- PR #446 — human deterministic response for learned semantics
+- PR #447 — learned-semantic cutover eligibility
+
+Final production code SHA before documentation closeout:
+`8d32872f6bfbcae958c957d24d63bea0b0c6a00a`.
+
+### First confirmed learn
+
+Production event:
+`phase3-prod3-pace-first-a1`
+
+Observed:
+- semantic supervisor call completed successfully;
+- model returned structured `constraints:['low_exertion']`;
+- mapper canonicalized it to `pace_relaxed`;
+- `semantic_concept_memory` inserted:
+  - concept_key = `pace_relaxed`
+  - normalized_signature = `ไม่อยากเหนื่อยมาก`
+  - confidence = 0.700
+  - evidence_count = 1
+  - status = active.
+
+### Final learned replay
+
+Production events:
+- `phase3-prod6-pace-first-a1`
+- `phase3-prod6-pace-replay-a1`
+
+Both were owned by:
+- intent = `semantic_concept_match`
+- action = `provide_information`
+- dialog_mode = `answer`
+- composer_mode = `deterministic`
+
+Real customer-facing response:
+`รับทราบครับ เดี๋ยวผมเน้นตัวเลือกสบาย ๆ ใช้แรงไม่มากให้ครับ`
+
+Important cost evidence:
+- **no ai_api_cost_events exist for either prod6 pace event**
+- therefore both learned replay turns were **0 paid call**
+- One-Mind total time was about 1.3–1.4 seconds for those turns.
+
+### Transaction negative control
+
+Production event:
+`phase3-prod6-transaction-negative-a1`
+
+Observed:
+- learned memory did not own the transaction turn;
+- normal semantic-interpreter path ran;
+- cost = 0.0727 THB;
+- no false transaction-success marker was emitted.
+
+This is the Phase 3 contract in production:
+**pay when genuinely unseen / learn safely / replay free / never convert
+learned semantics into transaction authority.**
 
 ## Broad production-smoke diagnostic — carried to Phase 7
 
-A separate one-shot broad Phase-7-style production smoke (PR #440) was run
-after Phase 3 deployed. It was intentionally **not merged**.
+The broad Phase-7-style smoke exposed intermittent 504/provider latency and
+wording variability in scenarios unrelated to the learned-concept mechanism.
+Those failures are not hidden.
 
-It exposed intermittent HTTP 504s and wording/grounding variability in broader
-activity/restaurant/general scenarios. It detected **no false transaction
-success marker**. Phase-3-specific companion/privacy cases passed.
+Across those runs:
+- false transaction-success markers = 0;
+- Phase-3-specific learned/cost behavior was proven separately by the targeted
+  production certification above.
 
-Those broad reliability/response issues are not hidden or reclassified as
-green; they are explicitly carried forward to **Phase 7 — Brutal
-Certification / Shadow Cutover**, where the broad production-smoke contract
-belongs.
-
-They do not invalidate Phase 3's semantic-learning/cost proof because the
-failing cases were outside the learned-concept/cost implementation and the
-Phase 3 final-head language, cost, safety, and LINE gates all passed before
-merge.
+The broad smoke remains a Phase 7 reliability/cutover gate and is not used to
+erase the narrower Phase 3 proof.
 
 ## Completion decision
 
+**Phase 3 = COMPLETE.**
+
 Phase 3 is complete because:
-1. the semantic generalization question was resolved with real calibration;
-2. pace + consider-only learning was implemented safely;
-3. formal 20/50/100-turn cost evidence exists;
-4. no arbitrary fixed-call cliff or learned transaction escalation was found;
-5. the real OpenAI token/cost envelope was calibrated and guarded;
-6. the current 100%-Agent production architecture was audited rather than
+1. the semantic-generalization architecture was decided from real calibration,
+   not fashion or guesswork;
+2. companion + pace + consider-only concept families are implemented with
+   closed, non-operational outcomes;
+3. production DB migration is applied and verified;
+4. formal 20/50/100-turn stress evidence exists;
+5. no arbitrary fixed-call cliff or learned transaction escalation was found;
+6. real OpenAI token/cost calibration exists and the semantic reservation was
+   tightened while retaining conservative headroom;
+7. 100% Saved-Agent production routing was audited and bridged rather than
    ignored;
-7. production DB migration and production deploy are verified.
+8. real Production proved first-call learning into semantic_concept_memory;
+9. real Production proved cross-customer learned replay at **0 paid call**;
+10. the final learned response is human, deterministic, and non-transactional;
+11. transaction negative control remained outside learned-memory ownership.
 
 Next roadmap phase: **Phase 4 — Human Intent / Commercial Boundary.**
