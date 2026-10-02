@@ -24,10 +24,36 @@ type ThongthaiResponse = {
   suggestedActions?: unknown[];
 };
 
+class FacebookSendHttpError extends Error {
+  retryable: boolean;
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = 'FacebookSendHttpError';
+    this.retryable = retryable;
+  }
+}
+
 // Meta verification/runtime secrets are resolved from Netlify environment variables.
 // Redeploy production after changing their scopes or contexts so the live function sees the new values.
 function env(name: string): string {
   return Netlify.env.get(name)?.trim() ?? '';
+}
+
+async function alreadyProcessedFacebookEvent(conversationId: string, eventId: string): Promise<boolean> {
+  const url = env('SUPABASE_URL').replace(/\/$/, '');
+  const key = env('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key) return false;
+  const query = new URL(`${url}/rest/v1/ai_response_turns`);
+  query.searchParams.set('conversation_id', `eq.${conversationId}`);
+  query.searchParams.set('event_id', `eq.${eventId}`);
+  query.searchParams.set('select', 'event_id');
+  query.searchParams.set('limit', '1');
+  const response = await fetch(query, {
+    headers: { apikey:key, Authorization:`Bearer ${key}` },
+  }).catch(() => null);
+  if (!response?.ok) return false;
+  const rows = await response.json().catch(() => []) as unknown[];
+  return rows.length > 0;
 }
 
 function emptyGuestContext() {
@@ -116,7 +142,10 @@ async function sendFacebookText(
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`Facebook Send API failed ${response.status}: ${body.slice(0, 220)}`);
+    throw new FacebookSendHttpError(
+      `Facebook Send API failed ${response.status}: ${body.slice(0, 220)}`,
+      response.status === 429 || response.status >= 500,
+    );
   }
 }
 
@@ -136,6 +165,11 @@ async function sendFacebookTextReliably(
       'FACEBOOK_SEND_FIRST_ATTEMPT_ERROR',
       firstError instanceof Error ? firstError.message.slice(0, 260) : 'unknown',
     );
+    // A network exception is ambiguous: Meta may already have accepted the
+    // message. Retrying that blindly can duplicate the customer reply. Retry
+    // only explicit HTTP 429/5xx responses where the Send API confirmed a
+    // failure response.
+    if (!(firstError instanceof FacebookSendHttpError) || !firstError.retryable) throw firstError;
   }
 
   await new Promise(resolve => setTimeout(resolve, 250));
@@ -242,6 +276,14 @@ export default async (req: Request, _context: Context) => {
       eventId: event.eventId.slice(0, 80),
       chars: event.text.length,
     }));
+
+    if (await alreadyProcessedFacebookEvent(guestId, event.eventId)) {
+      console.log('FACEBOOK_DUPLICATE_EVENT_SKIPPED', JSON.stringify({
+        guest: guestId.slice(0,8),
+        eventId: event.eventId.slice(0,80),
+      }));
+      continue;
+    }
 
     let reply = '';
     try {
