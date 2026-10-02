@@ -5608,6 +5608,64 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  const horseComparison = await boundedHorseComparisonBeforePrimary(
+    request,
+    guestDbId,
+  ).catch(error => {
+    console.error('THONGTHAI_BOUNDED_HORSE_COMPARISON_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (horseComparison) {
+    const polished = polishedResponse(horseComparison, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const horseCorrection = await boundedHorseCorrectionBeforePrimary(
+    request,
+    guestDbId,
+    channel,
+  ).catch(error => {
+    console.error('THONGTHAI_BOUNDED_HORSE_CORRECTION_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (horseCorrection) {
+    const polished = polishedResponse(horseCorrection, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const bookingStatusReadback = await verifiedBookingStatusReadbackBeforePrimary(
+    request,
+    guestDbId,
+  ).catch(error => {
+    console.error('THONGTHAI_VERIFIED_BOOKING_STATUS_READBACK_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (bookingStatusReadback) {
+    const polished = polishedResponse(bookingStatusReadback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
   const safetyCriticalRestaurantRecommendation = await safetyCriticalRestaurantRecommendationBeforePrimary(
     request,
     guestDbId,
