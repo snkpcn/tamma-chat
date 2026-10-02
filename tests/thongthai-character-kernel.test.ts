@@ -36,3 +36,17 @@ test('character kernel adds paragraph rhythm to dense Thai phone copy', () => {
   assert.match(text,/\n\n/u);
   assert.match(text,/ครับ$/u);
 });
+
+
+test('character kernel does not replace one canned opener with another or inject dialect', () => {
+  const text = applyThongthaiCharacterKernel({
+    message:'รับทราบครับ ลาเต้กับมัทฉะเป็นสองตัวที่เลือกง่ายครับ',
+    customerMessage:'มีอะไรแนะนำบ้างครับ',
+    language:'th',
+    channel:'facebook',
+  });
+  assert.doesNotMatch(text,/^รับทราบครับ|^ได้ครับ/u);
+  assert.doesNotMatch(text,/เบิ่ง|เด้อ|ม่วน/u);
+  assert.match(text,/ลาเต้กับมัทฉะ/u);
+  assert.match(text,/ครับ$/u);
+});
