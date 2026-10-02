@@ -149,6 +149,119 @@ export function composeIncidentResponse(
   ]);
 }
 
+export type SemanticIncidentResponseLanguage = 'th' | 'en' | 'zh' | 'lo' | 'vi';
+
+const SEMANTIC_INCIDENT_UNIT_LABEL: Record<SemanticIncidentResponseLanguage, Partial<Record<BusinessUnit, string>>> = {
+  th: {
+    restaurant: 'ร้านอาหาร', activity: 'กิจกรรม', stay: 'ที่พัก', cafe: 'คาเฟ่',
+    otop: 'OTOP/สินค้าชุมชน', membership: 'ทีมดูแลระบบสมาชิก',
+  },
+  en: {
+    restaurant: 'restaurant', activity: 'activity', stay: 'stay', cafe: 'café',
+    otop: 'OTOP', membership: 'membership',
+  },
+  zh: {
+    restaurant: '餐厅', activity: '活动', stay: '住宿', cafe: '咖啡店',
+    otop: 'OTOP', membership: '会员服务',
+  },
+  lo: {
+    restaurant: 'ຮ້ານອາຫານ', activity: 'ກິດຈະກຳ', stay: 'ທີ່ພັກ', cafe: 'ຄາເຟ',
+    otop: 'OTOP', membership: 'ສະມາຊິກ',
+  },
+  vi: {
+    restaurant: 'nhà hàng', activity: 'hoạt động', stay: 'lưu trú', cafe: 'cà phê',
+    otop: 'OTOP', membership: 'thành viên',
+  },
+};
+
+function semanticIncidentDeliveryLine(
+  language: SemanticIncidentResponseLanguage,
+  businessUnit: BusinessUnit,
+  targets: FeedbackTargetResult[],
+): string {
+  const ok = (status: FeedbackTargetResult['status']) => status === 'sent' || status === 'duplicate';
+  const owner = targets.find(target => target.team === 'owner_general');
+  const domain = targets.find(target => target.team !== 'owner_general');
+  const ownerOk = owner ? ok(owner.status) : false;
+  const domainOk = domain ? ok(domain.status) : false;
+  const label = SEMANTIC_INCIDENT_UNIT_LABEL[language][businessUnit] ?? '';
+
+  if (language === 'th') {
+    const domainLabel = domain ? (label || 'ที่เกี่ยวข้อง') : null;
+    return composeNotificationStatusLine(domainLabel, targets);
+  }
+
+  if (!domain) {
+    if (ownerOk) {
+      if (language === 'zh') return '已发送给负责人核查。';
+      if (language === 'lo') return 'ທອງໄທສົ່ງໃຫ້ເຈົ້າຂອງກວດສອບແລ້ວ.';
+      if (language === 'vi') return 'Thongthai đã gửi việc này cho chủ sở hữu kiểm tra.';
+      return 'Thongthai has sent this to the owner for review.';
+    }
+    if (language === 'zh') return '通知暂时未发送成功，但事项已记录，团队会继续核查。';
+    if (language === 'lo') return 'ການແຈ້ງເຕືອນຍັງບໍ່ສຳເລັດ ແຕ່ລະບົບບັນທຶກເລື່ອງໄວ້ແລ້ວ.';
+    if (language === 'vi') return 'Thông báo chưa gửi thành công, nhưng vụ việc đã được ghi nhận để đội ngũ kiểm tra.';
+    return 'The notification did not send successfully, but the case is recorded for review.';
+  }
+
+  if (domainOk && ownerOk) {
+    if (language === 'zh') return `已发送给${label || '相关'}团队和负责人核查。`;
+    if (language === 'lo') return `ທອງໄທສົ່ງໃຫ້ທີມ${label || 'ທີ່ກ່ຽວຂ້ອງ'} ແລະເຈົ້າຂອງກວດສອບແລ້ວ.`;
+    if (language === 'vi') return `Thongthai đã gửi cho đội ${label || 'liên quan'} và chủ sở hữu kiểm tra.`;
+    return `Thongthai has sent this to the ${label || 'relevant'} team and the owner for review.`;
+  }
+  if (domainOk) {
+    if (language === 'zh') return `已发送给${label || '相关'}团队；负责人通知暂未成功。`;
+    if (language === 'lo') return `ສົ່ງໃຫ້ທີມ${label || 'ທີ່ກ່ຽວຂ້ອງ'}ແລ້ວ ແຕ່ການແຈ້ງເຈົ້າຂອງຍັງບໍ່ສຳເລັດ.`;
+    if (language === 'vi') return `Đã gửi cho đội ${label || 'liên quan'}; thông báo cho chủ sở hữu chưa thành công.`;
+    return `It has reached the ${label || 'relevant'} team; the owner notification has not succeeded yet.`;
+  }
+  if (ownerOk) {
+    if (language === 'zh') return '相关团队尚未直接收到通知，但负责人已收到并会核查。';
+    if (language === 'lo') return 'ທີມຍັງບໍ່ໄດ້ຮັບໂດຍກົງ ແຕ່ເຈົ້າຂອງໄດ້ຮັບແລ້ວ.';
+    if (language === 'vi') return 'Đội liên quan chưa nhận trực tiếp, nhưng chủ sở hữu đã nhận để kiểm tra.';
+    return 'The team has not received it directly yet, but the owner has received it for review.';
+  }
+  if (language === 'zh') return '通知暂时未发送成功，但事项已记录，团队会继续核查。';
+  if (language === 'lo') return 'ການແຈ້ງເຕືອນຍັງບໍ່ສຳເລັດ ແຕ່ລະບົບບັນທຶກເລື່ອງໄວ້ແລ້ວ.';
+  if (language === 'vi') return 'Thông báo chưa gửi thành công, nhưng vụ việc đã được ghi nhận để đội ngũ kiểm tra.';
+  return 'The notification did not send successfully, but the case is recorded for review.';
+}
+
+/** Phase 5 semantic-incident acknowledgement. Used only when the semantic
+ * supervisor recognized an incident/help/complaint that the earlier raw
+ * deterministic guardrails did not. It is intentionally deterministic:
+ * business truth and notification truth come from the durable event result,
+ * never from an LLM draft. */
+export function composeSemanticIncidentResponse(
+  match: ServiceFeedbackMatch,
+  eventStored: boolean,
+  targets: FeedbackTargetResult[],
+  language: SemanticIncidentResponseLanguage,
+): string {
+  if (!eventStored) {
+    if (language === 'zh') return '已收到这件事，但系统暂时无法保存记录。为了不耽误处理，请直接告知现场工作人员。';
+    if (language === 'lo') return 'ທອງໄທຮັບຮູ້ເລື່ອງແລ້ວ ແຕ່ລະບົບຍັງບັນທຶກເຄສບໍ່ສຳເລັດ ກະລຸນາແຈ້ງພະນັກງານໜ້າງານໂດຍກົງ.';
+    if (language === 'vi') return 'Thongthai đã tiếp nhận, nhưng hệ thống chưa lưu được vụ việc. Vui lòng báo trực tiếp cho nhân viên tại chỗ để không chậm xử lý.';
+    if (language === 'en') return 'Thongthai has received this, but the system could not save the case. Please tell on-site staff directly so follow-up is not delayed.';
+    return 'ทองไทยรับเรื่องไว้ครับ แต่ตอนนี้ระบบบันทึกเคสไม่สำเร็จ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อไม่ให้การดูแลล่าช้าครับ';
+  }
+
+  let opener: string;
+  if (language === 'zh') opener = match.feedbackType === 'safety_issue' ? '已记录为安全事项，谢谢你立即告知。' : '已记录这件事，谢谢你直接告诉我。';
+  else if (language === 'lo') opener = match.feedbackType === 'safety_issue' ? 'ທອງໄທຮັບເລື່ອງຄວາມປອດໄພໄວ້ແລ້ວ ຂອບໃຈທີ່ແຈ້ງ.' : 'ທອງໄທຮັບເລື່ອງໄວ້ແລ້ວ ຂອບໃຈທີ່ບອກ.';
+  else if (language === 'vi') opener = match.feedbackType === 'safety_issue' ? 'Thongthai đã ghi nhận đây là vấn đề an toàn. Cảm ơn bạn đã báo ngay.' : 'Thongthai đã ghi nhận vụ việc. Cảm ơn bạn đã nói thẳng.';
+  else if (language === 'en') opener = match.feedbackType === 'safety_issue' ? 'Thongthai has logged this as a safety concern. Thank you for reporting it right away.' : 'Thongthai has logged this for follow-up. Thank you for telling me directly.';
+  else opener = match.feedbackType === 'safety_issue'
+    ? 'ทองไทยรับเรื่องความปลอดภัยไว้แล้วครับ ขอบคุณที่รีบแจ้งนะครับ'
+    : 'ทองไทยรับเรื่องไว้แล้วครับ ขอบคุณที่บอกตรง ๆ นะครับ';
+
+  return composeLineShortReply([
+    opener,
+    semanticIncidentDeliveryLine(language, match.businessUnit, targets),
+  ]);
+}
+
 export function composeServiceFeedbackResponse(
   match: ServiceFeedbackMatch,
   notificationQueued: boolean,
