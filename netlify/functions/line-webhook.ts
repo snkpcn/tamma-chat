@@ -165,7 +165,7 @@ function classifyRoute(event: LineWebhookEvent): { route: LineRoute; reason: str
  *  channel secret/access token or a full group/user id. */
 function safeInboundLogText(text:string):string{
   const value=text.trim();
-  if(/^(?:เบิกเงินเดือน|เบิกเงินเดือนล่วงหน้า|เบิกเงินล่วงหน้า|เงินเดือนล่วงหน้า|จ่ายเงินเดือน|โอนเงินเดือน|หักเบิก|หักเงินเบิก|หักเงินเดือนล่วงหน้า)\b/u.test(value)){
+  if(/^(?:เบิกเงินเดือน|เบิกเงินเดือนล่วงหน้า|เบิกเงินล่วงหน้า|เงินเดือนล่วงหน้า|จ่ายเงินเดือน|โอนเงินเดือน|หักเบิก|หักเงินเบิก|หักเงินเดือนล่วงหน้า)(?:\s|$)/u.test(value)){
     return '[PRIVATE_OWNER_PAYROLL_COMMAND]';
   }
   return value.slice(0,120);
