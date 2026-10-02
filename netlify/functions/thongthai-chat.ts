@@ -36,7 +36,9 @@ import {
   activityDurationOptionsForResource,
   formatActivityAssetNote,
   listServiceResources,
+  loadLatestBookingStatus,
   resetLineBookingPlanningSession,
+  upsertCustomerAccount,
 } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
@@ -131,6 +133,7 @@ import {
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
 import { EXPERIENCES } from '../../src/data/experiences';
 import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
+import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
 import {
   normalizePendingQuestion,
   resolvePendingQuestionAnswer,
@@ -616,6 +619,7 @@ function normalizeRequest(body: unknown): BrainRequest | null {
     : { section: null };
   return {
     guestId: typeof body.guestId === 'string' ? body.guestId : undefined,
+    environment: body.environment === 'test' ? 'test' : 'live',
     message: body.message.trim(),
     language,
     chatHistory: normalizeChatHistory(body.chatHistory),
@@ -623,6 +627,21 @@ function normalizeRequest(body: unknown): BrainRequest | null {
     journeyContext: normalizeJourneyContext(body.journeyContext),
     pageContext,
   };
+}
+
+const SYNTHETIC_TEST_GUEST_RE = /^(?:e2e|f7f7f7f7-|phase7-|test[-_:])/iu;
+
+export function resolveRequestEnvironment(
+  requested: BrainRequest['environment'],
+  providerGuestId: string | undefined,
+): 'live' | 'test' {
+  // Never trust a public TEST flag by itself. Only reserved synthetic ids used
+  // by certification/E2E runners may enter the TEST write partition. Normal
+  // Web/LINE/Messenger traffic therefore remains LIVE even if a client spoofs
+  // environment=test.
+  return requested === 'test' && Boolean(providerGuestId && SYNTHETIC_TEST_GUEST_RE.test(providerGuestId))
+    ? 'test'
+    : 'live';
 }
 
 function durableMemoryFromRequest(request: BrainRequest): DurableMemorySnapshot {
@@ -2687,6 +2706,37 @@ export async function explicitHorseHoldWithoutBookingResponse(
   const displayName = asset.name.startsWith('น้อง') ? asset.name : `น้อง${asset.name}`;
   return {
     message:`ได้ครับ เก็บ${displayName}ไว้เป็นตัวเลือกก่อนนะครับ ยังไม่ได้จองหรือส่งรายการครับ`,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
+/**
+ * Phase 7 latency boundary for a direct horse correction/alternate selection.
+ * The deterministic semantic lexicon already resolves negated names + “the
+ * other one” safely because the verified horse set is exhaustive. Persist the
+ * selected asset before Agent Primary so a simple correction can never spend
+ * 30 seconds in a model/tool loop or resurrect the rejected horse.
+ */
+async function boundedKnownHorseCorrectionBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  if (hasExplicitTransactionIntent(request.message)) return null;
+  if (isHorseInfoOrComparisonQuestion(request.message) || isCompareEntitiesAttributeQuestion(request.message)) return null;
+  if (!/(?:ไม่เอา|ไม่ใช่|เปลี่ยน(?:ใจ)?|อีกตัว|ตัวอื่น|ตัวที่เหลือ|แทน)/u.test(request.message)) return null;
+  const selected = findKnownActivityAssetSelection(request.message);
+  if (!selected || selected.resourceCode !== 'activity-horse') return null;
+  await persistHorseSelection(guestDbId, channel, selected.name);
+  const displayName = selected.name === 'ทองไทย' ? HORSE_FACTS.thongthai.name : HORSE_FACTS.pharadon.name;
+  return {
+    message:`ได้ครับ งั้นเลือก${displayName}แทนและเก็บไว้เป็นตัวเลือกก่อนครับ ตอนนี้ยังไม่ได้จองหรือส่งรายการครับ`,
     intent:'information',
     contextUpdates:{},
     journeyAction:{type:'none',journey:null},
@@ -5083,6 +5133,31 @@ async function boundedActivityAvailabilityClarification(
   };
 }
 
+const BOOKING_STATUS_READBACK_RE = /(?:ตอนนี้|ล่าสุด|สถานะ).{0,36}(?:จอง|คำขอจอง)|(?:จอง|คำขอจอง).{0,36}(?:ใช่ไหม|ไหม|หรือเปล่า|รึเปล่า|หรือยัง|สถานะ)/u;
+const BOOKING_AVAILABILITY_WORD_RE = /ว่าง|เต็ม|คิว/u;
+
+async function deterministicBookingStatusReadback(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (!guestDbId || hasCommitMarker(request.message)) return null;
+  if (!BOOKING_STATUS_READBACK_RE.test(request.message) || BOOKING_AVAILABILITY_WORD_RE.test(request.message)) return null;
+  const latest = await loadLatestBookingStatus(guestDbId);
+  const message = latest
+    ? `ตอนนี้มีคำขอจองเลขที่ ${latest.bookingCode} อยู่ในระบบครับ สถานะล่าสุด: ${latest.status}`
+    : 'ใช่ครับ ตอนนี้ยังไม่มีรายการจองที่ส่งเข้าระบบสำหรับคุณครับ สิ่งที่เลือกไว้ยังเป็นแค่ข้อมูลที่คุยกัน และยังไม่ได้จองหรือส่งรายการครับ';
+  return {
+    message,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 // The single canonical entry point into Thongthai's shared brain -- called by
 // BOTH the web HTTP handler below and LINE's adapter (_line-webhook-core.ts).
 // LINE used to reach this over HTTP (a self-fetch to this same site's own
@@ -5146,7 +5221,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           modelReplyUsed:false,
           groundedKnowledgeSupplied:false,
           zeroCostTurn:false,
-          environment:'live',
+          environment:request.environment ?? 'live',
           occurredAt:new Date().toISOString(),
         }).catch(error=>{
           console.error('AI_RESPONSE_TURN_FALLBACK_PERSIST_ERROR',error instanceof Error?error.message.slice(0,180):'unknown');
@@ -5158,6 +5233,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
 
   const channel = getBrainChannel(request.pageContext.section);
   const providerUserKey = request.guestId;
+  request = { ...request, environment: resolveRequestEnvironment(request.environment, providerUserKey) };
   const canonicalGuestId = await resolveCanonicalGuestId(channel, providerUserKey);
   if (canonicalGuestId && canonicalGuestId !== request.guestId) {
     request = { ...request, guestId: canonicalGuestId };
@@ -5185,6 +5261,15 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   }
 
   await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
+  if (request.environment === 'test' && guestDbId) {
+    await upsertCustomerAccount({
+      guestDbId,
+      isTest:true,
+      testLabel:'thongthai-synthetic-certification',
+    }).catch(error => {
+      console.error('THONGTHAI_TEST_GUEST_MARK_ERROR', error instanceof Error ? error.message.slice(0,180) : 'unknown');
+    });
+  }
 
   // One stable identity per transport turn. LINE supplies message.id; web
   // supplies eventId/request-id when available. Generate the fallback ONCE
@@ -5419,6 +5504,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  const bookingStatusReadback = await deterministicBookingStatusReadback(request, guestDbId).catch(error => {
+    console.error('THONGTHAI_BOOKING_STATUS_READBACK_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (bookingStatusReadback) {
+    const polished = polishedResponse(bookingStatusReadback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
   const commercialBoundary = classifyCommercialBoundaryText(
     request.message,
     topLevelSemanticIntent,
@@ -5470,6 +5571,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  const knownHorseCorrection = await boundedKnownHorseCorrectionBeforePrimary(request, guestDbId, channel).catch(error => {
+    console.error('THONGTHAI_BOUNDED_HORSE_CORRECTION_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (knownHorseCorrection) {
+    const polished = polishedResponse(knownHorseCorrection, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
   const availabilityClarification = await boundedActivityAvailabilityClarification(
     request,
     guestDbId,
@@ -5488,6 +5605,31 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       journeyAction:polished.journeyAction,
       suggestedActions:polished.suggestedActions,
     });
+  }
+
+  // Horse ride-feel/comparison facts are owner-verified and already have a
+  // deterministic composer. Let that bounded business fact lane answer before
+  // Agent Primary so a two-horse comparison can never hit the 30s model/tool
+  // timeout seen in the final Phase 7 production gate.
+  const localMatchBeforePrimary = !hasExplicitTransactionIntent(request.message)
+    ? classifyLocalConciergeQuestion(request.message)
+    : null;
+  if (localMatchBeforePrimary?.category === 'horse_comparison') {
+    const horseComparison = await deterministicLocalConciergeResponse(request).catch(error => {
+      console.error('THONGTHAI_HORSE_COMPARISON_PREPRIMARY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+      return null;
+    });
+    if (horseComparison) {
+      const polished = polishedResponse(horseComparison, channel);
+      await persistBrainRuntime(guestDbId, channel, polished);
+      return coreResult(200, {
+        message:polished.message,
+        intent:polished.intent,
+        contextUpdates:polished.contextUpdates,
+        journeyAction:polished.journeyAction,
+        suggestedActions:polished.suggestedActions,
+      });
+    }
   }
 
   const safetyCriticalRestaurantRecommendation = await safetyCriticalRestaurantRecommendationBeforePrimary(
@@ -5581,7 +5723,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           modelReplyUsed:false,
           groundedKnowledgeSupplied:true,
           zeroCostTurn:true,
-          environment:'live',
+          environment:request.environment ?? 'live',
           occurredAt:new Date().toISOString(),
         });
         explicitAiResponseTurnPersisted = true;
@@ -5731,7 +5873,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           modelReplyUsed: true,
           groundedKnowledgeSupplied: agentTurn.toolCalls.length > 0,
           zeroCostTurn: false,
-          environment: 'live',
+          environment: request.environment ?? 'live',
           occurredAt: new Date().toISOString(),
         });
         explicitAiResponseTurnPersisted = true;
