@@ -2028,6 +2028,7 @@ export function resolveDeterministicActivityPlanningCutover(
   oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
   channel: BrainChannel,
   language: BrainRequest['language'],
+  message: string,
 ): { kind:'respond'; response:ComposedResponse } | null {
   if (oneMind.status !== 'legacy_required') return null;
   const turn = oneMind.turn;
@@ -2038,11 +2039,14 @@ export function resolveDeterministicActivityPlanningCutover(
   if (meaning.commitmentLevel === 'explicit_transaction'
       || turn.dialogDecision.actionProposal?.customerCommitPresent) return null;
 
-  const stateUpdate =
-    turn.semanticTurn.speechAct === 'selection'
+  // This bridge exists only for an explicit correction/rejection such as
+  // "ไม่เอาทองไทย ... เอาอีกตัว". Bare selections remain on their existing
+  // ambiguity/context paths: a cold-start "เอาทองไทย" must still clarify,
+  // while an already-established riding context keeps its established UX.
+  const correctionSignal = HORSE_CORRECTION_SIGNAL_RE.test(message)
     || turn.semanticTurn.speechAct === 'correction'
-    || ['confirm','modify','correct_previous','provide_information'].includes(turn.semanticTurn.action);
-  if (!stateUpdate) return null;
+    || turn.semanticTurn.action === 'correct_previous';
+  if (!correctionSignal) return null;
 
   const composerInput = {
     channel,
@@ -6195,7 +6199,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   }
 
   const deterministicActivityPlanning = earlyOneMind
-    ? resolveDeterministicActivityPlanningCutover(earlyOneMind, channel, request.language)
+    ? resolveDeterministicActivityPlanningCutover(earlyOneMind, channel, request.language, request.message)
     : null;
   if (deterministicActivityPlanning?.kind === 'respond') {
     const semantic = earlyOneMind!.turn.dialogSemanticTurn;
