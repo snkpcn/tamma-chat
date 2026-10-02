@@ -111,6 +111,30 @@ function benefitSummary(parsed:ParsedInthaninDailyClose):string{
   return used.length?used.join(', '):'ไม่มี';
 }
 
+const EXPENSE_CATEGORY_LABELS:Record<string,string>={
+  ingredients:'วัตถุดิบ',
+  beverages:'เครื่องดื่ม',
+  packaging:'บรรจุภัณฑ์',
+  consumables:'ของใช้สิ้นเปลือง',
+  cleaning:'ทำความสะอาด',
+  maintenance:'ซ่อมบำรุง',
+  utilities:'ค่าสาธารณูปโภค',
+  transport:'ขนส่ง/เดินทาง',
+  staff:'ค่าใช้จ่ายพนักงาน',
+  equipment:'อุปกรณ์',
+  marketing:'การตลาด',
+  fees:'ค่าธรรมเนียม',
+  petty_cash:'เงินสดย่อย',
+  other:'อื่น ๆ',
+};
+
+function expenseBreakdown(parsed:ParsedInthaninDailyClose):string{
+  if(!parsed.expenses.length)return 'ไม่มี';
+  return parsed.expenses
+    .map(exp=>'• '+exp.label+' '+baht(exp.amount)+' · '+(EXPENSE_CATEGORY_LABELS[exp.category]??exp.category))
+    .join('\n');
+}
+
 function optionalWarningLines(parsed:ParsedInthaninDailyClose):string[]{
   const out:string[]=[];
   if(parsed.billCount===null)out.push('• ยังไม่ได้ใส่จำนวนบิล');
@@ -210,6 +234,7 @@ function successReply(
     'รวมรับเงิน: '+baht(result.payments_total)+' '+paymentStatus,
     '',
     'ค่าใช้จ่ายที่แจ้ง: '+baht(expenseTotal),
+    parsed.expenses.length?'แยกรายการอัตโนมัติ:\n'+expenseBreakdown(parsed):'',
     directCashExpense>0?'เงินสดจากยอดขายหลังจ่ายรายการเงินสดวันนี้: '+baht(cashAfter):'',
     cashSweepAmount!==null&&cashSweepAmount>0?'💰 ย้ายเงินสดส่วนเกินเข้าถุงรอเจ้าของ: '+baht(cashSweepAmount):'',
     parsed.cupCount!==null?'จำนวนแก้ว: '+parsed.cupCount+' แก้ว'+(averagePerCup!==null?' · เฉลี่ย '+baht(averagePerCup)+'/แก้ว':''):'',
