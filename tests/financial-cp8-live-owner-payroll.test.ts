@@ -56,5 +56,8 @@ test('salary advance is not silently turned into shop expense',()=>{
   assert.match(migration,/event_type.*salary_advance/s);
   assert.match(migration,/financial_employee_advance_owner_v1/);
   assert.match(migration,/advance_outstanding/);
+  const guard=readFileSync('supabase/migrations/20261002141000_financial_cp8_payroll_pending_guard_v1.sql','utf8');
+  assert.match(guard,/advance_deduction_exceeds_outstanding/);
+  assert.match(guard,/status in \(''awaiting_slip'',''needs_review''\)/);
   assert.doesNotMatch(payroll,/financial_daily_ledger_entries/);
 });
