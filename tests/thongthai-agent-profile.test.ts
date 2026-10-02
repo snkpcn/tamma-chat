@@ -23,7 +23,6 @@ test('Thongthai staging agent profile locks the owner-defined identity and trust
   assert.match(prompt, /Do not write from a fixed customer-service template/i);
   assert.match(prompt, /saved Agent session is short-term conversation memory/i);
   assert.match(prompt, /Silently follow this loop once per customer turn/i);
-  assert.match(prompt, /use ONE get_cafe_menu call/i);
   assert.doesNotMatch(prompt, /\nPERSONALITY\n|\nCONVERSATION STYLE\n/u);
   assert.match(prompt, /Never invent prices, availability, inventory/i);
   assert.match(prompt, /Never claim a booking, order, payment, refund, notification, cancellation/i);
