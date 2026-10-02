@@ -42,8 +42,10 @@ import {
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import {
+  applyConversationContextUpdate,
   emptyConversationContextState,
   loadConversationContext,
+  persistConversationContext,
   type ConversationContextState,
 } from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
@@ -2007,6 +2009,51 @@ export function resolveSupervisedActivityCutover(
   const response = composeGroundedDeterministicResponse(composerInput)
     ?? composeDeterministicResponse(composerInput);
   return { kind: 'respond', response };
+}
+
+/**
+ * Provider-outage bridge for NON-COMMITTED Activity planning updates only.
+ *
+ * The deterministic semantic layer can safely resolve bounded horse
+ * selections/corrections (including "reject X, take the other one") even when
+ * the supervisor is unavailable. Those turns are conversational state updates,
+ * not booking authorization. Ending them here prevents the correct structured
+ * selection from falling into the legacy booking-field collector, which used
+ * to surface public intent=booking despite no customer commitment.
+ *
+ * Explicit transaction meaning or any customer-authorized proposal still
+ * returns null and keeps the established transaction executor boundary.
+ */
+export function resolveDeterministicActivityPlanningCutover(
+  oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel: BrainChannel,
+  language: BrainRequest['language'],
+): { kind:'respond'; response:ComposedResponse } | null {
+  if (oneMind.status !== 'legacy_required') return null;
+  const turn = oneMind.turn;
+  if (turn.semanticTurn.domain !== 'activity'
+      || turn.semanticTurn.semanticSource !== 'deterministic_fallback') return null;
+
+  const meaning = turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
+  if (meaning.commitmentLevel === 'explicit_transaction'
+      || turn.dialogDecision.actionProposal?.customerCommitPresent) return null;
+
+  const stateUpdate =
+    turn.semanticTurn.speechAct === 'selection'
+    || turn.semanticTurn.speechAct === 'correction'
+    || ['confirm','modify','correct_previous','provide_information'].includes(turn.semanticTurn.action);
+  if (!stateUpdate) return null;
+
+  const composerInput = {
+    channel,
+    language,
+    semanticTurn:turn.dialogSemanticTurn,
+    dialogDecision:turn.dialogDecision,
+    knowledgeBundles:turn.groundedKnowledge,
+    degradation:turn.knowledgeDegradation,
+    operationalOutcome:null,
+  };
+  return { kind:'respond', response:composeDeterministicResponse(composerInput) };
 }
 
 /** Human Core PR D: task.slots (== proposal.validatedArgs) never carries a
