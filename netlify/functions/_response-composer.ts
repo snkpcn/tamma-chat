@@ -65,6 +65,9 @@ export type ResponseComposerInput = {
    * state readback (for example a considered selection) when no transactional
    * ActiveTask exists; never a raw transcript source. */
   conversationContext?: ConversationContextState;
+  /** Durable, already-normalized customer constraint codes. Used only for
+   * explicit state/preference readback such as an active-task summary. */
+  durableConstraints?: string[];
   dialogDecision: DialogDecision;
   knowledgeBundles: KnowledgeBundle[];
   degradation: DegradationPlan;
@@ -1419,10 +1422,14 @@ function preferenceLabel(language:ResponseLanguage, code:string):string|undefine
 }
 
 function preferenceItems(input: ResponseComposerInput): string[] {
-  const constraints = input.conversationContext?.workingMemory?.constraints ?? [];
+  const contextCodes = (input.conversationContext?.workingMemory?.constraints ?? [])
+    .map(constraint => constraint.code);
+  const durableCodes = Array.isArray(input.durableConstraints)
+    ? input.durableConstraints
+    : [];
   return [...new Set(
-    constraints
-      .map(constraint => preferenceLabel(input.language,constraint.code))
+    [...contextCodes, ...durableCodes]
+      .map(code => preferenceLabel(input.language,code))
       .filter((label): label is string => Boolean(label)),
   )];
 }
