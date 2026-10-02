@@ -98,25 +98,39 @@ export function composeSafetyIssueResponse(
   eventStored: boolean,
   targets: FeedbackTargetResult[],
 ): string {
-  const opener = 'ขอบคุณที่แจ้งนะครับ 🙏 เรื่องความปลอดภัยทองไทยรับไว้ก่อนเลยครับ';
-  // Never a real ground-condition/safety verdict from Thongthai itself --
-  // this line does double duty: it's the safety-doctrine hedge (no
-  // definite "ปลอดภัยแน่นอน"/"พื้นลื่นแน่นอน" claim) AND the honest "a
-  // human will actually check" reassurance, for both an on-site safety
-  // REPORT and a safety QUESTION (both classify as safety_issue).
-  const hedgeLine = 'สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีเพื่อความชัวร์ครับ';
+  const domainLabel = match.businessUnit !== 'unknown' && match.businessUnit !== 'general'
+    ? BUSINESS_UNIT_LABEL_TH[match.businessUnit] : null;
 
-  if (!eventStored) {
-    // Storage itself failed -- never claim stored or sent (Operational
-    // Truth Doctrine's strictest case).
+  if (match.severity === 'urgent') {
+    const opener = 'ทองไทยรับเรื่องด่วนแล้วครับ';
+    const immediate = 'ถ้ายังมีอันตรายอยู่ ให้หยุดกิจกรรม ออกจากจุดเสี่ยง และเรียกพนักงานหน้างานทันทีครับ';
+    const emergency = 'ถ้ามีผู้บาดเจ็บ หมดสติ หายใจผิดปกติ หรือเลือดออกมาก โทร 1669 ทันที; ถ้าเป็นไฟไหม้ โทร 199 ครับ';
+    if (!eventStored) {
+      return composeLineShortReply([
+        opener,
+        immediate,
+        emergency,
+        'ตอนนี้ระบบบันทึกเคสไม่สำเร็จ กรุณาแจ้งพนักงานหรือเจ้าหน้าที่หน้างานโดยตรงทันทีครับ',
+      ]);
+    }
     return composeLineShortReply([
       opener,
-      'ตอนนี้ระบบบันทึกเรื่องไม่สำเร็จ ขอโทษด้วยครับ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อความชัวร์ครับ',
+      immediate,
+      emergency,
+      composeNotificationStatusLine(domainLabel, targets),
     ]);
   }
 
-  const domainLabel = match.businessUnit !== 'unknown' && match.businessUnit !== 'general'
-    ? BUSINESS_UNIT_LABEL_TH[match.businessUnit] : null;
+  const opener = 'ขอบคุณที่แจ้งนะครับ เรื่องความปลอดภัยทองไทยรับไว้ก่อนเลยครับ';
+  const hedgeLine = 'สภาพจริงหน้างานต้องให้ทีมตรวจอีกทีเพื่อความชัวร์ครับ';
+
+  if (!eventStored) {
+    return composeLineShortReply([
+      opener,
+      'ตอนนี้ระบบบันทึกเรื่องไม่สำเร็จ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อความชัวร์ครับ',
+    ]);
+  }
+
   return composeLineShortReply([opener, hedgeLine, composeNotificationStatusLine(domainLabel, targets)]);
 }
 
@@ -133,15 +147,61 @@ export function composeIncidentResponse(
   eventStored: boolean,
   targets: FeedbackTargetResult[],
 ): string {
-  const opener = 'รับเรื่องของหายไว้ให้แล้วครับ ทองไทยจะช่วยประสานทีมตรวจสอบให้ 🙏';
+  const issues = new Set(match.issueKeywords);
+  const domainLabel = match.businessUnit !== 'unknown' && match.businessUnit !== 'general'
+    ? BUSINESS_UNIT_LABEL_TH[match.businessUnit] : null;
+
+  if (issues.has('missing_person')) {
+    const lines = [
+      'ทองไทยรับเรื่องคนพลัดหลงเป็นเรื่องด่วนแล้วครับ',
+      'ให้อยู่ที่จุดที่ปลอดภัยและแจ้งพนักงานหน้างานทันที อย่าแยกย้ายกันค้นหาแบบไม่มีจุดนัดหมายครับ',
+      'ถ้าเป็นเด็ก ผู้สูงอายุ หรือผู้ที่ต้องการการดูแล และยังหาไม่พบ ให้โทร 191 ได้ทันทีครับ',
+    ];
+    if (!eventStored) {
+      lines.push('ตอนนี้ระบบบันทึกเคสไม่สำเร็จ กรุณาแจ้งพนักงานหรือเจ้าหน้าที่หน้างานโดยตรงทันทีครับ');
+      return composeLineShortReply(lines);
+    }
+    lines.push(composeNotificationStatusLine(domainLabel, targets));
+    lines.push('ช่วยบอกชื่อหรือลักษณะ จุดที่เห็นครั้งสุดท้าย และเวลาประมาณครับ');
+    return composeLineShortReply(lines);
+  }
+
+  if (issues.has('threat_security')) {
+    const lines = [
+      'ทองไทยรับเรื่องความปลอดภัยนี้ไว้แล้วครับ',
+      'ถ้ายังมีคนคุกคาม ข่มขู่ หรือเสี่ยงทำร้าย ให้ไปอยู่กับพนักงานหรือจุดที่มีคนทันที และอย่าเผชิญหน้าครับ',
+      'ถ้าอันตรายกำลังเกิดขึ้น โทร 191 ได้ทันทีครับ',
+    ];
+    if (!eventStored) {
+      lines.push('ตอนนี้ระบบบันทึกเคสไม่สำเร็จ กรุณาแจ้งพนักงานหรือเจ้าหน้าที่โดยตรงทันทีครับ');
+      return composeLineShortReply(lines);
+    }
+    lines.push(composeNotificationStatusLine(domainLabel, targets));
+    return composeLineShortReply(lines);
+  }
+
+  if (issues.has('food_illness')) {
+    const lines = [
+      'ทองไทยรับเรื่องอาการหลังรับประทานอาหารไว้แล้วครับ',
+      'หยุดรับประทานรายการที่สงสัยไว้ก่อน และแจ้งพนักงานหน้างานทันทีครับ',
+      'ถ้ามีหายใจลำบาก หน้าหรือปากบวม หมดสติ หรืออาการรุนแรง โทร 1669 ทันทีครับ',
+    ];
+    if (!eventStored) {
+      lines.push('ตอนนี้ระบบบันทึกเคสไม่สำเร็จ กรุณาแจ้งพนักงานหรือเจ้าหน้าที่หน้างานโดยตรงทันทีครับ');
+      return composeLineShortReply(lines);
+    }
+    lines.push(composeNotificationStatusLine(domainLabel, targets));
+    lines.push('ถ้าสะดวก บอกเมนูที่ทานและเวลาที่เริ่มมีอาการให้ทองไทยเพิ่มในเคสครับ');
+    return composeLineShortReply(lines);
+  }
+
+  const opener = 'รับเรื่องของหายไว้ให้แล้วครับ ทองไทยจะช่วยประสานทีมตรวจสอบให้ครับ';
   if (!eventStored) {
     return composeLineShortReply([
       opener,
       'ตอนนี้ระบบบันทึกเคสไม่สำเร็จ รบกวนแจ้งพนักงานหน้างานทันทีเพื่อไม่ให้เสียเวลาค้นหาครับ',
     ]);
   }
-  const domainLabel = match.businessUnit !== 'unknown' && match.businessUnit !== 'general'
-    ? BUSINESS_UNIT_LABEL_TH[match.businessUnit] : null;
   return composeLineShortReply([
     opener,
     composeNotificationStatusLine(domainLabel, targets),
