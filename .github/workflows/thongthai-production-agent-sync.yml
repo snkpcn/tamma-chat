@@ -1,0 +1,43 @@
+name: Thongthai Production Agent Profile Sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'netlify/functions/_thongthai-agent-profile.ts'
+      - 'netlify/functions/_thongthai-service-voice.ts'
+      - 'netlify/functions/_thongthai-agent-tools.ts'
+      - 'scripts/create-thongthai-production-agent.ts'
+      - '.github/workflows/thongthai-production-agent-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: thongthai-production-agent-profile-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-production-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Require OpenAI credential
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "THONGTHAI_AGENT_SYNC_NOT_RUN: OPENAI_API_KEY missing"
+            exit 2
+          fi
+      - name: Sync Thongthai production Agent from canonical repo profile
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npm run agent:thongthai:production
