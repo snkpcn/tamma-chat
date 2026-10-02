@@ -21,7 +21,7 @@ import {
   capturePreferenceSignals,
 } from './_customer-db';
 import { resolveCanonicalGuestId } from './_thongthai-identity';
-import { extractPreferenceSignal } from './_customer-phrase-intelligence';
+import { extractGuestPreferenceSignal } from './_customer-phrase-intelligence';
 import { evaluateBotQualitySignals } from './_bot-quality-intelligence';
 import { recordIntelligenceEvent } from './_customer-intelligence-events';
 import {
@@ -5791,7 +5791,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // same-turn constraint must not be reclassified as pre-existing memory
   // and steal cold-start local-food/service-mind routing.
   const hadDurableRestaurantConstraintBeforeTurn = hasDurableRestaurantConstraint(request);
-  const sameTurnPreferenceSignal = extractPreferenceSignal(request.message);
+  const sameTurnPreferenceSignal = extractGuestPreferenceSignal(request.message);
   await capturePreferenceSignals(guestDbId, request.message, {
     channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
     eventId: transportEventId,
