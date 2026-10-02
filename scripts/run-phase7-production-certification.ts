@@ -14,8 +14,8 @@ import {
   phase7ContractIsComplete,
 } from './phase7-production-certification-contract';
 
-const PRODUCTION_URL = process.env.THONGTHAI_PRODUCTION_URL
-  ?? 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
+const PRODUCTION_URL = process.env.THONGTHAI_PRODUCTION_URL?.trim()
+  || 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type Payload = Record<string, unknown> & { message?: unknown; intent?: unknown };
