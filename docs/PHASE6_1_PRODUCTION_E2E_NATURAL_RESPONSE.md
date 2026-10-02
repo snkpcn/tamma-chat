@@ -1,6 +1,6 @@
 # Phase 6.1 — Production E2E Natural Response
 
-Status: **certification in progress**
+Status: **COMPLETE**
 
 Base production checkpoint:
 `688318dbb6633f75da6198a91227df9ffd1f24f0`
@@ -144,3 +144,78 @@ customer-facing path. Phase 6.2 therefore applies `normalizeResponseLanguageSurf
 `coreResult()`, before bot-quality telemetry, response persistence, and public return.
 
 This makes the language guard a true egress invariant rather than a composer-specific feature.
+
+
+## Phase 6.2 production deployment checkpoint
+
+Global egress implementation PR #472 merged as:
+
+`14cbf1578dea4383955138967ea008c3ac821d34`
+
+Netlify production deploy:
+
+`6abf501de1d34800080a9588`
+
+Verified before re-certification:
+
+- state: **READY**
+- context: **production**
+- branch: **main**
+- deploy `commit_ref` matches the Phase 6.2 merge exactly
+- deploy validation status: **ready**
+- secret scan matches: **0**
+
+The same 12-case production matrix will now be replayed unchanged.
+
+
+## Phase 6.2 final production certification — COMPLETE
+
+Final runtime implementation:
+
+- PR #472
+- merge commit: `14cbf1578dea4383955138967ea008c3ac821d34`
+- production deploy: `6abf501de1d34800080a9588`
+- deploy state: **READY**
+- deploy `commit_ref` matched implementation exactly
+- secret scan matches: **0**
+
+Production re-certification used the unchanged 12-case matrix.
+
+Result:
+
+- total: **12**
+- passed: **12**
+- failed: **0**
+- false transactions detected: **0**
+- English price parity across LINE / Web / Facebook: **true**
+- verified 30-minute horse price on all three English channels: **300**
+- Thai / English / Chinese / Lao / Vietnamese coverage: **PASS**
+- non-Thai Thai-particle leakage: **0**
+
+The earlier production defects are closed:
+
+- English LINE no longer appends `ครับ`
+- English Web no longer appends `ครับ`
+- English Facebook no longer appends `ครับ`
+- Chinese Facebook clarification no longer appends `ครับ`
+
+Read-only Supabase verification for all 12 passing synthetic guests:
+
+- bookings = **0**
+- cafe_inquiries = **0**
+- otop_orders = **0**
+- otop_order_sessions = **0**
+- payment_requests = **0**
+
+The one certification-detector false positive found during re-test was also closed:
+the international baht symbol `฿` is Unicode U+0E3F inside the Thai block but is not Thai-language prose. The detector now removes only that currency symbol before testing for actual Thai-script leakage; Thai words and polite particles remain fully detected.
+
+### Phase 6.2 completion decision
+
+**Phase 6.2 = COMPLETE.**
+
+The canonical final response invariant is now:
+
+`all customer response paths -> thongthai-chat coreResult -> requested-language surface guard -> channel presentation -> public response`
+
+No response path is permitted to bypass the final language surface guard.

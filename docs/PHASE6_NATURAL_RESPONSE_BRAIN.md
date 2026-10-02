@@ -200,3 +200,29 @@ Phase 6 closes only when:
 - Public Prepare remains 0%.
 
 Next roadmap phase after closure: **Phase 7**.
+
+
+## Phase 6 production E2E extension — COMPLETE
+
+Phase 6 was extended after its initial composer-level certification with a real production,
+multi-channel language matrix.
+
+Production testing exposed that composer-level language purity was not sufficient because some
+customer paths bypassed Response Composer parsing. Phase 6.2 moved the language surface guard
+to `thongthai-chat coreResult()`, the canonical final egress shared by every public path.
+
+Final evidence:
+
+- runtime fix PR #472 merged as `14cbf1578dea4383955138967ea008c3ac821d34`
+- Netlify production deploy `6abf501de1d34800080a9588` READY at the exact commit
+- production E2E: **12 / 12 PASS**
+- channels: Web / LINE / Facebook
+- languages: Thai / English / Chinese / Lao / Vietnamese
+- false transactions: **0**
+- transaction-table rows for all synthetic guests: **0**
+- English price parity across all three channels: **300**
+- final response language leakage: **0**
+
+Detailed evidence lives in `docs/PHASE6_1_PRODUCTION_E2E_NATURAL_RESPONSE.md`.
+
+**Phase 6 remains COMPLETE after production E2E certification.**
