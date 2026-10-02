@@ -1,0 +1,1 @@
+-- Production hotfix: corrected ORDER BY syntax in financial_attach_cafe_test_evidence_v1.\n-- Fresh installs already receive the corrected definition in the preceding migration.\n
