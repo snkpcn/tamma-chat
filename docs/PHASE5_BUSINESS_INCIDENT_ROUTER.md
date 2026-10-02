@@ -1,6 +1,6 @@
 # Phase 5 — Business + Incident Router
 
-Status: **implementation / certification**
+Status: **COMPLETE**
 
 Base production checkpoint: `b429736` (Phase 4 closed by PR #465)
 
@@ -108,6 +108,68 @@ Hard gates:
 - every expected business lane/business unit matches,
 - every expected incident routes INCIDENT,
 - zero incident cases cross the Phase 4 commercial boundary as current-turn commit.
+
+## Final production certification — COMPLETE
+
+Implementation PR: **#466**
+
+Merged production commit:
+`1107a0882de257cb428d788726d5d6fd089e63a9`
+
+Final gates on the merged implementation line:
+
+- One Mind full CI: **2,078 / 2,078 PASS**
+- Netlify Build Guard: **PASS**
+- Phase 3 cost stress regression: **PASS**
+- Phase 5 real OpenAI live matrix: **17 / 17 PASS**
+- incident cases in that live matrix: **9**
+- incident false COMMITs: **0**
+- Netlify production deploy: **READY**
+- production deploy id: `6abf356f796efc000835844f`
+- deploy commit_ref matches merged Phase 5 commit exactly
+- `_business-incident-router` and updated `thongthai-chat` functions are present in the production deploy
+
+Production database checkpoint:
+
+- migration `phase5_otop_feedback_routing` applied successfully
+- Supabase migration version recorded: `20261002043819`
+- `ops_feedback_events.business_unit` now includes `otop`
+- `ops_feedback_events.route_target` now includes `otop_group`
+- OTOP LINE notification channel is bound and enabled
+- `ops_feedback_events` remains RLS-enabled
+- `anon` has no SELECT/INSERT privilege
+- `authenticated` has no SELECT/INSERT privilege
+
+Production transaction-safety configuration was re-read after deployment:
+
+- `THONGTHAI_AGENT_LIVE_TRANSACTION_ENABLED=0`
+- `THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT=0`
+- transaction prepare guest allowlist is empty
+
+No Phase 5 change enabled public transaction execution.
+
+### Bugs found and closed during certification
+
+Certification exposed four additional real defects; all were fixed before merge:
+
+1. trusted semantic incidents reached grounded response composition before durable routing, causing an unnecessary second paid model call;
+2. transaction de-escalation could erase `complaint/request_help/incident_report` by rewriting the speech act to `statement`;
+3. wrong-item OTOP fulfilment text such as “ได้ของผิด อยากให้ช่วยตรวจสอบ” could be downgraded to a suggestion because `อยากให้` matched the suggestion marker;
+4. customer-voice extraction could fabricate a staff name from “แต่พนักงาน…” and could count `ดีมาก` as positive inside `ไม่ดีมาก`.
+
+All four now have regression coverage.
+
+### Security review note
+
+Supabase security advisors were run after the migration. The project still has pre-existing broad security-advisor findings on unrelated legacy tables/functions. Phase 5 did not add public table access; the Phase 5 feedback table boundary was directly verified as service-role-only from the customer side.
+
+## Completion decision
+
+**Phase 5 = COMPLETE.**
+
+Phase 5 is complete because the production system now has one explicit raw-then-semantic Business + Incident routing contract; operational incidents cannot authorize transactions; semantic open-world complaints/help/adverse events become durable operational cases before response composition; OTOP customer voice routes to its real OTOP team; live OpenAI certification passed with zero incident false commits; the required database migration is applied; and the exact merged commit is READY in production.
+
+Next roadmap phase: **Phase 6 — Natural Response Brain.**
 
 ## Definition of done
 
