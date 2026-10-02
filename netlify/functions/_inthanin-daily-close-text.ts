@@ -136,11 +136,11 @@ function amountFromLine(lines:string[],patterns:RegExp[],exclude:RegExp[]=[]):nu
 
 export function expenseCategory(label:string):InthaninExpenseCategory{
   const value=label.toLowerCase();
-  if(/นม|กาแฟ|เมล็ด|ไซรัป|ผง|วัตถุดิบ|น้ำแข็ง/u.test(value)) return 'ingredients';
+  if(/นม|เมจิ|กาแฟ|เมล็ด|โรบัสต้า|อาราบิก้า|ชา|มัทฉะ|โกโก้|ไซรัป|น้ำตาล|ครีม|วิป|ซอส|ผง|วัตถุดิบ|น้ำแข็ง/u.test(value)) return 'ingredients';
   if(/น้ำดื่ม|น้ำถัง|โซดา|เครื่องดื่ม/u.test(value)) return 'beverages';
-  if(/แก้ว|ฝา|หลอด|ถุง|กล่อง|แพ็ก|pack/u.test(value)) return 'packaging';
-  if(/ทิชชู่|กระดาษ|ของใช้สิ้นเปลือง/u.test(value)) return 'consumables';
-  if(/น้ำยา|ล้าง|ทำความสะอาด|ไม้กวาด|ถุงขยะ/u.test(value)) return 'cleaning';
+  if(/แก้ว|ฝา|หลอด|ถุงหิ้ว|กล่อง|สติ๊กเกอร์|สติกเกอร์|แพ็ก|แพค|pack/u.test(value)) return 'packaging';
+  if(/ทิชชู่|กระดาษ|ถุงมือ|ฟอยล์|ฟิล์ม|ของใช้สิ้นเปลือง/u.test(value)) return 'consumables';
+  if(/น้ำยา|ล้าง|ทำความสะอาด|ไม้กวาด|ถุงขยะ|ม็อบ/u.test(value)) return 'cleaning';
   if(/ซ่อม|ช่าง|อะไหล่/u.test(value)) return 'maintenance';
   if(/ค่าไฟ|ไฟฟ้า|ค่าน้ำ|น้ำประปา|อินเทอร์เน็ต|โทรศัพท์/u.test(value)) return 'utilities';
   if(/น้ำมัน|ค่าส่ง|ขนส่ง|รถ|เดินทาง/u.test(value)) return 'transport';
