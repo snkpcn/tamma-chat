@@ -7,43 +7,43 @@ const GENERIC_FALLBACK=/(?:ระบบจองของทองไทยต�
 const cases=[
   {
     id:'ask-booking-ability',
-    guestId:'f4e40001-0000-4f4e-8f4e-000000000701',
-    eventId:'phase4-prod2-ask-booking-a1',
+    guestId:'f4f40001-0000-4f4f-8f4f-000000000801',
+    eventId:'phase4-prod3-ask-booking-a1',
     message:'จองได้ไหมครับ',
     required:/จอง|รายละเอียด|บริการ/u,
   },
   {
     id:'ask-confirm-how',
-    guestId:'f4e40002-0000-4f4e-8f4e-000000000702',
-    eventId:'phase4-prod2-ask-confirm-a1',
+    guestId:'f4f40002-0000-4f4f-8f4f-000000000802',
+    eventId:'phase4-prod3-ask-confirm-a1',
     message:'ยืนยันการจองต้องทำยังไงครับ',
     required:/ยืนยัน|จอง|ขั้นตอน|รายละเอียด/u,
   },
   {
     id:'consider-selection',
-    guestId:'f4e40003-0000-4f4e-8f4e-000000000703',
-    eventId:'phase4-prod2-consider-selection-a1',
+    guestId:'f4f40003-0000-4f4f-8f4f-000000000803',
+    eventId:'phase4-prod3-consider-selection-a1',
     message:'เอาภาราดรครับ ยังไม่จองนะ',
     required:/ภาราดร|ม้า|ยังไม่จอง/u,
   },
   {
     id:'withhold-late',
-    guestId:'f4e40004-0000-4f4e-8f4e-000000000704',
-    eventId:'phase4-prod2-withhold-late-a1',
+    guestId:'f4f40004-0000-4f4f-8f4f-000000000804',
+    eventId:'phase4-prod3-withhold-late-a1',
     message:'จองเลยครับ แต่เดี๋ยวก่อน ยังไม่จอง',
     required:/ยังไม่|ไม่ดำเนินการ|ไม่จอง/u,
   },
   {
     id:'bare-confirm',
-    guestId:'f4e40005-0000-4f4e-8f4e-000000000705',
-    eventId:'phase4-prod2-bare-confirm-a1',
+    guestId:'f4f40005-0000-4f4f-8f4f-000000000805',
+    eventId:'phase4-prod3-bare-confirm-a1',
     message:'ยืนยันครับ',
     required:/ยืนยัน|เรื่องไหน|อะไร/u,
   },
   {
     id:'order-how',
-    guestId:'f4e40006-0000-4f4e-8f4e-000000000706',
-    eventId:'phase4-prod2-order-how-a1',
+    guestId:'f4f40006-0000-4f4f-8f4f-000000000806',
+    eventId:'phase4-prod3-order-how-a1',
     message:'ถ้าจะสั่งอาหารต้องทำยังไงครับ',
     required:/สั่ง|อาหาร|เมนู|ขั้นตอน/u,
   },
@@ -99,18 +99,18 @@ async function main(){
   const results=[];
   for(const c of cases) results.push(await send(c));
 
-  const resumeGuest='f4e40007-0000-4f4e-8f4e-000000000707';
+  const resumeGuest='f4f40007-0000-4f4f-8f4f-000000000807';
   const first=await send({
     id:'resume-seed',
     guestId:resumeGuest,
-    eventId:'phase4-prod2-resume-seed-a1',
+    eventId:'phase4-prod3-resume-seed-a1',
     message:'เอาภาราดรไว้ก่อน ยังไม่จองครับ',
     required:/ภาราดร|ม้า|ยังไม่จอง/u,
   });
   const second=await send({
     id:'resume-existing',
     guestId:resumeGuest,
-    eventId:'phase4-prod2-resume-existing-a1',
+    eventId:'phase4-prod3-resume-existing-a1',
     message:'กลับไปเรื่องจองต่อครับ แต่ยังไม่จองนะ',
     required:/ยังไม่|ไม่ดำเนินการ|ไม่จอง/u,
   });
