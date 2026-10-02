@@ -1930,7 +1930,7 @@ function cafeRecommendationMessage(
       ?? active.find(item=>item.category!=='coffee');
     if(selfPick&&companionPick){
       const lines=[
-        'แยกให้คนละแก้วตามที่บอกได้ครับ',
+        'แยกให้สองคนคนละแก้วตามที่บอกได้ครับ',
         `• ของคุณ: ${selfPick.name_th}${selfStrongCoffee?' — เริ่มจากฝั่งกาแฟที่ตรงโจทย์เข้มก่อน':''}`,
         `• ของแฟน: ${companionPick.name_th} — ฝั่งไม่ใช่กาแฟ`,
       ];
