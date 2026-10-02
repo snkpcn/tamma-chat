@@ -184,19 +184,10 @@ export function classifyCommercialBoundarySemantic(
     };
   }
 
-  if (turn.action === 'cancel' || meaning.userGoal === 'manage_existing') {
-    return {
-      mode:'MANAGE',
-      currentTurnCommit:false,
-      prepareEligible:false,
-      routeToOneMindBeforePrimary:true,
-      reason:'manage_existing_not_fresh_consent',
-    };
-  }
-
-  // Defense in depth: an explicit no-transaction constraint always defeats
-  // a contradictory model action label. The semantic parser should normally
-  // reconcile this earlier; the commercial boundary refuses to depend on that.
+  // Defense in depth and same-turn ordering: an explicit no-transaction
+  // constraint is the strongest commercial signal on the CURRENT turn. It
+  // must outrank correction/manage labels produced while revoking an earlier
+  // commitment ("จองเลย ... เดี๋ยวก่อน ยังไม่จอง").
   if (noTransactionConstraint(meaning.constraints)) {
     return {
       mode:'WITHHOLD',
@@ -204,6 +195,16 @@ export function classifyCommercialBoundarySemantic(
       prepareEligible:false,
       routeToOneMindBeforePrimary:true,
       reason:'semantic_no_transaction_constraint',
+    };
+  }
+
+  if (turn.action === 'cancel' || meaning.userGoal === 'manage_existing') {
+    return {
+      mode:'MANAGE',
+      currentTurnCommit:false,
+      prepareEligible:false,
+      routeToOneMindBeforePrimary:true,
+      reason:'manage_existing_not_fresh_consent',
     };
   }
 
