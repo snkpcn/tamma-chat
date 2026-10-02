@@ -4964,6 +4964,9 @@ const RESTAURANT_DURABLE_CONSTRAINT_CODES = new Set([
   'food_allergy','authentic_isan',
 ]);
 
+const DURABLE_RESTAURANT_CONSTRAINT_FOLLOWUP_RE =
+  /(?:ที่บอก(?:ไป|ไว้)?|ที่แจ้ง(?:ไว้)?|ตามที่บอก|ตามที่แจ้ง|เงื่อนไขที่บอก|ข้อจำกัดที่บอก)/u;
+
 function hasDurableRestaurantConstraint(request: BrainRequest): boolean {
   return (request.guestContext.constraints ?? []).some(code => RESTAURANT_DURABLE_CONSTRAINT_CODES.has(code));
 }
@@ -4980,8 +4983,10 @@ async function durableRestaurantRecommendationBeforeSemantic(
   request: BrainRequest,
   guestDbId: string | null,
   channel: BrainChannel,
+  hadDurableConstraintBeforeTurn: boolean,
 ): Promise<BrainResponse | null> {
-  if (!guestDbId || !hasDurableRestaurantConstraint(request)) return null;
+  if (!guestDbId || !hadDurableConstraintBeforeTurn) return null;
+  if (!DURABLE_RESTAURANT_CONSTRAINT_FOLLOWUP_RE.test(request.message)) return null;
   const intent = classifyRestaurantDietaryIntent(request.message);
   // This fast path is ONLY for a follow-up recommendation whose dietary
   // constraints are already durable. A current-turn constraint +
@@ -5167,6 +5172,10 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // LLM, never changes which responder answers this turn, and never
   // overrides Phase 1's boundary policy (see
   // _customer-phrase-intelligence.ts's own header comment).
+  // Snapshot the durable restaurant state BEFORE capturing this turn. A
+  // same-turn constraint must not be reclassified as pre-existing memory
+  // and steal cold-start local-food/service-mind routing.
+  const hadDurableRestaurantConstraintBeforeTurn = hasDurableRestaurantConstraint(request);
   const sameTurnPreferenceSignal = extractPreferenceSignal(request.message);
   await capturePreferenceSignals(guestDbId, request.message, {
     channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
@@ -5449,6 +5458,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     request,
     guestDbId,
     channel,
+    hadDurableRestaurantConstraintBeforeTurn,
   ).catch(error => {
     console.error('THONGTHAI_DURABLE_RESTAURANT_RECOMMENDATION_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
     return null;
