@@ -22,7 +22,8 @@ export type PersonMention = { label: string; kind: PersonMentionKind };
 export type IssueKeyword =
   | 'service' | 'delay' | 'cleanliness' | 'safety' | 'food_quality' | 'staff_behavior'
   | 'pricing' | 'booking' | 'payment' | 'communication' | 'system_error' | 'fulfillment'
-  | 'activity_condition' | 'accessibility' | 'child_safety' | 'elderly_comfort' | 'lost_property';
+  | 'activity_condition' | 'accessibility' | 'child_safety' | 'elderly_comfort' | 'lost_property'
+  | 'missing_person' | 'threat_security' | 'food_illness';
 
 export type ServiceFeedbackMatch = {
   feedbackType: FeedbackType;
@@ -50,7 +51,12 @@ export type ServiceFeedbackMatch = {
 // A real medical/physical emergency in progress always outranks every
 // other classification -- checked first, and forces severity 'urgent'
 // regardless of what else the message contains.
-const URGENT_SAFETY_MARKER = /ไฟไหม้|ไฟลุก|ไฟช็อต|ไฟรั่ว|บาดเจ็บ|เลือดออก|อุบัติเหตุ|หมดสติ|แพ้อาหารรุนแรง|ทำให้แพ้|ช็อกอา|โดนไฟดูด|จมน้ำ/u;
+const URGENT_SAFETY_MARKER = /ไฟไหม้|ไฟลุก|ไฟช็อต|ไฟรั่ว|บาดเจ็บ|เลือดออก|อุบัติเหตุ|หมดสติ|แพ้อาหารรุนแรง|ทำให้แพ้|ช็อกอา|โดนไฟดูด|จมน้ำ|หายใจไม่ออก|หายใจลำบาก|หน้าบวม|ปากบวม/u;
+
+const MISSING_PERSON_MARKER = /(?:เด็ก|ลูก|หลาน|ผู้สูงอายุ|เพื่อน|คนในกลุ่ม|สมาชิกในกลุ่ม)(?:หาย|พลัดหลง)|หา(?:เด็ก|ลูก|หลาน|ผู้สูงอายุ|เพื่อน|คนในกลุ่ม)[^\n]{0,24}ไม่เจอ/u;
+const IMMEDIATE_THREAT_MARKER = /(?:กำลัง|ตอนนี้)[^\n]{0,24}(?:คุกคาม|ข่มขู่|ทำร้าย|ลวนลาม|ตามรังควาน)|(?:ขู่จะทำร้าย|ถูกทำร้าย|โดนทำร้าย)/u;
+const THREAT_SECURITY_MARKER = /(?:คุกคาม|ข่มขู่|ลวนลาม|ตามรังควาน|ถูกขโมย|โดนขโมย|ลักทรัพย์|สงสัย.*ขโมย)/u;
+const FOOD_ILLNESS_MARKER = /อาหารเป็นพิษ|(?:กิน|ทาน|ดื่ม)[^\n]{0,36}(?:แล้ว)?[^\n]{0,24}(?:อาเจียน|ท้องเสีย|แน่นหน้าอก|หายใจไม่ออก|หายใจลำบาก|ผื่นขึ้น|หน้าบวม|ปากบวม)/u;
 
 // A safety CONCERN reported after the fact ("พื้นลื่นมาก น่ากลัว") --
 // distinct from _local-concierge-intent.ts's safety_uncertainty (a
@@ -227,6 +233,9 @@ const ISSUE_KEYWORD_MARKERS: ReadonlyArray<{ issue: IssueKeyword; pattern: RegEx
   { issue: 'activity_condition', pattern: /พื้นลื่น|สภาพพื้น|มีปัญหาระหว่างทาง|ดูเหนื่อย/u },
   { issue: 'accessibility', pattern: /ทางลาด|วีลแชร์|เดินไม่สะดวก/u },
   { issue: 'service', pattern: /บริการ/u },
+  { issue: 'missing_person', pattern: MISSING_PERSON_MARKER },
+  { issue: 'threat_security', pattern: /(?:คุกคาม|ข่มขู่|ทำร้าย|ลวนลาม|ตามรังควาน|ขโมย|ลักทรัพย์)/u },
+  { issue: 'food_illness', pattern: FOOD_ILLNESS_MARKER },
   { issue: 'lost_property', pattern: LOST_PROPERTY_MARKER },
 ];
 
@@ -321,8 +330,12 @@ export function classifyServiceFeedback(message: string): ServiceFeedbackMatch |
     return { feedbackType, businessUnit: unit, severity, staffName, ...extraction };
   }
 
-  // Urgent safety always wins, regardless of what else the message says.
+  // People/safety incidents outrank every commercial or service path.
+  if (MISSING_PERSON_MARKER.test(text)) return withExtraction('incident', 'urgent');
+  if (IMMEDIATE_THREAT_MARKER.test(text)) return withExtraction('incident', 'urgent');
   if (URGENT_SAFETY_MARKER.test(text)) return withExtraction('safety_issue', 'urgent');
+  if (FOOD_ILLNESS_MARKER.test(text)) return withExtraction('incident', 'high');
+  if (THREAT_SECURITY_MARKER.test(text)) return withExtraction('incident', 'high');
   if (SAFETY_CONCERN_MARKER.test(text)) return withExtraction('safety_issue', 'high');
   if (LOST_PROPERTY_MARKER.test(text)) return withExtraction('incident', 'high');
   if (FULFILLMENT_COMPLAINT_MARKER.test(text)) return withExtraction('complaint', 'normal');

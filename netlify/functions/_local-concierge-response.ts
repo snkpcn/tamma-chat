@@ -59,18 +59,29 @@ function isForecastQuestion(message: string): boolean {
   return FORECAST_QUESTION_MARKER.test(message);
 }
 
-/** One short "จากข้อมูลล่าสุด..." line built from a WeatherResult that's
- *  already confirmed status: 'ok' -- the only place allowed to phrase a
- *  live weather fact for the customer, so freshness/source are always
- *  cited together with the fact itself (never a bare number). */
+/** Natural current-weather line. Provider/provenance stays internal unless
+ * the guest explicitly asks where the weather came from. */
 function liveWeatherLine(weather: WeatherResult): string {
   const parts: string[] = [];
   if (weather.forecastSummary) parts.push(weather.forecastSummary);
   else if (weather.condition) parts.push(weather.condition);
-  if (weather.temperatureCelsius !== null) parts.push(`อุณหภูมิประมาณ ${weather.temperatureCelsius}°C`);
+  if (weather.temperatureCelsius !== null) parts.push(`ประมาณ ${weather.temperatureCelsius}°C`);
   if (weather.precipitationChance !== null) parts.push(`โอกาสฝนประมาณ ${weather.precipitationChance}%`);
-  const detail = parts.length ? parts.join(' ') : 'สภาพอากาศทั่วไป';
-  return `จากข้อมูลล่าสุด${weather.source ? ` (${weather.source})` : ''}: ${detail}`;
+  return parts.length ? parts.join(' · ') : 'สภาพอากาศทั่วไป';
+}
+
+function currentRainAnswer(message:string, weather:WeatherResult):string|null {
+  if (!/ฝน|rain/iu.test(message)) return null;
+  const rainy = /rain|drizzle|thunderstorm/iu.test(weather.condition ?? '')
+    || /ฝน|พายุ/iu.test(weather.forecastSummary ?? '');
+  return rainy ? 'ตอนนี้มีฝนครับ' : 'ตอนนี้ยังไม่เห็นฝนครับ';
+}
+
+function currentSunAnswer(message:string, weather:WeatherResult):string|null {
+  if (!/แดด|sun/iu.test(message)) return null;
+  const sunny = /clear|sun/iu.test(weather.condition ?? '')
+    || /แดด|ท้องฟ้าโปร่ง/u.test(weather.forecastSummary ?? '');
+  return sunny ? 'ตอนนี้มีแดดครับ' : 'ตอนนี้ยังไม่เห็นสถานะแดดชัดครับ';
 }
 
 export async function composeWeatherConditionResponse(message: string): Promise<string> {
@@ -80,17 +91,22 @@ export async function composeWeatherConditionResponse(message: string): Promise<
   const forecastAsked = isForecastQuestion(message);
 
   if (weather.status === 'ok') {
-    const lines = [liveWeatherLine(weather)];
+    const direct = currentRainAnswer(message, weather) ?? currentSunAnswer(message, weather);
+    const detail = liveWeatherLine(weather);
+    const lines = [direct ?? `ตอนนี้อากาศ${weather.forecastSummary || weather.condition || 'ปกติ'}ครับ`];
+    lines.push(`จากข้อมูลล่าสุด: ${detail}`);
     if (forecastAsked) {
-      lines.push('ข้อมูลนี้เป็นสภาพอากาศปัจจุบัน ทองไทยยังพยากรณ์ล่วงหน้าแบบยืนยัน 100% ไม่ได้ครับ ขอใช้เป็นแนวทางไปก่อนนะครับ');
+      lines.push('อันนี้เป็นสภาพอากาศตอนนี้นะครับ ถ้าถามพรุ่งนี้หรือวันอื่น ทองไทยยังไม่อยากฟันธงจากข้อมูลชุดนี้');
     }
-    lines.push(guidance.prepGuidance);
-    lines.push(guidance.indoorFriendlyNote.replace(/ที่ร่ม/u, `ที่ร่มอย่าง${indoorFriendlyNames()}`));
-    lines.push('สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ');
-    return lines.join('\n');
+    if (/ทำอะไรดี|แนะนำ|ไปไหนดี/u.test(message)) {
+      lines.push(`ถ้าอยากหลบแดดหรือพักก่อน แนะนำเริ่มที่ร่มอย่าง${indoorFriendlyNames()} แล้วค่อยดูอากาศกับกิจกรรมกลางแจ้งอีกทีครับ`);
+    } else if (/กิจกรรม|ขี่ม้า|ATV|กลางแจ้ง|ไปเที่ยว/u.test(message)) {
+      lines.push('ถ้าจะทำกิจกรรมกลางแจ้ง เบิ่งสภาพพื้นกับทีมหน้างานอีกทีจะชัวร์ที่สุดครับ');
+    }
+    return lines.join('\n\n');
   }
 
-  const lines = ['ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ'];
+  const lines = ['ตอนนี้ทองไทยยังเช็กอากาศสดให้ไม่ได้ครับ'];
   if (forecastAsked) lines.push('และยังพยากรณ์ล่วงหน้าแบบยืนยันไม่ได้ด้วยครับ');
   lines.push(`แต่โดยทั่วไปช่วงนี้: ${guidance.summary} — ${guidance.prepGuidance}`);
   lines.push(guidance.indoorFriendlyNote.replace(/ที่ร่ม/u, `ที่ร่มอย่าง${indoorFriendlyNames()}`));

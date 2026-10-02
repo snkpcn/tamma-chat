@@ -57,6 +57,8 @@ import {
 import { emptyTaskStateContainer } from './_task-state';
 import { persistAiResponseTurn, persistAiResponseTurnIfAbsent } from './_ai-cost-store';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
+import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
+import { resolveRequestedCustomerMedia } from './_thongthai-media';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
@@ -1778,7 +1780,8 @@ const CAFE_MENU_ALIASES:Record<string,readonly string[]>={
 
 function normalizeCafeLookup(value:string):string{
   return value
-    .toLowerCase()
+    .normalize('NFKC')
+    .toLocaleLowerCase('th-TH')
     .replace(/[()•·.,/\\_\-:!?'"“”‘’]+/g,' ')
     .replace(/\s+/g,' ')
     .trim();
@@ -1807,7 +1810,18 @@ function resolveCafeMenuItem(message:string,items:readonly CafeMasterMenuItem[])
     }
   }
   candidates.sort((a,b)=>b.score-a.score);
-  return candidates[0]?.item??null;
+  const resolved=candidates[0]?.item??null;
+  if(resolved)return resolved;
+  // Human shorthand: "ลาเต้" by itself means the coffee latte unless the
+  // customer explicitly says tea/green-tea/Thai-tea/matcha.
+  const normalizedMessage=compactCafeLookup(message);
+  const genericLatte=normalizedMessage.includes(compactCafeLookup('ลาเต้'))
+    || normalizedMessage.includes(compactCafeLookup('latte'));
+  const teaLatte=/(?:ชาไทย|ชาเขียว|มัทฉะ|matcha|thai\s*tea|green\s*tea)/iu.test(normalizeCafeLookup(message));
+  if(genericLatte&&!teaLatte){
+    return items.find(item=>item.code==='cafe_latte'&&item.active)??null;
+  }
+  return null;
 }
 
 function resolveCafeSlot(message:string,item:CafeMasterMenuItem){
@@ -1865,12 +1879,12 @@ function cafeMenuListMessage(items:readonly CafeMasterMenuItem[]):string{
     ['matcha','มัทฉะ'],
     ['non_coffee','ไม่ใช่กาแฟ'],
   ];
-  const lines=['เมนู Core ของ Inthanin ตาดโตนที่ยืนยันในระบบตอนนี้มีครับ'];
+  const lines=['มีครับ ที่ Inthanin ตาดโตนมีเครื่องดื่มหลัก ๆ ประมาณนี้'];
   for(const [category,label] of groups){
     const names=items.filter(item=>item.active&&item.category===category).map(item=>item.name_th);
-    if(names.length)lines.push(label+': '+names.join(' · '));
+    if(names.length)lines.push(`• ${label}: ${names.join(' · ')}`);
   }
-  lines.push('ถ้าบอกชื่อเมนู ผมบอกราคาแยกร้อน/เย็น/ปั่นตาม Slot จริงให้ได้ครับ');
+  lines.push('', 'ถ้ามีตัวที่เล็งไว้ บอกชื่อมาได้เลยครับ เดี๋ยวทองไทยเช็กร้อน/เย็น/ปั่นกับราคาให้ตรงตัว');
   return lines.join('\n');
 }
 
@@ -1889,13 +1903,19 @@ export function cafeGroundedAnswer(
 
   if(asksStock){
     return {
-      answer:'ตอนนี้เมนูและราคามีข้อมูลยืนยันแล้วครับ แต่สต็อกเครื่องดื่มรายเมนูยังไม่ได้เชื่อมเป็นข้อมูลสด จึงยังไม่ขอเดาว่าของหมดหรือไม่ครับ',
+      answer:'เมนูกับราคาเช็กให้ได้ครับ แต่จำนวนของคงเหลือหน้าร้านยังไม่ได้อัปเดตสด ทองไทยเลยไม่อยากเดาว่าหมดหรือยัง',
       grounded:false,
     };
   }
 
   if(!item&&isMenuDiscovery){
     return {answer:cafeMenuListMessage(items),grounded:true};
+  }
+  if(!item&&(isPriceAsk||isStyleAsk)){
+    return {
+      answer:'ทองไทยเห็นว่าถามเรื่องราคา/รูปแบบเครื่องดื่มครับ แต่จับชื่อเมนูยังไม่ชัวร์ พิมพ์ชื่อเมนูอีกนิดเดียวแล้วทองไทยเช็กให้ตรงตัวได้เลยครับ',
+      grounded:false,
+    };
   }
   if(!item)return null;
 
@@ -1906,13 +1926,13 @@ export function cafeGroundedAnswer(
   if(modifier){
     if(!modifier.applies_to.includes(item.code)){
       return {
-        answer:`${item.name_th} ตอนนี้ไม่ได้ตั้งให้ใช้ ${modifier.name_th} ในระบบครับ`,
+        answer:`${item.name_th} ตอนนี้เมนูนี้ยังไม่มีตัวเลือก${modifier.name_th}ครับ`,
         grounded:true,
       };
     }
     if(slot&&!modifier.styles.includes(slot.slot_code)){
       return {
-        answer:`${item.name_th} ${slot.label_th} ตอนนี้ไม่ได้เปิดตัวเลือก${modifier.name_th}ในระบบครับ`,
+        answer:`${item.name_th} ${slot.label_th} ตอนนี้แบบ${slot.label_th}ยังไม่ได้เปิดตัวเลือก${modifier.name_th}ครับ`,
         grounded:true,
       };
     }
@@ -1931,7 +1951,7 @@ export function cafeGroundedAnswer(
 
   if(isPriceAsk||isStyleAsk){
     if(!activeSlots.length){
-      return {answer:`${item.name_th} ตอนนี้ยังไม่มี Price Slot ที่เปิดใช้อยู่ครับ`,grounded:true};
+      return {answer:`${item.name_th} ตอนนี้ยังไม่มีราคาของเมนูนี้ให้ยืนยันครับ`,grounded:true};
     }
     const lines=[`${item.name_th} มี ${activeSlots.map(cafeSlotLine).join(' · ')}ครับ`];
     if(modifier){
@@ -1949,7 +1969,7 @@ export function cafeGroundedAnswer(
       grounded:true,
     };
   }
-  return {answer:`${item.name_th} มีใน Master ครับ แต่ตอนนี้ยังไม่มี Price Slot ที่เปิดใช้อยู่ครับ`,grounded:true};
+  return {answer:`${item.name_th} มีเมนูนี้ครับ แต่ตอนนี้ยังไม่มีราคาให้ยืนยัน`,grounded:true};
 }
 
 async function deterministicCafeResponse(
@@ -1999,26 +2019,26 @@ async function deterministicCafeResponse(
   } else if (/(?:รายการ.*ส่ง.*ร้าน|ส่งไปที่ร้าน.*หรือยัง)/u.test(message)) {
     answer = 'จากข้อความที่คุยกันรอบนี้ ยังไม่มีคำสั่งให้ส่งรายการไปที่ Inthanin Café ตาดโตนครับ ตอนนี้ยังเป็นการเลือกและถามข้อมูลเท่านั้นครับ';
   } else if (/(?:เปิด|ปิด|กี่โมง|อีกประมาณ.*ชั่วโมง|ที่จอดรถ)/u.test(message)) {
-    answer = 'ตอนนี้ทองไทยยังไม่มีข้อมูลเวลาเปิดปิดหรือข้อมูลที่จอดรถของ Inthanin Café ตาดโตนที่ยืนยันในระบบครับ เลยไม่ขอเดาให้ผิดครับ';
+    answer = 'ตอนนี้ทองไทยยังยืนยันเวลาเปิด-ปิดกับข้อมูลที่จอดรถของ Inthanin Café ตาดโตนให้ไม่ได้ครับ เลยไม่ขอเดาให้ผิด';
   } else if (/ถามเผื่อแฟน/u.test(message) && /คนเดียว/u.test(message)) {
     answer = `รับทราบครับ วันนี้มาคนเดียว ส่วนเรื่องเครื่องดื่มไม่กาแฟเป็นคำถามเผื่อแฟนครับ ตอนนี้ยังไม่ได้สั่งอะไร และความชอบที่จำไว้คือ ${preferences}ครับ`;
   } else if (/ไม่ได้แพ้นม/u.test(message)) {
     answer = `เข้าใจครับ เป็นความชอบที่ไม่อยากดื่มนมวัว ไม่ใช่อาการแพ้นมครับ ผมจะจำเป็น preference เท่านั้น ตอนนี้ความชอบคือ ${preferences}ครับ`;
   } else if (/(?:เมื่อกี้|จากที่คุยมา|สนใจอะไรไว้|ตัวไหนเหมาะ|เปลี่ยนใจ|ไม่เอาตัวนั้น|กลับมาเรื่อง)/u.test(message)) {
     answer = items.length
-      ? `ตอนนี้เมนูและราคาหลักของ Inthanin ตาดโตนเชื่อมแล้วครับ ส่วนความชอบที่คุยไว้คือ ${preferences}ครับ บอกชื่อเมนูที่อยากกลับมาดูได้เลยครับ`
-      : `ที่คุยกันไว้ตอนนี้เป็นความชอบเรื่องเครื่องดื่ม: ${preferences}ครับ แต่รอบนี้ทองไทยโหลด Menu Master ไม่ได้ จึงยังไม่ขอเดาชื่อเมนูให้ผิดครับ`;
+      ? `ได้ครับ กลับมาเรื่อง Inthanin กัน ตอนนี้ที่จำไว้คือ ${preferences} ถ้ามีเมนูที่เล็งไว้บอกชื่อมาได้เลยครับ`
+      : `ที่คุยกันไว้ตอนนี้เป็นความชอบเรื่องเครื่องดื่ม: ${preferences}ครับ แต่รอบนี้ทองไทยเช็กเมนูไม่ได้ จึงยังไม่ขอเดาชื่อเมนูให้ผิดครับ`;
   } else if (
     preferences !== 'ยังไม่ได้ล็อกรสชาติหรือเมนู'
     && /(?:หวาน|ขม|ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|นมวัว|น้ำตาล|เย็น)/u.test(message)
   ) {
     answer = items.length
-      ? `รับทราบครับ ตอนนี้ความชอบคือ ${preferences}ครับ เมนูและราคาหลักเชื่อมแล้ว ถ้าบอกชื่อเมนูที่สนใจ ผมเช็กราคาและ Slot จริงให้ต่อได้ครับ`
-      : `รับทราบครับ ตอนนี้ความชอบคือ ${preferences}ครับ รอบนี้ทองไทยโหลด Menu Master ไม่ได้ จึงยังไม่ขอเดาเมนูหรือราคาให้ผิดครับ`;
+      ? `รับทราบครับ ตอนนี้ความชอบคือ ${preferences}ครับ ถ้ามีเมนูที่สนใจ บอกชื่อมาได้เลยครับ เดี๋ยวทองไทยเช็กราคาแต่ละแบบให้`
+      : `ตอนนี้ที่จำไว้คือ ${preferences} ครับ แต่รอบนี้ทองไทยยังยืนยันเมนูกับราคาให้ไม่ได้ เลยไม่ขอเดาให้ผิดครับ`;
   } else if(items.length){
     answer=cafeMenuListMessage(items);
   } else {
-    answer='ตอนนี้ทองไทยโหลด Menu Master ของคาเฟ่ Inthanin ตาดโตนไม่ได้ครับ จึงยังไม่มีข้อมูลยืนยันเรื่องเมนูหรือราคาในรอบนี้ และไม่ขอเดาชื่อเมนูให้ผิดครับ ถ้าอยากได้กาแฟ ชา หรือเครื่องดื่มไม่กาแฟ บอกแนวไว้ก่อนได้ครับ';
+    answer='ตอนนี้ทองไทยยังยืนยันเมนูกับราคา Inthanin ตาดโตนให้ไม่ได้ครับ เลยไม่ขอเดาชื่อเมนูหรือราคาให้ผิด\n\nถ้าอยากคุยต่อ บอกได้เลยว่าอยากได้กาแฟ ชา หรือเครื่องดื่มไม่กาแฟ หรือจะให้ทองไทยช่วยดูร้านอาหาร ที่พัก หรือกิจกรรมก่อนได้ครับ';
   }
 
   return {
@@ -5578,6 +5598,33 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     // bypass the requested response language.
     if (statusCode === 200 && typeof typed?.message === 'string') {
       typed.message = normalizeFinalCustomerMessage(typed.message,request.language,channel);
+      typed.message = applyThongthaiCharacterKernel({
+        message: typed.message,
+        customerMessage: request.message,
+        language: request.language,
+        channel,
+      });
+
+      const requestedMedia = await resolveRequestedCustomerMedia({
+        customerMessage: request.message,
+        assistantMessage: typed.message,
+        language: request.language,
+        chatHistory: request.chatHistory,
+      });
+      if (requestedMedia) {
+        typed.media = requestedMedia.media;
+        const mediaAck = normalizeFinalCustomerMessage(requestedMedia.overrideMessage,request.language,channel);
+        const keepExistingAnswer = /(?:ราคา|กี่บาท|เท่าไหร่|เท่าไร|มีของ|เหลือ|สต็อก|stock|price|how\s*much|วัสดุ|ทำจาก|ที่มา|รายละเอียด|ไซซ์|ขนาด)/iu.test(request.message);
+        const combined = keepExistingAnswer && typeof typed.message === 'string' && typed.message.trim()
+          ? `${typed.message.trim()}\n\n${mediaAck}`
+          : mediaAck;
+        typed.message = applyThongthaiCharacterKernel({
+          message: combined,
+          customerMessage: request.message,
+          language: request.language,
+          channel,
+        });
+      }
     }
 
     if (statusCode === 200 && typeof typed?.message === 'string') {

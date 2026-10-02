@@ -12,6 +12,9 @@
   THONGTHAI_ONE_MIND_CUTOVER = "1"
 
 
+[images]
+  remote_images = ["https://upaokrprawzhgzeqsdke.supabase.co/.*"]
+
 [functions]
   node_bundler = "esbuild"
 

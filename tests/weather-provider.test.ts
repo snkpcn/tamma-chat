@@ -247,7 +247,7 @@ test('end-to-end: when weather is unavailable, the response says so plainly (nev
     const r = await processThongthaiChatCore(brainRequest('วันนี้อากาศเป็นยังไงบ้าง', gid, 'web'), 'evt-1');
     assert.equal(r.statusCode, 200);
     const message = msg(r.payload);
-    assert.match(message, /ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ/u);
+    assert.match(message, /ตอนนี้ทองไทยยัง(?:เช็กอากาศสดให้ไม่ได้|ไม่มีข้อมูลอากาศสดยืนยัน)/u);
     assert.doesNotMatch(message, NO_GENERIC_FAILURE);
   });
 });
@@ -286,7 +286,7 @@ test('HOTFIX: exact production-reported phrases never return the generic LLM-out
       assert.equal(r.statusCode, 200);
       const text = msg(r.payload);
       assert.doesNotMatch(text, GENERIC_LLM_OUTAGE, `"${message}" (no weather env) must never hit the generic LLM-outage apology`);
-      assert.match(text, /ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ/u);
+      assert.match(text, /ตอนนี้ทองไทยยัง(?:เช็กอากาศสดให้ไม่ได้|ไม่มีข้อมูลอากาศสดยืนยัน)/u);
     }
   });
 
@@ -322,7 +322,7 @@ test('HOTFIX: exact production-reported phrases never return the generic LLM-out
         assert.equal(r.statusCode, 200);
         const text = msg(r.payload);
         assert.doesNotMatch(text, GENERIC_LLM_OUTAGE, `"${message}" (provider error) must never hit the generic LLM-outage apology`);
-        assert.match(text, /ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ/u, `"${message}" must use the precise weather-unavailable wording, not a generic one`);
+        assert.match(text, /ตอนนี้ทองไทยยัง(?:เช็กอากาศสดให้ไม่ได้|ไม่มีข้อมูลอากาศสดยืนยัน)/u, `"${message}" must use the precise weather-unavailable wording, not a generic one`);
       }
     });
   } finally {

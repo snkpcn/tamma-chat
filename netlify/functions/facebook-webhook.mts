@@ -18,6 +18,7 @@ declare const Netlify: {
 
 type ThongthaiResponse = {
   message?: string;
+  media?: Array<{ type?:string; url?:string; deliveryUrl?:string; alt?:string }>;
   intent?: string;
   contextUpdates?: Record<string, unknown>;
   journeyAction?: unknown;
@@ -163,6 +164,41 @@ async function sendFacebookTextReliably(
   await sendFacebookText(recipientPsid, text, pageToken, pageId, graphVersion, personaId);
 }
 
+async function sendFacebookImage(
+  recipientPsid: string,
+  imageUrl: string,
+  pageToken: string,
+  pageId: string,
+  graphVersion: string,
+  personaId: string | null,
+): Promise<void> {
+  const response = await fetch(`https://graph.facebook.com/${graphVersion}/${encodeURIComponent(pageId)}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${pageToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      recipient: { id: recipientPsid },
+      message_type: 'RESPONSE',
+      ...(personaId ? { persona_id: personaId } : {}),
+      message: {
+        attachment: {
+          type: 'image',
+          payload: { url:imageUrl, is_reusable:true },
+        },
+      },
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new FacebookSendHttpError(
+      `Facebook image send failed ${response.status}: ${body.slice(0,220)}`,
+      response.status === 429 || response.status >= 500,
+    );
+  }
+}
+
 async function askThongthai(message: string, psid: string, eventId: string): Promise<ThongthaiResponse> {
   // Keep Meta's GET verification path tiny and fast: load the full Thongthai
   // application graph only for real POST message processing.
@@ -273,11 +309,13 @@ export default async (req: Request, _context: Context) => {
     }
 
     let reply = '';
+    let replyMedia: Array<{ type?:string; url?:string; deliveryUrl?:string; alt?:string }> = [];
     try {
       const result = await askThongthai(event.text, event.senderPsid, event.eventId);
       reply = typeof result.message === 'string' && result.message.trim()
         ? result.message.trim()
         : 'ทองไทยรับข้อความแล้วครับ ลองพิมพ์อีกครั้งได้เลยครับ';
+      replyMedia = Array.isArray(result.media) ? result.media.slice(0,4) : [];
     } catch (error) {
       console.error(
         'FACEBOOK_THONGTHAI_ERROR',
@@ -296,6 +334,14 @@ export default async (req: Request, _context: Context) => {
       });
       for (const chunk of splitFacebookText(reply)) {
         await sendFacebookTextReliably(event.senderPsid, chunk, pageToken, pageId, graphVersion, personaId);
+      }
+      for (const media of replyMedia) {
+        const imageUrl = typeof media.deliveryUrl === 'string' && /^https:\/\//iu.test(media.deliveryUrl)
+          ? media.deliveryUrl
+          : (typeof media.url === 'string' && /^https:\/\//iu.test(media.url) ? media.url : '');
+        if (media.type === 'image' && imageUrl) {
+          await sendFacebookImage(event.senderPsid, imageUrl, pageToken, pageId, graphVersion, personaId);
+        }
       }
     } catch (error) {
       console.error(
