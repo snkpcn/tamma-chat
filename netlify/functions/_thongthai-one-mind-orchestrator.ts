@@ -53,7 +53,7 @@ import {
   claimWriteAttemptForEvent, type SemanticConceptMatch,
 } from './_semantic-concept-memory';
 import { deriveSemanticMeaning, type SemanticMeaning } from './_semantic-meaning';
-import { classifyCommercialBoundarySemantic } from './_commercial-intent-boundary';
+import { classifyCommercialBoundarySemantic, classifyCommercialBoundaryText } from './_commercial-intent-boundary';
 import {
   LLMAvailabilityError,
   ProviderNotConfiguredError,
@@ -1016,6 +1016,49 @@ function normalizeExplicitNoTransactionAvailabilityRefinement(
 }
 
 
+export function reconcileCommercialQuestionRefinement(
+  turn: SemanticTurn,
+  message: string,
+): SemanticTurn {
+  const rawBoundary=classifyCommercialBoundaryText(message,'OTHER');
+  if (
+    rawBoundary.mode !== 'READ_ONLY'
+    || rawBoundary.reason !== 'commercial_question_not_consent'
+  ) return turn;
+
+  const semanticBoundary=classifyCommercialBoundarySemantic(turn);
+  const modelEscalated =
+    semanticBoundary.mode === 'COMMIT'
+    || semanticBoundary.currentTurnCommit
+    || turn.action === 'book'
+    || turn.action === 'order'
+    || turn.speechAct === 'transaction_request';
+
+  if (!modelEscalated) return turn;
+
+  // Human intent boundary: a QUESTION containing a commercial verb may ask
+  // about capability/process/availability, but it is not current-turn consent.
+  // Keep whatever safe structured entities/references the language model
+  // understood, while stripping transaction authority from the machine shape.
+  // Unknown-domain process questions become bounded support/policy questions
+  // so the existing human support renderer can answer in the customer's
+  // language without a second model call.
+  const unknownDomain = turn.domain === 'unknown';
+  return {
+    ...turn,
+    domain: unknownDomain ? 'support' : turn.domain,
+    intent: unknownDomain ? 'commercial_process_question' : turn.intent,
+    action:'ask',
+    speechAct:'question',
+    informationNeed: unknownDomain
+      ? 'policy'
+      : (turn.informationNeed === 'none' ? 'policy' : turn.informationNeed),
+    constraints:[...new Set([...turn.constraints,'no_transaction'])],
+    needsClarification: unknownDomain ? false : turn.needsClarification,
+    ...(unknownDomain ? { clarificationReason:undefined } : {}),
+  };
+}
+
 export function reconcileReadOnlyActivityPreferenceRefinement(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
@@ -1243,7 +1286,8 @@ async function resolveSemanticTurn(
     const slotMergedTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
     const roleReconciledTurn = reconcileNamedConditionalAvailabilityRoles(slotMergedTurn, deterministic);
     const availabilityReconciledTurn = normalizeExplicitNoTransactionAvailabilityRefinement(roleReconciledTurn, deterministic);
-    const modelTurn = reconcileReadOnlyActivityPreferenceRefinement(availabilityReconciledTurn, deterministic);
+    const preferenceReconciledTurn = reconcileReadOnlyActivityPreferenceRefinement(availabilityReconciledTurn, deterministic);
+    const modelTurn = reconcileCommercialQuestionRefinement(preferenceReconciledTurn, message);
 
     // Journey planning is conversational state only: there is no journey
     // transaction executor. A short ellipsis such as "same one, move it to
