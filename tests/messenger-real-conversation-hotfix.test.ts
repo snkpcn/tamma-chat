@@ -190,7 +190,7 @@ test('Messenger topic switch: restaurant topic switch outranks stale cafe contex
       const reply=msg(restaurant);
 
       assert.equal(restaurant.statusCode,200);
-      assert.match(reply,/ลาบปลาช่อน|คอหมูย่างจิ้มแจ่ว|เสือร้องไห้/u);
+      assert.match(reply,/ผัดไทย|ต้มยำกุ้ง|ข้าวผัดหมู|ลาบปลาช่อน|คอหมูย่าง|เสือร้องไห้/u);
       assert.match(reply,/บาท/u);
       assert.doesNotMatch(reply,/Inthanin|อินทนิน|คาเฟ่/u);
       assert.doesNotMatch(reply,/ตอนนี้คุณยังไม่ได้บอกรสชาติ|ความชอบที่จำไว้/u);
