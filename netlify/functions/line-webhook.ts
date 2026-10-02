@@ -10,6 +10,7 @@ import { handleRestaurantPreorderPostback, handleRestaurantStockText } from './_
 import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
+import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
 import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
   handleCustomerPaymentSlip,
@@ -162,6 +163,14 @@ function classifyRoute(event: LineWebhookEvent): { route: LineRoute; reason: str
  *  "the bot never responded" report can always be checked against whether
  *  LINE delivered the event to this webhook at all -- never logs the
  *  channel secret/access token or a full group/user id. */
+function safeInboundLogText(text:string):string{
+  const value=text.trim();
+  if(/^(?:เบิกเงินเดือน|เบิกเงินเดือนล่วงหน้า|เบิกเงินล่วงหน้า|เงินเดือนล่วงหน้า|จ่ายเงินเดือน|โอนเงินเดือน|หักเบิก|หักเงินเบิก|หักเงินเดือนล่วงหน้า)(?:\s|$)/u.test(value)){
+    return '[PRIVATE_OWNER_PAYROLL_COMMAND]';
+  }
+  return value.slice(0,120);
+}
+
 function logEventReceived(event: LineWebhookEvent): void {
   console.log('LINE_EVENT_RECEIVED', JSON.stringify({
     eventType: event.type ?? 'unknown',
@@ -171,7 +180,7 @@ function logEventReceived(event: LineWebhookEvent): void {
     hasUserId: Boolean(event.source?.userId),
     messageType: event.message?.type ?? null,
     text: event.message?.type === 'text' && typeof event.message.text === 'string'
-      ? event.message.text.slice(0, 40)
+      ? safeInboundLogText(event.message.text).slice(0,40)
       : null,
     hasReplyToken: Boolean(event.replyToken),
   }));
@@ -208,7 +217,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     userId: redactId(event.source?.userId),
     messageType: event.message?.type ?? null,
     hasReplyToken: Boolean(event.replyToken),
-    text: event.message?.type === 'text' ? (event.message.text ?? '').slice(0, 120) : null,
+    text: event.message?.type === 'text' ? safeInboundLogText(event.message.text ?? '') : null,
   }));
 
   if (!event.replyToken) return;
@@ -266,6 +275,17 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   if (event.type !== 'message') return;
 
   if (event.message?.type === 'image' && event.message.id) {
+    const payrollReply = await handleOwnerPayrollImage({
+      targetId,
+      userId: event.source?.userId ?? null,
+      messageId: event.message.id,
+      timestamp: event.timestamp,
+    });
+    if (payrollReply) {
+      await replyToLine(event.replyToken, payrollReply, accessToken);
+      return;
+    }
+
     const cafeEvidenceReply = await handleCafeTestDailyCloseImage({
       targetId,
       userId: event.source?.userId ?? null,
@@ -322,6 +342,18 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       text: event.message.text,
     });
     if (bindReply) await replyToLine(event.replyToken, bindReply, accessToken);
+    return;
+  }
+
+  const payrollTextReply = await handleOwnerPayrollText({
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+    messageId: event.message.id ?? null,
+    timestamp: event.timestamp,
+  });
+  if (payrollTextReply) {
+    await replyToLine(event.replyToken, payrollTextReply, accessToken);
     return;
   }
 

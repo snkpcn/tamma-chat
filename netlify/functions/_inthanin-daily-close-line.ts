@@ -148,23 +148,33 @@ function payloadFromParsed(parsed:ParsedInthaninDailyClose,text:string):Record<s
   };
 }
 
-function missingReply(parsed:ParsedInthaninDailyClose):string{
+function environmentLabel(environment:'test'|'live'):string{
+  return environment==='test'?'🧪 Café TEST':'🏪 Inthanin LIVE';
+}
+
+function missingReply(parsed:ParsedInthaninDailyClose,environment:'test'|'live'):string{
   const labels:Record<string,string>={
     date:'วันที่',
     reported_pos_net_sales:'ยอดขายตาม POS',
   };
   return [
-    '🧪 Café TEST — ทองไทยอ่านฟอร์มปิดยอดได้บางส่วนครับ',
+    environmentLabel(environment)+' — ทองไทยอ่านฟอร์มปิดยอดได้บางส่วนครับ',
     'แต่ยังขาดข้อมูลสำคัญ: '+parsed.missingCritical.map(key=>labels[key]??key).join(', '),
     '',
     'ยังไม่บันทึกลง Daily Close เพื่อกันยอดผิดครับ',
   ].join('\n');
 }
 
-function successReply(parsed:ParsedInthaninDailyClose,result:IngestResult,rematch?:RematchResult|null):string{
+function successReply(
+  parsed:ParsedInthaninDailyClose,
+  result:IngestResult,
+  environment:'test'|'live',
+  rematch?:RematchResult|null,
+  cashSweepAmount:number|null=null,
+):string{
   if(result.duplicate){
     return [
-      '🧪 Café TEST — รายการนี้รับไว้แล้วครับ',
+      environmentLabel(environment)+' — รายการนี้รับไว้แล้วครับ',
       'ทองไทยไม่ลง Daily Close ซ้ำจาก LINE message เดิมครับ',
     ].join('\n');
   }
@@ -181,7 +191,7 @@ function successReply(parsed:ParsedInthaninDailyClose,result:IngestResult,rematc
   const expenseTotal=parsed.expenses.reduce((sum,exp)=>sum+exp.amount,0);
 
   const lines=[
-    '🧪 Café TEST — บันทึก Daily Close Draft แล้วครับ',
+    environmentLabel(environment)+' — บันทึก Daily Close Draft แล้วครับ',
     'Inthanin Café ตาดโตน · '+thaiDate(parsed.localDate??String(result.local_date??'')),
     '',
     'ยอดขายสุทธิ POS: '+baht(result.net_sales),
@@ -190,6 +200,7 @@ function successReply(parsed:ParsedInthaninDailyClose,result:IngestResult,rematc
     '',
     'ค่าใช้จ่ายที่แจ้ง: '+baht(expenseTotal),
     directCashExpense>0?'เงินสดจากยอดขายหลังจ่ายรายการเงินสดวันนี้: '+baht(cashAfter):'',
+    cashSweepAmount!==null&&cashSweepAmount>0?'💰 ย้ายเงินสดส่วนเกินเข้าถุงรอเจ้าของ: '+baht(cashSweepAmount):'',
     parsed.cupCount!==null?'จำนวนแก้ว: '+parsed.cupCount+' แก้ว'+(averagePerCup!==null?' · เฉลี่ย '+baht(averagePerCup)+'/แก้ว':''):'',
     parsed.billCount!==null?'จำนวนบิล: '+parsed.billCount+' บิล':'',
     'สิทธิ/แต้ม/โปร: '+benefitSummary(parsed),
@@ -217,17 +228,21 @@ export async function handleCafeTestDailyCloseText(input:{
   if(!looksLikeInthaninDailyCloseText(input.text))return null;
 
   const team=await boundLineOpsTeam(input.targetId);
-  if(team!=='cafe_test')return null;
+  if(team!=='cafe_test'&&team!=='cafe')return null;
+  const environment:'test'|'live'=team==='cafe'?'live':'test';
 
   const parsed=parseInthaninDailyCloseText(input.text);
   if(!parsed.matched)return null;
-  if(parsed.missingCritical.length)return missingReply(parsed);
+  if(parsed.missingCritical.length)return missingReply(parsed,environment);
   if(!input.messageId){
-    return '🧪 Café TEST — อ่านฟอร์มได้แล้วครับ แต่ LINE message id หาย จึงยังไม่บันทึกเพื่อกันรายการซ้ำครับ';
+    return environmentLabel(environment)+' — อ่านฟอร์มได้แล้วครับ แต่ LINE message id หาย จึงยังไม่บันทึกเพื่อกันรายการซ้ำครับ';
   }
 
   const payload=payloadFromParsed(parsed,input.text);
-  const response=await dbFetch('rpc/financial_ingest_cafe_test_text_v1',{
+  const ingestRpc=environment==='live'
+    ?'financial_ingest_inthanin_live_text_v1'
+    :'financial_ingest_cafe_test_text_v1';
+  const response=await dbFetch('rpc/'+ingestRpc,{
     method:'POST',
     body:JSON.stringify({
       p_message_id:input.messageId,
@@ -240,10 +255,43 @@ export async function handleCafeTestDailyCloseText(input:{
   const result=Array.isArray(raw)?raw[0]:raw;
   if(!result?.ok)throw new Error('financial_daily_close_text_ingest_failed');
 
+  let cashSweepAmount:number|null=null;
+  if(environment==='live'&&result.daily_close_id){
+    const hasCashCounts=result.cash_opening_float!==null&&result.cash_opening_float!==undefined
+      &&result.cash_counted_closing!==null&&result.cash_counted_closing!==undefined;
+    const candidate=hasCashCounts
+      ?n(result.cash_opening_float)+n(result.payment_cash)
+        -n(result.purchase_cash_outflow)-n(result.expense_cash_outflow)-n(result.cash_counted_closing)
+      :0;
+    const keepFloat=hasCashCounts
+      &&Math.abs(n(result.cash_opening_float)-n(result.cash_counted_closing))<0.01;
+    const desiredSweep=keepFloat&&candidate>0.009?Math.round(candidate*100)/100:0;
+    try{
+      await dbFetch('rpc/financial_record_cash_sweep_live_v1',{
+        method:'POST',
+        body:JSON.stringify({
+          p_daily_close_id:result.daily_close_id,
+          p_amount:desiredSweep,
+          p_actor_hash:piiHash(input.userId)??'',
+          p_source:'line',
+        }),
+      });
+      cashSweepAmount=desiredSweep>0?desiredSweep:null;
+    }catch(error){
+      console.error(
+        'INTHANIN_LIVE_CASH_SWEEP_ERROR',
+        error instanceof Error?error.message.slice(0,220):'unknown',
+      );
+    }
+  }
+
   let rematch:RematchResult|null=null;
   if(result.daily_close_id){
     try{
-      const rematchResponse=await dbFetch('rpc/financial_rematch_cafe_test_day_evidence_v1',{
+      const rematchRpc=environment==='live'
+        ?'financial_rematch_inthanin_live_day_evidence_v1'
+        :'financial_rematch_cafe_test_day_evidence_v1';
+      const rematchResponse=await dbFetch('rpc/'+rematchRpc,{
         method:'POST',
         body:JSON.stringify({p_daily_close_id:result.daily_close_id}),
       });
@@ -258,7 +306,7 @@ export async function handleCafeTestDailyCloseText(input:{
   }
 
   console.log('INTHANIN_DAILY_CLOSE_TEXT_INGESTED',JSON.stringify({
-    environment:'test',
+    environment,
     localDate:parsed.localDate,
     duplicate:Boolean(result.duplicate),
     dailyCloseId:result.daily_close_id??null,
@@ -270,5 +318,5 @@ export async function handleCafeTestDailyCloseText(input:{
     ambiguousEvidence:Number(rematch?.ambiguous_count||0),
   }));
 
-  return successReply(parsed,result,rematch);
+  return successReply(parsed,result,environment,rematch,cashSweepAmount);
 }

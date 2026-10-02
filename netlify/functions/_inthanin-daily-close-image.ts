@@ -299,7 +299,7 @@ async function extractWithOpenAI(bytes: Buffer, mimeType: string): Promise<Finan
   }
 }
 
-async function extractFinancialEvidence(bytes: Buffer, mimeType: string): Promise<FinancialImageExtraction> {
+export async function extractFinancialEvidence(bytes: Buffer, mimeType: string): Promise<FinancialImageExtraction> {
   let geminiError: unknown = null;
   try {
     return await extractWithGemini(bytes, mimeType);
@@ -323,7 +323,7 @@ async function extractFinancialEvidence(bytes: Buffer, mimeType: string): Promis
   }
 }
 
-async function fetchLineImage(messageId: string): Promise<{ bytes: Buffer; mimeType: string; sha256: string }> {
+export async function fetchLineImage(messageId: string): Promise<{ bytes: Buffer; mimeType: string; sha256: string }> {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!token) throw new Error('LINE_CHANNEL_ACCESS_TOKEN is not configured');
   const response = await fetch(LINE_CONTENT_ENDPOINT + '/' + encodeURIComponent(messageId) + '/content', {
@@ -359,7 +359,7 @@ function localDateBangkok(timestamp?: number): string {
   }).format(new Date(Number.isFinite(timestamp) ? timestamp : Date.now()));
 }
 
-function extensionForMime(mimeType: string): string {
+export function extensionForMime(mimeType: string): string {
   return mimeType === 'image/png' ? 'png' : mimeType === 'image/webp' ? 'webp' : 'jpg';
 }
 
@@ -417,6 +417,7 @@ async function existingEvidence(messageId: string, sha256: string): Promise<{
 }
 
 async function attachEvidence(input: {
+  environment: 'test' | 'live';
   messageId: string;
   userId?: string | null;
   receivedLocalDate: string;
@@ -425,7 +426,10 @@ async function attachEvidence(input: {
   mimeType: string;
   extraction: FinancialImageExtraction;
 }): Promise<AttachResult> {
-  const response = await dbFetch('rpc/financial_attach_cafe_test_evidence_v1', {
+  const rpc = input.environment === 'live'
+    ? 'financial_attach_inthanin_live_evidence_v1'
+    : 'financial_attach_cafe_test_evidence_v1';
+  const response = await dbFetch('rpc/' + rpc, {
     method: 'POST',
     body: JSON.stringify({
       p_message_id: input.messageId,
@@ -463,14 +467,19 @@ function evidenceLabel(type: string | null | undefined): string {
   return labels[type || 'other'] || 'รูป/หลักฐาน';
 }
 
-function replyForResult(extraction: FinancialImageExtraction, result: AttachResult): string {
+function replyForResult(
+  extraction: FinancialImageExtraction,
+  result: AttachResult,
+  environment: 'test' | 'live',
+): string {
+  const prefix = environment === 'test' ? '🧪 Café TEST' : '🏪 Inthanin LIVE';
   if (result.duplicate) {
-    return '🧪 Café TEST — รูปนี้เคยรับไว้แล้วครับ\nทองไทยไม่ลงหลักฐานหรือค่าใช้จ่ายซ้ำครับ';
+    return prefix + ' — รูปนี้เคยรับไว้แล้วครับ\nทองไทยไม่ลงหลักฐานหรือค่าใช้จ่ายซ้ำครับ';
   }
 
   const amount = result.amount === null || result.amount === undefined ? null : money(result.amount);
   const base = [
-    '🧪 Café TEST — รับ' + evidenceLabel(result.evidence_type) + 'แล้วครับ',
+    prefix + ' — รับ' + evidenceLabel(result.evidence_type) + 'แล้วครับ',
     amount ? 'ยอดที่อ่านได้: ' + amount : 'ยอด: อ่านจากรูปได้ไม่ชัด',
   ];
 
@@ -523,13 +532,14 @@ export async function handleCafeTestDailyCloseImage(input: {
   timestamp?: number;
 }): Promise<string | null> {
   const team = await boundLineOpsTeam(input.targetId);
-  if (team !== 'cafe_test') return null;
+  if (team !== 'cafe_test' && team !== 'cafe') return null;
+  const environment: 'test' | 'live' = team === 'cafe' ? 'live' : 'test';
 
   const image = await fetchLineImage(input.messageId);
 
   const duplicate = await existingEvidence(input.messageId, image.sha256);
   if (duplicate) {
-    return '🧪 Café TEST — รูปนี้เคยรับไว้แล้วครับ\nทองไทยไม่ลงหลักฐานหรือค่าใช้จ่ายซ้ำครับ';
+    return (environment === 'test' ? '🧪 Café TEST' : '🏪 Inthanin LIVE') + ' — รูปนี้เคยรับไว้แล้วครับ\nทองไทยไม่ลงหลักฐานหรือค่าใช้จ่ายซ้ำครับ';
   }
 
   const receivedLocalDate = localDateBangkok(input.timestamp);
@@ -538,7 +548,7 @@ export async function handleCafeTestDailyCloseImage(input: {
 
   const safeMessageId = input.messageId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
   const storagePath = [
-    'test',
+    environment,
     'inthanin_tadtone',
     receivedLocalDate,
     image.sha256.slice(0, 16) + '-' + safeMessageId + '.' + extensionForMime(image.mimeType),
@@ -548,6 +558,7 @@ export async function handleCafeTestDailyCloseImage(input: {
 
   try {
     const result = await attachEvidence({
+      environment,
       messageId: input.messageId,
       userId: input.userId,
       receivedLocalDate,
@@ -562,7 +573,7 @@ export async function handleCafeTestDailyCloseImage(input: {
     }
 
     console.log('INTHANIN_FINANCIAL_EVIDENCE_INGESTED', JSON.stringify({
-      environment:'test',
+      environment,
       documentType:extraction.document_type,
       amount:extraction.amount_total,
       confidence:extraction.confidence,
@@ -572,7 +583,7 @@ export async function handleCafeTestDailyCloseImage(input: {
       dailyCloseId:result.daily_close_id ?? null,
     }));
 
-    return replyForResult(extraction, result);
+    return replyForResult(extraction, result, environment);
   } catch (error) {
     await deleteEvidenceObject(storagePath);
     throw error;

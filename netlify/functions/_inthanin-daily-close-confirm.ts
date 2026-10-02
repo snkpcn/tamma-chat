@@ -79,7 +79,7 @@ export function parseDailyCloseCommand(text:string,timestamp?:number):{
   return {kind,localDate:parsed??bangkokToday(timestamp)};
 }
 
-async function dailyCloseId(localDate:string):Promise<string|null>{
+async function dailyCloseId(localDate:string,environment:'test'|'live'):Promise<string|null>{
   const branchResponse=await dbFetch(
     'operations_business_branches?code=eq.inthanin_tadtone&active=eq.true&select=id&limit=1'
   );
@@ -89,7 +89,7 @@ async function dailyCloseId(localDate:string):Promise<string|null>{
   const closeResponse=await dbFetch(
     'financial_daily_closes?branch_id=eq.'+encodeURIComponent(branch.id)
     +'&local_date=eq.'+encodeURIComponent(localDate)
-    +'&environment=eq.test&select=id&limit=1'
+    +'&environment=eq.'+environment+'&select=id&limit=1'
   );
   return (await closeResponse.json() as Array<{id:string}>)[0]?.id??null;
 }
@@ -114,12 +114,13 @@ function bulletItems(items:ReconcileResult['blockers']):string[]{
   });
 }
 
-function reconcileText(result:ReconcileResult,localDate:string):string{
+function reconcileText(result:ReconcileResult,localDate:string,environment:'test'|'live'):string{
+  const prefix=environment==='test'?'🧪 Café TEST':'🔒 Owner · Inthanin LIVE';
   const ready=Boolean(result.ready_to_confirm??result.ready);
   const blockers=bulletItems(result.blockers);
   const warnings=bulletItems(result.warnings);
   const lines=[
-    '🧪 Café TEST — ตรวจปิดวัน '+localDate,
+    prefix+' — ตรวจปิดวัน '+localDate,
     '',
     'ยอดขายสุทธิ: '+money(result.net_sales),
     'รับเงินรวม: '+money(result.payments_total),
@@ -154,13 +155,21 @@ export async function handleCafeTestDailyCloseConfirmText(input:{
   if(!command)return null;
 
   const team=await boundLineOpsTeam(input.targetId);
-  if(team!=='cafe_test')return null;
+  if(team!=='cafe_test'&&team!=='cafe'&&team!=='owner_general')return null;
+  const environment:'test'|'live'=team==='cafe_test'?'test':'live';
+  const prefix=environment==='test'?'🧪 Café TEST':'🔒 Owner · Inthanin LIVE';
 
-  const closeId=await dailyCloseId(command.localDate);
+  if(team==='cafe'&&command.kind==='confirm'){
+    return '🔒 กลุ่ม Inthanin พนักงานใช้ตรวจยอดได้ครับ แต่การยืนยันปิดวัน LIVE ให้ทำในกลุ่ม Owner หรือ Backoffice เท่านั้นครับ';
+  }
+
+  const closeId=await dailyCloseId(command.localDate,environment);
   if(!closeId){
     return [
-      '🧪 Café TEST — ยังไม่มี Daily Close '+command.localDate+' ครับ',
-      'ส่งฟอร์มปิดยอดของวันนั้นก่อน แล้วค่อยพิมพ์ “ตรวจปิดวัน” หรือ “ยืนยันปิดวัน” ครับ',
+      prefix+' — ยังไม่มี Daily Close '+command.localDate+' ครับ',
+      environment==='live'
+        ?'ให้พนักงานส่งฟอร์มปิดยอดในกลุ่ม Inthanin ก่อนครับ'
+        :'ส่งฟอร์มปิดยอดของวันนั้นก่อน แล้วค่อยพิมพ์ “ตรวจปิดวัน” หรือ “ยืนยันปิดวัน” ครับ',
     ].join('\n');
   }
 
@@ -168,10 +177,13 @@ export async function handleCafeTestDailyCloseConfirmText(input:{
     const result=await callRpc('financial_reconcile_daily_close_v1',{
       p_daily_close_id:closeId,
     });
-    return reconcileText(result,command.localDate);
+    return reconcileText(result,command.localDate,environment);
   }
 
-  const result=await callRpc('financial_confirm_cafe_test_daily_close_v1',{
+  const confirmRpc=environment==='live'
+    ?'financial_confirm_inthanin_live_daily_close_v1'
+    :'financial_confirm_cafe_test_daily_close_v1';
+  const result=await callRpc(confirmRpc,{
     p_daily_close_id:closeId,
     p_actor_hash:piiHash(input.userId)??'',
     p_source:'line',
@@ -179,11 +191,11 @@ export async function handleCafeTestDailyCloseConfirmText(input:{
 
   if(result.confirmed){
     return [
-      '🧪 Café TEST — ✅ ยืนยันปิดวัน '+command.localDate+' แล้วครับ',
+      prefix+' — ✅ ยืนยันปิดวัน '+command.localDate+' แล้วครับ',
       'Daily Close ถูกล็อกแล้ว แก้ยอดตรง ๆ ไม่ได้',
       result.already_confirmed?'รายการนี้ยืนยันไว้ก่อนแล้วครับ':'หากพบตัวเลขผิดภายหลัง ต้องแก้ผ่าน Adjustment พร้อมเหตุผลครับ',
     ].join('\n');
   }
 
-  return reconcileText(result,command.localDate);
+  return reconcileText(result,command.localDate,environment);
 }
