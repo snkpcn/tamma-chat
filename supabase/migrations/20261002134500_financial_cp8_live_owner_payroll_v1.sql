@@ -216,7 +216,6 @@ begin
     select 1
     from public.financial_employee_payroll_events
     where owner_group_hash=p_group_hash
-      and created_by_hash is not distinct from nullif(trim(coalesce(p_user_hash,'')),'')
       and status='awaiting_slip'
       and created_at>now()-interval '12 hours'
   ) then
