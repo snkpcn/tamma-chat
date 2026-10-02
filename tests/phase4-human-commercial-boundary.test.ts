@@ -185,3 +185,24 @@ test('Phase 4 boundary-sensitive non-commit turns bypass 100% read-only Agent an
   assert.match(source,/const phase4CommercialBoundaryEligible =\s*commercialBoundary\.routeToOneMindBeforePrimary/u);
   assert.match(source,/!phase4CommercialBoundaryEligible/u);
 });
+
+
+test('Phase 4 semantic manage intent can independently veto execution',()=>{
+  const cancel=classifyCommercialBoundarySemantic(semantic({
+    action:'cancel',
+    speechAct:'task_control',
+    constraints:['no_transaction'],
+  }));
+  assert.equal(cancel.mode,'MANAGE');
+  assert.equal(cancel.currentTurnCommit,false);
+  assert.equal(cancel.withholdsExecution,true);
+
+  const correction=classifyCommercialBoundarySemantic(semantic({
+    action:'correct_previous',
+    speechAct:'correction',
+    entities:{horseName:'ทองไทย'},
+    constraints:['no_transaction'],
+  }));
+  assert.equal(correction.mode,'MANAGE');
+  assert.equal(correction.withholdsExecution,true);
+});
