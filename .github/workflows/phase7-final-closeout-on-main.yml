@@ -1,0 +1,34 @@
+name: Phase 7 Final Closeout on Main
+
+# One-shot post-merge certification for PR #495.
+# The job is guarded by the merge commit title so unrelated future pushes to
+# main never spend a production certification run.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  final-production-certification:
+    if: contains(github.event.head_commit.message, 'Phase 7 Final Closeout v2')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Wait for Netlify production deploy
+        run: |
+          echo "Waiting for the production deploy corresponding to this merge..."
+          sleep 150
+
+      - name: Run unchanged Phase 7 16-turn production contract
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: npx tsx scripts/run-phase7-production-certification.ts

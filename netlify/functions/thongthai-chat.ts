@@ -36,6 +36,7 @@ import {
   activityDurationOptionsForResource,
   formatActivityAssetNote,
   listServiceResources,
+  loadLatestBookingStatus,
   resetLineBookingPlanningSession,
 } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
@@ -131,6 +132,7 @@ import {
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
 import { EXPERIENCES } from '../../src/data/experiences';
 import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
+import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
 import {
   normalizePendingQuestion,
   resolvePendingQuestionAnswer,
@@ -616,6 +618,7 @@ function normalizeRequest(body: unknown): BrainRequest | null {
     : { section: null };
   return {
     guestId: typeof body.guestId === 'string' ? body.guestId : undefined,
+    environment: body.environment === 'test' ? 'test' : 'live',
     message: body.message.trim(),
     language,
     chatHistory: normalizeChatHistory(body.chatHistory),
@@ -5083,6 +5086,109 @@ async function boundedActivityAvailabilityClarification(
   };
 }
 
+const HORSE_COMPARISON_FOLLOWUP_RE = /(?:ต่างกัน|เปรียบเทียบ|ตัวไหนดี|เลือกตัวไหน|เลือกตัวไหนดี)/u;
+
+/**
+ * Phase 7 latency boundary for a contextual two-horse comparison.
+ *
+ * A follow-up such as "สองตัวนี้ต่างกันยังไง" contains no horse name on its
+ * own, so read-only Agent Primary previously took first refusal and could hit
+ * the 30s gateway timeout. Resolve it deterministically only when prior bounded
+ * context proves BOTH canonical horses were the subject of the conversation.
+ */
+async function boundedHorseComparisonBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (hasExplicitTransactionIntent(request.message) || !HORSE_COMPARISON_FOLLOWUP_RE.test(request.message)) return null;
+
+  const priorText = request.chatHistory.slice(-10).map(turn => turn.content).join('\n');
+  let hasBothHorseContext = /ทองไทย/u.test(priorText) && /ภาราดร/u.test(priorText);
+
+  if (!hasBothHorseContext && guestDbId) {
+    const context = await loadConversationContext(guestDbId).catch(() => null);
+    if (context) {
+      const boundedText = context.recentTurns.map(turn => turn.content).join('\n');
+      const entityIds = new Set(context.recentEntities.map(entity => entity.id));
+      hasBothHorseContext =
+        (/ทองไทย/u.test(boundedText) && /ภาราดร/u.test(boundedText))
+        || (entityIds.has('activity_asset:horse-thongthai') && entityIds.has('activity_asset:horse-pharadon'));
+    }
+  }
+
+  if (!hasBothHorseContext) return null;
+  return {
+    message: await composeLocalConciergeResponse({ category:'horse_comparison' }, request.message),
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
+const HORSE_CORRECTION_SIGNAL_RE = /(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจ|อีกตัว|ตัวอื่น|ตัวที่เหลือ|เอาแทน|แทน)/u;
+
+/**
+ * A bounded correction among the owner-verified horse assets still benefits
+ * from One-Mind's semantic supervision, but it must not enter the heavier
+ * Agent Primary loop first. This predicate changes routing only; One-Mind
+ * remains the component that interprets and persists the correction.
+ */
+function horseCorrectionRoutesBeforePrimary(request: BrainRequest): boolean {
+  if (hasExplicitTransactionIntent(request.message) || !HORSE_CORRECTION_SIGNAL_RE.test(request.message)) return false;
+  return Boolean(findKnownActivityAssetSelection(request.message));
+}
+
+const BOOKING_STATUS_READBACK_RE =
+  /(?:ยังไม่ได้จอง.{0,20}(?:ใช่ไหม|ใช่มั้ย|หรือยัง|ไหม|มั้ย)|มี(?:รายการ)?จอง.{0,16}(?:ไหม|มั้ย|หรือยัง)|จองอะไร(?:ไว้)?.{0,12}(?:ไหม|มั้ย|หรือยัง)|จองไปหรือยัง|จองแล้วหรือยัง|ได้จอง.{0,12}หรือยัง)/u;
+
+function publicBookingStatusLabel(status: string): string {
+  if (status === 'confirmed') return 'ยืนยันแล้ว';
+  if (status === 'cancelled') return 'ยกเลิกแล้ว';
+  if (status === 'completed') return 'เสร็จสมบูรณ์';
+  if (status === 'no_show') return 'ปิดรายการแล้ว';
+  return 'รอทีมงานตรวจสอบ';
+}
+
+/**
+ * Transaction-status questions are answered from guest-scoped booking truth,
+ * not from working task/catalog state. This closes the Phase 7 failure where
+ * an empty booking result was rendered as "ไม่มีตัวเลือกที่ตรง".
+ */
+async function verifiedBookingStatusReadbackBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  // A mixed request such as "สรุป...แล้วตอนนี้ยังไม่ได้จองใช่ไหม" is a
+  // summary first, not a status-only lookup. Let One-Mind/Response Composer
+  // preserve the full grounded working state and include the no-booking
+  // boundary in that summary instead of collapsing it to one DB sentence.
+  if (/สรุป/u.test(request.message)) return null;
+  if (!guestDbId || hasExplicitTransactionIntent(request.message) || !BOOKING_STATUS_READBACK_RE.test(request.message)) return null;
+  const latest = await loadLatestBookingStatus(guestDbId);
+  const message = latest
+    ? [
+        'มีรายการจองที่ส่งเข้าระบบแล้วครับ',
+        `เลขที่คำขอ: ${latest.bookingCode}`,
+        `สถานะ: ${publicBookingStatusLabel(latest.status)}`,
+      ].join('\n')
+    : 'ใช่ครับ ตอนนี้ยังไม่มีรายการจองที่ถูกส่งเข้าระบบสำหรับบัญชีนี้ครับ สิ่งที่คุยหรือเลือกไว้ยังไม่ได้จองหรือส่งรายการครับ';
+
+  return {
+    message,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 // The single canonical entry point into Thongthai's shared brain -- called by
 // BOTH the web HTTP handler below and LINE's adapter (_line-webhook-core.ts).
 // LINE used to reach this over HTTP (a self-fetch to this same site's own
@@ -5490,6 +5596,44 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  const horseComparison = await boundedHorseComparisonBeforePrimary(
+    request,
+    guestDbId,
+  ).catch(error => {
+    console.error('THONGTHAI_BOUNDED_HORSE_COMPARISON_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (horseComparison) {
+    const polished = polishedResponse(horseComparison, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const bookingStatusReadback = await verifiedBookingStatusReadbackBeforePrimary(
+    request,
+    guestDbId,
+  ).catch(error => {
+    console.error('THONGTHAI_VERIFIED_BOOKING_STATUS_READBACK_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (bookingStatusReadback) {
+    const polished = polishedResponse(bookingStatusReadback, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
   const safetyCriticalRestaurantRecommendation = await safetyCriticalRestaurantRecommendationBeforePrimary(
     request,
     guestDbId,
@@ -5681,8 +5825,11 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // - bounded ConversationContext carrying a considered selection/task ref
   // owns the turn before read-only Agent Primary.
   // Prepare-only routing remains separately authorized and unchanged.
+  const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
+
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
     && !phase4CommercialBoundaryEligible
+    && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
     && !boundedConversationBeforePrimary
     && shouldUseThongthaiAgentPrimary({

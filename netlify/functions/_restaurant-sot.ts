@@ -342,6 +342,7 @@ export async function createRestaurantPreorder(input: {
   guestDbId: string; channel: string; date: string; time: string;
   items: Array<{ name: string; quantity: number }>;
   customerName: string; phone?: string | null; email?: string | null; note?: string | null;
+  environment?: 'live' | 'test';
 }): Promise<PreorderCreateResult> {
   const requestedFor = new Date(`${input.date}T${input.time}:00+07:00`);
   if (Number.isNaN(requestedFor.valueOf())) throw new Error('invalid_requested_time');
@@ -351,7 +352,7 @@ export async function createRestaurantPreorder(input: {
   for (const item of resolved) {
     if (!item.menu!.is_orderable || item.menu!.available_servings < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);
   }
-  const environment = await guestEnvironment(input.guestDbId);
+  const environment = input.environment ?? await guestEnvironment(input.guestDbId);
   const canonicalItems = resolved
     .map(item => ({ menuItemId:item.menu!.menu_item_id, quantity:item.quantity }))
     .sort((a,b) => a.menuItemId.localeCompare(b.menuItemId));

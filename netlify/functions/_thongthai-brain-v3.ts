@@ -58,6 +58,9 @@ export interface JourneyContext {
 }
 export interface BrainRequest {
   guestId?: string;
+  /** Explicit synthetic-environment routing for controlled E2E requests.
+   *  Normal Web/LINE/Facebook traffic omits this and remains LIVE. */
+  environment?: 'live' | 'test';
   message: string;
   language: 'th' | 'en' | 'zh' | 'lo' | 'vi';
   chatHistory: ChatTurn[];
