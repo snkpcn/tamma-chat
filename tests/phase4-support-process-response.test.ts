@@ -123,3 +123,40 @@ test('Phase 4 unknown-domain commercial availability question has bounded Englis
   assert.match(response.message,/which service|activity|stay/i);
   assert.match(response.message,/availability/i);
 });
+
+
+test('Phase 4 restaurant ordering-process question uses the commercial process renderer',()=>{
+  const response=composeDeterministicResponse(
+    inputFor('ถ้าจะสั่งอาหารต้องทำยังไงครับ','th',{
+      domain:'restaurant',
+      intent:'ask_ordering_process',
+      action:'ask',
+      speechAct:'question',
+      informationNeed:'policy',
+      needsClarification:true,
+      clarificationReason:'restaurant or cafe ordering path unclear',
+    })
+  );
+  assert.equal(response.mode,'deterministic');
+  assert.match(response.message,/ถามขั้นตอน/u);
+  assert.match(response.message,/ยังไม่ทำรายการจริง/u);
+  assert.doesNotMatch(response.message,/ตอบเรื่องนี้ให้แม่นไม่ได้|คิดช้ากว่าปกติ/u);
+  assert.doesNotMatch(response.message,/จองสำเร็จ|สั่งซื้อสำเร็จ/u);
+});
+
+test('Phase 4 non-commercial restaurant policy question is not hijacked by commercial process copy',()=>{
+  const response=composeDeterministicResponse(
+    inputFor('ร้านมีนโยบายสำหรับเด็กไหมครับ','th',{
+      domain:'restaurant',
+      intent:'child_policy',
+      action:'ask',
+      speechAct:'question',
+      informationNeed:'policy',
+      needsClarification:false,
+    })
+  );
+  assert.doesNotMatch(
+    response.message,
+    /ถามขั้นตอนได้ครับ การถามหรือเลือกยังไม่ทำรายการจริง/u,
+  );
+});
