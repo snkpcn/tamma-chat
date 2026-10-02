@@ -567,3 +567,14 @@ test('Phase 4 commercial clarification exception cannot admit commit-shaped or n
     );
   }
 });
+
+
+test('Phase 4 One-Mind fast-paths explicit WITHHOLD before model reply reuse',()=>{
+  const source=readFileSync(
+    new URL('../netlify/functions/_thongthai-one-mind-response.ts',import.meta.url),
+    'utf8',
+  );
+  assert.match(source,/const explicitCommercialWithhold/u);
+  assert.match(source,/classifyCommercialBoundaryText\(input\.message,'OTHER'\)\.mode === 'WITHHOLD'/u);
+  assert.match(source,/\|\| explicitCommercialWithhold/u);
+});
