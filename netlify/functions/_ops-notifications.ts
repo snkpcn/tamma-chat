@@ -734,10 +734,11 @@ export async function notifyFeedbackEventTargets(id: string): Promise<{
   const event = rows[0];
   if (!event || !['live', 'test'].includes(event.environment)) return { overallStatus: 'ignored', targets: [] };
 
+  const isCafeTest = event.business_unit === 'cafe' && event.environment === 'test';
   const primaryTeam: OpsTeamCode = event.business_unit === 'cafe'
     ? cafeNotificationTeam(event.environment)
     : FEEDBACK_BUSINESS_UNIT_TEAM[event.business_unit] ?? 'all';
-  const escalate = event.environment === 'test' ? false : needsOwnerEscalation(event);
+  const escalate = isCafeTest ? false : needsOwnerEscalation(event);
   const routeTargets = escalate ? [...new Set([primaryTeam, 'owner_general' as OpsTeamCode])] : [primaryTeam];
 
   if (escalate) {
