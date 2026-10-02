@@ -108,3 +108,14 @@ test('rematch migration is TEST-only and creates reimbursement settlement withou
   assert.match(source,/matched_ledger/);
   assert.match(source,/on conflict \(source_channel,source_message_id,source_item_key\)/i);
 });
+
+
+test('paid reimbursement claim cannot be silently cancelled by a corrected text snapshot',()=>{
+  const source=readFileSync(
+    'supabase/migrations/20261002104730_financial_paid_claim_cancel_guard_v1.sql',
+    'utf8',
+  );
+  assert.match(source,/cancel_blocked_due_cash_settlement/);
+  assert.match(source,/new\.approval_status := 'needs_review'/);
+  assert.match(source,/accounting_role='cash_settlement'/);
+});
