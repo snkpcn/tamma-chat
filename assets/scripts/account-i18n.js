@@ -190,6 +190,7 @@
     document.title=t('page_title');
     document.querySelectorAll('[data-account-i18n]').forEach(el=>el.textContent=t(el.getAttribute('data-account-i18n')));
     document.querySelectorAll('[data-account-i18n-placeholder]').forEach(el=>el.setAttribute('placeholder',t(el.getAttribute('data-account-i18n-placeholder'))));
+    document.querySelectorAll('[data-account-count]').forEach(el=>el.textContent=t('items_count',{count:Number(el.dataset.count||0)}));
     document.querySelectorAll('[data-account-lang-select]').forEach(el=>el.value=current);
   }
   function setLang(lang,persist=true){if(!SUPPORTED.includes(lang))return;current=lang;if(persist)try{localStorage.setItem(STORAGE_KEY,lang);}catch{}apply();window.dispatchEvent(new CustomEvent('account:i18n-change',{detail:{lang}}));}
