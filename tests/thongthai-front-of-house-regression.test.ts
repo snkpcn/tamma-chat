@@ -52,13 +52,14 @@ test('last-mile copy strips internal implementation language',()=>{
   assert.doesNotMatch(text,/\bCore\b|\bMaster\b|Price\s*Slot|Slot\s*จริง|openweathermap|ยืนยันในระบบ/iu);
 });
 
-test('character kernel keeps one restrained emoji and softens robotic acknowledgement',()=>{
+test('character kernel keeps one restrained emoji without replacing one canned opener with another',()=>{
   const text=applyThongthaiCharacterKernel({
     message:'รับทราบครับ เดี๋ยวช่วยดูให้ครับ 😊🙏✨',
     customerMessage:'ช่วยแนะนำหน่อยครับ',
     language:'th',channel:'line',
   });
-  assert.match(text,/^ได้ครับ/u);
+  assert.doesNotMatch(text,/^รับทราบครับ|^ได้ครับ/u);
+  assert.match(text,/เดี๋ยวช่วยดูให้/u);
   assert.ok((text.match(/[\p{Extended_Pictographic}\uFE0F]/gu)??[]).length<=1);
   assert.match(text,/ครับ$/u);
 });
