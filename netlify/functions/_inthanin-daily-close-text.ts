@@ -159,7 +159,7 @@ function isPayrollSensitiveExpense(line:string):boolean{
 function expenseFunding(line:string):InthaninExpenseFunding{
   if(/พนักงาน.*(?:ออก|สำรอง)|ออกก่อน|สำรอง(?:เงิน)?ก่อน/u.test(line)) return 'employee_fronted';
   if(/เจ้าของ.*โอน|ผม.*โอน|owner.*transfer/iu.test(line)) return 'owner_transfer';
-  if(/โอน(?:ให้)?(?:ร้าน|supplier|vendor)|ร้านค้า.*โอน|vendor.*transfer/iu.test(line)) return 'vendor_transfer';
+  if(/โอน(?:ให้)?\s*(?:ร้าน|supplier|vendor)|ร้านค้า.*โอน|vendor.*transfer/iu.test(line)) return 'vendor_transfer';
   if(/เงินสด(?:ของ)?ร้าน|จ่ายสด(?:จาก)?ร้าน|cash\s*ร้าน/iu.test(line)) return 'company_cash';
 
   // Owner-confirmed Inthanin rule:
