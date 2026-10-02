@@ -278,6 +278,27 @@ async function hasConversationContextBeforePrimary(guestDbId: string | null): Pr
   }
 }
 
+async function cafeStateBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<Record<string, unknown> | null> {
+  if (isCafeReadOnlyTurn(request.message)) return {};
+  if (!guestDbId) return null;
+  try {
+    const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+    if (!isObject(snapshot.state)) return null;
+    return isCafeReadOnlyTurn(request.message, snapshot.state.active_topic)
+      ? snapshot.state
+      : null;
+  } catch (error) {
+    console.error(
+      'THONGTHAI_PRE_PRIMARY_CAFE_STATE_ERROR',
+      error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+    );
+    return null;
+  }
+}
+
 /**
  * Phase 7 verified-slot guard for a held horse selection.
  *
@@ -5908,8 +5929,11 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // owns the turn before read-only Agent Primary.
   // Prepare-only routing remains separately authorized and unchanged.
   const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
+  const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
+  const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+    && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
     && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
@@ -5924,6 +5948,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       || topLevelSemanticIntent === 'LOCATION_REQUEST',
   });
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
+
+  if (cafeReadOnlyBeforePrimary) {
+    const cafeResponse = deterministicCafeResponse(request, {
+      agentState: cafeStateForPrePrimary ?? {},
+    });
+    if (cafeResponse) {
+      const polished = polishedResponse(cafeResponse, channel);
+      await persistBrainRuntime(guestDbId, channel, polished);
+      return coreResult(200, {
+        message: polished.message,
+        intent: polished.intent,
+        contextUpdates: polished.contextUpdates,
+        journeyAction: polished.journeyAction,
+        suggestedActions: polished.suggestedActions,
+      });
+    }
+  }
 
   if (primaryAgentEligible && guestDbId) {
     try {
