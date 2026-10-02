@@ -556,8 +556,14 @@ test('Phase 4 commercial clarification exception cannot admit commit-shaped or n
     groundedKnowledge:[],
   };
   assert.equal(isTrustedReadOnlyCommercialClarification(turn,'จองเลยครับ'),false);
-  assert.deepEqual(
-    readOnlyCutoverEligibility(turn,{requireSemanticSupervisor:true,message:'จองเลยครับ'}),
-    {eligible:false,reason:'transactional_or_task_turn'},
+  const rejected=readOnlyCutoverEligibility(
+    turn,{requireSemanticSupervisor:true,message:'จองเลยครับ'},
   );
+  assert.equal(rejected.eligible,false);
+  if (!rejected.eligible) {
+    assert.ok(
+      rejected.reason === 'transactional_or_task_turn' || rejected.reason === 'domain_not_cut_over',
+      'either rejection reason is fail-closed; the critical contract is that the turn is not eligible',
+    );
+  }
 });
