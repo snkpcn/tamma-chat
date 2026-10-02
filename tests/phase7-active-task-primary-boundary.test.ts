@@ -131,7 +131,7 @@ test('Phase 7 task authority: 60-minute continuation reaches One-Mind policy eve
 
 
 test('Phase 7 bounded conversation authority: considered selection blocks read-only Agent Primary even without ActiveTask',()=>{
-  const state=emptyConversationContextState(new Date('2026-10-02T07:00:00Z'));
+  const state=emptyConversationContextState(new Date());
   const bounded={
     ...state,
     activeDomain:'activity' as const,
@@ -170,7 +170,7 @@ test('Phase 7 bounded conversation authority: explicit side-topic after held hor
     const internalId=harness.guestDbId(gid);
     assert.ok(internalId);
     const existing=harness.getState(internalId)?.state ?? {};
-    const state=emptyConversationContextState(new Date('2026-10-02T07:00:00Z'));
+    const state=emptyConversationContextState(new Date());
     harness.setState(internalId,{
       ...existing,
       taskState:emptyTaskStateContainer(),

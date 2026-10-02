@@ -28,20 +28,20 @@ test('lost property opens a durable incident and alerts the owner immediately', 
   });
 });
 
-test('a cafe lost-property incident alerts both the cafe team and owner without duplicate cases', async () => {
+test('a TEST cafe lost-property incident stays inside the dedicated cafe test LINE channel', async () => {
   await withHarness(async harness => {
-    harness.programOpsChannel('cafe');
+    harness.programOpsChannel('cafe_test');
     harness.programOpsChannel('owner_general');
     const gid = guestId('lost-item-cafe');
     const request = brainRequest('ลืมกระเป๋าไว้ที่คาเฟ่ Inthanin ช่วยตามให้หน่อยครับ', gid, 'web');
     const first = await processThongthaiChatCore(request, 'lost-item-event-2');
     const replay = await processThongthaiChatCore(request, 'lost-item-event-2');
 
-    assert.match(message(first.payload), /ทีมคาเฟ่และเจ้าของ/u);
-    assert.match(message(replay.payload), /ทีมคาเฟ่และเจ้าของ/u);
+    assert.match(message(first.payload), /รับเรื่องของหาย/u);
+    assert.match(message(replay.payload), /รับเรื่องของหาย/u);
     assert.equal(harness.postsTo('ops_feedback_events').length, 2, 'both transport attempts are observable');
     const deliveries = harness.notificationDeliveries().filter(row => row.deliveryType.startsWith('feedback_incident'));
-    assert.equal(deliveries.length, 2, 'idempotent retry must still leave only one durable delivery per distinct target');
-    assert.deepEqual(new Set(deliveries.map(row => row.teamCode)), new Set(['cafe', 'owner_general']));
+    assert.equal(deliveries.length, 1, 'TEST cafe incidents notify only the isolated cafe_test channel');
+    assert.deepEqual(new Set(deliveries.map(row => row.teamCode)), new Set(['cafe_test']));
   });
 });

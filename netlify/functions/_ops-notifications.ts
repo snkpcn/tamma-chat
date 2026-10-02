@@ -2,7 +2,7 @@ import { handleBookingOpsCommand } from './_ops-booking-actions';
 import { decryptPii, encryptPii, piiHash } from './_operations-db';
 import { safeTrackingUrl, shippingStatusLabel, type ShippingStatus } from './_member-delivery';
 
-export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'otop' | 'all' | 'owner_general' | 'ai_cost';
+export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'cafe_test' | 'otop' | 'all' | 'owner_general' | 'ai_cost';
 export type OpsNotificationEntity = 'booking' | 'cafe_inquiry' | 'otop_order' | 'feedback_event' | 'ai_cost';
 
 type TargetType = 'group' | 'room';
@@ -70,7 +70,8 @@ const TEAM_LABELS: Record<OpsTeamCode, string> = {
   restaurant: 'ตำมา-ชาติ / ร้านอาหาร',
   stay: 'ทำมา-ชาติ เฮือนสเตย์',
   activity: 'ทำมา-ชาติ ผจญภัย',
-  cafe: 'Inthanin Café',
+  cafe: 'Inthanin Café ตาดโตน',
+  cafe_test: 'Café TEST',
   otop: 'OTOP / สินค้าชุมชน',
   all: 'ทุกทีม',
   owner_general: 'เจ้าของ/ทั่วไป',
@@ -174,12 +175,13 @@ function dayBounds(localDate: string): { start: string; end: string } {
   };
 }
 
-function parseTeamCode(raw: string): OpsTeamCode | null {
+export function parseTeamCode(raw: string): OpsTeamCode | null {
   const value = raw.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
   const aliases: Array<[RegExp, OpsTeamCode]> = [
     [/^(restaurant|ร้านอาหาร|ตำมา ?ชาติ|ตํา​มา ?ชาติ)$/u, 'restaurant'],
     [/^(stay|ที่พัก|เฮือนสเตย์|เฮือนเสตย์|homestay)$/u, 'stay'],
     [/^(activity|กิจกรรม|ผจญภัย|adventure)$/u, 'activity'],
+    [/^(cafe test|test cafe|café test|test café|คาเฟ่ test|คาเฟ่เทส|กาแฟ test|inthanin test|อินทนิน test|อินทนินเทส)$/u, 'cafe_test'],
     [/^(cafe|café|คาเฟ่|กาแฟ|inthanin|อินทนิน)$/u, 'cafe'],
     [/^(otop|โอทอป|สินค้า|สินค้าชุมชน)$/u, 'otop'],
     [/^(all|ทั้งหมด|ทุกทีม)$/u, 'all'],
@@ -251,9 +253,12 @@ export async function bindLineTeamChannel(input: {
   // migration (see supabase/migrations); service_type deliberately stays
   // untouched.
   const NON_SERVICE_TEAM_CODES: OpsTeamCode[] = ['all', 'owner_general', 'ai_cost'];
+  const serviceType = input.teamCode === 'cafe_test'
+    ? 'cafe'
+    : NON_SERVICE_TEAM_CODES.includes(input.teamCode) ? null : input.teamCode;
   const payload = {
     team_code: input.teamCode,
-    service_type: NON_SERVICE_TEAM_CODES.includes(input.teamCode) ? null : input.teamCode,
+    service_type: serviceType,
     provider: 'line',
     target_type: input.targetType,
     target_id_enc: targetEncrypted,
@@ -539,6 +544,10 @@ async function notifyBooking(id: string): Promise<'sent' | 'duplicate' | 'not_bo
   });
 }
 
+export function cafeNotificationTeam(environment: string): 'cafe' | 'cafe_test' {
+  return environment === 'test' ? 'cafe_test' : 'cafe';
+}
+
 async function notifyCafeInquiry(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
   const response = await dbFetch(
     `cafe_inquiries?id=eq.${id}`
@@ -550,9 +559,10 @@ async function notifyCafeInquiry(id: string): Promise<'sent' | 'duplicate' | 'no
   }>)[0];
   if (!inquiry || !['live', 'test'].includes(inquiry.environment)) return 'ignored';
   const environmentPrefix = inquiry.environment === 'test' ? '🧪 TEST — ' : '';
+  const targetTeam: OpsTeamCode = cafeNotificationTeam(inquiry.environment);
   const customer = await customerInfo(inquiry.customer_id);
   const lines = [
-    `${environmentPrefix}☕ งานใหม่ — ${TEAM_LABELS.cafe}`,
+    `${environmentPrefix}☕ งานใหม่ — ${TEAM_LABELS[targetTeam]}`,
     `เลขที่: ${inquiry.inquiry_code}`,
     `สถานะ: ${inquiry.status}`,
     customer.name ? `ลูกค้า: ${customer.name}` : '',
@@ -562,7 +572,7 @@ async function notifyCafeInquiry(id: string): Promise<'sent' | 'duplicate' | 'no
     `หลังบ้าน: ${BACKOFFICE_URL}`,
   ].filter(Boolean);
   return sendTeamMessage({
-    teamCode: 'cafe',
+    teamCode: targetTeam,
     entityType: 'cafe_inquiry',
     entityId: inquiry.id,
     deliveryType: 'cafe_inquiry_created',
@@ -724,8 +734,11 @@ export async function notifyFeedbackEventTargets(id: string): Promise<{
   const event = rows[0];
   if (!event || !['live', 'test'].includes(event.environment)) return { overallStatus: 'ignored', targets: [] };
 
-  const primaryTeam = FEEDBACK_BUSINESS_UNIT_TEAM[event.business_unit] ?? 'all';
-  const escalate = needsOwnerEscalation(event);
+  const isCafeTest = event.business_unit === 'cafe' && event.environment === 'test';
+  const primaryTeam: OpsTeamCode = event.business_unit === 'cafe'
+    ? cafeNotificationTeam(event.environment)
+    : FEEDBACK_BUSINESS_UNIT_TEAM[event.business_unit] ?? 'all';
+  const escalate = isCafeTest ? false : needsOwnerEscalation(event);
   const routeTargets = escalate ? [...new Set([primaryTeam, 'owner_general' as OpsTeamCode])] : [primaryTeam];
 
   if (escalate) {
@@ -838,10 +851,10 @@ async function scheduleSummaryForBookingTeam(teamCode: 'restaurant' | 'stay' | '
   }).join('\n');
 }
 
-async function scheduleSummaryForCafe(localDate: string): Promise<string> {
+async function scheduleSummaryForCafe(localDate: string, environment: 'live' | 'test' = 'live'): Promise<string> {
   const bounds = dayBounds(localDate);
   const response = await dbFetch(
-    `cafe_inquiries?environment=eq.live&status=eq.open&created_at=lt.${encodeURIComponent(bounds.end)}`
+    `cafe_inquiries?environment=eq.${environment}&status=eq.open&created_at=lt.${encodeURIComponent(bounds.end)}`
     + '&select=inquiry_code,question,created_at&order=created_at.asc&limit=100',
   );
   const rows = await response.json() as Array<{ inquiry_code: string; question: string; created_at: string }>;
@@ -866,7 +879,8 @@ async function teamSummaryBody(teamCode: OpsTeamCode, localDate: string): Promis
   if (teamCode === 'restaurant' || teamCode === 'stay' || teamCode === 'activity') {
     return scheduleSummaryForBookingTeam(teamCode, localDate);
   }
-  if (teamCode === 'cafe') return scheduleSummaryForCafe(localDate);
+  if (teamCode === 'cafe') return scheduleSummaryForCafe(localDate, 'live');
+  if (teamCode === 'cafe_test') return scheduleSummaryForCafe(localDate, 'test');
   if (teamCode === 'otop') return scheduleSummaryForOtop(localDate);
 
   const sections: string[] = [];
@@ -1147,7 +1161,7 @@ export async function handleLineOpsGroupMessage(input: {
     }
     if (!teamCode || teamCode === 'all') {
       logBindAttempt(true, 'invalid_team');
-      return 'ยังไม่รู้จักชื่อนี้ครับ ใช้: restaurant / stay / activity / cafe / otop / เจ้าของ (owner) / ai cost';
+      return 'ยังไม่รู้จักชื่อนี้ครับ ใช้: restaurant / stay / activity / cafe / cafe test / otop / เจ้าของ (owner) / ai cost';
     }
     try {
       await bindLineTeamChannel({
@@ -1171,6 +1185,9 @@ export async function handleLineOpsGroupMessage(input: {
     logBindAttempt(true, 'success');
     if (teamCode === 'ai_cost') {
       return '✅ ผูกกลุ่มนี้กับค่าใช้จ่าย AI / API แล้วครับ\nจากนี้สรุปค่า OpenAI ต่อแชทและสรุปรายวันจะส่งเข้ากลุ่มนี้';
+    }
+    if (teamCode === 'cafe_test') {
+      return '✅ ผูกกลุ่มนี้กับ Café TEST แล้วครับ\nจากนี้เฉพาะงาน Inthanin/Café ที่ environment=TEST จะส่งเข้ากลุ่มนี้ ส่วน LIVE ยังอยู่กลุ่ม Inthanin เดิม';
     }
     return `✅ ผูกกลุ่มนี้กับทีม ${TEAM_LABELS[teamCode]} แล้วครับ\nจากนี้งานใหม่และสรุปตารางงานของทีมนี้จะส่งเข้ากลุ่มนี้`;
   }
