@@ -75,7 +75,7 @@ import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agen
 import { processOneMindCustomerTurn, isTrustedBoundedNoTransactionContinuation } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import { runThongthaiAgentPrimaryTurn } from './_thongthai-agent-session';
-import { executeThongthaiTransactionTool } from './_thongthai-agent-transactions';
+import { currentTurnExplicitlyConfirmsCafeInquiry, executeThongthaiTransactionTool } from './_thongthai-agent-transactions';
 import { runPrepareOnlyMultiVerticalFastPath } from './_thongthai-prepare-fastpath-v2';
 import { isPhase3SemanticLearningCandidate } from './_semantic-concept-memory';
 import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
@@ -376,11 +376,22 @@ type DegradedFallbackCategory = 'weather' | 'booking' | 'feedback' | 'casual';
 
 export function isAgentTransactionPrepareIntent(
   message: string,
-  topLevelSemanticIntent: string,
+  _topLevelSemanticIntent: string,
 ): boolean {
-  return topLevelSemanticIntent === 'BUSINESS_TRANSACTION'
-    || hasExplicitTransactionIntent(message)
-    || hasStandaloneTransactionRequest(message);
+  // Kernel V2 Phase 4 — Human Intent / Commercial Boundary:
+  // the top-level BUSINESS_TRANSACTION label is a ROUTING hint only (the
+  // classifier itself explicitly says it never authorizes a write). It must
+  // therefore never be promoted into transaction preparation authority.
+  //
+  // Fresh commercial preparation needs a CURRENT, affirmative transaction
+  // request. Questions ("จองได้ไหม"), selections ("เอาชุดนี้"), consideration
+  // ("เอาไว้ก่อน"), and a routing-only business label all remain read-only.
+  //
+  // Cafe staff handoff is the one non-book/order operational transaction in
+  // this Agent surface. Reuse its own fail-closed explicit-send boundary so a
+  // real "ส่งคำถามให้ทีมเลย" can enter prepare mode while "ส่งได้ไหม" cannot.
+  return hasStandaloneTransactionRequest(message)
+    || currentTurnExplicitlyConfirmsCafeInquiry(message);
 }
 
 export function categorizeDegradedFallback(message: string): DegradedFallbackCategory {
