@@ -289,6 +289,50 @@ function normalizeUsedFactKeys(value: unknown): string[] {
     : [];
 }
 
+/** Phase 6.1 last-mile language surface guard.
+ *
+ * The model can occasionally obey the requested language semantically but
+ * still append a Thai politeness/currency fragment because Thongthai's
+ * canonical personality is Thai (real production example:
+ * "A 30-minute horse ride is ฿300 per personครับ.").
+ *
+ * This is presentation cleanup only. It never translates or changes a
+ * business fact. Supported high-confidence Thai residue is normalized;
+ * anything broader remains visible to the existing language certification
+ * rather than being silently machine-translated here.
+ */
+export function normalizeResponseLanguageSurface(
+  input: string,
+  language: ResponseLanguage,
+): string {
+  let message=String(input??'').trim();
+  if(language==='th') return message;
+
+  // Polite particles are never business truth and must not leak into another
+  // language, even when attached directly to the preceding Latin/CJK word.
+  message=message
+    .replace(/(?:นะ)?ครับ/gu,'')
+    .replace(/ค่ะ/gu,'')
+    .replace(/คะ(?=$|[\s.,!?。！？])/gu,'');
+
+  // Currency/unit residue is safe to normalize because the numeric value is
+  // unchanged and these are exact lexical equivalents, not inferred facts.
+  if(language==='en'){
+    message=message.replace(/บาท/gu,'THB').replace(/นาที/gu,'minutes');
+  }else if(language==='zh'){
+    message=message.replace(/บาท/gu,'泰铢').replace(/นาที/gu,'分钟');
+  }else if(language==='lo'){
+    message=message.replace(/บาท/gu,'ບາດ').replace(/นาที/gu,'ນາທີ');
+  }else if(language==='vi'){
+    message=message.replace(/บาท/gu,'baht').replace(/นาที/gu,'phút');
+  }
+
+  return message
+    .replace(/[ \t]+([.,!?。！？])/gu,'$1')
+    .replace(/[ \t]{2,}/gu,' ')
+    .trim();
+}
+
 export function parseComposedResponse(raw: string, input: ResponseComposerInput): { message: string; usedFactKeys: string[] } {
   let parsed: Record<string, unknown>;
   try {
@@ -298,8 +342,9 @@ export function parseComposedResponse(raw: string, input: ResponseComposerInput)
   } catch {
     throw new ResponseCompositionError('composer_invalid_json');
   }
-  const message = typeof parsed.message === 'string' ? parsed.message.trim() : '';
-  if (!message) throw new ResponseCompositionError('composer_empty_message');
+  const rawMessage = typeof parsed.message === 'string' ? parsed.message.trim() : '';
+  if (!rawMessage) throw new ResponseCompositionError('composer_empty_message');
+  const message = normalizeResponseLanguageSurface(rawMessage,input.language);
 
   const usedFactKeys = normalizeUsedFactKeys(parsed.usedFactKeys);
   const allowed = new Set(allFacts(input.knowledgeBundles).map(fact => fact.key));
@@ -620,7 +665,7 @@ function safeModelConversationReply(input: ResponseComposerInput): ComposedRespo
   // one asked to summarize working state.
   if (input.dialogDecision.responseIntent === 'active_task_summary') return null;
 
-  const customerReply = reply;
+  const customerReply = normalizeResponseLanguageSurface(reply,input.language);
   assertOperationalClaimSafety(customerReply, input.operationalOutcome);
   assertNoInventedTemporalStructure(customerReply, input);
   return {
