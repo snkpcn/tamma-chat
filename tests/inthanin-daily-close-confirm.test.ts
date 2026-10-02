@@ -62,3 +62,12 @@ test('confirmation unification removes the ambiguous 2-arg overload',()=>{
   assert.match(source,/drop function if exists public\.financial_confirm_cafe_test_daily_close_v1\(uuid,text\)/i);
   assert.match(source,/financial_confirm_cafe_test_daily_close_v1\(p_daily_close_id uuid, p_actor_hash text, p_source text DEFAULT 'line'/);
 });
+
+
+test('legacy single-field adjustment RPC is removed so it cannot bypass atomic reconciliation',()=>{
+  const source=readFileSync(
+    'supabase/migrations/20261002113658_financial_drop_legacy_single_adjustment_v1.sql',
+    'utf8'
+  );
+  assert.match(source,/drop function if exists public\.financial_add_cafe_test_adjustment_v1/i);
+});
