@@ -41,7 +41,7 @@
   <section class="hero"><div class="eyebrow" data-account-i18n="member_eyebrow">สมาชิกทำมา-ชาติ</div><h1 data-account-i18n="account_title">บัญชีของฉัน</h1><p data-account-i18n="hero_desc">ดูข้อมูลสมาชิก แผนเที่ยว คำสั่งซื้อ และเรื่องที่ทีมทำมา-ชาติต้องติดตามได้ในหน้าเดียว โดยเชื่อมกับรหัสสมาชิกเดิม</p></section>
 
   <section id="chess-rewards" class="panel tt-chess-rewards-panel">
-    <div class="section-title"><h2 data-account-i18n="rewards_title">รางวัลของฉัน</h2><span id="ttChessRewardsCount" class="pill">0 รายการ</span></div>
+    <div class="section-title"><h2 data-account-i18n="rewards_title">รางวัลของฉัน</h2><span id="ttChessRewardsCount" class="pill" data-account-count="0">0 รายการ</span></div>
     <p class="muted" data-account-i18n="rewards_desc">รางวัลจากการเล่นหมากรุกกับทองไทย — ใช้ได้จริงในทำมา-ชาติ แสดงหน้าจอนี้ให้พนักงานเพื่อใช้สิทธิ์</p>
     <div id="ttChessRewardsList" class="tt-chess-rewards-list" style="margin-top:14px"></div>
     <div style="margin-top:10px"><a href="chess.html" class="secondary" style="display:inline-block;text-decoration:none;padding:11px 16px;border-radius:14px;font-weight:800;font-size:13px" data-account-i18n="play_chess">เล่นหมากรุกกับทองไทย</a></div>
@@ -99,11 +99,11 @@
     <div id="addresses" class="cards"></div>
 
     <div style="height:28px"></div>
-    <div class="section-title"><h2 data-account-i18n="bookings">การจอง</h2><span id="bookingCount" class="pill">0 รายการ</span></div><div id="bookings" class="cards"></div>
+    <div class="section-title"><h2 data-account-i18n="bookings">การจอง</h2><span id="bookingCount" class="pill" data-account-count="0">0 รายการ</span></div><div id="bookings" class="cards"></div>
     <div style="height:25px"></div>
-    <div class="section-title"><h2 data-account-i18n="orders">คำสั่งซื้อ OTOP</h2><span id="orderCount" class="pill">0 รายการ</span></div><div id="orders" class="cards"></div>
+    <div class="section-title"><h2 data-account-i18n="orders">คำสั่งซื้อ OTOP</h2><span id="orderCount" class="pill" data-account-count="0">0 รายการ</span></div><div id="orders" class="cards"></div>
     <div style="height:25px"></div>
-    <div class="section-title"><h2 data-account-i18n="inquiries">เรื่องที่สอบถามร้านกาแฟ</h2><span id="inquiryCount" class="pill">0 รายการ</span></div><div id="inquiries" class="cards"></div>
+    <div class="section-title"><h2 data-account-i18n="inquiries">เรื่องที่สอบถามร้านกาแฟ</h2><span id="inquiryCount" class="pill" data-account-count="0">0 รายการ</span></div><div id="inquiries" class="cards"></div>
     <div class="privacy" data-account-i18n="privacy">ข้อมูลชื่อ เบอร์โทร อีเมล และที่อยู่สำหรับการจัดส่งถูกเก็บแยกจากความจำเชิงสนทนาของทองไทย และเข้ารหัสฝั่งเซิร์ฟเวอร์ ใช้เพื่อให้บริการ การจอง คำสั่งซื้อ และการติดต่อกลับเท่านั้น</div>
   </section>
 </main>
@@ -157,11 +157,11 @@ function render(account){
   $('researchOptIn').checked=account.researchOptIn===true; $('birthDate').value=account.birthDate||''; $('gender').value=account.gender||'';
   $('genderSelfDescription').value=account.genderSelfDescription||''; $('genderDescriptionWrap').classList.toggle('hidden',account.gender!=='self_described');
   $('memberStatus').textContent=account.memberStatus==='member'?(account.profileCompleted?at('member_complete'):at('member_incomplete')):at('customer_account');
-  const bookings=Array.isArray(account.bookings)?account.bookings:[]; $('bookingCount').textContent=at('items_count',{count:bookings.length});
+  const bookings=Array.isArray(account.bookings)?account.bookings:[]; $('bookingCount').dataset.count=String(bookings.length);$('bookingCount').textContent=at('items_count',{count:bookings.length});
   if(!bookings.length)empty($('bookings'),at('no_bookings'));else $('bookings').innerHTML=bookings.map(x=>{const serviceKey={restaurant:'service_restaurant',stay:'service_stay',activity:'service_activity'}[x.service_type];const party=x.party_size?at('party_count',{count:x.party_size}):'';const qty=x.quantity>1?at('quantity_units',{count:x.quantity}):'';return `<div class="item"><div class="item-top"><div class="code">${esc(x.booking_code)}</div><span class="badge">${esc(statusLabel(x.status))}</span></div><div class="meta">${esc(serviceKey?at(serviceKey):x.service_type)} · ${esc(thTime(x.start_at))}<br>${esc(party)}${party&&qty?' · ':''}${esc(qty)}</div></div>`}).join('');
-  const orders=Array.isArray(account.orders)?account.orders:[]; $('orderCount').textContent=at('items_count',{count:orders.length});
+  const orders=Array.isArray(account.orders)?account.orders:[]; $('orderCount').dataset.count=String(orders.length);$('orderCount').textContent=at('items_count',{count:orders.length});
   if(!orders.length)empty($('orders'),at('no_orders'));else $('orders').innerHTML=orders.map(x=>{const items=Array.isArray(x.items)?x.items:[];const events=Array.isArray(x.shipping_events)?x.shipping_events:[];const trackingUrl=safeHref(x.tracking_url);const tracking=x.tracking_number?`<div class="meta"><b>${esc(x.carrier_name||at('carrier'))}</b> · ${esc(x.tracking_number)}</div>${trackingUrl?`<a class="tracking" href="${esc(trackingUrl)}" target="_blank" rel="noopener">${esc(at('track_parcel'))}</a>`:''}`:'';const fmt=n=>Number(n||0).toLocaleString(accountLocale());return `<div class="item"><div class="item-top"><div><div class="code">${esc(x.order_code)}</div><div class="money">฿${fmt(x.total_amount)}</div></div><span class="badge">${esc(x.fulfillment_type==='shipping'?shippingLabel(x.shipping_status):statusLabel(x.status))}</span></div><div class="order-items">${items.map(i=>`${esc(localizedOtopName(i.otop_products))} × ${esc(i.quantity)}`).join('<br>')}</div><div class="meta">${esc(at('subtotal'))} ฿${fmt(x.subtotal_amount||x.total_amount)} · ${esc(at('shipping_fee'))} ฿${fmt(x.shipping_fee)}<br>${esc(at('payment'))}: ${esc(paymentLabel(x.payment?.status))}</div>${x.shipping_address?`<div class="meta"><b>${esc(at('ship_to'))}:</b> ${esc(x.shipping_recipient_name||'')} · ${esc(x.shipping_phone||'')}<br>${esc(x.shipping_address)}</div>`:''}${tracking}${events.length?`<div class="timeline">${events.map(e=>`<div class="event"><b>${esc(shippingLabel(e.status))}</b> · ${esc(thTime(e.created_at))}<br>${esc(e.customer_message||'')}</div>`).join('')}</div>`:''}</div>`}).join('');
-  const inquiries=Array.isArray(account.inquiries)?account.inquiries:[]; $('inquiryCount').textContent=at('items_count',{count:inquiries.length});
+  const inquiries=Array.isArray(account.inquiries)?account.inquiries:[]; $('inquiryCount').dataset.count=String(inquiries.length);$('inquiryCount').textContent=at('items_count',{count:inquiries.length});
   if(!inquiries.length)empty($('inquiries'),at('no_inquiries'));else $('inquiries').innerHTML=inquiries.map(x=>`<div class="item"><div class="item-top"><div class="code">${esc(x.inquiry_code)}</div><span class="badge">${esc(statusLabel(x.status))}</span></div><div class="meta">${esc(x.question)}</div>${x.response_note?'<div class="meta"><b>'+esc(at('team'))+':</b> '+esc(x.response_note)+'</div>':''}</div>`).join('');
 }
 async function loadAccount(){
@@ -288,7 +288,7 @@ async function ttLoadRewards(){
   try{
     const data=await ttChessApiCall('list',{});
     const rewards=Array.isArray(data.rewards)?data.rewards:[];
-    $('ttChessRewardsCount').textContent=at('items_count',{count:rewards.length});
+    $('ttChessRewardsCount').dataset.count=String(rewards.length);$('ttChessRewardsCount').textContent=at('items_count',{count:rewards.length});
     if(!rewards.length){ empty(listEl,at('no_rewards')); return; }
     rewards.sort((a,b)=> (a.status==='available'?0:1) - (b.status==='available'?0:1));
     listEl.innerHTML='';
