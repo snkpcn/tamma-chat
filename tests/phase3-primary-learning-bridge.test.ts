@@ -53,8 +53,14 @@ test('customer runtime places Phase 3 learning bridge before 100% primary Agent 
   assert.ok(oneMind>agentCall);
   assert.match(
     source,
-    /const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible && shouldUseThongthaiAgentPrimary/u,
+    /const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible/u,
   );
+  assert.match(
+    source,
+    /!phase4CommercialBoundaryEligible/u,
+    'Phase 4 boundary-sensitive planning/withholding must also stay ahead of the 100% primary Agent',
+  );
+  assert.match(source,/shouldUseThongthaiAgentPrimary/u);
   assert.match(
     source,
     /semanticSource === 'semantic_concept_memory'/u,
