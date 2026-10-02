@@ -685,7 +685,9 @@ export function buildProductionSemanticInterpreterPrompt(
       ? 'stay=rooms/houses/check-in/check-out' : null,
     /(?:ม้า|ขี่|ATV|ยิงธนู|เป็ด|pedal|กิจกรรม)/iu.test(message) || context.activeDomain === 'activity'
       ? 'activity=horse riding/ATV/archery/pedal boat' : null,
-    /(?:กาแฟ|คาเฟ่|อินทนิล)/u.test(message) || context.activeDomain === 'cafe'
+    /(?:กาแฟ|คาเฟ่|อินทนิล)/u.test(message)
+      || (referencesPrior && /เครื่องดื่ม/u.test(message))
+      || context.activeDomain === 'cafe'
       ? 'cafe=Inthanin/cafe/drinks' : null,
     /(?:สินค้า|ของฝาก|OTOP)/iu.test(message) || context.activeDomain === 'otop'
       ? 'otop=local products/souvenirs' : null,
@@ -705,6 +707,7 @@ Core rules:
 - Current no-transaction wording keeps the turn read-only. Conditional fallback choices are status/availability, never immediate confirm/book/order.
 - If the CURRENT message explicitly says not to book/order yet, hold off, or keep it only as a consideration, ALWAYS include constraints=["no_transaction"] (plus any other real constraints). Never emit transaction_request for that turn.
 - Current corrections/replacements outrank stale selections and task values.
+- An explicit return such as "กลับมาเรื่องเครื่องดื่ม" / "ของแฟนเมื่อกี้" is a topic-resume signal. When the subject is drinks and the wording references prior context, prefer cafe over a stale restaurant/activity domain unless the CURRENT message explicitly names another drink-serving domain.
 - lastRecommendationReference is bounded evidence of what Thongthai previously recommended. Use it to resolve descriptive follow-ups across topic switches; if it uniquely identifies a recent entity, follow that entity's domain rather than stale activeDomain.
 - Asking what is selected/provided so far => intent=summarize_active_task, action=ask, informationNeed=none; never transaction_status.
 - Conversation task directives cancel_active/suspend_active/resume_suspended affect working state only, never a real transaction.
