@@ -71,11 +71,17 @@ function liveWeatherLine(weather: WeatherResult): string {
 }
 
 function currentRainAnswer(message:string, weather:WeatherResult):string|null {
-  if (!/ฝน|ตกไหม|rain/iu.test(message)) return null;
+  if (!/ฝน|rain/iu.test(message)) return null;
   const rainy = /rain|drizzle|thunderstorm/iu.test(weather.condition ?? '')
     || /ฝน|พายุ/iu.test(weather.forecastSummary ?? '');
-  if (rainy) return 'ตอนนี้มีฝนในข้อมูลอากาศล่าสุดครับ';
-  return 'ตอนนี้ยังไม่เห็นสถานะฝนในข้อมูลอากาศล่าสุดครับ';
+  return rainy ? 'ตอนนี้มีฝนครับ' : 'ตอนนี้ยังไม่เห็นฝนครับ';
+}
+
+function currentSunAnswer(message:string, weather:WeatherResult):string|null {
+  if (!/แดด|sun/iu.test(message)) return null;
+  const sunny = /clear|sun/iu.test(weather.condition ?? '')
+    || /แดด|ท้องฟ้าโปร่ง/u.test(weather.forecastSummary ?? '');
+  return sunny ? 'ตอนนี้มีแดดครับ' : 'ตอนนี้ยังไม่เห็นสถานะแดดชัดครับ';
 }
 
 export async function composeWeatherConditionResponse(message: string): Promise<string> {
@@ -85,13 +91,16 @@ export async function composeWeatherConditionResponse(message: string): Promise<
   const forecastAsked = isForecastQuestion(message);
 
   if (weather.status === 'ok') {
-    const direct = currentRainAnswer(message, weather);
-    const lines = [direct ?? `ตอนนี้อากาศ${liveWeatherLine(weather)}ครับ`];
-    if (direct) lines.push(liveWeatherLine(weather));
+    const direct = currentRainAnswer(message, weather) ?? currentSunAnswer(message, weather);
+    const detail = liveWeatherLine(weather);
+    const lines = [direct ?? `ตอนนี้อากาศ${weather.forecastSummary || weather.condition || 'ปกติ'}ครับ`];
+    lines.push(`จากข้อมูลล่าสุด: ${detail}`);
     if (forecastAsked) {
       lines.push('อันนี้เป็นสภาพอากาศตอนนี้นะครับ ถ้าถามพรุ่งนี้หรือวันอื่น ทองไทยยังไม่อยากฟันธงจากข้อมูลชุดนี้');
     }
-    if (/กิจกรรม|ขี่ม้า|ATV|กลางแจ้ง|ไปเที่ยว/u.test(message)) {
+    if (/ทำอะไรดี|แนะนำ|ไปไหนดี/u.test(message)) {
+      lines.push(`ถ้าอยากหลบแดดหรือพักก่อน แนะนำเริ่มที่ร่มอย่าง${indoorFriendlyNames()} แล้วค่อยดูอากาศกับกิจกรรมกลางแจ้งอีกทีครับ`);
+    } else if (/กิจกรรม|ขี่ม้า|ATV|กลางแจ้ง|ไปเที่ยว/u.test(message)) {
       lines.push('ถ้าจะทำกิจกรรมกลางแจ้ง เบิ่งสภาพพื้นกับทีมหน้างานอีกทีจะชัวร์ที่สุดครับ');
     }
     return lines.join('\n\n');
