@@ -2665,6 +2665,9 @@ export async function explicitHorseHoldWithoutBookingResponse(
 ): Promise<BrainResponse | null> {
   if (boundaryMode !== 'WITHHOLD') return null;
   if (!/(?:ไว้ก่อน|ยังไม่จอง|ไม่จอง)/u.test(request.message)) return null;
+  // Conditional fallback/availability language needs semantic reasoning over
+  // multiple options; it is not a direct single-selection hold.
+  if (/(?:ถ้า|ไม่ว่าง|ว่าง|เต็ม|คิว)/u.test(request.message)) return null;
   const asset = activityAssetFromText(request.message);
   if (!asset || asset.resourceCode !== 'activity-horse') return null;
 
@@ -5337,64 +5340,19 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  // Phase 7 final grounded restaurant precedence.
+  // Phase 7 final restaurant routing defer.
   //
-  // The established restaurant advisor already owns explicit dietary/menu
-  // declarations and recommendation requests from live restaurant data. Do
-  // not let the earlier general One-Mind composer return FACT_UNKNOWN before
-  // that specialized grounded renderer gets a chance. This is intentionally
-  // keyed to the existing semantic class + existing advisor gate, not a new
-  // phrase table. Rich restaurant status/availability/process questions remain
-  // outside this class and continue through One-Mind.
+  // An explicit current-turn MENU recommendation already has a mature,
+  // live-data-backed deterministic renderer later in this function. Let the
+  // semantic supervisor still understand/persist bounded context, but do not
+  // terminal-return its generic response for this narrow class. Falling
+  // through preserves the established restaurant advisor without creating
+  // early restaurant routing state that could steal later horse/care turns.
   const earlyRestaurantIntentClass = classifyRestaurantDietaryIntent(request.message);
-  // Keep this pre-supervision exception narrower than the mature restaurant
-  // responder itself. It exists only for an explicit CURRENT menu/restaurant
-  // recommendation follow-up (the Phase 7 turn that generic One-Mind can
-  // otherwise swallow). Constraint-only food-care, broad food-culture and
-  // horse "ไม่เอา..." sentences must continue to their established owners.
-  const explicitCurrentMenuRecommendation =
+  const deferExplicitMenuRecommendationToGroundedRestaurant =
     earlyRestaurantIntentClass === 'RECOMMENDATION_ONLY'
-    && /(?:เมนู|ร้านอาหาร|ตำมา-ชาติ|ตำมา)/u.test(request.message);
-  const groundedRestaurantBeforeSupervision =
-    explicitCurrentMenuRecommendation
+    && /(?:เมนู|ร้านอาหาร|ตำมา-ชาติ|ตำมา)/u.test(request.message)
     && isRestaurantAdvisorTurn(request, { agentState:{} });
-  if (groundedRestaurantBeforeSupervision) {
-    const snapshot = guestDbId
-      ? await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
-          console.error(
-            'THONGTHAI_RESTAURANT_EARLY_STATE_ERROR',
-            error instanceof Error ? error.message.slice(0, 220) : 'unknown',
-          );
-          return { state:null } as Awaited<ReturnType<typeof loadGuestAgentStateSnapshot>>;
-        })
-      : null;
-    const restaurantRuntime = {
-      agentState: isObject(snapshot?.state) ? snapshot!.state : {},
-    };
-    const groundedRestaurant = await deterministicRestaurantResponse(
-      request,
-      restaurantRuntime,
-      guestDbId,
-      channel,
-    ).catch(error => {
-      console.error(
-        'THONGTHAI_RESTAURANT_EARLY_GROUNDED_ERROR',
-        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
-      );
-      return null;
-    });
-    if (groundedRestaurant) {
-      const polished = polishedResponse(groundedRestaurant, channel);
-      await persistBrainRuntime(guestDbId, channel, polished);
-      return coreResult(200, {
-        message:polished.message,
-        intent:polished.intent,
-        contextUpdates:polished.contextUpdates,
-        journeyAction:polished.journeyAction,
-        suggestedActions:polished.suggestedActions,
-      });
-    }
-  }
 
   // Selection of the prepare-only canary is independent of the CURRENT
   // sentence's transaction wording. A later "ยืนยันส่งคำถาม", "เอาไว้ก่อน",
@@ -5765,7 +5723,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         || learnedSemanticReady
         || trustedZeroCostReady
         || trustedBoundedNoTransactionReady;
-      if (supervisedMeaningReady) {
+      if (supervisedMeaningReady && !deferExplicitMenuRecommendationToGroundedRestaurant) {
         console.log('THONGTHAI_HUMAN_CONVERSATION_FIRST', JSON.stringify({
           domain:oneMind.turn.semanticTurn.domain,
           action:oneMind.turn.semanticTurn.action,
@@ -5795,6 +5753,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
           journeyAction:supervisedResponse.journeyAction,
           suggestedActions:supervisedResponse.suggestedActions,
         });
+      }
+      if (supervisedMeaningReady && deferExplicitMenuRecommendationToGroundedRestaurant) {
+        console.log('THONGTHAI_HUMAN_CONVERSATION_DEFER_GROUNDED_RESTAURANT', JSON.stringify({
+          domain:oneMind.turn.semanticTurn.domain,
+          action:oneMind.turn.semanticTurn.action,
+        }));
       }
       console.log('THONGTHAI_HUMAN_CONVERSATION_LEGACY_REQUIRED', JSON.stringify({
         reason:oneMind.status === 'legacy_required'
