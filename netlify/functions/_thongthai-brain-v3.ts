@@ -58,6 +58,10 @@ export interface JourneyContext {
 }
 export interface BrainRequest {
   guestId?: string;
+  /** Explicit execution environment for synthetic certification/test traffic.
+   *  Public/runtime callers default to live; the HTTP gateway additionally
+   *  restricts TEST to reserved synthetic guest ids before honoring it. */
+  environment?: 'live' | 'test';
   message: string;
   language: 'th' | 'en' | 'zh' | 'lo' | 'vi';
   chatHistory: ChatTurn[];
