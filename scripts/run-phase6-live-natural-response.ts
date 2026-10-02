@@ -142,7 +142,7 @@ async function main(){
     const raw=await callResponseComposer(
       prompt,
       [{role:'user',content:probe.message}],
-      'phase6-live-natural-response',
+      'phase6-live-natural-response-certification',
     );
     const parsed=parseComposedResponse(raw,composerInput);
     const response=parsed.message;
