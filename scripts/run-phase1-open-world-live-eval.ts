@@ -52,13 +52,39 @@ const cases:Case[]=[
   {id:'open-plain-general',message:'แฟนผมเหนื่อยมาก ขอพักก่อนแป๊บนึง',expect:{domain:'general',speechAct:'statement'}},
 ];
 
+function isTransientProviderError(error:unknown):boolean{
+  const message=error instanceof Error?error.message:String(error);
+  return /(?:^|\s)(?:429|5\d\d)(?:\s|$)|OpenAI\s+(?:429|5\d\d)|provider.*(?:429|5\d\d)/iu.test(message);
+}
+
+async function interpretWithTransientRetry(
+  message:string,
+  context:SemanticContext,
+):Promise<SemanticTurn>{
+  let last:unknown;
+  for(let attempt=1;attempt<=3;attempt+=1){
+    try{
+      return await interpretSemanticTurn(message,context,{certificationMode:true});
+    }catch(error){
+      last=error;
+      if(!isTransientProviderError(error)||attempt===3) throw error;
+      console.log('PHASE1_LIVE_TRANSIENT_RETRY',JSON.stringify({
+        attempt,
+        error:error instanceof Error?error.message:String(error),
+      }));
+      await new Promise(resolve=>setTimeout(resolve,attempt*1200));
+    }
+  }
+  throw last;
+}
+
 async function main():Promise<void>{
   let pass=0;
   const failures:Array<Record<string,unknown>>=[];
 
   for(const item of cases){
     try{
-      const turn=await interpretSemanticTurn(item.message,item.context??emptySemanticContext(),{ certificationMode:true });
+      const turn=await interpretWithTransientRetry(item.message,item.context??emptySemanticContext());
       const checks=[
         item.expect.domain===undefined||turn.domain===item.expect.domain,
         item.expect.speechAct===undefined||turn.speechAct===item.expect.speechAct,
