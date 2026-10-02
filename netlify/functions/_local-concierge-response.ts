@@ -115,41 +115,28 @@ export function composeFoodCultureResponse(): string {
 }
 
 export function composeVisitorJourneyResponse(message: string): string {
-  const hasTime = /มีเวลา|ชั่วโมง|ชม\.?|นาที|ครึ่งวัน|เต็มวัน|คืน/u.test(message);
+  const hasTime = /มีเวลา|ครึ่งวัน|เต็มวัน|คืน/u.test(message);
   const hasCompanion = /คนเดียว|แฟน|ครอบครัว|เด็ก|ผู้ใหญ่|เพื่อน|แม่|พ่อ|ลูก/u.test(message);
   const wantsChill = /ชิล|ไม่รีบ|พักใจ|ไม่อยากเดินเยอะ/u.test(message);
   const wantsAdventure = /ลุย|ผจญภัย/u.test(message);
+  const noTransaction = /ยังไม่.*จอง|ไม่.*จอง|แค่.*ดู|ไว้ก่อน/u.test(message);
   const missing: string[] = [];
   if (!hasTime) missing.push('มีเวลาประมาณเท่าไร');
   if (!hasCompanion) missing.push('มากับใคร (คนเดียว/แฟน/ครอบครัว)');
-
-  if (!missing.length && wantsChill) {
-    return [
-      'ได้ครับ ถ้าอยากมาแบบชิล ๆ ไม่รีบ ทองไทยแนะนำแพลนสั้น ๆ แบบนี้ครับ',
-      `1) เริ่มที่ ${nodeLabel('inthanin', 'Inthanin')} แวะเครื่องดื่มและพักก่อน`,
-      '2) เดินชมพื้นที่แบบสบาย ๆ ไม่ต้องรีบไล่หลายจุด',
-      `3) ถ้ายังมีเวลาและอยากทำอะไรเพิ่ม ค่อยเลือก ${outdoorActivityNames()} อย่างใดอย่างหนึ่ง แล้วเช็กคิวจริงก่อนครับ`,
-      'ตอนนี้ทองไทยยังไม่ส่งจองอะไรให้ครับ ถ้าสนใจข้อไหนค่อยเช็กข้อมูลจริงของข้อนั้นต่อได้เลย',
-    ].join('\n');
-  }
-
-  if (!missing.length && wantsAdventure) {
-    return [
-      'ได้ครับ ถ้าอยากได้แบบลุยหน่อย ทองไทยแนะนำให้เลือกกิจกรรมหลักก่อนครับ',
-      `เริ่มจาก ${outdoorActivityNames()} สักอย่าง แล้วค่อยแวะ ${nodeLabel('inthanin', 'Inthanin')} หรือ ${nodeLabel('thamma-chat-restaurant', 'ตำมา-ชาติ')} พักท้ายช่วง`,
-      'ก่อนเริ่มกิจกรรมให้เช็กคิวและสภาพหน้างานจริงอีกครั้งครับ',
-      'ตอนนี้ทองไทยยังไม่ส่งจองอะไรให้ครับ',
-    ].join('\n');
-  }
 
   const lines = [
     `ทองไทยช่วยจัดแผนสั้นๆ ให้ได้ครับ ที่ทำมา-ชาติมีทั้งกิน (${nodeLabel('thamma-chat-restaurant', 'ตำมา-ชาติ')}), พัก (${nodeLabel('thamma-chat-stay', 'เฮือนสเตย์')}), กิจกรรมกลางแจ้ง (${outdoorActivityNames()}) และคาเฟ่ (${nodeLabel('inthanin', 'Inthanin')})`,
   ];
   if (missing.length) {
     lines.push(`ขอ${missing.join(' และ ')}เพิ่มอีกนิดครับ จะได้จัดแผนที่พอดีกับเวลาจริงๆ`);
+  } else if (wantsChill) {
+    lines.push(`ถ้าเอาแบบชิลๆ แนะนำเริ่มที่ ${nodeLabel('inthanin', 'Inthanin')} แล้วเดินชมพื้นที่/พักใจครับ ถ้ายังมีเวลาและอยากเพิ่มกิจกรรม ค่อยเลือก ${outdoorActivityNames()} ตามคิวหน้างานได้ครับ`);
+  } else if (wantsAdventure) {
+    lines.push(`ถ้าอยากลุย ให้เลือกกิจกรรมกลางแจ้งอย่าง ${outdoorActivityNames()} เป็นแกน แล้วค่อยแวะ ${nodeLabel('inthanin', 'Inthanin')} พักท้ายครับ`);
   } else {
-    lines.push('อยากได้โทนชิล ๆ หรือแบบลุยหน่อยครับ ทองไทยจะจัดลำดับให้พอดีกับเวลาที่มี');
+    lines.push('เลือกได้เลยว่าอยากเน้นกิน ชิล หรือกิจกรรม แล้วทองไทยจะจัดลำดับให้พอดีกับเวลาครับ');
   }
+  if (noTransaction) lines.push('ตอนนี้ทองไทยยังไม่จองหรือส่งรายการอะไรให้ครับ');
   return lines.join('\n');
 }
 
