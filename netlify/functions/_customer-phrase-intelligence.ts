@@ -119,7 +119,7 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   // transport channels.
   if (/ไม่(?:กิน|ดื่ม)กาแฟ|ไม่เอากาแฟ/u.test(text)) addConstraints.push('no_coffee');
   if (/(?:กลับมา|ดู|เอา).{0,10}กาแฟ(?:ก็ได้|ได้)|กินกาแฟได้|ดื่มกาแฟได้/u.test(text)) removeConstraints.push('no_coffee');
-  if (/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน/u.test(text)) addConstraints.push('low_sweet');
+  if (/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน|ไม่ชอบหวาน(?:มาก)?/u.test(text)) addConstraints.push('low_sweet');
   if (/ไม่ขมมาก|ไม่เอาขมมาก|ไม่ค่อยขม/u.test(text)) addConstraints.push('low_bitter');
   if (/ไม่เอานมวัว|ไม่ค่อยอยาก(?:กิน|ดื่ม)นมวัว|งดนมวัว/u.test(text)) addConstraints.push('no_cow_milk');
   if (/ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล/u.test(text)) addConstraints.push('no_sugar');
@@ -129,6 +129,94 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   if (/ถ้าฝนตกไม่สะดวก|ไม่สะดวกถ้าฝนตก|ไม่อยากทำกิจกรรมตอนฝนตก|แพ้ฝน/u.test(text)) addConstraints.push('rain_sensitive');
 
   return { addConstraints, removeConstraints, pace, travelerType };
+}
+
+/**
+ * Durable guest memory belongs to the customer, not automatically to every
+ * companion mentioned in the sentence. The broad phrase classifier above is
+ * intentionally subject-agnostic because same-turn domain responders still
+ * need to notice "แฟนแพ้กุ้ง" or "ลูกไม่กินเผ็ด". This wrapper is used ONLY
+ * when writing the customer's own durable memory.
+ */
+const GUEST_MEMORY_COMPANION_RE = /(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)/u;
+const GUEST_MEMORY_SELF_RE = /(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง)/u;
+
+const GUEST_SCOPED_CONSTRAINT_PATTERNS: Partial<Record<string,RegExp>> = {
+  no_coffee:/ไม่(?:กิน|ดื่ม)กาแฟ|ไม่เอากาแฟ/u,
+  low_sweet:/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน|ไม่ชอบหวาน(?:มาก)?/u,
+  low_bitter:/ไม่ขมมาก|ไม่เอาขมมาก|ไม่ค่อยขม/u,
+  no_cow_milk:/ไม่เอานมวัว|ไม่ค่อยอยาก(?:กิน|ดื่ม)นมวัว|งดนมวัว/u,
+  no_sugar:/ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล/u,
+  no_spicy:/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้|ไม่ใส่พริก/u,
+  mild_spice:/(?:กิน|ทาน)เผ็ดไม่เก่ง|ไม่ค่อย(?:กิน|ทาน)?เผ็ด|(?:กิน|ทาน)เผ็ดได้นิดหน่อย|ไม่เผ็ดมาก/u,
+  shrimp_allergy:/แพ้กุ้ง/u,
+  food_allergy:/แพ้อาหาร/u,
+  no_shrimp:/ไม่กินกุ้ง|ไม่เอากุ้ง|งดกุ้ง/u,
+  fear_of_falling:/กลัวตก/u,
+  fear_of_speed:/กลัวเร็ว/u,
+  limited_walking:/เดินไม่ไหว|เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้/u,
+};
+
+function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
+  const phrase=GUEST_SCOPED_CONSTRAINT_PATTERNS[code];
+  if(!phrase)return false;
+
+  // Classify each actual constraint occurrence by its NEAREST subject to the
+  // left. This avoids a broad first "แฟน" mention swallowing a later
+  // "ผม... แต่แฟนไม่กินกาแฟ" clause and incorrectly treating the whole
+  // sentence as customer-owned memory.
+  const phraseRe=new RegExp(phrase.source,'giu');
+  const companionRe=/(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)/gu;
+  const selfRe=/(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง)/gu;
+
+  for(const match of message.matchAll(phraseRe)){
+    const index=match.index??0;
+    const before=message.slice(Math.max(0,index-48),index);
+    const lastIndex=(source:string,re:RegExp)=>{
+      let latest=-1;
+      for(const found of source.matchAll(re))latest=found.index??latest;
+      return latest;
+    };
+    const companionAt=lastIndex(before,companionRe);
+    const selfAt=lastIndex(before,selfRe);
+    const subjectWindow=message.slice(Math.max(0,index-28),index);
+
+    // Shared wording must actually GOVERN this constraint occurrence. Only
+    // look to the left of the phrase. A later clause such as
+    // "แฟนไม่กินกาแฟ แล้วเราสองคนไม่ชอบหวาน" must not retroactively turn the
+    // companion's no-coffee preference into a shared one.
+    if(/เราสองคน|เราทั้งคู่|ทั้งคู่|พวกเรา/u.test(subjectWindow))continue;
+    if(companionAt>=0&&companionAt>selfAt)return true;
+  }
+  return false;
+}
+
+export function extractGuestPreferenceSignal(message:string):PreferenceSignal{
+  const raw=extractPreferenceSignal(message);
+  const addConstraints=raw.addConstraints.filter(code=>!constraintIsOnlyAboutCompanion(message,code));
+  const remove=new Set(raw.removeConstraints);
+
+  // Explicit self statements correct stale durable memory even when the same
+  // turn also describes a different companion's restriction.
+  if(/(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:ชอบกาแฟ|กินกาแฟได้|ดื่มกาแฟได้|เอากาแฟ)/u.test(message)){
+    remove.add('no_coffee');
+  }
+  if(/(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:กินเผ็ดได้|ทานเผ็ดได้)/u.test(message)){
+    remove.add('no_spicy'); remove.add('mild_spice');
+  }
+  if(
+    /(?:แฟน|ภรรยา|สามี|ลูก|แม่|พ่อ|เพื่อน).{0,18}แพ้กุ้ง/u.test(message)
+    && /(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:กินได้|กินกุ้งได้|ไม่ได้แพ้)/u.test(message)
+  ){
+    remove.add('shrimp_allergy'); remove.add('no_shrimp');
+  }
+
+  return {
+    addConstraints:[...new Set(addConstraints)],
+    removeConstraints:[...remove],
+    pace:raw.pace,
+    travelerType:raw.travelerType,
+  };
 }
 
 export function extractIntelligenceSignals(message: string): IntelligenceSignal[] {
@@ -169,7 +257,7 @@ export function extractIntelligenceSignals(message: string): IntelligenceSignal[
     signals.push({ eventType: 'demand', category: 'interest_cafe', domain: 'cafe' });
   }
   if (/ไม่(?:กิน|ดื่ม)กาแฟ|ไม่เอากาแฟ/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_no_coffee', domain:'cafe' });
-  if (/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_low_sweet', domain:'cafe' });
+  if (/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน|ไม่ชอบหวาน(?:มาก)?/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_low_sweet', domain:'cafe' });
   if (/ไม่ขมมาก|ไม่เอาขมมาก|ไม่ค่อยขม/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_low_bitter', domain:'cafe' });
   if (/ไม่เอานมวัว|ไม่ค่อยอยาก(?:กิน|ดื่ม)นมวัว|งดนมวัว/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_no_cow_milk', domain:'cafe' });
   if (/ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล/u.test(text)) signals.push({ eventType:'phrase', category:'cafe_no_sugar', domain:'cafe' });

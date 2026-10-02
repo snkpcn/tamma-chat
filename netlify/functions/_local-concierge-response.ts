@@ -54,6 +54,7 @@ function seasonHintFromMessage(message: string): LocalSeason {
 // today's data as the best available guidance, but say plainly that it
 // isn't a confirmed forecast.
 const FORECAST_QUESTION_MARKER = /พรุ่งนี้|มะรืน|พยากรณ์|forecast/iu;
+const EXPLICIT_WEATHER_CONTEXT_RE = /ฝน|แดด|ลม|อากาศ|ลื่น|โคลน|ร้อน|หนาว|weather|rain|sun/iu;
 
 function isForecastQuestion(message: string): boolean {
   return FORECAST_QUESTION_MARKER.test(message);
@@ -158,19 +159,34 @@ export function composeVisitorJourneyResponse(message: string): string {
 
 export async function composeActivitySuitabilityResponse(match: LocalConciergeMatch, message: string): Promise<string> {
   const activityName = match.activityNodeId ? nodeLabel(match.activityNodeId, 'กิจกรรมนี้') : 'กิจกรรมกลางแจ้ง';
+  const asksWeather = EXPLICIT_WEATHER_CONTEXT_RE.test(message);
+
+  if (!asksWeather) {
+    if (match.activityNodeId === 'activity-horse' && /มือใหม่|ไม่เคยขี่|หัดขี่|เริ่มต้น/u.test(message)) {
+      const thongthai = HORSE_FACTS.thongthai;
+      const pharadon = HORSE_FACTS.pharadon;
+      return [
+        'ถ้าไม่เคยขี่มาก่อน ทองไทยยังไม่อยากฟันธงว่าตัวไหนเหมาะกว่าจากข้อมูลที่มีครับ',
+        `สิ่งที่ยืนยันได้คือ ${pharadon.name}${pharadon.rideFeelTh} ส่วน${thongthai.name}${thongthai.rideFeelTh}ครับ`,
+        'ความนิ่มของจังหวะขี่ไม่เท่ากับความเหมาะสมเฉพาะคน ให้ทีมหน้างานช่วยดูประสบการณ์และความมั่นใจก่อนเลือกม้าจะชัวร์ที่สุดครับ',
+      ].join('\n\n');
+    }
+    return [
+      `เรื่องความเหมาะสมของ${activityName}กับแต่ละคน ทองไทยยังไม่มีข้อมูลยืนยันพอให้ฟันธงครับ`,
+      'ให้ทีมงานหน้างานช่วยดูอายุ ประสบการณ์ และความมั่นใจก่อนเริ่มจะชัวร์ที่สุดครับ',
+      `ถ้า${activityName}ไม่เหมาะหน้างาน ยังสลับไปกิจกรรมอื่นหรือแวะกิน/คาเฟ่/พักได้ครับ`,
+    ].join('\n\n');
+  }
+
   const weather = await getWeatherForTammaLocation();
   const forecastAsked = isForecastQuestion(message);
-
   const lines: string[] = [];
   lines.push(weather.status === 'ok' ? liveWeatherLine(weather) : 'ตอนนี้ทองไทยยังไม่มีข้อมูลอากาศสดยืนยันในระบบครับ');
   if (forecastAsked) {
     lines.push(weather.status === 'ok'
-      ? 'ข้อมูลนี้เป็นสภาพอากาศปัจจุบัน ยังพยากรณ์ล่วงหน้าแบบยืนยัน 100% ไม่ได้ครับ'
+      ? 'ข้อมูลนี้เป็นสภาพอากาศปัจจุบัน ยังพยากรณ์ล่วงหน้าแบบยืนยันไม่ได้ครับ'
       : 'และยังพยากรณ์ล่วงหน้าแบบยืนยันไม่ได้ด้วยครับ');
   }
-  // Ground condition is never claimed from a weather fact alone (rain/no
-  // rain does not by itself tell us the ACTUAL ground condition on site) --
-  // this caveat applies whether or not live weather is available above.
   lines.push(`โดยทั่วไป ${activityName} เล่นได้ในสภาพอากาศปกติ แต่สภาพพื้นจริงหน้างานต้องให้ทีมดูอีกทีครับ`);
   lines.push('แนะนำเช็คกับทีมงานตอนถึงหน้างานเพื่อความชัวร์ครับ ถ้าเล่นไม่ได้ทองไทยมีตัวเลือกอื่น (กิน/คาเฟ่/พัก) ให้ปรับแผนได้เสมอ');
   return lines.join('\n');

@@ -21,7 +21,7 @@ import {
   capturePreferenceSignals,
 } from './_customer-db';
 import { resolveCanonicalGuestId } from './_thongthai-identity';
-import { extractPreferenceSignal } from './_customer-phrase-intelligence';
+import { extractGuestPreferenceSignal } from './_customer-phrase-intelligence';
 import { evaluateBotQualitySignals } from './_bot-quality-intelligence';
 import { recordIntelligenceEvent } from './_customer-intelligence-events';
 import {
@@ -1749,6 +1749,20 @@ function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
 }
 
+function recentCafeConversationText(agentState:Record<string,unknown>):string{
+  const raw=agentState.conversationContext;
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))return '';
+  const turns=(raw as {recentTurns?:unknown}).recentTurns;
+  if(!Array.isArray(turns))return '';
+  return turns
+    .slice(-12)
+    .map(turn=>turn&&typeof turn==='object'&&typeof (turn as {content?:unknown}).content==='string'
+      ? String((turn as {content:string}).content)
+      : '')
+    .filter(Boolean)
+    .join('\n');
+}
+
 function cafePreferenceSummary(constraints: readonly string[]): string {
   const labels = [
     constraints.includes('no_coffee') ? 'ไม่เอากาแฟ' : '',
@@ -1894,9 +1908,36 @@ function cafeRecommendationMessage(
 ):string{
   const active=items.filter(item=>item.active);
   const constraints=new Set(request.guestContext.constraints??[]);
-  const noCoffee=constraints.has('no_coffee')
-    || /(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|no\s*coffee)/iu.test(request.message);
+  const selfNoCoffee=constraints.has('no_coffee')
+    || /(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง).{0,20}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
+  const companionNoCoffee=/(?:แฟน|ภรรยา|สามี|เพื่อน|ลูก).{0,24}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
+  const sharedNoCoffee=/(?:เราสองคน|เราทั้งคู่|ทั้งคู่).{0,24}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
+  const genericNoCoffee=/(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|no\s*coffee)/iu.test(request.message)
+    && !companionNoCoffee
+    && !/(?:ผม|ฉัน|หนู|ดิฉัน).{0,26}(?:ชอบ|เอา|อยากได้).{0,12}กาแฟ/u.test(request.message);
+  const noCoffee=selfNoCoffee||sharedNoCoffee||genericNoCoffee;
   const couple=/(?:แฟน|คู่รัก|สองคน|2\s*คน|couple)/iu.test(request.message);
+  const selfStrongCoffee=/(?:ผม|ฉัน|หนู|ดิฉัน).{0,26}(?:ชอบ|เอา|อยากได้).{0,12}กาแฟ.{0,12}(?:เข้ม|แรง)/u.test(request.message);
+  const sharedLowSweet=/(?:เราสองคน|เราทั้งคู่|ทั้งคู่).{0,30}(?:ไม่ชอบหวาน|ไม่หวานมาก|หวานน้อย)/u.test(request.message)
+    || constraints.has('low_sweet');
+
+  if(couple&&companionNoCoffee&&!noCoffee){
+    const selfPick=active.find(item=>item.code==='americano')
+      ?? active.find(item=>item.code==='espresso')
+      ?? active.find(item=>item.category==='coffee');
+    const companionPick=active.find(item=>item.code==='uji_pure_matcha')
+      ?? active.find(item=>item.code==='thai_tea_latte')
+      ?? active.find(item=>item.category!=='coffee');
+    if(selfPick&&companionPick){
+      const lines=[
+        'แยกให้สองคนคนละแก้วตามที่บอกได้ครับ',
+        `• ของคุณ: ${selfPick.name_th}${selfStrongCoffee?' — เริ่มจากฝั่งกาแฟที่ตรงโจทย์เข้มก่อน':''}`,
+        `• ของแฟน: ${companionPick.name_th} — ฝั่งไม่ใช่กาแฟ`,
+      ];
+      if(sharedLowSweet)lines.push('เรื่องความหวาน ทั้งสองคนเอาไม่หวานมากไว้ก่อนครับ เดี๋ยวตอนเลือกแบบร้อน/เย็นค่อยเช็กการปรับของแต่ละเมนูให้ตรงอีกที');
+      return lines.join('\n');
+    }
+  }
 
   const preferredCodes=noCoffee
     ? ['uji_pure_matcha','thai_tea_latte','green_tea_latte','cocoa','lemon_tea']
@@ -2058,6 +2099,29 @@ async function deterministicCafeResponse(
     );
   }
 
+  const recentCafeText=recentCafeConversationText(runtime.agentState??{});
+  const splitFollowup=/ของผม.{0,24}(?:เย็น|ร้อน|ปั่น).{0,40}(?:แฟน)/u.test(message)
+    || /(?:แฟน).{0,40}(?:ของผม).{0,24}(?:เย็น|ร้อน|ปั่น)/u.test(message);
+  if(items.length&&splitFollowup&&/อเมริกาโน่/u.test(recentCafeText)&&/อูจิ\s*เพียวมัทฉะ/u.test(recentCafeText)){
+    const selfItem=items.find(item=>item.code==='americano'&&item.active);
+    const requestedSlot=selfItem?resolveCafeSlot(message,selfItem):null;
+    const selfLine=selfItem&&requestedSlot
+      ? `ของคุณต่อจากเมื่อกี้เป็น ${selfItem.name_th} ${requestedSlot.label_th} ${cafeMoney(requestedSlot.price)}ครับ`
+      : 'ของคุณยังคงฝั่งอเมริกาโน่ไว้ครับ';
+    const companionLine='ส่วนของแฟน เมื่อกี้คัดอูจิ เพียวมัทฉะไว้ในฝั่งไม่ใช่กาแฟครับ แต่ข้อมูลเมนูที่มีไม่ได้บอกรสชาติละเอียดพอให้ทองไทยฟันธงว่า “หอมและดื่มง่ายที่สุด” โดยไม่เดา';
+    return {
+      message:[selfLine,companionLine,'ถ้าอยากได้ดื่มง่ายกว่าแนวมัทฉะ บอกได้ครับ เดี๋ยวทองไทยคัดจากฝั่งชาให้แทน'].join('\n\n'),
+      intent:'recommendation',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{activeTopic:'cafe'},
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+
   const grounded=items.length?cafeGroundedAnswer(request,items,modifiers):null;
   if(grounded){
     return {
@@ -2088,7 +2152,9 @@ async function deterministicCafeResponse(
   } else if (/ถามเผื่อแฟน/u.test(message) && /คนเดียว/u.test(message)) {
     answer = `รับทราบครับ วันนี้มาคนเดียว ส่วนเรื่องเครื่องดื่มไม่กาแฟเป็นคำถามเผื่อแฟนครับ ตอนนี้ยังไม่ได้สั่งอะไร และความชอบที่จำไว้คือ ${preferences}ครับ`;
   } else if (/ไม่ได้แพ้นม/u.test(message)) {
-    answer = `เข้าใจครับ เป็นความชอบที่ไม่อยากดื่มนมวัว ไม่ใช่อาการแพ้นมครับ ผมจะจำเป็น preference เท่านั้น ตอนนี้ความชอบคือ ${preferences}ครับ`;
+    answer = /แฟน/u.test(message)
+      ? 'เข้าใจครับ ของแฟนคือช่วงนี้ไม่อยากดื่มนมวัว แต่ไม่ได้แพ้นมครับ ทองไทยจะไม่ตีความเป็นเรื่องแพ้อาหาร'
+      : 'เข้าใจครับ เป็นความชอบที่ไม่อยากดื่มนมวัวช่วงนี้ ไม่ใช่อาการแพ้นมครับ';
   } else if (/(?:เมื่อกี้|จากที่คุยมา|สนใจอะไรไว้|ตัวไหนเหมาะ|เปลี่ยนใจ|ไม่เอาตัวนั้น|กลับมาเรื่อง)/u.test(message)) {
     answer = items.length
       ? `ได้ครับ กลับมาเรื่อง Inthanin กัน ตอนนี้ที่จำไว้คือ ${preferences} ถ้ามีเมนูที่เล็งไว้บอกชื่อมาได้เลยครับ`
@@ -5588,6 +5654,131 @@ function horseCorrectionRoutesBeforePrimary(request: BrainRequest): boolean {
   return Boolean(findKnownActivityAssetSelection(request.message));
 }
 
+async function directOtherHorseCorrectionResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+  eventId: string,
+): Promise<BrainResponse | null> {
+  const text=request.message.trim();
+  if(!guestDbId || hasExplicitTransactionIntent(text) || !/(?:อีกตัว|ตัวอื่น|ตัวที่เหลือ)/u.test(text))return null;
+
+  const rejectsThongthai=/(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจจาก).{0,12}(?:น้อง)?ทองไทย/u.test(text);
+  const rejectsPharadon=/(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจจาก).{0,12}(?:น้อง)?ภาราดร/u.test(text);
+  if(rejectsThongthai===rejectsPharadon)return null;
+
+  const [context,taskState]=await Promise.all([
+    loadConversationContext(guestDbId),
+    loadTaskState(guestDbId),
+  ]);
+  const historyText=request.chatHistory.slice(-10).map(turn=>turn.content).join('\n');
+  const contextHorseEvidence =
+    /(?:ม้า|ทองไทย|ภาราดร)/u.test(historyText)
+    || /horse/u.test(context.activeTopic??'')
+    || context.recentEntities.some(entity=>/horse-(?:thongthai|pharadon)/u.test(entity.id))
+    || context.recentTurns.some(turn=>/(?:ม้า|ทองไทย|ภาราดร)/u.test(turn.content));
+  const taskHorseEvidence=Boolean(
+    taskState.activeTask
+    && !isTerminalTaskStatus(taskState.activeTask.status)
+    && taskState.activeTask.domain==='activity'
+    && (
+      taskState.activeTask.slots.resourceCode==='activity-horse'
+      || typeof taskState.activeTask.slots.horseName==='string'
+      || typeof taskState.activeTask.slots.assetSelection==='string'
+      || taskState.activeTask.selectedEntities.some(entity=>/(?:ทองไทย|ภาราดร)/u.test(entity.name))
+    )
+  );
+  if(!contextHorseEvidence&&!taskHorseEvidence)return null;
+
+  const selected=rejectsThongthai?HORSE_FACTS.pharadon:HORSE_FACTS.thongthai;
+  const rejected=rejectsThongthai?HORSE_FACTS.thongthai:HORSE_FACTS.pharadon;
+  const selectedBare=selected.name.replace(/^น้อง/u,'');
+  const selectedEntityId=rejectsThongthai
+    ? 'activity_asset:horse-pharadon'
+    : 'activity_asset:horse-thongthai';
+  const now=new Date();
+  const lines=[
+    `ได้ครับ งั้นตัด${rejected.name}ออก เหลือ${selected.name}ครับ`,
+    `ข้อมูลที่ยืนยันได้คือ ${selected.name}${selected.rideFeelTh} แต่ทองไทยยังไม่ใช้จุดนี้ฟันธงเรื่องความเหมาะสมเฉพาะคนครับ`,
+  ];
+  if(/กลัวตก|กลัวล้ม|มือใหม่|ไม่เคยขี่/u.test(text)){
+    lines.push('ถ้ากังวลเรื่องตกหรือยังไม่เคยขี่ ให้ทีมหน้างานช่วยดูความมั่นใจและความเหมาะสมก่อนขึ้นม้าครับ');
+  }
+  lines.push('ตอนนี้ยังเป็นแค่การเลือกไว้ ยังไม่ได้จองหรือส่งรายการครับ');
+  const message=lines.join('\n\n');
+
+  // Persist a consideration, not a transaction. This makes the correction
+  // survive later topic switches without manufacturing a booking task.
+  const nextContext=applyConversationContextUpdate(context,{
+    eventId,
+    channel,
+    userMessage:text,
+    assistantMessage:message,
+    activeDomain:'activity',
+    activeTopic:'horse_recommendation',
+    newEntities:[{
+      id:selectedEntityId,
+      type:'horse',
+      name:selectedBare,
+      domain:'activity',
+      source:'catalog',
+      canonical:true,
+    }],
+  },now);
+  nextContext.workingMemory={
+    ...nextContext.workingMemory,
+    currentTopic:'activity:horse_selection:consider',
+    consideredSelections:[
+      {
+        domain:'activity',
+        name:selectedBare,
+        entityId:selectedEntityId,
+        entityType:'horse',
+        status:'considering',
+        observedAt:now.toISOString(),
+      },
+      ...nextContext.workingMemory.consideredSelections.filter(selection=>
+        !(selection.domain==='activity'&&/(?:ทองไทย|ภาราดร)/u.test(selection.name))
+      ),
+    ].slice(0,6),
+    transactionCommitment:'none',
+  };
+  await persistConversationContext(guestDbId,nextContext);
+
+  // If an activity task already exists, keep its selected slot in sync.
+  // Never start a new booking task just because the customer is considering
+  // the other horse.
+  if(taskState.activeTask&&!isTerminalTaskStatus(taskState.activeTask.status)&&taskState.activeTask.domain==='activity'){
+    const active=mergeTaskSlots(taskState.activeTask,{
+      resourceCode:'activity-horse',
+      horseName:selectedBare,
+      assetSelection:selectedBare,
+    });
+    active.selectedEntities=[{
+      id:selectedEntityId,
+      type:'horse',
+      name:selectedBare,
+      domain:'activity',
+      source:'catalog',
+      canonical:true,
+    }];
+    active.commitmentIntent=false;
+    await persistTaskState(guestDbId,{...taskState,activeTask:active});
+  }
+
+  return {
+    message,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    agentStateUpdate:{activeTopic:'activity'},
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 const BOOKING_STATUS_READBACK_RE =
   /(?:ยังไม่ได้จอง.{0,20}(?:ใช่ไหม|ใช่มั้ย|หรือยัง|ไหม|มั้ย)|มี(?:รายการ)?จอง.{0,16}(?:ไหม|มั้ย|หรือยัง)|จองอะไร(?:ไว้)?.{0,12}(?:ไหม|มั้ย|หรือยัง)|จองไปหรือยัง|จองแล้วหรือยัง|ได้จอง.{0,12}หรือยัง)/u;
 
@@ -5791,7 +5982,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // same-turn constraint must not be reclassified as pre-existing memory
   // and steal cold-start local-food/service-mind routing.
   const hadDurableRestaurantConstraintBeforeTurn = hasDurableRestaurantConstraint(request);
-  const sameTurnPreferenceSignal = extractPreferenceSignal(request.message);
+  const sameTurnPreferenceSignal = extractGuestPreferenceSignal(request.message);
   await capturePreferenceSignals(guestDbId, request.message, {
     channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
     eventId: transportEventId,
@@ -6319,6 +6510,24 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // - bounded ConversationContext carrying a considered selection/task ref
   // owns the turn before read-only Agent Primary.
   // Prepare-only routing remains separately authorized and unchanged.
+  const directHorseAlternative = await directOtherHorseCorrectionResponse(
+    request,
+    guestDbId,
+    channel,
+    transportEventId,
+  );
+  if (directHorseAlternative) {
+    const polished = polishedResponse(directHorseAlternative, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
+
   const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
   const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
   const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
@@ -6361,6 +6570,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     if (cafeResponse) {
       const polished = polishedResponse(cafeResponse, channel);
       await persistBrainRuntime(guestDbId, channel, polished);
+      try {
+        const currentContext = await loadConversationContext(guestDbId);
+        const nextContext = applyConversationContextUpdate(currentContext, {
+          eventId: transportEventId,
+          channel,
+          userMessage: request.message,
+          assistantMessage: polished.message,
+          activeDomain: 'cafe',
+          activeTopic: 'cafe',
+        });
+        await persistConversationContext(guestDbId, nextContext);
+      } catch (error) {
+        console.error(
+          'THONGTHAI_CAFE_CONTEXT_MIRROR_ERROR',
+          error instanceof Error ? error.message.slice(0,180) : 'unknown',
+        );
+      }
       return coreResult(200, {
         message: polished.message,
         intent: polished.intent,
