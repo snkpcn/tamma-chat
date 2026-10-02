@@ -26,6 +26,10 @@ export type CommercialBoundaryDecision = {
    * contract before the 100% read-only Saved Agent, so planning/withholding/
    * resume/cancel cannot be flattened into ordinary chat. */
   routeToOneMindBeforePrimary: boolean;
+  /** Independent commercial veto. A MANAGE/CANCEL turn may still carry an
+   * explicit no-transaction constraint; preserving both dimensions avoids
+   * collapsing human task-control intent into a generic WITHHOLD bucket. */
+  withholdsExecution?: boolean;
   reason: string;
 };
 
@@ -184,27 +188,33 @@ export function classifyCommercialBoundarySemantic(
     };
   }
 
-  // Defense in depth and same-turn ordering: an explicit no-transaction
-  // constraint is the strongest commercial signal on the CURRENT turn. It
-  // must outrank correction/manage labels produced while revoking an earlier
-  // commitment ("จองเลย ... เดี๋ยวก่อน ยังไม่จอง").
-  if (noTransactionConstraint(meaning.constraints)) {
-    return {
-      mode:'WITHHOLD',
-      currentTurnCommit:false,
-      prepareEligible:false,
-      routeToOneMindBeforePrimary:true,
-      reason:'semantic_no_transaction_constraint',
-    };
-  }
+  const semanticWithholdsExecution = noTransactionConstraint(meaning.constraints);
 
+  // Preserve the HUMAN intent first: cancel/correct/modify manages existing
+  // conversational/commercial state. The independent withholdsExecution bit
+  // records that this same turn explicitly forbids execution.
   if (turn.action === 'cancel' || meaning.userGoal === 'manage_existing') {
     return {
       mode:'MANAGE',
       currentTurnCommit:false,
       prepareEligible:false,
       routeToOneMindBeforePrimary:true,
+      withholdsExecution:semanticWithholdsExecution,
       reason:'manage_existing_not_fresh_consent',
+    };
+  }
+
+  // For a non-management turn, explicit no-transaction is the boundary mode
+  // itself. This also defeats a contradictory model action label such as
+  // action='book' + constraints=['no_transaction'].
+  if (semanticWithholdsExecution) {
+    return {
+      mode:'WITHHOLD',
+      currentTurnCommit:false,
+      prepareEligible:false,
+      routeToOneMindBeforePrimary:true,
+      withholdsExecution:true,
+      reason:'semantic_no_transaction_constraint',
     };
   }
 
