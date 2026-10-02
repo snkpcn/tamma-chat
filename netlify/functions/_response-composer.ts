@@ -315,15 +315,29 @@ export function parseComposedResponse(raw: string, input: ResponseComposerInput)
 const SUCCESS_CLAIM_RE = /(?:จอง(?:เรียบร้อย|สำเร็จ|แล้ว)|ยืนยันการจองแล้ว|ส่ง(?:คำขอ|รายการ|ออเดอร์)เข้าระบบแล้ว|สั่ง(?:เรียบร้อย|สำเร็จ|แล้ว)|ชำระ(?:แล้ว|สำเร็จ)|ใช้สิทธิ์(?:แล้ว|สำเร็จ)|\b(?:booked|reserved|confirmed|submitted|ordered|paid|redeemed)\b)/iu;
 const CONFIRMED_CLAIM_RE = /(?:ยืนยัน(?:การ)?จองแล้ว|ยืนยันแล้ว|\bconfirmed\b)/iu;
 
+function removeExplicitlyNegatedEnglishOperationalClaims(message:string):string {
+  // The success guard is deliberately lexical and strict, but a truthful
+  // state-readback such as "Nothing has been submitted yet" must not be
+  // mistaken for a success claim merely because it contains the token
+  // "submitted". Strip only tightly-bounded, explicit English negations
+  // before applying the existing positive-claim regex. This is one-way:
+  // affirmative "submitted/booked/confirmed" wording remains fully guarded.
+  return message
+    .replace(/\b(?:nothing|no\s+(?:request|booking|order|payment))\b[^.!?\n]{0,80}\b(?:booked|reserved|confirmed|submitted|ordered|paid|redeemed)\b/giu,'')
+    .replace(/\b(?:has|have|had|is|are|was|were)\s+not\s+(?:been\s+)?(?:booked|reserved|confirmed|submitted|ordered|paid|redeemed)\b/giu,'')
+    .replace(/\bnot\s+(?:yet\s+)?(?:booked|reserved|confirmed|submitted|ordered|paid|redeemed)\b/giu,'');
+}
+
 export function assertOperationalClaimSafety(
   message: string,
   outcome: VerifiedOperationalOutcome | null | undefined,
 ): void {
-  if (!SUCCESS_CLAIM_RE.test(message)) return;
+  const positiveClaimText=removeExplicitlyNegatedEnglishOperationalClaims(message);
+  if (!SUCCESS_CLAIM_RE.test(positiveClaimText)) return;
   if (!outcome?.executed || !outcome.success) {
     throw new ResponseCompositionError('composer_false_operational_success_claim');
   }
-  if (CONFIRMED_CLAIM_RE.test(message)) {
+  if (CONFIRMED_CLAIM_RE.test(positiveClaimText)) {
     const status = String(outcome.status ?? '').toLowerCase();
     if (!['confirmed', 'completed', 'paid', 'settled'].includes(status)) {
       throw new ResponseCompositionError('composer_false_confirmation_claim');
