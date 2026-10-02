@@ -90,7 +90,7 @@
         <div><label data-account-i18n="subdistrict">ตำบล / แขวง</label><input id="subdistrict" maxlength="120"></div>
         <div><label data-account-i18n="district">อำเภอ / เขต</label><input id="district" maxlength="120"></div>
         <div><label data-account-i18n="province">จังหวัด</label><input id="province" maxlength="80"></div>
-        <div><label data-account-i18n="postal_code">รหัสไปรษณีย์</label><input id="postalCode" inputmode="text" maxlength="20"></div>
+        <div><label data-account-i18n="postal_code">รหัสไปรษณีย์</label><input id="postalCode" inputmode="numeric" maxlength="5"></div>
         <div><label data-account-i18n="delivery_instructions">หมายเหตุถึงขนส่ง</label><input id="deliveryInstructions" maxlength="300" placeholder="เช่น โทรก่อนถึง ฝาก รปภ." data-account-i18n-placeholder="delivery_ph"></div>
       </div>
       <label style="margin-top:12px;display:flex;gap:9px;align-items:center;font-weight:650"><input id="addressDefault" type="checkbox" style="width:18px;height:18px"><span data-account-i18n="default_address">ตั้งเป็นที่อยู่หลัก</span></label>
@@ -108,6 +108,7 @@
   </section>
 </main>
 <script src="assets/scripts/account-i18n.js"></script>
+<script src="assets/scripts/otop-product-translations.js"></script>
 <script>
 const SUPABASE_URL='https://upaokrprawzhgzeqsdke.supabase.co';
 const SUPABASE_KEY='sb_publishable_RhUfQ8ZqUx9PYQWaEvV6Yw_Z8oB5zN_';
@@ -118,6 +119,20 @@ const $=id=>document.getElementById(id);
 const at=(key,vars={})=>window.AccountI18n?.t(key,vars)||key;
 const accountLocale=()=>window.AccountI18n?.locale?.()||'th-TH';
 const accountLang=()=>window.AccountI18n?.lang?.()||'th';
+const ACCOUNT_OTOP_CATALOG_BY_SKU={
+  'OTOP-BK-001':'chaiyaphum-otop-001','OTOP-BK-002':'chaiyaphum-otop-002',
+  'OTOP-NB-003':'chaiyaphum-otop-003','OTOP-NBD-004':'chaiyaphum-otop-004',
+  'OTOP-CT-005':'chaiyaphum-otop-005','OTOP-CY-006':'chaiyaphum-otop-006',
+  'OTOP-CY-007':'chaiyaphum-otop-007','OTOP-CY-008':'chaiyaphum-otop-008',
+  'OTOP-CY-009':'chaiyaphum-otop-009','OTOP-CY-010':'chaiyaphum-otop-010'
+};
+function localizedOtopName(product){
+  const original=product?.name||product?.sku||at('product');
+  if(accountLang()==='th')return original;
+  const catalogId=ACCOUNT_OTOP_CATALOG_BY_SKU[String(product?.sku||'')];
+  if(!catalogId)return original;
+  return window.OTOP_PRODUCT_TRANSLATIONS?.get?.(catalogId,accountLang(),{})?.name||original;
+}
 function authSession(){try{return JSON.parse(localStorage.getItem('tamma_auth_session')||'null')}catch{return null}}
 function storeAuth(data){const access=data.access_token||data.session?.access_token;const refresh=data.refresh_token||data.session?.refresh_token;if(!access)return false;localStorage.setItem('tamma_auth_session',JSON.stringify({access_token:access,refresh_token:refresh||null,expires_at:data.expires_at||data.session?.expires_at||Math.floor(Date.now()/1000)+3600}));return true}
 function token(){return authSession()?.access_token||''}
@@ -145,7 +160,7 @@ function render(account){
   const bookings=Array.isArray(account.bookings)?account.bookings:[]; $('bookingCount').textContent=at('items_count',{count:bookings.length});
   if(!bookings.length)empty($('bookings'),at('no_bookings'));else $('bookings').innerHTML=bookings.map(x=>{const serviceKey={restaurant:'service_restaurant',stay:'service_stay',activity:'service_activity'}[x.service_type];const party=x.party_size?at('party_count',{count:x.party_size}):'';const qty=x.quantity>1?at('quantity_units',{count:x.quantity}):'';return `<div class="item"><div class="item-top"><div class="code">${esc(x.booking_code)}</div><span class="badge">${esc(statusLabel(x.status))}</span></div><div class="meta">${esc(serviceKey?at(serviceKey):x.service_type)} · ${esc(thTime(x.start_at))}<br>${esc(party)}${party&&qty?' · ':''}${esc(qty)}</div></div>`}).join('');
   const orders=Array.isArray(account.orders)?account.orders:[]; $('orderCount').textContent=at('items_count',{count:orders.length});
-  if(!orders.length)empty($('orders'),at('no_orders'));else $('orders').innerHTML=orders.map(x=>{const items=Array.isArray(x.items)?x.items:[];const events=Array.isArray(x.shipping_events)?x.shipping_events:[];const trackingUrl=safeHref(x.tracking_url);const tracking=x.tracking_number?`<div class="meta"><b>${esc(x.carrier_name||at('carrier'))}</b> · ${esc(x.tracking_number)}</div>${trackingUrl?`<a class="tracking" href="${esc(trackingUrl)}" target="_blank" rel="noopener">${esc(at('track_parcel'))}</a>`:''}`:'';const fmt=n=>Number(n||0).toLocaleString(accountLocale());return `<div class="item"><div class="item-top"><div><div class="code">${esc(x.order_code)}</div><div class="money">฿${fmt(x.total_amount)}</div></div><span class="badge">${esc(x.fulfillment_type==='shipping'?shippingLabel(x.shipping_status):statusLabel(x.status))}</span></div><div class="order-items">${items.map(i=>`${esc(i.otop_products?.name||i.otop_products?.sku||at('product'))} × ${esc(i.quantity)}`).join('<br>')}</div><div class="meta">${esc(at('subtotal'))} ฿${fmt(x.subtotal_amount||x.total_amount)} · ${esc(at('shipping_fee'))} ฿${fmt(x.shipping_fee)}<br>${esc(at('payment'))}: ${esc(paymentLabel(x.payment?.status))}</div>${x.shipping_address?`<div class="meta"><b>${esc(at('ship_to'))}:</b> ${esc(x.shipping_recipient_name||'')} · ${esc(x.shipping_phone||'')}<br>${esc(x.shipping_address)}</div>`:''}${tracking}${events.length?`<div class="timeline">${events.map(e=>`<div class="event"><b>${esc(shippingLabel(e.status))}</b> · ${esc(thTime(e.created_at))}<br>${esc(e.customer_message||'')}</div>`).join('')}</div>`:''}</div>`}).join('');
+  if(!orders.length)empty($('orders'),at('no_orders'));else $('orders').innerHTML=orders.map(x=>{const items=Array.isArray(x.items)?x.items:[];const events=Array.isArray(x.shipping_events)?x.shipping_events:[];const trackingUrl=safeHref(x.tracking_url);const tracking=x.tracking_number?`<div class="meta"><b>${esc(x.carrier_name||at('carrier'))}</b> · ${esc(x.tracking_number)}</div>${trackingUrl?`<a class="tracking" href="${esc(trackingUrl)}" target="_blank" rel="noopener">${esc(at('track_parcel'))}</a>`:''}`:'';const fmt=n=>Number(n||0).toLocaleString(accountLocale());return `<div class="item"><div class="item-top"><div><div class="code">${esc(x.order_code)}</div><div class="money">฿${fmt(x.total_amount)}</div></div><span class="badge">${esc(x.fulfillment_type==='shipping'?shippingLabel(x.shipping_status):statusLabel(x.status))}</span></div><div class="order-items">${items.map(i=>`${esc(localizedOtopName(i.otop_products))} × ${esc(i.quantity)}`).join('<br>')}</div><div class="meta">${esc(at('subtotal'))} ฿${fmt(x.subtotal_amount||x.total_amount)} · ${esc(at('shipping_fee'))} ฿${fmt(x.shipping_fee)}<br>${esc(at('payment'))}: ${esc(paymentLabel(x.payment?.status))}</div>${x.shipping_address?`<div class="meta"><b>${esc(at('ship_to'))}:</b> ${esc(x.shipping_recipient_name||'')} · ${esc(x.shipping_phone||'')}<br>${esc(x.shipping_address)}</div>`:''}${tracking}${events.length?`<div class="timeline">${events.map(e=>`<div class="event"><b>${esc(shippingLabel(e.status))}</b> · ${esc(thTime(e.created_at))}<br>${esc(e.customer_message||'')}</div>`).join('')}</div>`:''}</div>`}).join('');
   const inquiries=Array.isArray(account.inquiries)?account.inquiries:[]; $('inquiryCount').textContent=at('items_count',{count:inquiries.length});
   if(!inquiries.length)empty($('inquiries'),at('no_inquiries'));else $('inquiries').innerHTML=inquiries.map(x=>`<div class="item"><div class="item-top"><div class="code">${esc(x.inquiry_code)}</div><span class="badge">${esc(statusLabel(x.status))}</span></div><div class="meta">${esc(x.question)}</div>${x.response_note?'<div class="meta"><b>'+esc(at('team'))+':</b> '+esc(x.response_note)+'</div>':''}</div>`).join('');
 }
