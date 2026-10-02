@@ -44,7 +44,7 @@ begin
       and e.match_status in ('unmatched','ambiguous')
       and e.extraction_confidence>=0.80
       and e.evidence_type in ('purchase_receipt','expense_receipt','transfer_slip')
-    order by e.created_at.asc
+    order by e.created_at ASC
   loop
     v_amount:=case
       when coalesce(ev.extracted_data->>'amount_total','') ~ '^\d+(\.\d+)?$'
