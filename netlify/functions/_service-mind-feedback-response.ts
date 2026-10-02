@@ -15,6 +15,7 @@ const BUSINESS_UNIT_LABEL_TH: Record<BusinessUnit, string> = {
   activity: 'กิจกรรม',
   stay: 'ที่พัก',
   cafe: 'คาเฟ่',
+  otop: 'OTOP/สินค้าชุมชน',
   membership: 'ระบบสมาชิก',
   system: 'ระบบทองไทย',
   general: 'ทำมา-ชาติ',
