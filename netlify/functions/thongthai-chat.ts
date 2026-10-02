@@ -66,13 +66,18 @@ import {
   type RestaurantPreorderDraft,
   type RestaurantProposedSetState,
 } from './_restaurant-preorder-dialog';
-import { processThongthaiOneMindTurnResilient, isTrustedZeroCostFactLookup } from './_thongthai-one-mind-orchestrator';
+import {
+  processThongthaiOneMindTurnResilient,
+  isTrustedZeroCostFactLookup,
+  isShortStandaloneConceptCandidate,
+} from './_thongthai-one-mind-orchestrator';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { processOneMindCustomerTurn, isTrustedBoundedNoTransactionContinuation } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import { runThongthaiAgentPrimaryTurn } from './_thongthai-agent-session';
 import { executeThongthaiTransactionTool } from './_thongthai-agent-transactions';
 import { runPrepareOnlyMultiVerticalFastPath } from './_thongthai-prepare-fastpath-v2';
+import { isPhase3SemanticLearningCandidate } from './_semantic-concept-memory';
 import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
@@ -5177,13 +5182,19 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const preserveVerifiedLocationBeforeSupervision = !hasExplicitTransactionIntent(request.message)
     && classifyLocalConciergeQuestion(request.message)?.category === 'location';
 
+  const phase3SemanticLearningEligible = !explicitTransactionIntent
+    && topLevelSemanticIntent !== 'WEATHER_REQUEST'
+    && !preserveVerifiedLocationBeforeSupervision
+    && isShortStandaloneConceptCandidate(request.message)
+    && isPhase3SemanticLearningCandidate(request.message);
+
   // Thongthai Saved-Agent production routing.
   //
   // Ordinary turns follow the proven read-only rollout. Explicit transaction
   // turns may enter only through the separate prepare-only canary. In that
   // mode the Agent may persist a review draft but cannot cross the commit
   // boundary. Weather/location stay on their established paths.
-  const readOnlyPrimaryAgentEligible = shouldUseThongthaiAgentPrimary({
+  const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible && shouldUseThongthaiAgentPrimary({
     guestKey: request.guestId,
     guestDbId,
     channel,
@@ -5336,8 +5347,11 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         && oneMind.turn.semanticTurn.semanticSource === 'deterministic_fallback'
         && oneMind.response.mode === 'deterministic'
         && isTrustedBoundedNoTransactionContinuation(oneMind.turn);
+      const learnedSemanticReady = oneMind.status === 'composed'
+        && oneMind.turn.semanticTurn.semanticSource === 'semantic_concept_memory';
       const supervisedMeaningReady = (oneMind.status === 'composed'
         && oneMind.turn.semanticTurn.semanticSource === 'openai_supervisor')
+        || learnedSemanticReady
         || trustedZeroCostReady
         || trustedBoundedNoTransactionReady;
       if (supervisedMeaningReady) {
