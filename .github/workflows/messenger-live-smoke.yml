@@ -1,0 +1,21 @@
+name: Messenger Live Production Smoke
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  messenger-live-smoke:
+    if: contains(github.event.pull_request.title, '[run messenger prod]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run Messenger-style production smoke
+        run: npx tsx scripts/run-messenger-live-smoke.ts
