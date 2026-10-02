@@ -689,6 +689,7 @@ export async function processOneMindCustomerTurn(
     // copy the customer actually reads.
     semanticTurn:turn.dialogSemanticTurn,
     conversationContext:turn.conversationContextAfter,
+    durableConstraints:input.durableMemory?.constraints ?? [],
     dialogDecision:turn.dialogDecision,
     knowledgeBundles:turn.groundedKnowledge,
     degradation:turn.knowledgeDegradation,
