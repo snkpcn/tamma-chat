@@ -2,43 +2,50 @@ const PRODUCTION_URL=process.env.THONGTHAI_PRODUCTION_URL
   ?? 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
 
 const FALSE_SUCCESS=/(?:จองสำเร็จ|ยืนยันการจองแล้ว|เลขที่จอง|สั่งซื้อสำเร็จ|เลขออเดอร์|ส่งคำถามแล้ว|เลขที่ติดตาม|ชำระเงินสำเร็จ|เตรียมรายการไว้แล้วครับ)/u;
+const GENERIC_FALLBACK=/(?:ระบบจองของทองไทยตอบช้ากว่าปกติ|คิดช้ากว่าปกติ|ตอบเรื่องนี้ให้แม่นไม่ได้|ลองส่งอีกครั้งในอีกสักครู่)/u;
 
 const cases=[
   {
     id:'ask-booking-ability',
-    guestId:'f4d40001-0000-4f4d-8f4d-000000000601',
-    eventId:'phase4-prod-ask-booking-a1',
+    guestId:'f4e40001-0000-4f4e-8f4e-000000000701',
+    eventId:'phase4-prod2-ask-booking-a1',
     message:'จองได้ไหมครับ',
+    required:/จอง|รายละเอียด|บริการ/u,
   },
   {
     id:'ask-confirm-how',
-    guestId:'f4d40002-0000-4f4d-8f4d-000000000602',
-    eventId:'phase4-prod-ask-confirm-a1',
+    guestId:'f4e40002-0000-4f4e-8f4e-000000000702',
+    eventId:'phase4-prod2-ask-confirm-a1',
     message:'ยืนยันการจองต้องทำยังไงครับ',
+    required:/ยืนยัน|จอง|ขั้นตอน|รายละเอียด/u,
   },
   {
     id:'consider-selection',
-    guestId:'f4d40003-0000-4f4d-8f4d-000000000603',
-    eventId:'phase4-prod-consider-selection-a1',
+    guestId:'f4e40003-0000-4f4e-8f4e-000000000703',
+    eventId:'phase4-prod2-consider-selection-a1',
     message:'เอาภาราดรครับ ยังไม่จองนะ',
+    required:/ภาราดร|ม้า|ยังไม่จอง/u,
   },
   {
     id:'withhold-late',
-    guestId:'f4d40004-0000-4f4d-8f4d-000000000604',
-    eventId:'phase4-prod-withhold-late-a1',
+    guestId:'f4e40004-0000-4f4e-8f4e-000000000704',
+    eventId:'phase4-prod2-withhold-late-a1',
     message:'จองเลยครับ แต่เดี๋ยวก่อน ยังไม่จอง',
+    required:/ยังไม่|ไม่ดำเนินการ|ไม่จอง/u,
   },
   {
     id:'bare-confirm',
-    guestId:'f4d40005-0000-4f4d-8f4d-000000000605',
-    eventId:'phase4-prod-bare-confirm-a1',
+    guestId:'f4e40005-0000-4f4e-8f4e-000000000705',
+    eventId:'phase4-prod2-bare-confirm-a1',
     message:'ยืนยันครับ',
+    required:/ยืนยัน|เรื่องไหน|อะไร/u,
   },
   {
     id:'order-how',
-    guestId:'f4d40006-0000-4f4d-8f4d-000000000606',
-    eventId:'phase4-prod-order-how-a1',
+    guestId:'f4e40006-0000-4f4e-8f4e-000000000706',
+    eventId:'phase4-prod2-order-how-a1',
     message:'ถ้าจะสั่งอาหารต้องทำยังไงครับ',
+    required:/สั่ง|อาหาร|เมนู|ขั้นตอน/u,
   },
 ];
 
@@ -69,10 +76,16 @@ async function send(c){
     const body=await res.json().catch(()=>({}));
     const message=typeof body.message==='string'?body.message:'';
     const falseSuccess=FALSE_SUCCESS.test(message);
-    const pass=res.status===200 && message.trim().length>0 && !falseSuccess;
+    const genericFallback=GENERIC_FALLBACK.test(message);
+    const missingRequired=c.required instanceof RegExp && !c.required.test(message);
+    const pass=res.status===200
+      && message.trim().length>0
+      && !falseSuccess
+      && !genericFallback
+      && !missingRequired;
     const row={
       id:c.id,eventId,httpStatus:res.status,latencyMs:Date.now()-started,
-      response:message.slice(0,500),falseSuccess,pass,
+      response:message.slice(0,500),falseSuccess,genericFallback,missingRequired,pass,
     };
     console.log(JSON.stringify(row));
     if(pass)return row;
@@ -86,18 +99,20 @@ async function main(){
   const results=[];
   for(const c of cases) results.push(await send(c));
 
-  const resumeGuest='f4d40007-0000-4f4d-8f4d-000000000607';
+  const resumeGuest='f4e40007-0000-4f4e-8f4e-000000000707';
   const first=await send({
     id:'resume-seed',
     guestId:resumeGuest,
-    eventId:'phase4-prod-resume-seed-a1',
+    eventId:'phase4-prod2-resume-seed-a1',
     message:'เอาภาราดรไว้ก่อน ยังไม่จองครับ',
+    required:/ภาราดร|ม้า|ยังไม่จอง/u,
   });
   const second=await send({
     id:'resume-existing',
     guestId:resumeGuest,
-    eventId:'phase4-prod-resume-existing-a1',
+    eventId:'phase4-prod2-resume-existing-a1',
     message:'กลับไปเรื่องจองต่อครับ แต่ยังไม่จองนะ',
+    required:/ยังไม่|ไม่ดำเนินการ|ไม่จอง/u,
   });
   results.push(first,second);
 
