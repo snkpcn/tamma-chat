@@ -4,7 +4,6 @@ import { resolveKnowledge, type GroundedFact, type KnowledgeNeed, type Knowledge
 import type { SemanticDomain } from './_semantic-interpreter';
 import { THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS, THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 import { restaurantMenuAdvice } from './_restaurant-sot';
-import { listCafeMasterMenu, listCafeBranchModifiers } from './_cafe-sot';
 
 export type ThongthaiAgentFunctionTool = {
   type: 'function';
@@ -43,14 +42,6 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
     parameters: objectSchema({
       query: { type: 'string', description: 'Menu-name keyword.' },
       allergen: { type: 'string', description: 'Optional allergen key when checking this named item.' },
-    }),
-  },
-  {
-    type: 'function',
-    name: 'get_cafe_menu',
-    description: 'Read the canonical live Inthanin core menu for the Tad Tone branch, including active drink names, categories, hot/iced/frappe price slots, and active branch modifiers such as oat milk. Use this for cafe menu facts and for grounding cafe recommendations. Read-only.',
-    parameters: objectSchema({
-      query: { type: 'string', description: 'Optional menu-name/code keyword when the customer asks about one specific drink. Leave empty for recommendation or menu discovery.' },
     }),
   },
   {
@@ -242,55 +233,6 @@ async function executeRestaurantRecommendation(args: JsonObject): Promise<string
   });
 }
 
-async function executeCafeMenu(args: JsonObject): Promise<string> {
-  const [items, modifiers] = await Promise.all([
-    listCafeMasterMenu(),
-    listCafeBranchModifiers('inthanin_tadtone'),
-  ]);
-  const query = normalizeText(args.query);
-  const compact = query.replace(/\s+/g, '');
-  const selected = items
-    .filter(item => item.active)
-    .filter(item => {
-      if (!query) return true;
-      const haystacks = [item.code, item.name_th, item.name_en]
-        .map(value => normalizeText(value));
-      return haystacks.some(value =>
-        value.includes(query)
-        || value.replace(/\s+/g, '').includes(compact)
-      );
-    })
-    .slice(0, query ? 8 : 40);
-
-  return JSON.stringify({
-    ok:selected.length > 0,
-    branch:'inthanin_tadtone',
-    items:selected.map(item => ({
-      code:item.code,
-      category:item.category,
-      name_th:item.name_th,
-      name_en:item.name_en,
-      slots:item.slots
-        .filter(slot => slot.active)
-        .sort((a,b) => a.sort_order-b.sort_order)
-        .map(slot => ({
-          code:slot.slot_code,
-          label_th:slot.label_th,
-          label_en:slot.label_en,
-          price:slot.price,
-        })),
-    })),
-    modifiers:modifiers.filter(modifier => modifier.active).map(modifier => ({
-      code:modifier.modifier_code,
-      name_th:modifier.name_th,
-      name_en:modifier.name_en,
-      surcharge:modifier.surcharge,
-      applies_to:modifier.applies_to,
-      styles:modifier.styles,
-    })),
-  });
-}
-
 export async function executeThongthaiReadOnlyTool(
   name: string,
   rawArgs: unknown,
@@ -298,7 +240,6 @@ export async function executeThongthaiReadOnlyTool(
 ): Promise<string> {
   const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
   if (name === 'recommend_restaurant_menu') return executeRestaurantRecommendation(args);
-  if (name === 'get_cafe_menu') return executeCafeMenu(args);
   const adapters = buildRealKnowledgeSourceAdapters(context.channel, {
     guestDbId: context.guestDbId,
     environment: context.environment ?? 'live',
