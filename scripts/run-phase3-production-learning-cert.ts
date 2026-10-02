@@ -45,25 +45,25 @@ async function send(label,guestId,message,eventBase){
 async function main(){
   const first=await send(
     'pace-first-confirm-and-learn',
-    'd5d5d5d5-0001-4d5d-8d5d-000000000021',
-    'ไม่อยากเหนื่อยมากครับ',
-    'phase3-prod3-pace-first'
+    'd6d6d6d6-0001-4d6d-8d6d-000000000031',
+    'ขอแบบชิลๆครับ',
+    'phase3-prod4-pace-first'
   );
 
   await new Promise(resolve=>setTimeout(resolve,2000));
 
   const replay=await send(
     'pace-cross-customer-exact-replay',
-    'd5d5d5d5-0002-4d5d-8d5d-000000000022',
-    'ไม่อยากเหนื่อยมากนะครับ',
-    'phase3-prod3-pace-replay'
+    'd6d6d6d6-0002-4d6d-8d6d-000000000032',
+    'ขอแบบชิลๆนะครับ',
+    'phase3-prod4-pace-replay'
   );
 
   const negative=await send(
     'transaction-negative-control',
-    'd5d5d5d5-0003-4d5d-8d5d-000000000023',
+    'd6d6d6d6-0003-4d6d-8d6d-000000000033',
     'จองเลยครับ',
-    'phase3-prod3-transaction-negative'
+    'phase3-prod4-transaction-negative'
   );
 
   console.log(JSON.stringify({
