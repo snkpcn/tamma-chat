@@ -72,6 +72,18 @@ export function detectFacebookLanguage(text: string): 'th' | 'en' | 'zh' | 'lo' 
   return 'en';
 }
 
+/**
+ * Messenger Page automation already owns the first-contact greeting in
+ * production. Suppress only a bare social hello here so Thongthai does not
+ * create a second greeting bubble after Meta's own welcome. Any hello that
+ * also asks for business help is NOT suppressed.
+ */
+export function isFacebookPageGreetingOnly(text: string): boolean {
+  const value=String(text??'').trim();
+  if(!value || value.length>40) return false;
+  return /^(?:สวัสดี|หวัดดี|ดีครับ|ดีคับ|ดีค่ะ|ดีค่า|ดีจ้า|hello|hi|hey)(?:\s*(?:ครับ|คับ|ค่ะ|คะ|จ้า|นะ))?[!?.ๆ\s]*$/iu.test(value);
+}
+
 export function verifyFacebookSignature(rawBody: string, signatureHeader: string | null, appSecret: string): boolean {
   if (!signatureHeader || !appSecret) return false;
   const match = /^sha256=([0-9a-f]{64})$/i.exec(signatureHeader.trim());

@@ -6,6 +6,7 @@ import {
   extractFacebookTextEvents,
   facebookGuestId,
   findThongthaiPersonaId,
+  isFacebookPageGreetingOnly,
   splitFacebookText,
   verifyFacebookSignature,
 } from './_facebook-messenger-adapter';
@@ -302,6 +303,14 @@ export default async (req: Request, _context: Context) => {
 
     if (await alreadyProcessedFacebookEvent(guestId, event.eventId)) {
       console.log('FACEBOOK_DUPLICATE_EVENT_SKIPPED', JSON.stringify({
+        guest: guestId.slice(0,8),
+        eventId: event.eventId.slice(0,80),
+      }));
+      continue;
+    }
+
+    if (isFacebookPageGreetingOnly(event.text)) {
+      console.log('FACEBOOK_PAGE_GREETING_OWNS_TURN', JSON.stringify({
         guest: guestId.slice(0,8),
         eventId: event.eventId.slice(0,80),
       }));

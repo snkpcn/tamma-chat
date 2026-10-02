@@ -1888,6 +1888,42 @@ function cafeMenuListMessage(items:readonly CafeMasterMenuItem[]):string{
   return lines.join('\n');
 }
 
+function cafeRecommendationMessage(
+  request:BrainRequest,
+  items:readonly CafeMasterMenuItem[],
+):string{
+  const active=items.filter(item=>item.active);
+  const preferredCodes=/แฟน|คู่รัก|couple/iu.test(request.message)
+    ? ['cafe_latte','caramel_macchiato','uji_pure_matcha','thai_tea_latte']
+    : ['cafe_latte','americano','thai_tea_latte','uji_pure_matcha'];
+
+  const picked:CafeMasterMenuItem[]=[];
+  for(const code of preferredCodes){
+    const item=active.find(candidate=>candidate.code===code);
+    if(item&&!picked.includes(item))picked.push(item);
+    if(picked.length>=3)break;
+  }
+  if(picked.length<3){
+    for(const item of active){
+      if(!picked.includes(item))picked.push(item);
+      if(picked.length>=3)break;
+    }
+  }
+
+  const names=picked.slice(0,3).map(item=>item.name_th);
+  if(!names.length)return 'ตอนนี้ทองไทยยังคัดเมนูแนะนำให้ไม่ได้ครับ';
+
+  const intro=/แฟน|คู่รัก|couple/iu.test(request.message)
+    ? 'ถ้าไปกับแฟน ทองไทยคัดให้สั้น ๆ ก่อนครับ'
+    : 'ถ้าอยากให้แนะนำแบบเลือกง่าย ๆ ทองไทยคัดให้ก่อนครับ';
+  return [
+    intro,
+    names.join(' · '),
+    '',
+    'ชอบกาแฟหรือไม่กาแฟ แล้วเอาหวานประมาณไหนครับ เดี๋ยวทองไทยคัดให้เหลือ 2 ตัว',
+  ].join('\n');
+}
+
 export function cafeGroundedAnswer(
   request:BrainRequest,
   items:readonly CafeMasterMenuItem[],
@@ -1897,6 +1933,8 @@ export function cafeGroundedAnswer(
   const item=resolveCafeMenuItem(message,items);
   const isMenuDiscovery=/(?:มีเมนูอะไร|เมนูมีอะไร|มีอะไรบ้าง|มีเครื่องดื่มอะไร|ขอเมนู)/u.test(message)
     || /(?:what.*menu|drink.*menu)/iu.test(message);
+  const isRecommendationAsk=/(?:แนะนำ|เลือกให้|ตัวไหนดี|อะไรดี|recommend)/iu.test(message);
+  const isFullListAsk=/(?:ทั้งหมด|ทุกเมนู|ขอเมนู|เมนูทั้งหมด|full\s*menu|all\s*menu)/iu.test(message);
   const isPriceAsk=/(?:ราคา|เท่าไหร่|เท่าไร|กี่บาท|how\s*much|price)/iu.test(message);
   const isStyleAsk=/(?:มีแบบไหน|แบบไหนบ้าง|ร้อน|เย็น|ปั่น|hot|iced|frappe)/iu.test(message);
   const asksStock=/(?:สต็อก|หมดไหม|มีของไหม|พร้อมขายไหม|stock)/iu.test(message);
@@ -1908,6 +1946,9 @@ export function cafeGroundedAnswer(
     };
   }
 
+  if(!item&&isRecommendationAsk&&!isFullListAsk){
+    return {answer:cafeRecommendationMessage(request,items),grounded:true};
+  }
   if(!item&&isMenuDiscovery){
     return {answer:cafeMenuListMessage(items),grounded:true};
   }
