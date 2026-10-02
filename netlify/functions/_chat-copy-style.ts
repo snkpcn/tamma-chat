@@ -52,6 +52,21 @@ export function enforceThongthaiMaleThaiParticles(input: string): string {
     .replace(/คะ(?![\u0E00-\u0E7F])/gu, 'ครับ');
 }
 
+function humanizeInternalJargon(value: string): string {
+  return value
+    .replace(/\bMenu\s+Master\b/giu, 'รายการเมนู')
+    .replace(/\bPrice\s+Slot\b/giu, 'ราคาแต่ละแบบ')
+    .replace(/\bSlot\s+จริง\b/giu, 'ราคาแต่ละแบบ')
+    .replace(/\bCore\s+(?=ของ|เมนู|menu)/giu, 'หลัก ')
+    .replace(/\bsource[- ]of[- ]truth\b/giu, 'ข้อมูลหลัก')
+    .replace(/จากข้อมูลล่าสุด\s*\((?:openweathermap|weather[^)]*)\)\s*:?/giu, 'ตอนนี้')
+    .replace(/ข้อมูลที่ยืนยันในระบบตอนนี้/gu, 'ข้อมูลที่มีตอนนี้')
+    .replace(/ข้อมูลที่ยืนยันในระบบ/gu, 'ข้อมูลที่เช็กได้')
+    .replace(/ที่ยืนยันในระบบตอนนี้/gu, 'ที่มีตอนนี้')
+    .replace(/ที่ยืนยันในระบบ/gu, 'ที่เช็กได้')
+    .replace(/ใน\s*Master\b/giu, 'ในเมนู');
+}
+
 function plainInlineMarkdown(value: string): string {
   return value
     .replace(/\*\*(.*?)\*\*/gs, '$1')
@@ -131,7 +146,7 @@ export function polishCustomerMessage(
   input: string,
   channel: CustomerChatChannel,
 ): string {
-  const normalized = enforceThongthaiMaleThaiParticles(String(input ?? ''))
+  const normalized = humanizeInternalJargon(enforceThongthaiMaleThaiParticles(String(input ?? '')))
     .replace(/(?:ตอนนี้)?ความชอบที่จำไว้คือ\s*ยังไม่ได้(?:ล็อก|เลือก)รสชาติหรือเมนูครับ/gu, 'ตอนนี้คุณยังไม่ได้บอกรสชาติหรือเมนูที่ชอบไว้ครับ')
     .replace(/\r\n?/g, '\n')
     .replace(/\u00a0/g, ' ')
