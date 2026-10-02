@@ -1912,7 +1912,7 @@ export function cafeGroundedAnswer(
     }
     if(slot&&!modifier.styles.includes(slot.slot_code)){
       return {
-        answer:`${item.name_th} ${slot.label_th} ตอนนี้ไม่ได้เปิดตัวเลือก ${modifier.name_th} ในระบบครับ`,
+        answer:`${item.name_th} ${slot.label_th} ตอนนี้ไม่ได้เปิดตัวเลือก${modifier.name_th}ในระบบครับ`,
         grounded:true,
       };
     }
@@ -2009,7 +2009,7 @@ async function deterministicCafeResponse(
   } else if(items.length){
     answer=cafeMenuListMessage(items);
   } else {
-    answer='ตอนนี้ทองไทยยังโหลด Menu Master ของ Inthanin ตาดโตนไม่ได้ครับ เลยไม่ขอเดาเมนูหรือราคาให้ผิดครับ';
+    answer='ตอนนี้ทองไทยโหลด Menu Master ของคาเฟ่ Inthanin ตาดโตนไม่ได้ครับ จึงยังไม่มีข้อมูลยืนยันเรื่องเมนูหรือราคาในรอบนี้ และไม่ขอเดาชื่อเมนูให้ผิดครับ ถ้าอยากได้กาแฟ ชา หรือเครื่องดื่มไม่กาแฟ บอกแนวไว้ก่อนได้ครับ';
   }
 
   return {
