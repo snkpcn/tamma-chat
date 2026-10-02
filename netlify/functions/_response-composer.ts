@@ -422,6 +422,52 @@ const FIELD_LABELS_TH: Record<string, string> = {
   question:'เรื่องที่ต้องการให้ทีมคาเฟ่ช่วย',
 };
 
+const FIELD_LABELS_BY_LANGUAGE: Record<ResponseLanguage, Record<string,string>> = {
+  th: FIELD_LABELS_TH,
+  en: {
+    date:'date', time:'time', durationMinutes:'duration', partySize:'number of guests',
+    resourceCode:'option', customerName:'name', phone:'contact number',
+    checkIn:'check-in date', checkOut:'check-out date', endDate:'check-out date',
+    nights:'number of nights', bedrooms:'number of bedrooms', quantity:'quantity',
+    items:'food items and quantities', itemName:'menu item', question:'what you want the café team to help with',
+  },
+  zh: {
+    date:'日期', time:'时间', durationMinutes:'时长', partySize:'人数',
+    resourceCode:'想要的项目', customerName:'姓名', phone:'联系电话',
+    checkIn:'入住日期', checkOut:'退房日期', endDate:'退房日期',
+    nights:'住宿晚数', bedrooms:'卧室数量', quantity:'数量',
+    items:'餐点和数量', itemName:'菜品', question:'希望咖啡店团队协助的事项',
+  },
+  lo: {
+    date:'ວັນທີ', time:'ເວລາ', durationMinutes:'ໄລຍະເວລາ', partySize:'ຈຳນວນຄົນ',
+    resourceCode:'ລາຍການທີ່ຕ້ອງການ', customerName:'ຊື່', phone:'ເບີຕິດຕໍ່',
+    checkIn:'ວັນເຊັກອິນ', checkOut:'ວັນເຊັກເອົາ', endDate:'ວັນເຊັກເອົາ',
+    nights:'ຈຳນວນຄືນ', bedrooms:'ຈຳນວນຫ້ອງນອນ', quantity:'ຈຳນວນ',
+    items:'ລາຍການອາຫານແລະຈຳນວນ', itemName:'ເມນູ', question:'ເລື່ອງທີ່ຢາກໃຫ້ທີມຄາເຟຊ່ວຍ',
+  },
+  vi: {
+    date:'ngày', time:'giờ', durationMinutes:'thời lượng', partySize:'số người',
+    resourceCode:'lựa chọn mong muốn', customerName:'tên', phone:'số liên hệ',
+    checkIn:'ngày nhận phòng', checkOut:'ngày trả phòng', endDate:'ngày trả phòng',
+    nights:'số đêm', bedrooms:'số phòng ngủ', quantity:'số lượng',
+    items:'món ăn và số lượng', itemName:'món', question:'việc bạn muốn đội cà phê hỗ trợ',
+  },
+};
+
+function localizedFieldLabel(language: ResponseLanguage, field: string): string {
+  return FIELD_LABELS_BY_LANGUAGE[language][field] ?? field;
+}
+
+function localizedCollectFieldMessage(language: ResponseLanguage, fields: string[]): string {
+  const labels=fields.map(field=>localizedFieldLabel(language,field));
+  if (!labels.length) return deterministicMessages(language).clarify;
+  if (language==='zh') return `还需要${labels.join('和')}，就可以继续了。目前还没有提交任何请求。`;
+  if (language==='lo') return `ຂໍ${labels.join(' ແລະ ')}ເພີ່ມອີກໜ້ອຍ ແລ້ວຈະຊ່ວຍຕໍ່ໄດ້. ຕອນນີ້ຍັງບໍ່ໄດ້ສົ່ງຄຳຂໍ.`;
+  if (language==='vi') return `Thongthai cần thêm ${labels.join(' và ')} để tiếp tục. Hiện chưa có yêu cầu nào được gửi.`;
+  if (language==='en') return `I just need the ${labels.join(' and ')} to continue. Nothing has been submitted yet.`;
+  return `ขอ${labels.join(' + ')}เพิ่มอีกนิดครับ`;
+}
+
 function activeTaskSubjectTh(input: ResponseComposerInput): string {
   const task=input.dialogDecision.taskStateContainer.activeTask;
   if (!task) return '';
@@ -465,25 +511,44 @@ function deterministicMessages(language: ResponseLanguage) {
     unknown:'I don’t have a verified answer for that yet, so I won’t guess.',
     empty:'I checked the current information and there are no matching options right now.',
     model:'I can’t answer this accurately right now. Please try again shortly, or I can hand this to the team.',
-    clarify:'I need one more detail to make sure I’m helping with the right thing.',
+    clarify:'I just need one more detail to make sure I help with the right thing.',
     noPromo:'There are no active eligible promotions right now.',
     comparison:'I don’t have verified information to compare that point, so I’d rather not guess.',
-    proposal:'I have the details ready, but nothing has been submitted yet.',
+    proposal:'The details are ready, but nothing has been submitted yet.',
     failed:'The request has not been submitted successfully yet.',
   };
-  // Thai is the canonical deterministic degradation copy. Other supported
-  // languages use short English only as a last-resort provider-down fallback
-  // rather than fabricating low-quality machine translations in channel code.
-  if (language !== 'th') return {
-    unavailable:'I can’t verify the latest information right now, so I won’t guess.',
-    unknown:'I don’t have a verified answer for that yet, so I won’t guess.',
-    empty:'I checked the current information and there are no matching options right now.',
-    model:'I can’t answer this accurately right now. Please try again shortly.',
-    clarify:'I need one more detail to make sure I’m helping with the right thing.',
-    noPromo:'There are no active eligible promotions right now.',
-    comparison:'I don’t have verified information to compare that point, so I won’t guess.',
-    proposal:'I have the details ready, but nothing has been submitted yet.',
-    failed:'The request has not been submitted successfully yet.',
+  if (language === 'zh') return {
+    unavailable:'我现在还无法核实最新信息，所以不想猜。如果你愿意，我可以请团队帮你确认。',
+    unknown:'这件事目前还没有已核实的信息，所以我不想猜。',
+    empty:'我刚核对了当前信息，现在没有符合条件的选项。',
+    model:'我现在还没法准确回答这件事。你可以稍后再试，或者我可以请团队继续帮你。',
+    clarify:'我还需要一个小细节，才能帮你确认对的事情。',
+    noPromo:'目前没有正在生效且符合条件的优惠。',
+    comparison:'目前没有足够的已核实信息来比较这一点，所以我不想猜。',
+    proposal:'资料已经准备好了，但目前还没有提交任何请求。',
+    failed:'这个请求目前还没有成功提交。',
+  };
+  if (language === 'lo') return {
+    unavailable:'ຕອນນີ້ທອງໄທຍັງກວດຢືນຢັນຂໍ້ມູນລ່າສຸດບໍ່ໄດ້ ເລີຍບໍ່ຢາກເດົາ. ຖ້າຕ້ອງການ ຈະໃຫ້ທີມຊ່ວຍກວດໃຫ້ໄດ້.',
+    unknown:'ເລື່ອງນີ້ຍັງບໍ່ມີຂໍ້ມູນທີ່ຢືນຢັນແລ້ວ ທອງໄທເລີຍບໍ່ຢາກເດົາ.',
+    empty:'ທອງໄທກວດຂໍ້ມູນປັດຈຸບັນແລ້ວ ຕອນນີ້ຍັງບໍ່ມີຕົວເລືອກທີ່ກົງ.',
+    model:'ຕອນນີ້ທອງໄທຍັງຕອບເລື່ອງນີ້ໃຫ້ແມ່ນບໍ່ໄດ້. ລອງອີກຄັ້ງພາຍຫຼັງ ຫຼືໃຫ້ທີມຊ່ວຍຕໍ່ໄດ້.',
+    clarify:'ຂໍອີກລາຍລະອຽດໜ້ອຍໜຶ່ງ ເພື່ອຊ່ວຍໃຫ້ຖືກເລື່ອງ.',
+    noPromo:'ຕອນນີ້ຍັງບໍ່ມີໂປຣໂມຊັນທີ່ເປີດໃຊ້ແລະກົງເງື່ອນໄຂ.',
+    comparison:'ຍັງບໍ່ມີຂໍ້ມູນຢືນຢັນພໍສຳລັບປຽບທຽບຈຸດນີ້ ທອງໄທບໍ່ຢາກເດົາ.',
+    proposal:'ລາຍລະອຽດພ້ອມແລ້ວ ແຕ່ຍັງບໍ່ໄດ້ສົ່ງຄຳຂໍເຂົ້າລະບົບ.',
+    failed:'ຄຳຂໍນີ້ຍັງສົ່ງບໍ່ສຳເລັດ.',
+  };
+  if (language === 'vi') return {
+    unavailable:'Hiện tại Thongthai chưa xác minh được thông tin mới nhất nên không muốn đoán. Nếu bạn muốn, mình có thể nhờ đội ngũ kiểm tra giúp.',
+    unknown:'Hiện tại chưa có thông tin đã được xác minh về việc này nên Thongthai không muốn đoán.',
+    empty:'Thongthai vừa kiểm tra thông tin hiện tại và chưa có lựa chọn nào phù hợp.',
+    model:'Hiện tại Thongthai chưa thể trả lời việc này một cách chính xác. Bạn có thể thử lại sau hoặc để đội ngũ hỗ trợ tiếp.',
+    clarify:'Thongthai cần thêm một chi tiết nhỏ để giúp đúng việc bạn đang hỏi.',
+    noPromo:'Hiện tại chưa có ưu đãi đang hoạt động và phù hợp.',
+    comparison:'Hiện chưa có đủ thông tin đã xác minh để so sánh điểm này nên Thongthai không muốn đoán.',
+    proposal:'Thông tin đã sẵn sàng cho bước tiếp theo, nhưng hiện chưa có yêu cầu nào được gửi.',
+    failed:'Yêu cầu này hiện chưa được gửi thành công.',
   };
   return {
     unavailable:'ตอนนี้ทองไทยยังเช็กข้อมูลล่าสุดเรื่องนี้ไม่ได้ครับ เลยไม่อยากเดาให้ผิด',
@@ -1644,14 +1709,17 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
   if (outcome?.executed && outcome.success) {
     const code = outcome.referenceCode ? ` ${outcome.referenceCode}` : '';
     const status = String(outcome.status ?? '').toLowerCase();
-    if (input.language === 'th') {
-      message = ['confirmed','completed','paid','settled'].includes(status)
-        ? `ยืนยันรายการแล้วครับ${code}`
-        : `ส่งคำขอเข้าระบบแล้วครับ${code} ทีมงานจะยืนยันอีกครั้ง`;
+    const terminal=['confirmed','completed','paid','settled'].includes(status);
+    if (input.language === 'zh') {
+      message = terminal ? `已确认。${code}` : `请求已经提交。${code} 团队会另外确认最终状态。`;
+    } else if (input.language === 'lo') {
+      message = terminal ? `ຢືນຢັນລາຍການແລ້ວ.${code}` : `ສົ່ງຄຳຂໍແລ້ວ.${code} ທີມງານຈະຢືນຢັນສະຖານະອີກຄັ້ງ.`;
+    } else if (input.language === 'vi') {
+      message = terminal ? `Đã xác nhận.${code}` : `Yêu cầu đã được gửi.${code} Đội ngũ sẽ xác nhận trạng thái cuối cùng riêng.`;
+    } else if (input.language === 'en') {
+      message = terminal ? `Confirmed.${code}` : `Request submitted.${code} The team will confirm the final status separately.`;
     } else {
-      message = ['confirmed','completed','paid','settled'].includes(status)
-        ? `Confirmed.${code}`
-        : `Request submitted.${code} The team will confirm it separately.`;
+      message = terminal ? `ยืนยันรายการแล้วครับ${code}` : `ส่งคำขอเข้าระบบแล้วครับ${code} ทีมงานจะยืนยันอีกครั้ง`;
     }
   } else if (outcome?.executed && !outcome.success) {
     message = copy.failed;
@@ -1711,8 +1779,10 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
       message = `${rejected}${activeTaskSubjectTh(input)}ระยะเวลาที่มีในระบบตอนนี้คือ ${durationChoice.durationMinutes} นาทีครับ`;
     } else if (durationChoice?.status === 'unknown' && input.language === 'th') {
       message = 'ตอนนี้ทองไทยยังเช็กระยะเวลาของกิจกรรมนี้ให้ไม่ได้ครับ ไม่ขอเดา ให้ทีมงานช่วยตรวจสอบอีกครั้งนะครับ';
-    } else if (input.language === 'th' && missing.length) {
-      message = `${activeTaskSubjectTh(input)}ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`;
+    } else if (missing.length) {
+      message = input.language === 'th'
+        ? `${activeTaskSubjectTh(input)}ขอ${missing.map(field => FIELD_LABELS_TH[field] ?? field).join(' + ')}เพิ่มอีกนิดครับ`
+        : localizedCollectFieldMessage(input.language, missing);
     } else {
       message = copy.clarify;
     }
