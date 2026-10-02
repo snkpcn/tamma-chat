@@ -11,6 +11,8 @@ name: Phase 7 Final Production Certification
 # so no real booking/order/payment/redemption is ever created. See that
 # script's own header comment for the full safety contract.
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       production_url:
@@ -23,6 +25,7 @@ permissions:
 
 jobs:
   production-smoke:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.title, '[run phase7 prod]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
