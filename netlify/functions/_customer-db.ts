@@ -110,6 +110,9 @@ const CONSTRAINTS = new Set([
   // extends, rather than duplicates, GuestContext).
   'low_intensity', 'fear_of_falling', 'fear_of_speed', 'food_allergy',
   'prefers_short_replies', 'prior_safety_concern',
+  // Café conversational preferences. These are customer preferences only,
+  // never allergy/medical claims and never transaction authorization.
+  'no_coffee', 'low_sweet', 'low_bitter', 'no_cow_milk', 'no_sugar',
 ]);
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
