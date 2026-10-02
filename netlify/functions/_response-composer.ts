@@ -1268,9 +1268,19 @@ const TASK_SUMMARY_FIELDS_TH: Record<string, string> = {
 
 function formatTaskSummaryValue(key: string, value: unknown, language: ResponseLanguage): string | null {
   if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') return null;
-  if (language === 'th') {
-    if (key === 'durationMinutes') return `${value} นาที`;
-    if (key === 'partySize') return `${value} คน`;
+  if (key === 'durationMinutes') {
+    if (language === 'th') return `${value} นาที`;
+    if (language === 'zh') return `${value} 分钟`;
+    if (language === 'lo') return `${value} ນາທີ`;
+    if (language === 'vi') return `${value} phút`;
+    return `${value} minutes`;
+  }
+  if (key === 'partySize') {
+    if (language === 'th') return `${value} คน`;
+    if (language === 'zh') return `${value} 人`;
+    if (language === 'lo') return `${value} ຄົນ`;
+    if (language === 'vi') return `${value} người`;
+    return `${value} people`;
   }
   return String(value);
 }
@@ -1306,23 +1316,62 @@ const PREFERENCE_CONSTRAINT_LABELS_TH: Readonly<Record<string, string>> = {
   fear_of_speed: 'ไม่ชอบความเร็ว',
 };
 
+const PREFERENCE_CONSTRAINT_LABELS_EN: Readonly<Record<string,string>> = {
+  no_shrimp:'avoid shrimp', shrimp_allergy:'shrimp allergy',
+  no_peanut:'avoid peanuts', peanut_allergy:'peanut allergy',
+  no_egg:'avoid eggs', egg_allergy:'egg allergy',
+  no_fish:'avoid fish', fish_allergy:'fish allergy',
+  food_allergy:'food allergy', no_pork:'no pork', no_beef:'no beef',
+  no_chicken:'no chicken', vegetarian:'vegetarian',
+  low_spicy:'mild food', mild_spice:'mild food', no_spicy:'no spicy food',
+  low_intensity:'prefers light activities', fear_of_falling:'concerned about falling',
+  fear_of_speed:'does not like speed',
+};
+const PREFERENCE_CONSTRAINT_LABELS_ZH: Readonly<Record<string,string>> = {
+  no_shrimp:'不吃虾', shrimp_allergy:'虾过敏', no_peanut:'不吃花生', peanut_allergy:'花生过敏',
+  no_egg:'不吃鸡蛋', egg_allergy:'鸡蛋过敏', no_fish:'不吃鱼', fish_allergy:'鱼类过敏',
+  food_allergy:'有食物过敏', no_pork:'不吃猪肉', no_beef:'不吃牛肉', no_chicken:'不吃鸡肉',
+  vegetarian:'素食', low_spicy:'少辣', mild_spice:'少辣', no_spicy:'完全不辣',
+  low_intensity:'喜欢轻松活动', fear_of_falling:'担心跌落', fear_of_speed:'不喜欢速度快',
+};
+const PREFERENCE_CONSTRAINT_LABELS_LO: Readonly<Record<string,string>> = {
+  no_shrimp:'ບໍ່ກິນກຸ້ງ', shrimp_allergy:'ແພ້ກຸ້ງ', no_peanut:'ບໍ່ກິນຖົ່ວ', peanut_allergy:'ແພ້ຖົ່ວ',
+  no_egg:'ບໍ່ກິນໄຂ່', egg_allergy:'ແພ້ໄຂ່', no_fish:'ບໍ່ກິນປາ', fish_allergy:'ແພ້ປາ',
+  food_allergy:'ມີອາການແພ້ອາຫານ', no_pork:'ບໍ່ກິນໝູ', no_beef:'ບໍ່ກິນຊີ້ນງົວ', no_chicken:'ບໍ່ກິນໄກ່',
+  vegetarian:'ມັງສະວິລັດ', low_spicy:'ກິນເຜັດໜ້ອຍ', mild_spice:'ກິນເຜັດໜ້ອຍ', no_spicy:'ບໍ່ກິນເຜັດ',
+  low_intensity:'ມັກກິດຈະກຳເບົາໆ', fear_of_falling:'ກັງວົນເລື່ອງຕົກ/ລົ້ມ', fear_of_speed:'ບໍ່ມັກຄວາມໄວ',
+};
+const PREFERENCE_CONSTRAINT_LABELS_VI: Readonly<Record<string,string>> = {
+  no_shrimp:'không ăn tôm', shrimp_allergy:'dị ứng tôm', no_peanut:'không ăn đậu phộng', peanut_allergy:'dị ứng đậu phộng',
+  no_egg:'không ăn trứng', egg_allergy:'dị ứng trứng', no_fish:'không ăn cá', fish_allergy:'dị ứng cá',
+  food_allergy:'có dị ứng thực phẩm', no_pork:'không ăn thịt heo', no_beef:'không ăn thịt bò', no_chicken:'không ăn thịt gà',
+  vegetarian:'ăn chay', low_spicy:'ăn ít cay', mild_spice:'ăn ít cay', no_spicy:'không ăn cay',
+  low_intensity:'thích hoạt động nhẹ', fear_of_falling:'lo bị ngã', fear_of_speed:'không thích tốc độ',
+};
+
+function preferenceLabel(language:ResponseLanguage, code:string):string|undefined {
+  if(language==='th') return PREFERENCE_CONSTRAINT_LABELS_TH[code];
+  if(language==='zh') return PREFERENCE_CONSTRAINT_LABELS_ZH[code];
+  if(language==='lo') return PREFERENCE_CONSTRAINT_LABELS_LO[code];
+  if(language==='vi') return PREFERENCE_CONSTRAINT_LABELS_VI[code];
+  return PREFERENCE_CONSTRAINT_LABELS_EN[code];
+}
+
 function preferenceItems(input: ResponseComposerInput): string[] {
   const constraints = input.conversationContext?.workingMemory?.constraints ?? [];
   return [...new Set(
     constraints
-      .map(constraint => PREFERENCE_CONSTRAINT_LABELS_TH[constraint.code])
+      .map(constraint => preferenceLabel(input.language,constraint.code))
       .filter((label): label is string => Boolean(label)),
   )];
 }
 
-const DOMAIN_INTEREST_LABELS_TH: Readonly<Partial<Record<SemanticDomain, string>>> = {
-  restaurant: 'อาหาร',
-  activity: 'กิจกรรม',
-  stay: 'ที่พัก',
-  cafe: 'คาเฟ่',
-  otop: 'ของฝาก/OTOP',
-  journey: 'แผนเที่ยว',
-  promotion: 'โปรโมชัน',
+const DOMAIN_INTEREST_LABELS: Record<ResponseLanguage, Partial<Record<SemanticDomain,string>>> = {
+  th:{restaurant:'อาหาร',activity:'กิจกรรม',stay:'ที่พัก',cafe:'คาเฟ่',otop:'ของฝาก/OTOP',journey:'แผนเที่ยว',promotion:'โปรโมชัน'},
+  en:{restaurant:'food',activity:'activities',stay:'stay',cafe:'café',otop:'OTOP/local products',journey:'trip plan',promotion:'promotions'},
+  zh:{restaurant:'餐饮',activity:'活动',stay:'住宿',cafe:'咖啡店',otop:'OTOP/本地产品',journey:'行程',promotion:'优惠'},
+  lo:{restaurant:'ອາຫານ',activity:'ກິດຈະກຳ',stay:'ທີ່ພັກ',cafe:'ຄາເຟ',otop:'OTOP/ສິນຄ້າຊຸມຊົນ',journey:'ແຜນທ່ຽວ',promotion:'ໂປຣໂມຊັນ'},
+  vi:{restaurant:'ẩm thực',activity:'hoạt động',stay:'lưu trú',cafe:'cà phê',otop:'OTOP/sản phẩm địa phương',journey:'kế hoạch chuyến đi',promotion:'khuyến mãi'},
 };
 
 function discussedDomains(input: ResponseComposerInput): SemanticDomain[] {
@@ -1334,7 +1383,7 @@ function discussedDomains(input: ResponseComposerInput): SemanticDomain[] {
     domains.add(selection.domain);
   }
   for (const constraint of input.conversationContext?.workingMemory?.constraints ?? []) {
-    if (PREFERENCE_CONSTRAINT_LABELS_TH[constraint.code]) domains.add(constraint.domain);
+    if (preferenceLabel(input.language,constraint.code)) domains.add(constraint.domain);
   }
   for (const entity of input.conversationContext?.recentEntities ?? []) {
     domains.add(entity.domain);
@@ -1345,7 +1394,7 @@ function discussedDomains(input: ResponseComposerInput): SemanticDomain[] {
 function interestItems(input: ResponseComposerInput): string[] {
   return [...new Set(
     discussedDomains(input)
-      .map(domain => DOMAIN_INTEREST_LABELS_TH[domain])
+      .map(domain => DOMAIN_INTEREST_LABELS[input.language][domain])
       .filter((label): label is string => Boolean(label)),
   )];
 }
@@ -1358,9 +1407,12 @@ function taskSummaryItems(
   const items: string[] = [];
   const selectedNames = [...new Set(task.selectedEntities.map(entity => entity.name.trim()).filter(Boolean))];
   if (selectedNames.length) {
-    items.push(language === 'th'
-      ? `รายการที่เลือก: ${selectedNames.join(', ')}`
-      : `Selected: ${selectedNames.join(', ')}`);
+    const selectedLabel=language==='th'?'รายการที่เลือก'
+      :language==='zh'?'已选择'
+      :language==='lo'?'ລາຍການທີ່ເລືອກ'
+      :language==='vi'?'Đã chọn'
+      :'Selected';
+    items.push(`${selectedLabel}: ${selectedNames.join(', ')}`);
   }
   for (const [key, labelTh] of Object.entries(TASK_SUMMARY_FIELDS_TH)) {
     if (key === 'horseName' && selectedNames.length) continue;
@@ -1368,7 +1420,7 @@ function taskSummaryItems(
     if (raw === undefined || raw === null || raw === '') continue;
     const value = formatTaskSummaryValue(key, raw, language);
     if (!value) continue;
-    items.push(language === 'th' ? `${labelTh}: ${value}` : `${key}: ${value}`);
+    items.push(`${language==='th'?labelTh:localizedFieldLabel(language,key)}: ${value}`);
   }
   return items;
 }
@@ -1379,15 +1431,19 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
   const suspendedItems = taskSummaryItems(container.suspendedTask, input.language);
   const interests = interestItems(input);
   const preferences = preferenceItems(input);
-  const extraSections: string[] = input.language === 'th'
-    ? [
-        interests.length ? `สนใจ: ${interests.join(', ')}` : '',
-        preferences.length ? `ความชอบ/ข้อจำกัดที่เคยแจ้งไว้: ${preferences.join(', ')}` : '',
-      ].filter(Boolean)
-    : [
-        interests.length ? `Interested in: ${interests.join(', ')}` : '',
-        preferences.length ? `Stated preferences/constraints: ${preferences.join(', ')}` : '',
-      ].filter(Boolean);
+  const sectionLabels = input.language==='th'
+    ? {interests:'สนใจ',preferences:'ความชอบ/ข้อจำกัดที่เคยแจ้งไว้'}
+    : input.language==='zh'
+      ? {interests:'感兴趣',preferences:'已说明的偏好/限制'}
+      : input.language==='lo'
+        ? {interests:'ສົນໃຈ',preferences:'ຄວາມມັກ/ຂໍ້ຈຳກັດທີ່ແຈ້ງໄວ້'}
+        : input.language==='vi'
+          ? {interests:'Quan tâm',preferences:'Sở thích/giới hạn đã nói'}
+          : {interests:'Interested in',preferences:'Stated preferences/constraints'};
+  const extraSections: string[] = [
+    interests.length ? `${sectionLabels.interests}: ${interests.join(', ')}` : '',
+    preferences.length ? `${sectionLabels.preferences}: ${preferences.join(', ')}` : '',
+  ].filter(Boolean);
 
   if (!activeItems.length && !suspendedItems.length) {
     // Consider-only selections deliberately live in ConversationContext
@@ -1409,9 +1465,13 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
       ? (entityName
         ? `ตอนนี้เลือกไว้เป็น ${entityName} ครับ แต่ยังไม่ได้ยืนยันการจอง และยังไม่ได้จองหรือส่งรายการ`
         : 'ตอนนี้ยังไม่มีรายการที่กำลังเลือกหรือกรอกค้างอยู่ครับ และยังไม่ได้ยืนยันการจอง และยังไม่ได้จองหรือส่งรายการ')
-      : (entityName
-        ? `The current selection is ${entityName}, but nothing has been booked or submitted.`
-        : 'There is no active or suspended selection right now, and nothing has been booked or submitted.');
+      : input.language === 'zh'
+        ? (entityName ? `目前先选的是 ${entityName}，但还没有预订或提交任何请求。` : '目前没有进行中的选择，也没有预订或提交任何请求。')
+        : input.language === 'lo'
+          ? (entityName ? `ຕອນນີ້ເລືອກໄວ້ເປັນ ${entityName} ແຕ່ຍັງບໍ່ໄດ້ຈອງ ຫຼືສົ່ງຄຳຂໍ.` : 'ຕອນນີ້ບໍ່ມີລາຍການທີ່ກຳລັງເລືອກ ແລະຍັງບໍ່ໄດ້ຈອງ ຫຼືສົ່ງຄຳຂໍ.')
+          : input.language === 'vi'
+            ? (entityName ? `Hiện đang tạm chọn ${entityName}, nhưng chưa đặt hay gửi yêu cầu nào.` : 'Hiện không có lựa chọn nào đang xử lý và chưa có yêu cầu đặt chỗ nào được gửi.')
+            : (entityName ? `The current selection is ${entityName}, but nothing has been booked or submitted.` : 'There is no active or suspended selection right now, and nothing has been booked or submitted.');
     return extraSections.length ? `${extraSections.join('\n')}\n\n${lead}` : lead;
   }
 
@@ -1422,10 +1482,17 @@ function activeTaskSummaryMessage(input: ResponseComposerInput): string {
     return `${sections.join('\n\n')}\n\nทั้งหมดนี้ยังเป็นข้อมูลที่คุยกันอยู่ ยังไม่ได้ยืนยันการจอง และยังไม่ได้จองหรือส่งรายการครับ`;
   }
 
+  const headings=input.language==='zh'
+    ? {current:'当前正在讨论',paused:'暂时保留',footer:'这些只是当前对话中的资料；还没有确认或提交任何请求。'}
+    : input.language==='lo'
+      ? {current:'ກຳລັງຄຸຍຢູ່',paused:'ພັກໄວ້ກ່ອນ',footer:'ທັງໝົດນີ້ເປັນພຽງຂໍ້ມູນໃນການສົນທະນາ; ຍັງບໍ່ມີການຢືນຢັນ ຫຼືສົ່ງຄຳຂໍ.'}
+      : input.language==='vi'
+        ? {current:'Đang trao đổi',paused:'Tạm giữ lại',footer:'Đây chỉ là thông tin đang trao đổi; chưa có yêu cầu nào được xác nhận hay gửi đi.'}
+        : {current:'Current',paused:'Paused',footer:'These are conversation-state details only; nothing has been confirmed or submitted.'};
   const sections: string[] = [...extraSections];
-  if (activeItems.length) sections.push(`Current:\n- ${activeItems.join('\n- ')}`);
-  if (suspendedItems.length) sections.push(`Paused:\n- ${suspendedItems.join('\n- ')}`);
-  return `${sections.join('\n\n')}\n\nThese are conversation-state details only; nothing has been confirmed or submitted.`;
+  if (activeItems.length) sections.push(`${headings.current}:\n- ${activeItems.join('\n- ')}`);
+  if (suspendedItems.length) sections.push(`${headings.paused}:\n- ${suspendedItems.join('\n- ')}`);
+  return `${sections.join('\n\n')}\n\n${headings.footer}`;
 }
 
 function isExplicitTaskResumeReadback(input: ResponseComposerInput): boolean {
