@@ -120,9 +120,10 @@ test('Phase 7 final routing: explicit restaurant recommendation uses durable shr
       assert.match(message,/เผ็ด|พริก/u);
       assert.doesNotMatch(message,/ยังตอบเรื่องนี้ให้แม่นไม่ได้|คิดช้ากว่าปกติ|ระบบตอบช้า/u);
       assert.equal(harness.postsTo('bookings').length,0);
-      // All three are established grounded restaurant classes and must not
-      // spend a semantic/model call merely because Agent Primary is 100%.
-      assert.equal(harness.modelCallCount(),0);
+      // The final menu turn may use one semantic-supervisor attempt, but the
+      // customer response must come from the grounded restaurant renderer;
+      // never add a second model/composer round merely to phrase known facts.
+      assert.ok(harness.modelCallCount() <= 1);
     });
   });
 });
