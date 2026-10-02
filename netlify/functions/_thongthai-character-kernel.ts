@@ -16,9 +16,7 @@ function protectCanonicalNames(value: string): string {
 
 function removeUnaskedProviderJargon(value: string, customerMessage: string): string {
   if (SOURCE_QUESTION_RE.test(customerMessage)) return value;
-  return value
-    .replace(SOURCE_JARGON_RE, '')
-    .replace(/^จากข้อมูลล่าสุด\s*[:：-]?\s*/u, '');
+  return value.replace(SOURCE_JARGON_RE, '');
 }
 
 function emergencyPlainText(value: string): string {
@@ -73,7 +71,7 @@ function ensureThaiMaleEnding(value: string): string {
   if (!text) return text;
   text = text.replace(/ครับ\s*([\p{Extended_Pictographic}\uFE0F]+)\s*$/u, '$1 ครับ');
   if (/ครับ[.!?…]?$/u.test(text)) return text;
-  return `${text}ครับ`;
+  return `${text} ครับ`;
 }
 
 /**
