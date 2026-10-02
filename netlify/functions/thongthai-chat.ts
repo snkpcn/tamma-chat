@@ -5136,6 +5136,29 @@ async function boundedActivityAvailabilityClarification(
 const BOOKING_STATUS_READBACK_RE = /(?:ตอนนี้|ล่าสุด|สถานะ).{0,36}(?:จอง|คำขอจอง)|(?:จอง|คำขอจอง).{0,36}(?:ใช่ไหม|ไหม|หรือเปล่า|รึเปล่า|หรือยัง|สถานะ)/u;
 const BOOKING_AVAILABILITY_WORD_RE = /ว่าง|เต็ม|คิว/u;
 
+const CONTEXTUAL_HORSE_COMPARE_RE = /(?:สองตัว|ทั้งสอง|สองตัวนี้|สองตัวนั้น|คู่นี้|พวกนี้).{0,28}(?:ต่างกัน|เปรียบเทียบ|ตัวไหนดี|เลือกตัวไหน)|(?:ต่างกัน|เปรียบเทียบ).{0,28}(?:สองตัว|ทั้งสอง|คู่นี้|พวกนี้)/u;
+
+async function isContextualHorseComparison(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<boolean> {
+  if (classifyLocalConciergeQuestion(request.message)?.category === 'horse_comparison') return true;
+  if (!CONTEXTUAL_HORSE_COMPARE_RE.test(request.message)) return false;
+
+  // Pronouns like “สองตัวนี้” need evidence of what the two entities are.
+  // Accept only when the bounded recent conversation actually contains both
+  // canonical horse names; never infer a pair from the pronoun alone.
+  const transportHistory = request.chatHistory.slice(-8).map(turn => turn.content).join('\n');
+  if (/ทองไทย/u.test(transportHistory) && /ภาราดร/u.test(transportHistory)) return true;
+  if (!guestDbId) return false;
+  const context = await loadConversationContext(guestDbId).catch(() => null);
+  if (!context) return false;
+  const durableText = context.recentTurns.slice(-8).map(turn => turn.content).join('\n');
+  if (/ทองไทย/u.test(durableText) && /ภาราดร/u.test(durableText)) return true;
+  const names = new Set(context.recentEntities.map(entity => entity.name));
+  return names.has('ทองไทย') && names.has('ภาราดร');
+}
+
 async function deterministicBookingStatusReadback(
   request: BrainRequest,
   guestDbId: string | null,
@@ -5611,15 +5634,23 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // deterministic composer. Let that bounded business fact lane answer before
   // Agent Primary so a two-horse comparison can never hit the 30s model/tool
   // timeout seen in the final Phase 7 production gate.
-  const localMatchBeforePrimary = !hasExplicitTransactionIntent(request.message)
-    ? classifyLocalConciergeQuestion(request.message)
-    : null;
-  if (localMatchBeforePrimary?.category === 'horse_comparison') {
-    const horseComparison = await deterministicLocalConciergeResponse(request).catch(error => {
-      console.error('THONGTHAI_HORSE_COMPARISON_PREPRIMARY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
-      return null;
-    });
+  const contextualHorseComparison = !hasExplicitTransactionIntent(request.message)
+    && await isContextualHorseComparison(request, guestDbId);
+  if (contextualHorseComparison) {
+    const directMatch = classifyLocalConciergeQuestion(request.message);
+    const horseComparison = directMatch?.category === 'horse_comparison'
+      ? await deterministicLocalConciergeResponse(request).catch(error => {
+          console.error('THONGTHAI_HORSE_COMPARISON_PREPRIMARY_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+          return null;
+        })
+      : {
+          message: composeHorseComparisonResponse(),
+          intent:'information' as const,
+          contextUpdates:{}, journeyAction:{type:'none' as const,journey:null}, suggestedActions:[],
+          responseStyle:'direct' as const, semanticMemoryUpdates:[], toolCalls:[],
+        };
     if (horseComparison) {
+
       const polished = polishedResponse(horseComparison, channel);
       await persistBrainRuntime(guestDbId, channel, polished);
       return coreResult(200, {
