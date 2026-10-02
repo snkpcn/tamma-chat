@@ -193,21 +193,32 @@ function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
 
 export function extractGuestPreferenceSignal(message:string):PreferenceSignal{
   const raw=extractPreferenceSignal(message);
-  const addConstraints=raw.addConstraints.filter(code=>!constraintIsOnlyAboutCompanion(message,code));
+  let addConstraints=raw.addConstraints.filter(code=>!constraintIsOnlyAboutCompanion(message,code));
   const remove=new Set(raw.removeConstraints);
 
-  // Explicit self statements correct stale durable memory even when the same
-  // turn also describes a different companion's restriction.
-  if(/(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:ชอบกาแฟ|กินกาแฟได้|ดื่มกาแฟได้|เอากาแฟ)/u.test(message)){
+  const dropAdd=(...codes:string[])=>{
+    const set=new Set(codes);
+    addConstraints=addConstraints.filter(code=>!set.has(code));
+  };
+
+  // Explicit self statements outrank any companion wording elsewhere in the
+  // same sentence. This is deliberately stronger than proximity parsing:
+  // "ผมชอบกาแฟ...แต่แฟนไม่กินกาแฟ" must never leave no_coffee on the guest,
+  // and "แฟนไม่กินเผ็ด แต่ผมกินเผ็ดได้" must actively clear stale guest spice
+  // avoidance rather than re-add it from the companion clause.
+  if(/(?:ผม|ฉัน|หนู|ดิฉัน).{0,24}(?:ชอบกาแฟ|กินกาแฟได้|ดื่มกาแฟได้|เอากาแฟ|อยากได้กาแฟ)/u.test(message)){
+    dropAdd('no_coffee');
     remove.add('no_coffee');
   }
-  if(/(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:กินเผ็ดได้|ทานเผ็ดได้)/u.test(message)){
+  if(/(?:ผม|ฉัน|หนู|ดิฉัน).{0,24}(?:กินเผ็ดได้|ทานเผ็ดได้)/u.test(message)){
+    dropAdd('no_spicy','mild_spice');
     remove.add('no_spicy'); remove.add('mild_spice');
   }
   if(
-    /(?:แฟน|ภรรยา|สามี|ลูก|แม่|พ่อ|เพื่อน).{0,18}แพ้กุ้ง/u.test(message)
-    && /(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:กินได้|กินกุ้งได้|ไม่ได้แพ้)/u.test(message)
+    /(?:แฟน|ภรรยา|สามี|ลูก|แม่|พ่อ|เพื่อน).{0,24}แพ้กุ้ง/u.test(message)
+    && /(?:ผม|ฉัน|หนู|ดิฉัน).{0,24}(?:กินได้|กินกุ้งได้|ไม่ได้แพ้)/u.test(message)
   ){
+    dropAdd('shrimp_allergy','no_shrimp');
     remove.add('shrimp_allergy'); remove.add('no_shrimp');
   }
 
