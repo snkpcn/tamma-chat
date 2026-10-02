@@ -40,6 +40,7 @@ import {
   resetLineBookingPlanningSession,
 } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
+import { loadActivityWorldFacts } from './_activity-sot';
 import {
   listCafeMasterMenu,
   listCafeBranchModifiers,
@@ -5686,6 +5687,68 @@ const HORSE_COMPARISON_FOLLOWUP_RE = /(?:ต่างกัน|เปรีย�
  * the 30s gateway timeout. Resolve it deterministically only when prior bounded
  * context proves BOTH canonical horses were the subject of the conversation.
  */
+async function boundedHorseDurationComparisonBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (!guestDbId || hasExplicitTransactionIntent(request.message)) return null;
+  const matches=[...request.message.matchAll(/(\d{1,3})\s*นาที/gu)].map(match=>Number(match[1]));
+  const durations=[...new Set(matches.filter(value=>Number.isInteger(value)&&value>0))];
+  if(durations.length<2 || !/(?:ต่างกัน|เทียบ|อันไหน|ตัวไหน)/u.test(request.message)) return null;
+
+  const context=await loadConversationContext(guestDbId);
+  const held=context.workingMemory.consideredSelections.find(selection=>
+    selection.domain==='activity'
+    && selection.status==='considering'
+    && /(?:ทองไทย|ภาราดร)/u.test(selection.name)
+  );
+  if(!held && !context.recentTurns.some(turn=>/(?:ม้า|ทองไทย|ภาราดร)/u.test(turn.content))) return null;
+
+  const facts=await loadActivityWorldFacts();
+  const factValue=facts.find(row=>row.fact_key==='activity_catalog_live')?.fact_value;
+  const activities=isObject(factValue)&&Array.isArray(factValue.activities)
+    ? factValue.activities.filter(isObject)
+    : [];
+  const horse=activities.find(activity=>
+    activity.activityCode==='horse' || activity.resourceCode==='activity-horse'
+  );
+  const options=horse&&Array.isArray(horse.durations)
+    ? horse.durations.filter(isObject)
+    : [];
+  const requested=durations.slice(0,2);
+  const rows=requested.map(minutes=>{
+    const option=options.find(row=>Number(row.durationMinutes)===minutes);
+    const price=option&&Number.isFinite(Number(option.price))?Number(option.price):null;
+    return {minutes,price};
+  });
+
+  const horseName=held?.name?.replace(/^น้อง/u,'')||'ม้าที่เลือกไว้';
+  const lines=[`ถ้าเป็น${horseName.startsWith('ม้า')?'':'น้อง'}${horseName} สองรอบนี้ต่างกันที่เวลาและราคาครับ`];
+  for(const row of rows){
+    lines.push(`• ${row.minutes} นาที${row.price!==null?` — ${row.price.toLocaleString('th-TH')} บาท`:''}`);
+  }
+  const timeDiff=Math.abs(rows[1]!.minutes-rows[0]!.minutes);
+  const bothPrice=rows.every(row=>row.price!==null);
+  lines.push(
+    bothPrice
+      ? `ต่างกัน ${timeDiff} นาที และ ${Math.abs(rows[1]!.price!-rows[0]!.price!).toLocaleString('th-TH')} บาทครับ`
+      : `ต่างกัน ${timeDiff} นาทีครับ ส่วนราคาที่ยังไม่ขึ้นด้านบนทองไทยไม่ขอเดา`
+  );
+  if(/ยังไม่จอง|ยังไม่.*จอง|แค่.*ถาม/u.test(request.message)){
+    lines.push('ตอนนี้ยังเป็นการเทียบตัวเลือก ยังไม่ได้จองหรือส่งรายการครับ');
+  }
+  return {
+    message:lines.join('\n'),
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 async function boundedBeginnerHorseSuitabilityBeforePrimary(
   request: BrainRequest,
 ): Promise<BrainResponse | null> {
@@ -6350,6 +6413,25 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (availabilityClarification) {
     const polished = polishedResponse(availabilityClarification, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const horseDurationComparison = await boundedHorseDurationComparisonBeforePrimary(
+    request,
+    guestDbId,
+  ).catch(error => {
+    console.error('THONGTHAI_BOUNDED_HORSE_DURATION_COMPARE_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (horseDurationComparison) {
+    const polished = polishedResponse(horseDurationComparison, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message:polished.message,
