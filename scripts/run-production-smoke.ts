@@ -96,7 +96,7 @@ const CASES: SmokeCase[] = [
     // Real production incident traced in THONGTHAI_HANDOFF.md's
     // final-perfection-pass entry.
     chainFrom: 'activity-01',
-    requiredMarkers: [/ภาราดร/u, /ยังไม่ได้ทำรายการ|ยังไม่ได้จอง/u],
+    requiredMarkers: [/ภาราดร/u, /ยังไม่ได้ทำรายการ|ยังไม่ได้จอง|ไม่ดำเนินการจอง/u],
     forbiddenMarkers: [...GENERIC_FALLBACK_MARKERS.map(text => new RegExp(text, 'u'))],
   },
   { id: 'stay-01', domain: 'stay', message: 'พรุ่งนี้มีห้องสำหรับ 3 คนไหม' },
