@@ -107,6 +107,26 @@ test('Phase 5 raw OTOP complaint routes to OTOP customer voice instead of owner/
   }
 });
 
+test('Phase 5 wrong OTOP fulfilment is complaint, not suggestion, and never invents a staff name/positive sentiment', () => {
+  const route = classifyRawBusinessIncidentRoute('สินค้า OTOP ได้ของผิดครับ อยากให้ช่วยตรวจสอบ');
+  assert.equal(route?.kind, 'service_feedback');
+  assert.equal(route?.lane, 'INCIDENT');
+  assert.equal(route?.businessUnit, 'otop');
+  if (route?.kind === 'service_feedback') {
+    assert.equal(route.feedback.feedbackType, 'complaint');
+    assert.deepEqual(route.feedback.issueKeywords, ['fulfillment']);
+  }
+
+  const staffRoute = classifyRawBusinessIncidentRoute('ขอสั่งสินค้า OTOP ชิ้นนี้เลยครับ แต่พนักงานพูดไม่ดีมาก ขอให้ช่วยดูเรื่องนี้ก่อน');
+  assert.equal(staffRoute?.kind, 'service_feedback');
+  if (staffRoute?.kind === 'service_feedback') {
+    assert.equal(staffRoute.feedback.staffName, null);
+    assert.equal(staffRoute.feedback.personMentions.some(item => item.kind === 'named'), false);
+    assert.equal(staffRoute.feedback.keywordSummary.topPositive.includes('ดีมาก'), false);
+    assert.ok(staffRoute.feedback.keywordSummary.topNegative.includes('พูดไม่ดี'));
+  }
+});
+
 test('Phase 5 raw OTOP complaint creates one durable case and notifies OTOP with zero model calls', async () => {
   await withHarness(async harness => {
     harness.programOpsChannel('otop');
