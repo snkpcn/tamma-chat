@@ -28,6 +28,17 @@ test('Phase 7 task authority: non-terminal ActiveTask blocks read-only Agent Pri
     activeTask:{...active,status:'completed'},
   }),false);
 
+  assert.equal(activeTaskOwnsConversationBeforePrimary({
+    ...emptyTaskStateContainer(),
+    activeTask:null,
+    suspendedTask:active,
+  }),true,'a non-terminal suspended task remains bounded continuation authority');
+
+  assert.equal(activeTaskOwnsConversationBeforePrimary({
+    ...emptyTaskStateContainer(),
+    suspendedTask:{...active,status:'completed'},
+  }),false);
+
   assert.equal(activeTaskOwnsConversationBeforePrimary(emptyTaskStateContainer()),false);
 });
 
