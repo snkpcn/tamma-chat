@@ -21,6 +21,19 @@ test('explicit confirmation remains eligible to revisit a prepared draft', () =>
   assert.equal(isAgentTransactionPrepareIntent('ยืนยันจองครับ', 'GENERAL'), true);
 });
 
-test('semantic business transaction classification can route prepare even without a literal booking verb', () => {
-  assert.equal(isAgentTransactionPrepareIntent('เอาตามที่คุยไว้ครับ', 'BUSINESS_TRANSACTION'), true);
+test('explicit non-booking operational handoff can route prepare without a literal booking verb', () => {
+  assert.equal(
+    isAgentTransactionPrepareIntent(
+      'ช่วยส่งคำถามให้ทีมคาเฟ่ว่าเตรียมลาเต้ 5 แก้วได้ไหมครับ',
+      'BUSINESS_TRANSACTION',
+    ),
+    true,
+  );
+});
+
+test('Phase 4 supersedes context-dependent acceptance as fresh prepare consent', () => {
+  assert.equal(
+    isAgentTransactionPrepareIntent('เอาตามที่คุยไว้ครับ', 'BUSINESS_TRANSACTION'),
+    false,
+  );
 });
