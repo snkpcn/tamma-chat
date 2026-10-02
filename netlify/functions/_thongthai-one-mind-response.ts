@@ -42,7 +42,10 @@ import {
   loadGuestAgentStateSnapshot,
 } from './_guest-agent-state-store';
 import { deriveSemanticMeaning } from './_semantic-meaning';
-import { classifyCommercialBoundarySemantic } from './_commercial-intent-boundary';
+import {
+  classifyCommercialBoundarySemantic,
+  classifyCommercialBoundaryText,
+} from './_commercial-intent-boundary';
 import { persistAiResponseTurn } from './_ai-cost-store';
 import { isPromotionMention } from './_promotion-dialog';
 
@@ -394,11 +397,16 @@ export function readOnlyCutoverEligibility(
   // narrower than adding all support traffic to INITIAL_CUTOVER_DOMAINS:
   // complaint / incident / request_help semantics remain outside this
   // exception and keep their existing escalation/legacy ownership.
+  const rawCommercialSupportBoundary = options.message
+    ? classifyCommercialBoundaryText(options.message)
+    : null;
   const canonicalCommercialSupportQuestion = semantic.domain === 'support'
     && (semantic.action === 'ask' || semantic.action === 'status')
     && semantic.speechAct !== 'request_help'
     && !turn.dialogDecision.actionProposal
-    && classifyCommercialBoundarySemantic(semantic).mode === 'READ_ONLY';
+    && classifyCommercialBoundarySemantic(semantic).mode === 'READ_ONLY'
+    && rawCommercialSupportBoundary?.mode === 'READ_ONLY'
+    && rawCommercialSupportBoundary.routeToOneMindBeforePrimary;
 
   if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)
       && !canonicalPaymentStatusLookup
