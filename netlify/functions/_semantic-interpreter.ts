@@ -30,7 +30,7 @@ import type { AiCallContext } from './_ai-cost-ledger';
 // is a plain generated data module with zero imports of its own, so importing
 // it here creates no dependency risk in either direction.
 import { THONGTHAI_BIBLE_SECTIONS } from './_thongthai-bible-generated';
-import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
+import { THONGTHAI_SEMANTIC_REPLY_VOICE } from './_thongthai-service-voice';
 import {
   extractDate,
   extractDateRange,
@@ -736,7 +736,7 @@ Relevant organization vocabulary: ${vocabulary.length ? vocabulary.join('; ') : 
 Bounded context: ${JSON.stringify(compactContext)}
 
 THONGTHAI CUSTOMER VOICE:
-${THONGTHAI_HUMAN_SERVICE_VOICE}
+${THONGTHAI_SEMANTIC_REPLY_VOICE}
 
 reply:
 - Thai customer-facing draft in Thongthai's voice.
