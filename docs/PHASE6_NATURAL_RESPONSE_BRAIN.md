@@ -1,6 +1,6 @@
 # Phase 6 — Natural Response Brain
 
-Status: **implementation / certification**
+Status: **COMPLETE**
 
 Base production checkpoint: `f8ea2e7ee3b527b7af8458b1a689d1142374e4c0` (Phase 5 complete)
 
@@ -127,6 +127,64 @@ For every language it must:
 - avoid internal/source/classification narration;
 - avoid false booking/order/confirmation language;
 - remain concise enough for customer chat.
+
+## Final production certification — COMPLETE
+
+Implementation PR: **#468**
+
+Merged production commit:
+`cebfec7591b95280082388f044aeb7fd5cd54bf2`
+
+Final gates on the implementation head:
+
+- One Mind full CI: **2,087 / 2,087 PASS**
+- Netlify Build Guard: **PASS**
+- Phase 3 cost-stress regression: **PASS**
+- real OpenAI Phase 6 natural-response matrix: **5 / 5 PASS**
+- live languages certified: Thai / English / Chinese / Lao / Vietnamese
+- Netlify deploy preview: **PASS**
+- Netlify production deploy: **READY**
+- production deploy id: `6abf3c2ec4ee0e0008aef269`
+- production `commit_ref` matches the merged Phase 6 commit exactly
+- production deploy includes updated `_response-composer`, `_service-mind-feedback-response`, and `thongthai-chat`
+- production secret scan: **0 matches**
+
+Production transaction-safety configuration was re-read immediately before merge:
+
+- `THONGTHAI_AGENT_LIVE_TRANSACTION_ENABLED=0`
+- `THONGTHAI_AGENT_TRANSACTION_PREPARE_PERCENT=0`
+- `THONGTHAI_AGENT_TRANSACTION_PREPARE_GUESTS` is empty
+
+No Phase 6 change enabled public transaction execution.
+
+### Bugs found and closed during certification
+
+Certification exposed four concrete defects/process gaps; all were fixed before merge:
+
+1. the live composer certification initially called the provider without the explicit certification caller boundary, so the production AI cost guard correctly blocked it;
+2. Vietnamese grounded composition leaked Thai wording (`บาทครับ`) into an otherwise Vietnamese sentence;
+3. the first English live-language assertion contained a malformed word-boundary fixture, causing a correct English answer to fail certification;
+4. the operational-success safety validator treated a truthful negated sentence such as `Nothing has been submitted yet` as a positive success claim because it matched the token `submitted`. The validator now removes only tightly bounded explicit negations before applying the existing positive-claim guard, while affirmative success claims remain blocked without verified outcomes.
+
+Regression coverage now locks these behaviors.
+
+### What Phase 6 now guarantees
+
+- supported customer languages no longer fall back to English/Thai merely because a deterministic response rail was selected;
+- missing-field questions name the actual missing field in the requested language;
+- active/suspended state summaries preserve the requested language;
+- deterministic refund/claim/liability/safety/customer-voice rails preserve the requested language and real delivery truth;
+- grounded OpenAI final composition is explicitly constrained to the requested output language;
+- non-Thai grounded composition is forbidden from appending Thai polite particles or ordinary Thai currency wording;
+- `requested` remains distinct from `confirmed` in localized operational responses;
+- Thai customer-facing copy still enforces male polite particles (`ครับ`);
+- commercial consent, incident routing, verified fact authority, and transaction execution boundaries are unchanged.
+
+## Completion decision
+
+**Phase 6 = COMPLETE.**
+
+Next roadmap phase: **Phase 7**.
 
 ## Definition of done
 
