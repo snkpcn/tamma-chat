@@ -1,4 +1,4 @@
-import { extractPreferenceSignal, extractIntelligenceSignals } from './_customer-phrase-intelligence';
+import { extractGuestPreferenceSignal, extractIntelligenceSignals } from './_customer-phrase-intelligence';
 import { recordIntelligenceEvent } from './_customer-intelligence-events';
 
 type GuestContextShape = {
@@ -510,7 +510,7 @@ export async function capturePreferenceSignals(
   const text = message.trim();
   if (!text) return;
 
-  const signal = extractPreferenceSignal(text);
+  const signal = extractGuestPreferenceSignal(text);
   const hasConstraintChange = signal.addConstraints.length > 0 || signal.removeConstraints.length > 0;
   if (hasConstraintChange || signal.pace || signal.travelerType) {
     try {
