@@ -252,6 +252,27 @@ export function isTrustedBoundedCorrectionContinuation(turn: OneMindTurnResult):
   return hasStructuredCorrection;
 }
 
+export function isTrustedLearnedSemanticContinuation(turn: OneMindTurnResult): boolean {
+  const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
+  if (semantic.semanticSource !== 'semantic_concept_memory') return false;
+  if (semantic.intent !== 'semantic_concept_match') return false;
+  if (turn.dialogDecision.actionProposal) return false;
+  if ((semantic.informationNeed ?? 'none') !== 'none') return false;
+  if (semantic.speechAct === 'transaction_request') return false;
+  if (['book','order','cancel'].includes(semantic.action)) return false;
+
+  if (semantic.action === 'provide_information') return true;
+
+  if (semantic.action === 'confirm') {
+    const noTransaction = semantic.constraints.some(constraint =>
+      /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint));
+    const resolvedReference = semantic.references.some(reference =>
+      Boolean(reference.resolvedEntityId) || (reference.resolvedEntityIds?.length ?? 0) === 1);
+    return noTransaction && resolvedReference;
+  }
+  return false;
+}
+
 export function readOnlyCutoverEligibility(
   turn: OneMindTurnResult,
   options: ReadOnlyCutoverEligibilityOptions = {},
@@ -285,7 +306,11 @@ export function readOnlyCutoverEligibility(
     // into a legacy clarification loop.
     const trustedBoundedNoTransaction = isTrustedBoundedNoTransactionContinuation(turn);
     const trustedBoundedCorrection = isTrustedBoundedCorrectionContinuation(turn);
-    if (!trustedZeroCostBypass && !trustedBoundedNoTransaction && !trustedBoundedCorrection) {
+    const trustedLearnedSemantic = isTrustedLearnedSemanticContinuation(turn);
+    if (!trustedZeroCostBypass
+        && !trustedBoundedNoTransaction
+        && !trustedBoundedCorrection
+        && !trustedLearnedSemantic) {
       return { eligible:false, reason:'transactional_or_task_turn' };
     }
   }
