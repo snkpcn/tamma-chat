@@ -8,6 +8,7 @@ import {
 } from '../netlify/functions/_semantic-interpreter';
 import { deriveSemanticMeaning } from '../netlify/functions/_semantic-meaning';
 import {
+  classifyRawBusinessIncidentRoute,
   classifySemanticBusinessIncidentRoute,
   type BusinessIncidentLane,
 } from '../netlify/functions/_business-incident-router';
@@ -81,7 +82,12 @@ async function main() {
   for (const probe of probes) {
     const turn = await interpretWithTransientRetry(probe.message, context);
     const meaning = deriveSemanticMeaning(turn);
-    const route = classifySemanticBusinessIncidentRoute(meaning);
+    // Mirror production precedence exactly: deterministic authority/customer-
+    // voice routing wins first; semantic routing is the open-world fallback.
+    // This matters when a reviewer/provider transiently degrades semantic
+    // domain ownership on a phrase the raw safety router already understands.
+    const rawRoute = classifyRawBusinessIncidentRoute(probe.message);
+    const route = rawRoute ?? classifySemanticBusinessIncidentRoute(meaning);
     const commercial = classifyCommercialBoundarySemantic(turn);
 
     const lanePass = route.lane === probe.expectedLane;
