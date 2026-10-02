@@ -40,6 +40,12 @@ import {
   resetLineBookingPlanningSession,
 } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
+import {
+  listCafeMasterMenu,
+  listCafeBranchModifiers,
+  type CafeMasterMenuItem,
+  type CafeBranchModifier,
+} from './_cafe-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import {
   applyConversationContextUpdate,
@@ -1752,12 +1758,238 @@ function cafePreferenceSummary(constraints: readonly string[]): string {
   return labels.length ? labels.join(' · ') : 'ยังไม่ได้ล็อกรสชาติหรือเมนู';
 }
 
-function deterministicCafeResponse(
+const CAFE_MENU_ALIASES:Record<string,readonly string[]>={
+  espresso:['เอสเพรสโซ่','เอสเปรสโซ่','เอสเปรสโซ','espresso'],
+  americano:['อเมริกาโน่','อเมริกาโน','americano'],
+  es_all_day:['เอสออลเดย์','เอส ออล เดย์','es all day'],
+  cappuccino:['คาปูชิโน่','คาปูชิโน','cappuccino'],
+  cafe_latte:['คาเฟ่ลาเต้','ลาเต้','cafe latte','latte'],
+  mocha:['มอคค่า','มอคคา','mocha'],
+  caramel_macchiato:['คาราเมล มัคคิอาโต้','คาราเมลมัคคิอาโต้','caramel macchiato'],
+  cocoa:['โกโก้','cocoa'],
+  fresh_milk:['นมสด','fresh milk'],
+  pink_milk:['นมชมพู','pink milk'],
+  thai_tea_latte:['ชาไทยลาเต้','ชาไทย','thai tea latte','thai tea'],
+  green_tea_latte:['ชาเขียวลาเต้','ชาเขียว','green tea latte','green tea'],
+  black_tea:['ชาดำ','black tea'],
+  lemon_tea:['ชามะนาว','lemon tea'],
+  uji_pure_matcha:['อูจิ เพียวมัทฉะ','อูจิเพียวมัทฉะ','เพียวมัทฉะ','มัทฉะ','uji pure matcha','matcha'],
+};
+
+function normalizeCafeLookup(value:string):string{
+  return value
+    .toLowerCase()
+    .replace(/[()•·.,/\\_\-:!?'"“”‘’]+/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+function compactCafeLookup(value:string):string{
+  return normalizeCafeLookup(value).replace(/\s+/g,'');
+}
+
+function resolveCafeMenuItem(message:string,items:readonly CafeMasterMenuItem[]):CafeMasterMenuItem|null{
+  const compact=compactCafeLookup(message);
+  const candidates:Array<{item:CafeMasterMenuItem;score:number}>=[];
+  for(const item of items){
+    const aliases=[
+      item.name_th,
+      item.name_en,
+      ...(CAFE_MENU_ALIASES[item.code]??[]),
+    ].filter(Boolean);
+    for(const alias of aliases){
+      const needle=compactCafeLookup(alias);
+      if(!needle||!compact.includes(needle))continue;
+      let score=needle.length;
+      // A generic "ลาเต้" must never beat the explicit tea-latte names.
+      if(item.code==='cafe_latte'&&needle===compactCafeLookup('ลาเต้'))score-=20;
+      candidates.push({item,score});
+    }
+  }
+  candidates.sort((a,b)=>b.score-a.score);
+  return candidates[0]?.item??null;
+}
+
+function resolveCafeSlot(message:string,item:CafeMasterMenuItem){
+  const compact=compactCafeLookup(message);
+  const standard:Record<string,readonly string[]>={
+    hot:['ร้อน','hot'],
+    iced:['เย็น','iced','ice'],
+    frappe:['ปั่น','frappe','frappé'],
+  };
+  const matches=item.slots
+    .filter(slot=>slot.active)
+    .map(slot=>{
+      const aliases=[
+        slot.slot_code,
+        slot.label_th,
+        slot.label_en,
+        ...(standard[slot.slot_code]??[]),
+      ];
+      const best=aliases
+        .map(alias=>compactCafeLookup(alias))
+        .filter(alias=>alias&&compact.includes(alias))
+        .sort((a,b)=>b.length-a.length)[0];
+      return best?{slot,score:best.length}:null;
+    })
+    .filter((value):value is {slot:CafeMasterMenuItem['slots'][number];score:number}=>Boolean(value))
+    .sort((a,b)=>b.score-a.score);
+  return matches[0]?.slot??null;
+}
+
+function resolveCafeModifier(message:string,modifiers:readonly CafeBranchModifier[]):CafeBranchModifier|null{
+  const compact=compactCafeLookup(message);
+  return modifiers.find(mod=>{
+    if(!mod.active)return false;
+    const aliases=[mod.modifier_code,mod.name_th,mod.name_en];
+    if(mod.modifier_code==='oat_milk')aliases.push('นมโอ๊ต','โอ๊ต','oat milk','oat');
+    return aliases.some(alias=>{
+      const needle=compactCafeLookup(alias);
+      return Boolean(needle&&compact.includes(needle));
+    });
+  })??null;
+}
+
+function cafeMoney(value:number):string{
+  return Number(value).toLocaleString('th-TH',{maximumFractionDigits:2})+' บาท';
+}
+
+function cafeSlotLine(slot:CafeMasterMenuItem['slots'][number]):string{
+  return `${slot.label_th} ${cafeMoney(slot.price)}`;
+}
+
+function cafeMenuListMessage(items:readonly CafeMasterMenuItem[]):string{
+  const groups:Array<[CafeMasterMenuItem['category'],string]>=[
+    ['coffee','กาแฟ'],
+    ['tea','ชา'],
+    ['matcha','มัทฉะ'],
+    ['non_coffee','ไม่ใช่กาแฟ'],
+  ];
+  const lines=['เมนู Core ของ Inthanin ตาดโตนที่ยืนยันในระบบตอนนี้มีครับ'];
+  for(const [category,label] of groups){
+    const names=items.filter(item=>item.active&&item.category===category).map(item=>item.name_th);
+    if(names.length)lines.push(label+': '+names.join(' · '));
+  }
+  lines.push('ถ้าบอกชื่อเมนู ผมบอกราคาแยกร้อน/เย็น/ปั่นตาม Slot จริงให้ได้ครับ');
+  return lines.join('\n');
+}
+
+export function cafeGroundedAnswer(
+  request:BrainRequest,
+  items:readonly CafeMasterMenuItem[],
+  modifiers:readonly CafeBranchModifier[],
+):{answer:string;grounded:boolean}|null{
+  const message=request.message.trim();
+  const item=resolveCafeMenuItem(message,items);
+  const isMenuDiscovery=/(?:มีเมนูอะไร|เมนูมีอะไร|มีอะไรบ้าง|มีเครื่องดื่มอะไร|ขอเมนู)/u.test(message)
+    || /(?:what.*menu|drink.*menu)/iu.test(message);
+  const isPriceAsk=/(?:ราคา|เท่าไหร่|เท่าไร|กี่บาท|how\s*much|price)/iu.test(message);
+  const isStyleAsk=/(?:มีแบบไหน|แบบไหนบ้าง|ร้อน|เย็น|ปั่น|hot|iced|frappe)/iu.test(message);
+  const asksStock=/(?:สต็อก|หมดไหม|มีของไหม|พร้อมขายไหม|stock)/iu.test(message);
+
+  if(asksStock){
+    return {
+      answer:'ตอนนี้เมนูและราคามีข้อมูลยืนยันแล้วครับ แต่สต็อกเครื่องดื่มรายเมนูยังไม่ได้เชื่อมเป็นข้อมูลสด จึงยังไม่ขอเดาว่าของหมดหรือไม่ครับ',
+      grounded:false,
+    };
+  }
+
+  if(!item&&isMenuDiscovery){
+    return {answer:cafeMenuListMessage(items),grounded:true};
+  }
+  if(!item)return null;
+
+  const activeSlots=item.slots.filter(slot=>slot.active).sort((a,b)=>a.sort_order-b.sort_order);
+  const slot=resolveCafeSlot(message,item);
+  const modifier=resolveCafeModifier(message,modifiers);
+
+  if(modifier){
+    if(!modifier.applies_to.includes(item.code)){
+      return {
+        answer:`${item.name_th} ตอนนี้ไม่ได้ตั้งให้ใช้ ${modifier.name_th} ในระบบครับ`,
+        grounded:true,
+      };
+    }
+    if(slot&&!modifier.styles.includes(slot.slot_code)){
+      return {
+        answer:`${item.name_th} ${slot.label_th} ตอนนี้ไม่ได้เปิดตัวเลือก${modifier.name_th}ในระบบครับ`,
+        grounded:true,
+      };
+    }
+  }
+
+  if(slot){
+    let price=slot.price;
+    const details=[`${item.name_th} ${slot.label_th} ${cafeMoney(price)}ครับ`];
+    if(modifier){
+      price+=modifier.surcharge;
+      details[0]=`${item.name_th} ${slot.label_th} เปลี่ยนเป็น${modifier.name_th} รวม ${cafeMoney(price)}ครับ`;
+      details.push(`ราคาปกติ ${cafeMoney(slot.price)} + ${modifier.name_th} ${cafeMoney(modifier.surcharge)}`);
+    }
+    return {answer:details.join('\n'),grounded:true};
+  }
+
+  if(isPriceAsk||isStyleAsk){
+    if(!activeSlots.length){
+      return {answer:`${item.name_th} ตอนนี้ยังไม่มี Price Slot ที่เปิดใช้อยู่ครับ`,grounded:true};
+    }
+    const lines=[`${item.name_th} มี ${activeSlots.map(cafeSlotLine).join(' · ')}ครับ`];
+    if(modifier){
+      const eligible=activeSlots.filter(s=>modifier.styles.includes(s.slot_code));
+      if(eligible.length){
+        lines.push(`${modifier.name_th} +${cafeMoney(modifier.surcharge)} ใช้ได้กับ ${eligible.map(s=>s.label_th).join(' / ')}ครับ`);
+      }
+    }
+    return {answer:lines.join('\n'),grounded:true};
+  }
+
+  if(activeSlots.length){
+    return {
+      answer:`${item.name_th} มีครับ — ${activeSlots.map(cafeSlotLine).join(' · ')}ครับ`,
+      grounded:true,
+    };
+  }
+  return {answer:`${item.name_th} มีใน Master ครับ แต่ตอนนี้ยังไม่มี Price Slot ที่เปิดใช้อยู่ครับ`,grounded:true};
+}
+
+async function deterministicCafeResponse(
   request: BrainRequest,
   runtime: Pick<BrainRuntimeContext,'agentState'>,
-): BrainResponse | null {
+): Promise<BrainResponse | null> {
   const message = request.message.trim();
   if (!isCafeReadOnlyTurn(message, runtime.agentState?.active_topic)) return null;
+
+  let items:CafeMasterMenuItem[]=[];
+  let modifiers:CafeBranchModifier[]=[];
+  try{
+    [items,modifiers]=await Promise.all([
+      listCafeMasterMenu(),
+      listCafeBranchModifiers('inthanin_tadtone'),
+    ]);
+  }catch(error){
+    console.error(
+      'THONGTHAI_CAFE_MENU_SOT_ERROR',
+      error instanceof Error?error.message.slice(0,220):'unknown',
+    );
+  }
+
+  const grounded=items.length?cafeGroundedAnswer(request,items,modifiers):null;
+  if(grounded){
+    return {
+      message:grounded.answer,
+      intent:'information',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{
+        activeTopic:'cafe',
+        ...(grounded.grounded?{clearUnresolvedNeed:true}:{unresolvedNeed:'cafe_stock_not_connected'}),
+      },
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
 
   const preferences = cafePreferenceSummary(request.guestContext.constraints ?? []);
   let answer = '';
@@ -1773,12 +2005,20 @@ function deterministicCafeResponse(
   } else if (/ไม่ได้แพ้นม/u.test(message)) {
     answer = `เข้าใจครับ เป็นความชอบที่ไม่อยากดื่มนมวัว ไม่ใช่อาการแพ้นมครับ ผมจะจำเป็น preference เท่านั้น ตอนนี้ความชอบคือ ${preferences}ครับ`;
   } else if (/(?:เมื่อกี้|จากที่คุยมา|สนใจอะไรไว้|ตัวไหนเหมาะ|เปลี่ยนใจ|ไม่เอาตัวนั้น|กลับมาเรื่อง)/u.test(message)) {
-    answer = `ที่คุยกันไว้ตอนนี้เป็นความชอบเรื่องเครื่องดื่ม: ${preferences}ครับ แต่ยังไม่ได้เลือกชื่อเมนูจริง เพราะระบบยังไม่มีเมนู Inthanin Café ตาดโตนที่ยืนยันให้ผมอ้างอิงครับ`;
+    answer = items.length
+      ? `ตอนนี้เมนูและราคาหลักของ Inthanin ตาดโตนเชื่อมแล้วครับ ส่วนความชอบที่คุยไว้คือ ${preferences}ครับ บอกชื่อเมนูที่อยากกลับมาดูได้เลยครับ`
+      : `ที่คุยกันไว้ตอนนี้เป็นความชอบเรื่องเครื่องดื่ม: ${preferences}ครับ แต่รอบนี้ทองไทยโหลด Menu Master ไม่ได้ จึงยังไม่ขอเดาชื่อเมนูให้ผิดครับ`;
+  } else if (
+    preferences !== 'ยังไม่ได้ล็อกรสชาติหรือเมนู'
+    && /(?:หวาน|ขม|ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|นมวัว|น้ำตาล|เย็น)/u.test(message)
+  ) {
+    answer = items.length
+      ? `รับทราบครับ ตอนนี้ความชอบคือ ${preferences}ครับ เมนูและราคาหลักเชื่อมแล้ว ถ้าบอกชื่อเมนูที่สนใจ ผมเช็กราคาและ Slot จริงให้ต่อได้ครับ`
+      : `รับทราบครับ ตอนนี้ความชอบคือ ${preferences}ครับ รอบนี้ทองไทยโหลด Menu Master ไม่ได้ จึงยังไม่ขอเดาเมนูหรือราคาให้ผิดครับ`;
+  } else if(items.length){
+    answer=cafeMenuListMessage(items);
   } else {
-    const hasCafePreference = preferences !== 'ยังไม่ได้ล็อกรสชาติหรือเมนู';
-    answer = hasCafePreference
-      ? `ถ้าหมายถึงคาเฟ่ Inthanin ตาดโตน ตอนนี้ทองไทยจำเงื่อนไขเครื่องดื่มที่คุณบอกไว้ว่า ${preferences}ครับ แต่ยังไม่มีข้อมูลยืนยันเรื่องเมนู ราคา หรือสต็อกเครื่องดื่มครับ เลยไม่ขอเดาชื่อเมนูให้ผิดครับ`
-      : 'ถ้าหมายถึงคาเฟ่ Inthanin ตาดโตน ตอนนี้ทองไทยยังไม่มีข้อมูลยืนยันเรื่องเมนู ราคา หรือสต็อกเครื่องดื่มครับ เลยไม่ขอเดาชื่อเมนูให้ผิดครับ ถ้าบอกแนวที่อยากได้ เช่น กาแฟ/ไม่กาแฟ หวานน้อย หรือสดชื่น ทองไทยช่วยจำเงื่อนไขไว้ก่อนได้ครับ หรือจะดูร้านอาหาร/ที่พักที่มีข้อมูลยืนยันในระบบต่อก็ได้ครับ';
+    answer='ตอนนี้ทองไทยโหลด Menu Master ของคาเฟ่ Inthanin ตาดโตนไม่ได้ครับ จึงยังไม่มีข้อมูลยืนยันเรื่องเมนูหรือราคาในรอบนี้ และไม่ขอเดาชื่อเมนูให้ผิดครับ ถ้าอยากได้กาแฟ ชา หรือเครื่องดื่มไม่กาแฟ บอกแนวไว้ก่อนได้ครับ';
   }
 
   return {
@@ -1790,7 +2030,7 @@ function deterministicCafeResponse(
     responseStyle: 'direct',
     agentStateUpdate: {
       activeTopic: 'cafe',
-      unresolvedNeed: 'cafe_read_only_inquiry',
+      unresolvedNeed: items.length ? 'cafe_read_only_inquiry' : 'cafe_menu_source_unavailable',
     },
     semanticMemoryUpdates: [],
     toolCalls: [],
@@ -6003,7 +6243,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
 
   if (cafeReadOnlyBeforePrimary) {
-    const cafeResponse = deterministicCafeResponse(request, {
+    const cafeResponse = await deterministicCafeResponse(request, {
       agentState: cafeStateForPrePrimary ?? {},
     });
     if (cafeResponse) {
@@ -7288,7 +7528,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  const deterministicCafe = deterministicCafeResponse(request, runtime);
+  const deterministicCafe = await deterministicCafeResponse(request, runtime);
   if (deterministicCafe) {
     const polished = polishedResponse(deterministicCafe, channel);
     await persistBrainRuntime(guestDbId, channel, polished);

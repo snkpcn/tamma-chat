@@ -44,7 +44,7 @@ function oneMind(
 test('1. supervised Cafe terminal gate precedes the legacy raw-text responder and runThongthaiBrain', () => {
   const source = readFileSync(new URL('../netlify/functions/thongthai-chat.ts', import.meta.url), 'utf8');
   const gate = source.indexOf('const supervisedCafe = earlyOneMind');
-  const legacy = source.indexOf('const deterministicCafe = deterministicCafeResponse');
+  const legacy = source.indexOf('const deterministicCafe = await deterministicCafeResponse');
   const brain = source.indexOf('firstResponse = await runThongthaiBrain');
   assert.ok(gate > 0 && gate < legacy && legacy < brain, `gate=${gate} legacy=${legacy} brain=${brain}`);
 });

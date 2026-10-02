@@ -9,7 +9,6 @@ export type CafeMenuPriceSlot={
   sort_order:number;
   metadata:Record<string,unknown>;
   updated_at:string;
-  slots:CafeMenuPriceSlot[];
 };
 
 export type CafeMasterMenuItem={
@@ -24,6 +23,7 @@ export type CafeMasterMenuItem={
   source_verified_at:string;
   metadata:Record<string,unknown>;
   updated_at:string;
+  slots:CafeMenuPriceSlot[];
 };
 
 export type CafeBranchModifier={
