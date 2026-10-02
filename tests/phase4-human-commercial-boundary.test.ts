@@ -12,7 +12,8 @@ import type { SemanticTurn } from '../netlify/functions/_semantic-interpreter';
 import { deriveDeterministicSemanticTurn } from '../netlify/functions/_deterministic-semantic-turn';
 import { reconcileReadOnlyActivityPreferenceRefinement } from '../netlify/functions/_thongthai-one-mind-orchestrator';
 import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
-import { emptyTaskStateContainer } from '../netlify/functions/_task-state';
+import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
+import { planDialogTurn, resolveDialogDecision } from '../netlify/functions/_dialog-manager';
 
 function semantic(overrides:Partial<SemanticTurn>):SemanticTurn{
   return {
@@ -297,4 +298,81 @@ test('Phase 4 activity preference reconciliation never de-escalates an explicit 
   assert.equal(reconciled.action,'book');
   assert.equal(reconciled.speechAct,'transaction_request');
   assert.equal(classifyCommercialBoundarySemantic(reconciled).currentTurnCommit,true);
+});
+
+
+test('Phase 4 Dialog Manager: no_transaction defeats contradictory book label and clears stale commitment',()=>{
+  const now=new Date('2026-10-02T08:00:00+07:00');
+  const active={
+    ...createActiveTask({
+      type:'stay_booking',
+      sourceChannel:'line',
+      initialSlots:{
+        resourceCode:'stay-villa-2br',
+        date:'2026-10-03',
+        endDate:'2026-10-05',
+        partySize:3,
+      },
+      requiredFields:['resourceCode','date','endDate','partySize'],
+      now,
+    }),
+    status:'ready' as const,
+    missingFields:[],
+    commitmentIntent:true,
+  };
+  const taskState={...emptyTaskStateContainer(),activeTask:active};
+
+  const malformed=semantic({
+    domain:'stay',
+    intent:'summarize_active_task',
+    action:'book',
+    speechAct:'transaction_request',
+    entities:{
+      partySize:3,
+      activityCode:'horse',
+      horsePreferences:['ภาราดร','ทองไทย'],
+    },
+    constraints:['no_transaction'],
+  });
+
+  const plan=planDialogTurn({
+    semanticTurn:malformed,
+    conversationContext:emptyConversationContextState(now),
+    taskState,
+    channel:'line',
+    eventId:'phase4-summary-no-transaction',
+  },now);
+
+  assert.equal(plan.customerCommitPresent,false);
+  assert.equal(plan.taskStateContainer.activeTask?.commitmentIntent,false);
+  assert.equal(plan.mode,'answer');
+  assert.ok(plan.reasons.includes('transaction_commitment_revoked'));
+  assert.ok(plan.reasons.includes('task_summary_requested'));
+
+  const decision=resolveDialogDecision(plan,[]);
+  assert.equal(decision.actionProposal,undefined);
+  assert.equal(decision.responseIntent,'active_task_summary');
+});
+
+test('Phase 4 Dialog Manager: contradictory book + no_transaction cannot manufacture a fresh task',()=>{
+  const now=new Date('2026-10-02T08:00:00+07:00');
+  const malformed=semantic({
+    domain:'activity',
+    intent:'summary_or_consider',
+    action:'book',
+    speechAct:'transaction_request',
+    entities:{activityCode:'horse'},
+    constraints:['no_transaction'],
+  });
+  const plan=planDialogTurn({
+    semanticTurn:malformed,
+    conversationContext:emptyConversationContextState(now),
+    taskState:emptyTaskStateContainer(),
+    channel:'web',
+    eventId:'phase4-no-fresh-task',
+  },now);
+
+  assert.equal(plan.customerCommitPresent,false);
+  assert.equal(plan.taskStateContainer.activeTask,null);
+  assert.equal(resolveDialogDecision(plan,[]).actionProposal,undefined);
 });
