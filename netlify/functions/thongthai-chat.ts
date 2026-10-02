@@ -5907,9 +5907,30 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const preserveVerifiedLocationBeforeSupervision = !hasExplicitTransactionIntent(request.message)
     && classifyLocalConciergeQuestion(request.message)?.category === 'location';
 
+  // Narrow production hotfix for a COMPLETE visitor-journey request.
+  //
+  // Do NOT bypass semantic supervision for the whole Local Concierge family:
+  // bare companion/preference turns feed semantic concept memory, and grounded
+  // horse comparisons deliberately use the model-owned final composer. The
+  // real Messenger failure was a much narrower shape: the customer already
+  // supplied (1) a time budget, (2) party context, and (3) a pace/mood, so the
+  // canonical visitor-journey responder has everything it needs and paying a
+  // semantic call can only produce the generic recommendation-without-facts
+  // fallback. Preserve ONLY that complete, non-transactional planning class
+  // before Agent Primary / early One-Mind.
+  const localConciergeBeforeSupervision = !hasExplicitTransactionIntent(request.message)
+    ? classifyLocalConciergeQuestion(request.message)
+    : null;
+  const completeVisitorJourneyBeforeSupervision =
+    localConciergeBeforeSupervision?.category === 'visitor_journey'
+    && /(?:มีเวลา|ชั่วโมง|ชม\.?|นาที|ครึ่งวัน|เต็มวัน|ค้างคืน|\d+\s*คืน)/u.test(request.message)
+    && /(?:คนเดียว|มากับ(?:แฟน|ครอบครัว|เด็ก|ผู้ใหญ่|เพื่อน|แม่|พ่อ|ลูก)|มีเด็ก|มีผู้สูงอายุ|พา(?:แฟน|แม่|พ่อ|ลูก)มา)/u.test(request.message)
+    && /(?:ชิล|ไม่รีบ|พักใจ|ไม่อยากเดินเยอะ|ลุย|ผจญภัย|จัดทริป|จัดแผน|จัดโปรแกรม)/u.test(request.message);
+
   const phase3SemanticLearningEligible = !explicitTransactionIntent
     && topLevelSemanticIntent !== 'WEATHER_REQUEST'
     && !preserveVerifiedLocationBeforeSupervision
+    && !completeVisitorJourneyBeforeSupervision
     && isShortStandaloneConceptCandidate(request.message)
     && isPhase3SemanticLearningCandidate(request.message);
 
@@ -5939,6 +5960,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+    && !completeVisitorJourneyBeforeSupervision
     && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
     && !horseCorrectionBeforePrimary
@@ -6092,6 +6114,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // the unchanged executor path below still owns the write.
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
       && !preserveVerifiedLocationBeforeSupervision
+      && !completeVisitorJourneyBeforeSupervision
       && topLevelSemanticIntent !== 'WEATHER_REQUEST') {
     try {
       const oneMind = await processOneMindCustomerTurn({
