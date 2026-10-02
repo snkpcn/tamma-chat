@@ -52,7 +52,7 @@ import { persistAiResponseTurn, persistAiResponseTurnIfAbsent } from './_ai-cost
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
-import { composeLocalConciergeResponse } from './_local-concierge-response';
+import { composeHorseComparisonResponse, composeLocalConciergeResponse } from './_local-concierge-response';
 import { redactWeatherUrl } from './_weather-provider';
 import { classifyServiceFeedback, mentionsThongthaiResponse, type ServiceFeedbackMatch, type IssueKeyword } from './_service-mind-feedback-intent';
 import { composeServiceFeedbackResponse, composeEscalationResponse, composeSemanticIncidentResponse } from './_service-mind-feedback-response';
