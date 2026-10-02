@@ -26,7 +26,6 @@ import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } fro
 import { extractTime } from './_slot-parsers';
 import {
   classifyCommercialBoundarySemantic,
-  classifyCommercialBoundaryText,
 } from './_commercial-intent-boundary';
 import {
   renderActivityAvailability,
@@ -1387,10 +1386,15 @@ function commercialSupportProcessMessage(input: ResponseComposerInput): string |
   if (turn.action !== 'ask' && turn.action !== 'status') return null;
 
   const semanticBoundary=classifyCommercialBoundarySemantic(turn);
-  const textBoundary=classifyCommercialBoundaryText(input.userMessage ?? '');
-  if (semanticBoundary.mode !== 'READ_ONLY'
-      || textBoundary.mode !== 'READ_ONLY'
-      || !textBoundary.routeToOneMindBeforePrimary) {
+  const supportCommercialProcess =
+    /(?:book|booking|order|ordering|confirm|confirmation|process|transaction)/iu.test(turn.intent)
+    || turn.informationNeed === 'policy';
+
+  // Rendering must follow the already-decided semantic contract rather than
+  // re-classifying raw customer text a second time. The pre-Agent router still
+  // owns raw-text admission; once a support turn has been semantically proven
+  // read-only, this renderer may answer it in any supported language.
+  if (semanticBoundary.mode !== 'READ_ONLY' || !supportCommercialProcess) {
     return null;
   }
 
