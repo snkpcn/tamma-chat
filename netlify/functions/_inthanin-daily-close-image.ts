@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
+import { openTransferPurposeFollowup } from './_inthanin-transfer-followup';
 
 type FinancialDocumentType =
   | 'pos_close'
@@ -582,6 +583,23 @@ export async function handleCafeTestDailyCloseImage(input: {
       evidenceId:result.evidence_id ?? null,
       dailyCloseId:result.daily_close_id ?? null,
     }));
+
+    if(!result.duplicate
+      &&result.evidence_id
+      &&result.evidence_type==='transfer_slip'
+      &&result.match_status==='unmatched'){
+      const followup=await openTransferPurposeFollowup({
+        targetId:input.targetId,
+        evidenceId:result.evidence_id,
+      });
+      if(followup.reply){
+        const base=replyForResult(extraction,result,environment)
+          .split('\n')
+          .slice(0,2)
+          .join('\n');
+        return base+'\n'+followup.reply;
+      }
+    }
 
     return replyForResult(extraction, result, environment);
   } catch (error) {
