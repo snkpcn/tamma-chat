@@ -71,7 +71,7 @@ test('Thai short Buddhist year 69 resolves to 2026',()=>{
   assert.equal(parseInthaninDate('1/10/2026'),'2026-10-01');
 });
 
-test('legacy owner sample reconciles 1,185 sales and infers the 100 cash deduction as itemized shop expenses',()=>{
+test('legacy owner sample reconciles 1,185 sales and applies the shop-cash default to itemized expenses',()=>{
   assert.equal(looksLikeInthaninDailyCloseText(legacySample),true);
   const p=parseInthaninDailyCloseText(legacySample);
   assert.equal(p.localDate,'2026-10-01');
@@ -89,7 +89,7 @@ test('legacy owner sample reconciles 1,185 sales and infers the 100 cash deducti
   ]);
   assert.equal(p.cupCount,18);
   assert.equal(p.billCount,null);
-  assert.ok(p.warnings.includes('legacy_cash_deduction_inferred_expense_funding'));
+  assert.ok(!p.warnings.includes('expense_funding_needs_review'));
   assert.deepEqual(p.missingCritical,[]);
 });
 
