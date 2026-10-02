@@ -95,5 +95,5 @@ function apply(){
 function setLang(v,persist=true){if(!SUPPORTED.includes(v))return;lang=v;if(persist)try{localStorage.setItem(KEY,v);}catch{}apply();window.dispatchEvent(new CustomEvent('menu:i18n-change',{detail:{lang}}));}
 function init(){lang=read();apply();document.querySelectorAll('[data-menu-lang-select]').forEach(el=>el.addEventListener('change',()=>setLang(el.value)));window.addEventListener('storage',e=>{if(e.key===KEY&&SUPPORTED.includes(e.newValue))setLang(e.newValue,false)});window.dispatchEvent(new CustomEvent('menu:i18n-ready',{detail:{lang}}));}
 window.MenuI18n={t,category,name,ingredient,locale,lang:()=>lang,setLang,init};
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+init();
 })();
