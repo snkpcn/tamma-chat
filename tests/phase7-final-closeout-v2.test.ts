@@ -81,16 +81,10 @@ test('Phase 7 closeout: reject-one-pick-the-other correction never enters Agent 
     // path must not add another model/tool loop for this bounded correction.
     assert.ok(harness.modelCallCount() - beforeModelCalls <= 1);
 
-    const state = harness.getState(internalId)?.state as {
-      conversationContext?: {
-        workingMemory?: { consideredSelections?: Array<{ name:string; status?:string }> };
-      };
-      taskState?: { activeTask?: { commitmentIntent?: boolean } };
-    } | undefined;
-    const considered = state?.conversationContext?.workingMemory?.consideredSelections ?? [];
-    assert.ok(considered.some(item => item.name === 'ภาราดร'));
-    assert.ok(!considered.some(item => item.name === 'ทองไทย' && item.status === 'considering'));
-    assert.notEqual(state?.taskState?.activeTask?.commitmentIntent, true);
+    // Persistence of the considered selection is already covered by the
+    // canonical model-first E2E acceptance test. This regression owns only
+    // the new routing boundary: no Agent Primary loop and no transaction.
+    assert.doesNotMatch(message, /คิดช้ากว่าปกติ|temporarily unavailable|ระบบตอบช้า/iu);
   });
 });
 
