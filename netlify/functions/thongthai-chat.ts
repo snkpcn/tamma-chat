@@ -1008,6 +1008,36 @@ function formatConstraintCorrectionAck(message: string): string | null {
   return `รับทราบครับ 🙏 ถ้างั้นทาน${corrected}ได้ตามปกติเลยครับ`;
 }
 
+/**
+ * Phase 7 latency/resilience boundary for a bare dietary preference update.
+ *
+ * A statement such as "ผมกินเผ็ดไม่เก่งด้วยครับ" is already deterministically
+ * understood by the customer-intelligence + restaurant preference parser and
+ * does not need a 100% Agent Primary turn. Running the Saved Agent for this
+ * shape caused a real production 504 and added menu-tool cost even though the
+ * customer asked for no new recommendation. Constraint+recommendation turns
+ * still continue to the grounded advisor/Agent path; only CONSTRAINT_ONLY is
+ * acknowledged here.
+ */
+export function deterministicConstraintOnlyPreferenceResponse(request: BrainRequest): BrainResponse | null {
+  if (classifyRestaurantDietaryIntent(request.message) !== 'CONSTRAINT_ONLY') return null;
+  const parsed = parseRestaurantConstraintSignals({
+    query:request.message,
+    recentMessages:[],
+  }, []);
+  return {
+    message: formatConstraintCorrectionAck(request.message)
+      ?? formatConstraintDeclarationAck({ parsed }, request.message),
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 // Natural, non-repeating phrase for a recommendation reply that's using
 // a REMEMBERED constraint (not restated this turn) -- e.g. "เลี่ยงกุ้งและ
 // ไม่เผ็ด" -- so formatAdvisorMessage can say "ถ้ายัง...อยู่" instead of
@@ -2538,6 +2568,40 @@ async function persistHorseSelection(guestDbId: string | null, channel: BrainCha
   } catch (error) {
     console.error('THONGTHAI_HORSE_SELECTION_PERSIST_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
   }
+}
+
+/**
+ * Phase 7 explicit consider-only horse selection.
+ *
+ * "เอาภาราดรไว้ก่อน แต่ยังไม่จอง" is a bounded planning-state update, not a
+ * booking flow. Persist the horse on a non-committed ActiveTask so later
+ * duration/correction/resume turns have real server-side continuity, and
+ * answer with information intent. This runs only behind the already-proven
+ * commercial WITHHOLD boundary.
+ */
+export async function explicitHorseHoldWithoutBookingResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+  boundaryMode: string,
+): Promise<BrainResponse | null> {
+  if (boundaryMode !== 'WITHHOLD') return null;
+  if (!/(?:ไว้ก่อน|ยังไม่จอง|ไม่จอง)/u.test(request.message)) return null;
+  const asset = activityAssetFromText(request.message);
+  if (!asset || asset.resourceCode !== 'activity-horse') return null;
+
+  await persistHorseSelection(guestDbId, channel, asset.name);
+  const displayName = asset.name.startsWith('น้อง') ? asset.name : `น้อง${asset.name}`;
+  return {
+    message:`ได้ครับ เก็บ${displayName}ไว้ก่อนนะครับ ยังไม่ได้จองหรือส่งรายการครับ`,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
 }
 
 // Once a horse-booking conversation is already established (chatHistory
@@ -5067,6 +5131,20 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  const earlyConstraintOnlyPreference = deterministicConstraintOnlyPreferenceResponse(request);
+  if (earlyConstraintOnlyPreference) {
+    console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder:'deterministicConstraintOnlyPreferenceResponse' }));
+    const polished = polishedResponse(earlyConstraintOnlyPreference, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
   // Phase 5 Business + Incident Router: one pre-model classification pass
   // owns the deterministic authority/feedback precedence. The individual
   // responders below receive the already-classified object so they cannot
@@ -5147,6 +5225,30 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   );
   const explicitTransactionIntent = commercialBoundary.currentTurnCommit;
   const transactionPrepareIntent = commercialBoundary.prepareEligible;
+
+  const explicitHorseHold = await explicitHorseHoldWithoutBookingResponse(
+    request,
+    guestDbId,
+    channel,
+    commercialBoundary.mode,
+  ).catch(error => {
+    console.error(
+      'THONGTHAI_EXPLICIT_HORSE_HOLD_ERROR',
+      error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+    );
+    return null;
+  });
+  if (explicitHorseHold) {
+    const polished = polishedResponse(explicitHorseHold, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
 
   // Selection of the prepare-only canary is independent of the CURRENT
   // sentence's transaction wording. A later "ยืนยันส่งคำถาม", "เอาไว้ก่อน",
