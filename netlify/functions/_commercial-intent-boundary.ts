@@ -74,6 +74,7 @@ export function classifyCommercialBoundaryText(
       currentTurnCommit:false,
       prepareEligible:false,
       routeToOneMindBeforePrimary:true,
+      withholdsExecution:true,
       reason:'explicit_no_transaction',
     };
   }
@@ -84,6 +85,7 @@ export function classifyCommercialBoundaryText(
       currentTurnCommit:false,
       prepareEligible:false,
       routeToOneMindBeforePrimary:true,
+      withholdsExecution:true,
       reason:'cancel_or_abandon_working_state',
     };
   }
