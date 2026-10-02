@@ -163,7 +163,9 @@ export function semanticConceptKeyForConfirmedMeaning(input: {
     if (companion) candidates.push(companion);
   }
   const paceValue = input.entities.pace ?? input.entities.exertionPreference;
-  if (paceValue === 'relaxed') candidates.push('pace_relaxed');
+  const relaxedPaceConstraint = input.constraints.some(value =>
+    /^(?:low_exertion|relaxed|not_tiring)$/iu.test(value));
+  if (paceValue === 'relaxed' || relaxedPaceConstraint) candidates.push('pace_relaxed');
   if (input.constraints.some(value =>
     /^(?:consider_only|not_yet_booking|no_transaction|not_booking)$/iu.test(value))) {
     candidates.push('consider_only');
