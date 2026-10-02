@@ -49,3 +49,16 @@ test('payroll-like purpose is never resolved into the staff-visible Inthanin led
   assert.match(followup,/เงินเดือน\|เบิกเงิน\|ค่าแรง\|ค่าจ้าง\|payroll\|salary/);
   assert.match(followup,/กลุ่ม Owner เท่านั้น/u);
 });
+
+
+test('Daily Close dedupe keeps the earlier slip-purpose event and suppresses the duplicate report item',()=>{
+  const line=readFileSync('netlify/functions/_inthanin-daily-close-line.ts','utf8');
+  const migration=readFileSync('supabase/migrations/20261002143500_financial_transfer_followup_dedupe_v1.sql','utf8');
+
+  assert.match(line,/financial_dedupe_transfer_followup_expenses_v1/);
+  assert.match(line,/transferPurposeDeduped/);
+  assert.match(migration,/duplicate_of_transfer_followup/);
+  assert.match(migration,/source_item_key='transfer_purpose'/);
+  assert.match(migration,/source_item_key like 'expense:%'/);
+  assert.match(migration,/purchase_cash_outflow=v_purchase_cash/);
+});
