@@ -224,6 +224,13 @@ function taskSlotPatch(entities: Record<string, unknown>): Record<string, unknow
     // explicit task-state event at the policy boundary instead.
     if (!NON_SLOT_META_KEYS.has(key) && value !== undefined && value !== null) patch[key] = value;
   }
+  // Current structured horse identity owns its legacy slot alias. Without
+  // this normalization, a correction can update horseName while downstream
+  // availability/status readers still see the rejected assetSelection.
+  // State normalization only; it never grants transaction authority.
+  if (typeof patch.horseName === 'string' && patch.horseName.trim()) {
+    patch.assetSelection = patch.horseName;
+  }
   return patch;
 }
 
