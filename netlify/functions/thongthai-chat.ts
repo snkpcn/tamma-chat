@@ -295,9 +295,18 @@ async function cafeStateBeforePrimary(
   try {
     const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
     if (!isObject(snapshot.state)) return null;
-    return isCafeReadOnlyTurn(request.message, snapshot.state.active_topic)
-      ? snapshot.state
-      : null;
+    if (isCafeReadOnlyTurn(request.message, snapshot.state.active_topic)) return snapshot.state;
+
+    const rawContext=snapshot.state.conversationContext;
+    const turns=isObject(rawContext)&&Array.isArray(rawContext.recentTurns)
+      ? rawContext.recentTurns
+      : [];
+    const recentCafeEvidence=turns
+      .slice(-24)
+      .some(turn=>isObject(turn)&&typeof turn.content==='string'
+        && /(?:Inthanin|อินทนิน|อเมริกาโน่|ลาเต้|มัทฉะ|ชาไทย|ชาเขียว|เครื่องดื่ม)/iu.test(turn.content));
+    const explicitCafeResume=/(?:กลับมา|กลับไป|ต่อ).{0,18}(?:เรื่อง)?เครื่องดื่ม|ของแฟนเมื่อกี้.{0,30}(?:ดื่ม|ขม|หวาน|เมนู)/u.test(request.message);
+    return explicitCafeResume&&recentCafeEvidence ? snapshot.state : null;
   } catch (error) {
     console.error(
       'THONGTHAI_PRE_PRIMARY_CAFE_STATE_ERROR',
@@ -2099,6 +2108,76 @@ async function deterministicCafeResponse(
   }
 
   const recentCafeText=recentCafeConversationText(runtime.agentState??{});
+
+  const cafeResumeForCompanion =
+    /(?:กลับมา|กลับไป|ต่อ).{0,18}(?:เรื่อง)?เครื่องดื่ม/u.test(message)
+    && /แฟน|เมื่อกี้/u.test(message);
+  if(items.length&&cafeResumeForCompanion&&/อูจิ\s*เพียวมัทฉะ/u.test(recentCafeText)){
+    return {
+      message:[
+        'ของแฟนที่คุยไว้ก่อนเปลี่ยนเรื่อง เป็นฝั่งไม่กาแฟครับ — ตอนนั้นคัดอูจิ เพียวมัทฉะไว้',
+        /ไม่เอานมวัว/u.test(recentCafeText)
+          ? 'แล้วมีเงื่อนไขเพิ่มว่าช่วงนี้ไม่อยากดื่มนมวัว แต่ไม่ได้แพ้นมครับ'
+          : '',
+        'ทั้งหมดนี้ยังเป็นแค่ตัวเลือก ยังไม่ได้สั่งหรือส่งรายการครับ',
+      ].filter(Boolean).join('\n\n'),
+      intent:'information',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{activeTopic:'cafe'},
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+
+  const selfPriceFollowup=/ของผม/u.test(message)
+    && /(?:ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล)/u.test(message)
+    && /(?:ราคา|กี่บาท|เท่าไหร่|เท่าไร)/u.test(message);
+  if(items.length&&selfPriceFollowup&&/อเมริกาโน่/u.test(recentCafeText)){
+    const item=items.find(candidate=>candidate.code==='americano'&&candidate.active);
+    const recentIced=/อเมริกาโน่.{0,30}เย็น/u.test(recentCafeText);
+    const slot=item?.slots.find(candidate=>candidate.active&&candidate.slot_code===(recentIced?'iced':'hot'))
+      ?? item?.slots.find(candidate=>candidate.active);
+    if(item&&slot){
+      return {
+        message:[
+          `ของคุณที่คุยไว้คือ ${item.name_th} ${slot.label_th} ราคา ${cafeMoney(slot.price)}ครับ`,
+          'ส่วน “ไม่ใส่น้ำตาลเลย” ข้อมูลเมนูที่เชื่อมอยู่ตอนนี้ยังไม่ได้ยืนยันกติกาการปรับเมนูนี้ไว้ ทองไทยเลยไม่ขอตอบว่าได้แน่นอนจนกว่าจะมีข้อมูลจากหน้าร้านครับ',
+        ].join('\n\n'),
+        intent:'information',
+        contextUpdates:{},
+        journeyAction:{type:'none',journey:null},
+        suggestedActions:[],
+        responseStyle:'direct',
+        agentStateUpdate:{activeTopic:'cafe'},
+        semanticMemoryUpdates:[],
+        toolCalls:[],
+      };
+    }
+  }
+
+  const companionBitternessFollowup=/แฟน/u.test(message)
+    && /(?:เมื่อกี้|ตัวไหน)/u.test(message)
+    && /ขม/u.test(message);
+  if(items.length&&companionBitternessFollowup&&/อูจิ\s*เพียวมัทฉะ/u.test(recentCafeText)){
+    return {
+      message:[
+        'ของแฟนเมื่อกี้คัดอูจิ เพียวมัทฉะไว้ครับ',
+        'แต่ข้อมูลเมนูที่เชื่อมอยู่ยังไม่มีระดับความขมของแต่ละแก้วให้เทียบกัน ทองไทยเลยไม่อยากเดาว่าตัวไหน “ขมน้อยสุด” ครับ',
+      ].join('\n\n'),
+      intent:'information',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{activeTopic:'cafe'},
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+
   const splitFollowup=/ของผม.{0,24}(?:เย็น|ร้อน|ปั่น).{0,40}(?:แฟน)/u.test(message)
     || /(?:แฟน).{0,40}(?:ของผม).{0,24}(?:เย็น|ร้อน|ปั่น)/u.test(message);
   if(items.length&&splitFollowup&&/อเมริกาโน่/u.test(recentCafeText)&&/อูจิ\s*เพียวมัทฉะ/u.test(recentCafeText)){
