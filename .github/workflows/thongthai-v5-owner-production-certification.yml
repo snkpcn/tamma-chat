@@ -1,0 +1,27 @@
+name: Thongthai V5 Owner Production Certification
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  owner-v5-production-certification:
+    if: contains(github.event.head_commit.message, 'Thongthai V5 Owner Acceptance')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Wait for matching Netlify production deploy
+        run: sleep 150
+      - name: Replay owner failure classes against production
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: npx tsx scripts/run-v5-owner-production-certification.ts
