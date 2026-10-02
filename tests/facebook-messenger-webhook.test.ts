@@ -66,6 +66,22 @@ test('extractFacebookTextEvents keeps configured-page text events only', () => {
   assert.equal(events[0]!.eventId, 'm-1');
 });
 
+test('extractFacebookTextEvents dedupes the same Meta message id inside one webhook payload', () => {
+  const payload = {
+    object:'page',
+    entry:[{
+      id:'page-123',
+      messaging:[
+        { sender:{id:'user-1'}, recipient:{id:'page-123'}, message:{mid:'dup-mid',text:'hello'} },
+        { sender:{id:'user-1'}, recipient:{id:'page-123'}, message:{mid:'dup-mid',text:'hello'} },
+      ],
+    }],
+  };
+  const events=extractFacebookTextEvents(payload,'page-123');
+  assert.equal(events.length,1);
+  assert.equal(events[0]!.eventId,'dup-mid');
+});
+
 test('language detection and message splitting stay within transport limits', () => {
   assert.equal(detectFacebookLanguage('สวัสดีครับ'), 'th');
   assert.equal(detectFacebookLanguage('hello'), 'en');
