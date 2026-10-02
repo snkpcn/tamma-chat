@@ -38,23 +38,39 @@ export type WorldwideEnv = Readonly<Record<string, string | undefined>>;
 
 const TRUE_VALUES = new Set(['1', 'true', 'on', 'yes']);
 
+function netlifyEnvValue(name: string): string | undefined {
+  const runtime = (globalThis as typeof globalThis & {
+    Netlify?: { env?: { get?: (key: string) => unknown } };
+  }).Netlify?.env;
+  const value = runtime?.get?.(name);
+  return typeof value === 'string' ? value : undefined;
+}
+
+export function runtimeWorldwideEnv(): WorldwideEnv {
+  const names = [
+    WORLDWIDE_MASTER_ENV,
+    ...Object.values(WORLDWIDE_CAPABILITY_ENV),
+  ];
+  return Object.fromEntries(names.map(name => [name, netlifyEnvValue(name)]));
+}
+
 export function explicitFeatureFlag(value: unknown): boolean {
   return typeof value === 'string' && TRUE_VALUES.has(value.trim().toLowerCase());
 }
 
-export function isWorldwideMasterEnabled(env: WorldwideEnv = process.env): boolean {
+export function isWorldwideMasterEnabled(env: WorldwideEnv = runtimeWorldwideEnv()): boolean {
   return explicitFeatureFlag(env[WORLDWIDE_MASTER_ENV]);
 }
 
 export function isWorldwideCapabilityEnabled(
   capability: WorldwideCapability,
-  env: WorldwideEnv = process.env,
+  env: WorldwideEnv = runtimeWorldwideEnv(),
 ): boolean {
   if (!isWorldwideMasterEnabled(env)) return false;
   return explicitFeatureFlag(env[WORLDWIDE_CAPABILITY_ENV[capability]]);
 }
 
-export function worldwideFeatureSnapshot(env: WorldwideEnv = process.env) {
+export function worldwideFeatureSnapshot(env: WorldwideEnv = runtimeWorldwideEnv()) {
   const master = isWorldwideMasterEnabled(env);
   const capabilities = Object.fromEntries(
     (Object.keys(WORLDWIDE_CAPABILITY_ENV) as WorldwideCapability[])
