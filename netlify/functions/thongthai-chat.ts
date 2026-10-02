@@ -1780,7 +1780,8 @@ const CAFE_MENU_ALIASES:Record<string,readonly string[]>={
 
 function normalizeCafeLookup(value:string):string{
   return value
-    .toLowerCase()
+    .normalize('NFKC')
+    .toLocaleLowerCase('th-TH')
     .replace(/[()•·.,/\\_\-:!?'"“”‘’]+/g,' ')
     .replace(/\s+/g,' ')
     .trim();
@@ -1813,8 +1814,11 @@ function resolveCafeMenuItem(message:string,items:readonly CafeMasterMenuItem[])
   if(resolved)return resolved;
   // Human shorthand: "ลาเต้" by itself means the coffee latte unless the
   // customer explicitly says tea/green-tea/Thai-tea/matcha.
-  if(/(?:^|[^ก-๙])(?:ลาเต้|latte)/iu.test(' '+message)
-      && !/(?:ชาไทย|ชาเขียว|มัทฉะ|matcha|thai\s*tea|green\s*tea)/iu.test(message)){
+  const normalizedMessage=compactCafeLookup(message);
+  const genericLatte=normalizedMessage.includes(compactCafeLookup('ลาเต้'))
+    || normalizedMessage.includes(compactCafeLookup('latte'));
+  const teaLatte=/(?:ชาไทย|ชาเขียว|มัทฉะ|matcha|thai\s*tea|green\s*tea)/iu.test(normalizeCafeLookup(message));
+  if(genericLatte&&!teaLatte){
     return items.find(item=>item.code==='cafe_latte'&&item.active)??null;
   }
   return null;
@@ -1906,6 +1910,12 @@ export function cafeGroundedAnswer(
 
   if(!item&&isMenuDiscovery){
     return {answer:cafeMenuListMessage(items),grounded:true};
+  }
+  if(!item&&(isPriceAsk||isStyleAsk)){
+    return {
+      answer:'ทองไทยเห็นว่าถามเรื่องราคา/รูปแบบเครื่องดื่มครับ แต่จับชื่อเมนูยังไม่ชัวร์ พิมพ์ชื่อเมนูอีกนิดเดียวแล้วทองไทยเช็กให้ตรงตัวได้เลยครับ',
+      grounded:false,
+    };
   }
   if(!item)return null;
 
