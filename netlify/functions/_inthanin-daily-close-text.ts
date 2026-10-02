@@ -221,13 +221,19 @@ function parseLegacyCashExpression(line:string|null):{cash:number|null;deduction
 }
 
 function noteFromLines(lines:string[]):string|null{
-  const index=lines.findIndex(line=>/หมายเหตุ/u.test(line));
-  if(index<0)return null;
-  const current=normalizeLine(lines[index]);
-  const inline=current.includes('=')?current.slice(current.indexOf('=')+1).trim():'';
-  if(inline)return inline;
+  for(const raw of lines){
+    const current=normalizeLine(raw);
+    if(!/หมายเหตุ/u.test(current))continue;
+    if(current.includes('=')){
+      const inline=current.slice(current.indexOf('=')+1).trim();
+      if(inline)return inline;
+    }
+  }
+
+  const headingIndex=lines.findIndex(line=>/หมายเหตุ/u.test(line));
+  if(headingIndex<0)return null;
   const following:string[]=[];
-  for(let i=index+1;i<lines.length;i+=1){
+  for(let i=headingIndex+1;i<lines.length;i+=1){
     const text=normalizeLine(lines[i]);
     if(!text)continue;
     if(/^\d+[.)]/.test(text))break;
