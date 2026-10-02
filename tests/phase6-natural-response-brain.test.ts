@@ -90,7 +90,7 @@ test('Phase 6 deterministic degradation never leaks English into zh/lo/vi',()=>{
 
 test('Phase 6 collect-field copy is localized and names the actual missing fields',()=>{
   const cases:Array<[ResponseLanguage,string,RegExp]>=[
-    ['en','date','date'],
+    ['en','date',/date/iu],
     ['zh','date',/日期/u],
     ['lo','date',/ວັນ/u],
     ['vi','date',/ngày/iu],
