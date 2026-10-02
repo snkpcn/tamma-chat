@@ -104,3 +104,25 @@ Phase 6.1 closes only when:
 - post-deploy production E2E workflow passes every case;
 - synthetic guest IDs are checked read-only against transaction tables and show zero transactions;
 - final checkpoint is persisted on `main`.
+
+
+## Production deployment checkpoint
+
+Implementation PR #470 merged as:
+
+`6ef5d04b697a8b7dafbd2343d2c8460769ff97f7`
+
+Netlify production deploy:
+
+`6abf4d7a4c017d00086e1874`
+
+Verified before production certification:
+
+- state: **READY**
+- context: **production**
+- branch: **main**
+- deploy `commit_ref` matches the implementation merge exactly
+- deploy validation status: **ready**
+- secret scan matches: **0**
+
+Production E2E certification against this exact deployment is now pending.
