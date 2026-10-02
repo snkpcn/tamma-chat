@@ -37,6 +37,8 @@ jobs:
             echo "THONGTHAI_AGENT_SYNC_NOT_RUN: OPENAI_API_KEY missing"
             exit 2
           fi
+      - name: Wait for the matching Netlify runtime deploy
+        run: sleep 120
       - name: Sync Thongthai production Agent from canonical repo profile
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
