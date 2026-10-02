@@ -28,11 +28,16 @@ async function send(label,guestId,message,eventBase){
     });
     const payload=await response.json().catch(()=>({}));
     const text=typeof payload.message==='string'?payload.message:'';
+    const genericFallback=/ตอบเรื่องนี้ให้แม่นไม่ได้|ลองอีกครั้งสักครู่|ระบบตอบช้า|คิดช้ากว่าปกติ/u.test(text);
     const row={
       label,attempt,eventId,httpStatus:response.status,
       latencyMs:Date.now()-started,response:text.slice(0,500),
       falseSuccess:FALSE_SUCCESS.test(text),
-      pass:response.status===200&&text.trim().length>0&&!FALSE_SUCCESS.test(text),
+      genericFallback,
+      pass:response.status===200
+        && text.trim().length>0
+        && !FALSE_SUCCESS.test(text)
+        && !(label.startsWith('pace-') && genericFallback),
     };
     console.log(JSON.stringify(row));
     if(row.pass) return row;
@@ -45,25 +50,25 @@ async function send(label,guestId,message,eventBase){
 async function main(){
   const first=await send(
     'pace-first-confirm-and-learn',
-    'd7d7d7d7-0001-4d7d-8d7d-000000000041',
+    'd8d8d8d8-0001-4d8d-8d8d-000000000051',
     'ไม่อยากเหนื่อยมากครับ',
-    'phase3-prod5-pace-first'
+    'phase3-prod6-pace-first'
   );
 
   await new Promise(resolve=>setTimeout(resolve,2000));
 
   const replay=await send(
     'pace-cross-customer-exact-replay',
-    'd7d7d7d7-0002-4d7d-8d7d-000000000042',
+    'd8d8d8d8-0002-4d8d-8d8d-000000000052',
     'ไม่อยากเหนื่อยมากนะครับ',
-    'phase3-prod5-pace-replay'
+    'phase3-prod6-pace-replay'
   );
 
   const negative=await send(
     'transaction-negative-control',
-    'd7d7d7d7-0003-4d7d-8d7d-000000000043',
+    'd8d8d8d8-0003-4d8d-8d8d-000000000053',
     'จองเลยครับ',
-    'phase3-prod5-transaction-negative'
+    'phase3-prod6-transaction-negative'
   );
 
   console.log(JSON.stringify({
