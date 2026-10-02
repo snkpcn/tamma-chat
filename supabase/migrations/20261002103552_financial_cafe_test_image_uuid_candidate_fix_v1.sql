@@ -1,0 +1,1 @@
+-- Production hotfix: UUID candidate aggregation now casts UUID -> text -> UUID.\n-- Fresh installs already receive the corrected definition in the preceding migration.\n
