@@ -5,6 +5,7 @@
   "description": "ทำมา-ชาติ — Experiences of Isan. Static site (index.html) plus the Thongthai AI concierge Netlify Functions backend.",
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts",
+    "audit:preww": "node scripts/pre-worldwide-readiness-gate.mjs",
     "eval:semantic:live": "tsx scripts/run-semantic-live-eval.ts",
     "eval:phase1:live": "tsx scripts/run-phase1-open-world-live-eval.ts",
     "certify:phase7:production": "tsx scripts/run-phase7-production-certification.ts",
