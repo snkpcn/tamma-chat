@@ -161,18 +161,22 @@ function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
   const phrase=GUEST_SCOPED_CONSTRAINT_PATTERNS[code];
   if(!phrase)return false;
   const source=phrase.source;
-  const scoped=new RegExp(`(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)(.{0,28}?)(?:${source})`,'iu');
-  const match=scoped.exec(message);
-  if(!match)return false;
-  // "มากับแฟน แต่ผมไม่กินกาแฟ" must remain the customer's preference:
-  // a self marker between the companion noun and the preference wins.
-  if(GUEST_MEMORY_SELF_RE.test(match[1]??''))return false;
+  const scoped=new RegExp(`(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)(.{0,28}?)(?:${source})`,'giu');
+  const matches=[...message.matchAll(scoped)];
+  if(!matches.length)return false;
 
-  // Shared wording is also customer-owned because the customer explicitly
-  // includes themself ("เราสองคน/เราทั้งคู่").
-  const around=message.slice(Math.max(0,(match.index??0)-20),(match.index??0)+match[0].length+20);
-  if(/เราสองคน|เราทั้งคู่|ทั้งคู่|พวกเรา/u.test(around))return false;
-  return GUEST_MEMORY_COMPANION_RE.test(match[0]);
+  // Prefer the closest clean companion-scoped occurrence. A sentence can
+  // mention the companion earlier for an unrelated reason ("มากับแฟนครับ
+  // ผมชอบกาแฟ... แต่แฟนไม่กินกาแฟ"). The first broad match may cross the
+  // self clause; a later clean match must still win.
+  for(const match of matches){
+    if(GUEST_MEMORY_SELF_RE.test(match[1]??''))continue;
+    const index=match.index??0;
+    const around=message.slice(Math.max(0,index-20),index+match[0].length+20);
+    if(/เราสองคน|เราทั้งคู่|ทั้งคู่|พวกเรา/u.test(around))continue;
+    if(GUEST_MEMORY_COMPANION_RE.test(match[0]))return true;
+  }
+  return false;
 }
 
 export function extractGuestPreferenceSignal(message:string):PreferenceSignal{
