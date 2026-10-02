@@ -9,6 +9,7 @@ import {
 import { createRestaurantPreorder, listRestaurantMenu, loadRestaurantWorldFacts, restaurantMenuAdvice } from './_restaurant-sot';
 import { loadActivePromotionsWorldFact, redeemPromotion } from './_promotions-runtime';
 import { loadActivityWorldFacts } from './_activity-sot';
+import { loadCafeWorldFacts } from './_cafe-sot';
 import { patchGuestAgentState } from './_guest-agent-state-store';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
@@ -94,8 +95,9 @@ export async function loadBrainRuntime(guestDbId: string | null, channel: BrainC
     dbFetch('world_facts?active=eq.true&verified=eq.true&select=fact_key,category,fact_value,source,updated_at&order=fact_key.asc&limit=300').then(r => r.json() as Promise<WorldFactRow[]>),
     loadActivityWorldFacts(),
     loadRestaurantWorldFacts(),
+    loadCafeWorldFacts('inthanin_tadtone'),
     loadActivePromotionsWorldFact(channel),
-  ]).then(([baseFacts, activityFacts, restaurantFacts, promotionFacts]) => [...baseFacts, ...activityFacts, ...restaurantFacts, ...promotionFacts]);
+  ]).then(([baseFacts, activityFacts, restaurantFacts, cafeFacts, promotionFacts]) => [...baseFacts, ...activityFacts, ...restaurantFacts, ...cafeFacts, ...promotionFacts]);
     if (!guestDbId) return { ...fallback, worldFacts:await worldPromise };
     const [states, memories, worldFacts] = await Promise.all([
       dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`).then(r => r.json() as Promise<Array<{state:Record<string,unknown>}>>),

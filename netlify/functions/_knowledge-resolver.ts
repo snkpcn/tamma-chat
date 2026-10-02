@@ -76,7 +76,7 @@ export type KnowledgeSourceType =
 export const SOURCE_REGISTRY: Record<KnowledgeNeed, readonly KnowledgeSourceType[]> = {
   catalog: ['activity_live', 'restaurant_live', 'stay_live', 'otop_live', 'bible'],
   entity_details: ['activity_live', 'restaurant_live', 'stay_live', 'bible'],
-  price: ['activity_live', 'restaurant_live', 'stay_live', 'otop_live'],
+  price: ['activity_live', 'restaurant_live', 'stay_live', 'otop_live', 'cafe_live'],
   availability: ['restaurant_live', 'activity_live', 'stay_live'],
   schedule: ['activity_live', 'stay_live'],
   inventory: ['activity_live', 'otop_live'],
@@ -257,7 +257,7 @@ function routeNeed(domain: SemanticDomain, need: KnowledgeNeed, adapters: Knowle
       if (need === 'order_status' && adapters.orderStatus?.lookup) return { sourceType: 'order_operational', fetch: adapters.orderStatus.lookup };
       return null;
     case 'cafe':
-      if ((need === 'catalog' || need === 'entity_details' || need === 'recommendations_input') && adapters.cafe?.facts) return { sourceType: 'cafe_live', fetch: adapters.cafe.facts };
+      if ((need === 'catalog' || need === 'entity_details' || need === 'recommendations_input' || need === 'price') && adapters.cafe?.facts) return { sourceType: 'cafe_live', fetch: adapters.cafe.facts };
       return null;
     case 'payment':
       if (adapters.paymentStatus?.lookup) return { sourceType: 'payment_operational', fetch: adapters.paymentStatus.lookup };
