@@ -121,30 +121,19 @@ begin
     returning id into v_followup_id;
   end if;
 
-  select count(*),min(amount) filter(
-    where created_at=(
-      select min(f2.created_at)
-      from public.financial_transfer_followups f2
-      where f2.target_hash=trim(p_target_hash)
-        and f2.status='awaiting_description'
-        and f2.created_at>now()-interval '72 hours'
-    )
-  )
-  into v_pending_count,v_oldest_amount
+  select count(*) into v_pending_count
   from public.financial_transfer_followups
   where target_hash=trim(p_target_hash)
     and status='awaiting_description'
     and created_at>now()-interval '72 hours';
 
-  if v_oldest_amount is null then
-    select amount into v_oldest_amount
-    from public.financial_transfer_followups
-    where target_hash=trim(p_target_hash)
-      and status='awaiting_description'
-      and created_at>now()-interval '72 hours'
-    order by created_at asc
-    limit 1;
-  end if;
+  select amount into v_oldest_amount
+  from public.financial_transfer_followups
+  where target_hash=trim(p_target_hash)
+    and status='awaiting_description'
+    and created_at>now()-interval '72 hours'
+  order by created_at asc
+  limit 1;
 
   return jsonb_build_object(
     'ok',true,'opened',true,'followup_id',v_followup_id,
