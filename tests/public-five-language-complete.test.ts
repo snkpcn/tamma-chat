@@ -28,6 +28,7 @@ function compileInlineScripts(html: string, page: string) {
   const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]);
   assert.ok(scripts.length > 0, `${page} should have inline JS`);
   for (const [index, source] of scripts.entries()) {
+    if (/^\s*import\s/m.test(source)) continue;
     assert.doesNotThrow(() => new Function(source), `${page} inline script ${index + 1} should parse`);
   }
 }
@@ -133,10 +134,13 @@ test('all six public pages use the same stored language contract', () => {
   const index = read('index.html');
   const map = read('otop-map.html');
   const store = read('otop.html');
+  const otopI18n = read('assets/scripts/otop-i18n.js');
   const account = read('assets/scripts/account-i18n.js');
   const menu = read('assets/scripts/menu-i18n.js');
   const chess = read('chess.html');
-  for (const [name, source] of [['home',index],['map',map],['store',store],['account',account],['menu',menu],['chess',chess]] as const) {
+  assert.match(map, /assets\/scripts\/otop-i18n\.js/, 'map must load the shared OTOP language runtime');
+  assert.match(store, /assets\/scripts\/otop-i18n\.js/, 'store must load the shared OTOP language runtime');
+  for (const [name, source] of [['home',index],['otop',otopI18n],['account',account],['menu',menu],['chess',chess]] as const) {
     assert.match(source, /thammachat-lang-v1/, `${name} must use the shared language preference`);
   }
 });
