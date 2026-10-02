@@ -4,8 +4,10 @@ import { readFileSync } from 'node:fs';
 import {
   isCustomerImageRequest,
   selectOtopProductForMedia,
+  resolveRequestedCustomerMedia,
   type MediaCatalogProduct,
 } from '../netlify/functions/_thongthai-media';
+import { withHarness } from './helpers/canonical-core-harness';
 
 const products:MediaCatalogProduct[] = [
   {
@@ -34,6 +36,38 @@ test('referential image request can resolve one product from recent bounded cont
     [{role:'assistant',content:'กล้วยกรอบแก้วตรานกกระจิบยังมีสินค้าครับ'}],
   );
   assert.equal(selected?.sku,'OTOP-NB-003');
+});
+
+test('media resolver reads only the live catalog shape and returns a transport-safe JPEG URL', async () => {
+  await withHarness(async () => {
+    const result=await resolveRequestedCustomerMedia({
+      customerMessage:'ขอดูรูปกล้วยกรอบแก้วหน่อยครับ',
+      assistantMessage:'มีครับ',
+      language:'th',
+      chatHistory:[],
+    });
+    assert.ok(result);
+    assert.equal(result?.media.length,1);
+    assert.equal(result?.media[0]?.sku,'OTOP-NB-003');
+    assert.match(result?.media[0]?.url ?? '',/\.webp$/u);
+    assert.match(result?.media[0]?.deliveryUrl ?? '',/\/\.netlify\/images\?/u);
+    assert.match(result?.media[0]?.deliveryUrl ?? '',/fm=jpg/u);
+    assert.match(result?.overrideMessage ?? '',/ให้เบิ่ง/u);
+  },{
+    otopProducts:[{
+      sku:'OTOP-NB-003',
+      name:'กล้วยกรอบแก้วตรานกกระจิบ',
+      active:true,
+      verified:true,
+      environment:'live',
+      otop_product_images:[{
+        public_url:'https://example.supabase.co/storage/v1/object/public/otop-products/banana.webp',
+        alt_text:'กล้วยกรอบแก้ว',
+        sort_order:0,
+        is_primary:true,
+      }],
+    }],
+  });
 });
 
 test('customer media contract is wired to LINE, Messenger, Web and Netlify image conversion', () => {
