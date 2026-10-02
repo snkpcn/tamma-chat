@@ -2057,7 +2057,14 @@ export function resolveDeterministicActivityPlanningCutover(
     degradation:turn.knowledgeDegradation,
     operationalOutcome:null,
   };
-  return { kind:'respond', response:composeDeterministicResponse(composerInput) };
+  const response = composeDeterministicResponse(composerInput);
+  const horseName = typeof turn.dialogSemanticTurn.entities.horseName === 'string'
+    ? turn.dialogSemanticTurn.entities.horseName.trim().replace(/^น้อง/u, '')
+    : '';
+  if (horseName && !response.message.includes(`น้อง${horseName}`)) {
+    response.message = response.message.replace(horseName, `น้อง${horseName}`);
+  }
+  return { kind:'respond', response };
 }
 
 /** Human Core PR D: task.slots (== proposal.validatedArgs) never carries a
