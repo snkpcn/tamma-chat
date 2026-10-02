@@ -42,6 +42,10 @@ import {
   loadGuestAgentStateSnapshot,
 } from './_guest-agent-state-store';
 import { deriveSemanticMeaning } from './_semantic-meaning';
+import {
+  classifyCommercialBoundarySemantic,
+  classifyCommercialBoundaryText,
+} from './_commercial-intent-boundary';
 import { persistAiResponseTurn } from './_ai-cost-store';
 import { isPromotionMention } from './_promotion-dialog';
 
@@ -387,7 +391,26 @@ export function readOnlyCutoverEligibility(
     && semantic.action === 'status'
     && semantic.informationNeed === 'transaction_status'
     && !turn.dialogDecision.actionProposal;
-  if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain) && !canonicalPaymentStatusLookup) {
+
+  // Phase 4: a support-domain commercial PROCESS QUESTION is read-only by
+  // definition once the shared commercial boundary says READ_ONLY. This is
+  // narrower than adding all support traffic to INITIAL_CUTOVER_DOMAINS:
+  // complaint / incident / request_help semantics remain outside this
+  // exception and keep their existing escalation/legacy ownership.
+  const rawCommercialSupportBoundary = options.message
+    ? classifyCommercialBoundaryText(options.message)
+    : null;
+  const canonicalCommercialSupportQuestion = semantic.domain === 'support'
+    && (semantic.action === 'ask' || semantic.action === 'status')
+    && semantic.speechAct !== 'request_help'
+    && !turn.dialogDecision.actionProposal
+    && classifyCommercialBoundarySemantic(semantic).mode === 'READ_ONLY'
+    && rawCommercialSupportBoundary?.mode === 'READ_ONLY'
+    && rawCommercialSupportBoundary.routeToOneMindBeforePrimary;
+
+  if (!INITIAL_CUTOVER_DOMAINS.has(turn.semanticTurn.domain)
+      && !canonicalPaymentStatusLookup
+      && !canonicalCommercialSupportQuestion) {
     return { eligible:false, reason:'domain_not_cut_over' };
   }
   const suspendedTask = turn.taskStateAfter.suspendedTask ?? turn.taskStateBefore.suspendedTask;
