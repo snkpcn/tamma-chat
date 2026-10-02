@@ -2634,10 +2634,18 @@ async function persistHorseSelection(guestDbId: string | null, channel: BrainCha
       && container.activeTask.type === 'activity_booking'
       && !isTerminalTaskStatus(container.activeTask.status);
     const task = reusable
-      ? mergeTaskSlots(container.activeTask!, { assetSelection: horseName, resourceCode: 'activity-horse' }, ACTIVITY_BOOKING_REQUIRED_FIELDS)
+      ? mergeTaskSlots(container.activeTask!, {
+        assetSelection: horseName,
+        horseName,
+        resourceCode: 'activity-horse',
+      }, ACTIVITY_BOOKING_REQUIRED_FIELDS)
       : mergeTaskSlots(
         createActiveTask({ type: 'activity_booking', sourceChannel: channel, requiredFields: ACTIVITY_BOOKING_REQUIRED_FIELDS }),
-        { assetSelection: horseName, resourceCode: 'activity-horse' },
+        {
+          assetSelection: horseName,
+          horseName,
+          resourceCode: 'activity-horse',
+        },
         ACTIVITY_BOOKING_REQUIRED_FIELDS,
       );
     await persistTaskState(guestDbId, { ...container, activeTask: task });
@@ -2659,6 +2667,12 @@ export async function explicitHorseHoldWithoutBookingResponse(
   boundaryMode: string,
 ): Promise<BrainResponse | null> {
   if (boundaryMode !== 'WITHHOLD') return null;
+  // This zero-cost fast path is deliberately narrower than the commercial
+  // WITHHOLD class. It owns only a direct NAMED hold ("เอาภาราดรไว้ก่อน").
+  // Conditional/fallback availability language still needs semantic
+  // supervision because it can name two horses and encode branching logic.
+  if (!/(?:เอา|เลือก)\s*(?:น้อง)?(?:ทองไทย|ภาราดร).{0,16}ไว้ก่อน/u.test(request.message)) return null;
+  if (/(?:ถ้า|ไม่ว่าง|ว่าง|เต็ม|คิว)/u.test(request.message)) return null;
   const asset = activityAssetFromText(request.message);
   if (!asset || asset.resourceCode !== 'activity-horse') return null;
   await persistHorseSelection(guestDbId, channel, asset.name);
