@@ -125,8 +125,13 @@ function findLine(lines:string[],patterns:RegExp[],exclude:RegExp[]=[]):string|n
 }
 
 function amountFromLine(lines:string[],patterns:RegExp[],exclude:RegExp[]=[]):number|null{
-  const line=findLine(lines,patterns,exclude);
-  return line ? firstAmountAfterEquals(line) : null;
+  for(const line of lines){
+    if(!patterns.some(pattern=>pattern.test(line)))continue;
+    if(exclude.some(pattern=>pattern.test(line)))continue;
+    const amount=firstAmountAfterEquals(line);
+    if(amount!==null)return amount;
+  }
+  return null;
 }
 
 function expenseCategory(label:string):InthaninExpenseCategory{
@@ -246,7 +251,8 @@ export function looksLikeInthaninDailyCloseText(text:string):boolean{
     /จำนวนแก้ว/u.test(value),
     /ค่าใช้จ่าย/u.test(value),
   ].filter(Boolean).length;
-  return signals>=3 && /ยอดขาย/u.test(value);
+  const closeSignal=/ยอดขาย|ปิดยอด|Daily\s*Close/iu.test(value);
+  return signals>=3 && closeSignal;
 }
 
 export function parseInthaninDailyCloseText(text:string):ParsedInthaninDailyClose{
