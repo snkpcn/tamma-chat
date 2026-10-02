@@ -1,3 +1,17 @@
+export type CafeMenuPriceSlot={
+  id:string;
+  menu_code:string;
+  slot_code:string;
+  label_th:string;
+  label_en:string;
+  price:number;
+  active:boolean;
+  sort_order:number;
+  metadata:Record<string,unknown>;
+  updated_at:string;
+  slots:CafeMenuPriceSlot[];
+};
+
 export type CafeMasterMenuItem={
   code:string;
   category:'coffee'|'non_coffee'|'tea'|'matcha';
@@ -50,12 +64,22 @@ async function dbFetch(path:string):Promise<Response>{
 }
 
 export async function listCafeMasterMenu():Promise<CafeMasterMenuItem[]>{
-  const res=await dbFetch(
-    'cafe_master_menu_items?active=eq.true&available_all_branches=eq.true'
-    +'&select=code,category,name_th,name_en,prices,available_all_branches,active,source,source_verified_at,metadata,updated_at'
-    +'&order=category.asc,name_th.asc'
-  );
-  return await res.json() as CafeMasterMenuItem[];
+  const [menuRes,slotRes]=await Promise.all([
+    dbFetch(
+      'cafe_master_menu_items?active=eq.true&available_all_branches=eq.true'
+      +'&select=code,category,name_th,name_en,prices,available_all_branches,active,source,source_verified_at,metadata,updated_at'
+      +'&order=category.asc,name_th.asc'
+    ),
+    dbFetch(
+      'cafe_menu_price_slots?active=eq.true'
+      +'&select=id,menu_code,slot_code,label_th,label_en,price,active,sort_order,metadata,updated_at'
+      +'&order=menu_code.asc,sort_order.asc,slot_code.asc'
+    ),
+  ]);
+  const menus=await menuRes.json() as Array<Omit<CafeMasterMenuItem,'slots'>>;
+  const rawSlots=await slotRes.json() as Array<Omit<CafeMenuPriceSlot,'price'> & {price:number|string}>;
+  const slots=rawSlots.map(slot=>({...slot,price:Number(slot.price)}));
+  return menus.map(menu=>({...menu,slots:slots.filter(slot=>slot.menu_code===menu.code)}));
 }
 
 export async function listCafeBranchModifiers(branchCode='inthanin_tadtone'):Promise<CafeBranchModifier[]>{
@@ -87,7 +111,7 @@ export async function loadCafeWorldFacts(branchCode='inthanin_tadtone'):Promise<
     return [{
       fact_key:'cafe_menu_live',
       category:'operations',
-      source:'cafe_master_menu_items+cafe_branch_modifiers',
+      source:'cafe_master_menu_items+cafe_menu_price_slots+cafe_branch_modifiers',
       updated_at:updatedAt,
       fact_value:{
         brand:'Inthanin',
@@ -101,6 +125,13 @@ export async function loadCafeWorldFacts(branchCode='inthanin_tadtone'):Promise<
           nameTh:item.name_th,
           nameEn:item.name_en,
           prices:item.prices,
+          slots:item.slots.map(slot=>({
+            code:slot.slot_code,
+            labelTh:slot.label_th,
+            labelEn:slot.label_en,
+            price:slot.price,
+            sortOrder:slot.sort_order,
+          })),
           availableAllBranches:item.available_all_branches,
         })),
         modifiers:modifiers.map(mod=>({
