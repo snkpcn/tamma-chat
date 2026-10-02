@@ -17,7 +17,7 @@ test('Phase 7 final: held horse rejects unsupported duration from verified activ
     const internalId=harness.guestDbId(gid);
     assert.ok(internalId);
     const existing=harness.getState(internalId)?.state ?? {};
-    const context=emptyConversationContextState(new Date('2026-10-02T07:00:00Z'));
+    const context=emptyConversationContextState(new Date());
     harness.setState(internalId,{
       ...existing,
       taskState:emptyTaskStateContainer(),
@@ -61,7 +61,7 @@ test('Phase 7 final: held horse rejects unsupported duration from verified activ
 });
 
 test('Phase 7 final: deterministic summary reads durable shrimp + mild-spice preferences even when working context only retained shrimp',()=>{
-  const context=emptyConversationContextState(new Date('2026-10-02T07:00:00Z'));
+  const context=emptyConversationContextState(new Date());
   const input:ResponseComposerInput={
     channel:'line',
     language:'th',
