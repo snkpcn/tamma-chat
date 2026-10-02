@@ -1383,19 +1383,28 @@ function isExplicitTaskResumeReadback(input: ResponseComposerInput): boolean {
 function commercialSupportProcessMessage(input: ResponseComposerInput): string | null {
   const turn=input.semanticTurn;
   if (!turn || input.dialogDecision.actionProposal) return null;
-  if (turn.domain !== 'support') return null;
   if (turn.action !== 'ask' && turn.action !== 'status') return null;
 
   const semanticBoundary=classifyCommercialBoundarySemantic(turn);
+  const rawBoundary=classifyCommercialBoundaryText(input.userMessage ?? '','OTHER');
+  const intentNamesCommercialProcess =
+    /(?:book|booking|order|ordering|confirm|confirmation|process|transaction)/iu.test(turn.intent);
   const supportCommercialProcess =
-    /(?:book|booking|order|ordering|confirm|confirmation|process|transaction)/iu.test(turn.intent)
-    || turn.informationNeed === 'policy';
+    intentNamesCommercialProcess
+    || (turn.domain === 'support' && turn.informationNeed === 'policy');
 
-  // Rendering must follow the already-decided semantic contract rather than
-  // re-classifying raw customer text a second time. The pre-Agent router still
-  // owns raw-text admission; once a support turn has been semantically proven
-  // read-only, this renderer may answer it in any supported language.
-  if (semanticBoundary.mode !== 'READ_ONLY' || !supportCommercialProcess) {
+  // The raw router decides only that this is a commercial QUESTION, never
+  // consent. The semantic interpreter then decides the domain/intent. This
+  // renderer may therefore answer a read-only ordering/booking PROCESS
+  // question in its real domain (restaurant/stay/activity/etc.) instead of
+  // requiring domain='support'. A non-commercial policy question never
+  // matches intentNamesCommercialProcess and is left to its own renderer.
+  if (
+    semanticBoundary.mode !== 'READ_ONLY'
+    || !supportCommercialProcess
+    || rawBoundary.mode !== 'READ_ONLY'
+    || rawBoundary.reason !== 'commercial_question_not_consent'
+  ) {
     return null;
   }
 
