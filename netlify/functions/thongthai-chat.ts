@@ -1894,9 +1894,36 @@ function cafeRecommendationMessage(
 ):string{
   const active=items.filter(item=>item.active);
   const constraints=new Set(request.guestContext.constraints??[]);
-  const noCoffee=constraints.has('no_coffee')
-    || /(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|no\s*coffee)/iu.test(request.message);
+  const selfNoCoffee=constraints.has('no_coffee')
+    || /(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง).{0,20}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
+  const companionNoCoffee=/(?:แฟน|ภรรยา|สามี|เพื่อน|ลูก).{0,24}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
+  const sharedNoCoffee=/(?:เราสองคน|เราทั้งคู่|ทั้งคู่).{0,24}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
+  const genericNoCoffee=/(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|no\s*coffee)/iu.test(request.message)
+    && !companionNoCoffee
+    && !/(?:ผม|ฉัน|หนู|ดิฉัน).{0,26}(?:ชอบ|เอา|อยากได้).{0,12}กาแฟ/u.test(request.message);
+  const noCoffee=selfNoCoffee||sharedNoCoffee||genericNoCoffee;
   const couple=/(?:แฟน|คู่รัก|สองคน|2\s*คน|couple)/iu.test(request.message);
+  const selfStrongCoffee=/(?:ผม|ฉัน|หนู|ดิฉัน).{0,26}(?:ชอบ|เอา|อยากได้).{0,12}กาแฟ.{0,12}(?:เข้ม|แรง)/u.test(request.message);
+  const sharedLowSweet=/(?:เราสองคน|เราทั้งคู่|ทั้งคู่).{0,30}(?:ไม่ชอบหวาน|ไม่หวานมาก|หวานน้อย)/u.test(request.message)
+    || constraints.has('low_sweet');
+
+  if(couple&&companionNoCoffee&&!noCoffee){
+    const selfPick=active.find(item=>item.code==='americano')
+      ?? active.find(item=>item.code==='espresso')
+      ?? active.find(item=>item.category==='coffee');
+    const companionPick=active.find(item=>item.code==='uji_pure_matcha')
+      ?? active.find(item=>item.code==='thai_tea_latte')
+      ?? active.find(item=>item.category!=='coffee');
+    if(selfPick&&companionPick){
+      const lines=[
+        'แยกให้คนละแก้วตามที่บอกได้ครับ',
+        `• ของคุณ: ${selfPick.name_th}${selfStrongCoffee?' — เริ่มจากฝั่งกาแฟที่ตรงโจทย์เข้มก่อน':''}`,
+        `• ของแฟน: ${companionPick.name_th} — ฝั่งไม่ใช่กาแฟ`,
+      ];
+      if(sharedLowSweet)lines.push('เรื่องความหวาน ทั้งสองคนเอาไม่หวานมากไว้ก่อนครับ เดี๋ยวตอนเลือกแบบร้อน/เย็นค่อยเช็กการปรับของแต่ละเมนูให้ตรงอีกที');
+      return lines.join('\n');
+    }
+  }
 
   const preferredCodes=noCoffee
     ? ['uji_pure_matcha','thai_tea_latte','green_tea_latte','cocoa','lemon_tea']
