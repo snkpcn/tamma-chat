@@ -233,6 +233,10 @@ async function currentBindingForTarget(targetId: string): Promise<NotificationCh
   return rows[0] ?? null;
 }
 
+export async function boundLineOpsTeam(targetId: string): Promise<OpsTeamCode | null> {
+  return (await currentBindingForTarget(targetId))?.team_code ?? null;
+}
+
 export async function bindLineTeamChannel(input: {
   teamCode: OpsTeamCode;
   targetType: TargetType;
