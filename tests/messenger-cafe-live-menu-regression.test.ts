@@ -84,3 +84,23 @@ test('frappe oat milk is not guessed when modifier is only enabled hot/iced',()=
   assert.match(r!.answer,/ไม่ได้เปิดตัวเลือกนมโอ๊ต/u);
   assert.doesNotMatch(r!.answer,/100 บาท/u);
 });
+
+
+test('owner screenshot regression: recommendation for a couple is compact, not a full menu dump',()=>{
+  const r=cafeGroundedAnswer(req('ที่ร้านมีไรแนะนำบ้างคับจะไปกับแฟน') as any,items,modifiers);
+  assert.ok(r);
+  assert.equal(r?.grounded,true);
+  assert.match(r!.answer,/แฟน/u);
+  assert.match(r!.answer,/คาเฟ่ลาเต้|ชาไทยลาเต้/u);
+  assert.doesNotMatch(r!.answer,/•\s*กาแฟ|•\s*ชา/u);
+  assert.doesNotMatch(r!.answer,/อเมริกาโน่.*คาเฟ่ลาเต้.*ชาไทยลาเต้.*โกโก้/u);
+  assert.ok(r!.answer.length<320, 'recommendation must stay phone-readable');
+  assert.equal((r!.answer.match(/\?/g)??[]).length<=1,true,'ask at most one useful follow-up');
+});
+
+test('explicit full-menu request can still use the broader catalog view',()=>{
+  const r=cafeGroundedAnswer(req('ขอเมนูทั้งหมดหน่อยครับ') as any,items,modifiers);
+  assert.ok(r);
+  assert.match(r!.answer,/•\s*กาแฟ/u);
+  assert.match(r!.answer,/•\s*ชา/u);
+});
