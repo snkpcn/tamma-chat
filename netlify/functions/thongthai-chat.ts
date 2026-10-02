@@ -5283,22 +5283,20 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // turns may enter only through the separate prepare-only canary. In that
   // mode the Agent may persist a review draft but cannot cross the commit
   // boundary. Weather/location stay on their established paths.
+  // Keep the Phase 4 source-level contract explicit: commercial planning /
+  // withholding already had first refusal over the 100% read-only Agent.
+  const phase4CommercialBoundaryEligible =
+    commercialBoundary.routeToOneMindBeforePrimary;
+
   const activeTaskBeforePrimary = !prepareOnlyAgentEligible
     && await hasActiveTaskBeforePrimary(guestDbId);
 
-  // Phase 7: a non-terminal ActiveTask is already a bounded, persisted
-  // conversation contract. Route that turn through One-Mind/Dialog Manager
-  // before the read-only Saved Agent, just like the Phase 4 commercial
-  // boundary already does. This prevents a long Agent session turn from
-  // stealing a short task continuation (real production failure: "เอา 60
-  // นาทีครับ" hit a gateway 504, then later turns collapsed into generic
-  // fallback).
-  const routeToOneMindBeforePrimary =
-    commercialBoundary.routeToOneMindBeforePrimary
-    || activeTaskBeforePrimary;
-
+  // Phase 7 adds a second independent boundary: a non-terminal ActiveTask is
+  // already a bounded, persisted conversation contract. One-Mind/Dialog
+  // Manager owns its continuation before read-only Agent Primary.
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
-    && !routeToOneMindBeforePrimary
+    && !phase4CommercialBoundaryEligible
+    && !activeTaskBeforePrimary
     && shouldUseThongthaiAgentPrimary({
     guestKey: request.guestId,
     guestDbId,
