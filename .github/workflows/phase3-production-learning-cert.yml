@@ -1,0 +1,25 @@
+name: Phase 3 Production Learning Cert
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  cert:
+    if: contains(github.event.pull_request.title, '[run p3 learning cert]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run targeted Phase 3 learning proof against production
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: npx tsx scripts/run-phase3-production-learning-cert.ts
