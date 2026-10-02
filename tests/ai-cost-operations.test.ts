@@ -77,7 +77,7 @@ test('AI cost migration is RLS-protected and LINE binding is dedicated',()=>{
 
   const toml=readFileSync('netlify.toml','utf8');
   assert.match(toml,/\[functions\."ai-cost-notify-idle"\]/);
-  assert.match(toml,/schedule = "\*\/15 \* \* \* \*"/);
+  assert.match(toml,/schedule = "\*\/5 \* \* \* \*"/);
   assert.match(toml,/\[functions\."ai-cost-notify-daily"\]/);
   assert.match(toml,/schedule = "5 17 \* \* \*"/);
 });
