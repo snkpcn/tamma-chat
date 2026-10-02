@@ -89,3 +89,22 @@ test('migration encodes no-double-count rules for receipt and reimbursement slip
   assert.match(source,/matched_ledger/);
   assert.match(source,/image_sha256/);
 });
+
+
+test('text Daily Close ingestion rematches evidence that arrived before the form',()=>{
+  const source=readFileSync('netlify/functions/_inthanin-daily-close-line.ts','utf8');
+  assert.match(source,/financial_rematch_cafe_test_day_evidence_v1/);
+  assert.match(source,/rematchedEvidence/);
+});
+
+test('rematch migration is TEST-only and creates reimbursement settlement without duplicating expense',()=>{
+  const source=readFileSync(
+    'supabase/migrations/20261002104147_financial_cafe_test_evidence_rematch_v1.sql',
+    'utf8',
+  );
+  assert.match(source,/rematch_test_only/);
+  assert.match(source,/cash_settlement/);
+  assert.match(source,/matched_claim/);
+  assert.match(source,/matched_ledger/);
+  assert.match(source,/on conflict \(source_channel,source_message_id,source_item_key\)/i);
+});
