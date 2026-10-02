@@ -45,6 +45,7 @@ type GuestContext = {
 
 type ThongthaiResponse = {
   message?: string;
+  media?: Array<{ type?:string; url?:string; deliveryUrl?:string; alt?:string }>;
   intent?: string;
   contextUpdates?: Partial<GuestContext>;
   journeyAction?: {
@@ -60,7 +61,8 @@ type CustomerLoadResponse = {
 
 type LineTextMessage = { type: 'text'; text: string };
 type LineFlexMessage = { type: 'flex'; altText: string; contents: Record<string, unknown> };
-type LineReplyMessage = LineTextMessage | LineFlexMessage;
+type LineImageMessage = { type:'image'; originalContentUrl:string; previewImageUrl:string };
+type LineReplyMessage = LineTextMessage | LineFlexMessage | LineImageMessage;
 
 const TAMMA_SITE_URL = 'https://tamma-chat.netlify.app';
 const LINE_LINK_ENDPOINT = '/.netlify/functions/line-link';
@@ -323,12 +325,23 @@ function buildReplyMessages(result: ThongthaiResponse, userId: string, channelSe
     && result.journeyAction.type !== 'none'
     && result.journeyAction.journey,
   );
-
-  const textLimit = isJourney ? MAX_LINE_MESSAGES - 1 : MAX_LINE_MESSAGES;
+  const media = (Array.isArray(result.media) ? result.media : [])
+    .filter(item => item?.type === 'image' && typeof item.deliveryUrl === 'string' && /^https:\/\//iu.test(item.deliveryUrl))
+    .slice(0,4);
+  const reserved = media.length + (isJourney ? 1 : 0);
+  const textLimit = Math.max(1, MAX_LINE_MESSAGES - reserved);
   const messages: LineReplyMessage[] = splitCustomerMessageForLine(baseText, 1800, textLimit)
     .map(text => ({ type: 'text', text }));
 
-  if (isJourney) messages.push(buildJourneyFlex(result, userId, channelSecret));
+  for (const item of media) {
+    if (messages.length >= MAX_LINE_MESSAGES - (isJourney ? 1 : 0)) break;
+    messages.push({
+      type:'image',
+      originalContentUrl:item.deliveryUrl!,
+      previewImageUrl:item.deliveryUrl!,
+    });
+  }
+  if (isJourney && messages.length < MAX_LINE_MESSAGES) messages.push(buildJourneyFlex(result, userId, channelSecret));
   return messages.slice(0, MAX_LINE_MESSAGES);
 }
 
