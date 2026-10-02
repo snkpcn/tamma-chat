@@ -56,7 +56,7 @@ test('unknown document/category values are normalized conservatively',()=>{
   assert.equal(x.document_type,'other');
   assert.equal(x.amount_total,null);
   assert.equal(x.expense_category,null);
-  assert.equal(x.confidence,1);
+  assert.equal(x.confidence,0,'out-of-range confidence is rejected conservatively');
 });
 
 test('LINE image router checks Café TEST evidence before settlement/fuel handlers',()=>{
