@@ -616,9 +616,15 @@ export async function processOneMindCustomerTurn(
       || explicitNamedActivitySelection
     );
   const hasModelConversationReply = Boolean(turn.dialogSemanticTurn.reply?.trim() || turn.semanticTurn.reply?.trim());
+  const learnedSemanticStateUpdate =
+    turn.dialogSemanticTurn.semanticSource === 'semantic_concept_memory'
+    && !turn.dialogDecision.actionProposal
+    && (turn.dialogSemanticTurn.informationNeed ?? 'none') === 'none'
+    && !['book','order','cancel'].includes(turn.dialogSemanticTurn.action);
   const deterministicFastPath = (
       turn.dialogDecision.mode === 'collect_field'
       || turn.dialogDecision.responseIntent === 'cannot_verify_comparison'
+      || learnedSemanticStateUpdate
       || (!hasModelConversationReply && (turn.dialogDecision.mode === 'clarify' || conversationalStateUpdate))
     )
     ? composeDeterministicResponse(composerInput)
