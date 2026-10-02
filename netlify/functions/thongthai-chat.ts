@@ -5347,8 +5347,16 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // phrase table. Rich restaurant status/availability/process questions remain
   // outside this class and continue through One-Mind.
   const earlyRestaurantIntentClass = classifyRestaurantDietaryIntent(request.message);
+  // Keep this pre-supervision exception narrower than the mature restaurant
+  // responder itself. It exists only for an explicit CURRENT menu/restaurant
+  // recommendation follow-up (the Phase 7 turn that generic One-Mind can
+  // otherwise swallow). Constraint-only food-care, broad food-culture and
+  // horse "ไม่เอา..." sentences must continue to their established owners.
+  const explicitCurrentMenuRecommendation =
+    earlyRestaurantIntentClass === 'RECOMMENDATION_ONLY'
+    && /(?:เมนู|ร้านอาหาร|ตำมา-ชาติ|ตำมา)/u.test(request.message);
   const groundedRestaurantBeforeSupervision =
-    earlyRestaurantIntentClass !== 'OTHER'
+    explicitCurrentMenuRecommendation
     && isRestaurantAdvisorTurn(request, { agentState:{} });
   if (groundedRestaurantBeforeSupervision) {
     const snapshot = guestDbId
