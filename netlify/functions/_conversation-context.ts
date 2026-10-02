@@ -34,7 +34,7 @@ import { patchGuestAgentState } from './_guest-agent-state-store';
 
 export const CONVERSATION_CONTEXT_SCHEMA_VERSION = 'conversation-context-v1';
 
-export const MAX_RECENT_TURNS = 8;
+export const MAX_RECENT_TURNS = 24;
 export const MAX_TURN_CHARS = 400;
 export const MAX_RECENT_ENTITIES = 6;
 export const MAX_CONSIDERED_SELECTIONS = 6;
