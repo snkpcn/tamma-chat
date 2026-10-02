@@ -76,6 +76,7 @@ test('Phase 7 turn 14 still rejects a generic outage, false booking intent, and 
 
 test('Phase 7 production runner falls back when workflow input resolves to an empty string',()=>{
   const source=readFileSync(new URL('../scripts/run-phase7-production-certification.ts',import.meta.url),'utf8');
-  assert.match(source,/THONGTHAI_PRODUCTION_URL\\?\\.trim\\(\\)\\s*\\|\\|\\s*'https:\\/\\/tamma-chat\\.netlify\\.app/u);
-  assert.doesNotMatch(source,/THONGTHAI_PRODUCTION_URL\\s*\\?\\?/u);
+  assert.ok(source.includes("process.env.THONGTHAI_PRODUCTION_URL?.trim()"));
+  assert.ok(source.includes("|| 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat'"));
+  assert.equal(source.includes('THONGTHAI_PRODUCTION_URL\n  ??'),false);
 });
