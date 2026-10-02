@@ -131,6 +131,78 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   return { addConstraints, removeConstraints, pace, travelerType };
 }
 
+/**
+ * Durable guest memory belongs to the customer, not automatically to every
+ * companion mentioned in the sentence. The broad phrase classifier above is
+ * intentionally subject-agnostic because same-turn domain responders still
+ * need to notice "แฟนแพ้กุ้ง" or "ลูกไม่กินเผ็ด". This wrapper is used ONLY
+ * when writing the customer's own durable memory.
+ */
+const GUEST_MEMORY_COMPANION_RE = /(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)/u;
+const GUEST_MEMORY_SELF_RE = /(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง)/u;
+
+const GUEST_SCOPED_CONSTRAINT_PATTERNS: Partial<Record<string,RegExp>> = {
+  no_coffee:/ไม่(?:กิน|ดื่ม)กาแฟ|ไม่เอากาแฟ/u,
+  low_sweet:/หวานน้อย|ไม่หวานมาก|ไม่ค่อยหวาน/u,
+  low_bitter:/ไม่ขมมาก|ไม่เอาขมมาก|ไม่ค่อยขม/u,
+  no_cow_milk:/ไม่เอานมวัว|ไม่ค่อยอยาก(?:กิน|ดื่ม)นมวัว|งดนมวัว/u,
+  no_sugar:/ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล/u,
+  no_spicy:/กินไม่เผ็ด|เผ็ดไม่ได้|ไม่กินเผ็ด|ไม่ทานเผ็ด|ทานเผ็ดไม่ได้|ไม่ใส่พริก/u,
+  mild_spice:/(?:กิน|ทาน)เผ็ดไม่เก่ง|ไม่ค่อย(?:กิน|ทาน)?เผ็ด|(?:กิน|ทาน)เผ็ดได้นิดหน่อย|ไม่เผ็ดมาก/u,
+  shrimp_allergy:/แพ้กุ้ง/u,
+  food_allergy:/แพ้อาหาร/u,
+  no_shrimp:/ไม่กินกุ้ง|ไม่เอากุ้ง|งดกุ้ง/u,
+  fear_of_falling:/กลัวตก/u,
+  fear_of_speed:/กลัวเร็ว/u,
+  limited_walking:/เดินไม่ไหว|เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้/u,
+};
+
+function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
+  const phrase=GUEST_SCOPED_CONSTRAINT_PATTERNS[code];
+  if(!phrase)return false;
+  const source=phrase.source;
+  const scoped=new RegExp(`(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)(.{0,28}?)(?:${source})`,'iu');
+  const match=scoped.exec(message);
+  if(!match)return false;
+  // "มากับแฟน แต่ผมไม่กินกาแฟ" must remain the customer's preference:
+  // a self marker between the companion noun and the preference wins.
+  if(GUEST_MEMORY_SELF_RE.test(match[1]??''))return false;
+
+  // Shared wording is also customer-owned because the customer explicitly
+  // includes themself ("เราสองคน/เราทั้งคู่").
+  const around=message.slice(Math.max(0,(match.index??0)-20),(match.index??0)+match[0].length+20);
+  if(/เราสองคน|เราทั้งคู่|ทั้งคู่|พวกเรา/u.test(around))return false;
+  return GUEST_MEMORY_COMPANION_RE.test(match[0]);
+}
+
+export function extractGuestPreferenceSignal(message:string):PreferenceSignal{
+  const raw=extractPreferenceSignal(message);
+  const addConstraints=raw.addConstraints.filter(code=>!constraintIsOnlyAboutCompanion(message,code));
+  const remove=new Set(raw.removeConstraints);
+
+  // Explicit self statements correct stale durable memory even when the same
+  // turn also describes a different companion's restriction.
+  if(/(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:ชอบกาแฟ|กินกาแฟได้|ดื่มกาแฟได้|เอากาแฟ)/u.test(message)){
+    remove.add('no_coffee');
+  }
+  if(/(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:กินเผ็ดได้|ทานเผ็ดได้)/u.test(message)){
+    remove.add('no_spicy'); remove.add('mild_spice');
+  }
+  if(
+    /(?:แฟน|ภรรยา|สามี|ลูก|แม่|พ่อ|เพื่อน).{0,18}แพ้กุ้ง/u.test(message)
+    && /(?:ผม|ฉัน|หนู|ดิฉัน).{0,18}(?:กินได้|กินกุ้งได้|ไม่ได้แพ้)/u.test(message)
+  ){
+    remove.add('shrimp_allergy'); remove.add('no_shrimp');
+  }
+
+  return {
+    addConstraints:[...new Set(addConstraints)],
+    removeConstraints:[...remove],
+    pace:raw.pace,
+    travelerType:raw.travelerType,
+  };
+}
+
 export function extractIntelligenceSignals(message: string): IntelligenceSignal[] {
   const text = message.trim();
   const signals: IntelligenceSignal[] = [];
