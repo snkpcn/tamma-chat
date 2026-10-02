@@ -1,6 +1,7 @@
-// Destructive production certification: creates five clearly-labelled test
-// records through the public Thongthai gateway. It is deliberately gated so
-// CI and an accidental local invocation can never mutate production.
+// Connected production-gateway certification: creates five clearly-labelled
+// TEST records through the real Thongthai endpoint. The gateway receives
+// environment='test' explicitly, and every downstream transaction write must
+// preserve that environment so test records never become LIVE operations.
 
 const PRODUCTION_URL = process.env.THONGTHAI_PRODUCTION_URL
   ?? 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         guestId: guest,
+        environment: 'test',
         eventId,
         message: item.message,
         language: 'th',
