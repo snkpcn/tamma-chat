@@ -2646,6 +2646,35 @@ async function persistHorseSelection(guestDbId: string | null, channel: BrainCha
   }
 }
 
+/**
+ * Phase 7 final boundary: an explicit horse selection combined with a current-
+ * turn no-booking marker is planning state, never a booking-field collection
+ * prompt. Persist the bounded, non-committed selection so later duration /
+ * resume turns have server-side continuity, then stop with information intent.
+ */
+export async function explicitHorseHoldWithoutBookingResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+  boundaryMode: string,
+): Promise<BrainResponse | null> {
+  if (boundaryMode !== 'WITHHOLD') return null;
+  const asset = activityAssetFromText(request.message);
+  if (!asset || asset.resourceCode !== 'activity-horse') return null;
+  await persistHorseSelection(guestDbId, channel, asset.name);
+  const displayName = asset.name.startsWith('น้อง') ? asset.name : `น้อง${asset.name}`;
+  return {
+    message:`ได้ครับ เก็บ${displayName}ไว้เป็นตัวเลือกก่อนนะครับ ยังไม่ได้จองหรือส่งรายการครับ`,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 // Once a horse-booking conversation is already established (chatHistory
 // showing explicit riding intent, OR -- for LINE, where chatHistory never
 // carries prior turns -- a persisted activity-domain task from an earlier
@@ -4915,6 +4944,85 @@ function deterministicThankYouCloseResponse(request: BrainRequest): BrainRespons
 
 export type ThongthaiChatCoreResult = { statusCode: number; payload: Record<string, unknown> };
 
+const RESTAURANT_DURABLE_CONSTRAINT_CODES = new Set([
+  'vegetarian','no_spicy','mild_spice','no_pork','no_beef','no_chicken','no_fish','no_egg',
+  'no_plara','no_peanut','no_shrimp','peanut_allergy','shrimp_allergy','fish_allergy','egg_allergy',
+  'food_allergy','authentic_isan',
+]);
+
+function hasDurableRestaurantConstraint(request: BrainRequest): boolean {
+  return (request.guestContext.constraints ?? []).some(code => RESTAURANT_DURABLE_CONSTRAINT_CODES.has(code));
+}
+
+/**
+ * Grounded menu follow-ups with durable dietary context do not need semantic
+ * model ownership. They have one authoritative job: apply the remembered
+ * normalized constraints to the live restaurant menu. This runs before Agent
+ * Primary / semantic cutover so a clear "which menu suits what I told you"
+ * turn cannot degrade into FACT_UNKNOWN while the actual live menu is
+ * available to deterministicRestaurantResponse.
+ */
+async function durableRestaurantRecommendationBeforeSemantic(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  if (!guestDbId || !hasDurableRestaurantConstraint(request)) return null;
+  const intent = classifyRestaurantDietaryIntent(request.message);
+  if (intent !== 'RECOMMENDATION_ONLY' && intent !== 'CONSTRAINT_AND_RECOMMENDATION') return null;
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(() => null);
+  const agentState = snapshot && isObject(snapshot.state) ? snapshot.state : {};
+  if (!isRestaurantAdvisorTurn(request, { agentState })) return null;
+  return deterministicRestaurantResponse(request, { agentState }, guestDbId, channel);
+}
+
+function asksActivityAvailabilityWithoutBooking(message: string, boundaryMode: string): boolean {
+  if (boundaryMode !== 'WITHHOLD') return false;
+  return /(?:เช็ก|เช็ค|ตรวจ|ดู).{0,24}(?:ว่าง|คิว)|(?:ว่าง|คิว).{0,24}(?:ไหม|มั้ย|หรือเปล่า|ได้ไหม)/u.test(message);
+}
+
+/**
+ * Availability-only + explicit no-booking is a read-only status question.
+ * When date/time is missing, answer the missing-slot question deterministically
+ * before state-summary composition. This prevents a semantically correct
+ * availability turn from nondeterministically collapsing into a mere task
+ * recap ("ภาราดร 45 นาที") that never answers availability at all.
+ */
+async function boundedActivityAvailabilityClarification(
+  request: BrainRequest,
+  guestDbId: string | null,
+  boundaryMode: string,
+): Promise<BrainResponse | null> {
+  if (!guestDbId || !asksActivityAvailabilityWithoutBooking(request.message, boundaryMode)) return null;
+  const task = await loadTaskState(guestDbId).catch(() => null);
+  const active = task?.activeTask?.type === 'activity_booking' && !isTerminalTaskStatus(task.activeTask.status)
+    ? task.activeTask : null;
+  const date = extractDate(request.message) ?? (typeof active?.slots?.date === 'string' ? active.slots.date : null);
+  const time = extractTime(request.message) ?? (typeof active?.slots?.time === 'string' ? active.slots.time : null);
+  if (date && time) return null;
+
+  const horse = typeof active?.slots?.assetSelection === 'string'
+    ? active.slots.assetSelection
+    : typeof active?.slots?.horseName === 'string'
+      ? active.slots.horseName
+      : '';
+  const duration = Number(active?.slots?.durationMinutes ?? active?.slots?.duration);
+  const subject = horse
+    ? `${horse}${Number.isFinite(duration) && duration > 0 ? ` ${duration} นาที` : ''}`
+    : 'รอบกิจกรรมที่เลือกไว้';
+  const missing = [date ? '' : 'วัน', time ? '' : 'เวลา'].filter(Boolean).join('และ');
+  return {
+    message:`ได้ครับ จะเช็กคิวว่างของ${subject}ให้ครับ ขอ${missing}ที่อยากมาเพิ่มก่อนนะครับ ตอนนี้ยังไม่ได้จองหรือส่งรายการครับ`,
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 // The single canonical entry point into Thongthai's shared brain -- called by
 // BOTH the web HTTP handler below and LINE's adapter (_line-webhook-core.ts).
 // LINE used to reach this over HTTP (a self-fetch to this same site's own
@@ -5274,6 +5382,67 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       contextUpdates: polished.contextUpdates,
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const explicitHorseHold = await explicitHorseHoldWithoutBookingResponse(
+    request,
+    guestDbId,
+    channel,
+    commercialBoundary.mode,
+  ).catch(error => {
+    console.error('THONGTHAI_EXPLICIT_HORSE_HOLD_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (explicitHorseHold) {
+    const polished = polishedResponse(explicitHorseHold, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const availabilityClarification = await boundedActivityAvailabilityClarification(
+    request,
+    guestDbId,
+    commercialBoundary.mode,
+  ).catch(error => {
+    console.error('THONGTHAI_BOUNDED_AVAILABILITY_CLARIFICATION_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (availabilityClarification) {
+    const polished = polishedResponse(availabilityClarification, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const durableRestaurantRecommendation = await durableRestaurantRecommendationBeforeSemantic(
+    request,
+    guestDbId,
+    channel,
+  ).catch(error => {
+    console.error('THONGTHAI_DURABLE_RESTAURANT_RECOMMENDATION_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (durableRestaurantRecommendation) {
+    const polished = polishedResponse(durableRestaurantRecommendation, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
     });
   }
 
