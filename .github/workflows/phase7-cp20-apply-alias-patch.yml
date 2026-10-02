@@ -1,0 +1,55 @@
+name: Phase 7 CP20 Apply Reviewed Alias Patch
+# Temporary branch-local maintenance job. Remove before merge.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened]
+permissions:
+  contents: write
+jobs:
+  apply-reviewed-patch:
+    if: github.repository == 'snkpcn/tamma-chat' && github.event.pull_request.head.repo.full_name == 'snkpcn/tamma-chat' && github.head_ref == 'phase7-cp20-slot-alias-invariant'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: phase7-cp20-slot-alias-invariant
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Verify original blob and reproduce failing invariant
+        shell: bash
+        run: |
+          test "$(git hash-object netlify/functions/_dialog-manager.ts)" = '4d70ddbc57e10252dc9464fb9607624f9609fdb0'
+          if npx tsx --test tests/phase7-slot-alias-invariant.test.ts; then
+            echo 'Expected the original runtime to fail the alias invariant; refusing an unnecessary patch.'
+            exit 1
+          fi
+      - name: Apply exact reviewed structural patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('netlify/functions/_dialog-manager.ts')
+          text = path.read_text()
+          old = "    if (!NON_SLOT_META_KEYS.has(key) && value !== undefined && value !== null) patch[key] = value;\n  }\n  return patch;\n}"
+          new = "    if (!NON_SLOT_META_KEYS.has(key) && value !== undefined && value !== null) patch[key] = value;\n  }\n  // Current structured horse identity owns its legacy slot alias. Without\n  // this normalization, a correction changes horseName but downstream\n  // availability readers can still see the rejected assetSelection.\n  // This is state normalization only, never transaction authorization.\n  if (typeof patch.horseName === 'string' && patch.horseName.trim()) {\n    patch.assetSelection = patch.horseName;\n  }\n  return patch;\n}"
+          assert text.count(old) == 1, 'Unexpected source: patch must match exactly once'
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+          git diff -- netlify/functions/_dialog-manager.ts
+      - name: Verify fixed invariant
+        run: npx tsx --test tests/phase7-slot-alias-invariant.test.ts
+      - name: Commit only the reviewed source change to this branch
+        shell: bash
+        run: |
+          test "$(git diff --name-only)" = 'netlify/functions/_dialog-manager.ts'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add netlify/functions/_dialog-manager.ts
+          git commit -m 'fix(phase7): normalize current horse choice across task slot aliases'
+          git push origin HEAD:refs/heads/phase7-cp20-slot-alias-invariant
