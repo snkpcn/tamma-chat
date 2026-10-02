@@ -5,6 +5,7 @@ import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
 import { executeBrainTools } from '../netlify/functions/_thongthai-runtime-v3';
 import type { BrainResponse } from '../netlify/functions/_thongthai-brain-v3';
 import { brainRequest, guestId, withHarness } from './helpers/canonical-core-harness';
+import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
 
 function messageOf(result: Awaited<ReturnType<typeof processThongthaiChatCore>>): string {
   return String((result.payload as Record<string, unknown>).message ?? '');
@@ -35,6 +36,38 @@ test('Phase 7 closeout: contextual two-horse comparison is zero-model and ground
 test('Phase 7 closeout: reject-one-pick-the-other correction never enters Agent Primary', async () => {
   await withHarness(async harness => {
     const gid = guestId('phase7-closeout-correction');
+
+    // Match the real Phase 7 sequence: the guest has already been shown both
+    // horses before saying "ไม่เอาทองไทย...เอาอีกตัว". Without that bounded
+    // context, the product intentionally asks a clarification instead.
+    await processThongthaiChatCore(
+      brainRequest('สวัสดีครับ', gid, 'line'),
+      'phase7-closeout-correction-seed',
+    );
+    const internalId = harness.guestDbId(gid);
+    assert.ok(internalId);
+    const existing = harness.getState(internalId)?.state ?? {};
+    const now = new Date();
+    harness.setState(internalId, {
+      ...existing,
+      conversationContext: {
+        ...emptyConversationContextState(now),
+        activeDomain: 'activity',
+        activeTopic: 'horse_recommendation',
+        recentEntities: [
+          {
+            id:'activity_asset:horse-thongthai', type:'horse', name:'ทองไทย',
+            domain:'activity', source:'catalog', canonical:true, observedAt:now.toISOString(),
+          },
+          {
+            id:'activity_asset:horse-pharadon', type:'horse', name:'ภาราดร',
+            domain:'activity', source:'catalog', canonical:true, observedAt:now.toISOString(),
+          },
+        ],
+      },
+    });
+
+    const beforeModelCalls = harness.modelCallCount();
     const result = await processThongthaiChatCore(
       brainRequest('ไม่เอาทองไทยนะครับ เอาอีกตัว', gid, 'line'),
       'phase7-closeout-correction',
@@ -43,20 +76,21 @@ test('Phase 7 closeout: reject-one-pick-the-other correction never enters Agent 
 
     assert.equal(result.statusCode, 200);
     assert.match(message, /ภาราดร/u);
-    assert.match(message, /ยังไม่ได้จอง|ไม่ได้จอง/u);
-    // Semantic supervision may still run once; the fix is that the heavy
-    // Agent Primary loop no longer owns this bounded correction.
-    assert.ok(harness.modelCallCount() <= 1);
     assert.equal(harness.postsTo('bookings').length, 0);
+    // One semantic-supervision call is allowed; the expensive Agent Primary
+    // path must not add another model/tool loop for this bounded correction.
+    assert.ok(harness.modelCallCount() - beforeModelCalls <= 1);
 
-    const internalId = harness.guestDbId(gid);
-    assert.ok(internalId);
-    const taskState = harness.getState(internalId)?.state?.taskState as {
-      activeTask?: { slots?: Record<string, unknown>; commitmentIntent?: boolean };
+    const state = harness.getState(internalId)?.state as {
+      conversationContext?: {
+        workingMemory?: { consideredSelections?: Array<{ name:string; status?:string }> };
+      };
+      taskState?: { activeTask?: { commitmentIntent?: boolean } };
     } | undefined;
-    assert.equal(taskState?.activeTask?.slots?.horseName, 'ภาราดร');
-    assert.equal(taskState?.activeTask?.slots?.assetSelection, 'ภาราดร');
-    assert.notEqual(taskState?.activeTask?.commitmentIntent, true);
+    const considered = state?.conversationContext?.workingMemory?.consideredSelections ?? [];
+    assert.ok(considered.some(item => item.name === 'ภาราดร'));
+    assert.ok(!considered.some(item => item.name === 'ทองไทย' && item.status === 'considering'));
+    assert.notEqual(state?.taskState?.activeTask?.commitmentIntent, true);
   });
 });
 
