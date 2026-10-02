@@ -50,3 +50,28 @@ for (const key of ['otop_empty_kicker','otop_empty_heading','otop_empty_body','o
 }
 
 console.log('PUBLIC_I18N_BUILD_GATE_OK');
+
+
+const publicSurfaces = [
+  ['account.html', ['id="accountLanguage"', 'assets/scripts/account-i18n.js', 'data-account-i18n=']],
+  ['chess.html', ['id="ttChessLanguage"', 'thammachat-lang-v1', 'data-tt-i18n=']],
+  ['menu.html', ['id="menuLanguage"', 'assets/scripts/menu-i18n.js', 'MenuI18n.name(item.name)']],
+  ['otop-map.html', ['data-otop-lang-select', 'assets/scripts/otop-i18n.js']],
+  ['otop.html', ['data-otop-lang-select', 'assets/scripts/otop-i18n.js']],
+];
+for (const [path, tokens] of publicSurfaces) {
+  const source = fs.readFileSync(new URL('../' + path, import.meta.url), 'utf8');
+  for (const token of tokens) {
+    if (!source.includes(token)) {
+      console.error('PUBLIC_I18N_BUILD_GATE_FAILED:', path, 'missing:', token);
+      process.exit(1);
+    }
+  }
+}
+for (const path of ['assets/scripts/account-i18n.js','assets/scripts/menu-i18n.js','chess.html','index.html','assets/scripts/otop-i18n.js']) {
+  const source = fs.readFileSync(new URL('../' + path, import.meta.url), 'utf8');
+  if (!source.includes('thammachat-lang-v1')) {
+    console.error('PUBLIC_I18N_BUILD_GATE_FAILED:', path, 'does not use the shared language preference');
+    process.exit(1);
+  }
+}

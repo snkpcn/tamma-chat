@@ -25,6 +25,7 @@
 .tt-chess-header a{ color:var(--tt-cream-2); text-decoration:none; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; }
 .tt-chess-header .tt-chess-title{ font-size:14.5px; font-weight:800; letter-spacing:.02em; display:flex; align-items:center; gap:8px; }
 .tt-chess-header .tt-chess-title img{ width:26px; height:26px; border-radius:50%; object-fit:cover; background:var(--tt-cream); }
+.tt-chess-header-actions{display:flex;align-items:center;gap:8px}.tt-chess-lang{width:auto;min-width:72px;border:1px solid rgba(247,241,228,.35);border-radius:999px;background:rgba(255,255,255,.08);color:var(--tt-cream-2);padding:7px 24px 7px 9px;font:inherit;font-size:11px}.tt-chess-lang option{color:var(--tt-brown-deep);background:var(--tt-cream-2)}@media(max-width:480px){.tt-chess-header{gap:6px}.tt-chess-header .tt-chess-title span{display:none}.tt-chess-header-actions{gap:5px}.tt-chess-lang{min-width:64px;padding-left:7px}.tt-chess-header a{font-size:11px}}
 .tt-chess-main{ max-width:640px; margin:0 auto; padding:18px 16px 8px; }
 
 .tt-chess-hero{ text-align:center; margin-bottom:18px; }
@@ -169,13 +170,18 @@
     <span data-tt-i18n="back_home">กลับหน้าแรก</span>
   </a>
   <span class="tt-chess-title">
-    <img src="assets/thongthai/thongthai-wai.webp" alt="ทองไทย">
+    <img src="assets/thongthai/thongthai-wai.webp" alt="Thongthai">
     <span data-tt-i18n="heading">ท้าทายทองไทย</span>
   </span>
-  <a href="/account.html#chess-rewards" id="ttChessMyRewardsLink">
-    <img src="assets/chess/derived/C08_profile_reward.webp" alt="" width="18" height="18" style="border-radius:0;background:none;">
-    <span data-tt-i18n="my_rewards_link">รางวัลของฉัน</span>
-  </a>
+  <div class="tt-chess-header-actions">
+    <select id="ttChessLanguage" class="tt-chess-lang" aria-label="Language">
+      <option value="th">TH</option><option value="en">EN</option><option value="zh">中文</option><option value="lo">ລາວ</option><option value="vi">VI</option>
+    </select>
+    <a href="/account.html#chess-rewards" id="ttChessMyRewardsLink">
+      <img src="assets/chess/derived/C08_profile_reward.webp" alt="" width="18" height="18" style="border-radius:0;background:none;">
+      <span data-tt-i18n="my_rewards_link">รางวัลของฉัน</span>
+    </a>
+  </div>
 </header>
 
 <main class="tt-chess-main">
@@ -191,7 +197,7 @@
       <p data-tt-i18n="subheading">ชนะทองไทย รับรางวัลใช้จริงในทำมา-ชาติ</p>
     </div>
 
-    <div class="tt-chess-side-toggle" role="group" aria-label="เลือกฝ่ายที่จะเล่น">
+    <div class="tt-chess-side-toggle" role="group" aria-label="เลือกฝ่ายที่จะเล่น" data-tt-i18n-aria="choose_side_aria">
       <button type="button" class="tt-chess-side-btn is-active" id="ttChessSideWhite" data-tt-i18n="side_white">ฝ่ายขาว</button>
       <button type="button" class="tt-chess-side-btn" id="ttChessSideBlack" data-tt-i18n="side_black">ฝ่ายดำ</button>
     </div>
@@ -231,14 +237,14 @@
   <!-- ============ GAME SCREEN ============ -->
   <section id="ttChessScreenGame" hidden>
     <div class="tt-chess-game-top">
-      <img class="tt-chess-thongthai-pose" id="ttChessPose" src="assets/thongthai/thongthai-wai.webp" alt="ทองไทย">
+      <img class="tt-chess-thongthai-pose" id="ttChessPose" src="assets/thongthai/thongthai-wai.webp" alt="Thongthai">
       <div class="tt-chess-speech" id="ttChessSpeech" data-tt-i18n="thongthai_say_start">ลองมาสู้กันสักตาไหม ผมทองไทยรอท้าอยู่นะ</div>
     </div>
     <div class="tt-chess-turn-row">
       <span id="ttChessTurnLabel" data-tt-i18n="your_turn">ตาของคุณ</span>
       <span class="tt-chess-timer"><img src="assets/chess/derived/C03_timer.webp" alt=""><span id="ttChessTimer">00:00</span></span>
     </div>
-    <div class="tt-chess-board" id="ttChessBoard" role="grid" aria-label="กระดานหมากรุก"></div>
+    <div class="tt-chess-board" id="ttChessBoard" role="grid" aria-label="กระดานหมากรุก" data-tt-i18n-aria="board_aria"></div>
     <div class="tt-chess-controls">
       <button type="button" class="tt-chess-ctrl-btn" id="ttChessHintBtn"><img src="assets/chess/derived/C01_hint.webp" alt=""><span data-tt-i18n="hint">คำใบ้</span></button>
       <button type="button" class="tt-chess-ctrl-btn" id="ttChessResignBtn"><img src="assets/chess/derived/C10_lose_badge.webp" alt=""><span data-tt-i18n="resign">ยอมแพ้</span></button>
@@ -284,8 +290,8 @@
     <div class="tt-chess-pass-body">
       <div id="ttChessMasterBadgeRow" hidden><span class="tt-chess-master-badge"><img src="assets/chess/derived/B08_trophy.webp" alt="" style="width:16px;height:16px;">Thongthai Master</span></div>
       <div class="tt-chess-pass-discount" id="ttChessPassDiscount">10%</div>
-      <div class="tt-chess-pass-scope" id="ttChessPassScope">ใช้ได้ทุกโซน</div>
-      <div><span class="tt-chess-status-pill" id="ttChessPassStatusPill">พร้อมใช้งาน</span></div>
+      <div class="tt-chess-pass-scope" id="ttChessPassScope" data-tt-i18n="reward_scope_all_zones">ใช้ได้ทุกโซน</div>
+      <div><span class="tt-chess-status-pill" id="ttChessPassStatusPill" data-tt-i18n="reward_status_available">พร้อมใช้งาน</span></div>
       <div class="tt-chess-pass-expiry" id="ttChessPassExpiry" style="margin-top:8px;"></div>
       <div id="ttChessZoneSelectRow" hidden style="margin-bottom:10px;"></div>
       <div class="tt-chess-zone-list" id="ttChessZoneList"></div>
@@ -332,6 +338,7 @@ import { Chess } from './assets/chess/vendor/chess.esm.js';
    ============================================================ */
 const TT_CHESS_I18N = {
 th:{
+  page_title:"เล่นหมากรุกกับทองไทย · ทำมา-ชาติ", choose_side_aria:"เลือกฝ่ายที่จะเล่น", board_aria:"กระดานหมากรุก",
   back_home:"กลับหน้าแรก", my_rewards_link:"รางวัลของฉัน",
   heading:"ท้าทายทองไทย", subheading:"ชนะทองไทย รับรางวัลใช้จริงในทำมา-ชาติ",
   choose_difficulty:"เลือกระดับความยาก", side_white:"ฝ่ายขาว", side_black:"ฝ่ายดำ",
@@ -373,6 +380,7 @@ th:{
   redeemed_label:"ใช้สิทธิ์แล้ว", not_redeemed_label:"ยังไม่ได้ใช้",
 },
 en:{
+  page_title:"Challenge Thongthai · Thammachat", choose_side_aria:"Choose which side to play", board_aria:"Chess board",
   back_home:"Back home", my_rewards_link:"My Rewards",
   heading:"Challenge Thongthai", subheading:"Beat Thongthai, earn a real discount at TAMMA-CHAT",
   choose_difficulty:"Choose your difficulty", side_white:"Play White", side_black:"Play Black",
@@ -414,6 +422,7 @@ en:{
   redeemed_label:"Redeemed", not_redeemed_label:"Not redeemed",
 },
 zh:{
+  page_title:"挑战 Thongthai · Thammachat", choose_side_aria:"选择执棋方", board_aria:"国际象棋棋盘",
   back_home:"返回首页", my_rewards_link:"我的奖励",
   heading:"挑战通泰", subheading:"战胜通泰，获得可在塔玛柴使用的真实折扣",
   choose_difficulty:"选择难度", side_white:"执白", side_black:"执黑",
@@ -455,6 +464,7 @@ zh:{
   redeemed_label:"已使用", not_redeemed_label:"尚未使用",
 },
 lo:{
+  page_title:"ທ້າທາຍ Thongthai · Thammachat", choose_side_aria:"ເລືອກຝ່າຍທີ່ຈະຫຼິ້ນ", board_aria:"ກະດານໝາກຮຸກ",
   back_home:"ກັບໜ້າຫຼັກ", my_rewards_link:"ລາງວັນຂອງຂ້ອຍ",
   heading:"ທ້າທາຍທອງໄທ", subheading:"ຊະນະທອງໄທ ຮັບສ່ວນຫຼຸດໃຊ້ໄດ້ຈິງທີ່ TAMMA-CHAT",
   choose_difficulty:"ເລືອກລະດັບຄວາມຍາກ", side_white:"ຝ່າຍຂາວ", side_black:"ຝ່າຍດຳ",
@@ -496,6 +506,7 @@ lo:{
   redeemed_label:"ໃຊ້ສິດແລ້ວ", not_redeemed_label:"ຍັງບໍ່ໄດ້ໃຊ້",
 },
 vi:{
+  page_title:"Thách đấu Thongthai · Thammachat", choose_side_aria:"Chọn bên để chơi", board_aria:"Bàn cờ",
   back_home:"Về trang chủ", my_rewards_link:"Phần thưởng của tôi",
   heading:"Thách đấu Thongthai", subheading:"Thắng Thongthai, nhận ưu đãi thật tại TAMMA-CHAT",
   choose_difficulty:"Chọn độ khó", side_white:"Chơi quân Trắng", side_black:"Chơi quân Đen",
@@ -546,7 +557,18 @@ function ttT(key){
 }
 function ttApplyTranslations(){
   document.documentElement.setAttribute('lang', ttLang);
+  document.title = ttT('page_title');
   document.querySelectorAll('[data-tt-i18n]').forEach(el=>{ el.textContent = ttT(el.getAttribute('data-tt-i18n')); });
+  document.querySelectorAll('[data-tt-i18n-aria]').forEach(el=>{ el.setAttribute('aria-label',ttT(el.getAttribute('data-tt-i18n-aria'))); });
+  const picker=document.getElementById('ttChessLanguage');if(picker)picker.value=ttLang;
+}
+function ttSetLang(lang,persist=true){
+  const supported=['th','en','zh','lo','vi'];
+  if(!supported.includes(lang))return;
+  ttLang=lang;
+  if(persist)try{window.localStorage.setItem(LANG_STORAGE_KEY,lang);}catch(e){}
+  ttApplyTranslations();
+  ttChessRenderDynamicText();
 }
 function ttInitI18n(){
   let saved = null;
@@ -561,9 +583,11 @@ function ttInitI18n(){
     else if(nav.startsWith('vi')) ttLang = 'vi';
   }
   ttApplyTranslations();
+  const picker=document.getElementById('ttChessLanguage');
+  if(picker)picker.addEventListener('change',()=>ttSetLang(picker.value));
   window.addEventListener('storage', (e)=>{
     if(e.key === LANG_STORAGE_KEY && e.newValue && supported.includes(e.newValue)){
-      ttLang = e.newValue; ttApplyTranslations(); ttChessRenderDynamicText();
+      ttSetLang(e.newValue,false);
     }
   });
 }
@@ -1121,6 +1145,7 @@ $('ttChessRedeemConfirmBtn').addEventListener('click', async ()=>{
 
 function ttChessRenderDynamicText(){
   if(ttState.game) ttUpdateTurnLabel();
+  if(ttState.currentReward) ttRenderWinnerPass(ttState.currentReward);
 }
 
 /* ============================================================
