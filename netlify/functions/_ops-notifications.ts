@@ -175,7 +175,7 @@ function dayBounds(localDate: string): { start: string; end: string } {
   };
 }
 
-function parseTeamCode(raw: string): OpsTeamCode | null {
+export function parseTeamCode(raw: string): OpsTeamCode | null {
   const value = raw.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
   const aliases: Array<[RegExp, OpsTeamCode]> = [
     [/^(restaurant|ร้านอาหาร|ตำมา ?ชาติ|ตํา​มา ?ชาติ)$/u, 'restaurant'],
@@ -544,6 +544,10 @@ async function notifyBooking(id: string): Promise<'sent' | 'duplicate' | 'not_bo
   });
 }
 
+export function cafeNotificationTeam(environment: string): 'cafe' | 'cafe_test' {
+  return environment === 'test' ? 'cafe_test' : 'cafe';
+}
+
 async function notifyCafeInquiry(id: string): Promise<'sent' | 'duplicate' | 'not_bound' | 'ignored'> {
   const response = await dbFetch(
     `cafe_inquiries?id=eq.${id}`
@@ -555,7 +559,7 @@ async function notifyCafeInquiry(id: string): Promise<'sent' | 'duplicate' | 'no
   }>)[0];
   if (!inquiry || !['live', 'test'].includes(inquiry.environment)) return 'ignored';
   const environmentPrefix = inquiry.environment === 'test' ? '🧪 TEST — ' : '';
-  const targetTeam: OpsTeamCode = inquiry.environment === 'test' ? 'cafe_test' : 'cafe';
+  const targetTeam: OpsTeamCode = cafeNotificationTeam(inquiry.environment);
   const customer = await customerInfo(inquiry.customer_id);
   const lines = [
     `${environmentPrefix}☕ งานใหม่ — ${TEAM_LABELS[targetTeam]}`,
@@ -730,8 +734,8 @@ export async function notifyFeedbackEventTargets(id: string): Promise<{
   const event = rows[0];
   if (!event || !['live', 'test'].includes(event.environment)) return { overallStatus: 'ignored', targets: [] };
 
-  const primaryTeam: OpsTeamCode = event.business_unit === 'cafe' && event.environment === 'test'
-    ? 'cafe_test'
+  const primaryTeam: OpsTeamCode = event.business_unit === 'cafe'
+    ? cafeNotificationTeam(event.environment)
     : FEEDBACK_BUSINESS_UNIT_TEAM[event.business_unit] ?? 'all';
   const escalate = event.environment === 'test' ? false : needsOwnerEscalation(event);
   const routeTargets = escalate ? [...new Set([primaryTeam, 'owner_general' as OpsTeamCode])] : [primaryTeam];
