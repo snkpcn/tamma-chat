@@ -582,6 +582,7 @@ const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
   'cafe_topic_switch',
   'membership_topic_switch',
   'activity_topic_narrow',
+  'activity_preference_recommendation_fallback',
   'broad_experience_discovery',
   'ask_price',
   'ask_availability_status',
