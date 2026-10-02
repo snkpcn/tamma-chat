@@ -14,8 +14,8 @@ import {
   phase7ContractIsComplete,
 } from './phase7-production-certification-contract';
 
-const PRODUCTION_URL = process.env.THONGTHAI_PRODUCTION_URL
-  ?? 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
+const PRODUCTION_URL = process.env.THONGTHAI_PRODUCTION_URL?.trim()
+  || 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type Payload = Record<string, unknown> & { message?: unknown; intent?: unknown };
@@ -43,6 +43,7 @@ async function main(): Promise<void> {
         body: JSON.stringify({
           guestId,
           eventId: `phase7-production-${guestId}-${index + 1}`,
+          environment: 'test',
           message: userMessage,
           language: 'th',
           chatHistory: history,
