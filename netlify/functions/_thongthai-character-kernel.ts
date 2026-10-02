@@ -4,6 +4,9 @@ const EMOJI_RE = /[\p{Extended_Pictographic}\uFE0F]/gu;
 const CRITICAL_RE = /(?:บาดเจ็บ|เลือดออก|หมดสติ|อุบัติเหตุ|จมน้ำ|ไฟไหม้|ไฟลุก|ไฟดูด|ไฟช็อต|อันตราย|เด็กหาย|คนหาย|คุกคาม|ข่มขู่|ทำร้าย|1669|191|199)/u;
 const SOURCE_QUESTION_RE = /(?:ข้อมูล.*จากไหน|แหล่งข้อมูล|source|provider|ใช้.*(?:openweather|openai|gemini|supabase))/iu;
 const SOURCE_JARGON_RE = /(?:จากข้อมูลล่าสุด\s*)?\((?:openweathermap|openweather|supabase|openai|gemini)\)\s*[:：]?\s*/giu;
+const ISAN_SAFE_CONTEXT_RE = /(?:สวัสดี|ขอบคุณ|แนะนำ|อยากกิน|อยากเที่ยว|อยากพัก|ขอดูรูป|ดูรูป|มีรูป)/u;
+const ISAN_BLOCK_RE = /(?:บาดเจ็บ|อุบัติเหตุ|ปลอดภัย|เด็ก|ผู้สูงอายุ|แพ้|ชำระ|จ่ายเงิน|คืนเงิน|เคลม|ชดเชย|ส่วนลดพิเศษ|รับผิด|คุกคาม|ข่มขู่|ของหาย|คนหาย)/u;
+const ISAN_ALREADY_RE = /(?:เบิ่ง|เด้อ|ม่วน|ได้อยู่)/u;
 
 function protectCanonicalNames(value: string): string {
   return value
@@ -28,6 +31,19 @@ function restrainDecorativeEmoji(value: string): string {
     seen += 1;
     return seen <= 2 ? token : '';
   }).replace(/[ \t]{2,}/g, ' ');
+}
+
+function applyLightIsanFlavor(value: string, customerMessage: string): string {
+  if (!ISAN_SAFE_CONTEXT_RE.test(customerMessage) || ISAN_BLOCK_RE.test(customerMessage) || ISAN_ALREADY_RE.test(value)) {
+    return value;
+  }
+  if (/สวัสดี/u.test(customerMessage)) {
+    return value.replace(/บอก(?:ทองไทย)?ได้เลยครับ/u, 'บอกทองไทยได้เลยเด้อครับ');
+  }
+  if (/แนะนำ/u.test(customerMessage)) {
+    return value.replace(/ลองดู/u, 'ลองเบิ่ง');
+  }
+  return value;
 }
 
 function paragraphizeDenseThai(value: string): string {
@@ -74,6 +90,7 @@ export function applyThongthaiCharacterKernel(input: {
     value = CRITICAL_RE.test(input.customerMessage)
       ? emergencyPlainText(value)
       : restrainDecorativeEmoji(value);
+    value = applyLightIsanFlavor(value,input.customerMessage);
     value = paragraphizeDenseThai(value);
     value = ensureThaiMaleEnding(value);
   }
