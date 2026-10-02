@@ -256,30 +256,32 @@ export async function handleCafeTestDailyCloseText(input:{
   if(!result?.ok)throw new Error('financial_daily_close_text_ingest_failed');
 
   let cashSweepAmount:number|null=null;
-  if(environment==='live'&&result.daily_close_id
-    &&result.cash_opening_float!==null&&result.cash_opening_float!==undefined
-    &&result.cash_counted_closing!==null&&result.cash_counted_closing!==undefined
-    &&Math.abs(n(result.cash_opening_float)-n(result.cash_counted_closing))<0.01){
-    const candidate=n(result.cash_opening_float)+n(result.payment_cash)
-      -n(result.purchase_cash_outflow)-n(result.expense_cash_outflow)-n(result.cash_counted_closing);
-    if(candidate>0.009){
-      try{
-        await dbFetch('rpc/financial_record_cash_sweep_live_v1',{
-          method:'POST',
-          body:JSON.stringify({
-            p_daily_close_id:result.daily_close_id,
-            p_amount:Math.round(candidate*100)/100,
-            p_actor_hash:piiHash(input.userId)??'',
-            p_source:'line',
-          }),
-        });
-        cashSweepAmount=Math.round(candidate*100)/100;
-      }catch(error){
-        console.error(
-          'INTHANIN_LIVE_CASH_SWEEP_ERROR',
-          error instanceof Error?error.message.slice(0,220):'unknown',
-        );
-      }
+  if(environment==='live'&&result.daily_close_id){
+    const hasCashCounts=result.cash_opening_float!==null&&result.cash_opening_float!==undefined
+      &&result.cash_counted_closing!==null&&result.cash_counted_closing!==undefined;
+    const candidate=hasCashCounts
+      ?n(result.cash_opening_float)+n(result.payment_cash)
+        -n(result.purchase_cash_outflow)-n(result.expense_cash_outflow)-n(result.cash_counted_closing)
+      :0;
+    const keepFloat=hasCashCounts
+      &&Math.abs(n(result.cash_opening_float)-n(result.cash_counted_closing))<0.01;
+    const desiredSweep=keepFloat&&candidate>0.009?Math.round(candidate*100)/100:0;
+    try{
+      await dbFetch('rpc/financial_record_cash_sweep_live_v1',{
+        method:'POST',
+        body:JSON.stringify({
+          p_daily_close_id:result.daily_close_id,
+          p_amount:desiredSweep,
+          p_actor_hash:piiHash(input.userId)??'',
+          p_source:'line',
+        }),
+      });
+      cashSweepAmount=desiredSweep>0?desiredSweep:null;
+    }catch(error){
+      console.error(
+        'INTHANIN_LIVE_CASH_SWEEP_ERROR',
+        error instanceof Error?error.message.slice(0,220):'unknown',
+      );
     }
   }
 
