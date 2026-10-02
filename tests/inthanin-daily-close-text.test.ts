@@ -150,3 +150,73 @@ test('Café TEST handler hard-requires cafe_test binding, never generic cafe LIV
   assert.match(source,/financial_ingest_cafe_test_text_v1/);
   assert.doesNotMatch(source,/environment\s*:\s*['"]live['"]/);
 });
+
+
+test('ordinary closing expenses default to same-day shop cash and auto-categorize when staff omits funding text',()=>{
+  const sample=`☕️ Inthanin Café ตาดโตน — ปิดยอดประจำวัน
+วันที่ = 3/10/69
+ยอดขายตาม POS = 1,500
+เงินสดจากการขาย = 700
+QR Code Manual = 800
+ค่าใช้จ่ายวันนี้
+- นมเมจิ 320 บาท
+- แก้วพลาสติก 450 บาท
+- น้ำยาล้าง 120 บาท
+จำนวนแก้ว = 20
+จำนวนบิล = 15
+เงินสดตั้งต้น = 2,000
+เงินสดนับจริงปลายวัน = 1,810`;
+  const p=parseInthaninDailyCloseText(sample);
+  assert.deepEqual(p.expenses.map(x=>[x.label,x.amount,x.category,x.funding]),[
+    ['นมเมจิ',320,'ingredients','company_cash'],
+    ['แก้วพลาสติก',450,'packaging','company_cash'],
+    ['น้ำยาล้าง',120,'cleaning','company_cash'],
+  ]);
+});
+
+test('explicit funding overrides the default shop-cash rule',()=>{
+  const sample=`Inthanin ปิดยอด
+วันที่ = 3/10/69
+ยอดขายตาม POS = 1,000
+เงินสดจากการขาย = 500
+QR Code Manual = 500
+ค่าใช้จ่ายวันนี้
+- นม 300 บาท / เจ้าของโอน
+- น้ำแข็ง 50 บาท / พนักงานออกก่อน
+- กล่อง 100 บาท / โอน vendor
+จำนวนบิล = 10
+เงินสดตั้งต้น = 2,000
+เงินสดนับจริงปลายวัน = 2,000`;
+  const p=parseInthaninDailyCloseText(sample);
+  assert.deepEqual(p.expenses.map(x=>[x.label,x.category,x.funding]),[
+    ['นม','ingredients','owner_transfer'],
+    ['น้ำแข็ง','ingredients','employee_fronted'],
+    ['กล่อง','packaging','vendor_transfer'],
+  ]);
+});
+
+test('payroll-sensitive lines are not ingested from the staff-visible close expense section',()=>{
+  const sample=`Inthanin ปิดยอด
+วันที่ = 3/10/69
+ยอดขายตาม POS = 1,000
+เงินสดจากการขาย = 500
+QR Code Manual = 500
+ค่าใช้จ่ายวันนี้
+- เงินเดือน ปอ 500 บาท
+- นมเมจิ 200 บาท
+จำนวนบิล = 10
+เงินสดตั้งต้น = 2,000
+เงินสดนับจริงปลายวัน = 2,300`;
+  const p=parseInthaninDailyCloseText(sample);
+  assert.deepEqual(p.expenses.map(x=>x.label),['นมเมจิ']);
+  assert.equal(p.expenses[0].funding,'company_cash');
+});
+
+test('Daily Close reply exposes the separated auto-categorized expense list to staff',()=>{
+  const source=readFileSync('netlify/functions/_inthanin-daily-close-line.ts','utf8');
+  assert.match(source,/แยกรายการอัตโนมัติ/u);
+  assert.match(source,/EXPENSE_CATEGORY_LABELS/);
+  assert.match(source,/วัตถุดิบ/u);
+  assert.match(source,/บรรจุภัณฑ์/u);
+  assert.match(source,/ทำความสะอาด/u);
+});
