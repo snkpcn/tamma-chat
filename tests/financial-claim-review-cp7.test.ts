@@ -32,3 +32,15 @@ test('CP7 review records actor, reason and decision without touching LIVE',()=>{
   assert.match(migration,/review_decision/);
   assert.doesNotMatch(migration,/environment='live'/);
 });
+
+
+test('CP7 approval clears the duplicate ledger-review blocker and reject supersedes the disputed economic event',()=>{
+  const followup=readFileSync(
+    'supabase/migrations/20261002200500_financial_claim_review_ledger_resolution_v1.sql',
+    'utf8',
+  );
+  assert.match(followup,/claim_review_status','approved/);
+  assert.match(followup,/'needs_review',false/);
+  assert.match(followup,/'superseded',true/);
+  assert.match(followup,/accounting_role='economic_event'/);
+});
