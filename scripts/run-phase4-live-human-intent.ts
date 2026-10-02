@@ -71,14 +71,39 @@ const probes:Probe[]=[
   {id:'incident-safety',message:'ช่วยด้วยครับ ล้มตอนเล่น ATV เจ็บอยู่',context:empty,expected:['INCIDENT'],mustCommit:false},
 ];
 
+function isTransientProviderError(error:unknown):boolean{
+  const message=error instanceof Error?error.message:String(error);
+  return /(?:^|\s)(?:429|5\d\d)(?:\s|$)|OpenAI\s+(?:429|5\d\d)|provider.*(?:429|5\d\d)/iu.test(message);
+}
+
+async function interpretWithTransientRetry(
+  message:string,
+  context:SemanticContext,
+){
+  let last:unknown;
+  for(let attempt=1;attempt<=3;attempt+=1){
+    try{
+      return await interpretSemanticTurn(message,context,{certificationMode:true});
+    }catch(error){
+      last=error;
+      if(!isTransientProviderError(error)||attempt===3) throw error;
+      console.log('PHASE4_LIVE_TRANSIENT_RETRY',JSON.stringify({
+        attempt,
+        error:error instanceof Error?error.message:String(error),
+      }));
+      await new Promise(resolve=>setTimeout(resolve,attempt*1200));
+    }
+  }
+  throw last;
+}
+
 async function main(){
   assert.ok(process.env.OPENAI_API_KEY,'OPENAI_API_KEY required');
   const results:any[]=[];
   for(const probe of probes){
-    const turn=await interpretSemanticTurn(
+    const turn=await interpretWithTransientRetry(
       probe.message,
       probe.context,
-      {certificationMode:true},
     );
     const boundary=classifyCommercialBoundarySemantic(turn);
     const pass=probe.expected.includes(boundary.mode)
