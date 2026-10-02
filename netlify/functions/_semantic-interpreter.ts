@@ -715,6 +715,7 @@ Core rules:
 - Open world: general=ordinary non-business conversation; local=surrounding area; incident=loss/damage/injury/adverse event; support=service help not owned by a narrower domain.
 - A report of loss, damage, injury, or another adverse event remains speechAct=incident_report even when the same sentence asks staff to help.
 - Any adverse-event report uses domain=incident even when its subject is an animal, property, a local place, or an organization service; narrower domains apply only when no incident is being reported.
+- Incident + clear owned area: entities.businessUnit=restaurant|activity|stay|cafe|otop|membership|system|general; omit if unclear.
 - When the customer explicitly contrasts two or more known alternatives against a criterion, action=compare (informationNeed may be recommendation). Use action=recommend for open-ended suggestions without a fixed comparison set.
 - Domain nouns identify subject; preserve the actual predicate, dates, times, party size, constraints, negation, and stated preferences.
 - Preserve all meaningful clauses in compound turns; do not drop later constraints, corrections, or fallback questions.
@@ -1681,8 +1682,18 @@ export function parseSemanticTurnResponse(
     && (action === 'book' || action === 'order')
     && !hasStandaloneTransactionRequest(currentMessage)
   ) {
+    const operationalIncidentSpeechAct =
+      speechAct === 'incident_report'
+      || speechAct === 'complaint'
+      || speechAct === 'request_help';
     action = concreteCurrentSelection ? 'confirm' : 'provide_information';
-    speechAct = concreteCurrentSelection ? 'selection' : 'statement';
+    // Removing unverified transaction authority must NEVER erase a trusted
+    // incident/complaint/help speech act. Phase 5 routes that speech act to a
+    // durable operational case; rewriting it to "statement" would silently
+    // convert an incident into ordinary business state.
+    if (!operationalIncidentSpeechAct) {
+      speechAct = concreteCurrentSelection ? 'selection' : 'statement';
+    }
     // The same untrusted model output may have drafted transaction claims or
     // slot-collection copy that no longer matches the safety-normalized turn.
     // Do not expose that stale draft after removing its write authority; force

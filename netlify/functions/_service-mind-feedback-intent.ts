@@ -15,13 +15,13 @@
 import { hasCommitMarker } from './_slot-parsers';
 
 export type FeedbackType = 'compliment' | 'complaint' | 'suggestion' | 'safety_issue' | 'system_feedback' | 'incident';
-export type BusinessUnit = 'restaurant' | 'activity' | 'stay' | 'cafe' | 'membership' | 'system' | 'general' | 'unknown';
+export type BusinessUnit = 'restaurant' | 'activity' | 'stay' | 'cafe' | 'otop' | 'membership' | 'system' | 'general' | 'unknown';
 export type Severity = 'low' | 'normal' | 'high' | 'urgent';
 export type PersonMentionKind = 'named' | 'role';
 export type PersonMention = { label: string; kind: PersonMentionKind };
 export type IssueKeyword =
   | 'service' | 'delay' | 'cleanliness' | 'safety' | 'food_quality' | 'staff_behavior'
-  | 'pricing' | 'booking' | 'payment' | 'communication' | 'system_error'
+  | 'pricing' | 'booking' | 'payment' | 'communication' | 'system_error' | 'fulfillment'
   | 'activity_condition' | 'accessibility' | 'child_safety' | 'elderly_comfort' | 'lost_property';
 
 export type ServiceFeedbackMatch = {
@@ -69,6 +69,12 @@ const SAFETY_CONCERN_MARKER = /พื้นลื่น(?:มาก)?|น่า�
 // customer has not yet supplied the exact time/location/item description.
 const LOST_PROPERTY_MARKER = /ของหาย|ทำ(?:ของ|กระเป๋า|โทรศัพท์|มือถือ|กุญแจ|หมวก|กระเป๋าสตางค์|กระเป๋าตังค์).*หาย|ลืม(?:ของ|กระเป๋า|โทรศัพท์|มือถือ|กุญแจ|หมวก|กระเป๋าสตางค์|กระเป๋าตังค์)|หา(?:ของ|กระเป๋า|โทรศัพท์|มือถือ|กุญแจ|หมวก|กระเป๋าสตางค์|กระเป๋าตังค์).*ไม่เจอ|(?:กระเป๋า|โทรศัพท์|มือถือ|กุญแจ|หมวก|กระเป๋าสตางค์|กระเป๋าตังค์)หาย/u;
 
+// Fulfilment defects are operational complaints even when phrased politely
+// ("ได้ของผิด อยากให้ช่วยตรวจสอบ"). Without these concrete defect markers,
+// the generic suggestion marker "อยากให้" can steal the turn and downgrade
+// a wrong-item incident to low-priority customer suggestion.
+const FULFILLMENT_COMPLAINT_MARKER = /(?:ได้|ได้รับ|ส่ง)(?:ของ|สินค้า|ออเดอร์)[^\n]{0,36}(?:ผิด|ไม่ตรง|ไม่ครบ|ขาด|เสียหาย|แตก)|(?:ของ|สินค้า|ออเดอร์)[^\n]{0,24}(?:ผิดรายการ|ไม่ตรง(?:กับที่สั่ง)?|ไม่ครบ|เสียหาย|แตก)/u;
+
 const COMPLAINT_MARKER = /แย่มาก|แย่จัง|ห่วย|รอนาน|นานมาก|ช้า|ไม่พอใจ|ผิดหวัง|ไม่ประทับใจ|บริการแย่|ไม่(?:ค่อย)?สะอาด|สกปรก|เย็นชา|หยาบคาย|ไม่สุภาพ|พูดไม่ดี|ทำไม่ดี|นิสัยไม่ดี|ตำหนิ|ร้องเรียน|มีปัญหา|ไม่โอเค|ตอบมั่ว|ไม่ตรง|ไม่ขึ้น|ควรแก้|ช่วยปรับ/u;
 const COMPLIMENT_MARKER = /ดูแลดีมาก|ดูแลดี|ประทับใจ|ชื่นชม|ขอชม|เก่งมาก|น่ารัก|บริการดี(?:มาก)?|ดีมากเลย|ยอดเยี่ยม|อร่อย|ตอบดี|ช่วยดี/u;
 const SUGGESTION_MARKER = /น่าจะมี|เสนอแนะ|ข้อเสนอแนะ|อยากให้|เสนอไอเดีย|ลองทำ.*ดูไหม|น่าจะเพิ่ม|ควรเพิ่ม/u;
@@ -113,6 +119,7 @@ const BUSINESS_UNIT_MARKERS: ReadonlyArray<{ unit: BusinessUnit; pattern: RegExp
   { unit: 'activity', pattern: /ขี่ม้า|ม้า|ภาราดร|atv|เอทีวี|ยิงธนู|กิจกรรม|ไกด์|คนดูแลม้า|กลางแจ้ง/iu },
   { unit: 'stay', pattern: /ห้องพัก|เช็คอิน|เช็กอิน|เช็คเอาท์|เช็กเอาท์|แม่บ้าน|ที่พัก|เฮือน(?:สเตย์)?|ห้องน้ำในห้อง/u },
   { unit: 'cafe', pattern: /คาเฟ่|inthanin|อินทนิน|กาแฟ|เครื่องดื่ม/iu },
+  { unit: 'otop', pattern: /otop|โอทอป|ของฝาก|สินค้าชุมชน|ผลิตภัณฑ์ชุมชน/iu },
   { unit: 'membership', pattern: /สมาชิก|แต้ม|สิทธิ์|โปรโมชั่น|จ่ายเงิน|ชำระเงิน|บัตร|ราคา/u },
   { unit: 'system', pattern: THONGTHAI_RESPONSE_MENTION },
 ];
@@ -170,7 +177,14 @@ function extractPersonMentions(text: string): PersonMention[] {
     mentions.push({ label: `${honorificMatch[1]}${honorificMatch[2]}`, kind: 'named' });
   } else {
     const bareMatch = text.match(BARE_NAME_BEHAVIOR_RE);
-    if (bareMatch && !ROLE_WORDS.includes(bareMatch[1])) mentions.push({ label: bareMatch[1], kind: 'named' });
+    if (bareMatch) {
+      const candidate = bareMatch[1];
+      // "แต่พนักงานพูดไม่ดี" / "ทางพนักงานพูดไม่ดี" are role phrases,
+      // not staff names. Reject any capture that merely ends in a known role.
+      if (!ROLE_WORDS.some(role => candidate === role || candidate.endsWith(role))) {
+        mentions.push({ label: candidate, kind: 'named' });
+      }
+    }
   }
 
   return mentions;
@@ -183,6 +197,7 @@ const BUSINESS_UNIT_MENTION_WORDS: readonly string[] = [
   'ขี่ม้า', 'atv', 'เอทีวี', 'ยิงธนู', 'ม้า', 'ภาราดร', 'ไกด์',
   'เฮือนสเตย์', 'บ้านพัก', 'ห้องพัก', 'เช็คอิน', 'เช็กอิน', 'เช็คเอาท์', 'เช็กเอาท์', 'แม่บ้าน',
   'inthanin', 'อินทนิน', 'กาแฟ', 'เครื่องดื่ม',
+  'otop', 'โอทอป', 'ของฝาก', 'สินค้าชุมชน',
   'ทองไทย', 'เว็บ', 'line', 'ระบบจอง', 'payment',
 ];
 
@@ -206,6 +221,7 @@ const ISSUE_KEYWORD_MARKERS: ReadonlyArray<{ issue: IssueKeyword; pattern: RegEx
   { issue: 'pricing', pattern: /ราคา|แพง|ไม่ตรง(?:ราคา)?/u },
   { issue: 'booking', pattern: /จอง(?:แล้วไม่ขึ้น)?|ระบบจอง/u },
   { issue: 'payment', pattern: /จ่ายเงิน|ชำระเงิน|payment/iu },
+  { issue: 'fulfillment', pattern: FULFILLMENT_COMPLAINT_MARKER },
   { issue: 'communication', pattern: /ไม่แจ้งเตือน|ทองไทยตอบ(?:ไม่ตรง|ยาวไป|งง)|ตอบมั่ว/u },
   { issue: 'system_error', pattern: /เว็บค้าง|ระบบแชทค้าง|ระบบจองใช้ยาก|error|บั๊ก/iu },
   { issue: 'activity_condition', pattern: /พื้นลื่น|สภาพพื้น|มีปัญหาระหว่างทาง|ดูเหนื่อย/u },
@@ -254,7 +270,18 @@ export function extractFeedbackKeywords(text: string): {
 } {
   const personMentions = extractPersonMentions(text);
   const businessUnitMentions = BUSINESS_UNIT_MENTION_WORDS.filter(word => text.toLowerCase().includes(word.toLowerCase()));
-  const positive = POSITIVE_SENTIMENT_WORDS.filter(word => text.includes(word));
+  const containsNonNegated = (word: string): boolean => {
+    let from = 0;
+    while (from < text.length) {
+      const index = text.indexOf(word, from);
+      if (index < 0) return false;
+      const prefix = text.slice(Math.max(0, index - 3), index);
+      if (!prefix.endsWith('ไม่')) return true;
+      from = index + word.length;
+    }
+    return false;
+  };
+  const positive = POSITIVE_SENTIMENT_WORDS.filter(containsNonNegated);
   const negative = NEGATIVE_SENTIMENT_WORDS.filter(word => text.includes(word));
   const sentimentKeywords = [...positive, ...negative];
   const issueKeywords = extractIssueKeywords(text);
@@ -298,6 +325,7 @@ export function classifyServiceFeedback(message: string): ServiceFeedbackMatch |
   if (URGENT_SAFETY_MARKER.test(text)) return withExtraction('safety_issue', 'urgent');
   if (SAFETY_CONCERN_MARKER.test(text)) return withExtraction('safety_issue', 'high');
   if (LOST_PROPERTY_MARKER.test(text)) return withExtraction('incident', 'high');
+  if (FULFILLMENT_COMPLAINT_MARKER.test(text)) return withExtraction('complaint', 'normal');
 
   // Compliments about Thongthai's own answers are checked BEFORE the
   // negative-only SYSTEM_FEEDBACK_MARKER, so "ทองไทยตอบดี" is a compliment,

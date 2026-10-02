@@ -649,7 +649,7 @@ async function notifyOtopOrder(id: string): Promise<'sent' | 'duplicate' | 'not_
 // entry) -- sendTeamMessage below honestly returns 'not_bound' until an
 // owner runs "ผูกทีม เจ้าของ" (or one of its aliases) in the real group.
 const FEEDBACK_BUSINESS_UNIT_TEAM: Record<string, OpsTeamCode> = {
-  restaurant: 'restaurant', activity: 'activity', stay: 'stay', cafe: 'cafe',
+  restaurant: 'restaurant', activity: 'activity', stay: 'stay', cafe: 'cafe', otop: 'otop',
   membership: 'owner_general', system: 'owner_general', general: 'owner_general', unknown: 'owner_general',
 };
 const FEEDBACK_TYPE_LABEL: Record<string, string> = {
