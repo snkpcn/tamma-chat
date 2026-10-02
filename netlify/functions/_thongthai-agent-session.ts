@@ -73,6 +73,15 @@ type SessionState = {
 
 export type AgentRuntimeMode = 'shadow' | 'primary';
 
+export type AgentMemoryContext = {
+  travelerType?: string | null;
+  group?: { adults?: number | null; children?: number | null; elderly?: number | null };
+  interests?: string[];
+  pace?: string | null;
+  budget?: number | null;
+  constraints?: string[];
+};
+
 export type AgentShadowTurnInput = {
   guestDbId: string;
   conversationId: string;
@@ -82,6 +91,9 @@ export type AgentShadowTurnInput = {
   environment?: 'live' | 'test';
   transactionMode?: ThongthaiAgentTransactionMode;
   runtimeMode?: AgentRuntimeMode;
+  /** Small sanitized durable service context already loaded by the shared
+   * customer-memory layer. Never a transcript and never transaction authority. */
+  memoryContext?: AgentMemoryContext;
 };
 
 export type AgentShadowTurnResult = {
@@ -211,6 +223,47 @@ async function saveSessionState(
   if (!ok) throw new Error('Could not persist Thongthai Agent session state.');
 }
 
+function compactAgentMemoryContext(input: AgentShadowTurnInput): string | null {
+  const source = input.memoryContext;
+  if (!source) return null;
+
+  const group = source.group && [source.group.adults, source.group.children, source.group.elderly]
+    .some(value => typeof value === 'number')
+    ? {
+        adults: typeof source.group.adults === 'number' ? source.group.adults : undefined,
+        children: typeof source.group.children === 'number' ? source.group.children : undefined,
+        elderly: typeof source.group.elderly === 'number' ? source.group.elderly : undefined,
+      }
+    : undefined;
+  const value = {
+    travelerType: source.travelerType || undefined,
+    group,
+    interests: Array.isArray(source.interests) && source.interests.length
+      ? source.interests.slice(0, 8)
+      : undefined,
+    pace: source.pace || undefined,
+    budget: typeof source.budget === 'number' && Number.isFinite(source.budget)
+      ? source.budget
+      : undefined,
+    constraints: Array.isArray(source.constraints) && source.constraints.length
+      ? source.constraints.slice(0, 12)
+      : undefined,
+  };
+  if (!Object.values(value).some(Boolean)) return null;
+  return JSON.stringify(value);
+}
+
+export function agentInputText(input: AgentShadowTurnInput): string {
+  const memory = compactAgentMemoryContext(input);
+  if (!memory) return input.message;
+  return [
+    '[PRIVATE CUSTOMER CONTEXT — use silently; do not quote or mention this block]',
+    memory,
+    '[CURRENT CUSTOMER MESSAGE]',
+    input.message,
+  ].join('\n');
+}
+
 async function createSession(
   input: AgentShadowTurnInput,
   runtime: AgentRuntimeConfig,
@@ -220,7 +273,7 @@ async function createSession(
     body: JSON.stringify({
       agent_id: runtime.agentId,
       environment: { type: 'none' },
-      input: input.message,
+      input: agentInputText(input),
       metadata: {
         app: 'thammachat',
         mode: runtime.mode,
@@ -239,7 +292,7 @@ async function sendMessage(sessionId: string, input: AgentShadowTurnInput): Prom
         type: 'agent.session.input.message',
         input: [{
           role: 'user',
-          content: [{ type: 'input_text', text: input.message }],
+          content: [{ type: 'input_text', text: agentInputText(input) }],
         }],
       }],
     }),
