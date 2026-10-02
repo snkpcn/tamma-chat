@@ -1874,7 +1874,7 @@ function cafeMenuListMessage(items:readonly CafeMasterMenuItem[]):string{
   return lines.join('\n');
 }
 
-function cafeGroundedAnswer(
+export function cafeGroundedAnswer(
   request:BrainRequest,
   items:readonly CafeMasterMenuItem[],
   modifiers:readonly CafeBranchModifier[],
