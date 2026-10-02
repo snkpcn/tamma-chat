@@ -29,8 +29,16 @@ function restrainDecorativeEmoji(value: string): string {
   let seen = 0;
   return value.replace(EMOJI_RE, token => {
     seen += 1;
-    return seen <= 2 ? token : '';
+    return seen <= 1 ? token : '';
   }).replace(/[ \t]{2,}/g, ' ');
+}
+
+function softenRoboticThaiOpeners(value:string, customerMessage:string):string {
+  if (ISAN_BLOCK_RE.test(customerMessage)) return value;
+  return value
+    .replace(/^รับทราบครับ\s*/u, 'ได้ครับ ')
+    .replace(/^จากข้อความที่คุยกันรอบนี้\s*/u, '')
+    .replace(/^จากข้อมูลที่เช็กได้ตอนนี้\s*[:：-]?\s*/u, '');
 }
 
 function applyLightIsanFlavor(value: string, customerMessage: string): string {
@@ -90,6 +98,7 @@ export function applyThongthaiCharacterKernel(input: {
     value = CRITICAL_RE.test(input.customerMessage)
       ? emergencyPlainText(value)
       : restrainDecorativeEmoji(value);
+    value = softenRoboticThaiOpeners(value,input.customerMessage);
     value = applyLightIsanFlavor(value,input.customerMessage);
     value = paragraphizeDenseThai(value);
     value = ensureThaiMaleEnding(value);
