@@ -190,27 +190,6 @@ export function normalizeForConceptMatching(message: string): string {
   return text.replace(PUNCTUATION_AND_SPACE, '').toLowerCase();
 }
 
-// Phase 3 production-routing bridge. These markers DO NOT decide meaning;
-// they only decide that a short, standalone turn is worth sending through
-// One-Mind's semantic-learning path before the 100% Saved-Agent rollout.
-// The semantic supervisor / learned-memory matcher remains the sole meaning
-// authority. False positives therefore cost at most one normal semantic call;
-// they can never create a concept or transaction by marker match alone.
-const PHASE3_COMPANION_ROUTE_MARKER =
-  /(?:มากับ|มาด้วย|พามา|ไปด้วย|อยู่ด้วย).{0,16}(?:แฟน|คนรัก|คนรู้ใจ|ครอบครัว|พ่อแม่|พ่อ|แม่|ลูก|ญาติ|พี่น้อง|เพื่อน|สามี|ภรรยา|คนเดียว)/u;
-const PHASE3_RELAXED_PACE_ROUTE_MARKER =
-  /(?:ไม่อยากเหนื่อย|ไม่เหนื่อย|เหนื่อยน้อย|ไม่หนัก|ชิล(?:ๆ)?|สบาย(?:ๆ)?|เบา(?:ๆ)?|เรื่อย(?:ๆ)?)/u;
-const PHASE3_CONSIDER_ONLY_ROUTE_MARKER =
-  /(?:ไว้ก่อน|จำไว้ก่อน|เก็บไว้ก่อน|ยังไม่(?:จอง|สั่ง|ทำรายการ)|ไม่ต้อง(?:จอง|สั่ง|ทำรายการ))/u;
-
-export function isPhase3SemanticLearningCandidate(message:string):boolean {
-  const text=String(message??'').normalize('NFC').trim();
-  if(!text) return false;
-  return PHASE3_COMPANION_ROUTE_MARKER.test(text)
-    || PHASE3_RELAXED_PACE_ROUTE_MARKER.test(text)
-    || PHASE3_CONSIDER_ONLY_ROUTE_MARKER.test(text);
-}
-
 /** Bounded Levenshtein distance -- returns Infinity once it provably exceeds
  *  maxDistance, mirroring _experience-discovery.ts's editDistanceWithin so
  *  this module never pays for an unbounded comparison. */
