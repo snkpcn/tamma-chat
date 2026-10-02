@@ -119,7 +119,7 @@ function mediaReply(language:string, productName:string, count:number): string {
     : `Được, đây là ảnh hiện có của ${productName}.`;
   return count > 1
     ? `ได้ครับ นี่รูป${productName}ที่มีอยู่ตอนนี้ ${count} รูป ส่งให้เบิ่งได้เลยครับ`
-    : `ได้ครับ นี่รูป${productName}ที่มีอยู่ตอนนี้ครับ`;
+    : `ได้ครับ นี่รูป${productName}ที่มีอยู่ตอนนี้ ส่งให้เบิ่งครับ`;
 }
 
 export async function resolveRequestedCustomerMedia(input: {
