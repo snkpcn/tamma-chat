@@ -120,6 +120,27 @@ Thailand remains the current production baseline:
 
 This seed is descriptive of the existing domestic business. It does not reroute the existing Thai checkout through WW code.
 
+## Applied production migrations
+
+- `20261002205229_ww1_global_data_core`
+- `20261002205312_ww1_global_data_core_indexes`
+
+Post-migration verification on 2026-10-03 confirmed:
+
+- 1 currency: THB
+- 1 country: TH
+- 5 locales: th/en/zh/lo/vi
+- 1 live domestic market: TH
+- 9 market capability rows
+- customs remains disabled
+- `anon` and `authenticated` have no table grants
+- `service_role` has server-side CRUD grants
+- advisor FK-index findings were resolved by the follow-up migration
+
+Supabase still reports the informational `rls_enabled_no_policy` lint for these six tables. This is intentional: the tables are server-only, RLS is enabled, direct anon/authenticated grants are revoked, and adding permissive policies merely to silence the lint would weaken the boundary. The relevant Supabase remediation/reference is https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy.
+
+New indexes may temporarily appear as `unused_index` while the data core has almost no traffic; this is expected immediately after creation.
+
 ## Definition of Done
 
 - [x] Pure country/currency/locale/market resolver implemented.
@@ -128,10 +149,10 @@ This seed is descriptive of the existing domestic business. It does not reroute 
 - [x] Missing capabilities default disabled.
 - [x] Locale and currency remain independent.
 - [x] Thailand resolves to the locked TH/THB domestic baseline.
-- [ ] Database migration applied and verified.
-- [ ] RLS/grants verified service-role-only.
-- [ ] Database advisors reviewed after migration.
-- [ ] Repo migration artifact matches applied migration.
+- [x] Database migration applied and verified.
+- [x] RLS/grants verified service-role-only.
+- [x] Database advisors reviewed after migration.
+- [x] Repo migration artifact matches applied migration.
 - [ ] Full CI passes.
 - [ ] Production deploy is ready on merged main.
 - [ ] WW flags remain deliberately controlled after deploy.
