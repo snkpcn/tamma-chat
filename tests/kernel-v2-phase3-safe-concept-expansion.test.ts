@@ -37,6 +37,11 @@ test('Phase 3: canonical model meaning maps only one safe concept family at a ti
     'pace_relaxed',
   );
   assert.equal(
+    semanticConceptKeyForConfirmedMeaning({ entities:{}, constraints:['low_exertion'] }),
+    'pace_relaxed',
+    'production semantic supervisor emits low_exertion as a structured constraint',
+  );
+  assert.equal(
     semanticConceptKeyForConfirmedMeaning({ entities:{}, constraints:['consider_only'] }),
     'consider_only',
   );
