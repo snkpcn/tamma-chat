@@ -33,10 +33,17 @@ function restrainDecorativeEmoji(value: string): string {
 
 function softenRoboticThaiOpeners(value:string, customerMessage:string):string {
   if (ISAN_BLOCK_RE.test(customerMessage)) return value;
-  return value
-    .replace(/^รับทราบครับ\s*/u, 'ได้ครับ ')
+  let next = value
     .replace(/^จากข้อความที่คุยกันรอบนี้\s*/u, '')
     .replace(/^จากข้อมูลที่เช็กได้ตอนนี้\s*[:：-]?\s*/u, '');
+
+  // A redundant acknowledgement before a substantive answer sounds canned.
+  // Remove it rather than replacing it with another canned opener. Preserve a
+  // genuine acknowledgement-only reply.
+  if (/^รับทราบครับ(?:\s+|[,，]\s*)\S/u.test(next)) {
+    next = next.replace(/^รับทราบครับ(?:\s+|[,，]\s*)/u, '');
+  }
+  return next;
 }
 
 function applyLightIsanFlavor(value: string, customerMessage: string): string {
@@ -75,10 +82,12 @@ function ensureThaiMaleEnding(value: string): string {
 }
 
 /**
- * Character Kernel: the final personality contract shared by every public
- * customer channel. It never changes prices, availability, transaction state
- * or business facts. It only protects identity, reading rhythm, source jargon,
- * emoji restraint and the owner-locked male Thai voice.
+ * Character Kernel: the final guardrail shared by every public customer
+ * channel. The language model/composer owns prose and personality; this layer
+ * must not compete by injecting canned warmth or dialect. It never changes
+ * prices, availability, transaction state or business facts. It only protects
+ * canonical names, reading rhythm, source jargon, emoji restraint and the
+ * owner-locked male Thai voice.
  */
 export function applyThongthaiCharacterKernel(input: {
   message: string;
@@ -97,7 +106,6 @@ export function applyThongthaiCharacterKernel(input: {
       ? emergencyPlainText(value)
       : restrainDecorativeEmoji(value);
     value = softenRoboticThaiOpeners(value,input.customerMessage);
-    value = applyLightIsanFlavor(value,input.customerMessage);
     value = paragraphizeDenseThai(value);
     value = ensureThaiMaleEnding(value);
   }
