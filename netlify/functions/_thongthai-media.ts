@@ -106,20 +106,20 @@ async function loadLiveOtopMediaCatalog(): Promise<MediaCatalogProduct[]> {
 
 function mediaReply(language:string, productName:string, count:number): string {
   if (language === 'en') return count > 1
-    ? `Yes — here are ${count} images of ${productName} from the live product record.`
-    : `Yes — here is the image of ${productName} from the live product record.`;
+    ? `Sure — here are ${count} current photos of ${productName}.`
+    : `Sure — here is the current photo of ${productName}.`;
   if (language === 'zh') return count > 1
-    ? `有的，这里是系统里 ${productName} 的 ${count} 张商品图片。`
-    : `有的，这是系统里 ${productName} 的商品图片。`;
+    ? `可以，这是 ${productName} 目前的 ${count} 张图片。`
+    : `可以，这是 ${productName} 目前的图片。`;
   if (language === 'lo') return count > 1
-    ? `ມີຄັບ ນີ້ແມ່ນຮູບ ${productName} ຈາກຂໍ້ມູນສິນຄ້າ ${count} ຮູບ.`
-    : `ມີຄັບ ນີ້ແມ່ນຮູບ ${productName} ຈາກຂໍ້ມູນສິນຄ້າ.`;
+    ? `ໄດ້ເລີຍ ນີ້ແມ່ນຮູບ ${productName} ທີ່ມີຕອນນີ້ ${count} ຮູບ.`
+    : `ໄດ້ເລີຍ ນີ້ແມ່ນຮູບ ${productName} ທີ່ມີຕອນນີ້.`;
   if (language === 'vi') return count > 1
-    ? `Có — đây là ${count} ảnh ${productName} đang có trong hồ sơ sản phẩm.`
-    : `Có — đây là ảnh ${productName} đang có trong hồ sơ sản phẩm.`;
+    ? `Được, đây là ${count} ảnh hiện có của ${productName}.`
+    : `Được, đây là ảnh hiện có của ${productName}.`;
   return count > 1
-    ? `มีครับ ทองไทยส่งรูป${productName}ที่มีอยู่ในหลังบ้านให้เบิ่ง ${count} รูปครับ`
-    : `มีครับ นี่คือรูป${productName}ที่มีอยู่ในหลังบ้าน ทองไทยส่งให้เบิ่งครับ`;
+    ? `ได้ครับ นี่รูป${productName}ที่มีอยู่ตอนนี้ ${count} รูป ส่งให้เบิ่งได้เลยครับ`
+    : `ได้ครับ นี่รูป${productName}ที่มีอยู่ตอนนี้ครับ`;
 }
 
 export async function resolveRequestedCustomerMedia(input: {
