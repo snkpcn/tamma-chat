@@ -1732,8 +1732,6 @@ export async function promotionDiscoveryFallbackResponse(
 
 const CAFE_EXPLICIT_MARKER = /(?:คาเฟ่|กาแฟ|ลาเต้|อเมริกาโน่|คาปูชิโน่|เอสเปรสโซ่|อินทนิน|inthanin)/iu;
 const CAFE_READ_ONLY_FOLLOWUP_MARKER = /(?:เครื่องดื่ม|ราคา|กี่บาท|เปิด|ปิด|กี่โมง|เมนู|มีอะไร|แนะนำ|ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอานมวัว|นมวัว|หวาน|ขม|เย็น|น้ำตาล|เมื่อกี้|ตัวไหน|เปลี่ยนใจ|ไม่เอาตัวนั้น|เอาไว้ก่อน|ยังไม่สั่ง|ยังไม่ต้องทำรายการ|ส่งไปที่ร้าน|ถึงร้านแล้วค่อย|ที่จอดรถ|อีกประมาณ.*ชั่วโมง|แฟน|คนเดียว|กลับมาเรื่อง)/u;
-const CAFE_AGENT_RECOMMENDATION_RE = /(?:แนะนำ|เลือกให้|ตัวไหนดี|อะไรดี|recommend)/iu;
-const CAFE_FULL_LIST_RE = /(?:ทั้งหมด|ทุกเมนู|ขอเมนู|เมนูทั้งหมด|full\s*menu|all\s*menu)/iu;
 
 function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   const text = message.trim();
@@ -6298,11 +6296,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // owns the turn before read-only Agent Primary.
   // Prepare-only routing remains separately authorized and unchanged.
   const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
-  const cafeCandidateStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
-  const cafeHumanRecommendationCandidate =
-    cafeCandidateStateForPrePrimary !== null
-    && CAFE_AGENT_RECOMMENDATION_RE.test(request.message)
-    && !CAFE_FULL_LIST_RE.test(request.message);
+  const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
+  const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
   // Narrow cafe -> restaurant topic-switch fast path. It exists only for an
   // EXPLICIT restaurant/menu discovery in the current sentence. Do not use
@@ -6319,7 +6314,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
     && !restaurantTopicSwitchBeforePrimary
     && !completeVisitorJourneyBeforeSupervision
-    && (cafeCandidateStateForPrePrimary === null || cafeHumanRecommendationCandidate)
+    && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
     && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
@@ -6334,14 +6329,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       || topLevelSemanticIntent === 'LOCATION_REQUEST',
   });
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
-  // Exact cafe facts remain deterministic/zero-cost. Only a genuine
-  // recommendation turn may yield to a selected Saved Agent, where the new
-  // read-only cafe tool grounds facts and the Agent owns human wording.
-  const cafeStateForPrePrimary =
-    cafeCandidateStateForPrePrimary !== null && !readOnlyPrimaryAgentEligible
-      ? cafeCandidateStateForPrePrimary
-      : null;
-  const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
   if (cafeReadOnlyBeforePrimary) {
     const cafeResponse = await deterministicCafeResponse(request, {
