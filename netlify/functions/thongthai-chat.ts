@@ -57,6 +57,8 @@ import {
 import { emptyTaskStateContainer } from './_task-state';
 import { persistAiResponseTurn, persistAiResponseTurnIfAbsent } from './_ai-cost-store';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
+import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
+import { resolveRequestedCustomerMedia } from './_thongthai-media';
 import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
@@ -5578,6 +5580,28 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     // bypass the requested response language.
     if (statusCode === 200 && typeof typed?.message === 'string') {
       typed.message = normalizeFinalCustomerMessage(typed.message,request.language,channel);
+      typed.message = applyThongthaiCharacterKernel({
+        message: typed.message,
+        customerMessage: request.message,
+        language: request.language,
+        channel,
+      });
+
+      const requestedMedia = await resolveRequestedCustomerMedia({
+        customerMessage: request.message,
+        assistantMessage: typed.message,
+        language: request.language,
+        chatHistory: request.chatHistory,
+      });
+      if (requestedMedia) {
+        typed.media = requestedMedia.media;
+        typed.message = applyThongthaiCharacterKernel({
+          message: normalizeFinalCustomerMessage(requestedMedia.overrideMessage,request.language,channel),
+          customerMessage: request.message,
+          language: request.language,
+          channel,
+        });
+      }
     }
 
     if (statusCode === 200 && typeof typed?.message === 'string') {
