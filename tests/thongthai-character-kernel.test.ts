@@ -28,7 +28,7 @@ test('character kernel makes emergency copy plain and keeps male ending', () => 
 
 test('character kernel adds paragraph rhythm to dense Thai phone copy', () => {
   const text = applyThongthaiCharacterKernel({
-    message:'มีสินค้าอยู่ครับ ราคาเช็กได้ครับ ส่งรูปให้ดูได้ครับ ถ้าอยากดูหลายมุมบอกได้ครับ',
+    message:'มีสินค้าอยู่ครับ รายการนี้มีข้อมูลจากหลังบ้านพร้อมราคาและสถานะสินค้าครับ ทองไทยส่งรูปที่มีอยู่ให้ดูได้ครับ ถ้าอยากดูหลายมุมหรืออยากเทียบกับสินค้าอีกชิ้นก็บอกได้ครับ เดี๋ยวทองไทยช่วยเลือกให้เข้ากับที่กำลังหาอยู่ครับ',
     customerMessage:'มีขายไหมครับ',
     language:'th',
     channel:'facebook',
