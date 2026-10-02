@@ -25,6 +25,7 @@ const must = [
   /ยังไม่มี.*ส่ง|ยังไม่ได้.*ส่ง|ไม่มีรายการ/u,
 ];
 
+async function main(){
 const results = [];
 for (let i=0;i<turns.length;i++) {
   const body = {
@@ -54,3 +55,6 @@ for (let i=0;i<turns.length;i++) {
 const failed=results.filter(x=>!x.pass);
 console.log(JSON.stringify({kind:'MESSENGER_LIVE_SMOKE',guestId,total:results.length,passed:results.length-failed.length,failed:failed.length,failedTurns:failed.map(x=>x.turn)},null,2));
 if(failed.length) process.exit(1);
+}
+
+main().catch(error=>{ console.error(error); process.exit(1); });
