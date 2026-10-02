@@ -164,36 +164,3 @@ test('Messenger/local concierge: complete solo chill request bypasses Agent and 
     });
   });
 });
-
-
-test('Messenger/local concierge: solo 90-minute chill request bypasses Agent/One-Mind generic fallback and never books', async () => {
-  await withEnv({
-    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
-    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
-    THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK:'100',
-    THONGTHAI_ONE_MIND_CUTOVER:'1',
-  }, async () => {
-    await withHarness(async harness => {
-      const gid=guestId('messenger-local-concierge-chill');
-      const before=harness.modelCallCount();
-      const r=await processThongthaiChatCore(
-        facebookRequest(
-          'ผมมาแถวตาดโตนคนเดียว มีเวลาประมาณชั่วโมงครึ่ง อยากได้อะไรชิลๆ ไม่รีบ ช่วยแนะนำหน่อยครับ แต่ยังไม่จองอะไรนะ',
-          gid,
-        ),
-        'fb-local-chill-1',
-      );
-      const reply=msg(r);
-      assert.equal(r.statusCode,200);
-      assert.match(reply,/Inthanin|อินทนิน/u);
-      assert.match(reply,/ชิล|พักใจ|เดินชม/u);
-      assert.match(reply,/ยังไม่จอง|ไม่ได้จอง|ไม่จอง/u);
-      assert.doesNotMatch(reply,/ตอบเรื่องนี้ให้แม่นไม่ได้|ลองอีกครั้งสักครู่|ให้ทีมงานช่วยต่อ/u);
-      assert.equal(harness.modelCallCount(),before,'local concierge must win before paid Agent/semantic paths');
-      assert.equal(harness.postsTo('bookings').length,0);
-      assert.equal(harness.postsTo('cafe_inquiries').length,0);
-      assert.equal(harness.postsTo('restaurant_preorders').length,0);
-      assert.equal(harness.postsTo('otop_orders').length,0);
-    });
-  });
-});
