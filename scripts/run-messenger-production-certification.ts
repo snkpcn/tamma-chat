@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
+// Stable rerun target observed READY before this synchronization:
+// main + production commit 787918c4a1d3b725f946db4d81da1428be50f848.
 const PRODUCTION_URL = process.env.THONGTHAI_PRODUCTION_URL?.trim()
   || 'https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat';
 
