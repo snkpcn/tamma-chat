@@ -25,6 +25,9 @@ import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
 import { extractTime } from './_slot-parsers';
 import {
+  classifyCommercialBoundarySemantic,
+} from './_commercial-intent-boundary';
+import {
   renderActivityAvailability,
   renderActivityCareResponse,
   renderActivityRecommendation,
@@ -1376,6 +1379,41 @@ function isExplicitTaskResumeReadback(input: ResponseComposerInput): boolean {
   );
 }
 
+function commercialSupportProcessMessage(input: ResponseComposerInput): string | null {
+  const turn=input.semanticTurn;
+  if (!turn || input.dialogDecision.actionProposal) return null;
+  if (turn.domain !== 'support') return null;
+  if (turn.action !== 'ask' && turn.action !== 'status') return null;
+
+  const semanticBoundary=classifyCommercialBoundarySemantic(turn);
+  const supportCommercialProcess =
+    /(?:book|booking|order|ordering|confirm|confirmation|process|transaction)/iu.test(turn.intent)
+    || turn.informationNeed === 'policy';
+
+  // Rendering must follow the already-decided semantic contract rather than
+  // re-classifying raw customer text a second time. The pre-Agent router still
+  // owns raw-text admission; once a support turn has been semantically proven
+  // read-only, this renderer may answer it in any supported language.
+  if (semanticBoundary.mode !== 'READ_ONLY' || !supportCommercialProcess) {
+    return null;
+  }
+
+  switch (input.language) {
+    case 'th':
+      return 'ถามขั้นตอนได้ครับ การถามหรือเลือกยังไม่ทำรายการจริง ถ้าต้องการทำรายการจริง บอกบริการหรือรายการที่ต้องการพร้อมรายละเอียดที่จำเป็นได้เลยครับ แล้วทองไทยจะสรุปให้ตรวจอีกครั้งก่อนมีการยืนยันจริง';
+    case 'en':
+      return 'You can ask about the process without creating anything. When you want to proceed, tell me what you want to book or order and the necessary details; I’ll summarize it for review before any real confirmation.';
+    case 'zh':
+      return '可以先询问流程，不会因此创建任何订单或预订。准备继续时，请告诉我想预订或下单的项目和必要信息，我会先汇总给你确认，再进入真正的确认步骤。';
+    case 'lo':
+      return 'ສາມາດຖາມຂັ້ນຕອນກ່ອນໄດ້ ໂດຍຍັງບໍ່ສ້າງການຈອງ ຫຼື ຄຳສັ່ງຊື້. ເມື່ອພ້ອມ ບອກລາຍການແລະລາຍລະອຽດທີ່ຈຳເປັນ ແລ້ວທອງໄທຈະສະຫຼຸບໃຫ້ກວດກ່ອນຢືນຢັນຈິງ.';
+    case 'vi':
+      return 'Bạn có thể hỏi quy trình trước mà chưa tạo đặt chỗ hay đơn hàng. Khi muốn tiếp tục, hãy cho tôi biết dịch vụ hoặc món hàng cùng các thông tin cần thiết; tôi sẽ tóm tắt để bạn kiểm tra trước bước xác nhận thực sự.';
+    default:
+      return null;
+  }
+}
+
 function conversationalStateUpdateMessage(input: ResponseComposerInput): string | null {
   if (input.language !== 'th' || !input.semanticTurn) return null;
   const turn = input.semanticTurn;
@@ -1573,6 +1611,8 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     message = activeTaskSummaryMessage(input);
   } else if (activityRejectedDurationMessage(input)) {
     message = activityRejectedDurationMessage(input)!;
+  } else if (commercialSupportProcessMessage(input)) {
+    message = commercialSupportProcessMessage(input)!;
   } else if (conversationalStateUpdateMessage(input)) {
     message = conversationalStateUpdateMessage(input)!;
   } else if (input.degradation.condition === 'source_unavailable') {

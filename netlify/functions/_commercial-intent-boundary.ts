@@ -34,22 +34,28 @@ export type CommercialBoundaryDecision = {
 };
 
 const TRANSACTION_QUESTION_RE =
-  /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร/u;
+  /[?？]|ไหม|ไหน|มั้ย|หรือเปล่า|รึเปล่า|ยังไง|อย่างไร|เมื่อไหร่|เมื่อไร|กี่โมง|เท่าไหร่|เท่าไร|\b(?:how|what|when|where|whether|can i|could i|is it possible|do i need)\b/iu;
 
 const COMMERCIAL_LANGUAGE_RE =
-  /(?:จอง|สั่ง|ยืนยัน|สมัครสมาชิก|ใช้โปร|เอาโปร|รับโปร|เอาชุด|เอาเซ็ต|ทำรายการ|ส่งคำถาม|ส่งเรื่อง|ส่งคำขอ)/iu;
+  /(?:จอง|สั่ง|ยืนยัน|สมัครสมาชิก|ใช้โปร|เอาโปร|รับโปร|เอาชุด|เอาเซ็ต|ทำรายการ|ส่งคำถาม|ส่งเรื่อง|ส่งคำขอ|\b(?:book|booking|reserve|reservation|order|ordering|confirm|confirmation|purchase|submit|redeem)\b)/iu;
 
 const RESUME_COMMERCIAL_RE =
-  /(?:กลับ.*(?:จอง|สั่ง|รายการ)|(?:จอง|สั่ง|รายการ)(?:\s|เรื่อง)*ต่อ(?:$|\s|ครับ|ค่ะ|นะ))/u;
+  /(?:กลับ.*(?:จอง|สั่ง|รายการ)|(?:จอง|สั่ง|รายการ)(?:\s|เรื่อง)*ต่อ(?:$|\s|ครับ|ค่ะ|นะ)|\b(?:resume|continue|go back to)\b.{0,24}\b(?:booking|reservation|order)\b)/iu;
 
 const PLANNING_SELECTION_RE =
-  /(?:^|\s)(?:ยืนยัน)(?:$|\s|ครับ|ค่ะ|คะ|คับ)|เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย/u;
+  /(?:^|\s)(?:ยืนยัน)(?:$|\s|ครับ|ค่ะ|คะ|คับ)|เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย|(?:^|\s)confirm(?:$|\s|please)/iu;
 
 const PROMOTION_COMMIT_RE =
   /(?:เอาโปรนี้|ใช้โปรนี้|รับโปรนี้|เอาสิทธิ์นี้)/u;
 
 const CAFE_HANDOFF_DIRECTIVE_RE =
-  /(?:ช่วย\s*)?(?:ส่ง|ฝาก)(?:เรื่อง|คำถาม|คำขอ).{0,80}(?:ทีม|ร้าน|คาเฟ่|อินทนิล|Inthanin)/iu;
+  /(?:ช่วย\s*)?(?:ส่ง|ฝาก)(?:เรื่อง|คำถาม|คำขอ).{0,80}(?:ทีม|ร้าน|คาเฟ่|อินทนิล|Inthanin)|\b(?:send|forward)\b.{0,40}\b(?:question|request|message)\b.{0,40}\b(?:team|cafe|inthanin)\b/iu;
+
+const ENGLISH_WITHHOLD_RE =
+  /\b(?:not yet|do not|don't|hold off)\b.{0,40}\b(?:book|booking|reserve|reservation|order|confirm|submit)\b|\b(?:book|reserve|order)\b.{0,40}\b(?:not yet|later|hold off)\b/iu;
+
+const ENGLISH_CANCEL_RE =
+  /\b(?:cancel|never mind|do not want|don't want)\b.{0,40}\b(?:booking|reservation|order|it|this)\b/iu;
 
 function noTransactionConstraint(constraints: readonly string[]): boolean {
   return constraints.some(value =>
@@ -62,22 +68,24 @@ export function classifyCommercialBoundaryText(
 ): CommercialBoundaryDecision {
   const text=String(message??'').trim();
 
-  if (hasExplicitNoTransactionMarker(text)) {
+  if (hasExplicitNoTransactionMarker(text) || ENGLISH_WITHHOLD_RE.test(text)) {
     return {
       mode:'WITHHOLD',
       currentTurnCommit:false,
       prepareEligible:false,
       routeToOneMindBeforePrimary:true,
+      withholdsExecution:true,
       reason:'explicit_no_transaction',
     };
   }
 
-  if (hasCancelMarker(text)) {
+  if (hasCancelMarker(text) || (COMMERCIAL_LANGUAGE_RE.test(text) && ENGLISH_CANCEL_RE.test(text))) {
     return {
       mode:'MANAGE',
       currentTurnCommit:false,
       prepareEligible:false,
       routeToOneMindBeforePrimary:true,
+      withholdsExecution:true,
       reason:'cancel_or_abandon_working_state',
     };
   }
