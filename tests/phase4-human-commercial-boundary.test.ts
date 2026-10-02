@@ -376,3 +376,44 @@ test('Phase 4 Dialog Manager: contradictory book + no_transaction cannot manufac
   assert.equal(plan.taskStateContainer.activeTask,null);
   assert.equal(resolveDialogDecision(plan,[]).actionProposal,undefined);
 });
+
+
+test('Phase 4 structural English commercial boundary separates questions, planning and withholding',()=>{
+  for(const message of [
+    'How do I confirm a booking?',
+    'Can I book this?',
+    'What is the ordering process?',
+  ]){
+    const d=classifyCommercialBoundaryText(message,'OTHER');
+    assert.equal(d.mode,'READ_ONLY',message);
+    assert.equal(d.currentTurnCommit,false,message);
+    assert.equal(d.routeToOneMindBeforePrimary,true,message);
+  }
+
+  const bareConfirm=classifyCommercialBoundaryText('confirm','OTHER');
+  assert.equal(bareConfirm.mode,'CONSIDER');
+  assert.equal(bareConfirm.currentTurnCommit,false);
+
+  const resume=classifyCommercialBoundaryText('continue booking','OTHER');
+  assert.equal(resume.mode,'CONSIDER');
+  assert.equal(resume.currentTurnCommit,false);
+
+  const withhold=classifyCommercialBoundaryText("don't book yet",'OTHER');
+  assert.equal(withhold.mode,'WITHHOLD');
+  assert.equal(withhold.currentTurnCommit,false);
+  assert.equal(withhold.withholdsExecution,true);
+
+  const cancel=classifyCommercialBoundaryText('cancel this booking','OTHER');
+  assert.equal(cancel.mode,'MANAGE');
+  assert.equal(cancel.currentTurnCommit,false);
+});
+
+test('Phase 4 structural English cafe handoff remains explicit prepare-capable operational consent',()=>{
+  const d=classifyCommercialBoundaryText(
+    'Can you send a question to the cafe team about five lattes?',
+    'OTHER',
+  );
+  assert.equal(d.mode,'COMMIT');
+  assert.equal(d.currentTurnCommit,true);
+  assert.equal(d.prepareEligible,true);
+});
