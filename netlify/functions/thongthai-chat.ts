@@ -5654,16 +5654,49 @@ function horseCorrectionRoutesBeforePrimary(request: BrainRequest): boolean {
   return Boolean(findKnownActivityAssetSelection(request.message));
 }
 
-function directOtherHorseCorrectionResponse(request: BrainRequest): BrainResponse | null {
+async function directOtherHorseCorrectionResponse(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+  eventId: string,
+): Promise<BrainResponse | null> {
   const text=request.message.trim();
-  if(hasExplicitTransactionIntent(text) || !/(?:อีกตัว|ตัวอื่น|ตัวที่เหลือ)/u.test(text))return null;
+  if(!guestDbId || hasExplicitTransactionIntent(text) || !/(?:อีกตัว|ตัวอื่น|ตัวที่เหลือ)/u.test(text))return null;
 
   const rejectsThongthai=/(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจจาก).{0,12}(?:น้อง)?ทองไทย/u.test(text);
   const rejectsPharadon=/(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจจาก).{0,12}(?:น้อง)?ภาราดร/u.test(text);
   if(rejectsThongthai===rejectsPharadon)return null;
 
+  const [context,taskState]=await Promise.all([
+    loadConversationContext(guestDbId),
+    loadTaskState(guestDbId),
+  ]);
+  const historyText=request.chatHistory.slice(-10).map(turn=>turn.content).join('\n');
+  const contextHorseEvidence =
+    /(?:ม้า|ทองไทย|ภาราดร)/u.test(historyText)
+    || /horse/u.test(context.activeTopic??'')
+    || context.recentEntities.some(entity=>/horse-(?:thongthai|pharadon)/u.test(entity.id))
+    || context.recentTurns.some(turn=>/(?:ม้า|ทองไทย|ภาราดร)/u.test(turn.content));
+  const taskHorseEvidence=Boolean(
+    taskState.activeTask
+    && !isTerminalTaskStatus(taskState.activeTask.status)
+    && taskState.activeTask.domain==='activity'
+    && (
+      taskState.activeTask.slots.resourceCode==='activity-horse'
+      || typeof taskState.activeTask.slots.horseName==='string'
+      || typeof taskState.activeTask.slots.assetSelection==='string'
+      || taskState.activeTask.selectedEntities.some(entity=>/(?:ทองไทย|ภาราดร)/u.test(entity.name))
+    )
+  );
+  if(!contextHorseEvidence&&!taskHorseEvidence)return null;
+
   const selected=rejectsThongthai?HORSE_FACTS.pharadon:HORSE_FACTS.thongthai;
   const rejected=rejectsThongthai?HORSE_FACTS.thongthai:HORSE_FACTS.pharadon;
+  const selectedBare=selected.name.replace(/^น้อง/u,'');
+  const selectedEntityId=rejectsThongthai
+    ? 'activity_asset:horse-pharadon'
+    : 'activity_asset:horse-thongthai';
+  const now=new Date();
   const lines=[
     `ได้ครับ งั้นตัด${rejected.name}ออก เหลือ${selected.name}ครับ`,
     `ข้อมูลที่ยืนยันได้คือ ${selected.name}${selected.rideFeelTh} แต่ทองไทยยังไม่ใช้จุดนี้ฟันธงเรื่องความเหมาะสมเฉพาะคนครับ`,
@@ -5672,9 +5705,70 @@ function directOtherHorseCorrectionResponse(request: BrainRequest): BrainRespons
     lines.push('ถ้ากังวลเรื่องตกหรือยังไม่เคยขี่ ให้ทีมหน้างานช่วยดูความมั่นใจและความเหมาะสมก่อนขึ้นม้าครับ');
   }
   lines.push('ตอนนี้ยังเป็นแค่การเลือกไว้ ยังไม่ได้จองหรือส่งรายการครับ');
+  const message=lines.join('\n\n');
+
+  // Persist a consideration, not a transaction. This makes the correction
+  // survive later topic switches without manufacturing a booking task.
+  const nextContext=applyConversationContextUpdate(context,{
+    eventId,
+    channel,
+    userMessage:text,
+    assistantMessage:message,
+    activeDomain:'activity',
+    activeTopic:'horse_recommendation',
+    newEntities:[{
+      id:selectedEntityId,
+      type:'horse',
+      name:selectedBare,
+      domain:'activity',
+      source:'catalog',
+      canonical:true,
+    }],
+  },now);
+  nextContext.workingMemory={
+    ...nextContext.workingMemory,
+    currentTopic:'activity:horse_selection:consider',
+    consideredSelections:[
+      {
+        domain:'activity',
+        name:selectedBare,
+        entityId:selectedEntityId,
+        entityType:'horse',
+        status:'considering',
+        observedAt:now.toISOString(),
+      },
+      ...nextContext.workingMemory.consideredSelections.filter(selection=>
+        !(selection.domain==='activity'&&/(?:ทองไทย|ภาราดร)/u.test(selection.name))
+      ),
+    ].slice(0,6),
+    transactionCommitment:'none',
+  };
+  await persistConversationContext(guestDbId,nextContext);
+
+  // If an activity task already exists, keep its selected slot in sync.
+  // Never start a new booking task just because the customer is considering
+  // the other horse.
+  if(taskState.activeTask&&!isTerminalTaskStatus(taskState.activeTask.status)&&taskState.activeTask.domain==='activity'){
+    const active=mergeTaskSlots(taskState.activeTask,{
+      resourceCode:'activity-horse',
+      horseName:selectedBare,
+      assetSelection:selectedBare,
+    });
+    active.selectedEntities=[{
+      id:selectedEntityId,
+      type:'horse',
+      name:selectedBare,
+      domain:'activity',
+      source:'catalog',
+      canonical:true,
+    }];
+    active.commitmentIntent=false;
+    await persistTaskState(guestDbId,{...taskState,activeTask:active});
+  }
+
   return {
-    message:lines.join('\n\n'),
-    intent:'recommendation',
+    message,
+    intent:'information',
     contextUpdates:{},
     journeyAction:{type:'none',journey:null},
     suggestedActions:[],
@@ -6416,7 +6510,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // - bounded ConversationContext carrying a considered selection/task ref
   // owns the turn before read-only Agent Primary.
   // Prepare-only routing remains separately authorized and unchanged.
-  const directHorseAlternative = directOtherHorseCorrectionResponse(request);
+  const directHorseAlternative = await directOtherHorseCorrectionResponse(
+    request,
+    guestDbId,
+    channel,
+    transportEventId,
+  );
   if (directHorseAlternative) {
     const polished = polishedResponse(directHorseAlternative, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
