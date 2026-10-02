@@ -578,3 +578,5 @@ test('Phase 4 One-Mind fast-paths explicit WITHHOLD before model reply reuse',()
   assert.match(source,/classifyCommercialBoundaryText\(input\.message,'OTHER'\)\.mode === 'WITHHOLD'/u);
   assert.match(source,/\|\| explicitCommercialWithhold/u);
 });
+
+// Phase 4 final WITHHOLD follow-up sync marker.
