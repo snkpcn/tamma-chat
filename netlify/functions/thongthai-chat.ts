@@ -5132,35 +5132,18 @@ async function boundedHorseComparisonBeforePrimary(
 const HORSE_CORRECTION_SIGNAL_RE = /(?:ไม่เอา|ไม่ใช่|เปลี่ยนใจ|อีกตัว|ตัวอื่น|ตัวที่เหลือ|เอาแทน|แทน)/u;
 
 /**
- * A bounded correction among the owner-verified horse assets never needs a
- * model round-trip. The shared semantic helper already handles negation and
- * "the other one" safely; this function only persists that canonical result.
+ * A bounded correction among the owner-verified horse assets still benefits
+ * from One-Mind's semantic supervision, but it must not enter the heavier
+ * Agent Primary loop first. This predicate changes routing only; One-Mind
+ * remains the component that interprets and persists the correction.
  */
-async function boundedHorseCorrectionBeforePrimary(
-  request: BrainRequest,
-  guestDbId: string | null,
-  channel: BrainChannel,
-): Promise<BrainResponse | null> {
-  if (hasExplicitTransactionIntent(request.message) || !HORSE_CORRECTION_SIGNAL_RE.test(request.message)) return null;
-  const selected = findKnownActivityAssetSelection(request.message);
-  if (!selected) return null;
-
-  await persistHorseSelection(guestDbId, channel, selected.name);
-  const displayName = selected.name.startsWith('น้อง') ? selected.name : `น้อง${selected.name}`;
-  return {
-    message:`ได้ครับ เปลี่ยนเป็น${displayName}ไว้เป็นตัวเลือกครับ ตอนนี้ยังไม่ได้จองหรือส่งรายการครับ`,
-    intent:'information',
-    contextUpdates:{},
-    journeyAction:{type:'none',journey:null},
-    suggestedActions:[],
-    responseStyle:'direct',
-    semanticMemoryUpdates:[],
-    toolCalls:[],
-  };
+function horseCorrectionRoutesBeforePrimary(request: BrainRequest): boolean {
+  if (hasExplicitTransactionIntent(request.message) || !HORSE_CORRECTION_SIGNAL_RE.test(request.message)) return false;
+  return Boolean(findKnownActivityAssetSelection(request.message));
 }
 
 const BOOKING_STATUS_READBACK_RE =
-  /(?:ยังไม่ได้จอง|จองอะไร(?:ไว้)?|มี(?:รายการ)?จอง|จองไปหรือยัง|จองแล้วหรือยัง|ได้จอง.{0,12}หรือยัง)/u;
+  /(?:ยังไม่ได้จอง.{0,20}(?:ใช่ไหม|ใช่มั้ย|หรือยัง|ไหม|มั้ย)|มี(?:รายการ)?จอง.{0,16}(?:ไหม|มั้ย|หรือยัง)|จองอะไร(?:ไว้)?.{0,12}(?:ไหม|มั้ย|หรือยัง)|จองไปหรือยัง|จองแล้วหรือยัง|ได้จอง.{0,12}หรือยัง)/u;
 
 function publicBookingStatusLabel(status: string): string {
   if (status === 'confirmed') return 'ยืนยันแล้ว';
@@ -5627,26 +5610,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  const horseCorrection = await boundedHorseCorrectionBeforePrimary(
-    request,
-    guestDbId,
-    channel,
-  ).catch(error => {
-    console.error('THONGTHAI_BOUNDED_HORSE_CORRECTION_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
-    return null;
-  });
-  if (horseCorrection) {
-    const polished = polishedResponse(horseCorrection, channel);
-    await persistBrainRuntime(guestDbId, channel, polished);
-    return coreResult(200, {
-      message:polished.message,
-      intent:polished.intent,
-      contextUpdates:polished.contextUpdates,
-      journeyAction:polished.journeyAction,
-      suggestedActions:polished.suggestedActions,
-    });
-  }
-
   const bookingStatusReadback = await verifiedBookingStatusReadbackBeforePrimary(
     request,
     guestDbId,
@@ -5857,8 +5820,11 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // - bounded ConversationContext carrying a considered selection/task ref
   // owns the turn before read-only Agent Primary.
   // Prepare-only routing remains separately authorized and unchanged.
+  const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
+
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
     && !phase4CommercialBoundaryEligible
+    && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
     && !boundedConversationBeforePrimary
     && shouldUseThongthaiAgentPrimary({
