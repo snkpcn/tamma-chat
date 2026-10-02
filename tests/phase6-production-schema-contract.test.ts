@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 const customerDb = readFileSync(new URL('../netlify/functions/_customer-db.ts', import.meta.url), 'utf8');
 const canonicalSchema = readFileSync(new URL('../netlify/functions/supabase/schema.sql', import.meta.url), 'utf8');
 const memoryMigration = readFileSync(
-  new URL('../supabase/migrations/20260929205003_phase6_extend_guest_memory_constraints.sql', import.meta.url),
+  new URL('../supabase/migrations/20261002112500_guest_memory_cafe_preferences.sql', import.meta.url),
   'utf8',
 );
 const catalogMigration = readFileSync(
