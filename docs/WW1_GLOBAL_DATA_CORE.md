@@ -16,7 +16,7 @@ The model is intentionally separate from customer-facing launch state. A row exi
 
 ### `commerce_currencies`
 
-Reference data for transaction/settlement currency codes.
+Reference data for transaction/default currency codes.
 
 - ISO-like uppercase 3-letter code
 - display name/symbol
@@ -58,7 +58,7 @@ Fields include:
 
 - market code
 - country
-- settlement currency
+- default currency
 - default locale
 - status: `draft | certification | live | suspended`
 - domestic marker
