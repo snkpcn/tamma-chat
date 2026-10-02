@@ -727,6 +727,9 @@ export async function processOneMindCustomerTurn(
   const hasModelConversationReply = Boolean(turn.dialogSemanticTurn.reply?.trim() || turn.semanticTurn.reply?.trim());
   const trustedCommercialClarification =
     isTrustedReadOnlyCommercialClarification(turn,input.message);
+  const explicitCommercialWithhold =
+    classifyCommercialBoundaryText(input.message,'OTHER').mode === 'WITHHOLD'
+    && !turn.dialogDecision.actionProposal;
   const learnedSemanticStateUpdate =
     turn.dialogSemanticTurn.semanticSource === 'semantic_concept_memory'
     && !turn.dialogDecision.actionProposal
@@ -736,6 +739,7 @@ export async function processOneMindCustomerTurn(
       turn.dialogDecision.mode === 'collect_field'
       || turn.dialogDecision.responseIntent === 'cannot_verify_comparison'
       || trustedCommercialClarification
+      || explicitCommercialWithhold
       || learnedSemanticStateUpdate
       || (!hasModelConversationReply && (turn.dialogDecision.mode === 'clarify' || conversationalStateUpdate))
     )
