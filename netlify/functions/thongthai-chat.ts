@@ -1932,7 +1932,7 @@ export function cafeGroundedAnswer(
     }
     if(slot&&!modifier.styles.includes(slot.slot_code)){
       return {
-        answer:`${item.name_th} ${slot.label_th} ตอนนี้แบบ${slot.label_th}ยังไม่มีตัวเลือก${modifier.name_th}ครับ`,
+        answer:`${item.name_th} ${slot.label_th} ตอนนี้แบบ${slot.label_th}ยังไม่ได้เปิดตัวเลือก${modifier.name_th}ครับ`,
         grounded:true,
       };
     }
@@ -2038,7 +2038,7 @@ async function deterministicCafeResponse(
   } else if(items.length){
     answer=cafeMenuListMessage(items);
   } else {
-    answer='ตอนนี้ทองไทยเช็กเมนู Inthanin ตาดโตนให้ไม่ได้ชั่วคราวครับ เลยไม่อยากเดาชื่อหรือราคาให้ผิด ถ้าบอกว่าอยากได้กาแฟ ชา หรือไม่กาแฟ ทองไทยช่วยคุยแนวที่ชอบไว้ก่อนได้ครับ';
+    answer='ตอนนี้ทองไทยเช็กเมนู Inthanin ตาดโตนให้ไม่ได้ชั่วคราวครับ ทองไทยไม่ขอเดาชื่อเมนูหรือราคาให้ผิด ถ้าบอกว่าอยากได้กาแฟ ชา หรือไม่กาแฟ ทองไทยช่วยคุยแนวที่ชอบไว้ก่อนได้ครับ';
   }
 
   return {
