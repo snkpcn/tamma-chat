@@ -113,3 +113,54 @@ test('Messenger/Inthanin: natural preference chain stays grounded, remembers cor
     });
   });
 });
+
+
+test('Messenger/local concierge: complete solo chill request bypasses Agent and generic One-Mind fallback', async () => {
+  await withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK:'100',
+    THONGTHAI_ONE_MIND_CUTOVER:'1',
+  }, async () => {
+    await withHarness(async harness => {
+      // Reproduce the real production shape. If semantic supervision runs,
+      // this scripted result would otherwise compose the generic "ตอบเรื่องนี้
+      // ให้แม่นไม่ได้" response seen by the owner in Messenger.
+      harness.programGeminiReply({
+        normalizedMeaning:'solo visitor near Tad Tone wants a relaxed ninety-minute recommendation and explicitly does not want to book yet',
+        reply:'ตอนนี้ทองไทยยังตอบเรื่องนี้ให้แม่นไม่ได้ครับ ลองอีกครั้งสักครู่ หรือให้ทีมงานช่วยต่อได้ครับ',
+        speechAct:'request',
+        domain:'local',
+        intent:'request_relaxed_recommendation',
+        action:'recommend',
+        informationNeed:'recommendation',
+        entities:{},
+        references:[],
+        constraints:[],
+        confidence:0.99,
+        needsClarification:true,
+      });
+
+      const gid=guestId('messenger-local-chill-owner-repro');
+      const before=harness.modelCallCount();
+      const r=await processThongthaiChatCore(
+        facebookRequest(
+          'ผมมาแถวตาดโตนคนเดียว มีเวลาประมาณชั่วโมงครึ่ง อยากได้อะไรชิลๆ ไม่รีบ ช่วยแนะนำหน่อยครับ แต่ยังไม่จองอะไรนะ',
+          gid,
+        ),
+        'fb-local-chill-1',
+      );
+      const reply=msg(r);
+
+      assert.equal(r.statusCode,200);
+      assert.doesNotMatch(reply,/ตอบเรื่องนี้ให้แม่นไม่ได้|ลองอีกครั้งสักครู่/u);
+      assert.match(reply,/Inthanin|อินทนิน/u);
+      assert.match(reply,/ขี่ม้า|ATV|ยิงธนู/u);
+      assert.match(reply,/ยังไม่.*จอง|ไม่ส่งจอง/u);
+      assert.equal(harness.modelCallCount(),before,'proven local-concierge class must not pay for Agent/semantic supervision');
+      assert.equal(harness.postsTo('bookings').length,0);
+      assert.equal(harness.postsTo('cafe_inquiries').length,0);
+      assert.equal(harness.postsTo('restaurant_preorders').length,0);
+    });
+  });
+});
