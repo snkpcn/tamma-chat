@@ -5613,8 +5613,13 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       });
       if (requestedMedia) {
         typed.media = requestedMedia.media;
+        const mediaAck = normalizeFinalCustomerMessage(requestedMedia.overrideMessage,request.language,channel);
+        const keepExistingAnswer = /(?:ราคา|กี่บาท|เท่าไหร่|เท่าไร|มีของ|เหลือ|สต็อก|stock|price|how\s*much|วัสดุ|ทำจาก|ที่มา|รายละเอียด|ไซซ์|ขนาด)/iu.test(request.message);
+        const combined = keepExistingAnswer && typeof typed.message === 'string' && typed.message.trim()
+          ? `${typed.message.trim()}\n\n${mediaAck}`
+          : mediaAck;
         typed.message = applyThongthaiCharacterKernel({
-          message: normalizeFinalCustomerMessage(requestedMedia.overrideMessage,request.language,channel),
+          message: combined,
           customerMessage: request.message,
           language: request.language,
           channel,
