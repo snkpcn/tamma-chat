@@ -1728,6 +1728,15 @@ const CAFE_READ_ONLY_FOLLOWUP_MARKER = /(?:เครื่องดื่ม|ร
 function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   const text = message.trim();
   if (hasExplicitTransactionIntent(text)) return false;
+
+  // Explicit topic switches always outrank stale café continuity. Without
+  // this gate a previous activeTopic='cafe' plus generic words such as
+  // "เมนู/มีอะไร/แนะนำ" can hijack a fresh restaurant/activity/stay/OTOP
+  // question and answer about Inthanin instead.
+  const explicitNonCafeTopic =
+    /(?:ร้านอาหาร|ตำมา-ชาติ|ตำมา|ขี่ม้า|ม้า|atv|เอทีวี|ยิงธนู|ธนู|ที่พัก|เฮือนสเตย์|ห้องพัก|otop|โอทอป|ของฝาก|สินค้า(?:ชุมชน)?)/iu.test(text);
+  if (explicitNonCafeTopic && !CAFE_EXPLICIT_MARKER.test(text)) return false;
+
   if (CAFE_EXPLICIT_MARKER.test(text)) return true;
   return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
 }
