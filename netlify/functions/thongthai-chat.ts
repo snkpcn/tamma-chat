@@ -42,8 +42,10 @@ import {
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import {
+  applyConversationContextUpdate,
   emptyConversationContextState,
   loadConversationContext,
+  persistConversationContext,
   type ConversationContextState,
 } from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
@@ -2007,6 +2009,62 @@ export function resolveSupervisedActivityCutover(
   const response = composeGroundedDeterministicResponse(composerInput)
     ?? composeDeterministicResponse(composerInput);
   return { kind: 'respond', response };
+}
+
+/**
+ * Provider-outage bridge for NON-COMMITTED Activity planning updates only.
+ *
+ * The deterministic semantic layer can safely resolve bounded horse
+ * selections/corrections (including "reject X, take the other one") even when
+ * the supervisor is unavailable. Those turns are conversational state updates,
+ * not booking authorization. Ending them here prevents the correct structured
+ * selection from falling into the legacy booking-field collector, which used
+ * to surface public intent=booking despite no customer commitment.
+ *
+ * Explicit transaction meaning or any customer-authorized proposal still
+ * returns null and keeps the established transaction executor boundary.
+ */
+export function resolveDeterministicActivityPlanningCutover(
+  oneMind: Awaited<ReturnType<typeof processOneMindCustomerTurn>>,
+  channel: BrainChannel,
+  language: BrainRequest['language'],
+  message: string,
+): { kind:'respond'; response:ComposedResponse } | null {
+  if (oneMind.status !== 'legacy_required') return null;
+  const turn = oneMind.turn;
+  if (turn.semanticTurn.domain !== 'activity'
+      || turn.semanticTurn.semanticSource !== 'deterministic_fallback') return null;
+
+  const meaning = turn.semanticMeaning ?? deriveSemanticMeaning(turn.dialogSemanticTurn);
+  if (meaning.commitmentLevel === 'explicit_transaction'
+      || turn.dialogDecision.actionProposal?.customerCommitPresent) return null;
+
+  // This bridge exists only for an explicit correction/rejection such as
+  // "ไม่เอาทองไทย ... เอาอีกตัว". Bare selections remain on their existing
+  // ambiguity/context paths: a cold-start "เอาทองไทย" must still clarify,
+  // while an already-established riding context keeps its established UX.
+  const correctionSignal = HORSE_CORRECTION_SIGNAL_RE.test(message)
+    || turn.semanticTurn.speechAct === 'correction'
+    || turn.semanticTurn.action === 'correct_previous';
+  if (!correctionSignal) return null;
+
+  const composerInput = {
+    channel,
+    language,
+    semanticTurn:turn.dialogSemanticTurn,
+    dialogDecision:turn.dialogDecision,
+    knowledgeBundles:turn.groundedKnowledge,
+    degradation:turn.knowledgeDegradation,
+    operationalOutcome:null,
+  };
+  const response = composeDeterministicResponse(composerInput);
+  const horseName = typeof turn.dialogSemanticTurn.entities.horseName === 'string'
+    ? turn.dialogSemanticTurn.entities.horseName.trim().replace(/^น้อง/u, '')
+    : '';
+  if (horseName && !response.message.includes(`น้อง${horseName}`)) {
+    response.message = response.message.replace(horseName, `น้อง${horseName}`);
+  }
+  return { kind:'respond', response };
 }
 
 /** Human Core PR D: task.slots (== proposal.validatedArgs) never carries a
@@ -6144,6 +6202,59 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       contextUpdates: polished.contextUpdates,
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
+    });
+  }
+
+  const deterministicActivityPlanning = earlyOneMind
+    ? resolveDeterministicActivityPlanningCutover(earlyOneMind, channel, request.language, request.message)
+    : null;
+  if (deterministicActivityPlanning?.kind === 'respond') {
+    const semantic = earlyOneMind!.turn.dialogSemanticTurn;
+    const polished = polishedResponse({
+      message:deterministicActivityPlanning.response.message,
+      intent:'information',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    }, channel);
+
+    // legacy_required does not persist One-Mind state. Preserve this safe
+    // consider/correction turn explicitly in ConversationContext so LINE
+    // continuity survives the provider outage without opening a booking task.
+    if (guestDbId) {
+      const selectedHorse = typeof semantic.entities.horseName === 'string'
+        ? semantic.entities.horseName.trim().replace(/^น้อง/u, '')
+        : '';
+      if (selectedHorse) {
+        // Preserve the same bounded planning-state contract every other horse
+        // selection uses. persistHorseSelection writes only non-committed task
+        // slots; it does not create a booking or authorize a transaction.
+        await persistHorseSelection(guestDbId, channel, selectedHorse);
+      }
+
+      const currentContext = await loadConversationContext(guestDbId);
+      const nextContext = applyConversationContextUpdate(currentContext, {
+        eventId:transportEventId,
+        channel,
+        userMessage:request.message,
+        assistantMessage:polished.message,
+        activeDomain:'activity',
+        lastAction:semantic.action,
+        semanticTurn:semantic,
+      });
+      await persistConversationContext(guestDbId, nextContext);
+    }
+
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
     });
   }
 
