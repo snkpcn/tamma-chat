@@ -1,0 +1,25 @@
+name: Phase 4 Production Boundary Cert
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  cert:
+    if: contains(github.event.pull_request.title, '[run phase4 prod]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run real Production commercial-boundary certification
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: npx tsx scripts/run-phase4-production-boundary-cert.ts
