@@ -42,6 +42,7 @@ import {
 } from './_knowledge-resolver';
 import { resolveActivityDurationOptions, resolveActivityResourceCode } from './_activity-catalog-policy';
 import { deriveSemanticMeaning } from './_semantic-meaning';
+import { classifyCommercialBoundarySemantic, semanticMayAuthorizeCommercialCommit } from './_commercial-intent-boundary';
 import { deriveCanonicalKnowledgeScope } from './_canonical-knowledge-scope';
 
 // ---------------------------------------------------------------------------
@@ -143,14 +144,14 @@ const TASK_WORTHY_ACTIONS: ReadonlySet<SemanticAction> = new Set(['confirm', 'pr
 const COMMIT_ACTIONS: ReadonlySet<SemanticAction> = new Set(['book', 'order']);
 
 function isExplicitTransaction(turn: SemanticTurn): boolean {
-  return deriveSemanticMeaning(turn).commitmentLevel === 'explicit_transaction';
+  return semanticMayAuthorizeCommercialCommit(turn);
 }
 
 const NO_TRANSACTION_CONSTRAINT_RE = /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu;
 
 function explicitlyRevokesTransaction(turn: SemanticTurn): boolean {
-  return !isExplicitTransaction(turn)
-    && turn.constraints.some(constraint => NO_TRANSACTION_CONSTRAINT_RE.test(constraint));
+  const boundary=classifyCommercialBoundarySemantic(turn);
+  return boundary.mode === 'WITHHOLD' || boundary.withholdsExecution === true;
 }
 
 // A prior explicit transaction request is scoped to the material details the
@@ -518,8 +519,7 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
     && !isTerminalTaskStatus(container.activeTask!.status)
     && container.activeTask!.domain === 'restaurant'
     && (typeof turn.entities.restaurantTransactionType === 'string'
-        || turn.action === 'book'
-        || turn.action === 'order')
+        || (isExplicitTransaction(turn) && (turn.action === 'book' || turn.action === 'order')))
     && Boolean(desiredRestaurantTask)
     && container.activeTask!.type !== desiredRestaurantTask;
   if (declaredRestaurantTaskSwitch) {
@@ -554,9 +554,18 @@ function mergeTaskState(input: DialogInput, now: Date): { container: TaskStateCo
       || typeof turn.entities.budget === 'number'
       || typeof turn.entities.budgetAmount === 'number';
     const meaning = deriveSemanticMeaning(turn);
+    const commercialBoundary=classifyCommercialBoundarySemantic(turn);
     const explicitNoTransaction = turn.constraints.some(constraint =>
       /^(?:not_yet_booking|no_transaction|not_booking|consider_only)$/iu.test(constraint)
     );
+
+    if (
+      commercialBoundary.withholdsExecution === true
+      && (turn.action === 'book' || turn.action === 'order')
+    ) {
+      reasons.push('nontransactional_state_update_preserved');
+      return { container, reasons };
+    }
     const hasResolvedContinuationReference = hasResolvedTaskReference(turn);
     const hasConcretePlanningSlot = [
       'date','time','partySize','durationMinutes','quantity',
@@ -1004,6 +1013,7 @@ export function planDialogTurn(input: DialogInput, now: Date = new Date()): Dial
       || turn.action === 'modify'
       || namedActivitySelectionUpdate
       || namedConsideredSelectionUpdate
+      || explicitlyRevokesTransaction(turn)
     );
 
   if (isTaskSideQuestion) reasons.push('task_side_question_preserved');
