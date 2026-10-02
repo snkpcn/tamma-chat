@@ -14,6 +14,7 @@ import { reconcileCommercialQuestionRefinement, reconcileReadOnlyActivityPrefere
 import { emptyConversationContextState } from '../netlify/functions/_conversation-context';
 import { createActiveTask, emptyTaskStateContainer } from '../netlify/functions/_task-state';
 import { planDialogTurn, resolveDialogDecision } from '../netlify/functions/_dialog-manager';
+import { isTrustedReadOnlyCommercialClarification, readOnlyCutoverEligibility } from '../netlify/functions/_thongthai-one-mind-response';
 
 function semantic(overrides:Partial<SemanticTurn>):SemanticTurn{
   return {
@@ -491,5 +492,72 @@ test('Phase 4 commercial reconciliation is a no-op for model results that are al
   assert.deepEqual(
     reconcileCommercialQuestionRefinement(model,'How do I confirm a booking?'),
     model,
+  );
+});
+
+
+test('Phase 4 trusted unknown-domain availability clarification is eligible before legacy fallback',()=>{
+  const semanticTurn=semantic({
+    domain:'unknown',
+    intent:'check_availability',
+    action:'status',
+    speechAct:'question',
+    informationNeed:'availability',
+    entities:{date:'2026-10-03'},
+    needsClarification:true,
+    clarificationReason:'service unspecified',
+  });
+  const turn:any={
+    semanticTurn,
+    dialogSemanticTurn:semanticTurn,
+    dialogDecision:{
+      mode:'clarify',
+      responseIntent:'clarify_ambiguous_entity',
+      reasons:['ambiguous_entity'],
+      missingFields:[],
+      actionProposal:undefined,
+      taskStateContainer:emptyTaskStateContainer(),
+    },
+    taskStateBefore:emptyTaskStateContainer(),
+    taskStateAfter:emptyTaskStateContainer(),
+    groundedKnowledge:[],
+  };
+
+  const message='ช่วยยืนยันหน่อยว่าพรุ่งนี้ว่างไหมครับ';
+  assert.equal(isTrustedReadOnlyCommercialClarification(turn,message),true);
+  assert.deepEqual(
+    readOnlyCutoverEligibility(turn,{requireSemanticSupervisor:true,message}),
+    {eligible:true},
+  );
+});
+
+test('Phase 4 commercial clarification exception cannot admit commit-shaped or non-commercial unknown turns',()=>{
+  const commit=semantic({
+    domain:'unknown',
+    intent:'book_unspecified',
+    action:'book',
+    speechAct:'transaction_request',
+    informationNeed:'none',
+    needsClarification:true,
+  });
+  const turn:any={
+    semanticTurn:commit,
+    dialogSemanticTurn:commit,
+    dialogDecision:{
+      mode:'clarify',
+      responseIntent:'clarify_ambiguous_entity',
+      reasons:['ambiguous_entity'],
+      missingFields:[],
+      actionProposal:undefined,
+      taskStateContainer:emptyTaskStateContainer(),
+    },
+    taskStateBefore:emptyTaskStateContainer(),
+    taskStateAfter:emptyTaskStateContainer(),
+    groundedKnowledge:[],
+  };
+  assert.equal(isTrustedReadOnlyCommercialClarification(turn,'จองเลยครับ'),false);
+  assert.deepEqual(
+    readOnlyCutoverEligibility(turn,{requireSemanticSupervisor:true,message:'จองเลยครับ'}),
+    {eligible:false,reason:'transactional_or_task_turn'},
   );
 });
