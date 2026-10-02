@@ -55,8 +55,8 @@ export function enforceThongthaiMaleThaiParticles(input: string): string {
 function humanizeInternalJargon(value: string): string {
   return value
     .replace(/\bMenu\s+Master\b/giu, 'รายการเมนู')
-    .replace(/\bPrice\s+Slot\b/giu, 'ราคาแต่ละแบบ')
-    .replace(/\bSlot\s+จริง\b/giu, 'ราคาแต่ละแบบ')
+    .replace(/Price\s*Slot/giu, 'ราคาแต่ละแบบ')
+    .replace(/Slot\s*จริง/giu, 'ราคาแต่ละแบบ')
     .replace(/\bCore\b/giu, 'หลัก')
     .replace(/\bMaster\b/giu, 'รายการหลัก')
     .replace(/\bsource[- ]of[- ]truth\b/giu, 'ข้อมูลหลัก')
