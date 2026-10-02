@@ -5968,17 +5968,20 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
   const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
-  // Explicit read-only restaurant discovery/recommendation should use the
-  // live restaurant SOT before the generic Saved Agent. This is especially
-  // important immediately after a cafe conversation: once stale cafe context
-  // correctly yields, the turn must land on the verified menu advisor rather
-  // than fall into a generic model/provider fallback.
-  const restaurantReadOnlyBeforePrimary =
+  // Narrow cafe -> restaurant topic-switch fast path. It exists only for an
+  // EXPLICIT restaurant/menu discovery in the current sentence. Do not use
+  // the broad restaurant advisor classifier here: that classifier also
+  // considers history/memory and would steal unrelated food-culture,
+  // availability, correction, and cross-domain turns before the semantic
+  // brain sees them.
+  const restaurantTopicSwitchBeforePrimary =
     !explicitTransactionIntent
-    && isRestaurantAdvisorTurn(request, { agentState:{} });
+    && /(?:ร้านอาหาร|ตำมา-ชาติ|ตำมา)/u.test(request.message)
+    && /(?:เมนู|มีอะไร|แนะนำ|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย)/u.test(request.message)
+    && !/(?:โต๊ะ|ว่าง|สถานะ|กี่โมง|จอง|สั่ง|ยืนยัน)/u.test(request.message);
 
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
-    && !restaurantReadOnlyBeforePrimary
+    && !restaurantTopicSwitchBeforePrimary
     && !completeVisitorJourneyBeforeSupervision
     && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
@@ -6013,7 +6016,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     }
   }
 
-  if (restaurantReadOnlyBeforePrimary) {
+  if (restaurantTopicSwitchBeforePrimary) {
     const restaurantResponse = await deterministicRestaurantResponse(
       request,
       { agentState:{} },
