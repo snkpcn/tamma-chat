@@ -44,7 +44,7 @@ export type CommerceLocale = {
 export type CommerceMarket = {
   marketCode: string;
   countryCode: string;
-  settlementCurrencyCode: string;
+  defaultCurrencyCode: string;
   defaultLocaleCode: string;
   status: MarketStatus;
   isDomestic: boolean;
@@ -185,7 +185,7 @@ export function composeMarketContext(
   if (market.status !== 'live') return { kind: 'unavailable', reason: 'market_not_live' };
 
   const currency = bundle.currency;
-  if (!currency || currency.currencyCode !== market.settlementCurrencyCode) {
+  if (!currency || currency.currencyCode !== market.defaultCurrencyCode) {
     return { kind: 'unavailable', reason: 'currency_not_configured' };
   }
   if (!currency.active) return { kind: 'unavailable', reason: 'currency_inactive' };
