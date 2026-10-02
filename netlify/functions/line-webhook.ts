@@ -7,6 +7,7 @@ import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
 import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
 import { handleStaffBookingPostback, type LineMessage } from './_ops-line-ui';
 import { handleRestaurantPreorderPostback, handleRestaurantStockText } from './_restaurant-sot';
+import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
 import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
   handleCustomerPaymentSlip,
@@ -308,6 +309,18 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       text: event.message.text,
     });
     if (bindReply) await replyToLine(event.replyToken, bindReply, accessToken);
+    return;
+  }
+
+  const dailyCloseReply = await handleCafeTestDailyCloseText({
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+    messageId: event.message.id ?? null,
+    timestamp: event.timestamp,
+  });
+  if (dailyCloseReply) {
+    await replyToLine(event.replyToken, dailyCloseReply, accessToken);
     return;
   }
 
