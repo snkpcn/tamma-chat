@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { loadWorldwideMarketContext } from '../netlify/functions/_worldwide-data-db';
 import {
   MARKET_CAPABILITIES,
   canonicalLocaleCode,
@@ -123,4 +124,10 @@ test('WW-1 missing capability rows always default to disabled', () => {
   assert.equal(result.context.capabilities.catalog, 'live');
   assert.equal(result.context.capabilities.checkout, 'disabled');
   assert.equal(result.context.capabilities.payments, 'disabled');
+});
+
+
+test('WW-1 DB loader is dormant when the WW-0 dataCore gate is off', async () => {
+  const result = await loadWorldwideMarketContext('TH', 'th', {});
+  assert.deepEqual(result, { kind: 'disabled' });
 });
