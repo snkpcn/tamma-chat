@@ -200,5 +200,5 @@
     window.dispatchEvent(new CustomEvent('account:i18n-ready',{detail:{lang:current}}));
   }
   window.AccountI18n={t,locale,lang:()=>current,setLang,init};
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+  init();
 })();
