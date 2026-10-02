@@ -1728,6 +1728,15 @@ const CAFE_READ_ONLY_FOLLOWUP_MARKER = /(?:เครื่องดื่ม|ร
 function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
   const text = message.trim();
   if (hasExplicitTransactionIntent(text)) return false;
+
+  // Explicit topic switches always outrank stale café continuity. Without
+  // this gate a previous activeTopic='cafe' plus generic words such as
+  // "เมนู/มีอะไร/แนะนำ" can hijack a fresh restaurant/activity/stay/OTOP
+  // question and answer about Inthanin instead.
+  const explicitNonCafeTopic =
+    /(?:ร้านอาหาร|ตำมา-ชาติ|ตำมา|ขี่ม้า|ม้า|atv|เอทีวี|ยิงธนู|ธนู|ที่พัก|เฮือนสเตย์|ห้องพัก|otop|โอทอป|ของฝาก|สินค้า(?:ชุมชน)?)/iu.test(text);
+  if (explicitNonCafeTopic && !CAFE_EXPLICIT_MARKER.test(text)) return false;
+
   if (CAFE_EXPLICIT_MARKER.test(text)) return true;
   return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
 }
@@ -5959,7 +5968,20 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
   const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
 
+  // Narrow cafe -> restaurant topic-switch fast path. It exists only for an
+  // EXPLICIT restaurant/menu discovery in the current sentence. Do not use
+  // the broad restaurant advisor classifier here: that classifier also
+  // considers history/memory and would steal unrelated food-culture,
+  // availability, correction, and cross-domain turns before the semantic
+  // brain sees them.
+  const restaurantTopicSwitchBeforePrimary =
+    !explicitTransactionIntent
+    && /(?:ร้านอาหาร|ตำมา-ชาติ|ตำมา)/u.test(request.message)
+    && /(?:เมนู|มีอะไร|แนะนำ|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย)/u.test(request.message)
+    && !/(?:โต๊ะ|ว่าง|สถานะ|กี่โมง|จอง|สั่ง|ยืนยัน)/u.test(request.message);
+
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+    && !restaurantTopicSwitchBeforePrimary
     && !completeVisitorJourneyBeforeSupervision
     && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
@@ -6115,6 +6137,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
       && !preserveVerifiedLocationBeforeSupervision
       && !completeVisitorJourneyBeforeSupervision
+      && !restaurantTopicSwitchBeforePrimary
       && topLevelSemanticIntent !== 'WEATHER_REQUEST') {
     try {
       const oneMind = await processOneMindCustomerTurn({
