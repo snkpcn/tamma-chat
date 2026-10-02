@@ -66,19 +66,26 @@ function latestConversationSession(costRows:CostRow[],turnRows:TurnRow[]):{calls
     ...turnRows.map(row=>({kind:'turn' as const,at:row.occurred_at,row})),
   ].sort((a,b)=>a.at.localeCompare(b.at));
   if(!activity.length)return{calls:[],turns:[]};
+
+  // conversation_id is shared by all paid intelligence paths for the same
+  // customer thread, but call_index_conversation is NOT a global sequence.
+  // Saved-Agent usage and the semantic/legacy ledger each start their own
+  // counters at 1. Therefore a 3 -> 1 transition can happen in the middle of
+  // one continuous conversation and MUST NOT split the cost report.
+  //
+  // Session boundaries are defined only by the same idle window the runtime
+  // itself uses to start a new conversation. This keeps one real active
+  // conversation together even when execution switches Agent -> One-Mind,
+  // while still separating genuinely new sessions for a stable customer id.
   const ledgerIdleMs=aiCostPolicy().conversationIdleMs;
   let startAt=activity[0]!.at;
   let previousAt=Date.parse(activity[0]!.at);
-  let previousCallIndex=activity[0]!.kind==='cost'?n(activity[0]!.row.call_index_conversation):0;
   for(let i=1;i<activity.length;i+=1){
     const current=activity[i]!;
     const currentAt=Date.parse(current.at);
-    const currentIndex=current.kind==='cost'?n(current.row.call_index_conversation):0;
-    const indexReset=current.kind==='cost'&&previousCallIndex>0&&currentIndex>0&&currentIndex<=previousCallIndex;
     const idleReset=Number.isFinite(previousAt)&&Number.isFinite(currentAt)&&currentAt-previousAt>=ledgerIdleMs;
-    if(indexReset||idleReset)startAt=current.at;
+    if(idleReset)startAt=current.at;
     previousAt=currentAt;
-    if(current.kind==='cost')previousCallIndex=currentIndex;
   }
   return{
     calls:costRows.filter(row=>row.occurred_at>=startAt).sort((a,b)=>a.occurred_at.localeCompare(b.occurred_at)),
@@ -164,11 +171,10 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
     const allCalls=rows.filter(row=>row.conversation_id===conversationId);
     const allTurns=turnRows.filter(row=>row.conversation_id===conversationId);
     // conversation_id is a stable customer/thread identifier, not a unique
-    // AI-cost ledger session. The ledger intentionally resets its call index
-    // after its idle window, so a 24h notifier scan can contain several
-    // separate conversations for the same LINE user. Summarize only the
-    // latest ledger session; otherwise old + new sessions are aggregated and
-    // the old max call index can reuse a previous idempotency key forever.
+    // session. A 24h scan can contain several separate conversations for the
+    // same LINE user, so summarize only the latest idle-window session. Do NOT
+    // split on call_index_conversation: Agent and semantic ledgers legitimately
+    // use independent counters inside the same live conversation.
     const {calls,turns}=latestConversationSession(allCalls,allTurns);
     if(!calls.length&&!turns.length)continue;
     const latestCallAt=calls.at(-1)?.occurred_at??'';
