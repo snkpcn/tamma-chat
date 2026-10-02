@@ -262,11 +262,52 @@ export function composeSemanticIncidentResponse(
   ]);
 }
 
+function localizedRoutingLine(language:SemanticIncidentResponseLanguage, notificationQueued:boolean):string {
+  if(language==='th') return routingLine(notificationQueued);
+  if(language==='zh') return notificationQueued ? '已发送给相关团队。' : '已记录下来，Thongthai 会转给相关团队。';
+  if(language==='lo') return notificationQueued ? 'ສົ່ງໃຫ້ທີມທີ່ກ່ຽວຂ້ອງແລ້ວ.' : 'ບັນທຶກເລື່ອງໄວ້ແລ້ວ ແລະຈະສົ່ງໃຫ້ທີມທີ່ກ່ຽວຂ້ອງ.';
+  if(language==='vi') return notificationQueued ? 'Thongthai đã gửi việc này cho đội liên quan.' : 'Thongthai đã ghi nhận và sẽ chuyển cho đội liên quan.';
+  return notificationQueued ? 'Thongthai has sent this to the relevant team.' : 'Thongthai has logged this and will pass it to the relevant team.';
+}
+
+function localizedFeedbackResponse(
+  match:ServiceFeedbackMatch,
+  notificationQueued:boolean,
+  eventResult:{eventId:string|null;targets:FeedbackTargetResult[]}|undefined,
+  language:SemanticIncidentResponseLanguage,
+):string {
+  if(language==='th') return '';
+  if(match.feedbackType==='complaint' || match.feedbackType==='safety_issue' || match.feedbackType==='incident') {
+    return composeSemanticIncidentResponse(match,eventResult?.eventId!=null,eventResult?.targets??[],language);
+  }
+  if(match.feedbackType==='compliment') {
+    const opener=language==='zh'?'非常感谢你的表扬 😊'
+      :language==='lo'?'ຂອບໃຈຫຼາຍສຳລັບຄຳຊົມ 😊'
+      :language==='vi'?'Cảm ơn bạn rất nhiều vì lời khen 😊'
+      :'Thank you so much for the kind feedback 😊';
+    return composeLineShortReply([opener,localizedRoutingLine(language,notificationQueued)]);
+  }
+  if(match.feedbackType==='suggestion') {
+    const opener=language==='zh'?'谢谢你的建议，这个想法很有帮助。'
+      :language==='lo'?'ຂອບໃຈສຳລັບຄຳແນະນຳ ໄອເດຍນີ້ມີປະໂຫຍດ.'
+      :language==='vi'?'Cảm ơn bạn đã góp ý, ý tưởng này rất hữu ích.'
+      :'Thanks for the suggestion — that’s genuinely useful.';
+    return composeLineShortReply([opener,localizedRoutingLine(language,notificationQueued)]);
+  }
+  const opener=language==='zh'?'谢谢你直接告诉我，Thongthai 会把这条反馈用于改进。'
+    :language==='lo'?'ຂອບໃຈທີ່ບອກກົງໆ ທອງໄທຈະນຳໄປປັບປຸງ.'
+    :language==='vi'?'Cảm ơn bạn đã nói thẳng. Thongthai sẽ dùng phản hồi này để cải thiện.'
+    :'Thanks for telling me directly. Thongthai will use this feedback to improve.';
+  return composeLineShortReply([opener,localizedRoutingLine(language,notificationQueued)]);
+}
+
 export function composeServiceFeedbackResponse(
   match: ServiceFeedbackMatch,
   notificationQueued: boolean,
   eventResult?: { eventId: string | null; targets: FeedbackTargetResult[] },
+  language: SemanticIncidentResponseLanguage = 'th',
 ): string {
+  if(language!=='th') return localizedFeedbackResponse(match,notificationQueued,eventResult,language);
   switch (match.feedbackType) {
     case 'complaint': return composeComplaintResponse(match, notificationQueued);
     case 'compliment': return composeComplimentResponse(match, notificationQueued);
@@ -289,6 +330,55 @@ export function composeServiceFeedbackResponse(
 // remaining categories (claim_request, bad_review_threat,
 // severe_allergy_medical, unverified_availability) were not given
 // verbatim text and were written to match the same tone/structure.
+const ESCALATION_OPENER_EN: Record<EscalationCategory,string> = {
+  refund_request:'For refunds or payment terms, Thongthai shouldn’t confirm a decision on the owner’s behalf.',
+  special_discount:'A special discount needs the owner or pricing team to check the conditions first.',
+  claim_request:'For a claim or compensation request, Thongthai shouldn’t decide on the owner’s behalf.',
+  accident_liability:'For accident liability, Thongthai shouldn’t guess or decide on the owner’s behalf.',
+  safety_guarantee:'Thongthai can’t guarantee safety 100%. The on-site team needs to assess the actual situation.',
+  bad_review_threat:'Thank you for saying how you feel directly. Thongthai doesn’t want this left unresolved.',
+  severe_allergy_medical:'Thank you for telling me. This needs the team to check carefully rather than Thongthai guessing.',
+  unverified_availability:'Thongthai needs the stay team to verify current room availability rather than guessing.',
+};
+const ESCALATION_OPENER_ZH: Record<EscalationCategory,string> = {
+  refund_request:'退款或付款条件需要由负责人确认，Thongthai 不会代替负责人做决定。',
+  special_discount:'特别折扣需要负责人或价格团队先核对条件。',
+  claim_request:'理赔或赔偿事项需要由负责人确认，Thongthai 不会代替负责人做决定。',
+  accident_liability:'事故责任需要由负责人确认，Thongthai 不会猜测或代替负责人判断。',
+  safety_guarantee:'Thongthai 不能保证 100% 安全，现场团队需要根据实际情况评估。',
+  bad_review_threat:'谢谢你直接说出感受，Thongthai 不希望这件事一直悬着。',
+  severe_allergy_medical:'谢谢你说明情况。这类问题需要团队认真确认，Thongthai 不会猜。',
+  unverified_availability:'当前房态需要住宿团队核实，Thongthai 不会猜。',
+};
+const ESCALATION_OPENER_LO: Record<EscalationCategory,string> = {
+  refund_request:'ເລື່ອງຄືນເງິນ ຫຼືເງື່ອນໄຂການຈ່າຍ ທອງໄທບໍ່ຄວນຢືນຢັນແທນເຈົ້າຂອງ.',
+  special_discount:'ສ່ວນຫຼຸດພິເສດຕ້ອງໃຫ້ເຈົ້າຂອງ ຫຼືທີມລາຄາກວດເງື່ອນໄຂກ່ອນ.',
+  claim_request:'ເລື່ອງເຄລມ ຫຼືຄ່າເສຍຫາຍ ທອງໄທບໍ່ຕັດສິນແທນເຈົ້າຂອງ.',
+  accident_liability:'ເລື່ອງຄວາມຮັບຜິດຈາກອຸບັດຕິເຫດ ທອງໄທບໍ່ເດົາ ຫຼືຕັດສິນແທນເຈົ້າຂອງ.',
+  safety_guarantee:'ທອງໄທບໍ່ສາມາດຮັບປະກັນຄວາມປອດໄພ 100%. ທີມໜ້າງານຕ້ອງປະເມີນຕາມສະພາບຈິງ.',
+  bad_review_threat:'ຂອບໃຈທີ່ບອກຄວາມຮູ້ສຶກກົງໆ ທອງໄທບໍ່ຢາກໃຫ້ເລື່ອງນີ້ຄ້າງ.',
+  severe_allergy_medical:'ຂອບໃຈທີ່ແຈ້ງ ເລື່ອງນີ້ຕ້ອງໃຫ້ທີມກວດໃຫ້ຊັດ ທອງໄທບໍ່ເດົາ.',
+  unverified_availability:'ຫ້ອງວ່າງຕອນນີ້ຕ້ອງໃຫ້ທີມທີ່ພັກກວດຢືນຢັນ ທອງໄທບໍ່ເດົາ.',
+};
+const ESCALATION_OPENER_VI: Record<EscalationCategory,string> = {
+  refund_request:'Việc hoàn tiền hoặc điều kiện thanh toán cần chủ sở hữu xác nhận; Thongthai không nên quyết định thay.',
+  special_discount:'Giảm giá đặc biệt cần chủ sở hữu hoặc đội giá kiểm tra điều kiện trước.',
+  claim_request:'Việc khiếu nại bồi thường cần chủ sở hữu xác nhận; Thongthai không quyết định thay.',
+  accident_liability:'Trách nhiệm khi xảy ra tai nạn cần chủ sở hữu xác nhận; Thongthai không đoán hay quyết định thay.',
+  safety_guarantee:'Thongthai không thể bảo đảm an toàn 100%. Đội tại chỗ cần đánh giá theo tình huống thực tế.',
+  bad_review_threat:'Cảm ơn bạn đã nói thẳng cảm nhận. Thongthai không muốn việc này bị bỏ ngỏ.',
+  severe_allergy_medical:'Cảm ơn bạn đã cho biết. Việc này cần đội ngũ kiểm tra kỹ, Thongthai không muốn đoán.',
+  unverified_availability:'Tình trạng phòng hiện tại cần đội lưu trú kiểm tra xác nhận, Thongthai không muốn đoán.',
+};
+
+function localizedEscalationOpener(language:SemanticIncidentResponseLanguage, category:EscalationCategory):string {
+  if(language==='en') return ESCALATION_OPENER_EN[category];
+  if(language==='zh') return ESCALATION_OPENER_ZH[category];
+  if(language==='lo') return ESCALATION_OPENER_LO[category];
+  if(language==='vi') return ESCALATION_OPENER_VI[category];
+  return ESCALATION_OPENER[category];
+}
+
 const ESCALATION_OPENER: Record<EscalationCategory, string> = {
   refund_request: 'เรื่องคืนเงิน/เงื่อนไขการชำระ ทองไทยขอไม่ยืนยันแทนเจ้าของนะครับ 🙏',
   special_discount: 'ส่วนลดพิเศษอาจต้องให้เจ้าของหรือทีมดูแลราคาเช็กเงื่อนไขให้ครับ 😊',
@@ -308,12 +398,17 @@ export function composeEscalationResponse(
   match: EscalationMatch,
   eventStored: boolean,
   targets: FeedbackTargetResult[],
+  language: SemanticIncidentResponseLanguage = 'th',
 ): string {
   // The one non-escalating instance: a bare, generic safety-guarantee
   // question with no named activity -- owner's own instruction: "If
   // generic: answer with no guarantee, ask context." No feedback event,
   // no notification, just the honest answer.
   if (match.category === 'safety_guarantee' && !match.escalates) {
+    if(language==='zh') return composeLineShortReply(['Thongthai 不能保证 100% 安全。','现场团队需要根据实际情况评估。','如果有儿童、老人或健康方面的顾虑，请告诉我，我会帮你把情况交给团队。']);
+    if(language==='lo') return composeLineShortReply(['ທອງໄທບໍ່ສາມາດຮັບປະກັນຄວາມປອດໄພ 100%.','ທີມໜ້າງານຕ້ອງປະເມີນຕາມສະພາບຈິງ.','ຖ້າມີເດັກ ຜູ້ສູງອາຍຸ ຫຼືກັງວົນເລື່ອງສຸຂະພາບ ບອກທອງໄທໄດ້.']);
+    if(language==='vi') return composeLineShortReply(['Thongthai không thể bảo đảm an toàn 100%.','Đội tại chỗ cần đánh giá theo tình huống thực tế.','Nếu có trẻ em, người lớn tuổi hoặc lo ngại về sức khỏe, hãy nói cho Thongthai biết để chuyển đúng thông tin cho đội ngũ.']);
+    if(language==='en') return composeLineShortReply(['Thongthai can’t guarantee safety 100%.','The on-site team needs to assess the actual conditions.','If children, older guests, or health concerns are involved, tell me and I’ll pass that context to the team.']);
     return composeLineShortReply([
       'ทองไทยไม่อยากรับประกันแทนทีมแบบ 100% นะครับ 🙏',
       'ทีมหน้างานจะช่วยประเมินและดูแลตามสถานการณ์จริงให้ดีที่สุดครับ',
@@ -321,17 +416,25 @@ export function composeEscalationResponse(
     ]);
   }
 
-  const opener = ESCALATION_OPENER[match.category];
+  const opener = localizedEscalationOpener(language,match.category);
   if (!eventStored) {
-    return composeLineShortReply([
-      opener,
-      'ตอนนี้ระบบบันทึกเรื่องไม่สำเร็จ ขอโทษด้วยครับ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อความชัวร์ครับ',
-    ]);
+    const failed=language==='zh'?'现在暂时无法保存这件事。为避免耽误，请直接告知现场工作人员。'
+      :language==='lo'?'ຕອນນີ້ລະບົບຍັງບັນທຶກເລື່ອງບໍ່ສຳເລັດ ກະລຸນາແຈ້ງພະນັກງານໜ້າງານໂດຍກົງ.'
+      :language==='vi'?'Hiện hệ thống chưa lưu được vụ việc. Vui lòng báo trực tiếp cho nhân viên tại chỗ để không chậm xử lý.'
+      :language==='en'?'The case could not be saved right now. Please tell on-site staff directly so follow-up is not delayed.'
+      :'ตอนนี้ระบบบันทึกเรื่องไม่สำเร็จ ขอโทษด้วยครับ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อความชัวร์ครับ';
+    return composeLineShortReply([opener,failed]);
   }
-  const domainLabel = match.domainUnit ? BUSINESS_UNIT_LABEL_TH[match.domainUnit] : null;
-  return composeLineShortReply([
-    opener,
-    composeNotificationStatusLine(domainLabel, targets),
-    ESCALATION_NEXT_QUESTION[match.category] ?? '',
-  ]);
+  const businessUnit=match.domainUnit??'general';
+  const delivery=language==='th'
+    ? composeNotificationStatusLine(match.domainUnit ? BUSINESS_UNIT_LABEL_TH[match.domainUnit] : null,targets)
+    : semanticIncidentDeliveryLine(language,businessUnit,targets);
+  const next=match.category==='special_discount'
+    ? language==='zh'?'请告诉我大概的日期、时间和你感兴趣的服务。'
+      :language==='lo'?'ຂໍວັນທີ ເວລາ ແລະບໍລິການທີ່ສົນໃຈໂດຍຄອບຄ່າ.'
+      :language==='vi'?'Bạn cho Thongthai biết ngày, giờ và dịch vụ quan tâm sơ bộ nhé.'
+      :language==='en'?'Please share the approximate date, time, and service you’re interested in.'
+      :ESCALATION_NEXT_QUESTION[match.category] ?? ''
+    :'';
+  return composeLineShortReply([opener,delivery,next]);
 }
