@@ -109,7 +109,7 @@ import {
   hasCommitMarker,
   hasStandaloneTransactionRequest,
 } from './_slot-parsers';
-import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask, suspendActiveTask } from './_task-state';
+import { createActiveTask, isTerminalTaskStatus, loadTaskState, mergeTaskSlots, persistTaskState, startNewActiveTask, suspendActiveTask, type TaskStateContainer } from './_task-state';
 import { HORSE_FACTS, INDOOR_FRIENDLY_BUSINESS_UNITS } from './_local-concierge-knowledge';
 import {
   composeDeterministicResponse,
@@ -184,6 +184,38 @@ function emptyJourneyContext(): JourneyContext {
     favorites: [],
     journalEntries: [],
   };
+}
+
+/**
+ * Phase 7 task-authority boundary.
+ *
+ * Once a real non-terminal ActiveTask exists, that bounded task state is the
+ * authoritative continuation context. Read-only Saved-Agent routing must not
+ * take first refusal on later turns: the One-Mind/Dialog Manager owns
+ * selection, duration, correction, side-topic suspension/resume, summary and
+ * no-transaction readback. Explicit prepare-only Agent routing remains a
+ * separate transaction-draft canary and is not blocked by this rule.
+ */
+export function activeTaskOwnsConversationBeforePrimary(container: TaskStateContainer): boolean {
+  return Boolean(
+    container.activeTask
+    && !isTerminalTaskStatus(container.activeTask.status)
+  );
+}
+
+async function hasActiveTaskBeforePrimary(guestDbId: string | null): Promise<boolean> {
+  if (!guestDbId) return false;
+  try {
+    return activeTaskOwnsConversationBeforePrimary(await loadTaskState(guestDbId));
+  } catch (error) {
+    // Do not fail the whole turn because the task-state read itself failed.
+    // Existing Agent/One-Mind routing can still degrade honestly.
+    console.error(
+      'THONGTHAI_PRE_PRIMARY_TASK_STATE_ERROR',
+      error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+    );
+    return false;
+  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -5251,11 +5283,20 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // turns may enter only through the separate prepare-only canary. In that
   // mode the Agent may persist a review draft but cannot cross the commit
   // boundary. Weather/location stay on their established paths.
+  // Keep the Phase 4 source-level contract explicit: commercial planning /
+  // withholding already had first refusal over the 100% read-only Agent.
   const phase4CommercialBoundaryEligible =
     commercialBoundary.routeToOneMindBeforePrimary;
 
+  const activeTaskBeforePrimary = !prepareOnlyAgentEligible
+    && await hasActiveTaskBeforePrimary(guestDbId);
+
+  // Phase 7 adds a second independent boundary: a non-terminal ActiveTask is
+  // already a bounded, persisted conversation contract. One-Mind/Dialog
+  // Manager owns its continuation before read-only Agent Primary.
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
     && !phase4CommercialBoundaryEligible
+    && !activeTaskBeforePrimary
     && shouldUseThongthaiAgentPrimary({
     guestKey: request.guestId,
     guestDbId,
