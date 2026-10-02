@@ -6355,6 +6355,14 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         eventId: transportEventId,
         channel,
         message: request.message,
+        memoryContext: {
+          travelerType: request.guestContext.travelerType,
+          group: request.guestContext.group,
+          interests: request.guestContext.interests,
+          pace: request.guestContext.pace,
+          budget: request.guestContext.budget,
+          constraints: request.guestContext.constraints,
+        },
         transactionMode: prepareOnlyAgentEligible ? 'prepare' : 'off',
       });
 
