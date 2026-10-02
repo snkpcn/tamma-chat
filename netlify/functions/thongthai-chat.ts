@@ -208,10 +208,18 @@ function emptyJourneyContext(): JourneyContext {
  * separate transaction-draft canary and is not blocked by this rule.
  */
 export function activeTaskOwnsConversationBeforePrimary(container: TaskStateContainer): boolean {
-  return Boolean(
+  const activeOwns = Boolean(
     container.activeTask
     && !isTerminalTaskStatus(container.activeTask.status)
   );
+  const suspendedOwns = Boolean(
+    container.suspendedTask
+    && !isTerminalTaskStatus(container.suspendedTask.status)
+  );
+  // A side-topic switch moves the original task into suspendedTask. It is
+  // still the bounded continuation authority for explicit resume/summary
+  // turns and must block read-only Agent Primary just like an active task.
+  return activeOwns || suspendedOwns;
 }
 
 /**
@@ -4979,6 +4987,34 @@ function hasDurableRestaurantConstraint(request: BrainRequest): boolean {
  * turn cannot degrade into FACT_UNKNOWN while the actual live menu is
  * available to deterministicRestaurantResponse.
  */
+function isSafetyCriticalRestaurantRecommendation(message: string): boolean {
+  if (!/แพ้(?:กุ้ง|ถั่ว|ปลา|ไข่|อาหารทะเล|ทะเล)/u.test(message)) return false;
+  const intent = classifyRestaurantDietaryIntent(message);
+  return intent === 'CONSTRAINT_AND_RECOMMENDATION';
+}
+
+/**
+ * Phase 7 final latency/safety boundary.
+ *
+ * A current-turn food allergy plus an explicit recommendation request has a
+ * complete local answer path: normalized constraint capture + live menu
+ * filtering + cross-contamination caution. Sending that turn to 100% Agent
+ * Primary adds latency/failure risk without adding authority. Keep this
+ * narrow to actual allergy+recommendation turns so generic food-culture or
+ * spice-only cold starts retain their established language-owned behavior.
+ */
+async function safetyCriticalRestaurantRecommendationBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  if (!guestDbId || !isSafetyCriticalRestaurantRecommendation(request.message)) return null;
+  const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(() => null);
+  const agentState = snapshot && isObject(snapshot.state) ? snapshot.state : {};
+  if (!isRestaurantAdvisorTurn(request, { agentState })) return null;
+  return deterministicRestaurantResponse(request, { agentState }, guestDbId, channel);
+}
+
 async function durableRestaurantRecommendationBeforeSemantic(
   request: BrainRequest,
   guestDbId: string | null,
@@ -5444,6 +5480,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (availabilityClarification) {
     const polished = polishedResponse(availabilityClarification, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const safetyCriticalRestaurantRecommendation = await safetyCriticalRestaurantRecommendationBeforePrimary(
+    request,
+    guestDbId,
+    channel,
+  ).catch(error => {
+    console.error('THONGTHAI_SAFETY_CRITICAL_RESTAURANT_RECOMMENDATION_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (safetyCriticalRestaurantRecommendation) {
+    const polished = polishedResponse(safetyCriticalRestaurantRecommendation, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message:polished.message,
