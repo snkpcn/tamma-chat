@@ -309,6 +309,27 @@ export function isTrustedLearnedSemanticContinuation(turn: OneMindTurnResult): b
   return false;
 }
 
+export function isTrustedReadOnlyCommercialClarification(
+  turn: OneMindTurnResult,
+  message: string,
+): boolean {
+  const rawBoundary=classifyCommercialBoundaryText(message,'OTHER');
+  if (
+    rawBoundary.mode !== 'READ_ONLY'
+    || rawBoundary.currentTurnCommit
+    || rawBoundary.reason !== 'commercial_question_not_consent'
+  ) return false;
+
+  const semantic=turn.dialogSemanticTurn ?? turn.semanticTurn;
+  const semanticBoundary=classifyCommercialBoundarySemantic(semantic);
+  if (semanticBoundary.mode !== 'READ_ONLY' || semanticBoundary.currentTurnCommit) return false;
+  if (turn.dialogDecision.actionProposal) return false;
+  if (!semantic.needsClarification) return false;
+  if (!['ask','status'].includes(semantic.action)) return false;
+  if (semantic.speechAct === 'transaction_request') return false;
+  return ['availability','policy','none'].includes(semantic.informationNeed ?? 'none');
+}
+
 export function readOnlyCutoverEligibility(
   turn: OneMindTurnResult,
   options: ReadOnlyCutoverEligibilityOptions = {},
@@ -382,7 +403,13 @@ export function readOnlyCutoverEligibility(
   // exception does NOT widen eligibility for that case -- the domain gate
   // below still applies exactly as before.
   const hasReplyToShow = Boolean((turn.dialogSemanticTurn ?? turn.semanticTurn).reply?.trim());
-  if (turn.semanticTurn.domain === 'unknown' && isSafeConversationalMode && hasReplyToShow) {
+  const trustedCommercialClarification = options.message !== undefined
+    && isTrustedReadOnlyCommercialClarification(turn,options.message);
+  if (
+    turn.semanticTurn.domain === 'unknown'
+    && isSafeConversationalMode
+    && (hasReplyToShow || trustedCommercialClarification)
+  ) {
     return { eligible:true };
   }
   const semantic=turn.dialogSemanticTurn??turn.semanticTurn;
@@ -698,6 +725,8 @@ export async function processOneMindCustomerTurn(
       || explicitNamedActivitySelection
     );
   const hasModelConversationReply = Boolean(turn.dialogSemanticTurn.reply?.trim() || turn.semanticTurn.reply?.trim());
+  const trustedCommercialClarification =
+    isTrustedReadOnlyCommercialClarification(turn,input.message);
   const learnedSemanticStateUpdate =
     turn.dialogSemanticTurn.semanticSource === 'semantic_concept_memory'
     && !turn.dialogDecision.actionProposal
@@ -706,6 +735,7 @@ export async function processOneMindCustomerTurn(
   const deterministicFastPath = (
       turn.dialogDecision.mode === 'collect_field'
       || turn.dialogDecision.responseIntent === 'cannot_verify_comparison'
+      || trustedCommercialClarification
       || learnedSemanticStateUpdate
       || (!hasModelConversationReply && (turn.dialogDecision.mode === 'clarify' || conversationalStateUpdate))
     )
