@@ -152,11 +152,20 @@ export function expenseCategory(label:string):InthaninExpenseCategory{
   return 'other';
 }
 
+function isPayrollSensitiveExpense(line:string):boolean{
+  return /เงินเดือน|เบิกเงินเดือน|เบิกเงินล่วงหน้า|ค่าแรงพนักงาน|ค่าจ้างพนักงาน|payroll|salary/iu.test(line);
+}
+
 function expenseFunding(line:string):InthaninExpenseFunding{
   if(/พนักงาน.*(?:ออก|สำรอง)|ออกก่อน|สำรอง(?:เงิน)?ก่อน/u.test(line)) return 'employee_fronted';
-  if(/เจ้าของ.*โอน|ผม.*โอน/u.test(line)) return 'owner_transfer';
-  if(/โอน(?:ให้)?(?:ร้าน|supplier|vendor)|ร้านค้า.*โอน/iu.test(line)) return 'vendor_transfer';
+  if(/เจ้าของ.*โอน|ผม.*โอน|owner.*transfer/iu.test(line)) return 'owner_transfer';
+  if(/โอน(?:ให้)?(?:ร้าน|supplier|vendor)|ร้านค้า.*โอน|vendor.*transfer/iu.test(line)) return 'vendor_transfer';
   if(/เงินสด(?:ของ)?ร้าน|จ่ายสด(?:จาก)?ร้าน|cash\s*ร้าน/iu.test(line)) return 'company_cash';
+
+  // Owner-confirmed Inthanin rule:
+  // ordinary shop expenses listed by staff in the Daily Close are paid
+  // from same-day shop cash unless the line explicitly says otherwise.
+  if(!isPayrollSensitiveExpense(line)) return 'company_cash';
   return 'unknown';
 }
 
@@ -180,6 +189,7 @@ function parseExpenseLine(line:string):ParsedInthaninExpense|null{
   if(!Number.isFinite(amount)||amount<=0) return null;
   const label=cleanExpenseLabel(withoutPrefix);
   if(!label||/^(?:ค่าใช้จ่าย|รวม)$/u.test(label)) return null;
+  if(isPayrollSensitiveExpense(label)) return null;
   return {
     label,
     amount,
