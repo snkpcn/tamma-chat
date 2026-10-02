@@ -78,6 +78,7 @@ import { runThongthaiAgentPrimaryTurn } from './_thongthai-agent-session';
 import { executeThongthaiTransactionTool } from './_thongthai-agent-transactions';
 import { runPrepareOnlyMultiVerticalFastPath } from './_thongthai-prepare-fastpath-v2';
 import { isPhase3SemanticLearningCandidate } from './_semantic-concept-memory';
+import { classifyCommercialBoundaryText } from './_commercial-intent-boundary';
 import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
@@ -378,9 +379,7 @@ export function isAgentTransactionPrepareIntent(
   message: string,
   topLevelSemanticIntent: string,
 ): boolean {
-  return topLevelSemanticIntent === 'BUSINESS_TRANSACTION'
-    || hasExplicitTransactionIntent(message)
-    || hasStandaloneTransactionRequest(message);
+  return classifyCommercialBoundaryText(message,topLevelSemanticIntent).prepareEligible;
 }
 
 export function categorizeDegradedFallback(message: string): DegradedFallbackCategory {
@@ -5055,10 +5054,13 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
-  const explicitTransactionIntent = isAgentTransactionPrepareIntent(
+  const commercialBoundary = classifyCommercialBoundaryText(
     request.message,
     topLevelSemanticIntent,
   );
+  const explicitTransactionIntent = commercialBoundary.currentTurnCommit;
+  const transactionPrepareIntent = commercialBoundary.prepareEligible;
+
   // Selection of the prepare-only canary is independent of the CURRENT
   // sentence's transaction wording. A later "ยืนยันส่งคำถาม", "เอาไว้ก่อน",
   // or status readback may contain no fresh จอง/สั่ง verb at all, but it still
@@ -5069,7 +5071,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     guestDbId,
     channel,
   });
-  const prepareOnlyAgentEligible = explicitTransactionIntent && prepareOnlyAgentSelected;
+  const prepareOnlyAgentEligible = transactionPrepareIntent && prepareOnlyAgentSelected;
 
   // Gate 0 latency guarantee: prepare and prepared-draft continuation turns
   // never need an LLM round trip. The runtime remains prepare-only: commit
@@ -5194,7 +5196,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // turns may enter only through the separate prepare-only canary. In that
   // mode the Agent may persist a review draft but cannot cross the commit
   // boundary. Weather/location stay on their established paths.
-  const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible && shouldUseThongthaiAgentPrimary({
+  const phase4CommercialBoundaryEligible =
+    commercialBoundary.routeToOneMindBeforePrimary;
+
+  const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+    && !phase4CommercialBoundaryEligible
+    && shouldUseThongthaiAgentPrimary({
     guestKey: request.guestId,
     guestDbId,
     channel,

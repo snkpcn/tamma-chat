@@ -561,6 +561,33 @@ function activityDurationChoiceForCollectField(input: ResponseComposerInput): Ac
   return resolveActivityDurationOptions(input.knowledgeBundles, resourceCode);
 }
 
+/**
+ * A rejected activity duration is an already-decided canonical policy result,
+ * not an open-ended recommendation. Render it before generic catalog/model
+ * composition regardless of Dialog mode: a non-transactional "60 นาที"
+ * continuation can intentionally suppress collect_field prompting while the
+ * policy still must tell the customer why 60 was rejected and which verified
+ * options remain.
+ */
+function activityRejectedDurationMessage(input:ResponseComposerInput):string|null {
+  if (input.language !== 'th') return null;
+  if (!input.dialogDecision.reasons.includes('activity_duration_rejected')) return null;
+
+  const rejected=Number(input.semanticTurn?.entities.durationMinutes);
+  const rejectedCopy=Number.isFinite(rejected) && rejected>0
+    ? `${rejected} นาทีไม่มีในตัวเลือกของกิจกรรมนี้ครับ `
+    : 'ระยะเวลาที่แจ้งมายังไม่ใช่ตัวเลือกของกิจกรรมนี้ครับ ';
+
+  const choice=activityDurationChoiceForCollectField(input);
+  if (choice?.status === 'multiple') {
+    return `${rejectedCopy}${activeTaskSubjectTh(input)}เลือกระยะเวลาที่มีได้ครับ: ${choice.options.map(minutes=>`${minutes} นาที`).join(' หรือ ')}`;
+  }
+  if (choice?.status === 'single') {
+    return `${rejectedCopy}${activeTaskSubjectTh(input)}ระยะเวลาที่มีในระบบตอนนี้คือ ${choice.durationMinutes} นาทีครับ`;
+  }
+  return `${rejectedCopy}ตอนนี้ทองไทยยังเช็กตัวเลือกระยะเวลาที่ถูกต้องเพิ่มเติมไม่ได้ครับ`;
+}
+
 function groundedValueMap(input: ResponseComposerInput): Map<string, unknown> {
   const map = new Map<string, unknown>();
   for (const fact of allFacts(input.knowledgeBundles)) map.set(fact.key, fact.value);
@@ -1544,6 +1571,8 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
     message = copy.failed;
   } else if (input.dialogDecision.responseIntent === 'active_task_summary') {
     message = activeTaskSummaryMessage(input);
+  } else if (activityRejectedDurationMessage(input)) {
+    message = activityRejectedDurationMessage(input)!;
   } else if (conversationalStateUpdateMessage(input)) {
     message = conversationalStateUpdateMessage(input)!;
   } else if (input.degradation.condition === 'source_unavailable') {
@@ -1637,6 +1666,13 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
 }
 
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
+  // Rejected duration is an authoritative policy outcome. It must outrank a
+  // second model call and generic catalog rendering even when the current turn
+  // is a non-transactional working-state update.
+  if (input.dialogDecision.reasons.includes('activity_duration_rejected')) {
+    return composeDeterministicResponse(input);
+  }
+
   // A task summary is a readback of canonical working state, not an
   // open-ended prose-generation problem. It must outrank generic grounded
   // rendering and the semantic model's conversational draft -- never the

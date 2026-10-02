@@ -215,6 +215,21 @@ function negatedKnownActivityAssetNames(message: string): string[] {
   return [...new Set(names)];
 }
 
+const CALMER_HORSE_PREFERENCE_RE = /นิ่งกว่า|นิสัยนิ่ง|ใจเย็นกว่า|calmer/iu;
+const RAIN_FALLBACK_REQUEST_RE = /ฝน|rain/iu;
+
+function structuredActivityPreferenceSignals(message:string): {
+  excludedKnownAssets:string[];
+  wantsCalmerKnownAsset:boolean;
+  wantsRainFallback:boolean;
+} {
+  return {
+    excludedKnownAssets:negatedKnownActivityAssetNames(message),
+    wantsCalmerKnownAsset:CALMER_HORSE_PREFERENCE_RE.test(message),
+    wantsRainFallback:RAIN_FALLBACK_REQUEST_RE.test(message),
+  };
+}
+
 function isInventoryCountQuestion(message: string): boolean {
   // Generic quantity-question structure, not a phrase answer table. The
   // activity topic itself comes from the canonical ecosystem graph above.
@@ -1239,10 +1254,10 @@ export function deriveDeterministicSemanticTurn(
     // context is carried as constraints only, never as a different action --
     // reclassifying it to a non-task-worthy "recommendation" action would lose
     // the selection instead of just describing it.
-    const excludedKnownAssets = negatedKnownActivityAssetNames(trimmed).filter(name => name !== knownActivityAsset.name);
+    const preferenceSignals=structuredActivityPreferenceSignals(trimmed);
+    const excludedKnownAssets = preferenceSignals.excludedKnownAssets.filter(name => name !== knownActivityAsset.name);
     if (excludedKnownAssets.length) entities.excludedHorse = excludedKnownAssets[0]!;
-    const wantsCalmerKnownAsset = /นิ่งกว่า|นิสัยนิ่ง|ใจเย็นกว่า|calmer/iu.test(trimmed);
-    const wantsRainFallback = /ฝน|rain/iu.test(trimmed);
+    const { wantsCalmerKnownAsset, wantsRainFallback } = preferenceSignals;
     const committing=hasCommitMarker(trimmed);
     const correcting=hasCorrectionMarker(trimmed);
     const explicitNoTransaction = hasExplicitNoTransactionMarker(trimmed);
@@ -1294,6 +1309,56 @@ export function deriveDeterministicSemanticTurn(
   // activity node), not a phrase table.
   if (activityTopic) {
     const committing=hasCommitMarker(trimmed);
+    const preferenceSignals=structuredActivityPreferenceSignals(trimmed);
+    const hasBoundedRecommendationPreference =
+      !committing
+      && activityTopic.activityCode === 'horse'
+      && (
+        preferenceSignals.excludedKnownAssets.length > 0
+        || preferenceSignals.wantsCalmerKnownAsset
+        || preferenceSignals.wantsRainFallback
+      );
+
+    if (hasBoundedRecommendationPreference) {
+      const date=extractDate(trimmed,now);
+      const time=extractTime(trimmed);
+      const entities:Record<string,unknown>={
+        activityCode:activityTopic.activityCode,
+        ...(date?{date}:{}),
+        ...(time?{time}:{}),
+        ...(preferenceSignals.excludedKnownAssets.length
+          ? {excludedHorse:preferenceSignals.excludedKnownAssets[0]!}
+          : {}),
+        ...(preferenceSignals.wantsCalmerKnownAsset
+          ? {preferredHorseTrait:'calm'}
+          : {}),
+        ...(preferenceSignals.wantsRainFallback
+          ? {weatherCondition:'rain'}
+          : {}),
+      };
+      return {
+        domain:'activity',
+        intent:'activity_preference_recommendation_fallback',
+        action:'recommend',
+        speechAct:'question',
+        informationNeed:'recommendation',
+        entities,
+        references:[],
+        constraints:[
+          ...preferenceSignals.excludedKnownAssets.map(name =>
+            `exclude_${name === 'ทองไทย' ? 'thongthai' : name}`),
+          ...(preferenceSignals.wantsCalmerKnownAsset
+            ? ['preferred_horse_trait:calm']
+            : []),
+          ...(preferenceSignals.wantsRainFallback
+            ? ['weather_fallback_requested']
+            : []),
+        ],
+        confidence:0.86,
+        needsClarification:false,
+      };
+    }
+
     return {
       domain: 'activity',
       intent: committing ? 'activity_booking_request' : 'activity_topic_narrow',

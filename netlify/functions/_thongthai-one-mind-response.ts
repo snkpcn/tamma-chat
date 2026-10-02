@@ -252,6 +252,38 @@ export function isTrustedBoundedCorrectionContinuation(turn: OneMindTurnResult):
   return hasStructuredCorrection;
 }
 
+/**
+ * Provider-unusable fallback for one very specific non-commercial shape:
+ * a horse recommendation whose bounded deterministic parser preserved
+ * explicit exclusion / calm preference / rain-fallback structure.
+ *
+ * This does NOT make the deterministic parser the normal language owner:
+ * deterministicNeedsLanguageRefinement still calls the real semantic model
+ * first. It is consulted only when requireSemanticSupervisor would otherwise
+ * reject the already-grounded fallback after that model result proved
+ * unusable. No ActionProposal or transaction commitment is ever admitted.
+ */
+export function isTrustedBoundedActivityPreferenceRecommendation(
+  turn: OneMindTurnResult,
+): boolean {
+  const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
+  if (semantic.semanticSource !== 'deterministic_fallback') return false;
+  if (semantic.domain !== 'activity') return false;
+  if (semantic.intent !== 'activity_preference_recommendation_fallback') return false;
+  if (semantic.action !== 'recommend') return false;
+  if (semantic.informationNeed !== 'recommendation') return false;
+  if (semantic.entities.activityCode !== 'horse') return false;
+  if (turn.dialogDecision.actionProposal) return false;
+  if (turn.taskStateBefore.activeTask?.commitmentIntent
+      || turn.taskStateAfter.activeTask?.commitmentIntent) return false;
+
+  const hasBoundedPreference = semantic.constraints.some(constraint =>
+    /^exclude_/u.test(constraint)
+    || constraint === 'preferred_horse_trait:calm'
+    || constraint === 'weather_fallback_requested');
+  return hasBoundedPreference;
+}
+
 export function isTrustedLearnedSemanticContinuation(turn: OneMindTurnResult): boolean {
   const semantic = turn.dialogSemanticTurn ?? turn.semanticTurn;
   if (semantic.semanticSource !== 'semantic_concept_memory') return false;
@@ -306,10 +338,12 @@ export function readOnlyCutoverEligibility(
     // into a legacy clarification loop.
     const trustedBoundedNoTransaction = isTrustedBoundedNoTransactionContinuation(turn);
     const trustedBoundedCorrection = isTrustedBoundedCorrectionContinuation(turn);
+    const trustedActivityPreference = isTrustedBoundedActivityPreferenceRecommendation(turn);
     const trustedLearnedSemantic = isTrustedLearnedSemanticContinuation(turn);
     if (!trustedZeroCostBypass
         && !trustedBoundedNoTransaction
         && !trustedBoundedCorrection
+        && !trustedActivityPreference
         && !trustedLearnedSemantic) {
       return { eligible:false, reason:'transactional_or_task_turn' };
     }

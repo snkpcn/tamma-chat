@@ -53,6 +53,7 @@ import {
   claimWriteAttemptForEvent, type SemanticConceptMatch,
 } from './_semantic-concept-memory';
 import { deriveSemanticMeaning, type SemanticMeaning } from './_semantic-meaning';
+import { classifyCommercialBoundarySemantic } from './_commercial-intent-boundary';
 import {
   LLMAvailabilityError,
   ProviderNotConfiguredError,
@@ -581,6 +582,7 @@ const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
   'cafe_topic_switch',
   'membership_topic_switch',
   'activity_topic_narrow',
+  'activity_preference_recommendation_fallback',
   'broad_experience_discovery',
   'ask_price',
   'ask_availability_status',
@@ -1013,6 +1015,61 @@ function normalizeExplicitNoTransactionAvailabilityRefinement(
   };
 }
 
+
+export function reconcileReadOnlyActivityPreferenceRefinement(
+  turn: SemanticTurn,
+  deterministic: SemanticTurn | null,
+): SemanticTurn {
+  if (
+    !deterministic
+    || deterministic.domain !== 'activity'
+    || !LANGUAGE_BRAIN_READ_ONLY_ACTIONS.has(deterministic.action)
+    || turn.domain !== 'activity'
+    || turn.confidence < 0.7
+    || turn.needsClarification === true
+  ) return turn;
+
+  const deterministicPreferenceShape =
+    deterministic.intent === 'activity_preference_recommendation_fallback'
+    || deterministic.informationNeed === 'recommendation'
+    || deterministic.constraints.some(value =>
+      /^(?:exclude_|preferred_horse_trait:|weather_fallback_requested)/u.test(value));
+
+  const modelPreferenceShape =
+    typeof turn.entities.preferredHorseTrait === 'string'
+    || typeof turn.entities.weatherCondition === 'string'
+    || typeof turn.entities.excludedHorse === 'string'
+    || turn.constraints.some(value =>
+      /^(?:exclude_|preferred_horse_trait:|weather_fallback_requested)/u.test(value));
+
+  if (!deterministicPreferenceShape && !modelPreferenceShape) return turn;
+
+  const commercial = classifyCommercialBoundarySemantic(turn);
+  if (commercial.currentTurnCommit
+      || commercial.mode === 'COMMIT'
+      || turn.action === 'book'
+      || turn.action === 'order'
+      || turn.speechAct === 'transaction_request') {
+    return turn;
+  }
+
+  // The model may call "pick the calmer one" a selection/confirm even though
+  // the full sentence is still a recommendation/discovery request. Preserve
+  // its richer structured preferences, but close the MACHINE action back to
+  // the proven read-only deterministic base. This is a de-escalation only.
+  return {
+    ...turn,
+    action: deterministic.action,
+    speechAct: deterministic.speechAct ?? (turn.speechAct === 'selection' ? 'question' : turn.speechAct),
+    informationNeed: deterministic.informationNeed ?? turn.informationNeed,
+    entities: {
+      ...deterministic.entities,
+      ...turn.entities,
+    },
+    constraints: [...new Set([...deterministic.constraints, ...turn.constraints])],
+  };
+}
+
 function modelRefinementIsUsable(
   turn: SemanticTurn,
   deterministic: SemanticTurn | null,
@@ -1185,7 +1242,8 @@ async function resolveSemanticTurn(
     const correctionReconciledTurn = reconcileSafeConversationalCorrectionDomain(rawModelTurn, deterministic);
     const slotMergedTurn = mergeSafeDeterministicSlots(correctionReconciledTurn, deterministic);
     const roleReconciledTurn = reconcileNamedConditionalAvailabilityRoles(slotMergedTurn, deterministic);
-    const modelTurn = normalizeExplicitNoTransactionAvailabilityRefinement(roleReconciledTurn, deterministic);
+    const availabilityReconciledTurn = normalizeExplicitNoTransactionAvailabilityRefinement(roleReconciledTurn, deterministic);
+    const modelTurn = reconcileReadOnlyActivityPreferenceRefinement(availabilityReconciledTurn, deterministic);
 
     // Journey planning is conversational state only: there is no journey
     // transaction executor. A short ellipsis such as "same one, move it to
