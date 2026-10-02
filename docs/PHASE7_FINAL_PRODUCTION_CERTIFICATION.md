@@ -55,4 +55,9 @@ Required:
 - closeout merged to main
 - production READY at exact final closeout commit
 
+Rerun trigger checkpoint:
+- PR #476 title carries `[run phase7 prod]`
+- certification targets production deploy `6abf5d64ab24600007985e4e`
+- canonical 16-turn contract remains unchanged
+
 Completion decision: pending.
