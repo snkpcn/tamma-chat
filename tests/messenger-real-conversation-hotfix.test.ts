@@ -164,3 +164,38 @@ test('Messenger/local concierge: complete solo chill request bypasses Agent and 
     });
   });
 });
+
+
+test('Messenger topic switch: restaurant topic switch outranks stale cafe context', async () => {
+  await withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_PRIMARY_PERCENT_FACEBOOK:'100',
+    THONGTHAI_ONE_MIND_CUTOVER:'1',
+  }, async () => {
+    await withHarness(async harness => {
+      const gid=guestId('messenger-cafe-to-restaurant-switch');
+
+      const cafe=await processThongthaiChatCore(
+        facebookRequest('แล้วร้านกาแฟละครับ',gid),
+        'fb-topic-switch-cafe',
+      );
+      assert.equal(cafe.statusCode,200);
+      assert.match(msg(cafe),/Inthanin|อินทนิน/u);
+
+      const restaurant=await processThongthaiChatCore(
+        facebookRequest('แล้วที่ร้านอาหารมีเมนูอะไรแนะนำครับ',gid),
+        'fb-topic-switch-restaurant',
+      );
+      const reply=msg(restaurant);
+
+      assert.equal(restaurant.statusCode,200);
+      assert.match(reply,/ลาบปลาช่อน|คอหมูย่างจิ้มแจ่ว|เสือร้องไห้/u);
+      assert.match(reply,/บาท/u);
+      assert.doesNotMatch(reply,/Inthanin|อินทนิน|คาเฟ่/u);
+      assert.doesNotMatch(reply,/ตอนนี้คุณยังไม่ได้บอกรสชาติ|ความชอบที่จำไว้/u);
+      assert.equal(harness.postsTo('restaurant_preorders').length,0);
+      assert.equal(harness.postsTo('cafe_inquiries').length,0);
+    });
+  });
+});
