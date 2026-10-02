@@ -160,21 +160,30 @@ const GUEST_SCOPED_CONSTRAINT_PATTERNS: Partial<Record<string,RegExp>> = {
 function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
   const phrase=GUEST_SCOPED_CONSTRAINT_PATTERNS[code];
   if(!phrase)return false;
-  const source=phrase.source;
-  const scoped=new RegExp(`(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)(.{0,28}?)(?:${source})`,'giu');
-  const matches=[...message.matchAll(scoped)];
-  if(!matches.length)return false;
 
-  // Prefer the closest clean companion-scoped occurrence. A sentence can
-  // mention the companion earlier for an unrelated reason ("มากับแฟนครับ
-  // ผมชอบกาแฟ... แต่แฟนไม่กินกาแฟ"). The first broad match may cross the
-  // self clause; a later clean match must still win.
-  for(const match of matches){
-    if(GUEST_MEMORY_SELF_RE.test(match[1]??''))continue;
+  // Classify each actual constraint occurrence by its NEAREST subject to the
+  // left. This avoids a broad first "แฟน" mention swallowing a later
+  // "ผม... แต่แฟนไม่กินกาแฟ" clause and incorrectly treating the whole
+  // sentence as customer-owned memory.
+  const phraseRe=new RegExp(phrase.source,'giu');
+  const companionRe=/(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)/gu;
+  const selfRe=/(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง)/gu;
+
+  for(const match of message.matchAll(phraseRe)){
     const index=match.index??0;
-    const around=message.slice(Math.max(0,index-20),index+match[0].length+20);
+    const before=message.slice(Math.max(0,index-48),index);
+    const lastIndex=(source:string,re:RegExp)=>{
+      let latest=-1;
+      for(const found of source.matchAll(re))latest=found.index??latest;
+      return latest;
+    };
+    const companionAt=lastIndex(before,companionRe);
+    const selfAt=lastIndex(before,selfRe);
+    const around=message.slice(Math.max(0,index-28),index+match[0].length+28);
+
+    // Explicit shared wording means the customer includes themself.
     if(/เราสองคน|เราทั้งคู่|ทั้งคู่|พวกเรา/u.test(around))continue;
-    if(GUEST_MEMORY_COMPANION_RE.test(match[0]))return true;
+    if(companionAt>=0&&companionAt>selfAt)return true;
   }
   return false;
 }
