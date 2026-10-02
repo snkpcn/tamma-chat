@@ -46,6 +46,8 @@ import {
   type CafeMasterMenuItem,
   type CafeBranchModifier,
 } from './_cafe-sot';
+import { loadOtopStoreCatalog } from './_member-delivery-db';
+import { wantsProductImage, resolveRequestedOtopProductMedia, productMediaAck } from './_thongthai-customer-media';
 import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
 import {
   applyConversationContextUpdate,
@@ -5574,6 +5576,27 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
 
   async function coreResult(statusCode: number, payload: unknown): Promise<ThongthaiChatCoreResult> {
     const typed = payload as Record<string, unknown>;
+
+    // Grounded customer media is a first-class output capability. OTOP images
+    // already approved in the live catalog may be returned when the customer
+    // explicitly asks to see that product. This never generates or guesses an
+    // image and never exposes storage internals to the customer.
+    if (statusCode === 200 && wantsProductImage(request.message)) {
+      try {
+        const catalog = await loadOtopStoreCatalog();
+        const resolved = resolveRequestedOtopProductMedia(request.message, catalog.products);
+        if (resolved?.media.length) {
+          typed.media = resolved.media;
+          const ack = productMediaAck(resolved.product.name, resolved.media.length, request.language);
+          const existing = typeof typed.message === 'string' ? typed.message.trim() : '';
+          typed.message = /(?:ราคา|กี่บาท|เท่าไหร่|เท่าไร|price|how\s*much)/iu.test(request.message) && existing
+            ? `${existing}\n\n${ack}`
+            : ack;
+        }
+      } catch (error) {
+        console.error('THONGTHAI_PRODUCT_MEDIA_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+      }
+    }
 
     // Phase 6.2 canonical final-language egress.
     //
