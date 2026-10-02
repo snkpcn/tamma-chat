@@ -15,7 +15,7 @@
 import { hasCommitMarker } from './_slot-parsers';
 
 export type FeedbackType = 'compliment' | 'complaint' | 'suggestion' | 'safety_issue' | 'system_feedback' | 'incident';
-export type BusinessUnit = 'restaurant' | 'activity' | 'stay' | 'cafe' | 'membership' | 'system' | 'general' | 'unknown';
+export type BusinessUnit = 'restaurant' | 'activity' | 'stay' | 'cafe' | 'otop' | 'membership' | 'system' | 'general' | 'unknown';
 export type Severity = 'low' | 'normal' | 'high' | 'urgent';
 export type PersonMentionKind = 'named' | 'role';
 export type PersonMention = { label: string; kind: PersonMentionKind };
@@ -113,6 +113,7 @@ const BUSINESS_UNIT_MARKERS: ReadonlyArray<{ unit: BusinessUnit; pattern: RegExp
   { unit: 'activity', pattern: /ขี่ม้า|ม้า|ภาราดร|atv|เอทีวี|ยิงธนู|กิจกรรม|ไกด์|คนดูแลม้า|กลางแจ้ง/iu },
   { unit: 'stay', pattern: /ห้องพัก|เช็คอิน|เช็กอิน|เช็คเอาท์|เช็กเอาท์|แม่บ้าน|ที่พัก|เฮือน(?:สเตย์)?|ห้องน้ำในห้อง/u },
   { unit: 'cafe', pattern: /คาเฟ่|inthanin|อินทนิน|กาแฟ|เครื่องดื่ม/iu },
+  { unit: 'otop', pattern: /otop|โอทอป|ของฝาก|สินค้าชุมชน|ผลิตภัณฑ์ชุมชน/iu },
   { unit: 'membership', pattern: /สมาชิก|แต้ม|สิทธิ์|โปรโมชั่น|จ่ายเงิน|ชำระเงิน|บัตร|ราคา/u },
   { unit: 'system', pattern: THONGTHAI_RESPONSE_MENTION },
 ];
@@ -183,6 +184,7 @@ const BUSINESS_UNIT_MENTION_WORDS: readonly string[] = [
   'ขี่ม้า', 'atv', 'เอทีวี', 'ยิงธนู', 'ม้า', 'ภาราดร', 'ไกด์',
   'เฮือนสเตย์', 'บ้านพัก', 'ห้องพัก', 'เช็คอิน', 'เช็กอิน', 'เช็คเอาท์', 'เช็กเอาท์', 'แม่บ้าน',
   'inthanin', 'อินทนิน', 'กาแฟ', 'เครื่องดื่ม',
+  'otop', 'โอทอป', 'ของฝาก', 'สินค้าชุมชน',
   'ทองไทย', 'เว็บ', 'line', 'ระบบจอง', 'payment',
 ];
 
