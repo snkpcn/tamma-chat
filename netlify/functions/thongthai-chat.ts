@@ -36,6 +36,7 @@ import {
   activityDurationOptionsForResource,
   formatActivityAssetNote,
   listServiceResources,
+  loadLatestBookingStatus,
   resetLineBookingPlanningSession,
 } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
@@ -131,6 +132,7 @@ import {
 import { ECOSYSTEM_PATHS, HOMESTAY_FACTS } from './_tamma-domain-knowledge';
 import { EXPERIENCES } from '../../src/data/experiences';
 import { classifyTopLevelSemanticIntent, topLevelIntentBlocksHorseTokenRouting } from './_top-level-intent';
+import { findKnownActivityAssetSelection } from './_deterministic-semantic-turn';
 import {
   normalizePendingQuestion,
   resolvePendingQuestionAnswer,
@@ -616,6 +618,7 @@ function normalizeRequest(body: unknown): BrainRequest | null {
     : { section: null };
   return {
     guestId: typeof body.guestId === 'string' ? body.guestId : undefined,
+    environment: body.environment === 'test' ? 'test' : 'live',
     message: body.message.trim(),
     language,
     chatHistory: normalizeChatHistory(body.chatHistory),
