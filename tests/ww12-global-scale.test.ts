@@ -83,6 +83,24 @@ test('WW-12 replica 5xx falls back once to primary while writes never touch repl
   }
 });
 
+
+test('WW-12 preserves fail-fast semantics for primary HTTP errors',async()=>{
+  const originalFetch=globalThis.fetch;
+  try{
+    globalThis.fetch=(async()=>new Response('db down',{status:503})) as typeof fetch;
+    await assert.rejects(
+      worldwideDbFetch(
+        'commerce_markets?select=market_code',
+        {},
+        {consistency:'strong',env:configured,operation:'test_primary_error'},
+      ),
+      /worldwide_db_http_503:test_primary_error/,
+    );
+  }finally{
+    globalThis.fetch=originalFetch;
+  }
+});
+
 test('WW-12 uses eventual consistency only for safe reference reads',()=>{
   const market=read('netlify/functions/_worldwide-data-db.ts');
   const price=read('netlify/functions/_multi-currency-db.ts');
