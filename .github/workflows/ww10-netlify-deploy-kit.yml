@@ -3,12 +3,7 @@ name: WW10 Netlify Deploy Kit
 # WW10 deploy relay v2: PR-only GitHub OIDC via Supabase
 
 on:
-  push:
-    branches:
-      - 'ops/ww10-netlify-deploy-kit'
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
