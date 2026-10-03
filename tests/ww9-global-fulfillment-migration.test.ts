@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 
 const sql=readFileSync(new URL('../supabase/migrations/20261003074400_ww9_global_fulfillment_tracking.sql',import.meta.url),'utf8');
 const conflictFix=readFileSync(new URL('../supabase/migrations/20261003083500_ww9_tracking_notification_conflict_fix.sql',import.meta.url),'utf8');
+const fkIndexes=readFileSync(new URL('../supabase/migrations/20261003084000_ww9_fulfillment_fk_indexes.sql',import.meta.url),'utf8');
 
 test('WW-9 migration creates provider-neutral booking, packages, immutable tracking, notification outbox, and returns',()=>{
   for(const table of [
@@ -66,4 +67,19 @@ test('WW-9 notification outbox conflict target is unambiguous on fresh and alrea
   assert.match(conflictFix,/create or replace function public\.record_commerce_fulfillment_booking_v1/);
   assert.match(conflictFix,/create or replace function public\.apply_commerce_fulfillment_tracking_event_v1/);
   assert.doesNotMatch(conflictFix,/on conflict\(tracking_event_id\)/i);
+});
+
+
+test('WW-9 covers every new advisor-reported foreign key path with an index',()=>{
+  for(const indexName of [
+    'commerce_fulfillment_shipments_market_service_idx',
+    'commerce_fulfillment_shipments_destination_idx',
+    'commerce_fulfillment_shipments_currency_idx',
+    'commerce_fulfillment_shipments_quote_idx',
+    'commerce_fulfillment_notification_shipment_idx',
+    'commerce_fulfillment_notification_order_idx',
+    'commerce_fulfillment_notification_customer_idx',
+    'commerce_return_requests_shipment_idx',
+    'commerce_return_requests_market_idx',
+  ]) assert.equal(fkIndexes.includes('create index if not exists '+indexName),true);
 });
