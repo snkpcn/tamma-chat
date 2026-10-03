@@ -6,8 +6,8 @@ import {
   normalizeReturnRequest,
 } from './_global-fulfillment';
 import type {WorldwideEnv} from './_worldwide-foundation';
+import {worldwideDbFetch} from './_worldwide-db-client';
 
-type DbConfig={url:string;key:string};
 type RuntimeEnv={get?:(key:string)=>unknown};
 
 function runtimeEnv():RuntimeEnv|undefined{
@@ -17,27 +17,11 @@ function envValue(key:string):string|undefined{
   const value=runtimeEnv()?.get?.(key);
   return typeof value==='string'&&value.trim()?value:process.env[key];
 }
-function config():DbConfig|null{
-  const url=envValue('SUPABASE_URL');
-  const key=envValue('SUPABASE_SERVICE_ROLE_KEY');
-  return url&&key?{url:url.replace(/\/$/,''),key}:null;
-}
 async function dbFetch(path:string,init:RequestInit={}){
-  const c=config(); if(!c)throw new Error('global_fulfillment_not_configured');
-  const response=await fetch(`${c.url}/rest/v1/${path}`,{
-    ...init,
-    headers:{
-      apikey:c.key,
-      Authorization:`Bearer ${c.key}`,
-      'Content-Type':'application/json',
-      ...(init.headers??{}),
-    },
+  return worldwideDbFetch(path,init,{
+    consistency:'strong',
+    operation:'global_fulfillment_truth',
   });
-  if(!response.ok){
-    const body=await response.text().catch(()=>'');
-    throw new Error(`global_fulfillment_db_${response.status}:${body.slice(0,400)}`);
-  }
-  return response;
 }
 
 function trackingPiiKey():Buffer{
