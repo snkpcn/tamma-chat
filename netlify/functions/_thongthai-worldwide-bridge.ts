@@ -48,7 +48,7 @@ export const THONGTHAI_BACKOFFICE_READ_LANES = Object.freeze([
   { lane:'market', source:'WW country/currency/locale/market core' },
   { lane:'pricing', source:'WW explicit multi-currency product price revisions' },
   { lane:'shipping', source:'domestic shipping settings or WW shipping quote authority' },
-  { lane:'customs', source:'WW customs profiles + destination rules + compliance snapshots' },
+  { lane:'customs', source:'WW customs profiles + explicit destination rules + compliance snapshots' },
   { lane:'fulfillment', source:'WW shipment/packages/tracking timeline' },
 ] as const);
 
