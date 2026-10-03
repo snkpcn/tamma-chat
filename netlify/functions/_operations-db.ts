@@ -2024,14 +2024,14 @@ export async function createCafeInquiry(input: {
   return { id: rows[0].id, inquiryCode: rows[0].inquiry_code };
 }
 
-export interface OrderableProduct { sku: string; name: string; description: string | null; price: number; stock: number }
+export interface OrderableProduct { productId: string; sku: string; name: string; description: string | null; price: number; stock: number }
 export async function listOtopProducts(environment: 'live' | 'test' = 'live'): Promise<OrderableProduct[]> {
   const res = await dbFetch(
     `otop_products?environment=eq.${environment}&active=eq.true&verified=eq.true&stock_qty=gt.0`
-    + '&select=sku,name,description,price,stock_qty&order=name.asc',
+    + '&select=id,sku,name,description,price,stock_qty&order=name.asc',
   );
-  const rows = await res.json() as Array<{ sku: string; name: string; description: string | null; price: number; stock_qty: number }>;
-  return rows.map(row => ({ sku: row.sku, name: row.name, description: row.description, price: Number(row.price), stock: Number(row.stock_qty) }));
+  const rows = await res.json() as Array<{ id:string; sku: string; name: string; description: string | null; price: number; stock_qty: number }>;
+  return rows.map(row => ({ productId:row.id, sku: row.sku, name: row.name, description: row.description, price: Number(row.price), stock: Number(row.stock_qty) }));
 }
 
 export async function createOtopOrder(input: {
