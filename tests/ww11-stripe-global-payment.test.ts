@@ -62,6 +62,9 @@ test('WW-11 Stripe adapter keeps provider secrets server-side and never persists
   assert.doesNotMatch(source,/sk_live_[A-Za-z0-9]+|whsec_[A-Za-z0-9]{16,}/);
   assert.doesNotMatch(db,/client_secret/);
   assert.match(source,/Idempotency-Key/);
+  assert.match(source,/payment_method_types\[\]/);
+  assert.match(source,/loadGlobalPaymentMethod/);
+  assert.match(source,/stripe_payment_method_not_live/);
 });
 
 test('WW-11 Stripe endpoints use modern Netlify Request handlers and member ownership',()=>{
