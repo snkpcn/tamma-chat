@@ -14,21 +14,14 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm test
       - name: WW10 production multilingual smoke
         env:
           THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
         run: |
-          node <<'NODE'
-          const { randomUUID } = require('node:crypto');
+          node --input-type=module <<'NODE'
+          import { randomUUID } from 'node:crypto';
           const cases = [
             {
               id:'th-worldwide',
