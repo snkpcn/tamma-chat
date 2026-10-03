@@ -483,7 +483,7 @@ function checkoutDateFromText(text: string, checkIn: string | null): string | nu
   const explicit = text.match(/(?:เช็กเอาต์|เชกเอาต์|เช็คเอาท์|เช็คเอาต์|เชคเอาท์|เชคเอาต์|checkout|ออก)(?:\s*วันที่)?\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{1,2})(?:\s*[\/.-]\s*(\d{2,4}))?)?/iu);
   if (!explicit) return null;
   if (explicit[2]) {
-    const today = bangkokDateParts(now);
+    const today = bangkokDateParts();
     let year = explicit[3] ? Number(explicit[3]) : today.year;
     if (year < 100) year += 2000;
     if (year > 2400) year -= 543;
