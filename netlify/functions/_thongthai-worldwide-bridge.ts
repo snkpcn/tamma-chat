@@ -37,6 +37,7 @@ export const THONGTHAI_BACKOFFICE_READ_LANES = Object.freeze([
   { lane:'customs', source:'WW customs capability (when live)' },
   { lane:'weather', source:'live weather provider' },
   { lane:'location', source:'owner-verified canonical navigation source' },
+  { lane:'incident', source:'Customer Voice incident store + existing team/owner notification routing' },
 ] as const);
 
 export type ThongthaiMarketRead =
