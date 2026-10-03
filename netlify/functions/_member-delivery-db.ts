@@ -143,9 +143,9 @@ export async function saveMemberAddress(
   if (useAddressV2 && !isWorldwideCapabilityEnabled('addressV2')) {
     throw new Error('international_address_not_enabled');
   }
-  const address: MemberAddressInput | InternationalAddressInput = useAddressV2
-    ? normalizeInternationalAddress(value)
-    : normalizeMemberAddress(value);
+  const internationalAddress = useAddressV2 ? normalizeInternationalAddress(value) : null;
+  const domesticAddress = useAddressV2 ? null : normalizeMemberAddress(value);
+  const isDefault = internationalAddress?.isDefault ?? domesticAddress?.isDefault ?? false;
   let id = addressId && UUID_RE.test(addressId) ? addressId : null;
 
   if (id) {
@@ -161,7 +161,7 @@ export async function saveMemberAddress(
     { headers: { Prefer: 'count=exact' } },
   );
   const existingAddresses = await countResponse.json() as Array<{ id: string }>;
-  const shouldDefault = address.isDefault || existingAddresses.length === 0;
+  const shouldDefault = isDefault || existingAddresses.length === 0;
   if (shouldDefault) {
     await dbFetch(`customer_addresses?customer_id=eq.${account.id}&is_default=eq.true`, {
       method: 'PATCH',
@@ -174,22 +174,22 @@ export async function saveMemberAddress(
     ? {
         customer_id: account.id,
         address_schema_version: 2,
-        country_code: address.countryCode,
-        label: address.label,
-        recipient_name_enc: encryptPii(address.recipientName),
-        phone_enc: encryptPii(address.phone),
-        organization_enc: encryptPii(address.organization),
-        address_line1_enc: encryptPii(address.addressLine1),
-        address_line2_enc: encryptPii(address.addressLine2),
-        dependent_locality_enc: encryptPii(address.dependentLocality),
-        locality_enc: encryptPii(address.locality),
-        administrative_area_enc: encryptPii(address.administrativeArea),
+        country_code: internationalAddress!.countryCode,
+        label: (useAddressV2 ? internationalAddress! : domesticAddress!).label,
+        recipient_name_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).recipientName),
+        phone_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).phone),
+        organization_enc: encryptPii(internationalAddress!.organization),
+        address_line1_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).addressLine1),
+        address_line2_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).addressLine2),
+        dependent_locality_enc: encryptPii(internationalAddress!.dependentLocality),
+        locality_enc: encryptPii(internationalAddress!.locality),
+        administrative_area_enc: encryptPii(internationalAddress!.administrativeArea),
         // V1 fields are intentionally cleared for non-domestic V2 records.
         subdistrict_enc: null,
         district_enc: null,
         province: null,
-        postal_code_enc: encryptPii(address.postalCode),
-        delivery_instructions_enc: encryptPii(address.deliveryInstructions),
+        postal_code_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).postalCode),
+        delivery_instructions_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).deliveryInstructions),
         is_default: shouldDefault,
         active: true,
         updated_at: new Date().toISOString(),
@@ -198,20 +198,20 @@ export async function saveMemberAddress(
         customer_id: account.id,
         address_schema_version: 1,
         country_code: 'TH',
-        label: address.label,
-        recipient_name_enc: encryptPii(address.recipientName),
-        phone_enc: encryptPii(address.phone),
+        label: (useAddressV2 ? internationalAddress! : domesticAddress!).label,
+        recipient_name_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).recipientName),
+        phone_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).phone),
         organization_enc: null,
-        address_line1_enc: encryptPii(address.addressLine1),
-        address_line2_enc: encryptPii(address.addressLine2),
+        address_line1_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).addressLine1),
+        address_line2_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).addressLine2),
         dependent_locality_enc: null,
         locality_enc: null,
         administrative_area_enc: null,
-        subdistrict_enc: encryptPii(address.subdistrict),
-        district_enc: encryptPii(address.district),
-        province: address.province,
-        postal_code_enc: encryptPii(address.postalCode),
-        delivery_instructions_enc: encryptPii(address.deliveryInstructions),
+        subdistrict_enc: encryptPii(domesticAddress!.subdistrict),
+        district_enc: encryptPii(domesticAddress!.district),
+        province: domesticAddress!.province,
+        postal_code_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).postalCode),
+        delivery_instructions_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).deliveryInstructions),
         is_default: shouldDefault,
         active: true,
         updated_at: new Date().toISOString(),
