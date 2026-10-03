@@ -129,6 +129,12 @@ export type ThongthaiShippingQuoteRead =
       source:'otop_shipping_settings';
       countryCode:'TH';
       currencyCode:'THB';
+      policy:{
+        domesticBaseFee:number;
+        freeShippingThreshold:number|null;
+        estimatedMinDays:number;
+        estimatedMaxDays:number;
+      };
       quote:{
         subtotal:number;
         shippingFee:number;
@@ -136,7 +142,7 @@ export type ThongthaiShippingQuoteRead =
         freeShipping:boolean;
         estimatedMinDays:number;
         estimatedMaxDays:number;
-      };
+      }|null;
     }
   | {
       status:'not_available';
@@ -154,24 +160,31 @@ export type ThongthaiShippingQuoteRead =
 
 export async function readThongthaiShippingQuote(input:{
   countryCode:unknown;
-  subtotal:unknown;
+  subtotal?:unknown;
   locale?:unknown;
   env?:WorldwideEnv;
 }):Promise<ThongthaiShippingQuoteRead>{
   const countryCode=typeof input.countryCode==='string'?input.countryCode.trim().toUpperCase():'';
-  const subtotal=Number(input.subtotal);
-  if(!Number.isFinite(subtotal)||subtotal<0){
+  const hasSubtotal=input.subtotal!==undefined&&input.subtotal!==null&&input.subtotal!=='';
+  const subtotal=hasSubtotal?Number(input.subtotal):null;
+  if(subtotal!==null&&(!Number.isFinite(subtotal)||subtotal<0)){
     return{status:'not_available',reason:'invalid_subtotal',countryCode};
   }
 
   if(countryCode===DOMESTIC_COMMERCE_BASELINE.countryCode){
     const settings=await loadShippingSettings();
-    const quote=calculateShippingQuote(subtotal,settings);
+    const quote=subtotal===null?null:calculateShippingQuote(subtotal,settings);
     return{
       status:'ready',
       source:'otop_shipping_settings',
       countryCode:'TH',
       currencyCode:'THB',
+      policy:{
+        domesticBaseFee:settings.domesticBaseFee,
+        freeShippingThreshold:settings.freeShippingThreshold,
+        estimatedMinDays:settings.estimatedMinDays,
+        estimatedMaxDays:settings.estimatedMaxDays,
+      },
       quote,
     };
   }
