@@ -136,7 +136,7 @@ export type ThongthaiShippingQuoteRead =
         | 'shipping_market_capability_not_live'
         | 'worldwide_thongthai_gate_off'
         | 'worldwide_shipping_gate_off'
-        | 'global_shipping_quote_source_not_connected';
+        | 'global_shipping_package_data_required';
       countryCode:string;
       market?:ResolvedMarketContext;
     };
@@ -182,10 +182,12 @@ export async function readThongthaiShippingQuote(input:{
     return {status:'not_available',reason:'worldwide_shipping_gate_off',countryCode,market:market.context};
   }
 
-  // WW owns the future international quote engine. Do not duplicate it here.
+  // WW-6 owns the international quote engine. This Thongthai read seam still
+  // receives only subtotal/country today, so it must not invent package weight
+  // or dimensions. WW-10 can supply verified parcel facts before calling WW-6.
   return {
     status:'not_available',
-    reason:'global_shipping_quote_source_not_connected',
+    reason:'global_shipping_package_data_required',
     countryCode,
     market:market.context,
   };
