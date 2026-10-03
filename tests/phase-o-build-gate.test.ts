@@ -12,9 +12,12 @@ test('Phase O live semantic build gate is opt-in and off by default',()=>{
 
 test('Netlify build runs the opt-in Phase O gate after deterministic polish scripts',()=>{
   const toml=readFileSync('netlify.toml','utf8');
-  const chat=toml.indexOf('apply-chat-polish.mjs');
-  const restaurant=toml.indexOf('apply-restaurant-constraint-copy.mjs');
-  const gate=toml.indexOf('phase-o-build-gate.mjs');
+  const command=toml.match(/^\s*command\s*=\s*"([^"]+)"\s*$/m)?.[1]??'';
+  const runnerMatch=command.match(/node\s+(scripts\/[^\s]+\.mjs)/);
+  const source=runnerMatch?readFileSync(runnerMatch[1],'utf8'):toml;
+  const chat=source.indexOf('apply-chat-polish.mjs');
+  const restaurant=source.indexOf('apply-restaurant-constraint-copy.mjs');
+  const gate=source.indexOf('phase-o-build-gate.mjs');
   assert.ok(chat>=0&&restaurant>chat&&gate>restaurant);
 });
 
