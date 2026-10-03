@@ -373,8 +373,9 @@
 
   function get(id, lang, fallback={}) {
     if (!lang || lang === 'th') return fallback;
-    const row = T[lang]?.[id];
-    return row ? { ...fallback, ...row } : fallback;
+    const english = T.en?.[id] || {};
+    const row = T[lang]?.[id] || {};
+    return { ...fallback, ...english, ...row };
   }
 
   window.OTOP_PRODUCT_TRANSLATIONS = { get };
