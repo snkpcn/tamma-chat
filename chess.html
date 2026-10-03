@@ -569,8 +569,9 @@ function ttSetLang(lang,persist=true){
   const normalized=window.ThammachatLocale?.normalize(lang)||lang;
   if(!supported.includes(normalized))return;
   ttLang=normalized;
-  if(window.ThammachatLocale)window.ThammachatLocale.set(normalized,{persist,source:'chess'});
-  else if(persist)try{window.localStorage.setItem(LANG_STORAGE_KEY,normalized);}catch(e){}
+  lang=normalized;
+  if(window.ThammachatLocale)window.ThammachatLocale.set(lang,{persist,source:'chess'});
+  else if(persist)try{window.localStorage.setItem(LANG_STORAGE_KEY,lang);}catch(e){}
   ttApplyTranslations();
   ttChessRenderDynamicText();
 }
