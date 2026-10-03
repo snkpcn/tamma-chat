@@ -120,12 +120,12 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
   {
     type: 'function',
     name: 'get_shipping_quote',
-    description: 'Read a canonical shipping quote for a destination country and merchandise subtotal. Thailand uses the existing OTOP shipping settings. International quotes only return when the WW shipping authority is actually connected and live; never guess a fee. Read-only.',
+    description: 'Read canonical shipping eligibility/policy for a destination country, and calculate a Thailand shipping quote when a subtotal is supplied. International readiness is checked before asking for subtotal; never guess a foreign fee. Read-only.',
     parameters: objectSchema({
       country_code: { type: 'string', description: 'Two-letter destination country code such as TH, SE, US.' },
-      subtotal: { type: 'number', minimum: 0, description: 'Current merchandise subtotal in the market transaction currency.' },
+      subtotal: { type: 'number', minimum: 0, description: 'Optional merchandise subtotal. Needed for an actual Thailand fee quote, not for checking whether an international market/shipping authority is live.' },
       locale: { type: 'string', description: 'Optional customer locale.' },
-    }, ['country_code','subtotal']),
+    }, ['country_code']),
   },
   {
     type: 'function',
@@ -303,9 +303,12 @@ export async function executeThongthaiReadOnlyTool(
   }
   if (name === 'get_shipping_quote') {
     const countryCode = stringArg(args, 'country_code');
-    const subtotal = Number(args.subtotal);
     if (!countryCode) return JSON.stringify({ ok:false, error:'country_code_required' });
-    if (!Number.isFinite(subtotal) || subtotal < 0) return JSON.stringify({ ok:false, error:'valid_subtotal_required' });
+    const rawSubtotal=args.subtotal;
+    const subtotal=rawSubtotal===undefined||rawSubtotal===null||rawSubtotal===''?null:Number(rawSubtotal);
+    if(subtotal!==null&&(!Number.isFinite(subtotal)||subtotal<0)){
+      return JSON.stringify({ok:false,error:'valid_subtotal_required'});
+    }
     return JSON.stringify(await readThongthaiShippingQuote({
       countryCode,
       subtotal,
