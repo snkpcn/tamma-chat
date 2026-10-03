@@ -19,6 +19,7 @@ const steps = [
   ['audit-ww8', 'npm', ['run', 'audit:ww8']],
   ['audit-ww9', 'npm', ['run', 'audit:ww9']],
   ['audit-ww10', 'npm', ['run', 'audit:ww10']],
+  ['audit-ww11', 'npm', ['run', 'audit:ww11']],
   ['semantic-certification-artifact', NODE, ['--import', 'tsx', 'scripts/write-semantic-certification-artifact.ts']],
 ];
 

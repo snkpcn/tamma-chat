@@ -120,6 +120,7 @@ function readyDeps(overrides:Partial<ThongthaiWorldwideDeps>={}):ThongthaiWorldw
       priority:1,
     }}),
     getGlobalStatus:async()=>null,
+    loadCertification:async()=>({kind:'ready' as const,certificationId:'55555555-5555-4555-8555-555555555555',certificationCode:'MC-WW11-TEST',validUntil:'2026-11-03T00:00:00.000Z'}),
     ...overrides,
   };
   return deps as unknown as ThongthaiWorldwideDeps;
@@ -139,7 +140,7 @@ test('Thongthai bridge owns no duplicate WW or shipping database', () => {
 test('Thongthai has a bounded read seam for every customer-facing backoffice lane', () => {
   const lanes=new Set(THONGTHAI_BACKOFFICE_READ_LANES.map(item=>item.lane));
   assert.deepEqual([...lanes].sort(),[
-    'activity','booking','cafe','customs','fulfillment','market','membership','otop','payment',
+    'activity','booking','cafe','certification','customs','fulfillment','market','membership','otop','payment',
     'pricing','promotion','restaurant','shipping','stay',
   ]);
   const tools=new Set(THONGTHAI_READ_ONLY_TOOLS.map(tool=>tool.name));
@@ -293,4 +294,23 @@ test('semantic supervisor is instructed to reply in the current customer languag
   );
   assert.match(prompt,/SAME language as the CURRENT customer message/u);
   assert.match(prompt,/Never infer country, market, currency, shipping destination, or payment method from the language used/u);
+});
+
+
+test('WW-11 country certification blocks checkout readiness even when WW-4/5/6/7 are otherwise ready', async()=>{
+  const offer=await readThongthaiWorldwideOffer({
+    countryCode:'SE',
+    items:[{sku:'TEST001',quantity:1}],
+    environment:'test',
+    idempotencySeed:'ww11-uncertified-offer',
+    env:WW10_ENABLED,
+  },readyDeps({
+    loadCertification:async()=>({kind:'not_available' as const,reason:'country_not_certified' as const}),
+  }));
+  assert.equal(offer.status,'partial');
+  assert.equal(offer.checkoutReadiness.status,'not_ready');
+  assert.deepEqual(offer.checkoutReadiness.countryCertification,{
+    status:'not_ready',
+    reason:'country_not_certified',
+  });
 });
