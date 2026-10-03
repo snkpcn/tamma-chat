@@ -120,6 +120,33 @@ Supabase advisors:
 
 Production remains fail-closed: no real country is certified by this rollout.
 
+
+## First real-country onboarding wave
+
+Owner-selected targets:
+
+- South Korea — market `KR`, currency `KRW`, default locale `ko`
+- Japan — market `JP`, currency `JPY`, default locale `ja`
+- United States — market `US`, currency `USD`, default locale `en`
+
+These three markets are now present in production as **certification targets**, not live commerce markets.
+
+Current first-wave state is deliberately fail-closed:
+
+- market status = `certification`
+- catalog / storefront / pricing / Thongthai = `shadow`
+- payments / shipping / customs / checkout / fulfillment = `disabled`
+- no real global-v2 payment provider is selected or enabled
+- no real carrier/service/rate authority is selected or enabled
+- no customs market policy or return policy is invented
+- no product shipping dimensions, verified customs classifications, or country certification are fabricated
+
+This means Thongthai can know these are the intended launch countries, but must still say checkout/shipping cannot be verified until the real provider, carrier, product-measurement, customs, and policy evidence is supplied and certified.
+
+Applied production onboarding migration:
+
+- `20261003215717_ww11_first_wave_kr_jp_us_targets`
+
 ## Definition of Done
 
 - [x] certification schema + service-role RPCs deployed
