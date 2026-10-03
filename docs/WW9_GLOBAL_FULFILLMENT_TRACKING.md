@@ -1,6 +1,6 @@
 # WW-9 — Global Fulfillment & Tracking
 
-Status: implementation
+Status: complete
 Date: 2026-10-03
 
 ## Goal
@@ -120,3 +120,69 @@ Tracking numbers are encrypted in the server layer before they are written to th
 No domestic shipping table, fee calculation, PromptPay path, or checkout-v1 RPC is modified.
 
 The legacy Thailand carrier stays legacy_v1 and cannot pass the WW-9 global booking gate.
+
+
+## Applied production migrations
+
+Production schema is installed and remains dormant until worldwide fulfillment is explicitly enabled.
+
+- `20261003082949_ww9_global_fulfillment_tracking`
+- `20261003083446_ww9_tracking_notification_conflict_fix`
+- `20261003083705_ww9_fulfillment_fk_indexes`
+
+The conflict hotfix fixes a PL/pgSQL name collision discovered by the rollback-only tracking probe before any real global shipment existed.
+
+## Rollback-only E2E certification
+
+A synthetic test transaction exercised the production RPCs end to end:
+
+1. authorized test member + test guest
+2. synthetic Sweden/SEK market
+3. synthetic captured global payment
+4. synthetic consumed global shipping quote
+5. carrier booking with one package + label
+6. `PICKED_UP` -> order `shipped`
+7. `DELIVERED` -> order `delivered/completed`
+8. late `IN_TRANSIT` event stored with `state_applied=false` and did not rewind delivery
+9. explicit live test return policy
+10. member replacement return request accepted
+
+The probe intentionally ended by raising `WW9_PROBE_PASS`, rolling back the whole transaction.
+
+Post-probe production counts:
+
+- fulfillment shipments: 0
+- packages: 0
+- tracking events: 0
+- notification outbox: 0
+- return policies: 0
+- return requests: 0
+- synthetic markets/providers/users/test actors: 0
+- live global-v2 shipping services: 0
+- live non-legacy global carriers: 0
+
+## Advisor verification
+
+- WW-9 tables are RLS-enabled with no anon/authenticated table grants.
+- WW-9 privileged RPCs are service-role-only.
+- Foreign-key advisor findings introduced by WW-9 are fully covered by indexes.
+- Remaining WW-9 advisor notices are INFO-only:
+  - RLS enabled with no policies: intentional for service-role-only server tables.
+  - unused indexes: expected while fulfillment is dormant and tables are empty.
+
+## Definition of Done
+
+- [x] Provider-neutral carrier booking evidence exists.
+- [x] Booking requires checkout v2, captured payment, consumed quote, and a live global-v2 carrier service.
+- [x] Multi-package tracking and label references are supported.
+- [x] Tracking numbers are encrypted server-side.
+- [x] Tracking events are immutable and idempotent.
+- [x] Out-of-order events cannot rewind terminal shipment state.
+- [x] Existing order shipping status remains synchronized for backoffice compatibility.
+- [x] Customer notification outbox is idempotent and does not auto-enable a delivery channel.
+- [x] International returns require an explicit live market policy.
+- [x] Domestic checkout/shipping v1 remains unchanged.
+- [x] Production migration + conflict hotfix + FK indexes are applied.
+- [x] Rollback-only E2E certification passed with zero residue.
+- [x] Security and performance advisors reviewed.
+- [x] Worldwide carrier/service/return data remains fail-closed.
