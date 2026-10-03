@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
 const sql=readFileSync(new URL('../supabase/migrations/20261003074400_ww9_global_fulfillment_tracking.sql',import.meta.url),'utf8');
+const conflictFix=readFileSync(new URL('../supabase/migrations/20261003083500_ww9_tracking_notification_conflict_fix.sql',import.meta.url),'utf8');
 
 test('WW-9 migration creates provider-neutral booking, packages, immutable tracking, notification outbox, and returns',()=>{
   for(const table of [
@@ -54,4 +55,15 @@ test('WW-9 returns fail closed until an explicit live market policy exists',()=>
   assert.match(sql,/return_window_closed/);
   assert.match(sql,/return_resolution_not_allowed/);
   assert.match(sql,/p\.enabled and p\.status='live'/);
+});
+
+
+test('WW-9 notification outbox conflict target is unambiguous on fresh and already-migrated databases',()=>{
+  assert.match(sql,/constraint commerce_fulfillment_notification_outbox_tracking_event_id_uq unique\(tracking_event_id\)/);
+  assert.doesNotMatch(sql,/on conflict\(tracking_event_id\)/i);
+  assert.match(sql,/on conflict on constraint commerce_fulfillment_notification_outbox_tracking_event_id_uq do nothing/i);
+  assert.match(conflictFix,/rename constraint commerce_fulfillment_notification_outbox_tracking_event_id_key[\s\S]*commerce_fulfillment_notification_outbox_tracking_event_id_uq/i);
+  assert.match(conflictFix,/create or replace function public\.record_commerce_fulfillment_booking_v1/);
+  assert.match(conflictFix,/create or replace function public\.apply_commerce_fulfillment_tracking_event_v1/);
+  assert.doesNotMatch(conflictFix,/on conflict\(tracking_event_id\)/i);
 });
