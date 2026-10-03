@@ -19,7 +19,8 @@
     "audit:ww3": "node --import tsx --test tests/ww3-storefront-locale.test.ts tests/ww3-public-locale-kernel.test.ts tests/five-language-production-certification.test.ts",
     "audit:ww4": "node --import tsx --test tests/ww4-multi-currency.test.ts tests/ww4-multi-currency-migration.test.ts tests/payments.test.ts tests/member-delivery-e2e.test.ts",
     "audit:ww5": "node --import tsx --test tests/ww5-global-payments.test.ts tests/ww5-global-payments-migration.test.ts tests/payments.test.ts tests/ww4-multi-currency.test.ts",
-    "audit:ww6": "node --import tsx --test tests/ww6-global-shipping.test.ts tests/ww6-global-shipping-migration.test.ts tests/member-delivery-e2e.test.ts tests/thongthai-worldwide-service-bridge.test.ts"
+    "audit:ww6": "node --import tsx --test tests/ww6-global-shipping.test.ts tests/ww6-global-shipping-migration.test.ts tests/member-delivery-e2e.test.ts tests/thongthai-worldwide-service-bridge.test.ts",
+    "audit:ww7": "node --import tsx --test tests/ww7-customs-compliance.test.ts tests/ww7-customs-compliance-migration.test.ts tests/ww6-global-shipping.test.ts tests/thongthai-worldwide-service-bridge.test.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0"
