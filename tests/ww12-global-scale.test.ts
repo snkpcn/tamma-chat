@@ -109,6 +109,18 @@ test('WW-12 DB client has bounded timeout, safe replica fallback and structured 
   assert.doesNotMatch(source,/console\.log\([^\n]*(?:apikey|Authorization|SERVICE_ROLE_KEY)/);
 });
 
+
+test('WW-12 exposes only a sanitized scale snapshot in public brain status',()=>{
+  const status=read('netlify/functions/thongthai-brain-status.ts');
+  assert.match(status,/worldwideDbScaleSnapshot/);
+  assert.match(status,/globalScale:/);
+  const client=read('netlify/functions/_worldwide-db-client.ts');
+  const snapshotStart=client.indexOf('export function worldwideDbScaleSnapshot');
+  assert.ok(snapshotStart>=0);
+  const snapshotBlock=client.slice(snapshotStart,snapshotStart+1200);
+  assert.doesNotMatch(snapshotBlock,/SERVICE_ROLE_KEY[^\n]*return|key:/);
+});
+
 test('WW-12 CDN cache policy accelerates static assets but keeps pages and mutable locale scripts revalidated',()=>{
   const headers=read('_headers');
   for(const page of ['/\n  Cache-Control: no-cache','/index.html\n  Cache-Control: no-cache','/account.html\n  Cache-Control: no-cache','/otop.html\n  Cache-Control: no-cache']){
