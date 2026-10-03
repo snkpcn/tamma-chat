@@ -107,7 +107,7 @@ import {
   classifySemanticBusinessIncidentRoute,
   semanticIncidentFeedbackMatch,
 } from './_business-incident-router';
-import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
+import { isForeignLanguageCustomerMessage, shouldUseThongthaiAgentForeignLanguagePrimary, shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
 import { deriveSemanticMeaning } from './_semantic-meaning';
@@ -6744,23 +6744,37 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     && /(?:เมนู|มีอะไร|แนะนำ|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย)/u.test(request.message)
     && !/(?:โต๊ะ|ว่าง|สถานะ|กี่โมง|จอง|สั่ง|ยืนยัน)/u.test(request.message);
 
-  const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+  const primaryRoutingCommonEligible = !phase3SemanticLearningEligible
     && !restaurantTopicSwitchBeforePrimary
     && !completeVisitorJourneyBeforeSupervision
     && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
     && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
-    && !boundedConversationBeforePrimary
-    && shouldUseThongthaiAgentPrimary({
-    guestKey: request.guestId,
-    guestDbId,
-    channel,
-    explicitTransactionIntent,
-    weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
-    locationRequest: preserveVerifiedLocationBeforeSupervision
-      || topLevelSemanticIntent === 'LOCATION_REQUEST',
-  });
+    && !boundedConversationBeforePrimary;
+
+  const foreignLanguagePrimaryEligible = primaryRoutingCommonEligible
+    && isForeignLanguageCustomerMessage(request.message)
+    && shouldUseThongthaiAgentForeignLanguagePrimary({
+      guestKey: request.guestId,
+      guestDbId,
+      channel,
+      explicitTransactionIntent,
+      weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+      locationRequest: preserveVerifiedLocationBeforeSupervision
+        || topLevelSemanticIntent === 'LOCATION_REQUEST',
+    });
+
+  const readOnlyPrimaryAgentEligible = primaryRoutingCommonEligible
+    && (foreignLanguagePrimaryEligible || shouldUseThongthaiAgentPrimary({
+      guestKey: request.guestId,
+      guestDbId,
+      channel,
+      explicitTransactionIntent,
+      weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+      locationRequest: preserveVerifiedLocationBeforeSupervision
+        || topLevelSemanticIntent === 'LOCATION_REQUEST',
+    }));
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
 
   if (cafeReadOnlyBeforePrimary) {
