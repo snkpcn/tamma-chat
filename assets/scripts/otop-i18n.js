@@ -1,8 +1,8 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'thammachat-lang-v1';
-  const SUPPORTED = ['th','en','zh','lo','vi'];
+  const STORAGE_KEY = window.ThammachatLocale?.storageKey || 'thammachat-lang-v1';
+  const SUPPORTED = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi'];
   const LOCALES = { th:'th-TH', en:'en-US', zh:'zh-CN', lo:'lo-LA', vi:'vi-VN' };
 
   const PROVINCES = {
@@ -307,15 +307,17 @@
     return String(value ?? '').replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? '');
   }
   function t(key, vars={}) {
-    const dict = COPY[current] || COPY.th;
-    const raw = dict[key] ?? COPY.th[key] ?? key;
-    return interpolate(raw, vars);
+    if (window.ThammachatLocale) return window.ThammachatLocale.translate(COPY, key, vars, current);
+    const chain = current === 'th' ? ['th'] : (current === 'en' ? ['en'] : [current, 'en']);
+    for (const lang of chain) if (COPY[lang]?.[key] !== undefined) return interpolate(COPY[lang][key], vars);
+    return interpolate(key, vars);
   }
   function provinceName(id, lang=current) {
-    return PROVINCES[id]?.[lang] || PROVINCES[id]?.th || id;
+    return PROVINCES[id]?.[lang] || (lang === 'th' ? PROVINCES[id]?.th : PROVINCES[id]?.en) || id;
   }
-  function locale() { return LOCALES[current] || LOCALES.th; }
+  function locale() { return window.ThammachatLocale?.locale(current) || LOCALES[current] || LOCALES.th; }
   function readSaved() {
+    if (window.ThammachatLocale) return window.ThammachatLocale.get();
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (SUPPORTED.includes(saved)) return saved;
@@ -341,13 +343,13 @@
     document.querySelectorAll('[data-otop-lang-select]').forEach(el => { el.value = current; });
   }
   function setLang(lang, persist=true) {
-    if (!SUPPORTED.includes(lang)) return;
-    current = lang;
-    if (persist) {
-      try { localStorage.setItem(STORAGE_KEY, lang); } catch {}
-    }
+    const normalized = window.ThammachatLocale?.normalize(lang) || lang;
+    if (!SUPPORTED.includes(normalized)) return;
+    current = normalized;
+    if (window.ThammachatLocale) window.ThammachatLocale.set(normalized, { persist, source:'otop' });
+    else if (persist) { try { localStorage.setItem(STORAGE_KEY, normalized); } catch {} }
     applyStatic();
-    window.dispatchEvent(new CustomEvent('otop:i18n-change', { detail:{ lang } }));
+    window.dispatchEvent(new CustomEvent('otop:i18n-change', { detail:{ lang:current } }));
   }
   function init() {
     current = readSaved();
@@ -355,6 +357,7 @@
     document.querySelectorAll('[data-otop-lang-select]').forEach(select => {
       select.addEventListener('change', () => setLang(select.value));
     });
+    window.addEventListener('thammachat:locale-change', event => { const next=event.detail?.lang; if(next&&next!==current)setLang(next,false); });
     window.dispatchEvent(new CustomEvent('otop:i18n-ready', { detail:{ lang:current } }));
   }
 
