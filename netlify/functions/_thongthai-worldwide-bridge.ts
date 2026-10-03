@@ -251,7 +251,8 @@ export function buildThongthaiOfferParcels(
   return{parcels,missingProfiles:[...new Set(missingProfiles)]};
 }
 
-type WorldwideDeps={
+export type ThongthaiWorldwideDeps={
+  readMarket:typeof readThongthaiMarketContext;
   listProducts:typeof listOtopProducts;
   loadPrice:typeof loadExplicitProductPrice;
   loadProfiles:typeof loadGlobalProductShippingProfiles;
@@ -261,7 +262,8 @@ type WorldwideDeps={
   getGlobalStatus:typeof getGuestGlobalCommerceStatus;
 };
 
-const DEFAULT_DEPS:WorldwideDeps={
+const DEFAULT_DEPS:ThongthaiWorldwideDeps={
+  readMarket:readThongthaiMarketContext,
   listProducts:listOtopProducts,
   loadPrice:loadExplicitProductPrice,
   loadProfiles:loadGlobalProductShippingProfiles,
@@ -284,7 +286,7 @@ export async function readThongthaiWorldwideOffer(input:{
   environment?:'live'|'test';
   idempotencySeed?:string;
   env?:WorldwideEnv;
-},deps:WorldwideDeps=DEFAULT_DEPS){
+},deps:ThongthaiWorldwideDeps=DEFAULT_DEPS){
   const countryCode=typeof input.countryCode==='string'?input.countryCode.trim().toUpperCase():'';
   if(!/^[A-Z]{2}$/.test(countryCode))return{status:'not_available' as const,reason:'invalid_country_code',countryCode};
   let items:ThongthaiWorldwideOfferItem[];
@@ -323,7 +325,7 @@ export async function readThongthaiWorldwideOffer(input:{
     };
   }
 
-  const market=await readThongthaiMarketContext(countryCode,input.locale,input.env);
+  const market=await deps.readMarket(countryCode,input.locale,input.env);
   if(market.status!=='ready')return{status:'not_available' as const,reason:'market_not_ready',countryCode,market};
   if(!isMarketCapabilityLive(market.context,'thongthai')){
     return{status:'not_available' as const,reason:'thongthai_market_capability_not_live',countryCode,market:market.context};
@@ -467,7 +469,7 @@ export async function readThongthaiGlobalCommerceStatus(input:{
   code?:unknown;
   environment?:'live'|'test';
   env?:WorldwideEnv;
-},deps:WorldwideDeps=DEFAULT_DEPS){
+},deps:ThongthaiWorldwideDeps=DEFAULT_DEPS){
   if(!isWorldwideCapabilityEnabled('thongthaiWorldwide',input.env)){
     return{status:'not_available' as const,reason:'worldwide_thongthai_gate_off'};
   }
