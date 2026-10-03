@@ -5,6 +5,8 @@ import type { SemanticDomain } from './_semantic-interpreter';
 import { THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS, THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 import { restaurantMenuAdvice } from './_restaurant-sot';
 import { readThongthaiMarketContext, readThongthaiShippingQuote } from './_thongthai-worldwide-bridge';
+import { getWeatherForTammaLocation } from './_weather-provider';
+import { TAMMA_CHART_LOCATION } from './_local-concierge-location';
 
 export type ThongthaiAgentFunctionTool = {
   type: 'function';
@@ -109,6 +111,18 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
   },
   {
     type: 'function',
+    name: 'get_current_weather',
+    description: 'Read current verified weather conditions for the Thammachat/Tad Tone location from the canonical live weather provider. This is current conditions, not a future forecast. Read-only.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
+    name: 'get_location_info',
+    description: 'Read the owner-verified Thammachat location/navigation information. Returns the canonical maps link and only returns a street address/coordinates if they have actually been resolved. Read-only.',
+    parameters: objectSchema({}),
+  },
+  {
+    type: 'function',
     name: 'get_market_context',
     description: 'Read the canonical WW market context for a destination country: market, currency, locale and capability states. Country is never inferred from language. Read-only.',
     parameters: objectSchema({
@@ -122,9 +136,9 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
     description: 'Read a canonical shipping quote for a destination country and merchandise subtotal. Thailand uses the existing OTOP shipping settings. International quotes only return when the WW shipping authority is actually connected and live; never guess a fee. Read-only.',
     parameters: objectSchema({
       country_code: { type: 'string', description: 'Two-letter destination country code such as TH, SE, US.' },
-      subtotal: { type: 'number', minimum: 0, description: 'Current merchandise subtotal in the market transaction currency.' },
+      subtotal: { type: 'number', minimum: 0, description: 'Optional merchandise subtotal. Supply it when the customer wants an exact quote; omit it when they only ask shipping policy/eligibility.' },
       locale: { type: 'string', description: 'Optional customer locale.' },
-    }, ['country_code','subtotal']),
+    }, ['country_code']),
   },
   {
     type: 'function',
@@ -276,6 +290,30 @@ export async function executeThongthaiReadOnlyTool(
 ): Promise<string> {
   const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
   if (name === 'recommend_restaurant_menu') return executeRestaurantRecommendation(args);
+  if (name === 'get_current_weather') {
+    const weather = await getWeatherForTammaLocation();
+    return JSON.stringify({
+      ok: weather.status === 'ok',
+      status: weather.status,
+      condition: weather.condition,
+      summary: weather.forecastSummary,
+      temperature_celsius: weather.temperatureCelsius,
+      precipitation_chance: weather.precipitationChance,
+      fetched_at: weather.fetchedAt,
+      unavailable_reason: weather.unavailableReason,
+      current_conditions_only: true,
+    });
+  }
+  if (name === 'get_location_info') {
+    return JSON.stringify({
+      ok: true,
+      maps_link: TAMMA_CHART_LOCATION.mapsLink,
+      resolution_status: TAMMA_CHART_LOCATION.resolutionStatus,
+      address: TAMMA_CHART_LOCATION.resolutionStatus === 'resolved' ? TAMMA_CHART_LOCATION.address : null,
+      latitude: TAMMA_CHART_LOCATION.resolutionStatus === 'resolved' ? TAMMA_CHART_LOCATION.latitude : null,
+      longitude: TAMMA_CHART_LOCATION.resolutionStatus === 'resolved' ? TAMMA_CHART_LOCATION.longitude : null,
+    });
+  }
   if (name === 'get_market_context') {
     const countryCode = stringArg(args, 'country_code');
     if (!countryCode) return JSON.stringify({ ok:false, error:'country_code_required' });
@@ -283,9 +321,14 @@ export async function executeThongthaiReadOnlyTool(
   }
   if (name === 'get_shipping_quote') {
     const countryCode = stringArg(args, 'country_code');
-    const subtotal = Number(args.subtotal);
     if (!countryCode) return JSON.stringify({ ok:false, error:'country_code_required' });
-    if (!Number.isFinite(subtotal) || subtotal < 0) return JSON.stringify({ ok:false, error:'valid_subtotal_required' });
+    const subtotalValue = args.subtotal;
+    const subtotal = subtotalValue === undefined || subtotalValue === null || subtotalValue === ''
+      ? null
+      : Number(subtotalValue);
+    if (subtotal !== null && (!Number.isFinite(subtotal) || subtotal < 0)) {
+      return JSON.stringify({ ok:false, error:'valid_subtotal_required' });
+    }
     return JSON.stringify(await readThongthaiShippingQuote({
       countryCode,
       subtotal,
