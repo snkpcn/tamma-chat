@@ -22,7 +22,7 @@
     "audit:ww6": "node --import tsx --test tests/ww6-global-shipping.test.ts tests/ww6-global-shipping-migration.test.ts tests/member-delivery-e2e.test.ts tests/thongthai-worldwide-service-bridge.test.ts",
     "audit:ww7": "node --import tsx --test tests/ww7-customs-compliance.test.ts tests/ww7-customs-compliance-migration.test.ts tests/ww6-global-shipping.test.ts tests/thongthai-worldwide-service-bridge.test.ts",
     "audit:ww8": "node --import tsx --test tests/ww8-international-checkout.test.ts tests/ww8-international-checkout-migration.test.ts tests/ww7-customs-compliance.test.ts tests/ww6-global-shipping.test.ts tests/ww5-global-payments.test.ts tests/ww4-multi-currency.test.ts tests/member-delivery-e2e.test.ts tests/payments.test.ts",
-    "audit:ww9": "node --import tsx --test tests/ww9-global-fulfillment.test.ts tests/ww9-global-fulfillment-migration.test.ts tests/ww8-international-checkout.test.ts tests/ww7-customs-compliance.test.ts tests/ww6-global-shipping.test.ts tests/ww5-global-payments.test.ts tests/member-delivery-e2e.test.ts tests/payments.test.ts"
+    "audit:ww9": "node --import tsx --test tests/ww9-global-fulfillment.test.ts tests/ww9-global-fulfillment-migration.test.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0"
