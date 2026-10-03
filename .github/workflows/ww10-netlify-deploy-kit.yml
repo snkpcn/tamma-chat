@@ -1,6 +1,6 @@
 name: WW10 Netlify Deploy Kit
 
-# WW10_DEPLOY_PROXY seeded as deploy-preview runtime var before this preview build
+# WW10 deploy relay v2: PR-only GitHub OIDC via Supabase
 
 on:
   push:
