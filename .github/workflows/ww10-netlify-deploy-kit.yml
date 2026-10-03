@@ -47,7 +47,7 @@ jobs:
           retention-days: 1
       - name: Deploy exact main through OIDC-gated relay
         env:
-          PREVIEW_TOKEN_URL: https://deploy-preview-552--tamma-chat.netlify.app/ww10-netlify-deploy-token
+          PREVIEW_TOKEN_URL: https://upaokrprawzhgzeqsdke.supabase.co/functions/v1/ww10-deploy-relay
         run: |
           set -euo pipefail
           OIDC_JSON="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=ww10-netlify-deploy")"
