@@ -199,22 +199,28 @@ export async function worldwideDbFetch(
     &&(method==='GET'||method==='HEAD')
     &&options.allowReplicaFallback!==false;
 
+  let response:Response;
   try{
-    const response=await requestOnce({
+    response=await requestOnce({
       path,init,route,operation,env,fallback:false,
     });
     if(canFallback&&response.status>=500){
-      return await requestOnce({
+      response=await requestOnce({
         path,init,route:'primary',operation,env,fallback:true,
       });
     }
-    return response;
   }catch(error){
-    if(canFallback){
-      return await requestOnce({
-        path,init,route:'primary',operation,env,fallback:true,
-      });
-    }
-    throw error;
+    if(!canFallback)throw error;
+    response=await requestOnce({
+      path,init,route:'primary',operation,env,fallback:true,
+    });
   }
+
+  if(!response.ok){
+    const body=await response.text().catch(()=>'');
+    throw new Error(
+      'worldwide_db_http_'+response.status+':'+operation+':'+body.slice(0,320)
+    );
+  }
+  return response;
 }
