@@ -17,35 +17,64 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
       - run: npm test
-      - name: Package exact current main source for WW10 production deploy
+      - name: WW10 production multilingual smoke
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
         run: |
-          mkdir -p /tmp/ww10-main
-          git archive 8fec3a15e3c2452e6a7d88eaf5584902ba6f9d42 | tar -x -C /tmp/ww10-main
-          tar -czf /tmp/tamma-chat-ww10-main.tgz -C /tmp/ww10-main .
-      - name: Package Netlify MCP CLI
-        run: |
-          mkdir -p /tmp/netlify-mcp
-          npm install --prefix /tmp/netlify-mcp @netlify/mcp@latest
-          tar -czf /tmp/netlify-mcp.tgz -C /tmp netlify-mcp
-      - name: Upload WW10 main source
-        uses: actions/upload-artifact@v4
-        with:
-          name: tamma-chat-ww10-main
-          path: /tmp/tamma-chat-ww10-main.tgz
-          if-no-files-found: error
-          retention-days: 1
-      - name: Upload Netlify MCP CLI
-        uses: actions/upload-artifact@v4
-        with:
-          name: ww10-netlify-mcp
-          path: /tmp/netlify-mcp.tgz
-          if-no-files-found: error
-          retention-days: 1
+          node <<'NODE'
+          const { randomUUID } = require('node:crypto');
+          const cases = [
+            {
+              id:'th-worldwide',
+              language:'th',
+              message:'ค่าส่งสินค้า OTOP ไปสวีเดนเท่าไหร่ครับ ถ้ายังไม่มีราคาจริงบอกตรงๆนะครับ',
+              accept:reply => /[ก-๙]/u.test(reply) && /(?:สวีเดน|ค่าส่ง|ยัง|ยืนยัน|ข้อมูล)/u.test(reply),
+              forbid:[/(?:SEK|USD)\s*\d|\d+(?:\.\d+)?\s*(?:SEK|USD)/iu],
+            },
+            {
+              id:'sv-worldwide',
+              language:'en',
+              message:'Kan ni skicka OTOP-produkter till Sverige? Om den internationella frakten inte är verifierad ännu, säg det tydligt på svenska.',
+              accept:reply => /(?:Sverige|frakt|skicka|leverans|verifier|bekräft)/iu.test(reply),
+              forbid:[/ครับ|ค่ะ|คะ/u,/(?:SEK|USD|THB)\s*\d|\d+(?:\.\d+)?\s*(?:SEK|USD|THB)/iu],
+            },
+          ];
+          const requestBase = {
+            chatHistory:[],
+            guestContext:{
+              tripDuration:null,travelerType:null,
+              group:{adults:null,children:null,elderly:null},
+              interests:[],pace:null,budget:null,constraints:[],
+            },
+            journeyContext:{
+              currentPlan:null,savedPlan:null,
+              visitedExperiences:[],favorites:[],journalEntries:[],
+            },
+            pageContext:{section:'web'},
+            environment:'live',
+          };
+          for (const tc of cases) {
+            const guestId=randomUUID();
+            const eventId='ww10-prod-smoke-'+tc.id+'-'+Date.now();
+            const response=await fetch(process.env.THONGTHAI_PRODUCTION_URL,{
+              method:'POST',
+              headers:{'content-type':'application/json'},
+              body:JSON.stringify({...requestBase,guestId,eventId,message:tc.message,language:tc.language}),
+            });
+            const body=await response.json().catch(()=>({}));
+            const reply=String(body.message??'');
+            console.log(JSON.stringify({id:tc.id,status:response.status,guestId,eventId,reply}));
+            if(response.status!==200)throw new Error(tc.id+': HTTP '+response.status);
+            if(reply.trim().length<20)throw new Error(tc.id+': empty/short reply');
+            if(!tc.accept(reply))throw new Error(tc.id+': language/fail-closed acceptance failed');
+            for(const pattern of tc.forbid){
+              if(pattern.test(reply))throw new Error(tc.id+': forbidden fabricated/voice pattern '+pattern);
+            }
+          }
+          NODE
