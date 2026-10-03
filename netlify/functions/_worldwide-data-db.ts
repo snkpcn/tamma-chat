@@ -1,4 +1,5 @@
 import { isWorldwideCapabilityEnabled, type WorldwideEnv } from './_worldwide-foundation';
+import {worldwideDbFetch} from './_worldwide-db-client';
 import {
   canonicalLocaleCode,
   composeMarketContext,
@@ -12,38 +13,11 @@ import {
   type MarketResolution,
 } from './_worldwide-data-core';
 
-type DbConfig = { url: string; key: string };
-
-function config(): DbConfig | null {
-  const runtime = (globalThis as typeof globalThis & {
-    Netlify?: { env?: { get?: (key: string) => unknown } };
-  }).Netlify?.env;
-  const get = (name: string): string | undefined => {
-    const value = runtime?.get?.(name);
-    return typeof value === 'string' ? value : undefined;
-  };
-  const url = get('SUPABASE_URL');
-  const key = get('SUPABASE_SERVICE_ROLE_KEY');
-  return url && key ? { url: url.replace(/\/$/, ''), key } : null;
-}
-
-async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const c = config();
-  if (!c) throw new Error('worldwide_data_core_not_configured');
-  const response = await fetch(`${c.url}/rest/v1/${path}`, {
-    ...init,
-    headers: {
-      apikey: c.key,
-      Authorization: `Bearer ${c.key}`,
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {}),
-    },
+async function dbFetch(path:string):Promise<Response>{
+  return worldwideDbFetch(path,{}, {
+    consistency:'eventual',
+    operation:'worldwide_market_reference',
   });
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new Error(`worldwide_data_core_db_${response.status}:${body.slice(0, 240)}`);
-  }
-  return response;
 }
 
 type CurrencyRow = {
