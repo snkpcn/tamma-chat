@@ -5,6 +5,7 @@ import {
   DOMESTIC_COMMERCE_BASELINE,
   isWorldwideCapabilityEnabled,
   worldwideFeatureSnapshot,
+  type WorldwideEnv,
 } from './_worldwide-foundation';
 import {
   isMarketCapabilityLive,
@@ -72,9 +73,10 @@ export type ThongthaiMarketReadout =
 export async function readThongthaiMarketContext(
   countryInput:unknown,
   requestedLocale:unknown,
+  env?:WorldwideEnv,
 ):Promise<ThongthaiMarketReadout>{
   const countryCode=normalizeCountryCode(countryInput);
-  const features=worldwideFeatureSnapshot();
+  const features=worldwideFeatureSnapshot(env);
 
   // Thailand remains answerable even while WW customer exposure is gated off.
   // This does not duplicate WW data; it exposes the locked domestic baseline
@@ -93,7 +95,7 @@ export async function readThongthaiMarketContext(
     };
   }
 
-  const result=await loadWorldwideMarketContext(countryCode,requestedLocale);
+  const result=await loadWorldwideMarketContext(countryCode,requestedLocale,env);
   if(result.kind!=='ready'){
     return{
       ok:false,
@@ -117,9 +119,9 @@ export async function readThongthaiMarketContext(
   };
 }
 
-function foreignShippingReady(context:ResolvedMarketContext):boolean{
-  return isWorldwideCapabilityEnabled('globalShipping')
-    && isWorldwideCapabilityEnabled('thongthaiWorldwide')
+function foreignShippingReady(context:ResolvedMarketContext,env?:WorldwideEnv):boolean{
+  return isWorldwideCapabilityEnabled('globalShipping',env)
+    && isWorldwideCapabilityEnabled('thongthaiWorldwide',env)
     && isMarketCapabilityLive(context,'shipping')
     && isMarketCapabilityLive(context,'thongthai');
 }
@@ -152,6 +154,7 @@ export async function readThongthaiShippingQuote(input:{
   countryCode:unknown;
   subtotal?:unknown;
   locale?:unknown;
+  env?:WorldwideEnv;
 }):Promise<ThongthaiShippingReadout>{
   const countryCode=normalizeCountryCode(input.countryCode);
   if(countryCode==='TH'){
@@ -175,7 +178,7 @@ export async function readThongthaiShippingQuote(input:{
     };
   }
 
-  const market=await readThongthaiMarketContext(countryCode,input.locale);
+  const market=await readThongthaiMarketContext(countryCode,input.locale,input.env);
   if(!market.ok){
     return{
       ok:false,
@@ -191,8 +194,8 @@ export async function readThongthaiShippingQuote(input:{
   // fail-closed until the separate WW shipping project publishes a canonical
   // quote source. Thongthai can already explain market readiness without
   // inventing a rate.
-  const raw=await loadWorldwideMarketContext(countryCode,input.locale);
-  if(raw.kind!=='ready'||!foreignShippingReady(raw.context)){
+  const raw=await loadWorldwideMarketContext(countryCode,input.locale,input.env);
+  if(raw.kind!=='ready'||!foreignShippingReady(raw.context,input.env)){
     return{
       ok:false,
       countryCode,
