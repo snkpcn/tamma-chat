@@ -80,7 +80,7 @@ grant select,insert on table public.commerce_market_certification_products to se
 create or replace function public.commerce_shipping_profile_hash_v1(p_product_id uuid)
 returns text language sql stable security definer set search_path=''
 as $$
-  select encode(digest(convert_to(jsonb_build_object(
+  select encode(extensions.digest(convert_to(jsonb_build_object(
     'productId',p.product_id,'originCountryCode',p.origin_country_code,
     'weightGrams',p.weight_grams,'lengthMm',p.length_mm,'widthMm',p.width_mm,
     'heightMm',p.height_mm,'shipsSeparately',p.ships_separately,'active',p.active
@@ -92,7 +92,7 @@ $$;
 create or replace function public.commerce_customs_profile_hash_v1(p_product_id uuid)
 returns text language sql stable security definer set search_path=''
 as $$
-  select encode(digest(convert_to(jsonb_build_object(
+  select encode(extensions.digest(convert_to(jsonb_build_object(
     'productId',p.product_id,'originCountryCode',p.origin_country_code,
     'classificationSystem',p.classification_system,'classificationCode',p.classification_code,
     'customsDescription',p.customs_description,'verificationStatus',p.verification_status,
@@ -105,7 +105,7 @@ $$;
 create or replace function public.commerce_destination_rule_hash_v1(p_product_id uuid,p_country_code text)
 returns text language sql stable security definer set search_path=''
 as $$
-  select encode(digest(convert_to(jsonb_build_object(
+  select encode(extensions.digest(convert_to(jsonb_build_object(
     'productId',r.product_id,'countryCode',r.country_code,'decision',r.decision,
     'status',r.status,'enabled',r.enabled,'requiredDocumentCodes',r.required_document_codes,
     'reasonCode',r.reason_code,'validFrom',r.valid_from,'validUntil',r.valid_until
@@ -367,7 +367,7 @@ begin
   order by pm.priority,pm.provider_code limit 1;
   if not found then raise exception 'certification_payment_method_not_live'; end if;
 
-  select encode(digest(convert_to(string_agg(pid::text,',' order by pid),'UTF8'),'sha256'),'hex')
+  select encode(extensions.digest(convert_to(string_agg(pid::text,',' order by pid),'UTF8'),'sha256'),'hex')
   into v_product_set_hash
   from (select distinct (trim(both '"' from e::text))::uuid pid from jsonb_array_elements(p_product_ids) e) x;
 
