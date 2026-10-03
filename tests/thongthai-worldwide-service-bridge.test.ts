@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   THONGTHAI_BACKOFFICE_READ_LANES,
+  buildThongthaiDomesticShippingRead,
   buildThongthaiOfferParcels,
   normalizeThongthaiWorldwideOfferItems,
   readThongthaiMarketContext,
@@ -194,20 +195,22 @@ test('foreign shipping eligibility checks market truth before asking for a subto
   assert.deepEqual(tool.parameters.required,['country_code']);
 });
 
-test('Thailand shipping policy can be read without subtotal and quote stays null', async () => {
-  const shipping=await readThongthaiShippingQuote({
-    countryCode:'TH',
-    locale:'th',
-    env:{},
-  });
-  assert.equal(shipping.status,'ready');
-  if(shipping.status!=='ready')assert.fail('expected domestic shipping policy');
+test('Thailand shipping policy can be represented without subtotal and quote stays null', () => {
+  const shipping=buildThongthaiDomesticShippingRead({
+    domesticBaseFee:60,
+    freeShippingThreshold:1500,
+    estimatedMinDays:1,
+    estimatedMaxDays:3,
+  },null);
   assert.equal(shipping.countryCode,'TH');
   assert.equal(shipping.currencyCode,'THB');
   assert.equal(shipping.quote,null);
-  assert.ok(shipping.policy.domesticBaseFee>=0);
-  assert.ok(shipping.policy.estimatedMinDays>=0);
-  assert.ok(shipping.policy.estimatedMaxDays>=shipping.policy.estimatedMinDays);
+  assert.deepEqual(shipping.policy,{
+    domesticBaseFee:60,
+    freeShippingThreshold:1500,
+    estimatedMinDays:1,
+    estimatedMaxDays:3,
+  });
 });
 
 test('worldwide offer normalizes duplicate SKUs without inferring destination from locale', async () => {
