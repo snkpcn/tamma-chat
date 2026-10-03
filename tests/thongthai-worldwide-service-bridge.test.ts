@@ -24,14 +24,15 @@ test('Thongthai bridge owns no duplicate WW or shipping database', () => {
 test('Thongthai has a bounded read seam for every customer-facing backoffice lane', () => {
   const lanes=new Set(THONGTHAI_BACKOFFICE_READ_LANES.map(item=>item.lane));
   assert.deepEqual([...lanes].sort(),[
-    'activity','booking','cafe','customs','market','membership','otop','payment',
-    'promotion','restaurant','shipping','stay',
+    'activity','booking','cafe','customs','location','market','membership','otop','payment',
+    'promotion','restaurant','shipping','stay','weather',
   ]);
   const tools=new Set(THONGTHAI_READ_ONLY_TOOLS.map(tool=>tool.name));
   for(const name of [
     'recommend_restaurant_menu','get_cafe_menu','get_activity_catalog','get_stay_catalog',
     'get_otop_catalog','get_active_promotions','get_booking_status','get_order_status',
-    'get_payment_status','get_membership_status','get_market_context','get_shipping_quote',
+    'get_payment_status','get_membership_status','get_current_weather','get_location_info',
+    'get_market_context','get_shipping_quote',
   ]) assert.ok(tools.has(name),`missing Thongthai read tool: ${name}`);
 });
 
