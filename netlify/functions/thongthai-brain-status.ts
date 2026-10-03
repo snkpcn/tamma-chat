@@ -5,6 +5,7 @@ import { SEMANTIC_INTERPRETER_VERSION } from './_semantic-interpreter';
 import { ONE_MIND_ORCHESTRATOR_VERSION } from './_thongthai-one-mind-orchestrator';
 import { RESPONSE_COMPOSER_VERSION } from './_response-composer';
 import { GRACEFUL_DEGRADATION_VERSION } from './_graceful-degradation';
+import {worldwideDbScaleSnapshot} from './_worldwide-db-client';
 
 function json(statusCode: number, body: unknown) {
   return {
@@ -39,6 +40,7 @@ export const handler: Handler = async event => {
       degradation: GRACEFUL_DEGRADATION_VERSION,
     },
     canonicalGateway: '/.netlify/functions/thongthai-chat',
+    globalScale: worldwideDbScaleSnapshot(),
     canonicalProduction: 'https://tamma-chat.netlify.app',
     channels,
     requiredRequestFields: [

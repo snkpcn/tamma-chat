@@ -1,17 +1,11 @@
 import {isWorldwideCapabilityEnabled,type WorldwideEnv} from './_worldwide-foundation';
+import {worldwideDbFetch} from './_worldwide-db-client';
 
-type DbConfig={url:string;key:string};
-function config():DbConfig|null{
-  const runtime=(globalThis as typeof globalThis&{Netlify?:{env?:{get?:(k:string)=>unknown}}}).Netlify?.env;
-  const get=(k:string)=>{const v=runtime?.get?.(k);return typeof v==='string'?v:undefined};
-  const url=get('SUPABASE_URL'),key=get('SUPABASE_SERVICE_ROLE_KEY');
-  return url&&key?{url:url.replace(/\/$/,''),key}:null;
-}
 async function dbFetch(path:string,init:RequestInit={}){
-  const c=config(); if(!c)throw new Error('customs_not_configured');
-  const r=await fetch(`${c.url}/rest/v1/${path}`,{...init,headers:{apikey:c.key,Authorization:`Bearer ${c.key}`,'Content-Type':'application/json',...(init.headers??{})}});
-  if(!r.ok){const b=await r.text().catch(()=>'');throw new Error(`customs_db_${r.status}:${b.slice(0,240)}`)}
-  return r;
+  return worldwideDbFetch(path,init,{
+    consistency:'strong',
+    operation:'customs_transaction_truth',
+  });
 }
 
 export async function createCustomsComplianceSnapshot(input:{
