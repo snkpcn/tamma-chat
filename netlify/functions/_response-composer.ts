@@ -2015,7 +2015,9 @@ function boundedCrossDomainReadback(input: ResponseComposerInput): ComposedRespo
   return null;
 }
 
-export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {\n  const boundedReadback = boundedCrossDomainReadback(input);\n  if (boundedReadback) return boundedReadback;
+export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
+  const boundedReadback = boundedCrossDomainReadback(input);
+  if (boundedReadback) return boundedReadback;
   // Rejected duration is an authoritative policy outcome. It must outrank a
   // second model call and generic catalog rendering even when the current turn
   // is a non-transactional working-state update.
