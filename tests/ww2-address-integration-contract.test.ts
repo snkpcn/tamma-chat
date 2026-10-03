@@ -54,7 +54,7 @@ test('WW-2 account form is present but capability-gated, and preserves V2 on fea
 
 test('WW-2 new account labels exist in every five-language dictionary', () => {
   for (const key of ['country_code','organization','dependent_locality','locality','administrative_area','invalid_country_code','invalid_international_phone','locality_required','international_address_not_enabled']) {
-    const matches = i18n.match(new RegExp(`${key}:`, 'g')) ?? [];
+    const matches = i18n.match(new RegExp(`(?:^|[,\\s{])${key}:`, 'g')) ?? [];
     assert.equal(matches.length, 5, `${key} should exist in all 5 account dictionaries`);
   }
 });
