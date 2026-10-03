@@ -24,7 +24,10 @@ function checkoutError(error: unknown) {
   const code = raw.split(':')[0];
   const detail = raw.includes(':') ? raw.slice(raw.indexOf(':') + 1).slice(0, 80) : undefined;
   const conflict = new Set(['product_not_available', 'insufficient_stock', 'shipping_quote_changed']);
-  const badRequest = new Set(['invalid_items', 'shipping_address_required', 'shipping_address_not_found']);
+  const badRequest = new Set([
+    'invalid_items', 'shipping_address_required', 'shipping_address_not_found',
+    'international_shipping_not_enabled',
+  ]);
   if (conflict.has(code)) return json(409, { error: code, detail });
   if (badRequest.has(code)) return json(400, { error: code });
   if (code === 'member_profile_required') return json(409, { error: code });

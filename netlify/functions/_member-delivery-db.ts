@@ -4,9 +4,13 @@ import {
   addressSnapshot,
   calculateShippingQuote,
   normalizeMemberAddress,
-  type MemberAddressInput,
   type ShippingSettings,
 } from './_member-delivery';
+import {
+  normalizeInternationalAddress,
+  wantsInternationalAddressV2,
+} from './_international-address';
+import { isWorldwideCapabilityEnabled } from './_worldwide-foundation';
 import { resolveOtopStoreStory } from './_otop-store-story';
 import { completedUnitsByProduct } from './_otop-merchandising';
 import { ALL_OTOP_PRODUCTS } from '../../src/data/otop';
@@ -60,26 +64,46 @@ type AddressRow = {
   address_line1_enc: string;
   address_line2_enc: string | null;
   subdistrict_enc: string | null;
-  district_enc: string;
-  province: string;
-  postal_code_enc: string;
+  district_enc: string | null;
+  province: string | null;
+  postal_code_enc: string | null;
   delivery_instructions_enc: string | null;
+  address_schema_version: number;
+  country_code: string;
+  organization_enc: string | null;
+  dependent_locality_enc: string | null;
+  locality_enc: string | null;
+  administrative_area_enc: string | null;
   is_default: boolean;
   created_at: string;
   updated_at: string;
 };
 
 function addressOutput(row: AddressRow) {
+  const addressVersion = row.address_schema_version === 2 ? 2 : 1;
+  const countryCode = row.country_code || 'TH';
+  const locality = addressVersion === 2 ? decryptPii(row.locality_enc) : decryptPii(row.district_enc);
+  const administrativeArea = addressVersion === 2 ? decryptPii(row.administrative_area_enc) : row.province;
+  const dependentLocality = addressVersion === 2
+    ? decryptPii(row.dependent_locality_enc)
+    : decryptPii(row.subdistrict_enc);
   return {
     id: row.id,
+    addressVersion,
+    countryCode,
     label: row.label,
     recipientName: decryptPii(row.recipient_name_enc),
     phone: decryptPii(row.phone_enc),
+    organization: decryptPii(row.organization_enc),
     addressLine1: decryptPii(row.address_line1_enc),
     addressLine2: decryptPii(row.address_line2_enc),
-    subdistrict: decryptPii(row.subdistrict_enc),
-    district: decryptPii(row.district_enc),
-    province: row.province,
+    dependentLocality,
+    locality,
+    administrativeArea,
+    // Legacy aliases remain populated so existing domestic UI/readers do not break.
+    subdistrict: dependentLocality,
+    district: locality,
+    province: administrativeArea,
     postalCode: decryptPii(row.postal_code_enc),
     deliveryInstructions: decryptPii(row.delivery_instructions_enc),
     isDefault: row.is_default,
@@ -91,7 +115,10 @@ function addressOutput(row: AddressRow) {
 const ADDRESS_SELECT = [
   'id', 'label', 'recipient_name_enc', 'phone_enc', 'address_line1_enc',
   'address_line2_enc', 'subdistrict_enc', 'district_enc', 'province',
-  'postal_code_enc', 'delivery_instructions_enc', 'is_default', 'created_at', 'updated_at',
+  'postal_code_enc', 'delivery_instructions_enc',
+  'address_schema_version', 'country_code', 'organization_enc',
+  'dependent_locality_enc', 'locality_enc', 'administrative_area_enc',
+  'is_default', 'created_at', 'updated_at',
 ].join(',');
 
 export async function listMemberAddresses(authUserId: string) {
@@ -110,7 +137,14 @@ export async function saveMemberAddress(
   addressId?: string | null,
 ) {
   const account = await memberAccount(authUserId);
-  const address = normalizeMemberAddress(value);
+  const useAddressV2 = wantsInternationalAddressV2(value);
+  if (useAddressV2 && !isWorldwideCapabilityEnabled('addressV2')) {
+    throw new Error('international_address_not_enabled');
+  }
+  const internationalAddress = useAddressV2 ? normalizeInternationalAddress(value) : null;
+  const domesticAddress = useAddressV2 ? null : normalizeMemberAddress(value);
+  const commonAddress = useAddressV2 ? internationalAddress! : domesticAddress!;
+  const isDefault = commonAddress.isDefault;
   let id = addressId && UUID_RE.test(addressId) ? addressId : null;
 
   if (id) {
@@ -126,7 +160,7 @@ export async function saveMemberAddress(
     { headers: { Prefer: 'count=exact' } },
   );
   const existingAddresses = await countResponse.json() as Array<{ id: string }>;
-  const shouldDefault = address.isDefault || existingAddresses.length === 0;
+  const shouldDefault = isDefault || existingAddresses.length === 0;
   if (shouldDefault) {
     await dbFetch(`customer_addresses?customer_id=eq.${account.id}&is_default=eq.true`, {
       method: 'PATCH',
@@ -135,22 +169,52 @@ export async function saveMemberAddress(
     });
   }
 
-  const body = {
-    customer_id: account.id,
-    label: address.label,
-    recipient_name_enc: encryptPii(address.recipientName),
-    phone_enc: encryptPii(address.phone),
-    address_line1_enc: encryptPii(address.addressLine1),
-    address_line2_enc: encryptPii(address.addressLine2),
-    subdistrict_enc: encryptPii(address.subdistrict),
-    district_enc: encryptPii(address.district),
-    province: address.province,
-    postal_code_enc: encryptPii(address.postalCode),
-    delivery_instructions_enc: encryptPii(address.deliveryInstructions),
-    is_default: shouldDefault,
-    active: true,
-    updated_at: new Date().toISOString(),
-  };
+  const body = useAddressV2
+    ? {
+        customer_id: account.id,
+        address_schema_version: 2,
+        country_code: internationalAddress!.countryCode,
+        label: commonAddress.label,
+        recipient_name_enc: encryptPii(commonAddress.recipientName),
+        phone_enc: encryptPii(commonAddress.phone),
+        organization_enc: encryptPii(internationalAddress!.organization),
+        address_line1_enc: encryptPii(commonAddress.addressLine1),
+        address_line2_enc: encryptPii(commonAddress.addressLine2),
+        dependent_locality_enc: encryptPii(internationalAddress!.dependentLocality),
+        locality_enc: encryptPii(internationalAddress!.locality),
+        administrative_area_enc: encryptPii(internationalAddress!.administrativeArea),
+        // V1 fields are intentionally cleared for non-domestic V2 records.
+        subdistrict_enc: null,
+        district_enc: null,
+        province: null,
+        postal_code_enc: encryptPii(commonAddress.postalCode),
+        delivery_instructions_enc: encryptPii(commonAddress.deliveryInstructions),
+        is_default: shouldDefault,
+        active: true,
+        updated_at: new Date().toISOString(),
+      }
+    : {
+        customer_id: account.id,
+        address_schema_version: 1,
+        country_code: 'TH',
+        label: commonAddress.label,
+        recipient_name_enc: encryptPii(commonAddress.recipientName),
+        phone_enc: encryptPii(commonAddress.phone),
+        organization_enc: null,
+        address_line1_enc: encryptPii(commonAddress.addressLine1),
+        address_line2_enc: encryptPii(commonAddress.addressLine2),
+        dependent_locality_enc: null,
+        locality_enc: null,
+        administrative_area_enc: null,
+        subdistrict_enc: encryptPii(domesticAddress!.subdistrict),
+        district_enc: encryptPii(domesticAddress!.district),
+        province: domesticAddress!.province,
+        postal_code_enc: encryptPii(commonAddress.postalCode),
+        delivery_instructions_enc: encryptPii(commonAddress.deliveryInstructions),
+        is_default: shouldDefault,
+        active: true,
+        updated_at: new Date().toISOString(),
+      };
 
   let response: Response;
   if (id) {
@@ -332,7 +396,14 @@ export async function checkoutMemberOtopOrder(authUserId: string, value: unknown
   );
   const addressRows = await addressResponse.json() as AddressRow[];
   if (!addressRows[0]) throw new Error('shipping_address_not_found');
-  const outputAddress = addressOutput(addressRows[0]);
+  const selectedAddress = addressRows[0];
+  // WW-2 allows international addresses to exist in the address book, but the
+  // current checkout still uses the domestic shipping engine. Never let a
+  // foreign/V2 address silently receive the Thailand shipping quote.
+  if ((selectedAddress.country_code || 'TH') !== 'TH' || selectedAddress.address_schema_version !== 1) {
+    throw new Error('international_shipping_not_enabled');
+  }
+  const outputAddress = addressOutput(selectedAddress);
   const normalizedAddress = normalizeMemberAddress(outputAddress);
   const [subtotal, settings] = await Promise.all([
     authoritativeSubtotal(items),

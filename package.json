@@ -14,7 +14,8 @@
     "otop:story:backfill": "tsx scripts/backfill-otop-product-stories.ts",
     "otop:story:backfill:apply": "tsx scripts/backfill-otop-product-stories.ts --apply",
     "agent:thongthai:production": "tsx scripts/create-thongthai-production-agent.ts",
-    "audit:ww1": "node --import tsx --test tests/ww1-global-data-core.test.ts tests/ww1-global-data-core-migration.test.ts"
+    "audit:ww1": "node --import tsx --test tests/ww1-global-data-core.test.ts tests/ww1-global-data-core-migration.test.ts",
+    "audit:ww2": "node --import tsx --test tests/ww2-international-address.test.ts tests/ww2-international-address-migration.test.ts tests/ww2-address-integration-contract.test.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0"

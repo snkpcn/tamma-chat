@@ -5,6 +5,7 @@ import {
   listMemberAddresses,
   saveMemberAddress,
 } from './_member-delivery-db';
+import { isWorldwideCapabilityEnabled } from './_worldwide-foundation';
 
 function json(statusCode: number, body: unknown) {
   return {
@@ -37,11 +38,22 @@ function errorResponse(error: unknown) {
   const badRequest = new Set([
     'malformed_json', 'recipient_name_required', 'invalid_phone', 'address_line_required',
     'district_required', 'province_required', 'invalid_postal_code', 'address_not_found',
+    'invalid_country_code', 'invalid_international_phone', 'locality_required',
+    'international_address_not_enabled',
   ]);
   if (code === 'member_profile_required') return json(409, { error: code });
   if (badRequest.has(code)) return json(400, { error: code });
   console.error('CUSTOMER_ADDRESSES_ERROR', code.slice(0, 120));
   return json(503, { error: 'addresses_temporarily_unavailable' });
+}
+
+function responseBody(addresses: unknown) {
+  return {
+    addresses,
+    features: {
+      addressV2: isWorldwideCapabilityEnabled('addressV2'),
+    },
+  };
 }
 
 export const handler: Handler = async (event: HandlerEvent) => {
@@ -50,24 +62,24 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
   try {
     if (event.httpMethod === 'GET') {
-      return json(200, { addresses: await listMemberAddresses(user.id) });
+      return json(200, responseBody(await listMemberAddresses(user.id)));
     }
     if (event.httpMethod === 'POST') {
       const body = parseBody(event);
       const address = await saveMemberAddress(user.id, body.address ?? body);
-      return json(201, { address, addresses: await listMemberAddresses(user.id) });
+      return json(201, { address, ...responseBody(await listMemberAddresses(user.id)) });
     }
     if (event.httpMethod === 'PATCH') {
       const body = parseBody(event);
       const id = typeof body.id === 'string' ? body.id : '';
       const address = await saveMemberAddress(user.id, body.address ?? body, id);
-      return json(200, { address, addresses: await listMemberAddresses(user.id) });
+      return json(200, { address, ...responseBody(await listMemberAddresses(user.id)) });
     }
     if (event.httpMethod === 'DELETE') {
       const body = parseBody(event);
       const id = typeof body.id === 'string' ? body.id : '';
       await deleteMemberAddress(user.id, id);
-      return json(200, { deleted: true, addresses: await listMemberAddresses(user.id) });
+      return json(200, { deleted: true, ...responseBody(await listMemberAddresses(user.id)) });
     }
     return json(405, { error: 'method_not_allowed' });
   } catch (error) {
