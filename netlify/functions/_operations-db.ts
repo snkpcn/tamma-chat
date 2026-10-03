@@ -449,7 +449,7 @@ function validIsoDate(year: number, month: number, day: number): string | null {
   return parsed.getUTCFullYear() === year && parsed.getUTCMonth() + 1 === month && parsed.getUTCDate() === day ? iso : null;
 }
 
-function bookingDateFromText(text: string): string | null {
+function bookingDateFromText(text: string, now: Date = new Date()): string | null {
   // "/" and "-" only, deliberately NOT ".": a period is also the activity
   // time separator ("13.00" = 13:00, see activityTimeFromText), so a message
   // stating both a date and a time ("3 ตุลาคม เวลา 13.00") would otherwise
@@ -457,7 +457,7 @@ function bookingDateFromText(text: string): string | null {
   // silently short-circuiting before the Thai-month check below ever ran.
   const numeric = text.match(/(?:^|\s)(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?(?:\s|$)/);
   if (numeric) {
-    const today = bangkokDateParts();
+    const today = bangkokDateParts(now);
     let year = numeric[3] ? Number(numeric[3]) : today.year;
     if (year < 100) year += 2000;
     if (year > 2400) year -= 543;
@@ -466,7 +466,7 @@ function bookingDateFromText(text: string): string | null {
   }
   const matched = text.match(/วันที่\s*(\d{1,2})(?:\s*(?:เดือน)?\s*(นี้|หน้า))?/u);
   if (matched) {
-    const today = bangkokDateParts();
+    const today = bangkokDateParts(now);
     let month = today.month + (matched[2] === 'หน้า' ? 1 : 0);
     let year = today.year;
     if (month > 12) { month = 1; year += 1; }
@@ -476,7 +476,7 @@ function bookingDateFromText(text: string): string | null {
   // above recognizes. Reuses the SAME shared parser _deterministic-semantic-
   // turn.ts's turn derivation already uses, rather than a second copy of the
   // Thai month lexicon here.
-  return extractDateShared(text);
+  return extractDateShared(text, now);
 }
 
 function checkoutDateFromText(text: string, checkIn: string | null): string | null {
@@ -741,16 +741,16 @@ function thaiShortDate(iso: string): string {
     .format(new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00+07:00` : iso));
 }
 
-function shiftBangkokDate(days: number): string {
-  const today = bangkokDateParts();
+function shiftBangkokDate(days: number, now: Date = new Date()): string {
+  const today = bangkokDateParts(now);
   const d = new Date(Date.UTC(today.year, today.month - 1, today.day + days));
   return d.toISOString().slice(0, 10);
 }
 
-export function activityDateFromText(text: string): string | null {
-  if (/(?:พรุ่งนี้|tomorrow)/iu.test(text)) return shiftBangkokDate(1);
-  if (/(?:วันนี้|today)/iu.test(text)) return shiftBangkokDate(0);
-  return bookingDateFromText(text);
+export function activityDateFromText(text: string, now: Date = new Date()): string | null {
+  if (/(?:พรุ่งนี้|tomorrow)/iu.test(text)) return shiftBangkokDate(1, now);
+  if (/(?:วันนี้|today)/iu.test(text)) return shiftBangkokDate(0, now);
+  return bookingDateFromText(text, now);
 }
 
 function activityResourceFromText(text: string): string | null {
