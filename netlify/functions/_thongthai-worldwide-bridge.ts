@@ -190,6 +190,7 @@ export async function readThongthaiShippingQuote(input:{
   if(!isWorldwideCapabilityEnabled('globalShipping',input.env)){
     return{status:'not_available',reason:'worldwide_shipping_gate_off',countryCode,market:market.context};
   }
+  // WW-6 safety contract: must not invent package weight or dimensions.
   return{
     status:'not_available',
     reason:'global_shipping_package_data_required',
