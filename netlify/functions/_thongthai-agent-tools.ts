@@ -148,6 +148,34 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
   },
   {
     type: 'function',
+    name: 'get_worldwide_commerce',
+    description: 'Build one canonical international commerce fact bundle for specific OTOP items and a destination country: explicit market/currency prices, verified parcel profiles, a WW-6 shipping quote when available, customs decision, payment-method readiness, and checkout readiness. This may persist immutable quote/compliance evidence but NEVER creates an order, payment intent, stock change, or fulfillment. Never infer destination from language.',
+    parameters: objectSchema({
+      country_code: { type: 'string', description: 'Explicit two-letter destination country code such as SE, DE, US. Never infer it from language.' },
+      items: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 30,
+        items: objectSchema({
+          sku: { type: 'string', description: 'Canonical OTOP SKU.' },
+          quantity: { type: 'integer', minimum: 1, maximum: 99 },
+        }, ['sku','quantity']),
+      },
+      locale: { type: 'string', description: 'Optional customer locale used only for presentation selection, not destination inference.' },
+      service_code: { type: 'string', description: 'Optional explicit WW shipping service code.' },
+      payment_method_code: { type: 'string', description: 'Optional explicit payment method code.' },
+    }, ['country_code','items']),
+  },
+  {
+    type: 'function',
+    name: 'get_global_order_status',
+    description: 'Read this guest/member-linked international OTOP order across WW-8/WW-9: order, global payment intent, customs decision, shipment, packages and tracking timeline. Owner-scoped to the current guest. Read-only.',
+    parameters: objectSchema({
+      code: { type: 'string', description: 'Optional international order code OR-... or global payment intent code PI-.... Leave empty for the latest global order owned by this guest.' },
+    }),
+  },
+  {
+    type: 'function',
     name: 'get_active_promotions',
     description: 'Read promotions that are currently eligible for this customer channel. Read-only.',
     parameters: objectSchema({}),
@@ -310,6 +338,28 @@ export async function executeThongthaiReadOnlyTool(
       countryCode,
       subtotal,
       locale:stringArg(args, 'locale'),
+    }));
+  }
+  if (name === 'get_worldwide_commerce') {
+    const countryCode=stringArg(args,'country_code');
+    if(!countryCode)return JSON.stringify({ok:false,error:'country_code_required'});
+    if(!context.eventId)return JSON.stringify({ok:false,error:'event_id_required'});
+    return JSON.stringify(await readThongthaiWorldwideCommerce({
+      countryCode,
+      items:args.items,
+      locale:stringArg(args,'locale'),
+      serviceCode:stringArg(args,'service_code'),
+      requestedPaymentMethod:stringArg(args,'payment_method_code'),
+      environment:context.environment??'live',
+      requestKey:context.eventId,
+    }));
+  }
+  if (name === 'get_global_order_status') {
+    if(!context.guestDbId)return JSON.stringify({ok:false,error:'guest_identity_required'});
+    return JSON.stringify(await readThongthaiGlobalOrderStatus({
+      guestDbId:context.guestDbId,
+      code:stringArg(args,'code'),
+      environment:context.environment??'live',
     }));
   }
   if (name === 'get_worldwide_offer') {
