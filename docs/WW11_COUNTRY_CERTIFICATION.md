@@ -132,7 +132,7 @@ Production remains fail-closed: no real country is certified by this rollout.
 - [x] zero synthetic residue
 - [x] Supabase security/performance advisors checked
 - [x] full CI + Netlify deploy preview pass on the functional implementation
-- [ ] merged and production deployed
+- [x] merged and production deployed
 
 
 ## Repository/production migration lock
