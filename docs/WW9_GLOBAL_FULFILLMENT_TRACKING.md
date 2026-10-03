@@ -186,3 +186,70 @@ Post-probe production counts:
 - [x] Rollback-only E2E certification passed with zero residue.
 - [x] Security and performance advisors reviewed.
 - [x] Worldwide carrier/service/return data remains fail-closed.
+
+
+## Production certification
+
+Applied production migrations:
+
+- `20261003082949_ww9_global_fulfillment_tracking`
+- `20261003083446_ww9_tracking_notification_conflict_fix`
+- `20261003083705_ww9_fulfillment_fk_indexes`
+
+The notification outbox unique constraint is normalized to:
+
+`commerce_fulfillment_notification_outbox_tracking_event_id_uq`
+
+so both fresh databases and the already-migrated production database use the same explicit conflict target.
+
+### Rollback-only E2E probe
+
+A synthetic test-only international order was created entirely inside one database transaction and rolled back.
+
+Verified in the transaction:
+
+- captured global payment is required before booking
+- one carrier booking creates exactly one shipment
+- repeated booking idempotency key returns the same shipment
+- label-ready evidence is recorded
+- PICKED_UP moves fulfillment/order into shipped state
+- IN_TRANSIT advances the global shipment without corrupting the existing order status contract
+- DELIVERED synchronizes shipment and order to delivered
+- a late IN_TRANSIT provider event is stored but `state_applied=false` and cannot rewind delivered state
+- notification outbox receives the applied customer-visible events
+- a live synthetic return policy permits one idempotent member return request
+- creating the return does not mutate the captured payment or create a refund
+- Thailand checkout-v1 order count is unchanged
+
+After ROLLBACK, all synthetic country, market, auth user, customer, carrier, payment provider, shipment, and return rows were verified at zero residue.
+
+Production still has:
+
+- 0 live `global_v2` shipping services
+- 0 live non-legacy global shipping providers
+
+so WW-9 remains fail-closed until a real carrier is explicitly certified.
+
+### Advisors
+
+Supabase advisors report no remaining WW-9 unindexed foreign keys.
+
+The only WW-9 security findings are INFO-level `RLS enabled / no policy`, which is intentional for these server-only tables because anon/authenticated grants are revoked and access is service-role only.
+
+New FK-covering indexes may initially appear as INFO-level unused indexes because international fulfillment is deliberately dormant.
+
+## Definition of Done
+
+- [x] International carrier booking is gated by checkout-v2, captured payment, consumed quote, live provider, and live global-v2 service.
+- [x] Multi-package shipment evidence and encrypted tracking-number storage are implemented.
+- [x] Tracking events are immutable and idempotent.
+- [x] Out-of-order events cannot rewind terminal fulfillment state.
+- [x] Existing `otop_orders.shipping_status` stays synchronized for backoffice compatibility.
+- [x] Notification outbox is idempotent and does not auto-enable a delivery channel.
+- [x] International return requests require an explicit live market return policy.
+- [x] Return creation does not automatically refund payment.
+- [x] Domestic checkout/shipping v1 remains unchanged.
+- [x] Production migrations applied.
+- [x] Rollback-only production E2E probe passed with zero residue.
+- [x] WW-9 foreign-key advisor findings resolved.
+- [x] Global provider/service activation remains deliberately off.
