@@ -179,7 +179,7 @@ export type {
 
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
 const THONGTHAI_PRIORITY_WORLDWIDE_READ_RE =
-  /(?:ค่าส่ง|ค่าจัดส่ง|ส่งต่างประเทศ|(?:ส่ง|จัดส่ง).{0,18}ไป|สกุลเงิน|ค่าเงิน|ศุลกากร|ภาษีนำเข้า|เลขพัสดุ|ติดตามพัสดุ|สถานะพัสดุ|international shipping|shipping cost|customs|import tax|currency|tracking)/iu;
+  /(?:ค่าส่ง|ค่าจัดส่ง|ส่งต่างประเทศ|จัดส่งต่างประเทศ|สกุลเงิน|ค่าเงิน|ศุลกากร|ภาษีนำเข้า|เลขพัสดุ|ติดตามพัสดุ|สถานะพัสดุ|(?:OTOP|โอทอป|สินค้า|ของฝาก).{0,30}(?:ส่ง|จัดส่ง).{0,30}(?:ไป|ต่างประเทศ)|international shipping|shipping cost|customs|import tax|currency|tracking)/iu;
 const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
 const RESTAURANT_ADVISOR_CONTEXT_SOURCE = 'restaurant_menu_advisor_v1';
 // "สวัสดี"/"หวัดดี" are commonly glued directly onto a polite particle with
@@ -6760,28 +6760,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     && /(?:เมนู|มีอะไร|แนะนำ|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย)/u.test(request.message)
     && !/(?:โต๊ะ|ว่าง|สถานะ|กี่โมง|จอง|สั่ง|ยืนยัน)/u.test(request.message);
 
-  const primaryRoutingCommonEligible = !phase3SemanticLearningEligible
+  const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
     && !restaurantTopicSwitchBeforePrimary
     && !completeVisitorJourneyBeforeSupervision
     && !cafeReadOnlyBeforePrimary
     && !phase4CommercialBoundaryEligible
     && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
-    && !boundedConversationBeforePrimary;
-
-  const foreignLanguagePrimaryEligible =
-    primaryRoutingCommonEligible && openLanguageOrWorldwidePriority;
-
-  const readOnlyPrimaryAgentEligible = primaryRoutingCommonEligible
-    && (foreignLanguagePrimaryEligible || shouldUseThongthaiAgentPrimary({
-      guestKey: request.guestId,
-      guestDbId,
-      channel,
-      explicitTransactionIntent,
-      weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
-      locationRequest: preserveVerifiedLocationBeforeSupervision
-        || topLevelSemanticIntent === 'LOCATION_REQUEST',
-    }));
+    && !boundedConversationBeforePrimary
+    && (
+      openLanguageOrWorldwidePriority
+      || shouldUseThongthaiAgentPrimary({
+        guestKey: request.guestId,
+        guestDbId,
+        channel,
+        explicitTransactionIntent,
+        weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+        locationRequest: preserveVerifiedLocationBeforeSupervision
+          || topLevelSemanticIntent === 'LOCATION_REQUEST',
+      })
+    );
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
 
   if (cafeReadOnlyBeforePrimary) {
