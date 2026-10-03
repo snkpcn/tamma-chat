@@ -199,3 +199,220 @@ export async function createGlobalPaymentIntent(
   if(!row)throw new Error('global_payment_intent_not_created');
   return {kind:'created',intentId:row.intent_id,intentCode:row.intent_code,status:row.status};
 }
+
+
+export type MemberGlobalPaymentIntent={
+  intentId:string;
+  intentCode:string;
+  sourceEntityId:string;
+  sourceEntityCode:string;
+  customerId:string;
+  marketCode:string;
+  currencyCode:string;
+  amountMinor:string;
+  capturedAmountMinor:string;
+  refundedAmountMinor:string;
+  providerCode:string;
+  paymentMethodCode:string;
+  status:string;
+  providerIntentId:string|null;
+  idempotencyKey:string;
+  environment:'live'|'test';
+};
+
+function mapGlobalPaymentIntentRow(row:Record<string,unknown>):MemberGlobalPaymentIntent{
+  return{
+    intentId:String(row.id),
+    intentCode:String(row.intent_code),
+    sourceEntityId:String(row.source_entity_id),
+    sourceEntityCode:String(row.source_entity_code),
+    customerId:String(row.customer_id),
+    marketCode:String(row.market_code),
+    currencyCode:String(row.currency_code),
+    amountMinor:String(row.amount_minor),
+    capturedAmountMinor:String(row.captured_amount_minor),
+    refundedAmountMinor:String(row.refunded_amount_minor),
+    providerCode:String(row.provider_code),
+    paymentMethodCode:String(row.payment_method_code),
+    status:String(row.status),
+    providerIntentId:row.provider_intent_id?String(row.provider_intent_id):null,
+    idempotencyKey:String(row.idempotency_key),
+    environment:String(row.environment)==='test'?'test':'live',
+  };
+}
+
+const PAYMENT_INTENT_SELECT=[
+  'id','intent_code','source_entity_id','source_entity_code','customer_id',
+  'market_code','currency_code','amount_minor','captured_amount_minor','refunded_amount_minor',
+  'provider_code','payment_method_code','status','provider_intent_id','idempotency_key','environment',
+].join(',');
+
+export async function loadMemberGlobalPaymentIntent(input:{
+  authUserId:unknown;
+  intentCode:unknown;
+  providerCode?:unknown;
+}):Promise<MemberGlobalPaymentIntent|null>{
+  const authUserId=typeof input.authUserId==='string'?input.authUserId.trim():'';
+  if(!UUID_RE.test(authUserId))throw new Error('authentication_required');
+  const intentCode=typeof input.intentCode==='string'?input.intentCode.trim().toUpperCase():'';
+  if(!/^PI-[A-Z0-9-]{6,80}$/.test(intentCode))throw new Error('invalid_payment_intent_code');
+  const providerCode=input.providerCode==null?null:normalizePaymentCode(input.providerCode);
+  if(input.providerCode!=null&&!providerCode)throw new Error('invalid_payment_provider');
+
+  const accountRes=await dbFetch(
+    'customer_accounts?auth_user_id=eq.'+encodeURIComponent(authUserId)
+    +'&member_status=eq.member&select=id&limit=1'
+  );
+  const accounts=await accountRes.json() as Array<{id:string}>;
+  const customerId=accounts[0]?.id;
+  if(!customerId)throw new Error('member_profile_required');
+
+  const response=await dbFetch(
+    'commerce_payment_intents?intent_code=eq.'+encodeURIComponent(intentCode)
+    +'&customer_id=eq.'+encodeURIComponent(customerId)
+    +'&source_entity_type=eq.otop_order'
+    +(providerCode?'&provider_code=eq.'+encodeURIComponent(providerCode):'')
+    +'&select='+PAYMENT_INTENT_SELECT+'&limit=1'
+  );
+  const rows=await response.json() as Array<Record<string,unknown>>;
+  return rows[0]?mapGlobalPaymentIntentRow(rows[0]):null;
+}
+
+export async function loadGlobalPaymentIntentById(intentId:unknown):Promise<MemberGlobalPaymentIntent|null>{
+  const id=typeof intentId==='string'?intentId.trim():'';
+  if(!UUID_RE.test(id))throw new Error('invalid_payment_intent_id');
+  const response=await dbFetch(
+    'commerce_payment_intents?id=eq.'+encodeURIComponent(id)
+    +'&select='+PAYMENT_INTENT_SELECT+'&limit=1'
+  );
+  const rows=await response.json() as Array<Record<string,unknown>>;
+  return rows[0]?mapGlobalPaymentIntentRow(rows[0]):null;
+}
+
+export async function loadGlobalPaymentIntentByProviderObject(input:{
+  providerCode:unknown;
+  providerIntentId:unknown;
+}):Promise<MemberGlobalPaymentIntent|null>{
+  const providerCode=normalizePaymentCode(input.providerCode);
+  const providerIntentId=typeof input.providerIntentId==='string'?input.providerIntentId.trim():'';
+  if(!providerCode||!providerIntentId||providerIntentId.length>240)throw new Error('invalid_provider_payment_reference');
+  const response=await dbFetch(
+    'commerce_payment_intents?provider_code=eq.'+encodeURIComponent(providerCode)
+    +'&provider_intent_id=eq.'+encodeURIComponent(providerIntentId)
+    +'&select='+PAYMENT_INTENT_SELECT+'&limit=1'
+  );
+  const rows=await response.json() as Array<Record<string,unknown>>;
+  return rows[0]?mapGlobalPaymentIntentRow(rows[0]):null;
+}
+
+export async function linkGlobalPaymentProviderIntent(input:{
+  intentId:unknown;
+  providerIntentId:unknown;
+}):Promise<MemberGlobalPaymentIntent>{
+  const intentId=typeof input.intentId==='string'?input.intentId.trim():'';
+  const providerIntentId=typeof input.providerIntentId==='string'?input.providerIntentId.trim():'';
+  if(!UUID_RE.test(intentId))throw new Error('invalid_payment_intent_id');
+  if(!providerIntentId||providerIntentId.length>240)throw new Error('invalid_provider_payment_reference');
+
+  const current=await loadGlobalPaymentIntentById(intentId);
+  if(!current)throw new Error('payment_intent_not_found');
+  if(current.providerIntentId){
+    if(current.providerIntentId!==providerIntentId)throw new Error('provider_intent_id_mismatch');
+    return current;
+  }
+  const response=await dbFetch(
+    'commerce_payment_intents?id=eq.'+encodeURIComponent(intentId)+'&provider_intent_id=is.null',
+    {
+      method:'PATCH',
+      headers:{Prefer:'return=representation'},
+      body:JSON.stringify({provider_intent_id:providerIntentId}),
+    },
+  );
+  const rows=await response.json() as Array<Record<string,unknown>>;
+  const row=rows[0];
+  if(row)return mapGlobalPaymentIntentRow(row);
+  const reread=await loadGlobalPaymentIntentById(intentId);
+  if(!reread||reread.providerIntentId!==providerIntentId)throw new Error('provider_intent_link_failed');
+  return reread;
+}
+
+export async function recordAndApplyGlobalPaymentEvent(input:{
+  providerCode:unknown;
+  providerEventId:unknown;
+  eventType:unknown;
+  providerObjectId?:unknown;
+  currencyCode?:unknown;
+  amountMinor?:unknown;
+  moneySemantics:'none'|'intent_total'|'refund_delta';
+  signatureVerified:boolean;
+  payloadSha256:unknown;
+  intentId:unknown;
+  newStatus:string;
+  metadata?:Record<string,unknown>;
+}){
+  const providerCode=normalizePaymentCode(input.providerCode);
+  if(!providerCode)throw new Error('invalid_payment_provider');
+  const providerEventId=typeof input.providerEventId==='string'?input.providerEventId.trim():'';
+  const eventType=typeof input.eventType==='string'?input.eventType.trim():'';
+  const providerObjectId=typeof input.providerObjectId==='string'?input.providerObjectId.trim():null;
+  const payloadSha256=typeof input.payloadSha256==='string'?input.payloadSha256.trim().toLowerCase():'';
+  const intentId=typeof input.intentId==='string'?input.intentId.trim():'';
+  if(!providerEventId||providerEventId.length>240)throw new Error('invalid_provider_event_id');
+  if(!eventType||eventType.length>120)throw new Error('invalid_provider_event_type');
+  if(!UUID_RE.test(intentId))throw new Error('invalid_payment_intent_id');
+  if(!/^[a-f0-9]{64}$/.test(payloadSha256))throw new Error('invalid_payload_digest');
+
+  let currencyCode:string|null=null;
+  let amountMinor:string|null=null;
+  if(input.moneySemantics!=='none'){
+    currencyCode=normalizePaymentCurrency(input.currencyCode);
+    const amount=typeof input.amountMinor==='bigint'
+      ?input.amountMinor
+      :BigInt(String(input.amountMinor??'0'));
+    if(!currencyCode||amount<=0n)throw new Error('provider_event_money_required');
+    amountMinor=amount.toString();
+  }
+
+  const recorded=await dbFetch('rpc/record_commerce_payment_event_v1',{
+    method:'POST',
+    headers:{Prefer:'return=representation'},
+    body:JSON.stringify({
+      p_provider_code:providerCode,
+      p_provider_event_id:providerEventId,
+      p_event_type:eventType,
+      p_provider_object_id:providerObjectId,
+      p_currency_code:currencyCode,
+      p_amount_minor:amountMinor,
+      p_money_semantics:input.moneySemantics,
+      p_signature_verified:input.signatureVerified,
+      p_payload_sha256:payloadSha256,
+      p_metadata:input.metadata??{},
+    }),
+  });
+  const recordedRows=await recorded.json() as Array<{event_id:number;duplicate:boolean;processing_status:string}>;
+  const event=recordedRows[0];
+  if(!event)throw new Error('payment_event_not_recorded');
+
+  const applied=await dbFetch('rpc/apply_commerce_payment_event_v1',{
+    method:'POST',
+    headers:{Prefer:'return=representation'},
+    body:JSON.stringify({
+      p_event_id:event.event_id,
+      p_intent_id:intentId,
+      p_new_status:input.newStatus,
+      p_provider_intent_id:providerObjectId,
+    }),
+  });
+  const appliedRows=await applied.json() as Array<{
+    intent_id:string;status:string;captured_amount_minor:string|number;refunded_amount_minor:string|number;
+  }>;
+  const row=appliedRows[0];
+  if(!row)throw new Error('payment_event_not_applied');
+  return{
+    duplicate:Boolean(event.duplicate),
+    intentId:row.intent_id,
+    status:row.status,
+    capturedAmountMinor:String(row.captured_amount_minor),
+    refundedAmountMinor:String(row.refunded_amount_minor),
+  };
+}
