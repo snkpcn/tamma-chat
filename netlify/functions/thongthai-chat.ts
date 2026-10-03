@@ -6731,10 +6731,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   }
 
   const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
-  const priorityWorldwideRead =
-    !explicitTransactionIntent && THONGTHAI_PRIORITY_WORLDWIDE_READ_RE.test(request.message);
-  const openLanguageOrWorldwidePriority =
-    (isForeignLanguageCustomerMessage(request.message) || priorityWorldwideRead)
+  const foreignLanguagePrimaryEligible =
+    isForeignLanguageCustomerMessage(request.message)
     && shouldUseThongthaiAgentForeignLanguagePrimary({
       guestKey: request.guestId,
       guestDbId,
@@ -6746,7 +6744,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
   const cafeReadOnlyBeforePrimary =
-    cafeStateForPrePrimary !== null && !openLanguageOrWorldwidePriority;
+    cafeStateForPrePrimary !== null && !foreignLanguagePrimaryEligible;
 
   // Narrow cafe -> restaurant topic-switch fast path. It exists only for an
   // EXPLICIT restaurant/menu discovery in the current sentence. Do not use
@@ -6769,7 +6767,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     && !activeTaskBeforePrimary
     && !boundedConversationBeforePrimary
     && (
-      openLanguageOrWorldwidePriority
+      foreignLanguagePrimaryEligible
       || shouldUseThongthaiAgentPrimary({
         guestKey: request.guestId,
         guestDbId,
