@@ -35,15 +35,20 @@ export type GlobalPaymentIntentEvidence = {
   marketCode: string;
   currencyCode: string;
   amountMinor: bigint;
+  capturedAmountMinor: bigint;
+  refundedAmountMinor: bigint;
   providerCode: string;
   paymentMethodCode: string;
   status: GlobalPaymentIntentStatus;
 };
 
+export type GlobalPaymentMoneySemantics = 'none' | 'intent_total' | 'refund_delta';
+
 export type GlobalPaymentEventEvidence = {
   providerCode: string;
   currencyCode: string | null;
   amountMinor: bigint | null;
+  moneySemantics: GlobalPaymentMoneySemantics;
   signatureVerified: boolean;
 };
 
@@ -95,11 +100,29 @@ export function assertGlobalPaymentEventMatchesIntent(
 ): void {
   if (!event.signatureVerified) throw new Error('provider_event_signature_not_verified');
   if (event.providerCode !== intent.providerCode) throw new Error('provider_event_provider_mismatch');
-  if (event.currencyCode !== null && event.currencyCode !== intent.currencyCode) {
+
+  if (event.moneySemantics === 'none') {
+    if (event.currencyCode !== null || event.amountMinor !== null) {
+      throw new Error('provider_event_money_semantics_invalid');
+    }
+    return;
+  }
+
+  if (event.currencyCode !== intent.currencyCode) {
     throw new Error('provider_event_currency_mismatch');
   }
-  if (event.amountMinor !== null && event.amountMinor !== intent.amountMinor) {
-    throw new Error('provider_event_amount_mismatch');
+  if (event.amountMinor === null || event.amountMinor <= 0n) {
+    throw new Error('provider_event_amount_missing');
+  }
+
+  if (event.moneySemantics === 'intent_total') {
+    if (event.amountMinor !== intent.amountMinor) throw new Error('provider_event_amount_mismatch');
+    return;
+  }
+
+  if (intent.capturedAmountMinor <= 0n) throw new Error('refund_before_capture');
+  if (intent.refundedAmountMinor + event.amountMinor > intent.capturedAmountMinor) {
+    throw new Error('refund_exceeds_capture');
   }
 }
 
