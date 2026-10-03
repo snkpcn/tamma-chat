@@ -94,8 +94,9 @@
 
   function get(provinceId, lang, fallback={}) {
     if (!lang || lang === 'th') return fallback;
-    const row = DATA[lang]?.[provinceId];
-    return row ? { ...fallback, ...row } : fallback;
+    const english = DATA.en?.[provinceId] || {};
+    const row = DATA[lang]?.[provinceId] || {};
+    return { ...fallback, ...english, ...row };
   }
 
   window.OTOP_PROVINCE_TRANSLATIONS = { get };
