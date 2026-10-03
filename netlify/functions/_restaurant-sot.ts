@@ -470,6 +470,38 @@ async function dispatchRestaurantPreorderPayment(preorderId: string): Promise<vo
   await dispatchPaymentNotification(payment.id);
 }
 
+export type RestaurantPreorderStatusSnapshot = {
+  preorderCode:string;
+  status:string;
+  totalAmount:number;
+  requestedFor:string;
+  createdAt:string;
+  updatedAt:string;
+};
+
+export async function loadLatestRestaurantPreorderStatus(
+  guestDbId:string | null,
+):Promise<RestaurantPreorderStatusSnapshot | null>{
+  if(!guestDbId)return null;
+  const response=await chartDbFetch(
+    `restaurant_preorders?guest_id=eq.${encodeURIComponent(guestDbId)}`
+    + '&select=preorder_code,status,total_amount,requested_for,created_at,updated_at'
+    + '&order=created_at.desc&limit=1',
+  );
+  const row=(await response.json() as Array<{
+    preorder_code:string;status:string;total_amount:number|string;
+    requested_for:string;created_at:string;updated_at:string;
+  }>)[0];
+  return row ? {
+    preorderCode:row.preorder_code,
+    status:row.status,
+    totalAmount:Number(row.total_amount),
+    requestedFor:row.requested_for,
+    createdAt:row.created_at,
+    updatedAt:row.updated_at,
+  } : null;
+}
+
 async function preorderById(id: string): Promise<PreorderRow | null> {
   const response = await chartDbFetch(`restaurant_preorders?id=eq.${id}&select=*&limit=1`);
   return (await response.json() as PreorderRow[])[0] ?? null;
