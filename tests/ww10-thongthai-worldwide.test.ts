@@ -92,3 +92,14 @@ test('WW-10 saved production Agent sync is triggered by canonical profile/tool c
   assert.match(workflow,/netlify\/functions\/_thongthai-agent-tools\.ts/);
   assert.match(workflow,/npm run agent:thongthai:production/);
 });
+
+
+test('WW-10 routes foreign and worldwide fact turns to one Saved Agent voice without bypassing transaction safety',()=>{
+  const chat=read('netlify/functions/thongthai-chat.ts');
+  assert.match(chat,/THONGTHAI_PRIORITY_WORLDWIDE_READ_RE/);
+  assert.match(chat,/const openLanguageOrWorldwidePriority/);
+  assert.match(chat,/isForeignLanguageCustomerMessage\(request\.message\)/);
+  assert.match(chat,/cafeStateForPrePrimary !== null && !openLanguageOrWorldwidePriority/);
+  assert.match(chat,/!explicitTransactionIntent && THONGTHAI_PRIORITY_WORLDWIDE_READ_RE\.test/);
+  assert.match(chat,/primaryRoutingCommonEligible && openLanguageOrWorldwidePriority/);
+});
