@@ -241,3 +241,145 @@ export async function getMemberGlobalFulfillment(authUserId:unknown,orderCode:un
     },
   };
 }
+
+
+export async function getGuestGlobalCommerceStatus(input:{
+  guestDbId:unknown;
+  code?:unknown;
+  environment?:'live'|'test';
+}){
+  const guestId=uuid(input.guestDbId,'guest_identity_required');
+  const environment=input.environment??'live';
+  const code=typeof input.code==='string'?input.code.trim().toUpperCase():'';
+  if(code&&!/^(?:OR|PI)-[A-Z0-9-]{6,80}$/.test(code))throw new Error('invalid_global_reference_code');
+
+  const accountRes=await dbFetch(
+    `customer_accounts?guest_id=eq.${encodeURIComponent(guestId)}&select=id&limit=1`,
+  );
+  const accounts=await accountRes.json() as Array<{id:string}>;
+  const account=accounts[0];
+  if(!account)return null;
+
+  let forcedOrderId:string|null=null;
+  if(code.startsWith('PI-')){
+    const paymentLookup=await dbFetch(
+      `commerce_payment_intents?intent_code=eq.${encodeURIComponent(code)}&environment=eq.${environment}`
+      +'&source_entity_type=eq.otop_order&select=source_entity_id&limit=1',
+    );
+    const payments=await paymentLookup.json() as Array<{source_entity_id:string}>;
+    forcedOrderId=payments[0]?.source_entity_id??null;
+    if(!forcedOrderId)return null;
+  }
+
+  const orderPath=
+    `otop_orders?customer_id=eq.${encodeURIComponent(account.id)}&checkout_version=eq.2&environment=eq.${environment}`
+    +(forcedOrderId?`&id=eq.${encodeURIComponent(forcedOrderId)}`:'')
+    +(code.startsWith('OR-')?`&order_code=eq.${encodeURIComponent(code)}`:'')
+    +'&select=id,order_code,status,shipping_status,market_code,destination_country_code,currency_code,'
+    +'subtotal_minor,shipping_fee_minor,total_minor,payment_intent_id,customs_snapshot_id,created_at,updated_at'
+    +'&order=created_at.desc&limit=1';
+  const orderRes=await dbFetch(orderPath);
+  const orders=await orderRes.json() as Array<Record<string,unknown>>;
+  const order=orders[0];
+  if(!order)return null;
+
+  const orderId=String(order.id);
+  const paymentIntentId=order.payment_intent_id?String(order.payment_intent_id):null;
+  const customsSnapshotId=order.customs_snapshot_id?String(order.customs_snapshot_id):null;
+
+  const [shipmentRes,paymentRes,customsRes]=await Promise.all([
+    dbFetch(
+      `commerce_fulfillment_shipments?order_id=eq.${encodeURIComponent(orderId)}`
+      +'&select=id,shipment_code,provider_code,service_code,shipment_status,booked_at,shipped_at,delivered_at,returned_at,updated_at&limit=1',
+    ),
+    paymentIntentId
+      ?dbFetch(
+        `commerce_payment_intents?id=eq.${encodeURIComponent(paymentIntentId)}`
+        +'&select=intent_code,status,amount_minor,captured_amount_minor,refunded_amount_minor,provider_code,payment_method_code,updated_at&limit=1',
+      )
+      :Promise.resolve(new Response('[]',{status:200,headers:{'Content-Type':'application/json'}})),
+    customsSnapshotId
+      ?dbFetch(
+        `commerce_customs_compliance_snapshots?id=eq.${encodeURIComponent(customsSnapshotId)}`
+        +'&select=decision,duty_tax_status,reasons,updated_at&limit=1',
+      )
+      :Promise.resolve(new Response('[]',{status:200,headers:{'Content-Type':'application/json'}})),
+  ]);
+  const shipments=await shipmentRes.json() as Array<Record<string,unknown>>;
+  const payments=await paymentRes.json() as Array<Record<string,unknown>>;
+  const customsRows=await customsRes.json() as Array<Record<string,unknown>>;
+  const shipment=shipments[0]??null;
+
+  let packages:Array<Record<string,unknown>>=[];
+  let events:Array<Record<string,unknown>>=[];
+  if(shipment?.id){
+    const [packageRes,eventRes]=await Promise.all([
+      dbFetch(
+        `commerce_fulfillment_packages?shipment_id=eq.${shipment.id}`
+        +'&select=package_index,provider_package_id,tracking_number_enc,tracking_url,package_status&order=package_index.asc',
+      ),
+      dbFetch(
+        `commerce_fulfillment_tracking_events?shipment_id=eq.${shipment.id}`
+        +'&select=event_code,provider_status,customer_message,occurred_at,state_applied&order=occurred_at.asc,received_at.asc',
+      ),
+    ]);
+    const packageRows=await packageRes.json() as Array<Record<string,unknown>>;
+    packages=packageRows.map(pkg=>({
+      packageIndex:Number(pkg.package_index),
+      providerPackageId:pkg.provider_package_id?String(pkg.provider_package_id):null,
+      trackingNumber:pkg.tracking_number_enc?decryptTrackingNumber(String(pkg.tracking_number_enc)):null,
+      trackingUrl:pkg.tracking_url?String(pkg.tracking_url):null,
+      packageStatus:String(pkg.package_status),
+    }));
+    events=await eventRes.json() as Array<Record<string,unknown>>;
+  }
+
+  const payment=payments[0]??null;
+  const customs=customsRows[0]??null;
+  return{
+    order:{
+      orderId,
+      orderCode:String(order.order_code),
+      status:String(order.status),
+      shippingStatus:order.shipping_status?String(order.shipping_status):null,
+      marketCode:String(order.market_code),
+      destinationCountryCode:String(order.destination_country_code),
+      currencyCode:String(order.currency_code),
+      subtotalMinor:order.subtotal_minor==null?null:String(order.subtotal_minor),
+      shippingFeeMinor:order.shipping_fee_minor==null?null:String(order.shipping_fee_minor),
+      totalMinor:order.total_minor==null?null:String(order.total_minor),
+      createdAt:String(order.created_at),
+      updatedAt:String(order.updated_at),
+    },
+    payment:payment?{
+      intentCode:String(payment.intent_code),
+      status:String(payment.status),
+      amountMinor:String(payment.amount_minor),
+      capturedAmountMinor:String(payment.captured_amount_minor),
+      refundedAmountMinor:String(payment.refunded_amount_minor),
+      providerCode:String(payment.provider_code),
+      paymentMethodCode:String(payment.payment_method_code),
+      updatedAt:String(payment.updated_at),
+    }:null,
+    customs:customs?{
+      decision:String(customs.decision),
+      dutyTaxStatus:String(customs.duty_tax_status),
+      reasons:customs.reasons,
+      updatedAt:String(customs.updated_at),
+    }:null,
+    fulfillment:shipment?{
+      shipmentId:String(shipment.id),
+      shipmentCode:String(shipment.shipment_code),
+      providerCode:String(shipment.provider_code),
+      serviceCode:String(shipment.service_code),
+      shipmentStatus:String(shipment.shipment_status),
+      bookedAt:String(shipment.booked_at),
+      shippedAt:shipment.shipped_at?String(shipment.shipped_at):null,
+      deliveredAt:shipment.delivered_at?String(shipment.delivered_at):null,
+      returnedAt:shipment.returned_at?String(shipment.returned_at):null,
+      updatedAt:String(shipment.updated_at),
+      packages,
+      events,
+    }:null,
+  };
+}

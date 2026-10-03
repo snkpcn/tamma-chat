@@ -107,6 +107,12 @@ export function shouldUseThongthaiAgentTransactionPrepare(input: {
  * same canonical tools as Thai service. Transaction/weather/location
  * boundaries remain unchanged.
  */
+export function isForeignLanguageCustomerMessage(message:string):boolean{
+  const text=message.trim();
+  if(!text||/[ก-๙]/u.test(text))return false;
+  return /\p{L}/u.test(text);
+}
+
 export function shouldUseThongthaiAgentForeignLanguagePrimary(input: {
   guestKey: string;
   guestDbId: string | null;

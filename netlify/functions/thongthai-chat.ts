@@ -107,7 +107,7 @@ import {
   classifySemanticBusinessIncidentRoute,
   semanticIncidentFeedbackMatch,
 } from './_business-incident-router';
-import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
+import { isForeignLanguageCustomerMessage, shouldUseThongthaiAgentForeignLanguagePrimary, shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
 import { deriveSemanticMeaning } from './_semantic-meaning';
@@ -178,6 +178,8 @@ export type {
 } from './_thongthai-brain-v3';
 
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
+const THONGTHAI_PRIORITY_WORLDWIDE_READ_RE =
+  /(?:ค่าส่ง|ค่าจัดส่ง|ส่งต่างประเทศ|จัดส่งต่างประเทศ|สกุลเงิน|ค่าเงิน|ศุลกากร|ภาษีนำเข้า|เลขพัสดุ|ติดตามพัสดุ|สถานะพัสดุ|(?:OTOP|โอทอป|สินค้า|ของฝาก).{0,30}(?:ส่ง|จัดส่ง).{0,30}(?:ไป|ต่างประเทศ)|international shipping|shipping cost|customs|import tax|currency|tracking)/iu;
 const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
 const RESTAURANT_ADVISOR_CONTEXT_SOURCE = 'restaurant_menu_advisor_v1';
 // "สวัสดี"/"หวัดดี" are commonly glued directly onto a polite particle with
@@ -6729,8 +6731,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   }
 
   const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
+  const priorityWorldwideRead =
+    !explicitTransactionIntent && THONGTHAI_PRIORITY_WORLDWIDE_READ_RE.test(request.message);
+  const openLanguageOrWorldwidePriority =
+    (isForeignLanguageCustomerMessage(request.message) || priorityWorldwideRead)
+    && shouldUseThongthaiAgentForeignLanguagePrimary({
+      guestKey: request.guestId,
+      guestDbId,
+      channel,
+      explicitTransactionIntent,
+      weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+      locationRequest: preserveVerifiedLocationBeforeSupervision
+        || topLevelSemanticIntent === 'LOCATION_REQUEST',
+    });
   const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
-  const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
+  const cafeReadOnlyBeforePrimary =
+    cafeStateForPrePrimary !== null && !openLanguageOrWorldwidePriority;
 
   // Narrow cafe -> restaurant topic-switch fast path. It exists only for an
   // EXPLICIT restaurant/menu discovery in the current sentence. Do not use
@@ -6752,15 +6768,18 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
     && !boundedConversationBeforePrimary
-    && shouldUseThongthaiAgentPrimary({
-    guestKey: request.guestId,
-    guestDbId,
-    channel,
-    explicitTransactionIntent,
-    weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
-    locationRequest: preserveVerifiedLocationBeforeSupervision
-      || topLevelSemanticIntent === 'LOCATION_REQUEST',
-  });
+    && (
+      openLanguageOrWorldwidePriority
+      || shouldUseThongthaiAgentPrimary({
+        guestKey: request.guestId,
+        guestDbId,
+        channel,
+        explicitTransactionIntent,
+        weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+        locationRequest: preserveVerifiedLocationBeforeSupervision
+          || topLevelSemanticIntent === 'LOCATION_REQUEST',
+      })
+    );
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
 
   if (cafeReadOnlyBeforePrimary) {
