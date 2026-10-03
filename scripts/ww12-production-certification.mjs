@@ -41,6 +41,21 @@ try{
   const marketByCode=new Map(markets.map(row=>[String(row.market_code),row]));
   const certMarkets=new Set(certifications.map(row=>String(row.market_code)));
   const failures=[];
+  const transactionEnvFlags=[
+    'TAMMA_WW_GLOBAL_PAYMENTS_ENABLED',
+    'TAMMA_WW_GLOBAL_SHIPPING_ENABLED',
+    'TAMMA_WW_CUSTOMS_ENABLED',
+    'TAMMA_WW_CHECKOUT_ENABLED',
+    'TAMMA_WW_FULFILLMENT_ENABLED',
+  ];
+
+  if(markets.filter(row=>row.status==='live').length===0){
+    for(const name of transactionEnvFlags){
+      if(/^(?:1|true|on|yes)$/i.test((process.env[name]??'').trim())){
+        failures.push('prelaunch_transaction_env_enabled:'+name);
+      }
+    }
+  }
 
   for(const market of markets){
     const code=String(market.market_code);
