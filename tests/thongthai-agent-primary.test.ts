@@ -83,7 +83,10 @@ test('foreign-language primary bypasses percentage canary but keeps master, chan
     }),false);
     assert.equal(shouldUseThongthaiAgentForeignLanguagePrimary({
       ...base,explicitTransactionIntent:false,weatherRequest:true,locationRequest:false,
-    }),false);
+    }),true,'foreign weather is read-only and grounded by the Agent weather tool');
+    assert.equal(shouldUseThongthaiAgentForeignLanguagePrimary({
+      ...base,explicitTransactionIntent:false,weatherRequest:false,locationRequest:true,
+    }),true,'foreign location is read-only and grounded by the Agent location tool');
   });
 
   withEnv({
