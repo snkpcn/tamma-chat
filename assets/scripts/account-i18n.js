@@ -1,7 +1,7 @@
 (() => {
   'use strict';
-  const STORAGE_KEY='thammachat-lang-v1';
-  const SUPPORTED=['th','en','zh','lo','vi'];
+  const STORAGE_KEY=window.ThammachatLocale?.storageKey||'thammachat-lang-v1';
+  const SUPPORTED=window.ThammachatLocale?.supported||['th','en','zh','lo','vi'];
   const LOCALES={th:'th-TH',en:'en-US',zh:'zh-CN',lo:'lo-LA',vi:'vi-VN'};
   const D={
     th:{
@@ -182,9 +182,9 @@
   };
   let current='th';
   function interpolate(v,vars={}){return String(v??'').replace(/\{(\w+)\}/g,(_,k)=>vars[k]??'');}
-  function t(key,vars={}){const d=D[current]||D.th;return interpolate(d[key]??D.th[key]??key,vars);}
-  function locale(){return LOCALES[current]||LOCALES.th;}
-  function read(){try{const v=localStorage.getItem(STORAGE_KEY);if(SUPPORTED.includes(v))return v;}catch{}const n=(navigator.language||'th').toLowerCase();return SUPPORTED.find(x=>n.startsWith(x))||'th';}
+  function t(key,vars={}){if(window.ThammachatLocale)return window.ThammachatLocale.translate(D,key,vars,current);const chain=current==='th'?['th']:(current==='en'?['en']:[current,'en']);for(const lang of chain){if(D[lang]?.[key]!==undefined)return interpolate(D[lang][key],vars)}return interpolate(key,vars);}
+  function locale(){return window.ThammachatLocale?.locale(current)||LOCALES[current]||LOCALES.th;}
+  function read(){if(window.ThammachatLocale)return window.ThammachatLocale.get();try{const v=localStorage.getItem(STORAGE_KEY);if(SUPPORTED.includes(v))return v;}catch{}const n=(navigator.language||'th').toLowerCase();return SUPPORTED.find(x=>n.startsWith(x))||'th';}
   function apply(){
     document.documentElement.lang=current;
     document.title=t('page_title');
@@ -193,11 +193,11 @@
     document.querySelectorAll('[data-account-count]').forEach(el=>el.textContent=t('items_count',{count:Number(el.dataset.count||0)}));
     document.querySelectorAll('[data-account-lang-select]').forEach(el=>el.value=current);
   }
-  function setLang(lang,persist=true){if(!SUPPORTED.includes(lang))return;current=lang;if(persist)try{localStorage.setItem(STORAGE_KEY,lang);}catch{}apply();window.dispatchEvent(new CustomEvent('account:i18n-change',{detail:{lang}}));}
+  function setLang(lang,persist=true){const normalized=window.ThammachatLocale?.normalize(lang)||lang;if(!SUPPORTED.includes(normalized))return;current=normalized;if(window.ThammachatLocale)window.ThammachatLocale.set(normalized,{persist,source:'account'});else if(persist)try{localStorage.setItem(STORAGE_KEY,normalized);}catch{}apply();window.dispatchEvent(new CustomEvent('account:i18n-change',{detail:{lang:current}}));}
   function init(){
     current=read();apply();
     document.querySelectorAll('[data-account-lang-select]').forEach(el=>el.addEventListener('change',()=>setLang(el.value)));
-    window.addEventListener('storage',e=>{if(e.key===STORAGE_KEY&&SUPPORTED.includes(e.newValue))setLang(e.newValue,false);});
+    window.addEventListener('storage',e=>{if(e.key===STORAGE_KEY&&SUPPORTED.includes(e.newValue))setLang(e.newValue,false);});window.addEventListener('thammachat:locale-change',e=>{const next=e.detail?.lang;if(next&&next!==current)setLang(next,false)});
     window.dispatchEvent(new CustomEvent('account:i18n-ready',{detail:{lang:current}}));
   }
   window.AccountI18n={t,locale,lang:()=>current,setLang,init};

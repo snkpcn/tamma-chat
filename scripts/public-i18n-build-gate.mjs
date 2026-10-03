@@ -75,3 +75,44 @@ for (const path of ['assets/scripts/account-i18n.js','assets/scripts/menu-i18n.j
     process.exit(1);
   }
 }
+
+
+const localeKernelPath = new URL('../assets/scripts/global-locale.js', import.meta.url);
+const localeKernel = fs.readFileSync(localeKernelPath, 'utf8');
+try {
+  new Function(localeKernel);
+} catch (error) {
+  console.error('PUBLIC_I18N_BUILD_GATE_FAILED: global locale kernel does not parse');
+  throw error;
+}
+
+for (const path of ['index.html','account.html','chess.html','menu.html','otop-map.html','otop.html']) {
+  const source = fs.readFileSync(new URL('../' + path, import.meta.url), 'utf8');
+  const kernelIndex = source.indexOf('assets/scripts/global-locale.js');
+  if (kernelIndex < 0) {
+    console.error('PUBLIC_I18N_BUILD_GATE_FAILED:', path, 'missing global locale kernel');
+    process.exit(1);
+  }
+  const runtimeCandidates = path === 'index.html' || path === 'chess.html'
+    ? ['const LANG_STORAGE_KEY']
+    : path === 'account.html'
+      ? ['assets/scripts/account-i18n.js']
+      : path === 'menu.html'
+        ? ['assets/scripts/menu-i18n.js']
+        : ['assets/scripts/otop-i18n.js'];
+  for (const marker of runtimeCandidates) {
+    if (source.indexOf(marker) <= kernelIndex) {
+      console.error('PUBLIC_I18N_BUILD_GATE_FAILED:', path, 'locale kernel must load before', marker);
+      process.exit(1);
+    }
+  }
+}
+
+for (const path of ['assets/scripts/account-i18n.js','assets/scripts/menu-i18n.js','assets/scripts/otop-i18n.js','index.html','chess.html']) {
+  const source = fs.readFileSync(new URL('../' + path, import.meta.url), 'utf8');
+  if (!source.includes('ThammachatLocale')) {
+    console.error('PUBLIC_I18N_BUILD_GATE_FAILED:', path, 'does not consume global locale kernel');
+    process.exit(1);
+  }
+}
+console.log('WW3_GLOBAL_LOCALE_BUILD_GATE_OK');

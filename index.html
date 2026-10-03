@@ -102,7 +102,7 @@ p{ margin:0; }
 <link rel="stylesheet" href="assets/styles/isan-boutique-phase1.css">
 <link rel="stylesheet" href="assets/styles/site-typography.css">
 <link rel="stylesheet" href="assets/styles/pre-worldwide-production.css">
-</head>
+<script src="assets/scripts/global-locale.js"></script>\n</head>
 <body>
 <style>
 /* ============================================================
@@ -2914,17 +2914,22 @@ vi: {
 /* ============================================================
    I18N ENGINE
    ============================================================ */
-const LANG_STORAGE_KEY = 'thammachat-lang-v1';
-let currentLang = 'th';
+const LANG_STORAGE_KEY = window.ThammachatLocale?.storageKey || 'thammachat-lang-v1';
+let currentLang = window.ThammachatLocale?.get() || 'th';
 let i18nMemoryFallback = null;
 
 async function langStorageGet(){
   try{
     if(window.storage && typeof window.storage.get === 'function'){
       const res = await window.storage.get(LANG_STORAGE_KEY, false);
-      if(res && res.value) return res.value;
+      if(res && res.value){
+        const normalized=window.ThammachatLocale?.normalize(res.value)||res.value;
+        if(window.ThammachatLocale)window.ThammachatLocale.set(normalized,{persist:true,dispatch:false,source:'home-storage'});
+        return normalized;
+      }
     }
   }catch(e){ /* not set yet, or window.storage unavailable — fall through */ }
+  if(window.ThammachatLocale) return window.ThammachatLocale.get();
   try{
     const raw = window.localStorage && window.localStorage.getItem(LANG_STORAGE_KEY);
     if(raw) return raw;
@@ -2932,21 +2937,26 @@ async function langStorageGet(){
   return i18nMemoryFallback;
 }
 async function langStorageSet(lang){
-  i18nMemoryFallback = lang;
+  const normalized=window.ThammachatLocale?.normalize(lang)||lang;
+  i18nMemoryFallback = normalized;
+  if(window.ThammachatLocale)window.ThammachatLocale.set(normalized,{persist:true,source:'home'});
   try{
     if(window.storage && typeof window.storage.set === 'function'){
-      await window.storage.set(LANG_STORAGE_KEY, lang, false);
+      await window.storage.set(LANG_STORAGE_KEY, normalized, false);
     }
   }catch(e){ /* fall through to localStorage below */ }
   try{
-    if(window.localStorage) window.localStorage.setItem(LANG_STORAGE_KEY, lang);
+    if(window.localStorage) window.localStorage.setItem(LANG_STORAGE_KEY, normalized);
   }catch(e){ /* kept in-memory only for this session */ }
 }
 
 function t(key){
-  const dict = TRANSLATIONS[currentLang] || TRANSLATIONS.th;
-  if(dict[key] !== undefined) return dict[key];
-  return (TRANSLATIONS.th[key] !== undefined) ? TRANSLATIONS.th[key] : key;
+  if(window.ThammachatLocale)return window.ThammachatLocale.translate(TRANSLATIONS,key,{},currentLang);
+  const chain=currentLang==='th'?['th']:(currentLang==='en'?['en']:[currentLang,'en']);
+  for(const lang of chain){
+    if(TRANSLATIONS[lang]?.[key]!==undefined)return TRANSLATIONS[lang][key];
+  }
+  return key;
 }
 
 function applyTranslations(){
@@ -2978,11 +2988,12 @@ function applyTranslations(){
 }
 
 async function setLang(lang){
-  if(!TRANSLATIONS[lang]) return;
-  currentLang = lang;
+  const normalized=window.ThammachatLocale?.normalize(lang)||lang;
+  if(!TRANSLATIONS[normalized]) return;
+  currentLang = normalized;
   applyTranslations();
-  await langStorageSet(lang);
-  window.dispatchEvent(new CustomEvent('i18n:change', { detail:{ lang } }));
+  await langStorageSet(normalized);
+  window.dispatchEvent(new CustomEvent('i18n:change', { detail:{ lang:currentLang } }));
 }
 
 window.I18N = {
@@ -2993,7 +3004,7 @@ window.I18N = {
 
 async function initI18n(){
   const saved = await langStorageGet();
-  const supported = ['th','en','zh','lo','vi'];
+  const supported = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi'];
   let initial = 'th';
   if(saved && supported.includes(saved)){
     initial = saved;
@@ -3007,6 +3018,10 @@ async function initI18n(){
   currentLang = initial;
   applyTranslations();
   window.dispatchEvent(new CustomEvent('i18n:change', { detail:{ lang: currentLang } }));
+  window.addEventListener('thammachat:locale-change', event=>{
+    const next=event.detail?.lang;
+    if(next&&next!==currentLang)setLang(next);
+  });
 
   // language switcher — desktop dropdown
   const langSwitch = document.getElementById('langSwitch');
