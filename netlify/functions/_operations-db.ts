@@ -1537,6 +1537,7 @@ export interface BookingStatusSnapshot {
   quantity: number | null;
   status: string;
   contactStatus: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -1548,6 +1549,7 @@ export interface PaymentStatusSnapshot {
   method: string;
   status: 'quote_required' | 'awaiting_payment' | 'proof_submitted' | 'verified' | 'rejected' | 'cancelled';
   sourceChannel: string;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -1564,6 +1566,7 @@ export interface OtopOrderStatusSnapshot {
   trackingUrl: string | null;
   shippedAt: string | null;
   deliveredAt: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -1594,12 +1597,12 @@ export async function loadLatestPaymentStatus(
     : '';
   const res = await dbFetch(
     `payment_requests?guest_id=eq.${encodeURIComponent(guestDbId)}${codeFilter}`
-    + '&select=payment_code,entity_code,amount,currency,method,status,source_channel,updated_at'
+    + '&select=payment_code,entity_code,amount,currency,method,status,source_channel,created_at,updated_at'
     + '&order=created_at.desc&limit=1',
   );
   const row = (await res.json() as Array<{
     payment_code:string;entity_code:string;amount:number|string|null;currency:string;method:string;
-    status:PaymentStatusSnapshot['status'];source_channel:string;updated_at:string;
+    status:PaymentStatusSnapshot['status'];source_channel:string;created_at:string;updated_at:string;
   }>)[0];
   return row ? {
     paymentCode:row.payment_code,
@@ -1609,6 +1612,7 @@ export async function loadLatestPaymentStatus(
     method:row.method,
     status:row.status,
     sourceChannel:row.source_channel,
+    createdAt:row.created_at,
     updatedAt:row.updated_at,
   } : null;
 }
@@ -1626,13 +1630,13 @@ export async function loadLatestOtopOrderStatus(
   const res = await dbFetch(
     `otop_orders?guest_id=eq.${encodeURIComponent(guestDbId)}`
     + (normalized ? `&order_code=eq.${encodeURIComponent(normalized)}` : '')
-    + '&select=order_code,status,subtotal_amount,shipping_fee,total_amount,fulfillment_type,shipping_status,carrier_name,tracking_number_enc,tracking_url,shipped_at,delivered_at,updated_at'
+    + '&select=order_code,status,subtotal_amount,shipping_fee,total_amount,fulfillment_type,shipping_status,carrier_name,tracking_number_enc,tracking_url,shipped_at,delivered_at,created_at,updated_at'
     + '&order=created_at.desc&limit=1',
   );
   const row = (await res.json() as Array<{
     order_code:string;status:string;subtotal_amount:number|string;shipping_fee:number|string;total_amount:number|string;
     fulfillment_type:'pickup'|'shipping';shipping_status:string|null;carrier_name:string|null;
-    tracking_number_enc:string|null;tracking_url:string|null;shipped_at:string|null;delivered_at:string|null;updated_at:string;
+    tracking_number_enc:string|null;tracking_url:string|null;shipped_at:string|null;delivered_at:string|null;created_at:string;updated_at:string;
   }>)[0];
   return row ? {
     orderCode:row.order_code,
@@ -1647,6 +1651,7 @@ export async function loadLatestOtopOrderStatus(
     trackingUrl:row.tracking_url,
     shippedAt:row.shipped_at,
     deliveredAt:row.delivered_at,
+    createdAt:row.created_at,
     updatedAt:row.updated_at,
   } : null;
 }
@@ -1685,12 +1690,12 @@ export async function loadLatestBookingStatus(
   const res = await dbFetch(
     `bookings?guest_id=eq.${encodeURIComponent(guestDbId)}`
     + (bookingCode ? `&booking_code=eq.${encodeURIComponent(bookingCode)}` : '')
-    + '&select=booking_code,service_type,start_at,end_at,party_size,quantity,status,contact_status,updated_at'
+    + '&select=booking_code,service_type,start_at,end_at,party_size,quantity,status,contact_status,created_at,updated_at'
     + '&order=created_at.desc&limit=1',
   );
   const rows = await res.json() as Array<{
     booking_code: string; service_type: ServiceType; start_at: string; end_at: string;
-    party_size: number | null; quantity: number | null; status: string; contact_status: string | null; updated_at: string;
+    party_size: number | null; quantity: number | null; status: string; contact_status: string | null; created_at:string; updated_at: string;
   }>;
   const row = rows[0];
   return row ? {
@@ -1702,6 +1707,7 @@ export async function loadLatestBookingStatus(
     quantity: row.quantity == null ? null : Number(row.quantity),
     status: row.status,
     contactStatus: row.contact_status,
+    createdAt: row.created_at,
     updatedAt: row.updated_at,
   } : null;
 }
