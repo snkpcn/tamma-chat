@@ -23,3 +23,97 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: WW10 final production smoke
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: |
+          node --input-type=module <<'NODE'
+          import { randomUUID } from 'node:crypto';
+
+          const cases = [
+            {
+              id: 'th-worldwide',
+              language: 'th',
+              message: 'ค่าส่งสินค้า OTOP ไปสวีเดนเท่าไหร่ครับ ถ้ายังไม่มีราคาจริงบอกตรงๆนะครับ',
+              accept: reply =>
+                /[ก-๙]/u.test(reply) &&
+                /สวีเดน/u.test(reply) &&
+                /(?:ยัง.{0,30}(?:ยืนยัน|เปิด|รองรับ|ตรวจสอบ|ไม่มี)|ไม่สามารถ.{0,30}(?:ยืนยัน|ตรวจสอบ)|ยังไม่มี.{0,30}(?:ข้อมูล|ค่าส่ง|ระบบ))/u.test(reply),
+              forbid: [
+                /(?:SEK|USD)\s*\d|\d+(?:\.\d+)?\s*(?:SEK|USD)/iu,
+                /ต้อง.{0,20}(?:ทราบ|รู้).{0,20}(?:ยอด|ค่าสินค้า).{0,20}ก่อน/u,
+              ],
+            },
+            {
+              id: 'sv-worldwide',
+              language: 'en',
+              message: 'Kan ni skicka OTOP-produkter till Sverige? Om den internationella frakten inte är verifierad ännu, säg det tydligt på svenska.',
+              accept: reply => /(?:Sverige|frakt|skicka|leverans|verifier|bekräft)/iu.test(reply),
+              forbid: [
+                /ครับ|ค่ะ|คะ/u,
+                /(?:SEK|USD|THB)\s*\d|\d+(?:\.\d+)?\s*(?:SEK|USD|THB)/iu,
+              ],
+            },
+            {
+              id: 'cafe-routing',
+              language: 'th',
+              message: 'ลาเต้เย็นไม่หวานมีไหมครับ ราคาเท่าไหร่',
+              accept: reply => /(?:ลาเต้|กาแฟ)/u.test(reply),
+              forbid: [/(?:สวีเดน|ต่างประเทศ|international|worldwide)/iu],
+            },
+            {
+              id: 'generic-shipping-word',
+              language: 'th',
+              message: 'ของชิ้นนี้ถูกส่งไปที่ร้านแล้วหรือยังครับ',
+              accept: reply => /[ก-๙]/u.test(reply),
+              forbid: [/(?:สวีเดน|SEK|ต่างประเทศ|international|worldwide)/iu],
+            },
+          ];
+
+          const requestBase = {
+            chatHistory: [],
+            guestContext: {
+              tripDuration: null,
+              travelerType: null,
+              group: { adults: null, children: null, elderly: null },
+              interests: [],
+              pace: null,
+              budget: null,
+              constraints: [],
+            },
+            journeyContext: {
+              currentPlan: null,
+              savedPlan: null,
+              visitedExperiences: [],
+              favorites: [],
+              journalEntries: [],
+            },
+            pageContext: { section: 'web' },
+            environment: 'live',
+          };
+
+          for (const tc of cases) {
+            const guestId = randomUUID();
+            const eventId = 'ww10-final-prod-smoke-' + tc.id + '-' + Date.now();
+            const response = await fetch(process.env.THONGTHAI_PRODUCTION_URL, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                ...requestBase,
+                guestId,
+                eventId,
+                message: tc.message,
+                language: tc.language,
+              }),
+            });
+            const body = await response.json().catch(() => ({}));
+            const reply = String(body.message ?? '');
+            console.log(JSON.stringify({ id: tc.id, status: response.status, guestId, eventId, reply }));
+            if (response.status !== 200) throw new Error(tc.id + ': HTTP ' + response.status);
+            if (reply.trim().length < 12) throw new Error(tc.id + ': empty/short reply');
+            if (!tc.accept(reply)) throw new Error(tc.id + ': acceptance failed');
+            for (const pattern of tc.forbid) {
+              if (pattern.test(reply)) throw new Error(tc.id + ': forbidden pattern ' + pattern);
+            }
+          }
+          NODE
