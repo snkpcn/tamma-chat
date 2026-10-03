@@ -131,3 +131,51 @@ export async function createGlobalShippingQuote(input:{
     expiresAt:row.expires_at,
   }};
 }
+
+
+export type GlobalProductShippingProfile={
+  productId:string;
+  originCountryCode:string;
+  weightGrams:number;
+  lengthMm:number;
+  widthMm:number;
+  heightMm:number;
+  shipsSeparately:boolean;
+};
+
+const PRODUCT_UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * WW-10 read seam: return only canonical WW-6 product parcel profiles.
+ * No dimensions or weights are inferred here. Missing profiles stay missing.
+ */
+export async function loadGlobalProductShippingProfiles(input:{
+  productIds:unknown;
+  env?:WorldwideEnv;
+}):Promise<{kind:'disabled'}|{kind:'ready';profiles:GlobalProductShippingProfile[]}>{
+  if(!isWorldwideCapabilityEnabled('globalShipping',input.env))return{kind:'disabled'};
+  if(!Array.isArray(input.productIds))throw new Error('invalid_product_ids');
+  const ids=[...new Set(input.productIds
+    .filter((value):value is string=>typeof value==='string'&&PRODUCT_UUID_RE.test(value))
+    .map(value=>value.toLowerCase()))];
+  if(ids.length<1||ids.length>30)throw new Error('invalid_product_ids');
+  const response=await dbFetch(
+    'commerce_product_shipping_profiles?product_id=in.('
+    +ids.join(',')
+    +')&active=eq.true'
+    +'&select=product_id,origin_country_code,weight_grams,length_mm,width_mm,height_mm,ships_separately'
+  );
+  const rows=await response.json() as Array<{
+    product_id:string;origin_country_code:string;weight_grams:number;
+    length_mm:number;width_mm:number;height_mm:number;ships_separately:boolean;
+  }>;
+  return{kind:'ready',profiles:rows.map(row=>({
+    productId:row.product_id,
+    originCountryCode:row.origin_country_code,
+    weightGrams:Number(row.weight_grams),
+    lengthMm:Number(row.length_mm),
+    widthMm:Number(row.width_mm),
+    heightMm:Number(row.height_mm),
+    shipsSeparately:Boolean(row.ships_separately),
+  }))};
+}
