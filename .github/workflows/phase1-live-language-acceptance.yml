@@ -56,3 +56,8 @@ jobs:
           THONGTHAI_SEMANTIC_MODEL: gpt-5.6-terra
           THONGTHAI_SEMANTIC_REVIEW_MODEL: gpt-5.6-sol
         run: npx tsx scripts/run-real-line-16-turn-live-acceptance.ts
+
+      - name: Run isolated Phase 2 production wave
+        env:
+          PHASE2_WAVE: activity,stay
+        run: npx tsx scripts/run-phase2-wave-certification.ts
