@@ -339,6 +339,7 @@ export async function loadOtopStoreCatalog() {
       );
       return {
         sku: String(row.sku),
+        currencyCode: 'THB',
         name: String(row.name),
         description: typeof row.description === 'string' ? row.description : null,
         price: Number(row.price),
@@ -360,6 +361,7 @@ export async function loadOtopStoreCatalog() {
           .slice(0, 4),
       };
     }),
+    currencyCode: 'THB',
     shipping: settings,
   };
 }
@@ -436,6 +438,7 @@ export async function checkoutMemberOtopOrder(authUserId: string, value: unknown
   if (!order) throw new Error('order_not_created');
   return {
     orderCode: order.order_code,
+    currencyCode: 'THB',
     subtotal: Number(order.subtotal),
     shippingFee: Number(order.shipping_fee),
     total: Number(order.total),
