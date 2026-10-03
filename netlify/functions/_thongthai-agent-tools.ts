@@ -1,10 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { buildRealKnowledgeSourceAdapters } from './_dialog-source-adapters';
 import { resolveKnowledge, type GroundedFact, type KnowledgeNeed, type KnowledgeRequest } from './_knowledge-resolver';
 import type { SemanticDomain } from './_semantic-interpreter';
 import { THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS, THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 import { restaurantMenuAdvice } from './_restaurant-sot';
-import { readThongthaiMarketContext, readThongthaiShippingQuote } from './_thongthai-worldwide-bridge';
+import { readThongthaiGlobalCommerceStatus, readThongthaiMarketContext, readThongthaiShippingQuote, readThongthaiWorldwideOffer } from './_thongthai-worldwide-bridge';
 
 export type ThongthaiAgentFunctionTool = {
   type: 'function';
@@ -125,6 +126,25 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
       subtotal: { type: 'number', minimum: 0, description: 'Current merchandise subtotal in the market transaction currency.' },
       locale: { type: 'string', description: 'Optional customer locale.' },
     }, ['country_code','subtotal']),
+  },
+  {
+    type: 'function',
+    name: 'get_worldwide_offer',
+    description: 'Build one canonical OTOP worldwide service bundle for an explicit destination country and exact SKU quantities: destination market/currency, explicit product prices, stock, WW parcel profile, shipping quote, customs eligibility, payment method readiness and checkout readiness. Never infer destination from language and never invent missing weight, dimensions, taxes, carrier or price. This is a non-ordering quote/read operation.',
+    parameters: objectSchema({
+      country_code: { type: 'string', description: 'Explicit two-letter destination country code such as TH, SE, US. Never derive it from the customer language.' },
+      items: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 30,
+        items: objectSchema({
+          sku: { type: 'string', description: 'Canonical OTOP SKU.' },
+          quantity: { type: 'integer', minimum: 1, maximum: 99 },
+        }, ['sku','quantity']),
+      },
+      locale: { type: 'string', description: 'Optional customer presentation locale; this never changes the destination country.' },
+      service_code: { type: 'string', description: 'Optional explicit WW shipping service code.' },
+    }, ['country_code','items']),
   },
   {
     type: 'function',
@@ -291,6 +311,33 @@ export async function executeThongthaiReadOnlyTool(
       subtotal,
       locale:stringArg(args, 'locale'),
     }));
+  }
+  if (name === 'get_worldwide_offer') {
+    const countryCode = stringArg(args, 'country_code');
+    if (!countryCode) return JSON.stringify({ ok:false, error:'country_code_required' });
+    return JSON.stringify(await readThongthaiWorldwideOffer({
+      countryCode,
+      items:args.items,
+      locale:stringArg(args, 'locale'),
+      serviceCode:stringArg(args, 'service_code'),
+      environment:context.environment ?? 'live',
+      idempotencySeed:context.eventId?.trim() || randomUUID(),
+    }));
+  }
+  if (name === 'get_order_status' || name === 'get_payment_status') {
+    const code = name === 'get_order_status'
+      ? stringArg(args, 'order_code')
+      : stringArg(args, 'code');
+    const global = await readThongthaiGlobalCommerceStatus({
+      guestDbId:context.guestDbId,
+      code,
+      environment:context.environment ?? 'live',
+    });
+    if (global.status === 'ready') {
+      return JSON.stringify(name === 'get_payment_status'
+        ? { ok:true, scope:'international', order:global.order, payment:global.payment }
+        : { ok:true, ...global });
+    }
   }
   const adapters = buildRealKnowledgeSourceAdapters(context.channel, {
     guestDbId: context.guestDbId,
