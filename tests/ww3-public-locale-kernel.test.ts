@@ -74,6 +74,5 @@ test('WW-3 language preference never authorizes or mutates commerce decisions', 
   const kernel = read('assets/scripts/global-locale.js');
   const server = read('netlify/functions/_storefront-locale.ts');
   assert.doesNotMatch(kernel, /THB|USD|shipping|checkout|payment/iu);
-  assert.doesNotMatch(server, /shipping|checkout|payment|price/iu);
-  assert.match(server, /countryCode' in \(result \?\? \{\}\)/u);
+  assert.doesNotMatch(server, /shipping|checkout|payment|price|countryCode|currencyCode/iu);
 });
