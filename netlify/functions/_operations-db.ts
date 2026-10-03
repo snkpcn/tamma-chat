@@ -1551,7 +1551,24 @@ export interface PaymentStatusSnapshot {
   updatedAt: string;
 }
 
+export interface OtopOrderStatusSnapshot {
+  orderCode: string;
+  status: string;
+  subtotalAmount: number;
+  shippingFee: number;
+  totalAmount: number;
+  fulfillmentType: 'pickup' | 'shipping';
+  shippingStatus: string | null;
+  carrierName: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  updatedAt: string;
+}
+
 const PAYMENT_LOOKUP_CODE_RE = /^(?:PAY|BK|PO|OR)-\d{6}-[A-Z0-9]{8}$/i;
+const OTOP_ORDER_LOOKUP_CODE_RE = /^OR-\d{6}-[A-Z0-9]{8}$/i;
 
 /** Read-only payment truth for the canonical guest. The guest predicate is
  * mandatory even when a code is supplied, so a customer can never enumerate
@@ -1585,6 +1602,44 @@ export async function loadLatestPaymentStatus(
     method:row.method,
     status:row.status,
     sourceChannel:row.source_channel,
+    updatedAt:row.updated_at,
+  } : null;
+}
+
+/** Read-only OTOP order + shipping truth for the canonical guest.
+ * The guest predicate is mandatory even when an order code is supplied.
+ * PII such as address/phone/recipient is deliberately not selected. */
+export async function loadLatestOtopOrderStatus(
+  guestDbId: string | null,
+  orderCode?: string | null,
+): Promise<OtopOrderStatusSnapshot | null> {
+  if (!guestDbId || !UUID_RE.test(guestDbId)) return null;
+  const normalized = typeof orderCode === 'string' ? orderCode.trim().toUpperCase() : '';
+  if (normalized && !OTOP_ORDER_LOOKUP_CODE_RE.test(normalized)) return null;
+  const res = await dbFetch(
+    `otop_orders?guest_id=eq.${encodeURIComponent(guestDbId)}`
+    + (normalized ? `&order_code=eq.${encodeURIComponent(normalized)}` : '')
+    + '&select=order_code,status,subtotal_amount,shipping_fee,total_amount,fulfillment_type,shipping_status,carrier_name,tracking_number_enc,tracking_url,shipped_at,delivered_at,updated_at'
+    + '&order=created_at.desc&limit=1',
+  );
+  const row = (await res.json() as Array<{
+    order_code:string;status:string;subtotal_amount:number|string;shipping_fee:number|string;total_amount:number|string;
+    fulfillment_type:'pickup'|'shipping';shipping_status:string|null;carrier_name:string|null;
+    tracking_number_enc:string|null;tracking_url:string|null;shipped_at:string|null;delivered_at:string|null;updated_at:string;
+  }>)[0];
+  return row ? {
+    orderCode:row.order_code,
+    status:row.status,
+    subtotalAmount:Number(row.subtotal_amount),
+    shippingFee:Number(row.shipping_fee),
+    totalAmount:Number(row.total_amount),
+    fulfillmentType:row.fulfillment_type,
+    shippingStatus:row.shipping_status,
+    carrierName:row.carrier_name,
+    trackingNumber:decryptPii(row.tracking_number_enc),
+    trackingUrl:row.tracking_url,
+    shippedAt:row.shipped_at,
+    deliveredAt:row.delivered_at,
     updatedAt:row.updated_at,
   } : null;
 }
