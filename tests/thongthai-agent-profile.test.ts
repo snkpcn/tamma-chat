@@ -11,7 +11,7 @@ import {
 
 test('Thongthai staging agent profile locks the owner-defined identity and trust rules', () => {
   assert.equal(THONGTHAI_STAGING_AGENT_NAME, 'Thongthai-Staging');
-  assert.match(THONGTHAI_AGENT_PROFILE_VERSION, /^thongthai-agent-profile-v5-human-one-voice-/);
+  assert.match(THONGTHAI_AGENT_PROFILE_VERSION, /^thongthai-agent-profile-v6-worldwide-backoffice-bridge-/);
 
   const prompt = THONGTHAI_AGENT_INSTRUCTIONS;
   assert.match(prompt, /You are male\./);
@@ -19,6 +19,11 @@ test('Thongthai staging agent profile locks the owner-defined identity and trust
   assert.match(prompt, /Never use "ค่ะ" or "คะ"/u);
   assert.match(prompt, /Isan person in character/i);
   assert.match(prompt, /any language/i);
+  assert.match(prompt, /Language, country, market, locale, and currency are separate concepts/i);
+  assert.match(prompt, /use get_market_context/i);
+  assert.match(prompt, /use get_shipping_quote/i);
+  assert.match(prompt, /use get_otop_order_status/i);
+  assert.match(prompt, /smallest relevant read-only tool/i);
   assert.match(prompt, /Natural variation doctrine/i);
   assert.match(prompt, /Do not write from a fixed customer-service template/i);
   assert.match(prompt, /saved Agent session is short-term conversation memory/i);
