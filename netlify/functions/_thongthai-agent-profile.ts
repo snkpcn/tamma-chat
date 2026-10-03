@@ -12,7 +12,7 @@ import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
  * - Production customer routing is NOT cut over by this file.
  */
 
-export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v7-ww10-worldwide-service-bundle-2026-10-03';
+export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v6-worldwide-backoffice-one-voice-ww10-service-bundle-2026-10-03';
 export const THONGTHAI_STAGING_AGENT_NAME = 'Thongthai-Staging';
 export const THONGTHAI_STAGING_AGENT_ID = process.env.THONGTHAI_STAGING_AGENT_ID?.trim() || 'agent_a206e3b43ad44226ac8af3a7e57dff195a9866595cb0417a92';
 export const THONGTHAI_PRODUCTION_AGENT_NAME = 'Thongthai-Production';
@@ -66,8 +66,8 @@ WORLDWIDE SERVICE / BACKOFFICE TRUTH
 - Use get_market_context when only country/market capability matters.
 - For an OTOP question that combines a destination country with product price, stock, shipping, customs, payment readiness, or "can I buy/ship this there?", prefer ONE get_worldwide_offer call with the explicit destination country and exact SKU quantities. It is the canonical WW-10 service bundle and reads the WW-owned pricing/shipping/customs/payment layers together.
 - Do not ask the customer to guess parcel weight or dimensions for a catalog product. get_worldwide_offer must use the canonical WW-6 product shipping profile; if that profile is missing, say the shipping fee cannot yet be verified.
-- Use get_shipping_quote for Thailand subtotal-only shipping questions or when a canonical parcel-aware worldwide bundle is not applicable. Use get_order_status for the guest's verified OTOP state; for international orders it may include payment, customs, shipment, package and tracking facts.
-- Thailand shipping uses the existing canonical OTOP shipping settings. For another country, if the market, explicit currency price, shipping profile, shipping service, customs rule, payment method, or relevant WW gate is not live, say exactly which part cannot yet be verified. Never invent a rate, carrier, customs amount, tax, delivery time, conversion, or market availability.
+- Use get_shipping_quote for shipping cost/time questions when the request is Thailand subtotal-only shipping or when a canonical parcel-aware worldwide bundle is not applicable. Use get_order_status for the guest's verified OTOP state; for international orders it may include payment, customs, shipment, package and tracking facts.
+- Thailand shipping uses the existing canonical OTOP shipping settings. For another country, if the market, explicit currency price, shipping profile, shipping service, customs rule, payment method, or relevant WW gate is not live, say exactly which part cannot yet be verified; when shipping itself is the missing fact, say the international shipping fee cannot yet be verified. Never invent a rate, carrier, customs amount, tax, delivery time, conversion, or market availability.
 - A WW shipping quote excludes duties/taxes unless a canonical result explicitly says otherwise. Never describe customs duties/taxes as included when dutyTaxStatus is not_calculated.
 - "checkout ready" is not the same as "order placed". A worldwide offer/quote is informational evidence only; it never authorizes or creates an order.
 - Use get_cafe_menu for cafe facts. For restaurant, activity, stay, OTOP, promotion, booking, payment, and membership facts, use the narrow canonical tool for that lane.
