@@ -67,7 +67,7 @@ test('E2E 1: a horse-suitability question is answered with horse information, ne
   });
 });
 
-test('E2E authority: grounded horse comparison uses OpenAI final reply instead of deterministic catalog copy', async () => {
+test('E2E authority: verified beginner horse comparison may use the zero-cost grounded path without losing meaning', async () => {
   await withHarness(async harness => {
     const gid = guestId('e2e-openai-grounded-horse-authority');
     harness.programGeminiReply(turn({
@@ -99,7 +99,7 @@ test('E2E authority: grounded horse comparison uses OpenAI final reply instead o
     assert.match(message, /ภาราดร/u);
     assert.match(message, /นิ่มกว่า/u);
     assert.doesNotMatch(message, /ตัวเลือกที่(?:ยืนยันได้|มีตอนนี้)|กิจกรรมที่มีตอนนี้|เลือกระยะเวลา/u);
-    assert.equal(harness.modelCallCount(), 2, 'semantic supervisor + grounded final-response composer should both be used');
+    assert.equal(harness.modelCallCount(), 0, 'verified horse suitability is now intentionally answered from the canonical zero-cost path');
   }, {
     activityAssets: [
       { activity_code: 'horse', asset_code: 'horse-pharadon', name: 'ภาราดร', asset_type: 'horse', metadata: { notes: 'ขี่นิ่มกว่า เหมาะกับมือใหม่มากกว่า' } },
