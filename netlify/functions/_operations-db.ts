@@ -1567,6 +1567,13 @@ export interface OtopOrderStatusSnapshot {
   updatedAt: string;
 }
 
+export interface CafeInquiryStatusSnapshot {
+  inquiryCode: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 const PAYMENT_LOOKUP_CODE_RE = /^(?:PAY|BK|PO|OR)-\d{6}-[A-Z0-9]{8}$/i;
 const OTOP_ORDER_LOOKUP_CODE_RE = /^OR-\d{6}-[A-Z0-9]{8}$/i;
 
@@ -1640,6 +1647,29 @@ export async function loadLatestOtopOrderStatus(
     trackingUrl:row.tracking_url,
     shippedAt:row.shipped_at,
     deliveredAt:row.delivered_at,
+    updatedAt:row.updated_at,
+  } : null;
+}
+
+/** Read-only cafe inquiry truth for the canonical guest.
+ * No question/contact PII is selected; this is only for customer-visible
+ * "did anything get sent to staff?" status summaries. */
+export async function loadLatestCafeInquiryStatus(
+  guestDbId: string | null,
+): Promise<CafeInquiryStatusSnapshot | null> {
+  if (!guestDbId || !UUID_RE.test(guestDbId)) return null;
+  const res = await dbFetch(
+    `cafe_inquiries?guest_id=eq.${encodeURIComponent(guestDbId)}`
+    + '&select=inquiry_code,status,created_at,updated_at'
+    + '&order=created_at.desc&limit=1',
+  );
+  const row = (await res.json() as Array<{
+    inquiry_code:string;status:string;created_at:string;updated_at:string;
+  }>)[0];
+  return row ? {
+    inquiryCode:row.inquiry_code,
+    status:row.status,
+    createdAt:row.created_at,
     updatedAt:row.updated_at,
   } : null;
 }
