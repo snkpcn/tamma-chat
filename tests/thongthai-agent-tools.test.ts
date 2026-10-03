@@ -22,6 +22,8 @@ test('Thongthai Agent keeps the original business fact tools bounded and read-on
     'get_otop_catalog',
     'get_cafe_menu',
     'get_order_status',
+    'get_current_weather',
+    'get_location_info',
     'get_market_context',
     'get_shipping_quote',
     'get_active_promotions',
