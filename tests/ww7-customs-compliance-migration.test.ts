@@ -22,8 +22,10 @@ test('WW-7 creates server-only customs profile/rule/policy/snapshot stores',()=>
 
 test('WW-7 does not infer customs facts from OTOP story/category data',()=>{
   assert.doesNotMatch(core,/metadata\s*->|materialOrIngredient|category|productName|storyVerified/iu);
-  assert.doesNotMatch(core,/insert into public\.commerce_product_customs_profiles[\s\S]*select[\s\S]*from public\.otop_products/iu);
-  assert.doesNotMatch(core,/insert into public\.commerce_customs_destination_rules[\s\S]*select/iu);
+  const profileInsert=core.match(/insert into public\.commerce_product_customs_profiles[\s\S]{0,1200}?on conflict\(product_id\)/iu)?.[0]??'';
+  assert.match(profileInsert,/\bvalues\s*\(/iu);
+  assert.doesNotMatch(profileInsert,/\bselect\b[\s\S]*\bfrom public\.otop_products\b/iu);
+  assert.doesNotMatch(core,/insert into public\.commerce_customs_destination_rules\b/iu);
 });
 
 test('WW-7 classification and origin require explicit verified profile data',()=>{
