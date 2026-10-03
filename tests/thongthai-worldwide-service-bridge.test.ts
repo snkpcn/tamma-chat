@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   THONGTHAI_BACKOFFICE_READ_LANES,
+  buildThongthaiDomesticShippingRead,
   buildThongthaiOfferParcels,
   normalizeThongthaiWorldwideOfferItems,
   readThongthaiMarketContext,
@@ -174,6 +175,41 @@ test('foreign market and subtotal-only shipping fail closed while WW is not enab
     status:'not_available',
     reason:'market_not_ready',
     countryCode:'SE',
+  });
+});
+
+test('foreign shipping eligibility checks market truth before asking for a subtotal', async () => {
+  const shipping=await readThongthaiShippingQuote({
+    countryCode:'SE',
+    locale:'sv',
+    env:{},
+  });
+  assert.deepEqual(shipping,{
+    status:'not_available',
+    reason:'market_not_ready',
+    countryCode:'SE',
+  });
+
+  const tool=THONGTHAI_READ_ONLY_TOOLS.find(item=>item.name==='get_shipping_quote');
+  assert.ok(tool);
+  assert.deepEqual(tool.parameters.required,['country_code']);
+});
+
+test('Thailand shipping policy can be represented without subtotal and quote stays null', () => {
+  const shipping=buildThongthaiDomesticShippingRead({
+    domesticBaseFee:60,
+    freeShippingThreshold:1500,
+    estimatedMinDays:1,
+    estimatedMaxDays:3,
+  },null);
+  assert.equal(shipping.countryCode,'TH');
+  assert.equal(shipping.currencyCode,'THB');
+  assert.equal(shipping.quote,null);
+  assert.deepEqual(shipping.policy,{
+    domesticBaseFee:60,
+    freeShippingThreshold:1500,
+    estimatedMinDays:1,
+    estimatedMaxDays:3,
   });
 });
 
