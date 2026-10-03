@@ -177,6 +177,39 @@ test('foreign market and subtotal-only shipping fail closed while WW is not enab
   });
 });
 
+test('foreign shipping eligibility checks market truth before asking for a subtotal', async () => {
+  const shipping=await readThongthaiShippingQuote({
+    countryCode:'SE',
+    locale:'sv',
+    env:{},
+  });
+  assert.deepEqual(shipping,{
+    status:'not_available',
+    reason:'market_not_ready',
+    countryCode:'SE',
+  });
+
+  const tool=THONGTHAI_READ_ONLY_TOOLS.find(item=>item.name==='get_shipping_quote');
+  assert.ok(tool);
+  assert.deepEqual(tool.parameters.required,['country_code']);
+});
+
+test('Thailand shipping policy can be read without subtotal and quote stays null', async () => {
+  const shipping=await readThongthaiShippingQuote({
+    countryCode:'TH',
+    locale:'th',
+    env:{},
+  });
+  assert.equal(shipping.status,'ready');
+  if(shipping.status!=='ready')assert.fail('expected domestic shipping policy');
+  assert.equal(shipping.countryCode,'TH');
+  assert.equal(shipping.currencyCode,'THB');
+  assert.equal(shipping.quote,null);
+  assert.ok(shipping.policy.domesticBaseFee>=0);
+  assert.ok(shipping.policy.estimatedMinDays>=0);
+  assert.ok(shipping.policy.estimatedMaxDays>=shipping.policy.estimatedMinDays);
+});
+
 test('worldwide offer normalizes duplicate SKUs without inferring destination from locale', async () => {
   assert.deepEqual(normalizeThongthaiWorldwideOfferItems([
     {sku:'test001',quantity:1},{sku:'TEST001',quantity:1},
