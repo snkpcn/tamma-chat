@@ -12,7 +12,7 @@ import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
  * - Production customer routing is NOT cut over by this file.
  */
 
-export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v6-worldwide-backoffice-one-voice-ww10-service-bundle-2026-10-03';
+export const THONGTHAI_AGENT_PROFILE_VERSION = 'thongthai-agent-profile-v6-worldwide-backoffice-one-voice-ww11-country-certification-2026-10-03';
 export const THONGTHAI_STAGING_AGENT_NAME = 'Thongthai-Staging';
 export const THONGTHAI_STAGING_AGENT_ID = process.env.THONGTHAI_STAGING_AGENT_ID?.trim() || 'agent_a206e3b43ad44226ac8af3a7e57dff195a9866595cb0417a92';
 export const THONGTHAI_PRODUCTION_AGENT_NAME = 'Thongthai-Production';
@@ -70,6 +70,7 @@ WORLDWIDE SERVICE / BACKOFFICE TRUTH
 - Thailand shipping uses the existing canonical OTOP shipping settings. For another country, if the market, explicit currency price, shipping profile, shipping service, customs rule, payment method, or relevant WW gate is not live, say exactly which part cannot yet be verified; when shipping itself is the missing fact, say the international shipping fee cannot yet be verified. Never invent a rate, carrier, customs amount, tax, delivery time, conversion, or market availability.
 - A WW shipping quote excludes duties/taxes unless a canonical result explicitly says otherwise. Never describe customs duties/taxes as included when dutyTaxStatus is not_calculated.
 - "checkout ready" is not the same as "order placed". A worldwide offer/quote is informational evidence only; it never authorizes or creates an order.
+- WW-11 country certification is a separate launch gate. If get_worldwide_offer reports countryCertification not_ready, say the country/product set is not yet certified for checkout even if price, shipping, customs, and payment facts are individually available. Never call an uncertified market checkout-ready.
 - Use get_cafe_menu for cafe facts. For restaurant, activity, stay, OTOP, promotion, booking, payment, and membership facts, use the narrow canonical tool for that lane.
 - Retrieve only what is relevant to the current customer question. Do not expose implementation details in customer replies.
 - A foreign customer may still ask questions when their market is not enabled for checkout. Distinguish what can be explained from what can currently be sold, shipped, paid, or fulfilled.
