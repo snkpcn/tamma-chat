@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {
   resolveWorldwideDbRoute,
+  worldwideDbFetch,
   worldwideDbScaleSnapshot,
   WW12_GLOBAL_SCALE_VERSION,
 } from '../netlify/functions/_worldwide-db-client';
@@ -40,6 +41,46 @@ test('WW-12 falls back to primary when replica configuration is incomplete',()=>
   assert.equal(snapshot.replicaConfigured,false);
   assert.equal(snapshot.writesAlwaysPrimary,true);
   assert.equal(snapshot.version,WW12_GLOBAL_SCALE_VERSION);
+});
+
+
+test('WW-12 replica 5xx falls back once to primary while writes never touch replica',async()=>{
+  const originalFetch=globalThis.fetch;
+  const calls:Array<{url:string;method:string}>=[];
+  try{
+    globalThis.fetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{
+      const url=String(input);
+      const method=(init?.method??'GET').toUpperCase();
+      calls.push({url,method});
+      if(url.startsWith('https://replica.example.com/')){
+        return new Response('replica unavailable',{status:503});
+      }
+      return new Response('[]',{status:200,headers:{'Content-Type':'application/json'}});
+    }) as typeof fetch;
+
+    const readResponse=await worldwideDbFetch(
+      'commerce_markets?select=market_code',
+      {},
+      {consistency:'eventual',env:configured,operation:'test_replica_fallback'},
+    );
+    assert.equal(readResponse.status,200);
+    assert.equal(calls.length,2);
+    assert.match(calls[0]!.url,/^https:\/\/replica\.example\.com\/rest\/v1\//);
+    assert.match(calls[1]!.url,/^https:\/\/primary\.example\.com\/rest\/v1\//);
+
+    calls.length=0;
+    const writeResponse=await worldwideDbFetch(
+      'rpc/test_write',
+      {method:'POST',body:'{}'},
+      {consistency:'eventual',env:configured,operation:'test_write'},
+    );
+    assert.equal(writeResponse.status,200);
+    assert.equal(calls.length,1);
+    assert.match(calls[0]!.url,/^https:\/\/primary\.example\.com\/rest\/v1\//);
+    assert.equal(calls[0]!.method,'POST');
+  }finally{
+    globalThis.fetch=originalFetch;
+  }
 });
 
 test('WW-12 uses eventual consistency only for safe reference reads',()=>{
