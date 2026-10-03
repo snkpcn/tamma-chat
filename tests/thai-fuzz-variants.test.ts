@@ -56,9 +56,9 @@ test('all four Thai date notations for the same calendar date resolve identicall
   assert.equal(extractDate('3 ต.ค.', NOW), expected);
   assert.equal(extractDate('03/10', NOW), expected);
   assert.equal(extractDate('3/10', NOW), expected);
-  assert.equal(activityDateFromText('3 ตุลาคม'), expected);
-  assert.equal(activityDateFromText('3 ต.ค.'), expected);
-  assert.equal(activityDateFromText('03/10'), expected);
+  assert.equal(activityDateFromText('3 ตุลาคม', NOW), expected);
+  assert.equal(activityDateFromText('3 ต.ค.', NOW), expected);
+  assert.equal(activityDateFromText('03/10', NOW), expected);
 });
 
 // ---------------------------------------------------------------------------
