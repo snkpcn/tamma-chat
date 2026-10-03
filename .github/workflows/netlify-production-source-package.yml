@@ -36,3 +36,16 @@ jobs:
           path: /tmp/netlify-mcp.tgz
           if-no-files-found: error
           retention-days: 1
+      - name: Require existing Netlify auth secret
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "NETLIFY_AUTH_TOKEN_MISSING"
+            exit 2
+          fi
+      - name: Deploy exact main SHA to Netlify production
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          npx -y netlify-cli@latest deploy --build --prod             --site 8c1f4d60-68c9-4940-9152-89e9c967e22c             --auth "$NETLIFY_AUTH_TOKEN"
