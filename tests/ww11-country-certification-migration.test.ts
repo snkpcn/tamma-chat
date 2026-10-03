@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
 const sql=readFileSync(new URL('../supabase/migrations/20261003130000_ww11_country_certification.sql',import.meta.url),'utf8');
+const fkIndexSql=readFileSync(new URL('../supabase/migrations/20261003132500_ww11_certification_fk_index.sql',import.meta.url),'utf8');
 
 test('WW-11 creates time-bounded market certification and exact product evidence',()=>{
   for(const table of ['commerce_market_certifications','commerce_market_certification_products']){
@@ -52,4 +53,10 @@ test('WW-11 certification becomes stale when exact product evidence changes',()=
   assert.match(sql,/commerce_customs_profile_hash_v1/);
   assert.match(sql,/commerce_destination_rule_hash_v1/);
   assert.match(sql,/cp\.price_revision_id=\(e->>'priceRevisionId'\)::uuid/);
+});
+
+
+test('WW-11 covers the composite market/service foreign key',()=>{
+  assert.match(fkIndexSql,/commerce_market_certifications_market_service_idx/);
+  assert.match(fkIndexSql,/\(market_code,shipping_service_code\)/);
 });
