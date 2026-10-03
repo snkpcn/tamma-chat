@@ -98,6 +98,31 @@ export function shouldUseThongthaiAgentTransactionPrepare(input: {
   return stableAgentPrepareCanaryBucket(input.guestKey) < Math.round(percent * 100);
 }
 
+/**
+ * Foreign/open-language customer path.
+ *
+ * Once the production Agent master switch and channel allowlist are already
+ * enabled, non-Thai customer turns do not go through the percentage canary.
+ * The Saved Agent is the single multilingual customer voice and can use the
+ * same canonical tools as Thai service. Transaction/weather/location
+ * boundaries remain unchanged.
+ */
+export function shouldUseThongthaiAgentForeignLanguagePrimary(input: {
+  guestKey: string;
+  guestDbId: string | null;
+  channel: BrainChannel;
+  explicitTransactionIntent: boolean;
+  weatherRequest: boolean;
+  locationRequest: boolean;
+}): boolean {
+  if (process.env.THONGTHAI_AGENT_PRIMARY_ENABLED !== '1') return false;
+  if (!input.guestDbId || !input.guestKey) return false;
+  if (!SUPPORTED_CHANNELS.has(input.channel)) return false;
+  if (!configuredChannels().has(input.channel)) return false;
+  if (input.explicitTransactionIntent || input.weatherRequest || input.locationRequest) return false;
+  return true;
+}
+
 export function shouldUseThongthaiAgentPrimary(input: {
   guestKey: string;
   guestDbId: string | null;

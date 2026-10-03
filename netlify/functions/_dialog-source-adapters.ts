@@ -22,6 +22,7 @@ import {
   listOtopProducts,
   listServiceResources,
   loadLatestBookingStatus,
+  loadLatestOtopOrderStatus,
   loadLatestPaymentStatus,
   loadMembershipStatus,
 } from './_operations-db';
@@ -409,6 +410,43 @@ function membershipStatusAdapter(guestDbId: string | null | undefined) {
   };
 }
 
+function orderStatusAdapter(guestDbId: string | null | undefined) {
+  return async (request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> => {
+    const sourceId = 'otop_orders_operational';
+    if (!guestDbId) return unavailable(sourceId, 'order_operational', new Error('guest_identity_required'), now);
+    try {
+      const orderCode = stringValue(request, 'orderCode') ?? stringValue(request, 'entityCode');
+      const order = await loadLatestOtopOrderStatus(guestDbId, orderCode);
+      if (!order) return { status:'empty', sourceId, sourceType:'order_operational', fetchedAt:now.toISOString() };
+      const base = `order:${order.orderCode}`;
+      const factBase = {
+        domain:'otop' as const,
+        sourceId,
+        sourceType:'order_operational' as const,
+        authoritative:true,
+        fetchedAt:now.toISOString(),
+        updatedAt:order.updatedAt,
+      };
+      const facts:GroundedFact[] = [
+        { ...factBase, key:`${base}:status`, value:order.status },
+        { ...factBase, key:`${base}:subtotal`, value:order.subtotalAmount },
+        { ...factBase, key:`${base}:shippingFee`, value:order.shippingFee },
+        { ...factBase, key:`${base}:total`, value:order.totalAmount },
+        { ...factBase, key:`${base}:fulfillmentType`, value:order.fulfillmentType },
+        { ...factBase, key:`${base}:shippingStatus`, value:order.shippingStatus },
+        { ...factBase, key:`${base}:carrierName`, value:order.carrierName },
+        { ...factBase, key:`${base}:trackingNumber`, value:order.trackingNumber },
+        { ...factBase, key:`${base}:trackingUrl`, value:order.trackingUrl },
+        { ...factBase, key:`${base}:shippedAt`, value:order.shippedAt },
+        { ...factBase, key:`${base}:deliveredAt`, value:order.deliveredAt },
+      ];
+      return ok(sourceId, 'order_operational', facts, now);
+    } catch (error) {
+      return unavailable(sourceId, 'order_operational', error, now);
+    }
+  };
+}
+
 function paymentStatusAdapter(guestDbId: string | null | undefined) {
   return async (request: KnowledgeRequest, now: Date = new Date()): Promise<SourceResult> => {
     const sourceId = 'payments_operational';
@@ -458,6 +496,7 @@ export function buildRealKnowledgeSourceAdapters(
     },
     promotion: { eligibility: request => promotionEligibilityAdapter(channel)() },
     bookingStatus: { lookup: request => bookingStatusAdapter(options.guestDbId)(request) },
+    orderStatus: { lookup: request => orderStatusAdapter(options.guestDbId)(request) },
     paymentStatus: { lookup: request => paymentStatusAdapter(options.guestDbId)(request) },
     membership: { status: request => membershipStatusAdapter(options.guestDbId)(request) },
     otop: { catalog: request => otopCatalogAdapter(environment) },

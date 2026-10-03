@@ -4,6 +4,7 @@ import { resolveKnowledge, type GroundedFact, type KnowledgeNeed, type Knowledge
 import type { SemanticDomain } from './_semantic-interpreter';
 import { THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS, THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 import { restaurantMenuAdvice } from './_restaurant-sot';
+import { readThongthaiMarketContext, readThongthaiShippingQuote } from './_thongthai-worldwide-bridge';
 
 export type ThongthaiAgentFunctionTool = {
   type: 'function';
@@ -89,6 +90,41 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
     parameters: objectSchema({
       sku: { type: 'string' },
     }),
+  },
+  {
+    type: 'function',
+    name: 'get_cafe_menu',
+    description: 'Read the canonical live Inthanin Tad Tone menu and branch modifiers. Use for cafe drink names, styles, prices and modifiers. Read-only.',
+    parameters: objectSchema({
+      query: { type: 'string', description: 'Optional menu/modifier keyword. Leave empty for the current compact cafe catalog.' },
+    }),
+  },
+  {
+    type: 'function',
+    name: 'get_order_status',
+    description: 'Read this guest\'s latest OTOP order and shipping status, including verified shipping fee, carrier and tracking when present. Never reads another guest. Read-only.',
+    parameters: objectSchema({
+      order_code: { type: 'string', description: 'Optional order code. Leave empty for the latest OTOP order owned by this guest.' },
+    }),
+  },
+  {
+    type: 'function',
+    name: 'get_market_context',
+    description: 'Read the canonical WW market context for a destination country: market, currency, locale and capability states. Country is never inferred from language. Read-only.',
+    parameters: objectSchema({
+      country_code: { type: 'string', description: 'Two-letter destination country code such as TH, SE, US.' },
+      locale: { type: 'string', description: 'Optional customer locale such as th, en-US, sv-SE.' },
+    }, ['country_code']),
+  },
+  {
+    type: 'function',
+    name: 'get_shipping_quote',
+    description: 'Read a canonical shipping quote for a destination country and merchandise subtotal. Thailand uses the existing OTOP shipping settings. International quotes only return when the WW shipping authority is actually connected and live; never guess a fee. Read-only.',
+    parameters: objectSchema({
+      country_code: { type: 'string', description: 'Two-letter destination country code such as TH, SE, US.' },
+      subtotal: { type: 'number', minimum: 0, description: 'Current merchandise subtotal in the market transaction currency.' },
+      locale: { type: 'string', description: 'Optional customer locale.' },
+    }, ['country_code','subtotal']),
   },
   {
     type: 'function',
@@ -240,6 +276,22 @@ export async function executeThongthaiReadOnlyTool(
 ): Promise<string> {
   const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
   if (name === 'recommend_restaurant_menu') return executeRestaurantRecommendation(args);
+  if (name === 'get_market_context') {
+    const countryCode = stringArg(args, 'country_code');
+    if (!countryCode) return JSON.stringify({ ok:false, error:'country_code_required' });
+    return JSON.stringify(await readThongthaiMarketContext(countryCode, stringArg(args, 'locale')));
+  }
+  if (name === 'get_shipping_quote') {
+    const countryCode = stringArg(args, 'country_code');
+    const subtotal = Number(args.subtotal);
+    if (!countryCode) return JSON.stringify({ ok:false, error:'country_code_required' });
+    if (!Number.isFinite(subtotal) || subtotal < 0) return JSON.stringify({ ok:false, error:'valid_subtotal_required' });
+    return JSON.stringify(await readThongthaiShippingQuote({
+      countryCode,
+      subtotal,
+      locale:stringArg(args, 'locale'),
+    }));
+  }
   const adapters = buildRealKnowledgeSourceAdapters(context.channel, {
     guestDbId: context.guestDbId,
     environment: context.environment ?? 'live',
@@ -279,6 +331,14 @@ export async function executeThongthaiReadOnlyTool(
     case 'get_otop_catalog':
       req = request('otop', ['catalog']);
       break;
+    case 'get_cafe_menu':
+      req = request('cafe', ['catalog']);
+      break;
+    case 'get_order_status':
+      req = request('otop', ['order_status'], {
+        orderCode: stringArg(args, 'order_code'),
+      });
+      break;
     case 'get_active_promotions':
       req = request('promotion', ['promotion_eligibility']);
       break;
@@ -305,6 +365,7 @@ export async function executeThongthaiReadOnlyTool(
   if (name === 'get_activity_catalog') facts = filterByPrefix(facts, stringArg(args, 'activity_code'));
   if (name === 'get_stay_catalog') facts = filterByPrefix(facts, stringArg(args, 'resource_code'));
   if (name === 'get_otop_catalog') facts = filterByPrefix(facts, stringArg(args, 'sku'));
+  if (name === 'get_cafe_menu') facts = filterByPrefix(facts, stringArg(args, 'query'));
   return safeResult(bundle, facts);
 }
 

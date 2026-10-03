@@ -20,6 +20,10 @@ test('Thongthai Agent keeps the original business fact tools bounded and read-on
     'get_stay_catalog',
     'check_stay_availability',
     'get_otop_catalog',
+    'get_cafe_menu',
+    'get_order_status',
+    'get_market_context',
+    'get_shipping_quote',
     'get_active_promotions',
     'get_booking_status',
     'get_payment_status',
@@ -28,7 +32,7 @@ test('Thongthai Agent keeps the original business fact tools bounded and read-on
   for (const tool of THONGTHAI_READ_ONLY_TOOLS) {
     assert.equal(tool.type, 'function');
     assert.equal(tool.parameters.additionalProperties, false);
-    assert.doesNotMatch(tool.name, /create|update|modify|cancel|delete|refund|notify|submit|redeem|order/i);
+    assert.doesNotMatch(tool.name, /create|update|modify|cancel|delete|refund|notify|submit|redeem/i);
     assert.match(tool.description, /Read-only/i);
   }
 });

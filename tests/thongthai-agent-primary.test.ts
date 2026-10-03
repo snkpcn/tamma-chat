@@ -4,6 +4,7 @@ import {
   configuredAgentPrimaryPercent,
   configuredAgentPreparePercent,
   shouldUseThongthaiAgentPrimary,
+  shouldUseThongthaiAgentForeignLanguagePrimary,
   shouldUseThongthaiAgentTransactionPrepare,
   stableAgentCanaryBucket,
   stableAgentPrepareCanaryBucket,
@@ -64,6 +65,35 @@ test('production Agent canary stays read-only and excludes weather/location', ()
     assert.equal(shouldUseThongthaiAgentPrimary({...base,explicitTransactionIntent:true,weatherRequest:false,locationRequest:false}), false);
     assert.equal(shouldUseThongthaiAgentPrimary({...base,explicitTransactionIntent:false,weatherRequest:true,locationRequest:false}), false);
     assert.equal(shouldUseThongthaiAgentPrimary({...base,explicitTransactionIntent:false,weatherRequest:false,locationRequest:true}), false);
+  });
+});
+
+test('foreign-language primary bypasses percentage canary but keeps master, channel and safety boundaries', () => {
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:'1',
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+    THONGTHAI_AGENT_PRIMARY_PERCENT:'0',
+  }, () => {
+    const base={guestKey:'foreign-guest',guestDbId:'db-a',channel:'line' as const};
+    assert.equal(shouldUseThongthaiAgentForeignLanguagePrimary({
+      ...base,explicitTransactionIntent:false,weatherRequest:false,locationRequest:false,
+    }),true);
+    assert.equal(shouldUseThongthaiAgentForeignLanguagePrimary({
+      ...base,explicitTransactionIntent:true,weatherRequest:false,locationRequest:false,
+    }),false);
+    assert.equal(shouldUseThongthaiAgentForeignLanguagePrimary({
+      ...base,explicitTransactionIntent:false,weatherRequest:true,locationRequest:false,
+    }),false);
+  });
+
+  withEnv({
+    THONGTHAI_AGENT_PRIMARY_ENABLED:undefined,
+    THONGTHAI_AGENT_PRIMARY_CHANNELS:'web,line,facebook',
+  }, () => {
+    assert.equal(shouldUseThongthaiAgentForeignLanguagePrimary({
+      guestKey:'foreign-guest',guestDbId:'db-a',channel:'line',
+      explicitTransactionIntent:false,weatherRequest:false,locationRequest:false,
+    }),false);
   });
 });
 
