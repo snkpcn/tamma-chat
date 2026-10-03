@@ -107,7 +107,11 @@ import {
   classifySemanticBusinessIncidentRoute,
   semanticIncidentFeedbackMatch,
 } from './_business-incident-router';
-import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
+import {
+  shouldUseThongthaiAgentPrimary,
+  shouldUseThongthaiAgentForeignLanguagePrimary,
+  shouldUseThongthaiAgentTransactionPrepare,
+} from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
 import { deriveSemanticMeaning } from './_semantic-meaning';
@@ -178,6 +182,28 @@ export type {
 } from './_thongthai-brain-v3';
 
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
+
+/**
+ * Open-language customer routing is intentionally broader than the five
+ * storefront dictionary languages. The Saved Agent sees the raw customer
+ * message and can answer naturally in languages such as Japanese, German,
+ * Swedish, Spanish, Arabic, Korean, etc. Commerce country/currency remains a
+ * separate tool-grounded fact.
+ *
+ * If Thai script is present, keep the highly-certified Thai deterministic
+ * paths. Otherwise any letter-bearing turn may use the multilingual Agent,
+ * even when legacy transport metadata bucketed an unsupported language as
+ * "en" or web normalization fell back to "th".
+ */
+export function isOpenLanguageCustomerTurn(
+  message:string,
+  language:BrainRequest['language'],
+):boolean{
+  const text=message.trim();
+  if(!text||/[\u0E00-\u0E7F]/u.test(text))return false;
+  if(language!=='th')return /\p{L}/u.test(text);
+  return /\p{L}/u.test(text);
+}
 const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
 const RESTAURANT_ADVISOR_CONTEXT_SOURCE = 'restaurant_menu_advisor_v1';
 // "สวัสดี"/"หวัดดี" are commonly glued directly onto a polite particle with
@@ -6729,8 +6755,24 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   }
 
   const horseCorrectionBeforePrimary = horseCorrectionRoutesBeforePrimary(request);
+  const openLanguageTurn = isOpenLanguageCustomerTurn(request.message, request.language);
+  const foreignLanguagePrimarySelected = openLanguageTurn
+    && !phase4CommercialBoundaryEligible
+    && shouldUseThongthaiAgentForeignLanguagePrimary({
+      guestKey:request.guestId,
+      guestDbId,
+      channel,
+      explicitTransactionIntent,
+      weatherRequest:topLevelSemanticIntent === 'WEATHER_REQUEST',
+      locationRequest:preserveVerifiedLocationBeforeSupervision
+        || topLevelSemanticIntent === 'LOCATION_REQUEST',
+    });
   const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
-  const cafeReadOnlyBeforePrimary = cafeStateForPrePrimary !== null;
+  // Non-Thai read-only service belongs to the multilingual Saved Agent so a
+  // Thai deterministic cafe template cannot leak into an English/Japanese/
+  // German/etc. conversation. The Agent reads the SAME canonical cafe tool.
+  const cafeReadOnlyBeforePrimary =
+    cafeStateForPrePrimary !== null && !foreignLanguagePrimarySelected;
 
   // Narrow cafe -> restaurant topic-switch fast path. It exists only for an
   // EXPLICIT restaurant/menu discovery in the current sentence. Do not use
@@ -6744,7 +6786,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     && /(?:เมนู|มีอะไร|แนะนำ|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย)/u.test(request.message)
     && !/(?:โต๊ะ|ว่าง|สถานะ|กี่โมง|จอง|สั่ง|ยืนยัน)/u.test(request.message);
 
-  const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
+  const ordinaryPrimarySelected = !phase3SemanticLearningEligible
     && !restaurantTopicSwitchBeforePrimary
     && !completeVisitorJourneyBeforeSupervision
     && !cafeReadOnlyBeforePrimary
@@ -6753,14 +6795,21 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     && !activeTaskBeforePrimary
     && !boundedConversationBeforePrimary
     && shouldUseThongthaiAgentPrimary({
-    guestKey: request.guestId,
-    guestDbId,
-    channel,
-    explicitTransactionIntent,
-    weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
-    locationRequest: preserveVerifiedLocationBeforeSupervision
-      || topLevelSemanticIntent === 'LOCATION_REQUEST',
-  });
+      guestKey: request.guestId,
+      guestDbId,
+      channel,
+      explicitTransactionIntent,
+      weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+      locationRequest: preserveVerifiedLocationBeforeSupervision
+        || topLevelSemanticIntent === 'LOCATION_REQUEST',
+    });
+
+  // Foreign/open-language read-only turns intentionally bypass Thai
+  // deterministic presentation and the percentage canary. Safety/transaction
+  // boundaries remain above/around this gate; business truth still comes only
+  // from the same canonical tools. This is one voice, not a second agent.
+  const readOnlyPrimaryAgentEligible =
+    foreignLanguagePrimarySelected || ordinaryPrimarySelected;
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
 
   if (cafeReadOnlyBeforePrimary) {
