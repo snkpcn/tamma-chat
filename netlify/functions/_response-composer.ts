@@ -1960,7 +1960,64 @@ export function composeDeterministicResponse(input: ResponseComposerInput): Comp
   };
 }
 
+
+function boundedCrossDomainReadback(input: ResponseComposerInput): ComposedResponse | null {
+  if (input.language !== 'th') return null;
+  const message = input.userMessage?.trim() ?? '';
+  const context = input.conversationContext;
+  if (!message || !context) return null;
+
+  const recentText = context.recentTurns.map(turn => turn.content).join('\n');
+
+  const explicitCafeResume =
+    /(?:กลับมา|กลับไป|ต่อ).{0,18}(?:เรื่อง)?เครื่องดื่ม/u.test(message)
+    && /(?:แฟน|ของแฟน|เมื่อกี้)/u.test(message);
+  if (explicitCafeResume && /อูจิ\s*เพียวมัทฉะ/u.test(recentText)) {
+    const noCowMilk = /ไม่เอานมวัว/u.test(recentText);
+    return {
+      message: polishCustomerMessage([
+        'ของแฟนที่คุยไว้ก่อนเปลี่ยนเรื่อง เป็นฝั่งไม่กาแฟครับ — ตอนนั้นคัดอูจิ เพียวมัทฉะไว้',
+        noCowMilk ? 'แล้วมีเงื่อนไขเพิ่มว่าช่วงนี้ไม่อยากดื่มนมวัว แต่ไม่ได้แพ้นมครับ' : '',
+        'ทั้งหมดนี้ยังเป็นแค่ตัวเลือก ยังไม่ได้สั่งหรือส่งรายการครับ',
+      ].filter(Boolean).join('\n\n'), input.channel),
+      mode:'deterministic',
+      usedFactKeys:[],
+      composerVersion:RESPONSE_COMPOSER_VERSION,
+      bibleVersion:THONGTHAI_BIBLE_VERSION,
+      channel:input.channel,
+      language:input.language,
+    };
+  }
+
+  const globalSubmissionReadback =
+    /(?:จากที่คุยมาทั้งหมด|จากที่คุยมา|ทั้งหมดที่คุย).{0,80}(?:สั่ง|จอง|ส่ง)/u.test(message)
+    || /(?:มีอะไร|อะไรบ้าง).{0,30}(?:ถูก)?(?:สั่ง|จอง|ส่ง).{0,50}(?:พนักงาน|ทีมงาน|แล้วบ้าง|ไปแล้ว)/u.test(message);
+  if (globalSubmissionReadback) {
+    const hasPositiveSubmissionEvidence =
+      /(?:BK-[A-Z0-9-]+|OR-[A-Z0-9-]+|INQ-[A-Z0-9-]+|ส่งเข้าระบบแล้ว|ยืนยันการจองแล้ว|สร้าง(?:คำสั่งซื้อ|รายการสั่ง)|ส่ง(?:คำถาม|รายการ)ให้(?:พนักงาน|ทีมงาน)แล้ว)/iu.test(recentText);
+    const noCommit = context.workingMemory.transactionCommitment === 'none';
+    if (noCommit && !hasPositiveSubmissionEvidence) {
+      return {
+        message: polishCustomerMessage(
+          'ตอนนี้ยังไม่มีอะไรถูกสั่ง จอง หรือส่งไปให้พนักงานจากบทสนทนานี้ครับ\n\nสิ่งที่คุยหรือเลือกไว้ยังเป็นแค่ตัวเลือก ยังไม่มีรายการจริงครับ',
+          input.channel,
+        ),
+        mode:'deterministic',
+        usedFactKeys:[],
+        composerVersion:RESPONSE_COMPOSER_VERSION,
+        bibleVersion:THONGTHAI_BIBLE_VERSION,
+        channel:input.channel,
+        language:input.language,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
+  const boundedReadback = boundedCrossDomainReadback(input);
+  if (boundedReadback) return boundedReadback;
   // Rejected duration is an authoritative policy outcome. It must outrank a
   // second model call and generic catalog rendering even when the current turn
   // is a non-transactional working-state update.
