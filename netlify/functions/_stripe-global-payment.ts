@@ -6,6 +6,7 @@ import {
   loadMemberGlobalPaymentIntent,
   recordAndApplyGlobalPaymentEvent,
   type MemberGlobalPaymentIntent,
+  loadGlobalPaymentMethod,
 } from './_global-payments-db';
 
 export const STRIPE_GLOBAL_PROVIDER_CODE='stripe_th';
@@ -100,6 +101,14 @@ export async function createStripePaymentSessionForMember(input:{
   if(['captured','refunded','cancelled','failed'].includes(internal.status)){
     throw new Error('payment_intent_not_payable');
   }
+  const readiness=await loadGlobalPaymentMethod({
+    marketCode:internal.marketCode,
+    currencyCode:internal.currencyCode,
+    requestedMethod:internal.paymentMethodCode,
+  });
+  if(readiness.kind!=='ready'||readiness.provider.providerCode!==STRIPE_GLOBAL_PROVIDER_CODE){
+    throw new Error('stripe_payment_method_not_live');
+  }
 
   let provider:Record<string,unknown>;
   if(internal.providerIntentId){
@@ -109,7 +118,7 @@ export async function createStripePaymentSessionForMember(input:{
     const form=toForm({
       amount:internal.amountMinor,
       currency:internal.currencyCode.toLowerCase(),
-      'automatic_payment_methods[enabled]':'true',
+      'payment_method_types[]':'card',
       'metadata[tamma_intent_id]':internal.intentId,
       'metadata[tamma_intent_code]':internal.intentCode,
       'metadata[tamma_order_code]':internal.sourceEntityCode,
