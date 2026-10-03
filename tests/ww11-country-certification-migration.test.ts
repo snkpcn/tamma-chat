@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
-const sql=readFileSync(new URL('../supabase/migrations/20261003130000_ww11_country_certification.sql',import.meta.url),'utf8');
-const fkIndexSql=readFileSync(new URL('../supabase/migrations/20261003132500_ww11_certification_fk_index.sql',import.meta.url),'utf8');
+const sql=readFileSync(new URL('../supabase/migrations/20261003131726_ww11_country_certification.sql',import.meta.url),'utf8');
+const fkIndexSql=readFileSync(new URL('../supabase/migrations/20261003132037_ww11_certification_fk_index.sql',import.meta.url),'utf8');
 
 test('WW-11 creates time-bounded market certification and exact product evidence',()=>{
   for(const table of ['commerce_market_certifications','commerce_market_certification_products']){

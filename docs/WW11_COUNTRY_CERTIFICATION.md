@@ -1,6 +1,6 @@
 # WW-11 — Country Certification
 
-Status: production-certified / ready to merge
+Status: production-deployed / fail-closed pending real country activation
 Date: 2026-10-03
 
 ## Goal
@@ -133,3 +133,13 @@ Production remains fail-closed: no real country is certified by this rollout.
 - [x] Supabase security/performance advisors checked
 - [x] full CI + Netlify deploy preview pass on the functional implementation
 - [ ] merged and production deployed
+
+
+## Repository/production migration lock
+
+Repository migration filenames are aligned to the exact versions already recorded by production:
+
+- `20261003131726_ww11_country_certification.sql`
+- `20261003132037_ww11_certification_fk_index.sql`
+
+This prevents future migration runners from treating the already-applied WW-11 schema as a second unapplied migration.
