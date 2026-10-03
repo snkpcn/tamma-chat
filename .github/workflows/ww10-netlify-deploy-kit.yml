@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - 'ops/ww10-netlify-deploy-kit'
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
