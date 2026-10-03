@@ -56,14 +56,27 @@ test('WW-10 foreign-language routing is script-agnostic but never turns language
   ]) assert.equal(isForeignLanguageCustomerMessage(message),true);
   assert.equal(isForeignLanguageCustomerMessage('ส่งไปสวีเดนได้ไหมครับ'),false);
 
-  assert.equal(shouldUseThongthaiAgentForeignLanguagePrimary({
-    guestKey:'guest-ww10',
-    guestDbId:'11111111-1111-4111-8111-111111111111',
-    channel:'facebook',
-    explicitTransactionIntent:false,
-    weatherRequest:false,
-    locationRequest:false,
-  }),false,'master Agent routing must remain gated by runtime config');
+  const before={
+    enabled:process.env.THONGTHAI_AGENT_PRIMARY_ENABLED,
+    channels:process.env.THONGTHAI_AGENT_PRIMARY_CHANNELS,
+  };
+  try{
+    delete process.env.THONGTHAI_AGENT_PRIMARY_ENABLED;
+    delete process.env.THONGTHAI_AGENT_PRIMARY_CHANNELS;
+    assert.equal(shouldUseThongthaiAgentForeignLanguagePrimary({
+      guestKey:'guest-ww10',
+      guestDbId:'11111111-1111-4111-8111-111111111111',
+      channel:'facebook',
+      explicitTransactionIntent:false,
+      weatherRequest:false,
+      locationRequest:false,
+    }),false,'master Agent routing must remain gated by runtime config');
+  }finally{
+    if(before.enabled===undefined)delete process.env.THONGTHAI_AGENT_PRIMARY_ENABLED;
+    else process.env.THONGTHAI_AGENT_PRIMARY_ENABLED=before.enabled;
+    if(before.channels===undefined)delete process.env.THONGTHAI_AGENT_PRIMARY_CHANNELS;
+    else process.env.THONGTHAI_AGENT_PRIMARY_CHANNELS=before.channels;
+  }
 });
 
 test('WW-10 Agent profile says country, language, quote and order are separate facts',()=>{
