@@ -1,0 +1,38 @@
+name: Netlify Production Source Package
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    if: startsWith(github.event.head_commit.message, 'ops: package Netlify production source')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Package exact source
+        run: |
+          tar --exclude=.git --exclude=node_modules -czf /tmp/tamma-chat-production-source.tgz .
+      - name: Install Netlify MCP CLI
+        run: |
+          mkdir -p /tmp/netlify-mcp
+          npm install --prefix /tmp/netlify-mcp @netlify/mcp@latest
+          tar -czf /tmp/netlify-mcp.tgz -C /tmp netlify-mcp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tamma-chat-production-source
+          path: /tmp/tamma-chat-production-source.tgz
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: netlify-mcp-cli
+          path: /tmp/netlify-mcp.tgz
+          if-no-files-found: error
+          retention-days: 1
