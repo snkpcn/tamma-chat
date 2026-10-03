@@ -161,7 +161,7 @@
 [hidden]{ display:none!important; }
 </style>
 <link rel="stylesheet" href="assets/styles/site-typography.css">
-</head>
+<script src="assets/scripts/global-locale.js"></script>\n</head>
 <body class="tt-chess-page">
 
 <header class="tt-chess-header">
@@ -549,11 +549,13 @@ vi:{
 },
 };
 
-const LANG_STORAGE_KEY = 'thammachat-lang-v1';
-let ttLang = 'th';
+const LANG_STORAGE_KEY = window.ThammachatLocale?.storageKey || 'thammachat-lang-v1';
+let ttLang = window.ThammachatLocale?.get() || 'th';
 function ttT(key){
-  const dict = TT_CHESS_I18N[ttLang] || TT_CHESS_I18N.th;
-  return dict[key] !== undefined ? dict[key] : (TT_CHESS_I18N.th[key] !== undefined ? TT_CHESS_I18N.th[key] : key);
+  if(window.ThammachatLocale)return window.ThammachatLocale.translate(TT_CHESS_I18N,key,{},ttLang);
+  const chain=ttLang==='th'?['th']:(ttLang==='en'?['en']:[ttLang,'en']);
+  for(const lang of chain)if(TT_CHESS_I18N[lang]?.[key]!==undefined)return TT_CHESS_I18N[lang][key];
+  return key;
 }
 function ttApplyTranslations(){
   document.documentElement.setAttribute('lang', ttLang);
@@ -563,24 +565,30 @@ function ttApplyTranslations(){
   const picker=document.getElementById('ttChessLanguage');if(picker)picker.value=ttLang;
 }
 function ttSetLang(lang,persist=true){
-  const supported=['th','en','zh','lo','vi'];
-  if(!supported.includes(lang))return;
-  ttLang=lang;
-  if(persist)try{window.localStorage.setItem(LANG_STORAGE_KEY,lang);}catch(e){}
+  const supported=window.ThammachatLocale?.supported||['th','en','zh','lo','vi'];
+  const normalized=window.ThammachatLocale?.normalize(lang)||lang;
+  if(!supported.includes(normalized))return;
+  ttLang=normalized;
+  lang=normalized;
+  if(window.ThammachatLocale)window.ThammachatLocale.set(lang,{persist,source:'chess'});
+  else if(persist)try{window.localStorage.setItem(LANG_STORAGE_KEY,lang);}catch(e){}
   ttApplyTranslations();
   ttChessRenderDynamicText();
 }
 function ttInitI18n(){
-  let saved = null;
-  try{ saved = window.localStorage && window.localStorage.getItem(LANG_STORAGE_KEY); }catch(e){}
-  const supported = ['th','en','zh','lo','vi'];
-  if(saved && supported.includes(saved)) ttLang = saved;
+  const supported = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi'];
+  if(window.ThammachatLocale) ttLang = window.ThammachatLocale.get();
   else {
-    const nav = (navigator.language || 'th').toLowerCase();
-    if(nav.startsWith('en')) ttLang = 'en';
-    else if(nav.startsWith('zh')) ttLang = 'zh';
-    else if(nav.startsWith('lo')) ttLang = 'lo';
-    else if(nav.startsWith('vi')) ttLang = 'vi';
+    let saved = null;
+    try{ saved = window.localStorage && window.localStorage.getItem(LANG_STORAGE_KEY); }catch(e){}
+    if(saved && supported.includes(saved)) ttLang = saved;
+    else {
+      const nav = (navigator.language || 'th').toLowerCase();
+      if(nav.startsWith('en')) ttLang = 'en';
+      else if(nav.startsWith('zh')) ttLang = 'zh';
+      else if(nav.startsWith('lo')) ttLang = 'lo';
+      else if(nav.startsWith('vi')) ttLang = 'vi';
+    }
   }
   ttApplyTranslations();
   const picker=document.getElementById('ttChessLanguage');
@@ -590,6 +598,7 @@ function ttInitI18n(){
       ttSetLang(e.newValue,false);
     }
   });
+  window.addEventListener('thammachat:locale-change',e=>{const next=e.detail?.lang;if(next&&next!==ttLang)ttSetLang(next,false)});
 }
 
 /* ============================================================
