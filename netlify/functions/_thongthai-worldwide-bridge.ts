@@ -32,8 +32,9 @@ import { createCustomsComplianceSnapshot } from './_customs-compliance-db';
 import { loadGlobalPaymentMethod } from './_global-payments-db';
 import { internationalCheckoutMissingCapabilities } from './_international-checkout';
 import { getGuestGlobalCommerceStatus } from './_global-fulfillment-db';
+import { loadCountryCertificationForOffer } from './_country-certification-db';
 
-export const THONGTHAI_WORLDWIDE_BRIDGE_VERSION = 'thongthai-worldwide-bridge-v2-ww10-2026-10-03';
+export const THONGTHAI_WORLDWIDE_BRIDGE_VERSION = 'thongthai-worldwide-bridge-v3-ww11-certification-2026-10-03';
 
 export const THONGTHAI_BACKOFFICE_READ_LANES = Object.freeze([
   { lane:'restaurant', source:'restaurant live menu + intelligence' },
@@ -50,6 +51,7 @@ export const THONGTHAI_BACKOFFICE_READ_LANES = Object.freeze([
   { lane:'shipping', source:'domestic shipping settings or WW shipping quote authority' },
   { lane:'customs', source:'WW customs profiles + explicit destination rules + compliance snapshots' },
   { lane:'fulfillment', source:'WW shipment/packages/tracking timeline' },
+  { lane:'certification', source:'WW-11 exact country/product certification evidence' },
 ] as const);
 
 export type ThongthaiMarketRead =
@@ -286,6 +288,7 @@ export type ThongthaiWorldwideDeps={
   createCustomsSnapshot:typeof createCustomsComplianceSnapshot;
   loadPaymentMethod:typeof loadGlobalPaymentMethod;
   getGlobalStatus:typeof getGuestGlobalCommerceStatus;
+  loadCertification:typeof loadCountryCertificationForOffer;
 };
 
 const DEFAULT_DEPS:ThongthaiWorldwideDeps={
@@ -297,6 +300,7 @@ const DEFAULT_DEPS:ThongthaiWorldwideDeps={
   createCustomsSnapshot:createCustomsComplianceSnapshot,
   loadPaymentMethod:loadGlobalPaymentMethod,
   getGlobalStatus:getGuestGlobalCommerceStatus,
+  loadCertification:loadCountryCertificationForOffer,
 };
 
 function toolIdempotencyKey(prefix:string,seed:string,payload:unknown):string{
@@ -459,6 +463,29 @@ export async function readThongthaiWorldwideOffer(input:{
     payment={status:'not_available',reason:'payment_method_unavailable',detail:error instanceof Error?error.message.slice(0,120):'unknown'};
   }
 
+  let certification:{kind:'ready';certificationId:string;certificationCode:string;validUntil:string}|{kind:'not_available';reason:string};
+  if(pricing.status!=='ready'){
+    certification={kind:'not_available',reason:'pricing_not_ready'};
+  }else{
+    try{
+      certification=await deps.loadCertification({
+        marketCode:market.context.marketCode,
+        countryCode:market.context.countryCode,
+        currencyCode:market.context.currencyCode,
+        productPriceRevisions:pricing.lines.map((line,index)=>({
+          productId:requestedProducts[index]!.productId,
+          priceRevisionId:line.priceRevisionId,
+        })),
+        environment,
+      });
+    }catch(error){
+      certification={
+        kind:'not_available',
+        reason:error instanceof Error?error.message.split(':')[0]:'country_certification_unavailable',
+      };
+    }
+  }
+
   const missingCheckoutCapabilities=internationalCheckoutMissingCapabilities(input.env);
   const checkoutReady=
     isMarketCapabilityLive(market.context,'checkout')
@@ -467,9 +494,10 @@ export async function readThongthaiWorldwideOffer(input:{
     &&customs.status==='ready'
     &&customs.decision==='eligible'
     &&payment.status==='ready'
+    &&certification.kind==='ready'
     &&missingCheckoutCapabilities.length===0;
 
-  const status=pricing.status==='ready'&&shipping.status==='ready'&&customs.status==='ready'&&payment.status==='ready'
+  const status=pricing.status==='ready'&&shipping.status==='ready'&&customs.status==='ready'&&payment.status==='ready'&&certification.kind==='ready'
     ?'ready' as const
     :'partial' as const;
   return{
@@ -481,11 +509,15 @@ export async function readThongthaiWorldwideOffer(input:{
     shipping,
     customs,
     payment,
+    certification,
     checkoutReadiness:{
       status:checkoutReady?'ready' as const:'not_ready' as const,
       missingWorldwideCapabilities:missingCheckoutCapabilities,
       marketCheckoutCapability:market.context.capabilities.checkout,
       dutiesAndTaxesIncluded:false,
+      countryCertification:certification.kind==='ready'
+        ?{status:'ready',certificationCode:certification.certificationCode,validUntil:certification.validUntil}
+        :{status:'not_ready',reason:certification.reason},
     },
   };
 }
