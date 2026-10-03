@@ -107,7 +107,7 @@ import {
   classifySemanticBusinessIncidentRoute,
   semanticIncidentFeedbackMatch,
 } from './_business-incident-router';
-import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
+import { shouldUseThongthaiAgentPrimary, shouldUseThongthaiAgentForeignLanguagePrimary, shouldUseThongthaiAgentTransactionPrepare } from './_thongthai-agent-primary';
 import type { DurableMemorySnapshot } from './_memory-relevance';
 import type { SemanticTurn } from './_semantic-interpreter';
 import { deriveSemanticMeaning } from './_semantic-meaning';
@@ -178,6 +178,17 @@ export type {
 } from './_thongthai-brain-v3';
 
 const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
+const THONGTHAI_PRIORITY_BACKOFFICE_READ_RE =
+  /(?:ค่าส่ง|ค่าจัดส่ง|ส่งต่างประเทศ|จัดส่งไป|ส่งไปต่างประเทศ|ติดตามพัสดุ|เลขพัสดุ|ขนส่ง|สกุลเงิน|ค่าเงิน|ศุลกากร|ภาษีนำเข้า)/u;
+
+function inferSupportedLanguageFallback(message:string):BrainRequest['language']{
+  if(/[\u0E00-\u0E7F]/u.test(message))return 'th';
+  if(/[\u0E80-\u0EFF]/u.test(message))return 'lo';
+  if(/[\u3400-\u9FFF]/u.test(message))return 'zh';
+  if(/[ăâđêôơưĂÂĐÊÔƠƯ]/u.test(message))return 'vi';
+  return 'en';
+}
+
 const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
 const RESTAURANT_ADVISOR_CONTEXT_SOURCE = 'restaurant_menu_advisor_v1';
 // "สวัสดี"/"หวัดดี" are commonly glued directly onto a polite particle with
@@ -657,16 +668,17 @@ function normalizeChatHistory(value: unknown): ChatTurn[] {
 
 function normalizeRequest(body: unknown): BrainRequest | null {
   if (!isObject(body) || !isNonEmptyString(body.message)) return null;
+  const message=body.message.trim();
   const language = isNonEmptyString(body.language) && LANGUAGES.has(body.language)
     ? body.language as BrainRequest['language']
-    : 'th';
+    : inferSupportedLanguageFallback(message);
   const pageContext = isObject(body.pageContext)
     ? { section: typeof body.pageContext.section === 'string' ? body.pageContext.section : null }
     : { section: null };
   return {
     guestId: typeof body.guestId === 'string' ? body.guestId : undefined,
     environment: body.environment === 'test' ? 'test' : 'live',
-    message: body.message.trim(),
+    message,
     language,
     chatHistory: normalizeChatHistory(body.chatHistory),
     guestContext: normalizeGuestContext(body.guestContext),
@@ -6744,26 +6756,41 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     && /(?:เมนู|มีอะไร|แนะนำ|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย)/u.test(request.message)
     && !/(?:โต๊ะ|ว่าง|สถานะ|กี่โมง|จอง|สั่ง|ยืนยัน)/u.test(request.message);
 
+  const priorityMultilingualOrBackofficeRead =
+    (request.language !== 'th' || THONGTHAI_PRIORITY_BACKOFFICE_READ_RE.test(request.message))
+    && shouldUseThongthaiAgentForeignLanguagePrimary({
+      guestKey: request.guestId,
+      guestDbId,
+      channel,
+      explicitTransactionIntent,
+      weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+      locationRequest: preserveVerifiedLocationBeforeSupervision
+        || topLevelSemanticIntent === 'LOCATION_REQUEST',
+    });
+
   const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible
     && !restaurantTopicSwitchBeforePrimary
     && !completeVisitorJourneyBeforeSupervision
-    && !cafeReadOnlyBeforePrimary
+    && !(cafeReadOnlyBeforePrimary && !priorityMultilingualOrBackofficeRead)
     && !phase4CommercialBoundaryEligible
     && !horseCorrectionBeforePrimary
     && !activeTaskBeforePrimary
     && !boundedConversationBeforePrimary
-    && shouldUseThongthaiAgentPrimary({
-    guestKey: request.guestId,
-    guestDbId,
-    channel,
-    explicitTransactionIntent,
-    weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
-    locationRequest: preserveVerifiedLocationBeforeSupervision
-      || topLevelSemanticIntent === 'LOCATION_REQUEST',
-  });
+    && (
+      priorityMultilingualOrBackofficeRead
+      || shouldUseThongthaiAgentPrimary({
+        guestKey: request.guestId,
+        guestDbId,
+        channel,
+        explicitTransactionIntent,
+        weatherRequest: topLevelSemanticIntent === 'WEATHER_REQUEST',
+        locationRequest: preserveVerifiedLocationBeforeSupervision
+          || topLevelSemanticIntent === 'LOCATION_REQUEST',
+      })
+    );
   const primaryAgentEligible = prepareOnlyAgentEligible || readOnlyPrimaryAgentEligible;
 
-  if (cafeReadOnlyBeforePrimary) {
+  if (cafeReadOnlyBeforePrimary && !priorityMultilingualOrBackofficeRead) {
     const cafeResponse = await deterministicCafeResponse(request, {
       agentState: cafeStateForPrePrimary ?? {},
     });
