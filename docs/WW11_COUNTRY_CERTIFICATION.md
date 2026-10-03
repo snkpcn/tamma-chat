@@ -1,6 +1,6 @@
 # WW-11 — Country Certification
 
-Status: implementation
+Status: production-certified / ready to merge
 Date: 2026-10-03
 
 ## Goal
@@ -79,16 +79,58 @@ At the start of WW-11 production currently has:
 
 Therefore no real country is certified by the WW-11 rollout itself. This is deliberate.
 
+## Production certification
+
+Applied production migrations:
+
+- 20261003131726_ww11_country_certification
+- WW-11 certification FK index hardening migration
+
+Rollback-only synthetic country probe passed:
+
+- configured a synthetic non-domestic market entirely inside one transaction
+- enabled all required market capabilities
+- configured a synthetic global-v2 payment method
+- configured a synthetic global-v2 shipping service, destination zone, and rate tier
+- created one test-only product with explicit SEK price, shipping profile, verified customs profile, and allowed destination rule
+- generated a canonical WW-6 shipping quote
+- generated a WW-7 customs snapshot with decision=eligible
+- verified the same product/price did not resolve before certification
+- created a WW-11 market certification
+- verified the exact product + price revision resolved after certification
+- created a synthetic checkout-v2 order and line item; deferred WW-11 + WW-8 guards passed
+- changed the certified price amount and verified the prior certification stopped resolving
+- verified country_certification_required after the price change
+- rolled the entire transaction back
+
+Zero-residue verification after rollback:
+
+- synthetic country = 0 rows
+- synthetic market = 0 rows
+- synthetic product = 0 rows
+- synthetic certification = 0 rows
+- synthetic certification products = 0 rows
+- synthetic order = 0 rows
+
+Supabase advisors:
+
+- no remaining WW-11 unindexed foreign keys
+- RLS-enabled/no-policy findings are INFO and intentional because certification tables are service-role-only
+- unused-index findings are INFO and expected while no real foreign country is live
+
+Production remains fail-closed: no real country is certified by this rollout.
+
 ## Definition of Done
 
-- [ ] certification schema + service-role RPCs deployed
-- [ ] exact product/price/profile evidence captured
-- [ ] quote + customs snapshot evidence required
-- [ ] return policy required
-- [ ] checkout-v2 database guard active
-- [ ] WW-10 offer reports certification readiness
-- [ ] rollback-only synthetic country certification probe passes
-- [ ] zero synthetic residue
-- [ ] Supabase security/performance advisors checked
-- [ ] full CI + Netlify deploy preview pass
+- [x] certification schema + service-role RPCs deployed
+- [x] exact product/price/profile evidence captured
+- [x] quote + customs snapshot evidence required
+- [x] return policy required
+- [x] checkout-v2 database guard active
+- [x] WW-10 offer reports certification readiness
+- [x] rollback-only synthetic country certification probe passes
+- [x] zero synthetic residue
+- [x] Supabase security/performance advisors checked
+- [x] full CI + Netlify deploy preview pass on the functional implementation
+- [ ] final documentation commit CI pass
 - [ ] merged and production deployed
