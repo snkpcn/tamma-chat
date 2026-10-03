@@ -147,6 +147,22 @@ Applied production onboarding migration:
 
 - `20261003215717_ww11_first_wave_kr_jp_us_targets`
 
+
+## First-wave provider stack
+
+Provider selection for KR / JP / US certification:
+
+- Payment: **Stripe Thailand**, card-first. The production database registers adapter `stripe_payment_intents_v1` in `certification` state only. It is inactive until the real Stripe account is connected, webhook verification is configured, and certification tests pass.
+- Shipping: **DHL Express MyDHL API**. The production database registers adapter `dhl_express_mydhl_v1` and a Thailand-origin first-wave zone for KR / JP / US in `certification` state only. It is inactive until a real DHL Express account/API credential set exists and live Rating/Shipment/Tracking probes pass.
+
+No provider credentials are stored in the database or repository. Only environment-variable names are recorded as configuration metadata.
+
+Applied production provider migration:
+
+- `20261003220444_ww11_first_wave_stripe_dhl_certification`
+
+The carrier service rows are intentionally not created yet because DHL service/product codes, rates, and transit promises must come from the authenticated MyDHL account rather than being guessed.
+
 ## Definition of Done
 
 - [x] certification schema + service-role RPCs deployed
