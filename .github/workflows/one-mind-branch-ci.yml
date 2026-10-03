@@ -23,3 +23,27 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Checkout exact main for WW12 production deploy
+        if: github.head_ref == 'ops/ww12-production-deploy'
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          clean: true
+      - name: Require Netlify auth for WW12 deploy
+        if: github.head_ref == 'ops/ww12-production-deploy'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "NETLIFY_AUTH_TOKEN_MISSING"
+            exit 2
+          fi
+          echo "WW12_DEPLOY_MAIN_SHA=$(git rev-parse HEAD)"
+      - name: Deploy exact main to Netlify production
+        if: github.head_ref == 'ops/ww12-production-deploy'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          npx -y netlify-cli@latest deploy --build --prod \
+            --site 8c1f4d60-68c9-4940-9152-89e9c967e22c \
+            --auth "$NETLIFY_AUTH_TOKEN"
