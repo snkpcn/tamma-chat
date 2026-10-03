@@ -1,0 +1,41 @@
+name: WW10 Netlify Deploy Kit
+
+on:
+  push:
+    branches:
+      - 'ops/ww10-netlify-deploy-kit'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact WW10 main
+        uses: actions/checkout@v4
+        with:
+          ref: de34324fd69d23bd19a81709ab18a34c98629f8d
+      - name: Package exact source
+        run: |
+          tar --exclude=.git --exclude=node_modules -czf /tmp/tamma-chat-ww10-source.tgz .
+      - name: Install Netlify MCP CLI locally
+        run: |
+          mkdir -p /tmp/netlify-mcp
+          npm install --prefix /tmp/netlify-mcp @netlify/mcp@latest
+          tar -czf /tmp/netlify-mcp.tgz -C /tmp netlify-mcp
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: tamma-chat-ww10-source
+          path: /tmp/tamma-chat-ww10-source.tgz
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload Netlify CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: ww10-netlify-mcp
+          path: /tmp/netlify-mcp.tgz
+          if-no-files-found: error
+          retention-days: 1
