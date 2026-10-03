@@ -82,7 +82,7 @@ test('WW-12 CDN cache policy accelerates static assets but keeps pages and mutab
 
 test('WW-12 production certification is read-only and fails unsafe global exposure',()=>{
   const cert=read('scripts/ww12-production-certification.mjs');
-  assert.match(cert,/CONTEXT.*production/);
+  assert.match(cert,/process\.env\.CONTEXT[\s\S]{0,120}context!==['\"]production['\"]/);
   assert.match(cert,/live_market_without_current_certification/);
   assert.match(cert,/prelaunch_transaction_capability_exposed/);
   assert.match(cert,/live_payment_method_on_nonlive_market/);
