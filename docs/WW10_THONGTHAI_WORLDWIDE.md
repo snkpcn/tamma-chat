@@ -51,7 +51,7 @@ The production Saved Agent is the multilingual customer voice for ordinary forei
 
 This routing is script-agnostic: English, German, Swedish, Chinese, Lao, and other non-Thai text can use the same Agent. Language still never defines country, market, currency, or transaction intent.
 
-Thai routing and all existing task/transaction/weather/location guards remain unchanged.
+Ordinary Thai routing remains unchanged. Explicit Thai worldwide commerce fact questions such as international shipping, currency, customs, and parcel tracking receive the same priority Saved-Agent fact path; task/transaction/weather/location guards still take precedence.
 
 ## Worldwide order status
 
