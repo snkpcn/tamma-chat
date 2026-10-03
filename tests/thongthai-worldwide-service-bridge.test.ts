@@ -199,7 +199,7 @@ test('worldwide offer normalizes duplicate SKUs without inferring destination fr
   },deps);
   assert.equal(requestedCountry,'SE');
   assert.equal(offer.status,'ready');
-  assert.equal(offer.scope,'international');
+  if(offer.status!=='ready'||offer.scope!=='international')assert.fail('expected ready international offer');
   assert.equal(offer.market.countryCode,'SE');
   assert.equal(offer.market.currencyCode,'SEK');
   assert.equal(offer.pricing.status,'ready');
@@ -231,6 +231,7 @@ test('worldwide offer derives parcels only from canonical profiles and never gue
     env:WW10_ENABLED,
   },readyDeps({loadProfiles:async()=>({kind:'ready',profiles:[]}) as never}));
   assert.equal(missing.status,'partial');
+  if(missing.status!=='partial'||missing.scope!=='international')assert.fail('expected partial international offer');
   assert.equal(missing.shipping.status,'not_available');
   assert.equal(missing.shipping.reason,'shipping_profile_required');
 });
