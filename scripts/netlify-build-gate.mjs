@@ -21,6 +21,36 @@ const steps = [
   ['semantic-certification-artifact', NODE, ['--import', 'tsx', 'scripts/write-semantic-certification-artifact.ts']],
 ];
 
+async function recordNetlifyDiagnostic(stageCode, stageName, childExit) {
+  if (process.env.NETLIFY !== 'true') return;
+  const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  try {
+    await fetch(`${url}/rest/v1/ww9_build_diagnostics`, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        commit_sha: process.env.COMMIT_REF ?? null,
+        deploy_context: process.env.CONTEXT ?? null,
+        stage_code: stageCode,
+        stage_name: stageName,
+        child_exit: childExit,
+        node_version: process.version,
+      }),
+    });
+  } catch {
+    // Diagnostics must never change build outcome.
+  }
+}
+
+await recordNetlifyDiagnostic(10, 'runner-started', null);
+
 for (let index = 0; index < steps.length; index += 1) {
   const [name, command, args] = steps[index];
   const code = 21 + index;
@@ -33,21 +63,11 @@ for (let index = 0; index < steps.length; index += 1) {
   if (result.error || result.status !== 0) {
     const detail = result.error?.message ?? `child_exit=${result.status ?? 'null'}`;
     console.error(`NETLIFY_BUILD_STAGE_FAIL:${code}:${name}:${detail}`);
-    if (process.env.NETLIFY === 'true' && process.env.CONTEXT === 'deploy-preview') {
-      const { writeFileSync } = await import('node:fs');
-      const safeName = name.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
-      const diagnosticPath = `netlify/functions/ww9-diagnostic-${code}-${safeName}.mts`;
-      writeFileSync(
-        diagnosticPath,
-        `export default async () => new Response("WW9_DIAGNOSTIC_STAGE_${code}_${safeName}");\n`,
-        'utf8',
-      );
-      console.error(`WW9_NETLIFY_DIAGNOSTIC_FUNCTION:${diagnosticPath}`);
-      process.exit(0);
-    }
+    await recordNetlifyDiagnostic(code, name, result.status ?? null);
     process.exit(code);
   }
   console.log(`NETLIFY_BUILD_STAGE_OK:${code}:${name}`);
 }
 
+await recordNetlifyDiagnostic(99, 'runner-completed', 0);
 console.log('NETLIFY_BUILD_GATE_OK');
