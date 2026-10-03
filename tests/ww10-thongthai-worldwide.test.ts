@@ -101,5 +101,6 @@ test('WW-10 routes foreign and worldwide fact turns to one Saved Agent voice wit
   assert.match(chat,/isForeignLanguageCustomerMessage\(request\.message\)/);
   assert.match(chat,/cafeStateForPrePrimary !== null && !openLanguageOrWorldwidePriority/);
   assert.match(chat,/!explicitTransactionIntent && THONGTHAI_PRIORITY_WORLDWIDE_READ_RE\.test/);
-  assert.match(chat,/primaryRoutingCommonEligible && openLanguageOrWorldwidePriority/);
+  assert.match(chat,/const readOnlyPrimaryAgentEligible = !phase3SemanticLearningEligible/);
+  assert.match(chat,/openLanguageOrWorldwidePriority[\s\S]*shouldUseThongthaiAgentPrimary/);
 });
