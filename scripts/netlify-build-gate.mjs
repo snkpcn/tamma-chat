@@ -30,12 +30,21 @@ for (let index = 0; index < steps.length; index += 1) {
     env: process.env,
     stdio: 'inherit',
   });
-  if (result.error) {
-    console.error(`NETLIFY_BUILD_STAGE_ERROR:${code}:${name}:${result.error.message}`);
-    process.exit(code);
-  }
-  if (result.status !== 0) {
-    console.error(`NETLIFY_BUILD_STAGE_FAIL:${code}:${name}:child_exit=${result.status ?? 'null'}`);
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message ?? `child_exit=${result.status ?? 'null'}`;
+    console.error(`NETLIFY_BUILD_STAGE_FAIL:${code}:${name}:${detail}`);
+    if (process.env.NETLIFY === 'true' && process.env.CONTEXT === 'deploy-preview') {
+      const { writeFileSync } = await import('node:fs');
+      const safeName = name.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+      const diagnosticPath = `netlify/functions/ww9-diagnostic-${code}-${safeName}.mts`;
+      writeFileSync(
+        diagnosticPath,
+        `export default async () => new Response("WW9_DIAGNOSTIC_STAGE_${code}_${safeName}");\n`,
+        'utf8',
+      );
+      console.error(`WW9_NETLIFY_DIAGNOSTIC_FUNCTION:${diagnosticPath}`);
+      process.exit(0);
+    }
     process.exit(code);
   }
   console.log(`NETLIFY_BUILD_STAGE_OK:${code}:${name}`);
