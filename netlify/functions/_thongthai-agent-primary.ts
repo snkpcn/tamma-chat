@@ -104,8 +104,10 @@ export function shouldUseThongthaiAgentTransactionPrepare(input: {
  * Once the production Agent master switch and channel allowlist are already
  * enabled, non-Thai customer turns do not go through the percentage canary.
  * The Saved Agent is the single multilingual customer voice and can use the
- * same canonical tools as Thai service. Transaction/weather/location
- * boundaries remain unchanged.
+ * same canonical tools as Thai service. Transaction writes remain outside
+ * this read-only path. Weather and location are allowed here because the
+ * Agent now has canonical read-only weather/location tools; it does not
+ * invent those facts.
  */
 export function shouldUseThongthaiAgentForeignLanguagePrimary(input: {
   guestKey: string;
@@ -119,7 +121,10 @@ export function shouldUseThongthaiAgentForeignLanguagePrimary(input: {
   if (!input.guestDbId || !input.guestKey) return false;
   if (!SUPPORTED_CHANNELS.has(input.channel)) return false;
   if (!configuredChannels().has(input.channel)) return false;
-  if (input.explicitTransactionIntent || input.weatherRequest || input.locationRequest) return false;
+  // A transaction-shaped turn must stay on the established prepare/commit
+  // boundary. Weather/location are safe read-only Agent turns because the
+  // canonical tools are available on the Agent surface.
+  if (input.explicitTransactionIntent) return false;
   return true;
 }
 
