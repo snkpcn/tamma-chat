@@ -1,0 +1,27 @@
+name: Thongthai Worldwide Customer Production Certification
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  worldwide-customer-certification:
+    if: contains(github.event.head_commit.message, 'Thongthai Worldwide Customer Acceptance')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Wait for Netlify production and Agent profile sync
+        run: sleep 180
+      - name: Test multilingual customers and shipping truth in production
+        env:
+          THONGTHAI_PRODUCTION_URL: https://tamma-chat.netlify.app/.netlify/functions/thongthai-chat
+        run: npx tsx scripts/run-thongthai-worldwide-customer-certification.ts
