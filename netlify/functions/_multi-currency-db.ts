@@ -48,7 +48,8 @@ export type MultiCurrencyPriceLoad =
       | 'market_currency_not_enabled'
       | 'pricing_capability_not_live'
       | 'currency_inactive'
-      | PriceResolution extends { kind:'not_available'; reason: infer R } ? R & string : never
+      | 'price_not_configured'
+      | 'price_not_current'
     }
   | { kind:'invalid'; reason:'ambiguous_active_price' }
   | { kind:'ready'; price:ExplicitProductPrice };
@@ -103,17 +104,23 @@ export async function loadExplicitProductPrice(input:{
   const currency=currencies[0];
   if(!currency)return {kind:'not_available',reason:'currency_inactive'};
 
-  const resolved=resolveExplicitProductPrice(currencyCode,prices.map(row=>({
+  const resolved=resolveExplicitProductPrice(currencyCode,prices.map(row=>{
+    const amountMinor=typeof row.amount_minor==='number'
+      ? (Number.isSafeInteger(row.amount_minor)?BigInt(row.amount_minor):null)
+      : /^\d+$/.test(String(row.amount_minor))?BigInt(String(row.amount_minor)):null;
+    if(amountMinor===null)throw new Error('multi_currency_amount_out_of_range');
+    return {
     id:row.id,
     productId:row.product_id,
     currencyCode:row.currency_code,
-    amountMinor:BigInt(row.amount_minor),
+    amountMinor,
     minorUnit:Number(currency.minor_unit),
     priceSource:row.price_source,
     validFrom:row.valid_from,
     validUntil:row.valid_until,
     active:row.active,
-  })));
+  };
+  }));
 
   return resolved;
 }
