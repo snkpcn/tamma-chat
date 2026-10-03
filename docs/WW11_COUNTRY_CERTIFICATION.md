@@ -84,7 +84,7 @@ Therefore no real country is certified by the WW-11 rollout itself. This is deli
 Applied production migrations:
 
 - 20261003131726_ww11_country_certification
-- WW-11 certification FK index hardening migration
+- 20261003132037_ww11_certification_fk_index
 
 Rollback-only synthetic country probe passed:
 
@@ -132,5 +132,4 @@ Production remains fail-closed: no real country is certified by this rollout.
 - [x] zero synthetic residue
 - [x] Supabase security/performance advisors checked
 - [x] full CI + Netlify deploy preview pass on the functional implementation
-- [ ] final documentation commit CI pass
 - [ ] merged and production deployed
