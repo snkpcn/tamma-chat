@@ -20,7 +20,9 @@ const steps = [
   ['audit-ww9', 'npm', ['run', 'audit:ww9']],
   ['audit-ww10', 'npm', ['run', 'audit:ww10']],
   ['audit-ww11', 'npm', ['run', 'audit:ww11']],
+  ['audit-ww12', 'npm', ['run', 'audit:ww12']],
   ['semantic-certification-artifact', NODE, ['--import', 'tsx', 'scripts/write-semantic-certification-artifact.ts']],
+  ['ww12-production-certification', NODE, ['scripts/ww12-production-certification.mjs']],
 ];
 
 for (let index = 0; index < steps.length; index += 1) {
