@@ -1,4 +1,5 @@
 import { isWorldwideCapabilityEnabled, type WorldwideEnv } from './_worldwide-foundation';
+import {worldwideDbFetch} from './_worldwide-db-client';
 import { normalizeCurrencyCode } from './_worldwide-data-core';
 import {
   resolveExplicitProductPrice,
@@ -8,36 +9,11 @@ import {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-type DbConfig = { url: string; key: string };
-
-function config(): DbConfig | null {
-  const runtime = (globalThis as typeof globalThis & {
-    Netlify?: { env?: { get?: (key: string) => unknown } };
-  }).Netlify?.env;
-  const get = (name: string): string | undefined => {
-    const value = runtime?.get?.(name);
-    return typeof value === 'string' ? value : undefined;
-  };
-  const url = get('SUPABASE_URL');
-  const key = get('SUPABASE_SERVICE_ROLE_KEY');
-  return url && key ? { url:url.replace(/\/$/,''), key } : null;
-}
-
-async function dbFetch(path: string): Promise<Response> {
-  const c = config();
-  if (!c) throw new Error('multi_currency_not_configured');
-  const response = await fetch(`${c.url}/rest/v1/${path}`, {
-    headers: {
-      apikey:c.key,
-      Authorization:`Bearer ${c.key}`,
-      'Content-Type':'application/json',
-    },
+async function dbFetch(path:string):Promise<Response>{
+  return worldwideDbFetch(path,{}, {
+    consistency:'strong',
+    operation:'multi_currency_price_truth',
   });
-  if (!response.ok) {
-    const body = await response.text().catch(()=>'');
-    throw new Error(`multi_currency_db_${response.status}:${body.slice(0,240)}`);
-  }
-  return response;
 }
 
 export type MultiCurrencyPriceLoad =
