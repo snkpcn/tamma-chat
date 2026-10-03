@@ -17,9 +17,35 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Package exact current main source for WW10 production deploy
+        run: |
+          mkdir -p /tmp/ww10-main
+          git archive 8fec3a15e3c2452e6a7d88eaf5584902ba6f9d42 | tar -x -C /tmp/ww10-main
+          tar -czf /tmp/tamma-chat-ww10-main.tgz -C /tmp/ww10-main .
+      - name: Package Netlify MCP CLI
+        run: |
+          mkdir -p /tmp/netlify-mcp
+          npm install --prefix /tmp/netlify-mcp @netlify/mcp@latest
+          tar -czf /tmp/netlify-mcp.tgz -C /tmp netlify-mcp
+      - name: Upload WW10 main source
+        uses: actions/upload-artifact@v4
+        with:
+          name: tamma-chat-ww10-main
+          path: /tmp/tamma-chat-ww10-main.tgz
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload Netlify MCP CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: ww10-netlify-mcp
+          path: /tmp/netlify-mcp.tgz
+          if-no-files-found: error
+          retention-days: 1
