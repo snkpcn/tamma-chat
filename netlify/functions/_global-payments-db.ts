@@ -6,7 +6,6 @@ import {
   resolveGlobalPaymentMethod,
   type GlobalMarketPaymentMethod,
   type GlobalPaymentProvider,
-  type PaymentMethodResolution,
 } from './_global-payments';
 
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -52,7 +51,10 @@ export type GlobalPaymentMethodLoad=
       | 'invalid_currency'
       | 'payments_capability_not_live'
       | 'market_currency_not_enabled'
-      | PaymentMethodResolution extends {kind:'not_available';reason:infer R}?R&string:never
+      | 'payment_method_not_configured'
+      | 'provider_not_live'
+      | 'method_not_live'
+      | 'legacy_execution_mode'
     }
   | {kind:'invalid';reason:'ambiguous_payment_method'}
   | {kind:'ready';provider:GlobalPaymentProvider;method:GlobalMarketPaymentMethod};
