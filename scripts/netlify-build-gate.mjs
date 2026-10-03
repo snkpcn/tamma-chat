@@ -22,7 +22,6 @@ const steps = [
 ];
 
 async function recordNetlifyDiagnostic(stageCode, stageName, childExit) {
-  if (process.env.NETLIFY !== 'true') return;
   const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return;
