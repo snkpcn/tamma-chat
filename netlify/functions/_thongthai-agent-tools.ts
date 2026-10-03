@@ -7,6 +7,14 @@ import { restaurantMenuAdvice } from './_restaurant-sot';
 import { readThongthaiMarketContext, readThongthaiShippingQuote } from './_thongthai-worldwide-bridge';
 import { getWeatherForTammaLocation } from './_weather-provider';
 import { TAMMA_CHART_LOCATION } from './_local-concierge-location';
+import { createFeedbackEvent } from './_service-mind-feedback-events';
+import type {
+  BusinessUnit,
+  FeedbackType,
+  IssueKeyword,
+  ServiceFeedbackMatch,
+  Severity,
+} from './_service-mind-feedback-intent';
 
 export type ThongthaiAgentFunctionTool = {
   type: 'function';
@@ -171,6 +179,45 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
   },
 ] as const;
 
+export const THONGTHAI_SERVICE_OPERATION_TOOLS: readonly ThongthaiAgentFunctionTool[] = [
+  {
+    type:'function',
+    name:'report_service_incident',
+    description:'Create an idempotent Customer Voice/service incident case from the CURRENT customer message and dispatch the existing responsible team/owner notification routing. Use only for a real complaint, lost property, safety issue, service incident, fulfillment problem, or system feedback the customer is reporting now—not for hypothetical policy questions. This is an operational case report, never a booking/order/payment action.',
+    parameters:objectSchema({
+      feedback_type:{
+        type:'string',
+        enum:['complaint','suggestion','safety_issue','system_feedback','incident'],
+        description:'Closed incident/feedback class.',
+      },
+      business_unit:{
+        type:'string',
+        enum:['restaurant','activity','stay','cafe','otop','membership','system','general','unknown'],
+        description:'Best matching business owner. Use general/unknown when the customer did not identify one.',
+      },
+      severity:{
+        type:'string',
+        enum:['low','normal','high','urgent'],
+        description:'Operational severity. Use urgent only for an immediate serious safety/person threat.',
+      },
+      issue_keywords:{
+        type:'array',
+        maxItems:8,
+        items:{
+          type:'string',
+          enum:[
+            'service','delay','cleanliness','safety','food_quality','staff_behavior',
+            'pricing','booking','payment','communication','system_error','fulfillment',
+            'activity_condition','accessibility','child_safety','elderly_comfort','lost_property',
+            'missing_person','threat_security','food_illness',
+          ],
+        },
+        description:'Optional normalized issue categories directly supported by the customer message.',
+      },
+    },['feedback_type','business_unit','severity']),
+  },
+] as const;
+
 export type ThongthaiAgentToolContext = {
   guestDbId: string | null;
   channel: BrainChannel;
@@ -181,6 +228,63 @@ export type ThongthaiAgentToolContext = {
 };
 
 type JsonObject = Record<string, unknown>;
+
+const FEEDBACK_TYPES = new Set<FeedbackType>(['complaint','suggestion','safety_issue','system_feedback','incident']);
+const BUSINESS_UNITS = new Set<BusinessUnit>(['restaurant','activity','stay','cafe','otop','membership','system','general','unknown']);
+const SEVERITIES = new Set<Severity>(['low','normal','high','urgent']);
+const ISSUE_KEYWORDS = new Set<IssueKeyword>([
+  'service','delay','cleanliness','safety','food_quality','staff_behavior',
+  'pricing','booking','payment','communication','system_error','fulfillment',
+  'activity_condition','accessibility','child_safety','elderly_comfort','lost_property',
+  'missing_person','threat_security','food_illness',
+]);
+
+async function executeServiceIncidentTool(
+  args:JsonObject,
+  context:ThongthaiAgentToolContext,
+):Promise<string>{
+  const feedbackType=stringArg(args,'feedback_type') as FeedbackType|undefined;
+  const businessUnit=stringArg(args,'business_unit') as BusinessUnit|undefined;
+  const severity=stringArg(args,'severity') as Severity|undefined;
+  if(!feedbackType||!FEEDBACK_TYPES.has(feedbackType))return JSON.stringify({ok:false,error:'invalid_feedback_type'});
+  if(!businessUnit||!BUSINESS_UNITS.has(businessUnit))return JSON.stringify({ok:false,error:'invalid_business_unit'});
+  if(!severity||!SEVERITIES.has(severity))return JSON.stringify({ok:false,error:'invalid_severity'});
+  const customerMessage=typeof context.message==='string'?context.message.trim():'';
+  if(!customerMessage)return JSON.stringify({ok:false,error:'customer_message_required'});
+  const issueKeywords=Array.isArray(args.issue_keywords)
+    ? [...new Set(args.issue_keywords.filter((value):value is IssueKeyword =>
+        typeof value==='string'&&ISSUE_KEYWORDS.has(value as IssueKeyword)
+      ))].slice(0,8)
+    : [];
+  const match:ServiceFeedbackMatch={
+    feedbackType,
+    businessUnit,
+    severity,
+    staffName:null,
+    personMentions:[],
+    businessUnitMentions:[],
+    sentimentKeywords:[],
+    issueKeywords,
+    namedAssets:[],
+    keywordSummary:{topPositive:[],topNegative:[]},
+  };
+  const result=await createFeedbackEvent({
+    match,
+    message:customerMessage,
+    channel:context.channel,
+    guestDbId:context.guestDbId,
+    sourceEventKey:context.eventId??null,
+  });
+  return JSON.stringify({
+    ok:Boolean(result.eventId),
+    event_id:result.eventId,
+    notification_queued:result.notificationQueued,
+    targets:result.targets.map(target=>({
+      team:target.team,
+      status:target.status,
+    })),
+  });
+}
 
 function stringArg(args: JsonObject, key: string): string | undefined {
   const value = args[key];
@@ -415,11 +519,13 @@ export async function executeThongthaiReadOnlyTool(
 
 export const THONGTHAI_PRODUCTION_PREPARE_TOOLS: readonly ThongthaiAgentFunctionTool[] = [
   ...THONGTHAI_READ_ONLY_TOOLS,
+  ...THONGTHAI_SERVICE_OPERATION_TOOLS,
   ...THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS,
 ];
 
 export const THONGTHAI_AGENT_TOOLS: readonly ThongthaiAgentFunctionTool[] = [
   ...THONGTHAI_READ_ONLY_TOOLS,
+  ...THONGTHAI_SERVICE_OPERATION_TOOLS,
   ...THONGTHAI_STAGING_TRANSACTION_TOOLS,
 ];
 
@@ -430,6 +536,10 @@ export async function executeThongthaiAgentTool(
   rawArgs: unknown,
   context: ThongthaiAgentToolContext,
 ): Promise<string> {
+  if (name === 'report_service_incident') {
+    const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
+    return executeServiceIncidentTool(args, context);
+  }
   if (TRANSACTION_TOOL_NAMES.has(name)) {
     return executeThongthaiTransactionTool(name, rawArgs, {
       guestDbId: context.guestDbId,
