@@ -15,6 +15,10 @@ test('Thongthai Agent keeps the original business fact tools bounded and read-on
   assert.deepEqual(names, [
     'recommend_restaurant_menu',
     'get_restaurant_menu',
+    'get_cafe_menu',
+    'get_market_context',
+    'get_shipping_quote',
+    'get_otop_order_status',
     'get_activity_catalog',
     'check_activity_availability',
     'get_stay_catalog',
@@ -184,4 +188,16 @@ test('prepare tool descriptions tell the Agent to avoid redundant preflight look
   assert.match(restaurant.description, /call this tool directly/i);
   assert.ok(cafe);
   assert.match(cafe.description, /call this tool directly/i);
+});
+
+
+test('worldwide/backoffice read tools are present without introducing write authority', () => {
+  const byName = new Map(THONGTHAI_READ_ONLY_TOOLS.map(tool => [tool.name, tool]));
+  for (const name of ['get_cafe_menu','get_market_context','get_shipping_quote','get_otop_order_status']) {
+    const tool=byName.get(name);
+    assert.ok(tool, name);
+    assert.match(tool.description,/Read-only/i);
+    assert.equal(tool.parameters.additionalProperties,false);
+  }
+  assert.match(byName.get('get_shipping_quote')!.description,/never estimate a foreign rate/i);
 });
