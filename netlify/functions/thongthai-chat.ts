@@ -1770,7 +1770,9 @@ function isCafeReadOnlyTurn(message: string, activeTopic?: unknown): boolean {
     /(?:ร้านอาหาร|ตำมา-ชาติ|ตำมา|ขี่ม้า|ม้า|atv|เอทีวี|ยิงธนู|ธนู|ที่พัก|เฮือนสเตย์|ห้องพัก|otop|โอทอป|ของฝาก|สินค้า(?:ชุมชน)?)/iu.test(text);
   if (explicitNonCafeTopic && !CAFE_EXPLICIT_MARKER.test(text)) return false;
 
-  if (CAFE_EXPLICIT_MARKER.test(text)) return true;
+  const explicitCafeResume =
+    /(?:กลับมา|กลับไป|ต่อ).{0,18}(?:เรื่อง)?(?:เครื่องดื่ม|Inthanin|อินทนิน)|ของ(?:แฟน|ผม|ฉัน|หนู).{0,18}(?:เมื่อกี้|ก่อนหน้า).{0,30}(?:ดื่ม|ขม|หวาน|เมนู)/iu.test(text);
+  if (CAFE_EXPLICIT_MARKER.test(text) || explicitCafeResume) return true;
   return activeTopic === 'cafe' && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(text);
 }
 
@@ -1780,7 +1782,7 @@ function recentCafeConversationText(agentState:Record<string,unknown>):string{
   const turns=(raw as {recentTurns?:unknown}).recentTurns;
   if(!Array.isArray(turns))return '';
   return turns
-    .slice(-12)
+    .slice(-24)
     .map(turn=>turn&&typeof turn==='object'&&typeof (turn as {content?:unknown}).content==='string'
       ? String((turn as {content:string}).content)
       : '')
