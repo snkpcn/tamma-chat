@@ -1,6 +1,6 @@
 # WW-12 — Global Scale
 
-Status: implementation
+Status: merged / awaiting production deploy
 Date: 2026-10-04
 
 ## Goal
@@ -110,6 +110,19 @@ WW-12 does not bypass those missing facts.
 
 When returning to real-country activation later, each country still needs the exact WW-11 evidence chain before checkout can become live.
 
+## Pre-deploy production baseline
+
+Read-only production check after merge:
+
+- foreign markets: 3 (KR, JP, US)
+- live foreign markets: 0
+- live market without current certification: 0
+- prelaunch exposed payment/shipping/customs/checkout/fulfillment capabilities: 0
+- live global-v2 payment methods on non-live markets: 0
+- live global-v2 shipping services on non-live markets: 0
+
+This verifies the merged code/data baseline is still fail-closed before production publication.
+
 ## Definition of Done
 
 - [x] bounded CDN/static cache policy
@@ -120,8 +133,8 @@ When returning to real-country activation later, each country still needs the ex
 - [x] structured global scale traces
 - [x] WW-12 audit in Netlify build gate
 - [x] read-only production fail-closed certification gate
-- [ ] full repository CI passes
-- [ ] Netlify deploy preview passes
-- [ ] merged to main
+- [x] full repository CI passes
+- [x] Netlify deploy preview passes
+- [x] merged to main
 - [ ] production deploy ready
 - [ ] live production certification observed PASS
