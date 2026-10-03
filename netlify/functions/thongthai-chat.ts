@@ -40,6 +40,7 @@ import {
   resetLineBookingPlanningSession,
 } from './_operations-db';
 import { restaurantMenuAdvice } from './_restaurant-sot';
+import { loadActivityWorldFacts } from './_activity-sot';
 import {
   listCafeMasterMenu,
   listCafeBranchModifiers,
@@ -295,9 +296,18 @@ async function cafeStateBeforePrimary(
   try {
     const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
     if (!isObject(snapshot.state)) return null;
-    return isCafeReadOnlyTurn(request.message, snapshot.state.active_topic)
-      ? snapshot.state
-      : null;
+    if (isCafeReadOnlyTurn(request.message, snapshot.state.active_topic)) return snapshot.state;
+
+    const rawContext=snapshot.state.conversationContext;
+    const turns=isObject(rawContext)&&Array.isArray(rawContext.recentTurns)
+      ? rawContext.recentTurns
+      : [];
+    const recentCafeEvidence=turns
+      .slice(-24)
+      .some(turn=>isObject(turn)&&typeof turn.content==='string'
+        && /(?:Inthanin|อินทนิน|อเมริกาโน่|ลาเต้|มัทฉะ|ชาไทย|ชาเขียว|เครื่องดื่ม)/iu.test(turn.content));
+    const explicitCafeResume=/(?:กลับมา|กลับไป|ต่อ).{0,18}(?:เรื่อง)?เครื่องดื่ม|ของแฟนเมื่อกี้.{0,30}(?:ดื่ม|ขม|หวาน|เมนู)/u.test(request.message);
+    return explicitCafeResume&&recentCafeEvidence ? snapshot.state : null;
   } catch (error) {
     console.error(
       'THONGTHAI_PRE_PRIMARY_CAFE_STATE_ERROR',
@@ -1908,14 +1918,13 @@ function cafeRecommendationMessage(
 ):string{
   const active=items.filter(item=>item.active);
   const constraints=new Set(request.guestContext.constraints??[]);
-  const selfNoCoffee=constraints.has('no_coffee')
-    || /(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง).{0,20}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
+  // The guest-scoped preference classifier already separates the customer
+  // from companions before this function runs. Never re-infer "self" with a
+  // cross-clause regex here: "ผมชอบกาแฟ...แต่แฟนไม่กินกาแฟ" used to match
+  // from ผม all the way to แฟนไม่กินกาแฟ and wrongly remove coffee from the
+  // customer's own recommendation.
+  const noCoffee=constraints.has('no_coffee');
   const companionNoCoffee=/(?:แฟน|ภรรยา|สามี|เพื่อน|ลูก).{0,24}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
-  const sharedNoCoffee=/(?:เราสองคน|เราทั้งคู่|ทั้งคู่).{0,24}(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ)/u.test(request.message);
-  const genericNoCoffee=/(?:ไม่กินกาแฟ|ไม่ดื่มกาแฟ|ไม่เอากาแฟ|no\s*coffee)/iu.test(request.message)
-    && !companionNoCoffee
-    && !/(?:ผม|ฉัน|หนู|ดิฉัน).{0,26}(?:ชอบ|เอา|อยากได้).{0,12}กาแฟ/u.test(request.message);
-  const noCoffee=selfNoCoffee||sharedNoCoffee||genericNoCoffee;
   const couple=/(?:แฟน|คู่รัก|สองคน|2\s*คน|couple)/iu.test(request.message);
   const selfStrongCoffee=/(?:ผม|ฉัน|หนู|ดิฉัน).{0,26}(?:ชอบ|เอา|อยากได้).{0,12}กาแฟ.{0,12}(?:เข้ม|แรง)/u.test(request.message);
   const sharedLowSweet=/(?:เราสองคน|เราทั้งคู่|ทั้งคู่).{0,30}(?:ไม่ชอบหวาน|ไม่หวานมาก|หวานน้อย)/u.test(request.message)
@@ -2100,6 +2109,76 @@ async function deterministicCafeResponse(
   }
 
   const recentCafeText=recentCafeConversationText(runtime.agentState??{});
+
+  const cafeResumeForCompanion =
+    /(?:กลับมา|กลับไป|ต่อ).{0,18}(?:เรื่อง)?เครื่องดื่ม/u.test(message)
+    && /แฟน|เมื่อกี้/u.test(message);
+  if(items.length&&cafeResumeForCompanion&&/อูจิ\s*เพียวมัทฉะ/u.test(recentCafeText)){
+    return {
+      message:[
+        'ของแฟนที่คุยไว้ก่อนเปลี่ยนเรื่อง เป็นฝั่งไม่กาแฟครับ — ตอนนั้นคัดอูจิ เพียวมัทฉะไว้',
+        /ไม่เอานมวัว/u.test(recentCafeText)
+          ? 'แล้วมีเงื่อนไขเพิ่มว่าช่วงนี้ไม่อยากดื่มนมวัว แต่ไม่ได้แพ้นมครับ'
+          : '',
+        'ทั้งหมดนี้ยังเป็นแค่ตัวเลือก ยังไม่ได้สั่งหรือส่งรายการครับ',
+      ].filter(Boolean).join('\n\n'),
+      intent:'information',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{activeTopic:'cafe'},
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+
+  const selfPriceFollowup=/ของผม/u.test(message)
+    && /(?:ไม่ใส่น้ำตาล|ไม่เอาน้ำตาล|งดน้ำตาล)/u.test(message)
+    && /(?:ราคา|กี่บาท|เท่าไหร่|เท่าไร)/u.test(message);
+  if(items.length&&selfPriceFollowup&&/อเมริกาโน่/u.test(recentCafeText)){
+    const item=items.find(candidate=>candidate.code==='americano'&&candidate.active);
+    const recentIced=/อเมริกาโน่.{0,30}เย็น/u.test(recentCafeText);
+    const slot=item?.slots.find(candidate=>candidate.active&&candidate.slot_code===(recentIced?'iced':'hot'))
+      ?? item?.slots.find(candidate=>candidate.active);
+    if(item&&slot){
+      return {
+        message:[
+          `ของคุณที่คุยไว้คือ ${item.name_th} ${slot.label_th} ราคา ${cafeMoney(slot.price)}ครับ`,
+          'ส่วน “ไม่ใส่น้ำตาลเลย” ข้อมูลเมนูที่เชื่อมอยู่ตอนนี้ยังไม่ได้ยืนยันกติกาการปรับเมนูนี้ไว้ ทองไทยเลยไม่ขอตอบว่าได้แน่นอนจนกว่าจะมีข้อมูลจากหน้าร้านครับ',
+        ].join('\n\n'),
+        intent:'information',
+        contextUpdates:{},
+        journeyAction:{type:'none',journey:null},
+        suggestedActions:[],
+        responseStyle:'direct',
+        agentStateUpdate:{activeTopic:'cafe'},
+        semanticMemoryUpdates:[],
+        toolCalls:[],
+      };
+    }
+  }
+
+  const companionBitternessFollowup=/แฟน/u.test(message)
+    && /(?:เมื่อกี้|ตัวไหน)/u.test(message)
+    && /ขม/u.test(message);
+  if(items.length&&companionBitternessFollowup&&/อูจิ\s*เพียวมัทฉะ/u.test(recentCafeText)){
+    return {
+      message:[
+        'ของแฟนเมื่อกี้คัดอูจิ เพียวมัทฉะไว้ครับ',
+        'แต่ข้อมูลเมนูที่เชื่อมอยู่ยังไม่มีระดับความขมของแต่ละแก้วให้เทียบกัน ทองไทยเลยไม่อยากเดาว่าตัวไหน “ขมน้อยสุด” ครับ',
+      ].join('\n\n'),
+      intent:'information',
+      contextUpdates:{},
+      journeyAction:{type:'none',journey:null},
+      suggestedActions:[],
+      responseStyle:'direct',
+      agentStateUpdate:{activeTopic:'cafe'},
+      semanticMemoryUpdates:[],
+      toolCalls:[],
+    };
+  }
+
   const splitFollowup=/ของผม.{0,24}(?:เย็น|ร้อน|ปั่น).{0,40}(?:แฟน)/u.test(message)
     || /(?:แฟน).{0,40}(?:ของผม).{0,24}(?:เย็น|ร้อน|ปั่น)/u.test(message);
   if(items.length&&splitFollowup&&/อเมริกาโน่/u.test(recentCafeText)&&/อูจิ\s*เพียวมัทฉะ/u.test(recentCafeText)){
@@ -5608,6 +5687,90 @@ const HORSE_COMPARISON_FOLLOWUP_RE = /(?:ต่างกัน|เปรีย�
  * the 30s gateway timeout. Resolve it deterministically only when prior bounded
  * context proves BOTH canonical horses were the subject of the conversation.
  */
+async function boundedHorseDurationComparisonBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+): Promise<BrainResponse | null> {
+  if (!guestDbId || hasExplicitTransactionIntent(request.message)) return null;
+  const matches=[...request.message.matchAll(/(\d{1,3})\s*นาที/gu)].map(match=>Number(match[1]));
+  const durations=[...new Set(matches.filter(value=>Number.isInteger(value)&&value>0))];
+  if(durations.length<2 || !/(?:ต่างกัน|เทียบ|อันไหน|ตัวไหน)/u.test(request.message)) return null;
+
+  const context=await loadConversationContext(guestDbId);
+  const held=context.workingMemory.consideredSelections.find(selection=>
+    selection.domain==='activity'
+    && selection.status==='considering'
+    && /(?:ทองไทย|ภาราดร)/u.test(selection.name)
+  );
+  if(!held && !context.recentTurns.some(turn=>/(?:ม้า|ทองไทย|ภาราดร)/u.test(turn.content))) return null;
+
+  const facts=await loadActivityWorldFacts();
+  const factValue=facts.find(row=>row.fact_key==='activity_catalog_live')?.fact_value;
+  const activities=isObject(factValue)&&Array.isArray(factValue.activities)
+    ? factValue.activities.filter(isObject)
+    : [];
+  const horse=activities.find(activity=>
+    activity.activityCode==='horse' || activity.resourceCode==='activity-horse'
+  );
+  const options=horse&&Array.isArray(horse.durations)
+    ? horse.durations.filter(isObject)
+    : [];
+  const requested=durations.slice(0,2);
+  const rows=requested.map(minutes=>{
+    const option=options.find(row=>Number(row.durationMinutes)===minutes);
+    const price=option&&Number.isFinite(Number(option.price))?Number(option.price):null;
+    return {minutes,price};
+  });
+
+  const horseName=held?.name?.replace(/^น้อง/u,'')||'ม้าที่เลือกไว้';
+  const lines=[`ถ้าเป็น${horseName.startsWith('ม้า')?'':'น้อง'}${horseName} สองรอบนี้ต่างกันที่เวลาและราคาครับ`];
+  for(const row of rows){
+    lines.push(`• ${row.minutes} นาที${row.price!==null?` — ${row.price.toLocaleString('th-TH')} บาท`:''}`);
+  }
+  const timeDiff=Math.abs(rows[1]!.minutes-rows[0]!.minutes);
+  const bothPrice=rows.every(row=>row.price!==null);
+  lines.push(
+    bothPrice
+      ? `ต่างกัน ${timeDiff} นาที และ ${Math.abs(rows[1]!.price!-rows[0]!.price!).toLocaleString('th-TH')} บาทครับ`
+      : `ต่างกัน ${timeDiff} นาทีครับ ส่วนราคาที่ยังไม่ขึ้นด้านบนทองไทยไม่ขอเดา`
+  );
+  if(/ยังไม่จอง|ยังไม่.*จอง|แค่.*ถาม/u.test(request.message)){
+    lines.push('ตอนนี้ยังเป็นการเทียบตัวเลือก ยังไม่ได้จองหรือส่งรายการครับ');
+  }
+  return {
+    message:lines.join('\n'),
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
+async function boundedBeginnerHorseSuitabilityBeforePrimary(
+  request: BrainRequest,
+): Promise<BrainResponse | null> {
+  if (hasExplicitTransactionIntent(request.message)) return null;
+  if (!/(?:ม้า|ขี่ม้า)/u.test(request.message)) return null;
+  if (!/(?:มือใหม่|ไม่เคยขี่|หัดขี่|ครั้งแรก|เริ่มต้น)/u.test(request.message)) return null;
+  if (!/(?:เหมาะ|ตัวไหน|แนะนำ|ไหนดี|ได้ไหม)/u.test(request.message)) return null;
+  return {
+    message:await composeLocalConciergeResponse(
+      {category:'activity_suitability',activityNodeId:'activity-horse'},
+      request.message,
+    ),
+    intent:'information',
+    contextUpdates:{},
+    journeyAction:{type:'none',journey:null},
+    suggestedActions:[],
+    responseStyle:'direct',
+    semanticMemoryUpdates:[],
+    toolCalls:[],
+  };
+}
+
 async function boundedHorseComparisonBeforePrimary(
   request: BrainRequest,
   guestDbId: string | null,
@@ -6250,6 +6413,43 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   });
   if (availabilityClarification) {
     const polished = polishedResponse(availabilityClarification, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const horseDurationComparison = await boundedHorseDurationComparisonBeforePrimary(
+    request,
+    guestDbId,
+  ).catch(error => {
+    console.error('THONGTHAI_BOUNDED_HORSE_DURATION_COMPARE_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (horseDurationComparison) {
+    const polished = polishedResponse(horseDurationComparison, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message:polished.message,
+      intent:polished.intent,
+      contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,
+      suggestedActions:polished.suggestedActions,
+    });
+  }
+
+  const beginnerHorseSuitability = await boundedBeginnerHorseSuitabilityBeforePrimary(
+    request,
+  ).catch(error => {
+    console.error('THONGTHAI_BOUNDED_BEGINNER_HORSE_ERROR', error instanceof Error ? error.message.slice(0,220) : 'unknown');
+    return null;
+  });
+  if (beginnerHorseSuitability) {
+    const polished = polishedResponse(beginnerHorseSuitability, channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message:polished.message,
