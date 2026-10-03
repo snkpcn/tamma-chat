@@ -4,6 +4,11 @@ import { resolveKnowledge, type GroundedFact, type KnowledgeNeed, type Knowledge
 import type { SemanticDomain } from './_semantic-interpreter';
 import { THONGTHAI_PREPARE_ONLY_TRANSACTION_TOOLS, THONGTHAI_STAGING_TRANSACTION_TOOLS, executeThongthaiTransactionTool, type ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
 import { restaurantMenuAdvice } from './_restaurant-sot';
+import {
+  readThongthaiMarketContext,
+  readThongthaiShippingQuote,
+  readThongthaiOtopOrderStatus,
+} from './_thongthai-backoffice-gateway';
 
 export type ThongthaiAgentFunctionTool = {
   type: 'function';
@@ -42,6 +47,41 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
     parameters: objectSchema({
       query: { type: 'string', description: 'Menu-name keyword.' },
       allergen: { type: 'string', description: 'Optional allergen key when checking this named item.' },
+    }),
+  },
+  {
+    type: 'function',
+    name: 'get_cafe_menu',
+    description: 'Read the canonical live Inthanin Tad Tone café menu, drink names, hot/iced/frappe prices, and active modifiers. Use this for café facts and recommendations instead of guessing from memory. Read-only.',
+    parameters: objectSchema({
+      query: { type: 'string', description: 'Optional drink name/code/keyword. Leave empty for menu discovery or recommendation grounding.' },
+    }),
+  },
+  {
+    type: 'function',
+    name: 'get_market_context',
+    description: 'Read canonical worldwide market context for a destination country: market readiness, currency, locale, and capability states. Country/market/currency are independent from the language the customer speaks. Read-only.',
+    parameters: objectSchema({
+      country_code: { type: 'string', description: 'ISO-style two-letter destination country code, e.g. TH, SE, US.' },
+      locale: { type: 'string', description: 'Optional requested customer locale such as en, sv-SE, ja, zh-CN.' },
+    }, ['country_code']),
+  },
+  {
+    type: 'function',
+    name: 'get_shipping_quote',
+    description: 'Read the canonical shipping policy/quote for an OTOP delivery destination. Thailand returns live domestic shipping settings and an exact quote when subtotal is supplied. Foreign destinations fail closed unless the separate WW shipping source is live; never estimate a foreign rate. Read-only.',
+    parameters: objectSchema({
+      country_code: { type: 'string', description: 'ISO-style two-letter destination country code.' },
+      subtotal: { type: 'number', minimum: 0, description: 'Optional cart subtotal in the market/current canonical currency when known.' },
+      locale: { type: 'string', description: 'Optional customer locale.' },
+    }, ['country_code']),
+  },
+  {
+    type: 'function',
+    name: 'get_otop_order_status',
+    description: 'Read this guest’s own latest OTOP order and delivery status, including carrier/tracking when available. Never reads another guest. Read-only.',
+    parameters: objectSchema({
+      order_code: { type: 'string', description: 'Optional specific order code. Leave empty for the latest order belonging to this guest.' },
     }),
   },
   {
@@ -178,6 +218,28 @@ function filterRestaurantFacts(facts: GroundedFact[], args: JsonObject): Grounde
   }).slice(0, 260);
 }
 
+function filterCafeFacts(facts: GroundedFact[], args: JsonObject): GroundedFact[] {
+  const query = normalizeText(args.query);
+  if (!query) return facts.slice(0, 180);
+  const compact = query.replace(/\s+/g, '');
+  const ids = new Set<string>();
+  for (const fact of facts) {
+    const match = fact.key.match(/^cafe:([^:]+):(?:name|name_en)$/);
+    if (!match) continue;
+    const value = normalizeText(fact.value);
+    if (value.includes(query) || value.replace(/\s+/g, '').includes(compact) || match[1]!.includes(compact)) {
+      ids.add(match[1]!);
+    }
+  }
+  if (!ids.size) return [];
+  return facts.filter(fact => {
+    const item = fact.key.match(/^cafe:([^:]+):/);
+    if (item && ids.has(item[1]!)) return true;
+    // Active branch modifiers can materially change a matched drink's price.
+    return fact.key.startsWith('cafe_modifier:');
+  }).slice(0, 180);
+}
+
 function filterByPrefix(facts: GroundedFact[], prefix?: string): GroundedFact[] {
   if (!prefix) return facts.slice(0, 220);
   const needle = prefix.toLowerCase();
@@ -240,6 +302,26 @@ export async function executeThongthaiReadOnlyTool(
 ): Promise<string> {
   const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
   if (name === 'recommend_restaurant_menu') return executeRestaurantRecommendation(args);
+  if (name === 'get_market_context') {
+    return JSON.stringify(await readThongthaiMarketContext(
+      stringArg(args, 'country_code'),
+      stringArg(args, 'locale'),
+    ));
+  }
+  if (name === 'get_shipping_quote') {
+    return JSON.stringify(await readThongthaiShippingQuote({
+      countryCode: stringArg(args, 'country_code'),
+      subtotal: args.subtotal,
+      locale: stringArg(args, 'locale'),
+    }));
+  }
+  if (name === 'get_otop_order_status') {
+    return JSON.stringify(await readThongthaiOtopOrderStatus(
+      context.guestDbId,
+      stringArg(args, 'order_code'),
+      context.environment ?? 'live',
+    ));
+  }
   const adapters = buildRealKnowledgeSourceAdapters(context.channel, {
     guestDbId: context.guestDbId,
     environment: context.environment ?? 'live',
@@ -249,6 +331,9 @@ export async function executeThongthaiReadOnlyTool(
   switch (name) {
     case 'get_restaurant_menu':
       req = request('restaurant', ['catalog']);
+      break;
+    case 'get_cafe_menu':
+      req = request('cafe', ['catalog']);
       break;
     case 'get_activity_catalog':
       req = request('activity', ['catalog'], {
@@ -302,6 +387,7 @@ export async function executeThongthaiReadOnlyTool(
   const bundle = await resolveKnowledge(req, adapters);
   let facts = bundle.facts;
   if (name === 'get_restaurant_menu') facts = filterRestaurantFacts(facts, args);
+  if (name === 'get_cafe_menu') facts = filterCafeFacts(facts, args);
   if (name === 'get_activity_catalog') facts = filterByPrefix(facts, stringArg(args, 'activity_code'));
   if (name === 'get_stay_catalog') facts = filterByPrefix(facts, stringArg(args, 'resource_code'));
   if (name === 'get_otop_catalog') facts = filterByPrefix(facts, stringArg(args, 'sku'));
