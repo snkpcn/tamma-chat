@@ -37,9 +37,12 @@ import {
   formatActivityAssetNote,
   listServiceResources,
   loadLatestBookingStatus,
+  loadLatestCafeInquiryStatus,
+  loadLatestOtopOrderStatus,
+  loadLatestPaymentStatus,
   resetLineBookingPlanningSession,
 } from './_operations-db';
-import { restaurantMenuAdvice } from './_restaurant-sot';
+import { restaurantMenuAdvice, loadLatestRestaurantPreorderStatus } from './_restaurant-sot';
 import { loadActivityWorldFacts } from './_activity-sot';
 import {
   listCafeMasterMenu,
