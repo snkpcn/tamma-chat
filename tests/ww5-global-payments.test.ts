@@ -67,19 +67,20 @@ test('WW-5 payment intent state machine rejects unsafe backwards transitions',()
 test('WW-5 provider events must be verified and must match provider/currency/amount',()=>{
   const intent={
     marketCode:'SE',currencyCode:'SEK',amountMinor:10000n,
+    capturedAmountMinor:0n,refundedAmountMinor:0n,
     providerCode:'provider_x',paymentMethodCode:'card',status:'processing' as const,
   };
   assert.doesNotThrow(()=>assertGlobalPaymentEventMatchesIntent(intent,{
-    providerCode:'provider_x',currencyCode:'SEK',amountMinor:10000n,signatureVerified:true,
+    providerCode:'provider_x',currencyCode:'SEK',amountMinor:10000n,moneySemantics:'intent_total',signatureVerified:true,
   }));
   assert.throws(()=>assertGlobalPaymentEventMatchesIntent(intent,{
-    providerCode:'provider_x',currencyCode:'USD',amountMinor:10000n,signatureVerified:true,
+    providerCode:'provider_x',currencyCode:'USD',amountMinor:10000n,moneySemantics:'intent_total',signatureVerified:true,
   }),/provider_event_currency_mismatch/u);
   assert.throws(()=>assertGlobalPaymentEventMatchesIntent(intent,{
-    providerCode:'provider_x',currencyCode:'SEK',amountMinor:9999n,signatureVerified:true,
+    providerCode:'provider_x',currencyCode:'SEK',amountMinor:9999n,moneySemantics:'intent_total',signatureVerified:true,
   }),/provider_event_amount_mismatch/u);
   assert.throws(()=>assertGlobalPaymentEventMatchesIntent(intent,{
-    providerCode:'provider_x',currencyCode:'SEK',amountMinor:10000n,signatureVerified:false,
+    providerCode:'provider_x',currencyCode:'SEK',amountMinor:10000n,moneySemantics:'intent_total',signatureVerified:false,
   }),/provider_event_signature_not_verified/u);
 });
 
@@ -88,4 +89,21 @@ test('WW-5 DB loader is dormant when globalPayments gate is off',async()=>{
     marketCode:'TH',currencyCode:'THB',requestedMethod:'promptpay_owner_qr',env:{},
   });
   assert.deepEqual(result,{kind:'disabled'});
+});
+
+
+test('WW-5 refund delta cannot exceed captured amount',()=>{
+  const intent={
+    marketCode:'SE',currencyCode:'SEK',amountMinor:10000n,
+    capturedAmountMinor:10000n,refundedAmountMinor:2500n,
+    providerCode:'provider_x',paymentMethodCode:'card',status:'captured' as const,
+  };
+  assert.doesNotThrow(()=>assertGlobalPaymentEventMatchesIntent(intent,{
+    providerCode:'provider_x',currencyCode:'SEK',amountMinor:2500n,
+    moneySemantics:'refund_delta',signatureVerified:true,
+  }));
+  assert.throws(()=>assertGlobalPaymentEventMatchesIntent(intent,{
+    providerCode:'provider_x',currencyCode:'SEK',amountMinor:8000n,
+    moneySemantics:'refund_delta',signatureVerified:true,
+  }),/refund_exceeds_capture/u);
 });
