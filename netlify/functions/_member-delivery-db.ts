@@ -4,13 +4,11 @@ import {
   addressSnapshot,
   calculateShippingQuote,
   normalizeMemberAddress,
-  type MemberAddressInput,
   type ShippingSettings,
 } from './_member-delivery';
 import {
   normalizeInternationalAddress,
   wantsInternationalAddressV2,
-  type InternationalAddressInput,
 } from './_international-address';
 import { isWorldwideCapabilityEnabled } from './_worldwide-foundation';
 import { resolveOtopStoreStory } from './_otop-store-story';
@@ -145,7 +143,8 @@ export async function saveMemberAddress(
   }
   const internationalAddress = useAddressV2 ? normalizeInternationalAddress(value) : null;
   const domesticAddress = useAddressV2 ? null : normalizeMemberAddress(value);
-  const isDefault = internationalAddress?.isDefault ?? domesticAddress?.isDefault ?? false;
+  const commonAddress = useAddressV2 ? internationalAddress! : domesticAddress!;
+  const isDefault = commonAddress.isDefault;
   let id = addressId && UUID_RE.test(addressId) ? addressId : null;
 
   if (id) {
@@ -175,12 +174,12 @@ export async function saveMemberAddress(
         customer_id: account.id,
         address_schema_version: 2,
         country_code: internationalAddress!.countryCode,
-        label: (useAddressV2 ? internationalAddress! : domesticAddress!).label,
-        recipient_name_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).recipientName),
-        phone_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).phone),
+        label: commonAddress.label,
+        recipient_name_enc: encryptPii(commonAddress.recipientName),
+        phone_enc: encryptPii(commonAddress.phone),
         organization_enc: encryptPii(internationalAddress!.organization),
-        address_line1_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).addressLine1),
-        address_line2_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).addressLine2),
+        address_line1_enc: encryptPii(commonAddress.addressLine1),
+        address_line2_enc: encryptPii(commonAddress.addressLine2),
         dependent_locality_enc: encryptPii(internationalAddress!.dependentLocality),
         locality_enc: encryptPii(internationalAddress!.locality),
         administrative_area_enc: encryptPii(internationalAddress!.administrativeArea),
@@ -188,8 +187,8 @@ export async function saveMemberAddress(
         subdistrict_enc: null,
         district_enc: null,
         province: null,
-        postal_code_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).postalCode),
-        delivery_instructions_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).deliveryInstructions),
+        postal_code_enc: encryptPii(commonAddress.postalCode),
+        delivery_instructions_enc: encryptPii(commonAddress.deliveryInstructions),
         is_default: shouldDefault,
         active: true,
         updated_at: new Date().toISOString(),
@@ -198,20 +197,20 @@ export async function saveMemberAddress(
         customer_id: account.id,
         address_schema_version: 1,
         country_code: 'TH',
-        label: (useAddressV2 ? internationalAddress! : domesticAddress!).label,
-        recipient_name_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).recipientName),
-        phone_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).phone),
+        label: commonAddress.label,
+        recipient_name_enc: encryptPii(commonAddress.recipientName),
+        phone_enc: encryptPii(commonAddress.phone),
         organization_enc: null,
-        address_line1_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).addressLine1),
-        address_line2_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).addressLine2),
+        address_line1_enc: encryptPii(commonAddress.addressLine1),
+        address_line2_enc: encryptPii(commonAddress.addressLine2),
         dependent_locality_enc: null,
         locality_enc: null,
         administrative_area_enc: null,
         subdistrict_enc: encryptPii(domesticAddress!.subdistrict),
         district_enc: encryptPii(domesticAddress!.district),
         province: domesticAddress!.province,
-        postal_code_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).postalCode),
-        delivery_instructions_enc: encryptPii((useAddressV2 ? internationalAddress! : domesticAddress!).deliveryInstructions),
+        postal_code_enc: encryptPii(commonAddress.postalCode),
+        delivery_instructions_enc: encryptPii(commonAddress.deliveryInstructions),
         is_default: shouldDefault,
         active: true,
         updated_at: new Date().toISOString(),
