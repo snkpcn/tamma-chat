@@ -303,7 +303,7 @@ export async function readThongthaiWorldwideOffer(input:{
 
   if(countryCode===DOMESTIC_COMMERCE_BASELINE.countryCode){
     const subtotal=items.reduce((sum,item)=>sum+(productBySku.get(item.sku)!.price*item.quantity),0);
-    const shipping=await readThongthaiShippingQuote({countryCode:'TH',subtotal,locale:input.locale,inputEnv:undefined} as never);
+    const shipping=await readThongthaiShippingQuote({countryCode:'TH',subtotal,locale:input.locale,env:input.env});
     return{
       status:'ready' as const,
       scope:'domestic' as const,
