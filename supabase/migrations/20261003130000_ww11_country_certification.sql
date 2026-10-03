@@ -444,6 +444,22 @@ begin
            select 1 from public.commerce_market_certification_products cp
            where cp.certification_id=c.id and cp.product_id=(e->>'productId')::uuid
              and cp.price_revision_id=(e->>'priceRevisionId')::uuid
+             and exists(
+               select 1 from public.commerce_product_prices pr
+               where pr.id=cp.price_revision_id
+                 and pr.product_id=cp.product_id
+                 and pr.currency_code=c.currency_code
+                 and pr.amount_minor=cp.price_amount_minor
+                 and pr.active and pr.valid_from<=now()
+                 and (pr.valid_until is null or pr.valid_until>now())
+                 and 1=(
+                   select count(*) from public.commerce_product_prices current_price
+                   where current_price.product_id=cp.product_id
+                     and current_price.currency_code=c.currency_code
+                     and current_price.active and current_price.valid_from<=now()
+                     and (current_price.valid_until is null or current_price.valid_until>now())
+                 )
+             )
              and cp.shipping_profile_hash=public.commerce_shipping_profile_hash_v1(cp.product_id)
              and cp.customs_profile_hash=public.commerce_customs_profile_hash_v1(cp.product_id)
              and cp.destination_rule_hash=public.commerce_destination_rule_hash_v1(cp.product_id,c.country_code)
