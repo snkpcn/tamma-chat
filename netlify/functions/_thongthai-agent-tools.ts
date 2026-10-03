@@ -130,7 +130,7 @@ export const THONGTHAI_READ_ONLY_TOOLS: readonly ThongthaiAgentFunctionTool[] = 
   {
     type: 'function',
     name: 'get_worldwide_offer',
-    description: 'Build one canonical OTOP worldwide service bundle for an explicit destination country and exact SKU quantities: destination market/currency, explicit product prices, stock, WW parcel profile, shipping quote, customs eligibility, payment method readiness and checkout readiness. Never infer destination from language and never invent missing weight, dimensions, taxes, carrier or price. This is a non-ordering quote/read operation.',
+    description: 'Read-only. Build one canonical OTOP worldwide service bundle for an explicit destination country and exact SKU quantities: destination market/currency, explicit product prices, stock, WW parcel profile, shipping quote, customs eligibility, payment method readiness and checkout readiness. Never infer destination from language and never invent missing weight, dimensions, taxes, carrier or price. This is a non-ordering quote/read operation.',
     parameters: objectSchema({
       country_code: { type: 'string', description: 'Explicit two-letter destination country code such as TH, SE, US. Never derive it from the customer language.' },
       items: {
