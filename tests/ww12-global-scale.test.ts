@@ -134,9 +134,13 @@ test('WW-12 exposes only a sanitized scale snapshot in public brain status',()=>
   assert.match(status,/globalScale:/);
   const client=read('netlify/functions/_worldwide-db-client.ts');
   const snapshotStart=client.indexOf('export function worldwideDbScaleSnapshot');
-  assert.ok(snapshotStart>=0);
-  const snapshotBlock=client.slice(snapshotStart,snapshotStart+1200);
-  assert.doesNotMatch(snapshotBlock,/SERVICE_ROLE_KEY[^\n]*return|key:/);
+  const snapshotEnd=client.indexOf('function routeConfig',snapshotStart);
+  assert.ok(snapshotStart>=0&&snapshotEnd>snapshotStart);
+  const snapshotBlock=client.slice(snapshotStart,snapshotEnd);
+  assert.match(snapshotBlock,/primaryConfigured/);
+  assert.match(snapshotBlock,/replicaConfigured/);
+  assert.match(snapshotBlock,/writesAlwaysPrimary:true/);
+  assert.doesNotMatch(snapshotBlock,/return\s*\{[^}]*SERVICE_ROLE_KEY|return\s*\{[^}]*key:/s);
 });
 
 test('WW-12 CDN cache policy accelerates static assets but keeps pages and mutable locale scripts revalidated',()=>{
