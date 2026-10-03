@@ -113,7 +113,7 @@ create table if not exists public.commerce_fulfillment_notification_outbox (
   id uuid primary key default gen_random_uuid(),
   shipment_id uuid not null
     references public.commerce_fulfillment_shipments(id) on delete cascade,
-  tracking_event_id uuid not null unique
+  tracking_event_id uuid not null
     references public.commerce_fulfillment_tracking_events(id) on delete cascade,
   order_id uuid not null references public.otop_orders(id) on delete cascade,
   customer_id uuid null references public.customer_accounts(id) on delete set null,
@@ -129,7 +129,8 @@ create table if not exists public.commerce_fulfillment_notification_outbox (
     check (environment in ('live','test')),
   sent_at timestamptz null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint commerce_fulfillment_notification_outbox_tracking_event_id_uq unique(tracking_event_id)
 );
 
 create table if not exists public.commerce_return_policies (
@@ -465,7 +466,7 @@ begin
     p_environment
   from public.commerce_fulfillment_tracking_events e
   where e.shipment_id=v_shipment.id and e.event_code in ('BOOKED','LABEL_READY')
-  on conflict(tracking_event_id) do nothing;
+  on conflict on constraint commerce_fulfillment_notification_outbox_tracking_event_id_uq do nothing;
 
   return query
     select v_shipment.id,v_shipment.shipment_code,v_shipment.provider_code,
@@ -653,7 +654,7 @@ begin
         'occurredAt',p_occurred_at
       ),
       p_environment
-    ) on conflict(tracking_event_id) do nothing;
+    ) on conflict on constraint commerce_fulfillment_notification_outbox_tracking_event_id_uq do nothing;
   end if;
 
   return query select v_event.id,v_shipment.shipment_status,v_event.state_applied,v_order.shipping_status;
