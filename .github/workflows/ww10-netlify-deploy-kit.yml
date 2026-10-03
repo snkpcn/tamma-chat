@@ -19,7 +19,7 @@ jobs:
       - name: Checkout exact WW10 main
         uses: actions/checkout@v4
         with:
-          ref: de34324fd69d23bd19a81709ab18a34c98629f8d
+          ref: 8fec3a15e3c2452e6a7d88eaf5584902ba6f9d42
       - name: Package exact source
         run: |
           tar --exclude=.git --exclude=node_modules -czf /tmp/tamma-chat-ww10-source.tgz .
