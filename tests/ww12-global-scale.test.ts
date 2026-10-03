@@ -158,6 +158,7 @@ test('WW-12 production certification is read-only and fails unsafe global exposu
   assert.match(cert,/prelaunch_transaction_capability_exposed/);
   assert.match(cert,/live_payment_method_on_nonlive_market/);
   assert.match(cert,/live_shipping_service_on_nonlive_market/);
+  assert.match(cert,/prelaunch_transaction_env_enabled/);
   assert.match(cert,/WW12_GLOBAL_PRODUCTION_CERTIFICATION_PASS/);
   assert.doesNotMatch(cert,/method\s*:\s*['\"](?:POST|PATCH|PUT|DELETE)['\"]/i);
   assert.doesNotMatch(cert,/rpc\//i);
