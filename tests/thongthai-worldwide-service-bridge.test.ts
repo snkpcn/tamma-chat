@@ -15,7 +15,7 @@ import { buildProductionSemanticInterpreterPrompt, emptySemanticContext } from '
 test('Thongthai bridge owns no duplicate WW or shipping database', () => {
   const source=readFileSync(new URL('../netlify/functions/_thongthai-worldwide-bridge.ts',import.meta.url),'utf8');
   assert.doesNotMatch(source,/fetch\s*\(/u);
-  assert.doesNotMatch(source,/commerce_(?:countries|currencies|locales|markets)|otop_shipping_settings/u);
+  assert.doesNotMatch(source,/\b(?:dbFetch|chartDbFetch|publicDbFetch)\b|\/rest\/v1\//u);
   assert.match(source,/loadWorldwideMarketContext/u);
   assert.match(source,/loadShippingSettings/u);
   assert.match(source,/calculateShippingQuote/u);
