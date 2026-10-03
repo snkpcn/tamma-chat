@@ -12,7 +12,7 @@ test('WW-9 migration creates provider-neutral booking, packages, immutable track
     'commerce_fulfillment_notification_outbox',
     'commerce_return_policies',
     'commerce_return_requests',
-  ]) assert.match(sql,new RegExp(\`create table if not exists public\\\\.\${table}\`));
+  ]) assert.match(sql,new RegExp('create table if not exists public\\\\.'+table));
 });
 
 test('WW-9 is service-role only with RLS and no carrier or foreign return policy seed',()=>{
@@ -24,8 +24,8 @@ test('WW-9 is service-role only with RLS and no carrier or foreign return policy
     'commerce_return_policies',
     'commerce_return_requests',
   ]){
-    assert.match(sql,new RegExp(\`alter table public\\\\.\${table} enable row level security\`));
-    assert.match(sql,new RegExp(\`revoke all on table public\\\\.\${table} from public,anon,authenticated,service_role\`));
+    assert.match(sql,new RegExp('alter table public\\\\.'+table+' enable row level security'));
+    assert.match(sql,new RegExp('revoke all on table public\\\\.'+table+' from public,anon,authenticated,service_role'));
   }
   assert.doesNotMatch(sql,/insert into public\.commerce_shipping_providers/i);
   assert.doesNotMatch(sql,/insert into public\.commerce_return_policies/i);
