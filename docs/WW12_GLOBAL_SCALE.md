@@ -1,6 +1,6 @@
 # WW-12 — Global Scale
 
-Status: merged / awaiting production deploy
+Status: complete / production certified
 Date: 2026-10-04
 
 ## Goal
@@ -89,16 +89,24 @@ When disabled, slow requests, failures, and replica fallbacks are still traced.
 
 ## Final production certification
 
-`scripts/ww12-production-certification.mjs` is read-only.
+`scripts/ww12-production-certification.mjs` and the runtime endpoint at
+`/api/ww12/certification` are read-only.
 
 On non-production builds it explicitly skips.
 
-On Netlify production it blocks deployment if it detects:
+On Netlify production the build check blocks deployment if it can read the
+production database and detects:
 
 - a live foreign market with no current WW-11 certification
 - a first-wave KR / JP / US market still in certification state but exposing payment/shipping/customs/checkout/fulfillment capability
 - a live global-v2 payment method attached to a non-live market
 - a live global-v2 shipping service attached to a non-live market
+
+If the production database is unavailable from the build network, the build
+check records a deferred result instead of treating infrastructure reachability
+as a safety decision. The deployed runtime endpoint then performs the same
+fail-closed checks with Netlify runtime secrets and returns a sanitized result
+with `Cache-Control: no-store`.
 
 The production gate is deliberately compatible with the current first-wave state: KR / JP / US may remain fail-closed while real product measurements, customs evidence, Stripe credentials, DHL credentials and country certification are completed later.
 
@@ -123,6 +131,23 @@ Read-only production check after merge:
 
 This verifies the merged code/data baseline is still fail-closed before production publication.
 
+## Production certification evidence
+
+Observed on 2026-10-04 after merge commit `fd610ce` was published to
+`tamma-chat.netlify.app`:
+
+- runtime certification: PASS (`ok: true`, no failures)
+- foreign markets: 3 (KR, JP, US)
+- live foreign markets: 0
+- current foreign certifications: 0
+- live global-v2 payment methods: 0
+- live global-v2 shipping services: 0
+- first-wave state: KR / JP / US remain `certification` and uncertified
+
+This is the intended safe launch state. WW-12 is deployed and certified, while
+foreign checkout remains unavailable until each country completes the separate
+WW-11 evidence and activation process.
+
 ## Definition of Done
 
 - [x] bounded CDN/static cache policy
@@ -136,5 +161,5 @@ This verifies the merged code/data baseline is still fail-closed before producti
 - [x] full repository CI passes
 - [x] Netlify deploy preview passes
 - [x] merged to main
-- [ ] production deploy ready
-- [ ] live production certification observed PASS
+- [x] production deploy complete
+- [x] live production certification observed PASS
