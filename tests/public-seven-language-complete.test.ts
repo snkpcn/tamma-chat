@@ -93,9 +93,10 @@ test('first-wave packs contain no leaked translation tokens and preserve critica
   ]).join('\n');
   assert.doesNotMatch(packSource,/ZX[A-Z0-9_]+|ღ|♥|�/u);
   assert.doesNotMatch(allText,/ZX[A-Z0-9_]+|ღ|♥|�/u);
+  assert.doesNotMatch(allText,/ทองไทย|Thongthai/iu,'Japanese/Korean public copy leaked an unlocalized assistant name');
 
-  assert.equal(packs.home.ja.thongthai_alt,'ทองไทย');
-  assert.equal(packs.home.ko.thongthai_alt,'ทองไทย');
+  assert.equal(packs.home.ja.thongthai_alt,'トーンタイ');
+  assert.equal(packs.home.ko.thongthai_alt,'통타이');
   assert.equal(packs.home.ja.hero_sub,'食べて、泊まって、探検して、地域の工芸を生み出す人々に出会う。すべてが一つの場所に。');
   assert.equal(packs.home.ko.hero_sub,'먹고, 머물고, 탐험하며 지역 공예를 만드는 사람들을 만나 보세요. 이 모든 경험이 한곳에 있습니다.');
   assert.equal(packs.home.ja.opt_who_friends,'友人と');
@@ -147,6 +148,8 @@ test('Thongthai accepts ja/ko everywhere and final egress removes Thai surface l
   }
   assert.equal(normalizeResponseLanguageSurface('ขี่ม้า 30 นาที ราคา 300 บาทครับ','ja'),'ขี่ม้า 30 分 ราคา 300 バーツ');
   assert.equal(normalizeResponseLanguageSurface('ขี่ม้า 30 นาที ราคา 300 บาทครับ','ko'),'ขี่ม้า 30 분 ราคา 300 바트');
+  assert.equal(normalizeResponseLanguageSurface('ทองไทย / ภาราดร','ja'),'トーンタイ / パラドン');
+  assert.equal(normalizeResponseLanguageSurface('Thongthai / ภาราดร','ko'),'통타이 / 파라돈');
   const profile=read('netlify/functions/_thongthai-agent-profile.ts');
   assert.match(profile,/any language the customer uses/iu);
   assert.match(profile,/never infer.*destination|must not infer.*destination/iu);

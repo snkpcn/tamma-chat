@@ -329,9 +329,17 @@ export function normalizeResponseLanguageSurface(
   }else if(language==='vi'){
     message=message.replace(/บาท/gu,'baht').replace(/นาที/gu,'phút');
   }else if(language==='ja'){
-    message=message.replace(/บาท/gu,'バーツ').replace(/นาที/gu,'分');
+    message=message
+      .replace(/บาท/gu,'バーツ')
+      .replace(/นาที/gu,'分')
+      .replace(/ทองไทย|Thongthai/giu,'トーンタイ')
+      .replace(/ภาราดร/gu,'パラドン');
   }else if(language==='ko'){
-    message=message.replace(/บาท/gu,'바트').replace(/นาที/gu,'분');
+    message=message
+      .replace(/บาท/gu,'바트')
+      .replace(/นาที/gu,'분')
+      .replace(/ทองไทย|Thongthai/giu,'통타이')
+      .replace(/ภาราดร/gu,'파라돈');
   }
 
   return message
