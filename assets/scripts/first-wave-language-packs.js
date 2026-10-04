@@ -2394,4 +2394,20 @@
     'สะระแหน่':'민트', 'หมูสับ':'다진 돼지고기', 'หอมแดง':'샬롯',
     'ไอศกรีมกะทิสด':'생 코코넛 밀크 아이스크림',
   });
+
+  // The Thai-script assistant name is canonical in Thai, but it must not leak
+  // into Japanese or Korean UI copy. Keep one localized display form on every
+  // nested public content family, including future additions to this pack.
+  const localizeAssistantName = (value, displayName) => {
+    if (typeof value === 'string') return value.replace(/ทองไทย|Thongthai/giu,displayName);
+    if (Array.isArray(value)) return value.map(item=>localizeAssistantName(item,displayName));
+    if (value && typeof value === 'object') {
+      for (const [key,item] of Object.entries(value)) value[key]=localizeAssistantName(item,displayName);
+    }
+    return value;
+  };
+  for (const section of Object.values(packs)) {
+    localizeAssistantName(section.ja,'トーンタイ');
+    localizeAssistantName(section.ko,'통타이');
+  }
 })();
