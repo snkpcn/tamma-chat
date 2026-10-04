@@ -96,6 +96,8 @@ test('first-wave packs contain no leaked translation tokens and preserve critica
 
   assert.equal(packs.home.ja.thongthai_alt,'ทองไทย');
   assert.equal(packs.home.ko.thongthai_alt,'ทองไทย');
+  assert.equal(packs.home.ja.hero_sub,'食べて、泊まって、探検して、地域の工芸を生み出す人々に出会う。すべてが一つの場所に。');
+  assert.equal(packs.home.ko.hero_sub,'먹고, 머물고, 탐험하며 지역 공예를 만드는 사람들을 만나 보세요. 이 모든 경험이 한곳에 있습니다.');
   assert.equal(packs.home.ja.opt_who_friends,'友人と');
   assert.equal(packs.home.ja.opt_mood_nature,'自然');
   assert.equal(packs.home.ja.flow_s6_t,'また訪れる');
