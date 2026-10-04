@@ -17,6 +17,7 @@ test('public HTML and OTOP language assets cannot stay stale across deploys',()=
     '/assets/scripts/otop-i18n.js',
     '/assets/scripts/otop-product-translations.js',
     '/assets/scripts/otop-province-translations.js',
+    '/assets/styles/*',
   ]){
     const start=headers.indexOf(path+'\n');
     assert.ok(start>=0,`missing freshness header for ${path}`);

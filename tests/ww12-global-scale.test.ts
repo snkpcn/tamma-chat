@@ -143,7 +143,7 @@ test('WW-12 exposes only a sanitized scale snapshot in public brain status',()=>
   assert.doesNotMatch(snapshotBlock,/return\s*\{[^}]*SERVICE_ROLE_KEY|return\s*\{[^}]*key:/s);
 });
 
-test('WW-12 CDN cache policy accelerates static assets but keeps pages and mutable locale scripts revalidated',()=>{
+test('WW-12 CDN cache policy accelerates stable imagery but keeps pages, styles and mutable locale scripts revalidated',()=>{
   const headers=read('_headers');
   for(const page of ['/\n  Cache-Control: no-cache','/index.html\n  Cache-Control: no-cache','/account.html\n  Cache-Control: no-cache','/otop.html\n  Cache-Control: no-cache']){
     assert.ok(headers.includes(page));
@@ -151,7 +151,7 @@ test('WW-12 CDN cache policy accelerates static assets but keeps pages and mutab
   assert.match(headers,/\/assets\/brand\/\*[\s\S]{0,180}s-maxage=86400/);
   assert.match(headers,/\/assets\/chess\/\*[\s\S]{0,180}s-maxage=86400/);
   assert.match(headers,/\/assets\/thongthai\/\*[\s\S]{0,180}s-maxage=86400/);
-  assert.match(headers,/\/assets\/styles\/\*[\s\S]{0,180}s-maxage=3600/);
+  assert.match(headers,/\/assets\/styles\/\*[\s\S]{0,120}no-cache/);
   assert.match(headers,/otop-i18n\.js[\s\S]{0,120}no-cache/);
 });
 
