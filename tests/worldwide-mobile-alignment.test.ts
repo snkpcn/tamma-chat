@@ -6,6 +6,9 @@ import test from 'node:test';
 const root = join(import.meta.dirname, '..');
 const visual = readFileSync(join(root, 'assets/styles/site-visual-system.css'), 'utf8');
 const home = readFileSync(join(root, 'assets/styles/pre-worldwide-production.css'), 'utf8');
+const mapHtml = readFileSync(join(root, 'otop-map.html'), 'utf8');
+const otopI18n = readFileSync(join(root, 'assets/scripts/otop-i18n.js'), 'utf8');
+const firstWave = readFileSync(join(root, 'assets/scripts/first-wave-language-packs.js'), 'utf8');
 
 test('all public mobile surfaces use one 20px logical content rail', () => {
   assert.match(visual, /WORLDWIDE MOBILE ALIGNMENT LOCK/);
@@ -33,4 +36,12 @@ test('translated mobile hero copy never switches between centered and edge align
   assert.match(visual, /\.site-page--chess\s+\.tt-chess-hero\s*\{[^}]*text-align:\s*start/s);
   assert.match(visual, /\.site-page--store\s+\.showcaseNote\s*\{[^}]*text-align:\s*start/s);
   assert.match(visual, /\.site-page--account\s+:where\(\.hero,\s*\.panel\)\s*\{[^}]*text-align:\s*start/s);
+});
+
+test('OTOP map title and metadata follow all seven site languages', () => {
+  assert.match(mapHtml, /data-otop-i18n-content="map_meta_desc"/);
+  assert.match(otopI18n, /document\.title\s*=\s*t\('map_page_title'\)/);
+  assert.match(otopI18n, /\[data-otop-i18n-content\]/);
+  assert.equal((otopI18n.match(/map_page_title:/g) || []).length, 5);
+  assert.equal((firstWave.match(/"map_page_title"/g) || []).length, 2);
 });
