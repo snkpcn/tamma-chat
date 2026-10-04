@@ -29,8 +29,9 @@
   Cache-Control: no-cache, max-age=0, must-revalidate
 
 
-# WW-12 Global Scale: cache only static visual/style assets.
-# HTML and mutable locale/product scripts above remain revalidated/no-cache.
+# WW-12 Global Scale: cache only fingerprint-stable visual assets.
+# HTML, CSS and mutable locale/product scripts must revalidate together so a
+# fresh document can never be composed with an older responsive layout.
 /assets/brand/*
   Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800
 
@@ -41,5 +42,4 @@
   Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800
 
 /assets/styles/*
-  Cache-Control: public, max-age=300, s-maxage=3600, stale-while-revalidate=86400
-
+  Cache-Control: no-cache, max-age=0, must-revalidate
