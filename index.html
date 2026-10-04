@@ -732,21 +732,20 @@ p{ margin:0; }
 .concierge-fab span{ font-size:13.5px; font-weight:700; color:var(--brown-deep); }
 .concierge-fab .dot{ width:8px; height:8px; border-radius:100px; background:#5fa25f; margin-left:2px; box-shadow:0 0 0 3px rgba(95,162,95,.22); }
 
-/* ---- Thongthai portrait BOX — rounded-square avatar, chest-up crop.
-   Used everywhere Thongthai appears in the chat UI: never a circle,
-   never full-body. object-position:top keeps the face framed even
-   when the box is very small. ---- */
+/* ---- Thongthai portrait — circular avatar, chest-up crop.
+   The round portrait follows the concierge pill and chat controls, while
+   the restrained bronze rim keeps it premium rather than social-app generic. ---- */
 .ca-box{
-  display:block; flex:none; border-radius:10px; overflow:hidden; background:var(--cream);
-  border:1px solid rgba(43,29,19,.1); box-shadow:0 2px 6px -2px rgba(43,29,19,.18);
+  display:block; flex:none; border-radius:50%; overflow:hidden; background:var(--cream);
+  border:1px solid rgba(156,122,69,.28); box-shadow:0 2px 7px -3px rgba(43,29,19,.24);
 }
 .ca-box img{ width:100%; height:100%; object-fit:cover; object-position:center top; display:block; }
-.ca-box-launcher{ width:42px; height:42px; border-radius:11px; }
+.ca-box-launcher{ width:42px; height:42px; border-radius:50%; box-shadow:0 0 0 2px rgba(253,251,246,.9),0 5px 12px -6px rgba(43,29,19,.35); }
 @media(min-width:768px){ .ca-box-launcher{ width:46px; height:46px; } }
-.ca-box-header{ width:44px; height:44px; border-radius:12px; }
+.ca-box-header{ width:44px; height:44px; border-radius:50%; box-shadow:0 0 0 2px rgba(253,251,246,.9),0 5px 12px -6px rgba(43,29,19,.3); }
 @media(min-width:768px){ .ca-box-header{ width:48px; height:48px; } }
-.ca-box-msg{ width:34px; height:34px; border-radius:9px; margin-top:2px; }
-@media(min-width:768px){ .ca-box-msg{ width:40px; height:40px; border-radius:10px; } }
+.ca-box-msg{ width:34px; height:34px; border-radius:50%; margin-top:2px; }
+@media(min-width:768px){ .ca-box-msg{ width:40px; height:40px; border-radius:50%; } }
 
 .chat-overlay{ position:fixed; inset:0; z-index:800; background:rgba(20,13,8,.4); opacity:0; pointer-events:none; transition:opacity .4s var(--ease); }
 .chat-overlay.is-open{ opacity:1; pointer-events:auto; }
