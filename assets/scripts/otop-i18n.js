@@ -38,6 +38,7 @@
       catalog_sort_aria:'เรียงสินค้า', category_nav_aria:'หมวดสินค้า', product_close_aria:'ปิดรายละเอียดสินค้า',
       quantity_aria:'จำนวนสินค้า', qty_decrease:'ลดจำนวน', qty_increase:'เพิ่มจำนวน', drawer_aria:'ตะกร้าสินค้าและชำระเงิน',
       product_gallery_aria:'รูปสินค้า {name}', view_image_aria:'ดูภาพที่ {index}',
+      map_page_title:'แผนที่ของดีอีสาน — ทำมา-ชาติ OTOP',
       map_meta_desc:'เลือกจังหวัดบนแผนที่อีสาน แล้วรู้จักผู้คน วิถีชีวิต และเรื่องราวของแต่ละพื้นที่ ก่อนเลือกชมสินค้าชุมชน',
       store_meta_desc:'เลือกซื้อสินค้าชุมชนจากจังหวัดอีสาน พร้อมเรื่องราวผู้ผลิต ราคา และสต็อกจากหลังบ้านทำมา-ชาติ',
       map_skip:'ข้ามไปยังแผนที่', map_overline:'ประสบการณ์อีสาน 20 จังหวัด',
@@ -92,6 +93,7 @@
       catalog_sort_aria:'Sort products', category_nav_aria:'Product categories', product_close_aria:'Close product details',
       quantity_aria:'Product quantity', qty_decrease:'Decrease quantity', qty_increase:'Increase quantity', drawer_aria:'Shopping cart and checkout',
       product_gallery_aria:'Images of {name}', view_image_aria:'View image {index}',
+      map_page_title:'Isan Province Map — Thammachat OTOP',
       map_meta_desc:'Explore the people, craft and stories of all 20 Isan provinces before discovering their community-made products.',
       store_meta_desc:'Shop community-made goods from Isan with maker stories, live prices and stock from Thammachat.',
       map_skip:'Skip to map', map_overline:'20 Provinces of Isan',
@@ -146,6 +148,7 @@
       catalog_sort_aria:'商品排序', category_nav_aria:'商品分类', product_close_aria:'关闭商品详情',
       quantity_aria:'商品数量', qty_decrease:'减少数量', qty_increase:'增加数量', drawer_aria:'购物车与结账',
       product_gallery_aria:'{name} 商品图片', view_image_aria:'查看第 {index} 张图片',
+      map_page_title:'伊善府域地图 — Thammachat OTOP',
       map_meta_desc:'探索伊森 20 府的人、手艺与地方故事，再认识来自社区的产品。',
       store_meta_desc:'选购伊森社区商品，了解制作者故事，并查看 Thammachat 后台的最新价格与库存。',
       map_skip:'跳到地图', map_overline:'泰国东北部 20 府',
@@ -200,6 +203,7 @@
       catalog_sort_aria:'ຈັດລຽງສິນຄ້າ', category_nav_aria:'ໝວດສິນຄ້າ', product_close_aria:'ປິດລາຍລະອຽດສິນຄ້າ',
       quantity_aria:'ຈຳນວນສິນຄ້າ', qty_decrease:'ຫຼຸດຈຳນວນ', qty_increase:'ເພີ່ມຈຳນວນ', drawer_aria:'ກະຕ່າສິນຄ້າ ແລະ ຊຳລະເງິນ',
       product_gallery_aria:'ຮູບສິນຄ້າ {name}', view_image_aria:'ເບິ່ງຮູບທີ {index}',
+      map_page_title:'ແຜນທີ່ແຂວງອີສານ — Thammachat OTOP',
       map_meta_desc:'ຮູ້ຈັກຜູ້ຄົນ ງານຝີມື ແລະ ເລື່ອງລາວຂອງ 20 ແຂວງອີສານ ກ່ອນເລືອກຊົມສິນຄ້າຊຸມຊົນ.',
       store_meta_desc:'ເລືອກຊື້ສິນຄ້າຊຸມຊົນອີສານ ພ້ອມເລື່ອງຂອງຄົນເຮັດ ລາຄາ ແລະ ສະຕັອກຫຼ້າສຸດ.',
       map_skip:'ໄປທີ່ແຜນທີ່', map_overline:'20 ແຂວງອີສານ',
@@ -254,6 +258,7 @@
       catalog_sort_aria:'Sắp xếp sản phẩm', category_nav_aria:'Danh mục sản phẩm', product_close_aria:'Đóng chi tiết sản phẩm',
       quantity_aria:'Số lượng sản phẩm', qty_decrease:'Giảm số lượng', qty_increase:'Tăng số lượng', drawer_aria:'Giỏ hàng và thanh toán',
       product_gallery_aria:'Hình ảnh {name}', view_image_aria:'Xem ảnh {index}',
+      map_page_title:'Bản đồ các tỉnh Isan — Thammachat OTOP',
       map_meta_desc:'Khám phá con người, nghề thủ công và câu chuyện của 20 tỉnh Isan trước khi xem các sản phẩm do cộng đồng làm ra.',
       store_meta_desc:'Mua sản phẩm cộng đồng từ Isan với câu chuyện người làm, giá và tồn kho mới nhất từ Thammachat.',
       map_skip:'Bỏ qua đến bản đồ', map_overline:'20 tỉnh vùng Isan',
@@ -340,8 +345,12 @@
   }
   function applyStatic() {
     document.documentElement.lang = current;
+    if (document.body?.classList.contains('site-page--map')) document.title = t('map_page_title');
     document.querySelectorAll('[data-otop-i18n]').forEach(el => {
       el.textContent = t(el.getAttribute('data-otop-i18n'));
+    });
+    document.querySelectorAll('[data-otop-i18n-content]').forEach(el => {
+      el.setAttribute('content', t(el.getAttribute('data-otop-i18n-content')));
     });
     document.querySelectorAll('[data-otop-i18n-placeholder]').forEach(el => {
       el.setAttribute('placeholder', t(el.getAttribute('data-otop-i18n-placeholder')));
