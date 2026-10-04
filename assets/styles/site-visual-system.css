@@ -59,6 +59,35 @@ body.site-page {
   max-width: 100%;
 }
 
+/* Native select arrows vary by browser and were being rendered twice on
+ * iOS. The picker owns one deliberate chevron across every public page. */
+.site-page .site-lang-picker {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.site-page .site-lang-picker select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: none;
+}
+
+.site-page .site-lang-picker::after,
+.site-page--store .marketPicker::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  inset-inline-end: 12px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-68%) rotate(45deg);
+  transform-origin: center;
+  pointer-events: none;
+}
+
 /* ---------- MAIN EXPERIENCE ---------- */
 
 .site-page--home .header-inner {
@@ -256,7 +285,21 @@ body.site-page {
   align-items: center;
 }
 
-.site-page--store :where(.field, .field select, .field input, .site-lang-picker select, .account, .cartBtn) {
+.site-page--store .top .tools > * {
+  flex: 0 0 auto;
+}
+
+.site-page--store .marketPicker {
+  min-height: var(--site-control);
+  padding-inline-end: 30px;
+}
+
+.site-page--store .marketPicker select {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.site-page--store :where(.field, .field select, .field input, .site-lang-picker select, .account, .cartBtn, .sort, .mobileCatalogTools select, .mobileCatalogTools input) {
   min-height: var(--site-control);
 }
 
@@ -269,7 +312,7 @@ body.site-page {
   height: var(--site-icon);
 }
 
-.site-page--store :where(.showcasePrimary, .showcaseSecondary, .primary, .secondary, .view) {
+.site-page--store :where(.showcasePrimary, .showcaseSecondary, .primary, .secondary, .lockedCheckout, .view) {
   min-height: var(--site-control);
   display: inline-flex;
   align-items: center;
@@ -712,22 +755,127 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
   }
 
   .site-page--store .top .nav {
-    min-height: 64px;
-    padding-inline: var(--site-gutter);
+    min-height: 68px;
+    padding-inline: 16px;
+    gap: 6px;
+  }
+
+  .site-page--store .top .logo img {
+    width: 90px;
+  }
+
+  .site-page--store .top .tools {
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .site-page--store .marketPicker {
+    width: 84px;
+    min-width: 84px;
+    min-height: var(--site-control);
+    padding: 0 24px 0 8px;
+    gap: 5px;
+  }
+
+  .site-page--store .marketPicker svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .site-page--store .marketPickerText {
+    font-size: 9px;
+    letter-spacing: .01em;
+  }
+
+  .site-page--store .marketPicker::after {
+    inset-inline-end: 10px;
+  }
+
+  .site-page--store .top .site-lang-picker,
+  .site-page--store .top .site-lang-picker select {
+    width: 72px;
+    max-width: 72px;
+    min-height: var(--site-control);
+  }
+
+  .site-page--store .top .site-lang-picker select {
+    padding: 0 23px 0 10px;
+    border-color: currentColor;
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1;
+  }
+
+  .site-page--store .top .site-lang-picker::after {
+    inset-inline-end: 11px;
   }
 
   .site-page--store .top .cartBtn {
+    width: 58px !important;
+    min-width: 58px;
     min-height: var(--site-control);
+    padding-inline: 7px !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    font-size: 0;
+  }
+
+  .site-page--store .top .cartBtn::before {
+    content: "";
+    width: 17px;
+    height: 17px;
+    flex: 0 0 auto;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 8V6a4 4 0 0 1 8 0v2M5 8h14l-1 12H6L5 8Z' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M8 8V6a4 4 0 0 1 8 0v2M5 8h14l-1 12H6L5 8Z' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+
+  .site-page--store .top .cartBtn span {
+    min-width: 20px;
+    height: 20px;
+    margin-left: 0;
+    font-size: 11px;
   }
 
   .site-page--store .showcaseActions {
     display: grid;
     grid-template-columns: 1fr;
     width: 100%;
+    max-width: 360px;
+    gap: 10px;
   }
 
   .site-page--store :where(.showcasePrimary, .showcaseSecondary) {
     width: 100%;
+    min-height: 50px;
+    padding: 0 18px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 1.3;
+    text-decoration: none;
+  }
+
+  .site-page--store .showcaseSecondary {
+    border: 1px solid rgba(255, 255, 255, .5);
+    background: rgba(22, 14, 10, .28);
+    color: #fff;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+
+  .site-page--store .view {
+    min-height: var(--site-control);
+    padding-inline: 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+
+  .site-page--store :where(.primary, .secondary, .lockedCheckout) {
+    min-height: 50px;
+    line-height: 1.3;
   }
 
   .site-page--store .showcaseContent,
@@ -870,6 +1018,49 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
 
   .site-page--chess .tt-chess-diff-card {
     padding: 15px 13px;
+  }
+}
+
+@media (max-width: 430px) {
+  .site-page--store .top .nav {
+    min-height: 64px;
+    padding-inline: 10px;
+    gap: 5px;
+  }
+
+  .site-page--store .top .logo img {
+    width: 72px;
+  }
+
+  .site-page--store .top .tools {
+    gap: 5px;
+  }
+
+  .site-page--store .marketPicker {
+    width: 78px;
+    min-width: 78px;
+    padding-inline: 7px 20px;
+    gap: 4px;
+  }
+
+  .site-page--store .marketPickerText {
+    font-size: 8.5px;
+  }
+
+  .site-page--store .marketPicker::after {
+    inset-inline-end: 8px;
+  }
+
+  .site-page--store .top .site-lang-picker,
+  .site-page--store .top .site-lang-picker select {
+    width: 72px;
+    max-width: 72px;
+  }
+
+  .site-page--store .top .cartBtn {
+    width: 54px !important;
+    min-width: 54px;
+    padding-inline: 5px !important;
   }
 }
 
