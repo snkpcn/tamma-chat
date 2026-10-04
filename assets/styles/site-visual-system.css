@@ -1,0 +1,826 @@
+/*
+ * Thammachat sitewide visual system
+ * Final cascade layer for spacing, controls, icon geometry and responsive
+ * composition across every public surface. Page identity stays intact while
+ * shared interaction and alignment rules remain consistent.
+ */
+
+:root {
+  --site-shell: 1180px;
+  --site-gutter: clamp(16px, 4vw, 32px);
+  --site-control: 44px;
+  --site-control-compact: 40px;
+  --site-icon: 20px;
+  --site-radius-sm: 12px;
+  --site-radius-md: 18px;
+  --site-radius-lg: 28px;
+  --site-focus: #c29a5b;
+  --site-focus-ring: 0 0 0 4px rgba(194, 154, 91, .24);
+}
+
+html {
+  width: 100%;
+  max-width: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body.site-page {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  text-rendering: optimizeLegibility;
+}
+
+.site-page :where(button, input, select, textarea, a) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.site-page :where(button, input, select, textarea) {
+  font: inherit;
+}
+
+.site-page :where(button, a, select, input, textarea):focus-visible {
+  outline: 2px solid var(--site-focus) !important;
+  outline-offset: 3px;
+  box-shadow: var(--site-focus-ring);
+}
+
+.site-page :where(button, a) > svg,
+.site-page :where(button, a) > img {
+  flex: 0 0 auto;
+}
+
+.site-page :where(svg[aria-hidden="true"], button svg, a svg) {
+  pointer-events: none;
+}
+
+.site-page img {
+  max-width: 100%;
+}
+
+/* ---------- MAIN EXPERIENCE ---------- */
+
+.site-page--home .header-inner {
+  min-height: 76px;
+  gap: clamp(16px, 2vw, 30px);
+}
+
+.site-page--home .main-nav {
+  align-items: center;
+  gap: clamp(2px, .7vw, 10px);
+}
+
+.site-page--home .main-nav a {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 clamp(7px, .8vw, 12px);
+  border-radius: 999px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.site-page--home .main-nav a:hover,
+.site-page--home .main-nav a:focus-visible {
+  background: rgba(255, 255, 255, .08);
+}
+
+.site-page--home .header-actions,
+.site-page--home .hero-actions,
+.site-page--home .community-map-actions,
+.site-page--home .planner-actions {
+  align-items: center;
+}
+
+.site-page--home :where(.lang-toggle, .menu-btn, .mobile-nav-close, .chat-close) {
+  min-width: var(--site-control);
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.site-page--home :where(.lang-toggle, .menu-btn, .mobile-nav-close, .chat-close) svg {
+  width: var(--site-icon);
+  height: var(--site-icon);
+}
+
+.site-page--home .btn,
+.site-page--home .p-opt,
+.site-page--home .j-tab,
+.site-page--home .qchip {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.35;
+}
+
+.site-page--home .planner-options,
+.site-page--home .chip-row,
+.site-page--home .journal-tabs {
+  align-items: stretch;
+}
+
+.site-page--home .hotspot-dot {
+  width: var(--site-control);
+  height: var(--site-control);
+  display: grid;
+  place-items: center;
+}
+
+.site-page--home .hotspot-dot svg {
+  width: 19px;
+  height: 19px;
+}
+
+.site-page--home .jf-icon-wrap {
+  width: 54px;
+  min-width: 54px;
+}
+
+.site-page--home .jf-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+}
+
+.site-page--home .jf-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.site-page--home .jf-text h4 {
+  min-height: 1.5em;
+  display: flex;
+  align-items: center;
+}
+
+.site-page--home .footer-col a {
+  min-height: var(--site-control-compact);
+  display: inline-flex;
+  align-items: center;
+}
+
+.site-page--home .footer-socials {
+  gap: 8px;
+}
+
+.site-page--home .footer-socials a {
+  width: var(--site-control);
+  height: var(--site-control);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.site-page--home .footer-socials svg {
+  width: 18px;
+  height: 18px;
+}
+
+.site-page--home .concierge-fab {
+  min-height: 54px;
+  padding: 6px 16px 6px 6px;
+  gap: 10px;
+}
+
+.site-page--home .chat-send,
+.site-page--home .chat-close {
+  width: var(--site-control);
+  height: var(--site-control);
+}
+
+.site-page--home .chat-input-row {
+  align-items: center;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+.site-page--home .mobile-nav:not(.is-open) {
+  visibility: hidden;
+}
+
+.site-page--home .mobile-nav.is-open {
+  visibility: visible;
+}
+
+/* ---------- OTOP MAP ---------- */
+
+.site-page--map .map-header {
+  width: 100%;
+  min-height: 88px;
+}
+
+.site-page--map .brand-lockup,
+.site-page--map .account-nav {
+  min-width: 0;
+}
+
+.site-page--map :where(.account-link, .site-lang-picker select, .province-chip, .province-cta) {
+  min-height: var(--site-control);
+}
+
+.site-page--map .site-lang-picker select {
+  padding-inline: 14px 32px;
+}
+
+.site-page--map .map-card-head {
+  align-items: flex-start;
+}
+
+.site-page--map .map-legend {
+  min-height: var(--site-control);
+  align-items: center;
+}
+
+.site-page--map .legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+
+.site-page--map .province-cta {
+  gap: 10px;
+}
+
+/* ---------- OTOP STORE ---------- */
+
+.site-page--store .top .nav {
+  min-height: 76px;
+}
+
+.site-page--store .top .tools {
+  align-items: center;
+}
+
+.site-page--store :where(.field, .field select, .field input, .site-lang-picker select, .account, .cartBtn) {
+  min-height: var(--site-control);
+}
+
+.site-page--store .field {
+  align-items: center;
+}
+
+.site-page--store .field > svg {
+  width: var(--site-icon);
+  height: var(--site-icon);
+}
+
+.site-page--store :where(.showcasePrimary, .showcaseSecondary, .primary, .secondary, .view) {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.site-page--store .showcaseNote a,
+.site-page--store .empty a {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  text-underline-offset: 4px;
+}
+
+.site-page--store .productOpen {
+  border-radius: var(--site-radius-md);
+}
+
+.site-page--store .detailClose,
+.site-page--store .sheetHead .close {
+  width: var(--site-control);
+  height: var(--site-control);
+  display: grid;
+  place-items: center;
+}
+
+.site-page--store .qty button,
+.site-page--store .qtyPicker button,
+.site-page--store .detailThumb {
+  min-width: var(--site-control);
+  min-height: var(--site-control);
+}
+
+.site-page--store .categoryNav a {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---------- RESTAURANT MENU ---------- */
+
+.site-page--menu .wrap {
+  width: min(1100px, 100%);
+  padding: 18px var(--site-gutter) 72px;
+}
+
+.site-page--menu .hero {
+  padding: 0 8px 24px;
+}
+
+.site-page--menu .menu-topbar {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.site-page--menu .menu-home {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.site-page--menu .menu-home img {
+  width: 132px;
+  height: auto;
+}
+
+.site-page--menu .menu-lang {
+  position: static;
+  min-height: var(--site-control);
+  min-width: 88px;
+}
+
+.site-page--menu .brand {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.site-page--menu .truth {
+  min-height: var(--site-control);
+  justify-content: center;
+  line-height: 1.45;
+}
+
+.site-page--menu .bar {
+  min-height: 78px;
+  gap: 14px;
+}
+
+.site-page--menu .chat,
+.site-page--menu .retry {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+.site-page--menu .chat svg {
+  width: 18px;
+  height: 18px;
+}
+
+.site-page--menu .category {
+  height: 100%;
+}
+
+/* ---------- MEMBER ACCOUNT ---------- */
+
+.site-page--account .shell {
+  width: min(920px, 100%);
+  padding: 24px var(--site-gutter) 80px;
+}
+
+.site-page--account .brand {
+  min-height: 52px;
+  gap: 18px;
+}
+
+.site-page--account .account-tools {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.site-page--account .account-lang,
+.site-page--account .back {
+  min-height: var(--site-control);
+}
+
+.site-page--account .back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px;
+}
+
+.site-page--account .back svg {
+  width: 18px;
+  height: 18px;
+}
+
+.site-page--account .panel {
+  border: 1px solid rgba(111, 87, 52, .08);
+}
+
+.site-page--account :where(button, .secondary[href], .tracking) {
+  min-height: var(--site-control);
+}
+
+.site-page--account .secondary[href],
+.site-page--account .tracking {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.site-page--account .tabs {
+  align-items: stretch;
+}
+
+.site-page--account .tab {
+  min-height: var(--site-control);
+}
+
+.site-page--account .account-feature-card {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+}
+
+.site-page--account .account-feature-icon {
+  width: 68px;
+  height: 68px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #e9dfd0;
+  border: 1px solid #d8c8b2;
+}
+
+.site-page--account .account-feature-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+}
+
+.site-page--account .account-feature-copy {
+  min-width: 0;
+}
+
+.site-page--account .account-feature-copy .section-title {
+  margin-bottom: 6px;
+}
+
+.site-page--account .account-feature-copy .muted {
+  margin: 0;
+}
+
+.site-page--account .account-feature-action {
+  min-width: 152px;
+  gap: 8px;
+  padding: 11px 16px;
+  border-radius: 14px;
+  font-weight: 800;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.site-page--account .account-feature-action svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ---------- CHESS ---------- */
+
+.site-page--chess .tt-chess-header {
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  padding-inline: max(16px, calc((100vw - 1180px) / 2));
+}
+
+.site-page--chess .tt-chess-header > a {
+  min-height: var(--site-control);
+  justify-self: start;
+  padding: 0 8px;
+  border-radius: 999px;
+}
+
+.site-page--chess .tt-chess-title {
+  justify-self: center;
+}
+
+.site-page--chess .tt-chess-header-actions {
+  justify-self: end;
+}
+
+.site-page--chess .tt-chess-lang {
+  min-height: var(--site-control);
+  min-width: 88px;
+}
+
+.site-page--chess .tt-chess-main {
+  width: min(680px, 100%);
+  padding: clamp(24px, 4vh, 40px) var(--site-gutter) 32px;
+}
+
+.site-page--chess #ttChessScreenDifficulty:not([hidden]) {
+  min-height: calc(100dvh - 132px);
+  display: grid;
+  align-content: start;
+}
+
+.site-page--chess .tt-chess-diff-card {
+  padding: 18px 16px;
+  border-radius: var(--site-radius-md);
+}
+
+.site-page--chess .tt-chess-diff-card img.tt-chess-badge {
+  width: 56px;
+  height: 56px;
+}
+
+.site-page--chess :where(.tt-chess-side-btn, .tt-chess-start-btn, .tt-chess-ctrl-btn, .tt-chess-btn) {
+  min-height: var(--site-control);
+}
+
+/* ---------- LANGUAGE-SAFE WRAPPING ---------- */
+
+html[lang="ja"] .site-page :where(h1, h2, h3, h4, p, a, button),
+html[lang="ko"] .site-page :where(h1, h2, h3, h4, p, a, button),
+html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- TABLET ---------- */
+
+@media (max-width: 1023.98px) {
+  .site-page--home .header-inner {
+    min-height: 68px;
+  }
+
+  .site-page--home .section-pad {
+    padding-block: clamp(64px, 9vw, 88px);
+  }
+
+  .site-page--map .map-header {
+    padding-inline: 20px;
+  }
+
+  .site-page--account .account-feature-card {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+
+  .site-page--account .account-feature-action {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+/* ---------- MOBILE ---------- */
+
+@media (max-width: 680px) {
+  :root {
+    --site-gutter: 16px;
+    --site-radius-lg: 22px;
+  }
+
+  .site-page--home .header-inner {
+    min-height: 64px;
+    gap: 10px;
+  }
+
+  .site-page--home .hero-actions,
+  .site-page--home .planner-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .site-page--home .hero-actions .btn,
+  .site-page--home .planner-actions .btn {
+    width: 100%;
+  }
+
+  .site-page--home .mobile-nav-panel {
+    width: min(340px, 90vw);
+  }
+
+  .site-page--home .mobile-nav-close {
+    width: var(--site-control);
+    height: var(--site-control);
+  }
+
+  .site-page--home .mobile-nav-links a {
+    min-height: 52px;
+  }
+
+  .site-page--home .journal-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .site-page--home .j-tab {
+    width: 100%;
+    white-space: normal;
+  }
+
+  .site-page--home .footer-socials a {
+    width: 46px;
+    height: 46px;
+  }
+
+  .site-page--map .map-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 14px;
+    padding: 10px 16px 12px;
+  }
+
+  .site-page--map .account-nav {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 10px;
+    border-top: 1px solid rgba(237, 218, 183, .12);
+  }
+
+  .site-page--map main {
+    padding-inline: 16px;
+  }
+
+  .site-page--map .map-card-head {
+    padding-inline: 20px;
+  }
+
+  .site-page--map .map-canvas-wrap {
+    min-height: 430px;
+  }
+
+  .site-page--store .top .nav {
+    min-height: 64px;
+  }
+
+  .site-page--store .top .cartBtn {
+    min-height: var(--site-control);
+  }
+
+  .site-page--store .showcaseActions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .site-page--store :where(.showcasePrimary, .showcaseSecondary) {
+    width: 100%;
+  }
+
+  .site-page--store .detailInfo,
+  .site-page--store .sheet {
+    border-radius: 22px 22px 0 0;
+  }
+
+  .site-page--menu .wrap {
+    padding-top: 10px;
+  }
+
+  .site-page--menu .hero {
+    padding-top: 0;
+  }
+
+  .site-page--menu .menu-home img {
+    width: 112px;
+  }
+
+  .site-page--menu .brand {
+    font-size: clamp(42px, 15vw, 58px);
+  }
+
+  .site-page--menu .truth {
+    width: 100%;
+    border-radius: 16px;
+    padding-inline: 14px;
+  }
+
+  .site-page--menu .bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .site-page--menu .chat {
+    width: 100%;
+  }
+
+  .site-page--menu .category {
+    padding: 18px 16px;
+  }
+
+  .site-page--account .shell {
+    padding-top: 18px;
+  }
+
+  .site-page--account .brand {
+    align-items: flex-start;
+  }
+
+  .site-page--account .logo img {
+    width: 126px;
+  }
+
+  .site-page--account .account-tools {
+    gap: 4px 8px;
+  }
+
+  .site-page--account .hero h1 {
+    line-height: 1.12;
+  }
+
+  .site-page--account .panel {
+    border-radius: 22px;
+    padding: 20px 18px;
+  }
+
+  .site-page--account .account-feature-card {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .site-page--account .account-feature-icon {
+    width: 56px;
+    height: 56px;
+  }
+
+  .site-page--account .account-feature-action {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .site-page--account .section-title {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .site-page--chess .tt-chess-header {
+    min-height: 58px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding-inline: 8px 12px;
+  }
+
+  .site-page--chess .tt-chess-title {
+    display: none;
+  }
+
+  .site-page--chess .tt-chess-main {
+    padding: 22px 14px 28px;
+  }
+
+  .site-page--chess .tt-chess-diff-grid {
+    gap: 10px;
+  }
+
+  .site-page--chess .tt-chess-diff-card {
+    padding: 15px 13px;
+  }
+}
+
+@media (max-width: 390px) {
+  .site-page--map .brand-lockup .brand-main-logo {
+    width: 96px;
+  }
+
+  .site-page--map .brand-lockup .brand-otop-logo {
+    width: 50px;
+    height: 50px;
+  }
+
+  .site-page--map .account-link {
+    padding-inline: 10px;
+  }
+
+  .site-page--account .back {
+    font-size: 0;
+    width: var(--site-control);
+    justify-content: center;
+  }
+
+  .site-page--account .back svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .site-page--chess .tt-chess-diff-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-page *,
+  .site-page *::before,
+  .site-page *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
