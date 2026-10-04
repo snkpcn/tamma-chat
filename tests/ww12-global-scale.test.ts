@@ -164,8 +164,23 @@ test('WW-12 production certification is read-only and fails unsafe global exposu
   assert.match(cert,/live_shipping_service_on_nonlive_market/);
   assert.match(cert,/prelaunch_transaction_env_enabled/);
   assert.match(cert,/WW12_GLOBAL_PRODUCTION_CERTIFICATION_PASS/);
+  assert.match(cert,/WW12_GLOBAL_PRODUCTION_CERTIFICATION_DEFERRED/);
   assert.doesNotMatch(cert,/method\s*:\s*['\"](?:POST|PATCH|PUT|DELETE)['\"]/i);
   assert.doesNotMatch(cert,/rpc\//i);
+});
+
+
+test('WW-12 runtime certification uses Netlify runtime secrets and exposes only sanitized safety state',()=>{
+  const source=read('netlify/functions/ww12-scale-certification.mts');
+  assert.match(source,/Netlify\.env\.get\('SUPABASE_URL'\)/);
+  assert.match(source,/Netlify\.env\.get\('SUPABASE_SERVICE_ROLE_KEY'\)/);
+  assert.match(source,/path:'\/api\/ww12\/certification'/);
+  assert.match(source,/prelaunch_transaction_capability_exposed/);
+  assert.match(source,/live_market_without_current_certification/);
+  assert.match(source,/live_payment_method_on_nonlive_market/);
+  assert.match(source,/live_shipping_service_on_nonlive_market/);
+  assert.match(source,/Cache-Control':'no-store'/);
+  assert.doesNotMatch(source,/return\s+json\([^\n]*(?:SUPABASE_SERVICE_ROLE_KEY|apikey|Authorization)/);
 });
 
 test('WW-12 build gate stays after WW-11 and runs final production certification last',()=>{
