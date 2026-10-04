@@ -4,8 +4,8 @@
  * Challenge Thongthai — server-authoritative chess session endpoint.
  * The browser is NEVER trusted for a result: every move is validated and
  * applied server-side against the stored FEN via chess.js, Thongthai's
- * reply move is computed server-side, and only a verified checkmate here
- * can ever lead to a reward being issued (see chess-rewards.ts).
+ * reply move is computed server-side. Chess is a standalone recreational
+ * experience: game outcomes never create discounts, coupons, or OTOP value.
  *
  * Actions (all POST):
  *  - state:  { guestId } -> the guest's current active game, if any, plus
@@ -25,19 +25,15 @@ import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
   abandonActiveGames,
   createGame,
-  getEligibleZones,
   hasVerifiedHardWin,
   insertChessEvent,
   isValidAnonymousId,
   loadActiveGame,
   loadGame,
   resolveOrCreateGuestId,
-  toPublicReward,
   updateGameAfterMoves,
-  issueRewardForWin,
   type ChessGame,
   type Difficulty,
-  type PublicChessReward,
 } from './_chess-db';
 import { applyMove, gameStatusFromFen, isValidFen, selectThongthaiMove, startingFen } from './_chess-engine';
 
@@ -191,7 +187,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
       if (playerMoveResult.isGameOver) {
         const finalStatus = playerMoveResult.isCheckmate ? 'player_won' : 'draw';
-        const reward = await finalizeGame(game, guestDbId, playerMoveResult.fen, movesAfterPlayer, finalStatus);
+        await finalizeGame(game, guestDbId, playerMoveResult.fen, movesAfterPlayer, finalStatus);
         return json(200, {
           fen: playerMoveResult.fen,
           moves: movesAfterPlayer,
@@ -202,7 +198,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
           isCheckmate: playerMoveResult.isCheckmate,
           isStalemate: playerMoveResult.isStalemate,
           isDraw: playerMoveResult.isDraw,
-          reward,
         });
       }
 
@@ -214,7 +209,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
           ? 'thongthai_won'
           : 'draw';
 
-      const reward = await finalizeGame(game, guestDbId, reply.fen, reply.moves, finalStatus);
+      await finalizeGame(game, guestDbId, reply.fen, reply.moves, finalStatus);
 
       return json(200, {
         fen: reply.fen,
@@ -226,7 +221,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
         isCheckmate: statusAfterReply.isCheckmate,
         isStalemate: statusAfterReply.isStalemate,
         isDraw: statusAfterReply.isDraw,
-        reward,
       });
     } catch (err) {
       console.error('CHESS_MOVE_ERROR', err instanceof Error ? err.message.slice(0, 200) : 'unknown');
@@ -260,7 +254,7 @@ async function finalizeGame(
   fen: string,
   moves: string[],
   status: 'active' | 'player_won' | 'thongthai_won' | 'draw',
-): Promise<PublicChessReward | null> {
+): Promise<void> {
   // Check BEFORE updating this game's own status — hasVerifiedHardWin
   // queries for an existing hard win, and this game would otherwise count
   // itself once its own row is updated below, making "was this the first"
@@ -268,20 +262,16 @@ async function finalizeGame(
   const wasFirstHardWin = status === 'player_won' && game.difficulty === 'hard' && !(await hasVerifiedHardWin(guestDbId));
 
   await updateGameAfterMoves(game.id, fen, moves, status);
-  if (status === 'active') return null;
+  if (status === 'active') return;
 
   if (status === 'player_won') {
     await insertChessEvent(guestDbId, 'chess_game_won', { difficulty: game.difficulty, game_id: game.id });
-    const reward = await issueRewardForWin(guestDbId, game.id, game.difficulty);
     if (wasFirstHardWin) {
       await insertChessEvent(guestDbId, 'chess_master_unlocked', { game_id: game.id });
     }
-    const zones = await getEligibleZones();
-    return toPublicReward(reward, zones);
   } else if (status === 'thongthai_won') {
     await insertChessEvent(guestDbId, 'chess_game_lost', { difficulty: game.difficulty, game_id: game.id, reason: 'checkmate' });
   } else if (status === 'draw') {
     await insertChessEvent(guestDbId, 'chess_game_drawn', { difficulty: game.difficulty, game_id: game.id });
   }
-  return null;
 }
