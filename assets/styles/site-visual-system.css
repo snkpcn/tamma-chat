@@ -642,6 +642,7 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
   .site-page--map .map-header {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     gap: 10px 14px;
     padding: 10px var(--site-gutter) 12px;
   }
@@ -650,13 +651,36 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
     justify-self: start;
   }
 
+  .site-page--map .map-header-actions {
+    display: contents;
+  }
+
+  .site-page--map .map-header > .map-header-actions > .site-lang-picker {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    margin: 0;
+  }
+
   .site-page--map .account-nav {
     grid-column: 1 / -1;
+    grid-row: 2;
     width: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
+    display: flex;
+    justify-content: stretch;
+    flex-wrap: nowrap;
+    gap: 8px;
     padding-top: 10px;
     border-top: 1px solid rgba(237, 218, 183, .12);
+  }
+
+  .site-page--map .account-nav .account-link {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-inline: 8px;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.25;
   }
 
   .site-page--map main {

@@ -27,7 +27,7 @@ test('all public mobile surfaces use one 20px logical content rail', () => {
 
 test('mobile map header and content resolve to the same logical start edge', () => {
   assert.match(visual, /\.site-page--map\s+\.brand-lockup\s*\{[^}]*justify-self:\s*start/s);
-  assert.match(visual, /\.site-page--map\s+\.account-nav\s*\{[^}]*justify-content:\s*flex-start/s);
+  assert.match(visual, /\.site-page--map\s+\.account-nav\s*\{[^}]*grid-row:\s*2[^}]*justify-content:\s*stretch/s);
   assert.match(visual, /\.site-page--map\s+\.map-legend\s*\{[^}]*justify-content:\s*flex-start/s);
   assert.match(visual, /\.site-page--map\s+\.province-index,[^}]*\.map-footer\s*\{[^}]*padding-inline:\s*var\(--site-gutter\)/s);
 });

@@ -206,9 +206,41 @@ html.isan-boutique .nearby-maps-link {
     text-align: start;
   }
 
-  html.isan-boutique .header-inner {
+  /* MOBILE HEADER COLLISION GUARD
+   * The general `.btn` touch-target rule must never resurrect the desktop
+   * planner CTA inside a 320–430px header.
+   */
+  html.isan-boutique .site-header .header-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     min-height: 64px;
     gap: 10px;
+  }
+
+  html.isan-boutique .site-header .brand {
+    min-width: 0;
+    max-width: 132px;
+  }
+
+  html.isan-boutique .site-header .brand img {
+    width: 100%;
+    max-width: 132px;
+    height: auto;
+  }
+
+  html.isan-boutique .site-header .header-actions {
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  html.isan-boutique .site-header .hdr-cta {
+    display: none !important;
+  }
+
+  html.isan-boutique .site-header :where(.lang-toggle, .menu-btn) {
+    flex: 0 0 auto;
   }
 
   html.isan-boutique :where(.hero-actions, .planner-actions) {
