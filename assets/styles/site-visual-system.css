@@ -223,6 +223,7 @@ body.site-page {
 }
 
 .site-page--map .site-lang-picker select {
+  min-height: var(--site-control);
   padding-inline: 14px 32px;
 }
 
@@ -823,4 +824,3 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
     transition-duration: .01ms !important;
   }
 }
-

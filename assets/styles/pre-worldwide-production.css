@@ -184,6 +184,14 @@ html.isan-boutique .mobile-nav.is-open {
   visibility: visible;
 }
 
+html.isan-boutique .hotspot-card > a,
+html.isan-boutique .nearby-maps-link {
+  min-height: var(--site-control-compact);
+  display: inline-flex;
+  align-items: center;
+  padding-block: 8px;
+}
+
 @media (max-width: 680px) {
   html.isan-boutique .header-inner {
     min-height: 64px;

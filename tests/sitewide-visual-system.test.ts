@@ -31,7 +31,10 @@ test('every public surface loads the final visual system last', () => {
   const homeStylesheets = [...home.matchAll(/<link\s+rel="stylesheet"\s+href="([^"]+)"/g)]
     .map((match) => match[1]);
   assert.equal(homeStylesheets.at(-1), 'assets/styles/pre-worldwide-production.css');
-  assert.match(source('assets/styles/pre-worldwide-production.css'), /SITEWIDE HOME VISUAL AUDIT/);
+  const homeCss = source('assets/styles/pre-worldwide-production.css');
+  assert.match(homeCss, /SITEWIDE HOME VISUAL AUDIT/);
+  assert.match(homeCss, /\.hotspot-card\s*>\s*a/);
+  assert.match(homeCss, /\.nearby-maps-link/);
 });
 
 test('visual system locks shared controls, focus and responsive behavior', () => {
@@ -42,6 +45,7 @@ test('visual system locks shared controls, focus and responsive behavior', () =>
   assert.match(css, /overflow-x:\s*clip/);
   assert.match(css, /@media\s*\(max-width:\s*680px\)/);
   assert.match(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(css, /\.site-page--map\s+\.site-lang-picker\s+select\s*\{[^}]*min-height:\s*var\(--site-control\)/s);
 
   for (const pageClass of ['site-page--home', ...pages.map(([, pageClass]) => pageClass)]) {
     assert.match(css, new RegExp(`\\.${pageClass.replaceAll('-', '\\-')}`));
