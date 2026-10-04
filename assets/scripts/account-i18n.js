@@ -1,8 +1,8 @@
 (() => {
   'use strict';
   const STORAGE_KEY=window.ThammachatLocale?.storageKey||'thammachat-lang-v1';
-  const SUPPORTED=window.ThammachatLocale?.supported||['th','en','zh','lo','vi'];
-  const LOCALES={th:'th-TH',en:'en-US',zh:'zh-CN',lo:'lo-LA',vi:'vi-VN'};
+  const SUPPORTED=window.ThammachatLocale?.supported||['th','en','zh','lo','vi','ja','ko'];
+  const LOCALES={th:'th-TH',en:'en-US',zh:'zh-CN',lo:'lo-LA',vi:'vi-VN',ja:'ja-JP',ko:'ko-KR'};
   const D={
     th:{
       page_title:'บัญชีของฉัน · ทำมา-ชาติ',back_web:'กลับหน้าเว็บ',member_eyebrow:'สมาชิกทำมา-ชาติ',account_title:'บัญชีของฉัน',
@@ -180,6 +180,8 @@
       redeem_confirm_title:'Xác nhận sử dụng',redeem_confirm_body:'Đưa màn hình này cho nhân viên rồi xác nhận để dùng ưu đãi tại khu vực này. Không thể hoàn tác.',confirm:'Xác nhận'
     }
   };
+  const FIRST_WAVE_ACCOUNT_PACKS=window.THAMMACHAT_FIRST_WAVE_LANGUAGE_PACKS?.account||{};
+  for(const language of ['ja','ko'])if(FIRST_WAVE_ACCOUNT_PACKS[language])D[language]=FIRST_WAVE_ACCOUNT_PACKS[language];
   let current='th';
   function interpolate(v,vars={}){return String(v??'').replace(/\{(\w+)\}/g,(_,k)=>vars[k]??'');}
   function t(key,vars={}){if(window.ThammachatLocale)return window.ThammachatLocale.translate(D,key,vars,current);const chain=current==='th'?['th']:(current==='en'?['en']:[current,'en']);for(const lang of chain){if(D[lang]?.[key]!==undefined)return interpolate(D[lang][key],vars)}return interpolate(key,vars);}

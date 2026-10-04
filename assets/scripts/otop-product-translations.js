@@ -371,6 +371,9 @@
     }
   };
 
+  const FIRST_WAVE=window.THAMMACHAT_FIRST_WAVE_LANGUAGE_PACKS?.products||{};
+  for(const language of ['ja','ko'])if(FIRST_WAVE[language])T[language]=FIRST_WAVE[language];
+
   function get(id, lang, fallback={}) {
     if (!lang || lang === 'th') return fallback;
     const english = T.en?.[id] || {};

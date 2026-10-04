@@ -10,6 +10,8 @@
     zh: Object.freeze({ language:'zh', locale:'zh-CN', label:'中文', direction:'ltr' }),
     lo: Object.freeze({ language:'lo', locale:'lo-LA', label:'ລາວ', direction:'ltr' }),
     vi: Object.freeze({ language:'vi', locale:'vi-VN', label:'Tiếng Việt', direction:'ltr' }),
+    ja: Object.freeze({ language:'ja', locale:'ja-JP', label:'日本語', direction:'ltr' }),
+    ko: Object.freeze({ language:'ko', locale:'ko-KR', label:'한국어', direction:'ltr' }),
   });
   const SUPPORTED = Object.freeze(Object.keys(DEFINITIONS));
   let memory = null;

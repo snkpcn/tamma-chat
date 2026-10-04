@@ -20,10 +20,10 @@ test('all public pages use the shared typography contract', () => {
   assert.match(css, /html\[lang="en"\][\s\S]*--font-display:\s*var\(--site-font-en\)/);
 });
 
-test('OTOP map and store share the existing five-language preference', () => {
+test('OTOP map and store share the seven-language preference', () => {
   const i18n = read('assets/scripts/otop-i18n.js');
   assert.match(i18n, /thammachat-lang-v1/);
-  assert.match(i18n, /\['th','en','zh','lo','vi'\]/);
+  assert.match(i18n, /\['th','en','zh','lo','vi','ja','ko'\]/);
   for (const province of ['chaiyaphum','khonkaen','buriram','surin','sisaket','nakhonratchasima','roiet','mahasarakham','kalasin','sakonnakhon','nakhonphanom','mukdahan','yasothon','amnatcharoen','ubonratchathani','udonthani','nongkhai','buengkan','loei','nongbualamphu']) {
     assert.match(i18n, new RegExp(`\\b${province}:`));
   }
@@ -33,7 +33,7 @@ test('OTOP map and store share the existing five-language preference', () => {
   for (const page of [map, store]) {
     assert.match(page, /assets\/scripts\/otop-i18n\.js/);
     assert.match(page, /data-otop-lang-select/);
-    for (const lang of ['th','en','zh','lo','vi']) {
+    for (const lang of ['th','en','zh','lo','vi','ja','ko']) {
       assert.match(page, new RegExp(`<option value="${lang}"`));
     }
   }

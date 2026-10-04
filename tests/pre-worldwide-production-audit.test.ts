@@ -70,11 +70,11 @@ test('English OTOP map/store/product translations contain no Thai-script copy', 
   }
 });
 
-test('main and OTOP share the exact same five-language preference contract', () => {
+test('main and OTOP share the exact same seven-language preference contract', () => {
   const main = read('index.html');
   const otop = read('assets/scripts/otop-i18n.js');
   assert.match(main, /thammachat-lang-v1/);
   assert.match(otop, /thammachat-lang-v1/);
-  assert.match(main, /\['th','en','zh','lo','vi'\]/);
-  assert.match(otop, /\['th','en','zh','lo','vi'\]/);
+  assert.match(main, /\['th','en','zh','lo','vi','ja','ko'\]/);
+  assert.match(otop, /\['th','en','zh','lo','vi','ja','ko'\]/);
 });

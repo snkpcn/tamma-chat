@@ -44,7 +44,7 @@ const MAX_FACTS_IN_PROMPT = 100;
 const PRICE_QUESTION_RE = /ราคา|เท่าไร|เท่าไหร่|กี่บาท/iu;
 const HOW_IT_WORKS_RE = /(?:ยังไง|อย่างไร|ไง|วิธี|ทำยังไง|เล่นยังไง|ขี่.*ไง)/iu;
 
-export type ResponseLanguage = 'th' | 'en' | 'zh' | 'lo' | 'vi';
+export type ResponseLanguage = 'th' | 'en' | 'zh' | 'lo' | 'vi' | 'ja' | 'ko';
 
 export type VerifiedOperationalOutcome = {
   executed: boolean;
@@ -328,6 +328,10 @@ export function normalizeResponseLanguageSurface(
     message=message.replace(/บาท/gu,'ບາດ').replace(/นาที/gu,'ນາທີ');
   }else if(language==='vi'){
     message=message.replace(/บาท/gu,'baht').replace(/นาที/gu,'phút');
+  }else if(language==='ja'){
+    message=message.replace(/บาท/gu,'バーツ').replace(/นาที/gu,'分');
+  }else if(language==='ko'){
+    message=message.replace(/บาท/gu,'바트').replace(/นาที/gu,'분');
   }
 
   return message
@@ -516,6 +520,20 @@ const FIELD_LABELS_BY_LANGUAGE: Record<ResponseLanguage, Record<string,string>> 
     nights:'số đêm', bedrooms:'số phòng ngủ', quantity:'số lượng',
     items:'món ăn và số lượng', itemName:'món', question:'việc bạn muốn đội cà phê hỗ trợ',
   },
+  ja: {
+    date:'日付', time:'時間', durationMinutes:'所要時間', partySize:'人数',
+    resourceCode:'希望する項目', customerName:'お名前', phone:'連絡先電話番号',
+    checkIn:'チェックイン日', checkOut:'チェックアウト日', endDate:'チェックアウト日',
+    nights:'宿泊数', bedrooms:'寝室数', quantity:'数量',
+    items:'料理と数量', itemName:'メニュー', question:'カフェチームへのご相談内容',
+  },
+  ko: {
+    date:'날짜', time:'시간', durationMinutes:'소요 시간', partySize:'인원',
+    resourceCode:'원하는 항목', customerName:'이름', phone:'연락처',
+    checkIn:'체크인 날짜', checkOut:'체크아웃 날짜', endDate:'체크아웃 날짜',
+    nights:'숙박 일수', bedrooms:'침실 수', quantity:'수량',
+    items:'음식과 수량', itemName:'메뉴', question:'카페 팀에 문의할 내용',
+  },
 };
 
 function localizedFieldLabel(language: ResponseLanguage, field: string): string {
@@ -528,6 +546,8 @@ function localizedCollectFieldMessage(language: ResponseLanguage, fields: string
   if (language==='zh') return `还需要${labels.join('和')}，就可以继续了。目前还没有提交任何请求。`;
   if (language==='lo') return `ຂໍ${labels.join(' ແລະ ')}ເພີ່ມອີກໜ້ອຍ ແລ້ວຈະຊ່ວຍຕໍ່ໄດ້. ຕອນນີ້ຍັງບໍ່ໄດ້ສົ່ງຄຳຂໍ.`;
   if (language==='vi') return `Thongthai cần thêm ${labels.join(' và ')} để tiếp tục. Hiện chưa có yêu cầu nào được gửi.`;
+  if (language==='ja') return `続けるために、${labels.join('と')}を教えてください。まだリクエストは送信されていません。`;
+  if (language==='ko') return `계속하려면 ${labels.join(' 및 ')} 정보가 필요합니다. 아직 요청은 제출되지 않았습니다.`;
   if (language==='en') return `I just need the ${labels.join(' and ')} to continue. Nothing has been submitted yet.`;
   return `ขอ${labels.join(' + ')}เพิ่มอีกนิดครับ`;
 }
@@ -613,6 +633,28 @@ function deterministicMessages(language: ResponseLanguage) {
     comparison:'Hiện chưa có đủ thông tin đã xác minh để so sánh điểm này nên Thongthai không muốn đoán.',
     proposal:'Thông tin đã sẵn sàng cho bước tiếp theo, nhưng hiện chưa có yêu cầu nào được gửi.',
     failed:'Yêu cầu này hiện chưa được gửi thành công.',
+  };
+  if (language === 'ja') return {
+    unavailable:'現在、最新情報を確認できないため推測ではお答えしません。必要であればチームに確認を依頼できます。',
+    unknown:'現時点で確認済みの情報がないため、推測ではお答えしません。',
+    empty:'現在の情報を確認しましたが、条件に合う選択肢はありません。',
+    model:'現在、この件に正確にお答えできません。少し時間をおいて再度お試しいただくか、チームに引き継げます。',
+    clarify:'正しくお手伝いするために、もう一点だけ教えてください。',
+    noPromo:'現在、利用できる対象プロモーションはありません。',
+    comparison:'比較に必要な確認済み情報がないため、推測ではお答えしません。',
+    proposal:'内容は準備できていますが、まだリクエストは送信されていません。',
+    failed:'リクエストはまだ正常に送信されていません。',
+  };
+  if (language === 'ko') return {
+    unavailable:'현재 최신 정보를 확인할 수 없어 추측해서 답하지 않겠습니다. 원하시면 담당 팀에 확인을 요청할 수 있습니다.',
+    unknown:'현재 확인된 정보가 없어 추측해서 답하지 않겠습니다.',
+    empty:'현재 정보를 확인했지만 조건에 맞는 선택지가 없습니다.',
+    model:'현재 이 내용을 정확히 답하기 어렵습니다. 잠시 후 다시 시도하거나 담당 팀에 전달할 수 있습니다.',
+    clarify:'정확히 도와드리려면 한 가지 정보가 더 필요합니다.',
+    noPromo:'현재 이용 가능한 프로모션이 없습니다.',
+    comparison:'비교할 수 있는 확인된 정보가 없어 추측해서 답하지 않겠습니다.',
+    proposal:'내용은 준비됐지만 아직 요청이 제출되지 않았습니다.',
+    failed:'요청이 아직 정상적으로 제출되지 않았습니다.',
   };
   return {
     unavailable:'ตอนนี้ทองไทยยังเช็กข้อมูลล่าสุดเรื่องนี้ไม่ได้ครับ เลยไม่อยากเดาให้ผิด',
@@ -1412,12 +1454,28 @@ const PREFERENCE_CONSTRAINT_LABELS_VI: Readonly<Record<string,string>> = {
   vegetarian:'ăn chay', low_spicy:'ăn ít cay', mild_spice:'ăn ít cay', no_spicy:'không ăn cay',
   low_intensity:'thích hoạt động nhẹ', fear_of_falling:'lo bị ngã', fear_of_speed:'không thích tốc độ',
 };
+const PREFERENCE_CONSTRAINT_LABELS_JA: Readonly<Record<string,string>> = {
+  no_shrimp:'エビを避ける', shrimp_allergy:'エビアレルギー', no_peanut:'ピーナッツを避ける', peanut_allergy:'ピーナッツアレルギー',
+  no_egg:'卵を避ける', egg_allergy:'卵アレルギー', no_fish:'魚を避ける', fish_allergy:'魚アレルギー',
+  food_allergy:'食物アレルギーあり', no_pork:'豚肉なし', no_beef:'牛肉なし', no_chicken:'鶏肉なし',
+  vegetarian:'ベジタリアン', low_spicy:'辛さ控えめ', mild_spice:'辛さ控えめ', no_spicy:'辛くしない',
+  low_intensity:'軽いアクティビティを希望', fear_of_falling:'転倒が心配', fear_of_speed:'速い動きが苦手',
+};
+const PREFERENCE_CONSTRAINT_LABELS_KO: Readonly<Record<string,string>> = {
+  no_shrimp:'새우 제외', shrimp_allergy:'새우 알레르기', no_peanut:'땅콩 제외', peanut_allergy:'땅콩 알레르기',
+  no_egg:'달걀 제외', egg_allergy:'달걀 알레르기', no_fish:'생선 제외', fish_allergy:'생선 알레르기',
+  food_allergy:'음식 알레르기 있음', no_pork:'돼지고기 제외', no_beef:'소고기 제외', no_chicken:'닭고기 제외',
+  vegetarian:'채식', low_spicy:'덜 맵게', mild_spice:'덜 맵게', no_spicy:'맵지 않게',
+  low_intensity:'가벼운 활동 선호', fear_of_falling:'낙상 우려', fear_of_speed:'빠른 속도를 선호하지 않음',
+};
 
 function preferenceLabel(language:ResponseLanguage, code:string):string|undefined {
   if(language==='th') return PREFERENCE_CONSTRAINT_LABELS_TH[code];
   if(language==='zh') return PREFERENCE_CONSTRAINT_LABELS_ZH[code];
   if(language==='lo') return PREFERENCE_CONSTRAINT_LABELS_LO[code];
   if(language==='vi') return PREFERENCE_CONSTRAINT_LABELS_VI[code];
+  if(language==='ja') return PREFERENCE_CONSTRAINT_LABELS_JA[code];
+  if(language==='ko') return PREFERENCE_CONSTRAINT_LABELS_KO[code];
   return PREFERENCE_CONSTRAINT_LABELS_EN[code];
 }
 
@@ -1440,6 +1498,8 @@ const DOMAIN_INTEREST_LABELS: Record<ResponseLanguage, Partial<Record<SemanticDo
   zh:{restaurant:'餐饮',activity:'活动',stay:'住宿',cafe:'咖啡店',otop:'OTOP/本地产品',journey:'行程',promotion:'优惠'},
   lo:{restaurant:'ອາຫານ',activity:'ກິດຈະກຳ',stay:'ທີ່ພັກ',cafe:'ຄາເຟ',otop:'OTOP/ສິນຄ້າຊຸມຊົນ',journey:'ແຜນທ່ຽວ',promotion:'ໂປຣໂມຊັນ'},
   vi:{restaurant:'ẩm thực',activity:'hoạt động',stay:'lưu trú',cafe:'cà phê',otop:'OTOP/sản phẩm địa phương',journey:'kế hoạch chuyến đi',promotion:'khuyến mãi'},
+  ja:{restaurant:'食事',activity:'アクティビティ',stay:'宿泊',cafe:'カフェ',otop:'OTOP・地域商品',journey:'旅行プラン',promotion:'プロモーション'},
+  ko:{restaurant:'음식',activity:'액티비티',stay:'숙박',cafe:'카페',otop:'OTOP·지역 상품',journey:'여행 일정',promotion:'프로모션'},
 };
 
 function discussedDomains(input: ResponseComposerInput): SemanticDomain[] {

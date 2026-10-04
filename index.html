@@ -100,9 +100,12 @@ p{ margin:0; }
 :focus-visible{ outline:2.5px solid var(--terracotta); outline-offset:3px; border-radius:4px; }
 </style>
 <link rel="stylesheet" href="assets/styles/isan-boutique-phase1.css">
+<link rel="stylesheet" href="assets/styles/isan-final-repair.css">
 <link rel="stylesheet" href="assets/styles/site-typography.css">
 <link rel="stylesheet" href="assets/styles/pre-worldwide-production.css">
-<script src="assets/scripts/global-locale.js"></script>\n</head>
+<script src="assets/scripts/global-locale.js"></script>
+<script src="assets/scripts/first-wave-language-packs.js"></script>
+</head>
 <body>
 <style>
 /* ============================================================
@@ -836,6 +839,8 @@ p{ margin:0; }
           <button type="button" data-lang="zh" role="option">中文 <span class="lang-native">ZH</span></button>
           <button type="button" data-lang="lo" role="option">ລາວ <span class="lang-native">LO</span></button>
           <button type="button" data-lang="vi" role="option">Tiếng Việt <span class="lang-native">VI</span></button>
+          <button type="button" data-lang="ja" role="option">日本語 <span class="lang-native">JA</span></button>
+          <button type="button" data-lang="ko" role="option">한국어 <span class="lang-native">KO</span></button>
         </div>
       </div>
       <a href="#" class="btn btn-secondary btn-sm hdr-cta" id="askThongthaiHeader" data-i18n="cta_ask_thongthai_long">ให้ทองไทยช่วยวางแผน</a>
@@ -864,6 +869,8 @@ p{ margin:0; }
       <button type="button" data-lang="zh">中文</button>
       <button type="button" data-lang="lo">ລາວ</button>
       <button type="button" data-lang="vi">Tiếng Việt</button>
+      <button type="button" data-lang="ja">日本語</button>
+      <button type="button" data-lang="ko">한국어</button>
     </div>
     <a href="#" class="btn btn-secondary" id="askThongthaiMobile" data-i18n="cta_ask_thongthai_long">ให้ทองไทยช่วยวางแผน</a>
   </div>
@@ -1135,10 +1142,6 @@ p{ margin:0; }
       </article>
     </div>
     <div class="community-grid fade-up" id="communityGrid" aria-live="polite"></div>
-    <div class="community-actions fade-up">
-      <a class="btn btn-primary" href="otop-map.html" data-i18n="otop_ask">เปิดแผนที่ของดีอีสาน</a>
-      <a class="btn btn-outline" href="otop.html" data-i18n="otop_view_journey">ดูสินค้า OTOP ชัยภูมิ</a>
-    </div>
     <p class="community-note" data-i18n="otop_note">เรื่องราวผ้าไหมบ้านเขว้าอ้างอิงข้อมูลจากหน่วยงานท้องถิ่นและภาพการผลิตจริงในพื้นที่</p>
   </div>
 </section>
@@ -1322,14 +1325,19 @@ p{ margin:0; }
           <img src="assets/chess/derived/B03_badge_hard.webp" alt="">
           <img src="assets/chess/derived/B04_badge_master.webp" alt="">
         </div>
-        <div class="tt-chess-home-actions">
-          <a href="chess.html" class="btn btn-primary btn-sm" data-i18n="chess_card_cta">เริ่มท้าทายทองไทย</a>
+        <div class="tt-chess-winner-pass" aria-label="Winner Pass">
+          <img src="assets/chess/derived/A10_winner_pass_frame.webp" width="1080" height="608" loading="lazy" decoding="async" alt="Winner Pass สำหรับผู้ชนะทองไทย">
         </div>
       </div>
-      <div class="tt-chess-home-art" aria-hidden="true">
-        <img class="tt-chess-home-board" src="assets/chess/derived/A01_chessboard_full.webp" width="1024" height="1024" loading="lazy" decoding="async" alt="">
-        <img class="tt-chess-home-character" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" decoding="async" alt="">
-      </div></div>
+      <div class="tt-chess-home-stage">
+        <div class="tt-chess-home-actions">
+          <a href="chess.html" class="btn btn-primary btn-sm" data-i18n="chess_card_cta">เริ่มเล่นหมากรุก</a>
+        </div>
+        <div class="tt-chess-home-art">
+          <img class="tt-chess-home-character" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" loading="lazy" decoding="async" alt="ทองไทยชวนเล่นหมากรุก">
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -1495,7 +1503,7 @@ p{ margin:0; }
      THONGTHAI CONCIERGE — floating entry, drawer + bottom sheet
      ============================================================ -->
 <button class="concierge-fab" id="conciergeFab" type="button" aria-haspopup="dialog" aria-controls="chatPanel">
-  <span class="ca-box ca-box-launcher"><img id="fabAvatarImg" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" alt="ทองไทย" data-i18n-alt="thongthai_alt"></span>
+  <span class="ca-box ca-box-launcher"><img id="fabAvatarImg" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" alt="ทองไทย"></span>
   <span data-i18n="cta_ask_thongthai_short">ถามทองไทย</span>
   <span class="dot" aria-hidden="true"></span>
 </button>
@@ -1504,7 +1512,7 @@ p{ margin:0; }
   <div class="chat-panel" id="chatPanel" role="dialog" aria-modal="true" aria-labelledby="chatTitle">
     <div class="chat-drag"><span></span></div>
     <div class="chat-head">
-      <span class="ca-box ca-box-header"><img id="headerAvatarImg" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" alt="ทองไทย" data-i18n-alt="thongthai_alt"></span>
+      <span class="ca-box ca-box-header"><img id="headerAvatarImg" src="assets/brand/characters/thongthai-portrait-master-4k.webp" width="4096" height="4096" alt="ทองไทย"></span>
       <div class="info">
         <h4 id="chatTitle" data-i18n="chat_title">ทองไทย</h4>
         <div class="status" id="chatStatus" data-i18n="chat_status_ready">พร้อมช่วยวางแผน</div>
@@ -2911,6 +2919,11 @@ vi: {
 
 };
 
+const FIRST_WAVE_HOME_PACKS = window.THAMMACHAT_FIRST_WAVE_LANGUAGE_PACKS?.home || {};
+for (const language of ['ja','ko']) {
+  if (FIRST_WAVE_HOME_PACKS[language]) TRANSLATIONS[language] = FIRST_WAVE_HOME_PACKS[language];
+}
+
 /* ============================================================
    I18N ENGINE
    ============================================================ */
@@ -3004,7 +3017,7 @@ window.I18N = {
 
 async function initI18n(){
   const saved = await langStorageGet();
-  const supported = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi'];
+  const supported = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi','ja','ko'];
   let initial = 'th';
   if(saved && supported.includes(saved)){
     initial = saved;
@@ -3014,6 +3027,8 @@ async function initI18n(){
     else if(nav.startsWith('zh')) initial = 'zh';
     else if(nav.startsWith('lo')) initial = 'lo';
     else if(nav.startsWith('vi')) initial = 'vi';
+    else if(nav.startsWith('ja')) initial = 'ja';
+    else if(nav.startsWith('ko')) initial = 'ko';
   }
   currentLang = initial;
   applyTranslations();
@@ -3288,7 +3303,7 @@ function tagLabel(tag){
   if(tag==='inthanin') return 'Inthanin';
   return window.I18N ? window.I18N.t('loc_'+tag+'_name') : tag;
 }
-const LOCALE_MAP = { th:'th-TH', en:'en-US', zh:'zh-CN', lo:'lo-LA', vi:'vi-VN' };
+const LOCALE_MAP = { th:'th-TH', en:'en-US', zh:'zh-CN', lo:'lo-LA', vi:'vi-VN', ja:'ja-JP', ko:'ko-KR' };
 function fmtDate(ts){
   const d = new Date(ts);
   const locale = LOCALE_MAP[window.I18N ? window.I18N.lang() : 'th'] || 'th-TH';

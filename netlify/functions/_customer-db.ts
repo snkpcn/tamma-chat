@@ -114,7 +114,7 @@ const CONSTRAINTS = new Set([
   // never allergy/medical claims and never transaction authorization.
   'no_coffee', 'low_sweet', 'low_bitter', 'no_cow_milk', 'no_sugar',
 ]);
-const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
+const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi', 'ja', 'ko']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function safeDbError(stage: string, err: unknown): void {
