@@ -2,8 +2,8 @@
   'use strict';
 
   const STORAGE_KEY = window.ThammachatLocale?.storageKey || 'thammachat-lang-v1';
-  const SUPPORTED = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi'];
-  const LOCALES = { th:'th-TH', en:'en-US', zh:'zh-CN', lo:'lo-LA', vi:'vi-VN' };
+  const SUPPORTED = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi','ja','ko'];
+  const LOCALES = { th:'th-TH', en:'en-US', zh:'zh-CN', lo:'lo-LA', vi:'vi-VN', ja:'ja-JP', ko:'ko-KR' };
 
   const PROVINCES = {
     chaiyaphum:{th:'ชัยภูมิ',en:'Chaiyaphum',zh:'猜也蓬',lo:'ໄຊຍະພູມ',vi:'Chaiyaphum'},
@@ -301,6 +301,13 @@
     }
   };
 
+  const FIRST_WAVE=window.THAMMACHAT_FIRST_WAVE_LANGUAGE_PACKS||{};
+  for(const language of ['ja','ko']){
+    if(FIRST_WAVE.otop?.[language])COPY[language]=FIRST_WAVE.otop[language];
+    for(const [province,translation] of Object.entries(FIRST_WAVE.provinceNames?.[language]||{})){
+      PROVINCES[province]={...(PROVINCES[province]||{}),[language]:translation};
+    }
+  }
   let current = 'th';
 
   function interpolate(value, vars={}) {
@@ -327,6 +334,8 @@
     if (nav.startsWith('zh')) return 'zh';
     if (nav.startsWith('lo')) return 'lo';
     if (nav.startsWith('vi')) return 'vi';
+    if (nav.startsWith('ja')) return 'ja';
+    if (nav.startsWith('ko')) return 'ko';
     return 'th';
   }
   function applyStatic() {

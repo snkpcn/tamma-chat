@@ -92,6 +92,9 @@
     }
   };
 
+  const FIRST_WAVE=window.THAMMACHAT_FIRST_WAVE_LANGUAGE_PACKS?.provinces||{};
+  for(const language of ['ja','ko'])if(FIRST_WAVE[language])DATA[language]=FIRST_WAVE[language];
+
   function get(provinceId, lang, fallback={}) {
     if (!lang || lang === 'th') return fallback;
     const english = DATA.en?.[provinceId] || {};

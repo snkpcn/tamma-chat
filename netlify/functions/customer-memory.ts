@@ -17,7 +17,7 @@ type GuestContext = {
 };
 
 const ACTIONS = new Set<CustomerSnapshotAction>(['profile', 'favorite', 'visited', 'save_journey']);
-const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
+const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi', 'ja', 'ko']);
 const FORBIDDEN_RAW_CHAT_KEYS = ['message', 'chat', 'chatHistory', 'transcript', 'prompt', 'journalEntries'];
 
 function emptyContext(): GuestContext {

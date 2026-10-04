@@ -42,7 +42,7 @@ import {
 import { applyMove, gameStatusFromFen, isValidFen, selectThongthaiMove, startingFen } from './_chess-engine';
 
 const DIFFICULTIES: Difficulty[] = ['easy', 'medium', 'hard', 'master'];
-const LANGUAGES = ['th', 'en', 'zh', 'lo', 'vi'];
+const LANGUAGES = ['th', 'en', 'zh', 'lo', 'vi', 'ja', 'ko'];
 
 function json(statusCode: number, body: unknown) {
   return {

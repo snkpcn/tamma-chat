@@ -21,6 +21,7 @@ const steps = [
   ['audit-ww10', 'npm', ['run', 'audit:ww10']],
   ['audit-ww11', 'npm', ['run', 'audit:ww11']],
   ['audit-ww12', 'npm', ['run', 'audit:ww12']],
+  ['audit-i18n7', 'npm', ['run', 'audit:i18n7']],
   ['semantic-certification-artifact', NODE, ['--import', 'tsx', 'scripts/write-semantic-certification-artifact.ts']],
   ['ww12-production-certification', NODE, ['scripts/ww12-production-certification.mjs']],
 ];

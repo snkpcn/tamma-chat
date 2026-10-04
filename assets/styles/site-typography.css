@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
 
 /*
  * Thammachat sitewide typography contract.
@@ -11,6 +11,8 @@
   --site-font-zh: "Noto Sans SC", sans-serif;
   --site-font-lo: "Noto Sans Lao", sans-serif;
   --site-font-vi: "Noto Sans", sans-serif;
+  --site-font-ja: "Noto Sans JP", sans-serif;
+  --site-font-ko: "Noto Sans KR", sans-serif;
 
   /* Backward-compatible aliases used by existing page CSS. */
   --font-display: var(--site-font-th);
@@ -37,6 +39,14 @@ html[lang="vi"] {
   --font-display: var(--site-font-vi);
   --font-body: var(--site-font-vi);
 }
+html[lang="ja"] {
+  --font-display: var(--site-font-ja);
+  --font-body: var(--site-font-ja);
+}
+html[lang="ko"] {
+  --font-display: var(--site-font-ko);
+  --font-body: var(--site-font-ko);
+}
 
 html[lang="th"] :where(body, body *),
 html[lang="th"] :where(input, button, select, textarea) {
@@ -57,6 +67,14 @@ html[lang="lo"] :where(input, button, select, textarea) {
 html[lang="vi"] :where(body, body *),
 html[lang="vi"] :where(input, button, select, textarea) {
   font-family: var(--site-font-vi) !important;
+}
+html[lang="ja"] :where(body, body *),
+html[lang="ja"] :where(input, button, select, textarea) {
+  font-family: var(--site-font-ja) !important;
+}
+html[lang="ko"] :where(body, body *),
+html[lang="ko"] :where(input, button, select, textarea) {
+  font-family: var(--site-font-ko) !important;
 }
 
 /* A shared compact language selector used by OTOP Map and Store. */

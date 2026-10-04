@@ -161,7 +161,9 @@
 [hidden]{ display:none!important; }
 </style>
 <link rel="stylesheet" href="assets/styles/site-typography.css">
-<script src="assets/scripts/global-locale.js"></script>\n</head>
+<script src="assets/scripts/global-locale.js"></script>
+<script src="assets/scripts/first-wave-language-packs.js"></script>
+</head>
 <body class="tt-chess-page">
 
 <header class="tt-chess-header">
@@ -175,7 +177,7 @@
   </span>
   <div class="tt-chess-header-actions">
     <select id="ttChessLanguage" class="tt-chess-lang" aria-label="Language">
-      <option value="th">TH</option><option value="en">EN</option><option value="zh">中文</option><option value="lo">ລາວ</option><option value="vi">VI</option>
+      <option value="th">TH</option><option value="en">EN</option><option value="zh">中文</option><option value="lo">ລາວ</option><option value="vi">VI</option><option value="ja">日本語</option><option value="ko">한국어</option>
     </select>
     <a href="/account.html#chess-rewards" id="ttChessMyRewardsLink">
       <img src="assets/chess/derived/C08_profile_reward.webp" alt="" width="18" height="18" style="border-radius:0;background:none;">
@@ -333,7 +335,7 @@ import { Chess } from './assets/chess/vendor/chess.esm.js';
 
 /* ============================================================
    ttChessI18N — mirrors index.html's I18N engine exactly (same
-   localStorage key, same 5 languages) so language choice stays
+   localStorage key, same 7 languages) so language choice stays
    consistent across pages without a second translation system.
    ============================================================ */
 const TT_CHESS_I18N = {
@@ -549,6 +551,11 @@ vi:{
 },
 };
 
+const FIRST_WAVE_CHESS_PACKS = window.THAMMACHAT_FIRST_WAVE_LANGUAGE_PACKS?.chess || {};
+for (const language of ['ja','ko']) {
+  if (FIRST_WAVE_CHESS_PACKS[language]) TT_CHESS_I18N[language] = FIRST_WAVE_CHESS_PACKS[language];
+}
+
 const LANG_STORAGE_KEY = window.ThammachatLocale?.storageKey || 'thammachat-lang-v1';
 let ttLang = window.ThammachatLocale?.get() || 'th';
 function ttT(key){
@@ -565,7 +572,7 @@ function ttApplyTranslations(){
   const picker=document.getElementById('ttChessLanguage');if(picker)picker.value=ttLang;
 }
 function ttSetLang(lang,persist=true){
-  const supported=window.ThammachatLocale?.supported||['th','en','zh','lo','vi'];
+  const supported=window.ThammachatLocale?.supported||['th','en','zh','lo','vi','ja','ko'];
   const normalized=window.ThammachatLocale?.normalize(lang)||lang;
   if(!supported.includes(normalized))return;
   ttLang=normalized;
@@ -576,7 +583,7 @@ function ttSetLang(lang,persist=true){
   ttChessRenderDynamicText();
 }
 function ttInitI18n(){
-  const supported = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi'];
+  const supported = window.ThammachatLocale?.supported || ['th','en','zh','lo','vi','ja','ko'];
   if(window.ThammachatLocale) ttLang = window.ThammachatLocale.get();
   else {
     let saved = null;
@@ -588,6 +595,8 @@ function ttInitI18n(){
       else if(nav.startsWith('zh')) ttLang = 'zh';
       else if(nav.startsWith('lo')) ttLang = 'lo';
       else if(nav.startsWith('vi')) ttLang = 'vi';
+      else if(nav.startsWith('ja')) ttLang = 'ja';
+      else if(nav.startsWith('ko')) ttLang = 'ko';
     }
   }
   ttApplyTranslations();

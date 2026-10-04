@@ -209,7 +209,7 @@ export function composeIncidentResponse(
   ]);
 }
 
-export type SemanticIncidentResponseLanguage = 'th' | 'en' | 'zh' | 'lo' | 'vi';
+export type SemanticIncidentResponseLanguage = 'th' | 'en' | 'zh' | 'lo' | 'vi' | 'ja' | 'ko';
 
 const SEMANTIC_INCIDENT_UNIT_LABEL: Record<SemanticIncidentResponseLanguage, Partial<Record<BusinessUnit, string>>> = {
   th: {
@@ -231,6 +231,14 @@ const SEMANTIC_INCIDENT_UNIT_LABEL: Record<SemanticIncidentResponseLanguage, Par
   vi: {
     restaurant: 'nhà hàng', activity: 'hoạt động', stay: 'lưu trú', cafe: 'cà phê',
     otop: 'OTOP', membership: 'thành viên',
+  },
+  ja: {
+    restaurant: 'レストラン', activity: 'アクティビティ', stay: '宿泊', cafe: 'カフェ',
+    otop: 'OTOP', membership: '会員サポート',
+  },
+  ko: {
+    restaurant: '레스토랑', activity: '액티비티', stay: '숙박', cafe: '카페',
+    otop: 'OTOP', membership: '회원 지원',
   },
 };
 
@@ -256,11 +264,15 @@ function semanticIncidentDeliveryLine(
       if (language === 'zh') return '已发送给负责人核查。';
       if (language === 'lo') return 'ທອງໄທສົ່ງໃຫ້ເຈົ້າຂອງກວດສອບແລ້ວ.';
       if (language === 'vi') return 'Thongthai đã gửi việc này cho chủ sở hữu kiểm tra.';
+      if (language === 'ja') return '担当責任者に確認を依頼しました。';
+      if (language === 'ko') return '책임자에게 검토를 요청했습니다.';
       return 'Thongthai has sent this to the owner for review.';
     }
     if (language === 'zh') return '通知暂时未发送成功，但事项已记录，团队会继续核查。';
     if (language === 'lo') return 'ການແຈ້ງເຕືອນຍັງບໍ່ສຳເລັດ ແຕ່ລະບົບບັນທຶກເລື່ອງໄວ້ແລ້ວ.';
     if (language === 'vi') return 'Thông báo chưa gửi thành công, nhưng vụ việc đã được ghi nhận để đội ngũ kiểm tra.';
+    if (language === 'ja') return '通知は送信できませんでしたが、確認できるよう案件を記録しました。';
+    if (language === 'ko') return '알림 전송에는 실패했지만 검토할 수 있도록 건을 기록했습니다.';
     return 'The notification did not send successfully, but the case is recorded for review.';
   }
 
@@ -268,23 +280,31 @@ function semanticIncidentDeliveryLine(
     if (language === 'zh') return `已发送给${label || '相关'}团队和负责人核查。`;
     if (language === 'lo') return `ທອງໄທສົ່ງໃຫ້ທີມ${label || 'ທີ່ກ່ຽວຂ້ອງ'} ແລະເຈົ້າຂອງກວດສອບແລ້ວ.`;
     if (language === 'vi') return `Thongthai đã gửi cho đội ${label || 'liên quan'} và chủ sở hữu kiểm tra.`;
+    if (language === 'ja') return `${label || '担当'}チームと責任者に確認を依頼しました。`;
+    if (language === 'ko') return `${label || '담당'} 팀과 책임자에게 검토를 요청했습니다.`;
     return `Thongthai has sent this to the ${label || 'relevant'} team and the owner for review.`;
   }
   if (domainOk) {
     if (language === 'zh') return `已发送给${label || '相关'}团队；负责人通知暂未成功。`;
     if (language === 'lo') return `ສົ່ງໃຫ້ທີມ${label || 'ທີ່ກ່ຽວຂ້ອງ'}ແລ້ວ ແຕ່ການແຈ້ງເຈົ້າຂອງຍັງບໍ່ສຳເລັດ.`;
     if (language === 'vi') return `Đã gửi cho đội ${label || 'liên quan'}; thông báo cho chủ sở hữu chưa thành công.`;
+    if (language === 'ja') return `${label || '担当'}チームには届いていますが、責任者への通知はまだ成功していません。`;
+    if (language === 'ko') return `${label || '담당'} 팀에는 전달됐지만 책임자 알림은 아직 성공하지 못했습니다.`;
     return `It has reached the ${label || 'relevant'} team; the owner notification has not succeeded yet.`;
   }
   if (ownerOk) {
     if (language === 'zh') return '相关团队尚未直接收到通知，但负责人已收到并会核查。';
     if (language === 'lo') return 'ທີມຍັງບໍ່ໄດ້ຮັບໂດຍກົງ ແຕ່ເຈົ້າຂອງໄດ້ຮັບແລ້ວ.';
     if (language === 'vi') return 'Đội liên quan chưa nhận trực tiếp, nhưng chủ sở hữu đã nhận để kiểm tra.';
+    if (language === 'ja') return '担当チームにはまだ直接届いていませんが、責任者が確認できる状態です。';
+    if (language === 'ko') return '담당 팀에는 아직 직접 전달되지 않았지만 책임자가 검토할 수 있도록 전달됐습니다.';
     return 'The team has not received it directly yet, but the owner has received it for review.';
   }
   if (language === 'zh') return '通知暂时未发送成功，但事项已记录，团队会继续核查。';
   if (language === 'lo') return 'ການແຈ້ງເຕືອນຍັງບໍ່ສຳເລັດ ແຕ່ລະບົບບັນທຶກເລື່ອງໄວ້ແລ້ວ.';
   if (language === 'vi') return 'Thông báo chưa gửi thành công, nhưng vụ việc đã được ghi nhận để đội ngũ kiểm tra.';
+  if (language === 'ja') return '通知は送信できませんでしたが、確認できるよう案件を記録しました。';
+  if (language === 'ko') return '알림 전송에는 실패했지만 검토할 수 있도록 건을 기록했습니다.';
   return 'The notification did not send successfully, but the case is recorded for review.';
 }
 
@@ -304,6 +324,8 @@ export function composeSemanticIncidentResponse(
     if (language === 'lo') return 'ທອງໄທຮັບຮູ້ເລື່ອງແລ້ວ ແຕ່ລະບົບຍັງບັນທຶກເຄສບໍ່ສຳເລັດ ກະລຸນາແຈ້ງພະນັກງານໜ້າງານໂດຍກົງ.';
     if (language === 'vi') return 'Thongthai đã tiếp nhận, nhưng hệ thống chưa lưu được vụ việc. Vui lòng báo trực tiếp cho nhân viên tại chỗ để không chậm xử lý.';
     if (language === 'en') return 'Thongthai has received this, but the system could not save the case. Please tell on-site staff directly so follow-up is not delayed.';
+    if (language === 'ja') return '内容は受け取りましたが、システムに記録できませんでした。対応が遅れないよう、現地スタッフへ直接お知らせください。';
+    if (language === 'ko') return '내용은 접수했지만 시스템에 저장하지 못했습니다. 처리가 지연되지 않도록 현장 직원에게 직접 알려 주세요.';
     return 'ทองไทยรับเรื่องไว้ครับ แต่ตอนนี้ระบบบันทึกเคสไม่สำเร็จ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อไม่ให้การดูแลล่าช้าครับ';
   }
 
@@ -312,6 +334,8 @@ export function composeSemanticIncidentResponse(
   else if (language === 'lo') opener = match.feedbackType === 'safety_issue' ? 'ທອງໄທຮັບເລື່ອງຄວາມປອດໄພໄວ້ແລ້ວ ຂອບໃຈທີ່ແຈ້ງ.' : 'ທອງໄທຮັບເລື່ອງໄວ້ແລ້ວ ຂອບໃຈທີ່ບອກ.';
   else if (language === 'vi') opener = match.feedbackType === 'safety_issue' ? 'Thongthai đã ghi nhận đây là vấn đề an toàn. Cảm ơn bạn đã báo ngay.' : 'Thongthai đã ghi nhận vụ việc. Cảm ơn bạn đã nói thẳng.';
   else if (language === 'en') opener = match.feedbackType === 'safety_issue' ? 'Thongthai has logged this as a safety concern. Thank you for reporting it right away.' : 'Thongthai has logged this for follow-up. Thank you for telling me directly.';
+  else if (language === 'ja') opener = match.feedbackType === 'safety_issue' ? '安全上の問題として記録しました。すぐにお知らせいただきありがとうございます。' : '確認対応のため記録しました。率直にお知らせいただきありがとうございます。';
+  else if (language === 'ko') opener = match.feedbackType === 'safety_issue' ? '안전 문제로 기록했습니다. 바로 알려 주셔서 감사합니다.' : '후속 확인을 위해 기록했습니다. 솔직하게 알려 주셔서 감사합니다.';
   else opener = match.feedbackType === 'safety_issue'
     ? 'ทองไทยรับเรื่องความปลอดภัยไว้แล้วครับ ขอบคุณที่รีบแจ้งนะครับ'
     : 'ทองไทยรับเรื่องไว้แล้วครับ ขอบคุณที่บอกตรง ๆ นะครับ';
@@ -327,6 +351,8 @@ function localizedRoutingLine(language:SemanticIncidentResponseLanguage, notific
   if(language==='zh') return notificationQueued ? '已发送给相关团队。' : '已记录下来，Thongthai 会转给相关团队。';
   if(language==='lo') return notificationQueued ? 'ສົ່ງໃຫ້ທີມທີ່ກ່ຽວຂ້ອງແລ້ວ.' : 'ບັນທຶກເລື່ອງໄວ້ແລ້ວ ແລະຈະສົ່ງໃຫ້ທີມທີ່ກ່ຽວຂ້ອງ.';
   if(language==='vi') return notificationQueued ? 'Thongthai đã gửi việc này cho đội liên quan.' : 'Thongthai đã ghi nhận và sẽ chuyển cho đội liên quan.';
+  if(language==='ja') return notificationQueued ? '担当チームに送信しました。' : '内容を記録し、担当チームに共有します。';
+  if(language==='ko') return notificationQueued ? '담당 팀에 전달했습니다.' : '내용을 기록했으며 담당 팀에 전달하겠습니다.';
   return notificationQueued ? 'Thongthai has sent this to the relevant team.' : 'Thongthai has logged this and will pass it to the relevant team.';
 }
 
@@ -344,6 +370,8 @@ function localizedFeedbackResponse(
     const opener=language==='zh'?'非常感谢你的表扬 😊'
       :language==='lo'?'ຂອບໃຈຫຼາຍສຳລັບຄຳຊົມ 😊'
       :language==='vi'?'Cảm ơn bạn rất nhiều vì lời khen 😊'
+      :language==='ja'?'温かいお言葉をありがとうございます 😊'
+      :language==='ko'?'따뜻한 말씀 정말 감사합니다 😊'
       :'Thank you so much for the kind feedback 😊';
     return composeLineShortReply([opener,localizedRoutingLine(language,notificationQueued)]);
   }
@@ -351,12 +379,16 @@ function localizedFeedbackResponse(
     const opener=language==='zh'?'谢谢你的建议，这个想法很有帮助。'
       :language==='lo'?'ຂອບໃຈສຳລັບຄຳແນະນຳ ໄອເດຍນີ້ມີປະໂຫຍດ.'
       :language==='vi'?'Cảm ơn bạn đã góp ý, ý tưởng này rất hữu ích.'
+      :language==='ja'?'ご提案ありがとうございます。とても参考になります。'
+      :language==='ko'?'제안해 주셔서 감사합니다. 정말 도움이 됩니다.'
       :'Thanks for the suggestion — that’s genuinely useful.';
     return composeLineShortReply([opener,localizedRoutingLine(language,notificationQueued)]);
   }
   const opener=language==='zh'?'谢谢你直接告诉我，Thongthai 会把这条反馈用于改进。'
     :language==='lo'?'ຂອບໃຈທີ່ບອກກົງໆ ທອງໄທຈະນຳໄປປັບປຸງ.'
     :language==='vi'?'Cảm ơn bạn đã nói thẳng. Thongthai sẽ dùng phản hồi này để cải thiện.'
+    :language==='ja'?'率直にお知らせいただきありがとうございます。改善に活かします。'
+    :language==='ko'?'솔직하게 알려 주셔서 감사합니다. 개선에 반영하겠습니다.'
     :'Thanks for telling me directly. Thongthai will use this feedback to improve.';
   return composeLineShortReply([opener,localizedRoutingLine(language,notificationQueued)]);
 }
@@ -430,12 +462,34 @@ const ESCALATION_OPENER_VI: Record<EscalationCategory,string> = {
   severe_allergy_medical:'Cảm ơn bạn đã cho biết. Việc này cần đội ngũ kiểm tra kỹ, Thongthai không muốn đoán.',
   unverified_availability:'Tình trạng phòng hiện tại cần đội lưu trú kiểm tra xác nhận, Thongthai không muốn đoán.',
 };
+const ESCALATION_OPENER_JA: Record<EscalationCategory,string> = {
+  refund_request:'返金や支払い条件は責任者の確認が必要なため、Thongthai が代理で決定することはできません。',
+  special_discount:'特別割引は、責任者または料金担当チームが条件を確認する必要があります。',
+  claim_request:'請求や補償については責任者の確認が必要なため、Thongthai が代理で決定することはできません。',
+  accident_liability:'事故の責任については、Thongthai が推測したり責任者に代わって判断したりすることはできません。',
+  safety_guarantee:'Thongthai は安全を100%保証できません。現地チームが実際の状況を確認する必要があります。',
+  bad_review_threat:'率直なお気持ちをお知らせいただきありがとうございます。このままにせず対応します。',
+  severe_allergy_medical:'お知らせいただきありがとうございます。推測ではなく、チームが慎重に確認する必要があります。',
+  unverified_availability:'現在の空室状況は宿泊チームによる確認が必要なため、推測ではお答えしません。',
+};
+const ESCALATION_OPENER_KO: Record<EscalationCategory,string> = {
+  refund_request:'환불이나 결제 조건은 책임자 확인이 필요하므로 Thongthai가 대신 결정할 수 없습니다.',
+  special_discount:'특별 할인은 책임자 또는 가격 담당 팀이 조건을 먼저 확인해야 합니다.',
+  claim_request:'청구나 보상 요청은 책임자 확인이 필요하므로 Thongthai가 대신 결정할 수 없습니다.',
+  accident_liability:'사고 책임은 Thongthai가 추측하거나 책임자 대신 판단할 수 없습니다.',
+  safety_guarantee:'Thongthai는 안전을 100% 보장할 수 없습니다. 현장 팀이 실제 상황을 확인해야 합니다.',
+  bad_review_threat:'솔직한 마음을 알려 주셔서 감사합니다. 이 문제가 그대로 남지 않도록 확인하겠습니다.',
+  severe_allergy_medical:'알려 주셔서 감사합니다. 추측하지 않고 담당 팀이 신중히 확인해야 하는 내용입니다.',
+  unverified_availability:'현재 객실 상황은 숙박 팀의 확인이 필요하므로 추측해서 답하지 않겠습니다.',
+};
 
 function localizedEscalationOpener(language:SemanticIncidentResponseLanguage, category:EscalationCategory):string {
   if(language==='en') return ESCALATION_OPENER_EN[category];
   if(language==='zh') return ESCALATION_OPENER_ZH[category];
   if(language==='lo') return ESCALATION_OPENER_LO[category];
   if(language==='vi') return ESCALATION_OPENER_VI[category];
+  if(language==='ja') return ESCALATION_OPENER_JA[category];
+  if(language==='ko') return ESCALATION_OPENER_KO[category];
   return ESCALATION_OPENER[category];
 }
 
@@ -469,6 +523,8 @@ export function composeEscalationResponse(
     if(language==='lo') return composeLineShortReply(['ທອງໄທບໍ່ສາມາດຮັບປະກັນຄວາມປອດໄພ 100%.','ທີມໜ້າງານຕ້ອງປະເມີນຕາມສະພາບຈິງ.','ຖ້າມີເດັກ ຜູ້ສູງອາຍຸ ຫຼືກັງວົນເລື່ອງສຸຂະພາບ ບອກທອງໄທໄດ້.']);
     if(language==='vi') return composeLineShortReply(['Thongthai không thể bảo đảm an toàn 100%.','Đội tại chỗ cần đánh giá theo tình huống thực tế.','Nếu có trẻ em, người lớn tuổi hoặc lo ngại về sức khỏe, hãy nói cho Thongthai biết để chuyển đúng thông tin cho đội ngũ.']);
     if(language==='en') return composeLineShortReply(['Thongthai can’t guarantee safety 100%.','The on-site team needs to assess the actual conditions.','If children, older guests, or health concerns are involved, tell me and I’ll pass that context to the team.']);
+    if(language==='ja') return composeLineShortReply(['Thongthai は安全を100%保証できません。','現地チームが実際の状況を確認する必要があります。','お子様、高齢の方、健康上の心配がある場合は教えてください。チームに正確に共有します。']);
+    if(language==='ko') return composeLineShortReply(['Thongthai는 안전을 100% 보장할 수 없습니다.','현장 팀이 실제 상황을 확인해야 합니다.','어린이, 고령자 또는 건강상 우려가 있다면 알려 주세요. 담당 팀에 정확히 전달하겠습니다.']);
     return composeLineShortReply([
       'ทองไทยไม่อยากรับประกันแทนทีมแบบ 100% นะครับ 🙏',
       'ทีมหน้างานจะช่วยประเมินและดูแลตามสถานการณ์จริงให้ดีที่สุดครับ',
@@ -482,6 +538,8 @@ export function composeEscalationResponse(
       :language==='lo'?'ຕອນນີ້ລະບົບຍັງບັນທຶກເລື່ອງບໍ່ສຳເລັດ ກະລຸນາແຈ້ງພະນັກງານໜ້າງານໂດຍກົງ.'
       :language==='vi'?'Hiện hệ thống chưa lưu được vụ việc. Vui lòng báo trực tiếp cho nhân viên tại chỗ để không chậm xử lý.'
       :language==='en'?'The case could not be saved right now. Please tell on-site staff directly so follow-up is not delayed.'
+      :language==='ja'?'現在、案件を保存できませんでした。対応が遅れないよう、現地スタッフへ直接お知らせください。'
+      :language==='ko'?'현재 건을 저장하지 못했습니다. 처리가 지연되지 않도록 현장 직원에게 직접 알려 주세요.'
       :'ตอนนี้ระบบบันทึกเรื่องไม่สำเร็จ ขอโทษด้วยครับ รบกวนแจ้งพนักงานหน้างานโดยตรงเพื่อความชัวร์ครับ';
     return composeLineShortReply([opener,failed]);
   }
@@ -494,6 +552,8 @@ export function composeEscalationResponse(
       :language==='lo'?'ຂໍວັນທີ ເວລາ ແລະບໍລິການທີ່ສົນໃຈໂດຍຄອບຄ່າ.'
       :language==='vi'?'Bạn cho Thongthai biết ngày, giờ và dịch vụ quan tâm sơ bộ nhé.'
       :language==='en'?'Please share the approximate date, time, and service you’re interested in.'
+      :language==='ja'?'ご希望のおおよその日付、時間、サービスを教えてください。'
+      :language==='ko'?'원하는 대략적인 날짜, 시간, 서비스를 알려 주세요.'
       :ESCALATION_NEXT_QUESTION[match.category] ?? ''
     :'';
   return composeLineShortReply([opener,delivery,next]);

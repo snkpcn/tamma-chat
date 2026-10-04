@@ -29,7 +29,7 @@ import {
   toPublicReward,
 } from './_chess-db';
 
-const LANGUAGES = ['th', 'en', 'zh', 'lo', 'vi'];
+const LANGUAGES = ['th', 'en', 'zh', 'lo', 'vi', 'ja', 'ko'];
 
 function json(statusCode: number, body: unknown) {
   return {

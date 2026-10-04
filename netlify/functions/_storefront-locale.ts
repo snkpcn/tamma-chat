@@ -8,6 +8,8 @@ export const STOREFRONT_LOCALES = Object.freeze({
   zh: Object.freeze({ localeCode:'zh', browserLocale:'zh-CN', direction:'ltr' as const }),
   lo: Object.freeze({ localeCode:'lo', browserLocale:'lo-LA', direction:'ltr' as const }),
   vi: Object.freeze({ localeCode:'vi', browserLocale:'vi-VN', direction:'ltr' as const }),
+  ja: Object.freeze({ localeCode:'ja', browserLocale:'ja-JP', direction:'ltr' as const }),
+  ko: Object.freeze({ localeCode:'ko', browserLocale:'ko-KR', direction:'ltr' as const }),
 });
 
 export type StorefrontLanguage = keyof typeof STOREFRONT_LOCALES;

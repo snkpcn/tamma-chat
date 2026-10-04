@@ -177,7 +177,7 @@ export type {
   JourneyContext,
 } from './_thongthai-brain-v3';
 
-const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi']);
+const LANGUAGES = new Set(['th', 'en', 'zh', 'lo', 'vi', 'ja', 'ko']);
 const THONGTHAI_PRIORITY_WORLDWIDE_READ_RE =
   /(?:ค่าส่ง|ค่าจัดส่ง|ส่งต่างประเทศ|จัดส่งต่างประเทศ|สกุลเงิน|ค่าเงิน|ศุลกากร|ภาษีนำเข้า|เลขพัสดุ|ติดตามพัสดุ|สถานะพัสดุ|(?:OTOP|โอทอป|สินค้า|ของฝาก).{0,30}(?:ส่ง|จัดส่ง).{0,30}(?:ไป|ต่างประเทศ)|international shipping|shipping cost|customs|import tax|currency|tracking)/iu;
 const RESTAURANT_SET_ACCEPT_RE = /(เอา(?:ชุด|เซ็ต)นี้|เอาชุดเมื่อกี้|ชุดเมื่อกี้|เอาตามนี้|ตามนี้|โอเค(?:ชุด|เซ็ต)นี้|ตกลง(?:ชุด|เซ็ต)นี้|จัด(?:ชุด|เซ็ต)นี้|ชุดนี้เลย)/u;
@@ -855,6 +855,8 @@ function duplicateRestaurantPreorderMessage(
       zh: `这笔预订单已经存在 ✅\n系统没有重复创建订单。\n原订单号：${code}\n状态：等待餐厅接单。`,
       lo: `ລາຍການນີ້ມີຢູ່ແລ້ວ ✅\nລະບົບບໍ່ໄດ້ສ້າງອໍເດີຊ້ຳ\nລະຫັດເດີມ: ${code}\nສະຖານະ: ລໍຖ້າຮ້ານຮັບອໍເດີ`,
       vi: `Đơn đặt trước này đã tồn tại ✅\nHệ thống không tạo đơn trùng.\nMã cũ: ${code}\nTrạng thái: đang chờ nhà hàng nhận đơn.`,
+      ja: `この事前注文はすでに登録されています ✅\n重複注文は作成されていません。\n既存の注文番号：${code}\n状況：レストランの受付待ちです。`,
+      ko: `이 사전 주문은 이미 등록되어 있습니다 ✅\n중복 주문은 생성하지 않았습니다.\n기존 주문 번호: ${code}\n상태: 레스토랑 접수 대기 중입니다.`,
     };
     return messages[language];
   } catch {

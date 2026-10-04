@@ -29,7 +29,7 @@ export interface JourneyContext {
 export interface BrainRequest {
   guestId?: string;
   message: string;
-  language: 'th' | 'en' | 'zh' | 'lo' | 'vi';
+  language: 'th' | 'en' | 'zh' | 'lo' | 'vi' | 'ja' | 'ko';
   chatHistory: ChatTurn[];
   guestContext: GuestContext;
   journeyContext: JourneyContext;
