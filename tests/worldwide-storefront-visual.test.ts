@@ -44,6 +44,8 @@ test('OTOP storefront visibly exposes destination, currency and global commerce 
   assert.match(html,/id="globalCommerce"/);
   assert.match(html,/id="detailMarket"/);
   assert.match(html,/id="internationalPreviewView"/);
+  assert.match(html,/\$\('closeDrawer'\)\.textContent='×';[\s\S]*setAttribute\('aria-label',tr\('close'\)\)/);
+  assert.match(html,/\.sheetHead \.close\{[^}]*white-space:nowrap/);
   assert.match(html,/assets\/styles\/worldwide-storefront\.css/);
   assert.match(html,/assets\/scripts\/worldwide-storefront\.js/);
 });
