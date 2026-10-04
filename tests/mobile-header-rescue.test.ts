@@ -32,4 +32,6 @@ test('mobile map heading remains readable at the 320px floor', () => {
 test('a fresh HTML deploy cannot be paired with stale responsive CSS', () => {
   assert.match(headers, /\/assets\/styles\/\*\n\s+Cache-Control: no-cache, max-age=0, must-revalidate/);
   assert.doesNotMatch(headers, /\/assets\/styles\/\*[\s\S]{0,120}stale-while-revalidate/);
+  assert.match(mapHtml, /otop-map\.css\?v=20261004-mobile-rescue/);
+  assert.match(mapHtml, /site-visual-system\.css\?v=20261004-mobile-rescue/);
 });

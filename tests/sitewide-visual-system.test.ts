@@ -5,6 +5,7 @@ import test from 'node:test';
 
 const root = join(import.meta.dirname, '..');
 const visualStylesheet = 'assets/styles/site-visual-system.css';
+const visualStylesheetHref = `${visualStylesheet}?v=20261004-mobile-rescue`;
 const pages = [
   ['otop-map.html', 'site-page--map'],
   ['otop.html', 'site-page--store'],
@@ -23,14 +24,14 @@ test('every public surface loads the final visual system last', () => {
     const stylesheets = [...html.matchAll(/<link\s+rel="stylesheet"\s+href="([^"]+)"/g)]
       .map((match) => match[1]);
 
-    assert.equal(stylesheets.at(-1), visualStylesheet, `${page} must load the visual system last`);
+    assert.equal(stylesheets.at(-1), visualStylesheetHref, `${page} must load the visual system last`);
     assert.match(html, new RegExp(`<body[^>]*class="[^"]*site-page[^"]*${pageClass}`));
   }
 
   const home = source('index.html');
   const homeStylesheets = [...home.matchAll(/<link\s+rel="stylesheet"\s+href="([^"]+)"/g)]
     .map((match) => match[1]);
-  assert.equal(homeStylesheets.at(-1), 'assets/styles/pre-worldwide-production.css');
+  assert.equal(homeStylesheets.at(-1), 'assets/styles/pre-worldwide-production.css?v=20261004-mobile-rescue');
   const homeCss = source('assets/styles/pre-worldwide-production.css');
   assert.match(homeCss, /SITEWIDE HOME VISUAL AUDIT/);
   assert.match(homeCss, /\.hotspot-card\s*>\s*a/);
