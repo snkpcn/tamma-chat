@@ -1,0 +1,454 @@
+/* Global storefront visual layer.
+ * Foreign markets are visible and destination-aware, but remain fail-closed
+ * until the WW-12 certification endpoint reports every launch gate live.
+ */
+
+.marketPicker {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 112px;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.marketPicker svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+
+.marketPickerText {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .035em;
+  white-space: nowrap;
+}
+
+.marketPicker select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.marketPicker:focus-within {
+  outline: 3px solid rgba(185,130,49,.38);
+  outline-offset: 2px;
+}
+
+.top.is-over-hero .marketPicker {
+  border-color: rgba(255,255,255,.34);
+  background: rgba(20,13,9,.22);
+  color: #fff;
+}
+
+.globalCommerce {
+  position: relative;
+  margin: 0 0 54px;
+  overflow: hidden;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 92% 8%, rgba(190,137,59,.19), transparent 34%),
+    linear-gradient(135deg, #23150e 0%, #382116 100%);
+  color: #fff;
+  box-shadow: 0 24px 62px rgba(43,27,17,.17);
+}
+
+.globalCommerceHead {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 28px;
+  align-items: end;
+  padding: 34px 36px 30px;
+}
+
+.globalCommerceOverline {
+  margin: 0 0 10px;
+  color: rgba(255,255,255,.58);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .17em;
+  text-transform: uppercase;
+}
+
+.globalCommerce h2 {
+  max-width: 720px;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(29px,4vw,48px);
+  font-weight: 500;
+  line-height: 1.18;
+}
+
+.globalCommerceLead {
+  max-width: 680px;
+  margin: 13px 0 0;
+  color: rgba(255,255,255,.7);
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.globalRoute {
+  min-width: 240px;
+  display: grid;
+  gap: 9px;
+  justify-items: end;
+}
+
+.globalRouteLine {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  color: rgba(255,255,255,.74);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.globalCountryCode {
+  display: inline-grid;
+  place-items: center;
+  min-width: 38px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 999px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+.globalStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.88);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.globalStatus::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d5a65d;
+  box-shadow: 0 0 0 4px rgba(213,166,93,.12);
+}
+
+.globalStatus.is-live::before {
+  background: #82b777;
+  box-shadow: 0 0 0 4px rgba(130,183,119,.13);
+}
+
+.globalCapabilities {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  border-top: 1px solid rgba(255,255,255,.12);
+}
+
+.globalCapability {
+  min-width: 0;
+  padding: 22px 24px 24px;
+}
+
+.globalCapability + .globalCapability {
+  border-left: 1px solid rgba(255,255,255,.12);
+}
+
+.globalCapabilityLabel {
+  display: block;
+  color: rgba(255,255,255,.48);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.globalCapabilityValue {
+  display: block;
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.globalCapabilityNote {
+  display: block;
+  margin-top: 5px;
+  color: rgba(255,255,255,.56);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.globalCertificationSource {
+  margin: 0;
+  padding: 10px 24px 12px;
+  border-top: 1px solid rgba(255,255,255,.08);
+  color: rgba(255,255,255,.38);
+  font-size: 9px;
+  letter-spacing: .04em;
+  text-align: right;
+}
+
+.marketAvailability {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  color: var(--brown);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.marketAvailability::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: #b98231;
+}
+
+.marketAvailability.is-live::before {
+  background: #6c865b;
+}
+
+.detailMarket {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: -5px 0 22px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(238,227,207,.48);
+  color: var(--brown);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.detailMarketCode {
+  flex: none;
+  min-width: 34px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--brown);
+  color: #fff;
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.internationalCheckout {
+  padding-bottom: 12px;
+}
+
+.internationalRoute {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 15px 0 18px;
+  padding: 14px;
+  border-radius: 15px;
+  background: var(--soft);
+  color: var(--brown);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.internationalRoute .globalCountryCode {
+  border-color: rgba(123,63,35,.26);
+  color: var(--brown);
+}
+
+.checkoutJourney {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  overflow: hidden;
+}
+
+.checkoutJourneyItem {
+  display: grid;
+  grid-template-columns: 34px minmax(0,1fr);
+  gap: 12px;
+  padding: 15px;
+  background: #fffdf8;
+}
+
+.checkoutJourneyItem + .checkoutJourneyItem {
+  border-top: 1px solid var(--line);
+}
+
+.checkoutJourneyNumber {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--brown);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.checkoutJourneyItem strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.checkoutJourneyItem p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.certificationNotice {
+  margin: 18px 0 14px;
+  padding: 16px;
+  border: 1px solid rgba(155,99,45,.2);
+  border-radius: 16px;
+  background: #f5ead8;
+  color: #6a3f25;
+}
+
+.certificationNotice strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.certificationNotice p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.lockedCheckout {
+  min-height: 51px;
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  background: #d8c9b6;
+  color: #7f6b5c;
+  font-weight: 700;
+  cursor: not-allowed;
+}
+
+.steps.is-global {
+  overflow-x: auto;
+  padding-bottom: 5px;
+  scrollbar-width: none;
+}
+
+.steps.is-global::-webkit-scrollbar { display: none; }
+.steps.is-global span { flex: none; }
+
+@media (max-width: 1120px) {
+  .site-page--store .searchField { display: none; }
+}
+
+@media (max-width: 920px) {
+  .site-page--store .provinceField { display: none; }
+  .globalCapabilities { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .globalCapability:nth-child(3) { border-left: 0; }
+  .globalCapability:nth-child(n+3) { border-top: 1px solid rgba(255,255,255,.12); }
+}
+
+@media (max-width: 680px) {
+  .site-page--store .top .nav {
+    flex-wrap: nowrap !important;
+    gap: 7px;
+  }
+
+  .site-page--store .top .logo img { width: 92px; }
+  .site-page--store .top .tools { gap: 5px; }
+
+  .marketPicker {
+    min-width: 76px;
+    min-height: 38px;
+    padding: 0 8px;
+    gap: 5px;
+  }
+
+  .marketPicker svg { width: 14px; height: 14px; }
+  .marketPickerText { font-size: 9px; letter-spacing: .02em; }
+
+  .site-page--store .site-lang-picker select {
+    width: 52px;
+    max-width: 52px;
+    padding-inline: 8px 18px;
+  }
+
+  .site-page--store .top .cartBtn {
+    min-width: 48px;
+    padding-inline: 8px;
+  }
+
+  .globalCommerce {
+    margin-bottom: 42px;
+    border-radius: 22px;
+  }
+
+  .globalCommerceHead {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    align-items: start;
+    padding: 25px 20px 22px;
+  }
+
+  .globalCommerce h2 { font-size: 30px; }
+  .globalCommerceLead { font-size: 12px; }
+
+  .globalRoute {
+    min-width: 0;
+    width: 100%;
+    justify-items: start;
+  }
+
+  .globalRouteLine { justify-content: flex-start; }
+
+  .globalCapabilities { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .globalCapability { padding: 17px 16px 18px; }
+  .globalCapabilityValue { font-size: 13px; }
+  .globalCapabilityNote { font-size: 9px; }
+  .globalCertificationSource { padding-inline: 16px; text-align: left; }
+
+  .marketAvailability { font-size: 10px; }
+  .detailMarket { margin-bottom: 18px; }
+
+  .drawer .steps.is-global {
+    margin-inline: -2px;
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 390px) {
+  .site-page--store .top .logo img { width: 84px; }
+  .marketPicker { min-width: 70px; padding-inline: 6px; }
+  .site-page--store .top .cartBtn { padding-inline: 7px; font-size: 11px; }
+  .site-page--store .top .cartBtn span { min-width: 20px; height: 20px; margin-left: 3px; }
+}
