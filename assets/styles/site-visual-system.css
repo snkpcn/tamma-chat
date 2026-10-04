@@ -285,10 +285,6 @@ body.site-page {
   align-items: center;
 }
 
-.site-page--store .top .tools > * {
-  flex: 0 0 auto;
-}
-
 .site-page--store .marketPicker {
   min-height: var(--site-control);
   padding-inline-end: 30px;
@@ -623,6 +619,12 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
 
 /* ---------- MOBILE ---------- */
 
+@media (max-width: 1280px) {
+  .site-page--store .searchField {
+    display: none;
+  }
+}
+
 @media (max-width: 680px) {
   :root {
     --site-gutter: 20px;
@@ -769,6 +771,10 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
     gap: 6px;
   }
 
+  .site-page--store .top .tools > * {
+    flex: 0 0 auto;
+  }
+
   .site-page--store .marketPicker {
     width: 84px;
     min-width: 84px;
@@ -794,6 +800,7 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
   .site-page--store .top .site-lang-picker,
   .site-page--store .top .site-lang-picker select {
     width: 72px;
+    min-width: 72px;
     max-width: 72px;
     min-height: var(--site-control);
   }

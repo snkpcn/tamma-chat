@@ -6,6 +6,7 @@ import test from 'node:test';
 const root = join(import.meta.dirname, '..');
 const html = readFileSync(join(root, 'otop.html'), 'utf8');
 const visual = readFileSync(join(root, 'assets/styles/site-visual-system.css'), 'utf8');
+const firstWave = readFileSync(join(root, 'assets/scripts/first-wave-language-packs.js'), 'utf8');
 
 test('language and market pickers render one deliberate chevron', () => {
   assert.match(visual, /\.site-page \.site-lang-picker select\s*\{[^}]*-webkit-appearance:\s*none[^}]*appearance:\s*none[^}]*background-image:\s*none/s);
@@ -24,6 +25,14 @@ test('mobile storefront header stays a single aligned control row', () => {
   // two 5px tool gaps + two 10px gutters = 311px at the 320px floor.
   assert.ok(72 + 5 + 78 + 72 + 54 + (2 * 5) + (2 * 10) <= 320);
   assert.doesNotMatch(html, /@media\(max-width:390px\)\{\.tools\{grid-template-columns:[^}]+\}\.cartBtn\{[^}]*width:100%/);
+});
+
+test('long locales cannot force desktop controls through the brand', () => {
+  const beforeMobile = visual.slice(0, visual.indexOf('@media (max-width: 680px)'));
+  assert.doesNotMatch(beforeMobile, /\.site-page--store \.top \.tools > \*\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(visual, /@media \(max-width: 680px\)[\s\S]*?\.site-page--store \.top \.tools > \*\s*\{[^}]*flex:\s*0 0 auto/s);
+  assert.match(visual, /@media \(max-width: 1280px\)[\s\S]*?\.site-page--store \.searchField\s*\{[^}]*display:\s*none/s);
+  assert.match(firstWave, /Object\.assign\(packs\.otop\.ja,\s*\{[^}]*shop_account:'アカウント'[^}]*shop_cart:'カート'/s);
 });
 
 test('mobile hero and commerce actions share intentional tap geometry', () => {
