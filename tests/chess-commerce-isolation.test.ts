@@ -27,10 +27,32 @@ test('account links to the standalone game without a chess commerce client', () 
 
 test('homepage chess entry is recreational and has no commerce promise', () => {
   const home = read('index.html');
+  const languagePacks = read('assets/scripts/first-wave-language-packs.js');
   const chessSection = home.match(/<section class="section-pad" id="chess-challenge">[\s\S]*?<\/section>/u)?.[0] ?? '';
   assert.ok(chessSection, 'homepage should retain the chess entry point');
   assert.match(chessSection, /href="chess\.html"/u);
   assert.doesNotMatch(chessSection, /winner\s*pass|otop|discount|coupon|reward|ส่วนลด|คูปอง|รางวัล/iu);
+
+  const chessTranslationLines = [...home.matchAll(/^.*chess_card_(?:eyebrow|heading|sub|cta).*$/gmu),
+    ...languagePacks.matchAll(/^.*chess_card_(?:eyebrow|heading|sub|cta).*$/gmu)]
+    .map((match) => match[0])
+    .join('\n');
+  assert.ok(chessTranslationLines, 'translated chess card copy should be present');
+  assert.doesNotMatch(
+    chessTranslationLines,
+    /winner\s*pass|otop|discount|coupon|reward|privilege|ส่วนลด|คูปอง|รางวัล|สิทธิ์|奖励|优惠|折扣|クーポン|割引|特典|報酬|쿠폰|할인|혜택|보상/iu,
+    'no supported language may advertise commerce through chess',
+  );
+
+  const journeyRewardLines = [...home.matchAll(/^.*flow_s5_d.*$/gmu),
+    ...languagePacks.matchAll(/^.*flow_s5_d.*$/gmu)]
+    .map((match) => match[0])
+    .join('\n');
+  assert.doesNotMatch(
+    journeyRewardLines,
+    /เล่นหมากรุก|chess|ทองไทย|thongthai|象棋|国际象棋|チェス|통타이|체스/iu,
+    'journey privileges must never be earned through chess or Thongthai',
+  );
 
   const buildTransform = read('scripts/apply-isan-boutique-phase1.mjs');
   const generatedSection = buildTransform.match(/const chessSection = `([\s\S]*?)`;/u)?.[1] ?? '';
