@@ -65,15 +65,7 @@
     return localizedProvinceStory(province).description;
   }
   function applyPageMeta() {
-    const lang = i18n()?.lang() || 'th';
-    const titles = {
-      th:'แผนที่ของดีอีสาน — ทำมา-ชาติ OTOP',
-      en:'Isan OTOP Map — Thammachat',
-      zh:'伊森 OTOP 地图 — Thammachat',
-      lo:'ແຜນທີ່ OTOP ອີສານ — Thammachat',
-      vi:'Bản đồ OTOP Isan — Thammachat'
-    };
-    document.title = titles[lang] || titles.th;
+    document.title = tr('map_page_title');
     const metaDescription = document.querySelector('meta[name="description"]');
     if (metaDescription) metaDescription.content = tr('map_meta_desc');
   }
