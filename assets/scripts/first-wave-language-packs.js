@@ -2253,7 +2253,8 @@
     visit_ask_thongthai:'주변 명소를 ทองไทย에게 묻기', nearby_cat_temple:'사원',
   });
   Object.assign(packs.otop.ja, {
-    brand_name:'Thammachat', close:'閉じる', free:'無料', payment_due:'お支払い金額',
+    brand_name:'Thammachat', shop_account:'アカウント', shop_cart:'カート',
+    close:'閉じる', free:'無料', payment_due:'お支払い金額',
     place_order:'注文を確定する', back_cart:'カートに戻る',
     qty_decrease:'数量を減らす', qty_increase:'数量を増やす',
     sort_featured:'おすすめ順', sort_low_high:'価格：安い順', sort_high_low:'価格：高い順',
