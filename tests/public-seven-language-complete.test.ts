@@ -87,6 +87,53 @@ test('first-wave translations are native-script content with matching keys and i
   assert.ok(koLeaves.filter(value=>korean.test(value)).length/koLeaves.length>0.95,'Korean pack has too much fallback copy');
 });
 
+test('first-wave packs contain no leaked translation tokens and preserve critical terminology', () => {
+  const allText=Object.values(packs).flatMap(section=>[
+    ...leaves(section.ja), ...leaves(section.ko),
+  ]).join('\n');
+  assert.doesNotMatch(packSource,/ZX[A-Z0-9_]+|ღ|♥|�/u);
+  assert.doesNotMatch(allText,/ZX[A-Z0-9_]+|ღ|♥|�/u);
+
+  assert.equal(packs.home.ja.thongthai_alt,'ทองไทย');
+  assert.equal(packs.home.ko.thongthai_alt,'ทองไทย');
+  assert.equal(packs.home.ja.opt_who_friends,'友人と');
+  assert.equal(packs.home.ja.opt_mood_nature,'自然');
+  assert.equal(packs.home.ja.flow_s6_t,'また訪れる');
+  assert.equal(packs.home.ja.hotspot_stay_title,'Thammachat Huenstay');
+  assert.equal(packs.home.ko.time_part_evening,'저녁');
+  assert.equal(packs.account.ja.shipping_returned,'返送済み');
+  assert.equal(packs.chess.ja.hint,'ヒント');
+  assert.equal(packs.chess.ja.winner_pass_title,'Winner Pass');
+  assert.equal(packs.chess.ko.winner_pass_title,'Winner Pass');
+  assert.equal(packs.otop.ja.free,'無料');
+  assert.equal(packs.otop.ko.free,'무료');
+  assert.equal(packs.menuIngredients.ja['ไข่ไก่'],'鶏卵');
+  assert.equal(packs.menuIngredients.ko['ไข่ไก่'],'달걀');
+  assert.equal(packs.menuNames.ko['ข้าวเหนียว'],'찹쌀밥');
+
+  const canonicalProvinceNames=[
+    'Chaiyaphum','Khon Kaen','Buriram','Surin','Sisaket','Nakhon Ratchasima',
+    'Roi Et','Maha Sarakham','Kalasin','Sakon Nakhon','Nakhon Phanom','Mukdahan',
+    'Yasothon','Amnat Charoen','Ubon Ratchathani','Udon Thani','Nong Khai',
+    'Bueng Kan','Loei','Nong Bua Lamphu',
+  ];
+  assert.deepEqual(Object.values(packs.provinceNames.ja),canonicalProvinceNames);
+  assert.deepEqual(Object.values(packs.provinceNames.ko),canonicalProvinceNames);
+  for(const language of ['ja','ko'] as const){
+    for(const product of Object.values(packs.products[language]) as Array<Record<string,string>>){
+      if(product.originPlace==='Chaiyaphum') assert.equal(product.originPlace,'Chaiyaphum');
+    }
+  }
+});
+
+test('home interpolation passes variables into the locale kernel before rendering', () => {
+  const home=read('index.html');
+  assert.match(home,/function t\(key, vars=\{\}\)/u);
+  assert.match(home,/translate\(TRANSLATIONS,key,vars,currentLang\)/u);
+  assert.match(home,/t\('nearby_distance',\{km:p\.distanceKm\.toFixed\(1\)\}\)/u);
+  assert.doesNotMatch(home,/t\('[^']+'\)\.replace\('\{/u);
+});
+
 test('Thongthai accepts ja/ko everywhere and final egress removes Thai surface leakage', () => {
   for(const source of [
     read('netlify/functions/_thongthai-brain.ts'),

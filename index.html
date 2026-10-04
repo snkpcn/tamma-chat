@@ -2963,11 +2963,16 @@ async function langStorageSet(lang){
   }catch(e){ /* kept in-memory only for this session */ }
 }
 
-function t(key){
-  if(window.ThammachatLocale)return window.ThammachatLocale.translate(TRANSLATIONS,key,{},currentLang);
+function t(key, vars={}){
+  if(window.ThammachatLocale)return window.ThammachatLocale.translate(TRANSLATIONS,key,vars,currentLang);
   const chain=currentLang==='th'?['th']:(currentLang==='en'?['en']:[currentLang,'en']);
   for(const lang of chain){
-    if(TRANSLATIONS[lang]?.[key]!==undefined)return TRANSLATIONS[lang][key];
+    if(TRANSLATIONS[lang]?.[key]!==undefined){
+      return Object.entries(vars).reduce(
+        (text,[name,value])=>text.replaceAll(`{${name}}`,String(value)),
+        TRANSLATIONS[lang][key],
+      );
+    }
   }
   return key;
 }
@@ -3405,7 +3410,7 @@ function renderNearbyGrid(){
       <span class="nearby-rating"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>${p.rating} · ${p.reviewCount.toLocaleString()} ${t('nearby_reviews_label')}</span>
       <p class="nearby-note">${t(p.noteKey)}</p>
       <div class="nearby-card-foot">
-        <span class="nearby-distance">${p.distanceKm < 0.3 ? t('nearby_here') : t('nearby_distance').replace('{km}', p.distanceKm.toFixed(1))}</span>
+        <span class="nearby-distance">${p.distanceKm < 0.3 ? t('nearby_here') : t('nearby_distance',{km:p.distanceKm.toFixed(1)})}</span>
         <a class="nearby-maps-link" href="https://www.google.com/maps/place/?q=place_id:${p.placeId}" target="_blank" rel="noopener">${t('visit_open_maps_short')} →</a>
       </div>
     </div>
@@ -3464,7 +3469,7 @@ function renderRewards(state){
   });
   const headline = qs('#rewardsHeadline');
   if(unlockedCount===0) headline.textContent = t('rewards_headline_zero');
-  else if(unlockedCount < REWARD_DEFS.length) headline.textContent = t('rewards_headline_progress').replace('{n}', unlockedCount).replace('{total}', REWARD_DEFS.length);
+  else if(unlockedCount < REWARD_DEFS.length) headline.textContent = t('rewards_headline_progress',{n:unlockedCount,total:REWARD_DEFS.length});
   else headline.textContent = t('rewards_headline_complete');
 }
 
@@ -3677,7 +3682,7 @@ function planDescription(time, who, mood){
   let extra = '';
   if(who==='family') extra += t('plan_desc_family_extra');
   if(mood==='rest') extra += t('plan_desc_rest_extra');
-  return t('plan_desc_tpl').replace('{time}', timeText).replace('{who}', whoText).replace('{extra}', extra);
+  return t('plan_desc_tpl',{time:timeText,who:whoText,extra});
 }
 
 const MULTI_DAY_NIGHTS = { '2d1n': 1, '3d2n': 2 };
@@ -3723,7 +3728,7 @@ function renderAIJourney(journey){
   qs('#prFlow').innerHTML = '';
   qs('#prDays').innerHTML = journey.days.map(d => `
     <div class="pr-day">
-      <div class="pr-day-theme">${t('plan_day_label').replace('{n}', d.day)}${d.theme ? ' — ' + escapeHtml(d.theme) : ''}</div>
+      <div class="pr-day-theme">${t('plan_day_label',{n:d.day})}${d.theme ? ' — ' + escapeHtml(d.theme) : ''}</div>
       ${(d.stops||[]).map(s => `
         <div class="pr-day-stop">
           <div class="pr-day-time">${escapeHtml(s.time || '')}</div>
@@ -4361,7 +4366,7 @@ const ConciergeProvider = (function(){
     // intent matching since "อีก 2 ชั่วโมงกี่โมง" isn't really a fixed phrase.
     if(relMins !== null){
       const future = new Date(now.getTime() + relMins*60000);
-      return { text: t('concierge_relative_time').replace('{time}', formatDestinationTime(future)), pose:'default' };
+      return { text: t('concierge_relative_time',{time:formatDestinationTime(future)}), pose:'default' };
     }
 
     // §19/§20 change-of-mind — "ไม่เอา Outdoor แล้ว" / "เอากินแทน" edit the
@@ -4380,13 +4385,13 @@ const ConciergeProvider = (function(){
       const stops = buildJourney(prefs);
       c.lastJourneyStops = stops;
       const key = stopEdit.action === 'remove' ? 'concierge_stop_removed' : 'concierge_stop_added';
-      return { text: t(key).replace('{stop}', stopLbl(stopEdit.stopId)), pose:'thinking', flow: stops.map(stopLbl), offerSave:true };
+      return { text: t(key,{stop:stopLbl(stopEdit.stopId)}), pose:'thinking', flow: stops.map(stopLbl), offerSave:true };
     }
 
     const intent = detectIntent(text);
     switch(intent){
       case 'time_now': {
-        const msg = t('concierge_time_now').replace('{time}', formatDestinationTime(now));
+        const msg = t('concierge_time_now',{time:formatDestinationTime(now)});
         // §14 Time-aware Journey reasoning: if a duration was also mentioned
         // in this message ("ตอนนี้กี่โมง แล้วมีอีก 3 ชั่วโมง..."), don't just
         // answer the clock question — use it to build a real recommendation.
@@ -4398,9 +4403,9 @@ const ConciergeProvider = (function(){
         return { text: msg, pose:'default' };
       }
       case 'date_today':
-        return { text: t('concierge_date_today').replace('{date}', formatDestinationDate(now)), pose:'default' };
+        return { text: t('concierge_date_today',{date:formatDestinationDate(now)}), pose:'default' };
       case 'time_of_day':
-        return { text: t('concierge_time_of_day').replace('{part}', t(partOfDayKey(destinationHour(now)))), pose:'default' };
+        return { text: t('concierge_time_of_day',{part:t(partOfDayKey(destinationHour(now)))}), pose:'default' };
       case 'tired':
         c.lowEnergy = true;
         return { text:t('concierge_tired'), pose:'calm' };
@@ -4432,11 +4437,11 @@ const ConciergeProvider = (function(){
       case 'nearby_closest': {
         const list = window.nearbyWithDistance();
         const closest = list[0];
-        return { text: t('concierge_nearby_closest').replace('{name}', closest.name).replace('{km}', closest.distanceKm.toFixed(1)), pose:'guiding' };
+        return { text: t('concierge_nearby_closest',{name:closest.name,km:closest.distanceKm.toFixed(1)}), pose:'guiding' };
       }
       case 'nearby_top_rated': {
         const top = [...window.nearbyWithDistance()].sort((a,b)=> b.rating - a.rating)[0];
-        return { text: t('concierge_nearby_top_rated').replace('{name}', top.name).replace('{rating}', top.rating), pose:'guiding' };
+        return { text: t('concierge_nearby_top_rated',{name:top.name,rating:top.rating}), pose:'guiding' };
       }
       case 'nearby_discovery': {
         const category = detectNearbyCategory(text);
@@ -4445,14 +4450,14 @@ const ConciergeProvider = (function(){
         if(category && filtered.length){
           const picks = filtered.slice(0, 3);
           const names = picks.map(p=>p.name).join(', ');
-          return { text: t('concierge_nearby_category').replace('{names}', names), pose:'guiding' };
+          return { text: t('concierge_nearby_category',{names}), pose:'guiding' };
         }
         if(category && !filtered.length){
           return { text: t('concierge_nearby_category_none'), pose:'thinking' };
         }
         const picks = all.slice(0, 3);
         const names = picks.map(p=>p.name).join(', ');
-        return { text: t('concierge_nearby_discovery').replace('{names}', names), pose:'guiding' };
+        return { text: t('concierge_nearby_discovery',{names}), pose:'guiding' };
       }
       case 'weather': {
         const prefs = { duration:c.duration||'half', travelerType:c.travelerType||'solo', mood:c.mood, lowEnergy:true, excludedStops:c.excludedStops };
@@ -4470,7 +4475,7 @@ const ConciergeProvider = (function(){
       case 'returning_guest': {
         const st = window.JourneyProvider.get();
         if(st.savedPlans.length){
-          return { text:t('concierge_returning_with_history').replace('{stops}', st.savedPlans[0].stops.join(' → ')), pose:'reassuring' };
+          return { text:t('concierge_returning_with_history',{stops:st.savedPlans[0].stops.join(' → ')}), pose:'reassuring' };
         }
         return { text:t('concierge_returning_no_history'), pose:'welcome' };
       }
@@ -4479,7 +4484,7 @@ const ConciergeProvider = (function(){
       case 'rewards': {
         const unlocked = window.getUnlockedRewardNames ? window.getUnlockedRewardNames() : [];
         const msg = unlocked.length
-          ? t('concierge_rewards_some').replace('{list}', unlocked.join(', '))
+          ? t('concierge_rewards_some',{list:unlocked.join(', ')})
           : t('concierge_rewards_none');
         return { text: msg, pose:'reassuring' };
       }
@@ -4488,9 +4493,9 @@ const ConciergeProvider = (function(){
         if(calc){
           const msg = calc.fromMinutes
             ? (calc.remMinutes === 0
-                ? t('concierge_calc_to_hours_exact').replace('{h}', calc.hours)
-                : t('concierge_calc_to_hours').replace('{h}', calc.hours).replace('{m}', calc.remMinutes))
-            : t('concierge_calc_to_minutes').replace('{m}', calc.minutes);
+                ? t('concierge_calc_to_hours_exact',{h:calc.hours})
+                : t('concierge_calc_to_hours',{h:calc.hours,m:calc.remMinutes}))
+            : t('concierge_calc_to_minutes',{m:calc.minutes});
           return { text: msg, pose:'default' };
         }
         return { text:t('concierge_default'), pose:'thinking' };
@@ -4517,10 +4522,10 @@ const ConciergeProvider = (function(){
         if(c.travelerType) parts.push(t('who_'+c.travelerType));
         if(c.mood) parts.push(t('opt_mood_'+c.mood));
         if(c.lastJourneyStops && c.lastJourneyStops.length){
-          return { text: t('concierge_memory_recall').replace('{stops}', c.lastJourneyStops.map(stopLbl).join(' → ')), pose:'journal' };
+          return { text: t('concierge_memory_recall',{stops:c.lastJourneyStops.map(stopLbl).join(' → ')}), pose:'journal' };
         }
         if(parts.length){
-          return { text: t('concierge_memory_partial').replace('{parts}', parts.join(', ')), pose:'journal' };
+          return { text: t('concierge_memory_partial',{parts:parts.join(', ')}), pose:'journal' };
         }
         return { text: t('concierge_memory_empty'), pose:'thinking' };
       }
@@ -4603,9 +4608,9 @@ const ConciergeProvider = (function(){
           return { text:t('concierge_view_journey_empty'), pose:'thinking' };
         }
         const parts = [];
-        if(st.savedPlans.length) parts.push(t('concierge_view_journey_last').replace('{stops}', st.savedPlans[0].stops.join(' → ')));
-        if(st.journalEntries.length) parts.push(t('concierge_view_journey_entries').replace('{n}', st.journalEntries.length));
-        if(st.favorites.length) parts.push(t('concierge_view_journey_favs').replace('{favs}', st.favorites.join(', ')));
+        if(st.savedPlans.length) parts.push(t('concierge_view_journey_last',{stops:st.savedPlans[0].stops.join(' → ')}));
+        if(st.journalEntries.length) parts.push(t('concierge_view_journey_entries',{n:st.journalEntries.length}));
+        if(st.favorites.length) parts.push(t('concierge_view_journey_favs',{favs:st.favorites.join(', ')}));
         return { text: parts.join(' • '), pose:'journal' };
       }
       default: {
