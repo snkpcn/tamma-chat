@@ -12,18 +12,19 @@
 .account-tools{display:flex;align-items:center;gap:10px}.account-lang{width:auto;min-width:78px;border:1px solid rgba(216,203,181,.35);background:rgba(255,255,255,.08);color:#f4eee2;border-radius:999px;padding:9px 28px 9px 12px;font-size:12px}.account-lang option{color:#201d18;background:#fffdf8}@media(max-width:520px){.account-tools{gap:6px}.account-lang{min-width:68px;padding-left:9px}.back{font-size:12px}}
 </style>
 <link rel="stylesheet" href="assets/styles/site-typography.css">
+<link rel="stylesheet" href="assets/styles/site-visual-system.css">
 <script src="assets/scripts/global-locale.js"></script>
 <script src="assets/scripts/first-wave-language-packs.js"></script>
 </head>
-<body>
+<body class="site-page site-page--account">
 <main class="shell">
-  <div class="brand"><div class="logo"><img src="assets/brand/logos/tamma-chat-logo.svg" width="1051" height="404" alt="Thammachat"></div><div class="account-tools"><select id="accountLanguage" class="account-lang" data-account-lang-select aria-label="Language"><option value="th">TH</option><option value="en">EN</option><option value="zh">中文</option><option value="lo">ລາວ</option><option value="vi">VI</option><option value="ja">日本語</option><option value="ko">한국어</option></select><a class="back" href="/" data-account-i18n="back_web">กลับหน้าเว็บ</a></div></div>
+  <div class="brand"><div class="logo"><img src="assets/brand/logos/tamma-chat-logo.svg" width="1051" height="404" alt="Thammachat"></div><div class="account-tools"><select id="accountLanguage" class="account-lang" data-account-lang-select aria-label="Language"><option value="th">TH</option><option value="en">EN</option><option value="zh">中文</option><option value="lo">ລາວ</option><option value="vi">VI</option><option value="ja">日本語</option><option value="ko">한국어</option></select><a class="back" href="/"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-account-i18n="back_web">กลับหน้าเว็บ</span></a></div></div>
   <section class="hero"><div class="eyebrow" data-account-i18n="member_eyebrow">สมาชิกทำมา-ชาติ</div><h1 data-account-i18n="account_title">บัญชีของฉัน</h1><p data-account-i18n="hero_desc">ดูข้อมูลสมาชิก แผนเที่ยว คำสั่งซื้อ และเรื่องที่ทีมทำมา-ชาติต้องติดตามได้ในหน้าเดียว โดยเชื่อมกับรหัสสมาชิกเดิม</p></section>
 
-  <section id="play-chess" class="panel">
-    <div class="section-title"><h2 data-account-i18n="chess_title">เล่นหมากรุกกับทองไทย</h2></div>
-    <p class="muted" data-account-i18n="chess_desc">เกมฝึกความคิดเพื่อความสนุกกับทองไทย</p>
-    <div style="margin-top:10px"><a href="chess.html" class="secondary" style="display:inline-block;text-decoration:none;padding:11px 16px;border-radius:14px;font-weight:800;font-size:13px" data-account-i18n="play_chess">เล่นหมากรุกกับทองไทย</a></div>
+  <section id="play-chess" class="panel account-feature-card">
+    <div class="account-feature-icon" aria-hidden="true"><img src="assets/thongthai/thongthai-wai.webp" width="512" height="512" alt=""></div>
+    <div class="account-feature-copy"><div class="section-title"><h2 data-account-i18n="chess_title">เล่นหมากรุกกับทองไทย</h2></div><p class="muted" data-account-i18n="chess_desc">เกมฝึกความคิดเพื่อความสนุกกับทองไทย</p></div>
+    <a href="chess.html" class="secondary account-feature-action"><span data-account-i18n="play_chess">เล่นหมากรุกกับทองไทย</span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
   </section>
 
   <section id="authPanel" class="panel">

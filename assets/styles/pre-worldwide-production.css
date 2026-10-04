@@ -11,6 +11,230 @@
   --otop-card-gap: 28px;
 }
 
+/* SITEWIDE HOME VISUAL AUDIT
+ * Keep this final because index.html is the large production shell and this
+ * stylesheet already owns its last-cascade worldwide polish layer.
+ */
+html.isan-boutique {
+  --site-control: 44px;
+  --site-control-compact: 40px;
+  --site-icon: 20px;
+  --site-focus: #c29a5b;
+  --site-focus-ring: 0 0 0 4px rgba(194, 154, 91, .24);
+  width: 100%;
+  max-width: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html.isan-boutique body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+  text-rendering: optimizeLegibility;
+}
+
+html.isan-boutique :where(button, input, select, textarea, a) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.isan-boutique :where(button, a, select, input, textarea):focus-visible {
+  outline: 2px solid var(--site-focus) !important;
+  outline-offset: 3px;
+  box-shadow: var(--site-focus-ring);
+}
+
+html.isan-boutique :where(svg[aria-hidden="true"], button svg, a svg) {
+  pointer-events: none;
+}
+
+html.isan-boutique .header-inner {
+  min-height: 76px;
+  gap: clamp(16px, 2vw, 30px);
+}
+
+html.isan-boutique .main-nav {
+  align-items: center;
+  gap: clamp(2px, .7vw, 10px);
+}
+
+html.isan-boutique .main-nav a {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 clamp(7px, .8vw, 12px);
+  border-radius: 999px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+html.isan-boutique .main-nav a:hover,
+html.isan-boutique .main-nav a:focus-visible {
+  background: rgba(255, 255, 255, .08);
+}
+
+html.isan-boutique :where(.header-actions, .hero-actions, .community-map-actions, .planner-actions) {
+  align-items: center;
+}
+
+html.isan-boutique :where(.lang-toggle, .menu-btn, .mobile-nav-close, .chat-close) {
+  min-width: var(--site-control);
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+html.isan-boutique :where(.lang-toggle, .menu-btn, .mobile-nav-close, .chat-close) svg {
+  width: var(--site-icon);
+  height: var(--site-icon);
+}
+
+html.isan-boutique :where(.btn, .p-opt, .j-tab, .qchip) {
+  min-height: var(--site-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.35;
+}
+
+html.isan-boutique :where(.planner-options, .chip-row, .journal-tabs) {
+  align-items: stretch;
+}
+
+html.isan-boutique .hotspot-dot {
+  width: var(--site-control);
+  height: var(--site-control);
+  display: grid;
+  place-items: center;
+}
+
+html.isan-boutique .hotspot-dot svg {
+  width: 19px;
+  height: 19px;
+}
+
+html.isan-boutique .jf-icon-wrap {
+  width: 54px;
+  min-width: 54px;
+}
+
+html.isan-boutique .jf-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+}
+
+html.isan-boutique .jf-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+html.isan-boutique .jf-text h4 {
+  min-height: 1.5em;
+  display: flex;
+  align-items: center;
+}
+
+html.isan-boutique .footer-col a {
+  min-height: var(--site-control-compact);
+  display: inline-flex;
+  align-items: center;
+}
+
+html.isan-boutique .footer-socials {
+  gap: 8px;
+}
+
+html.isan-boutique .footer-socials a {
+  width: var(--site-control);
+  height: var(--site-control);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+html.isan-boutique .footer-socials svg {
+  width: 18px;
+  height: 18px;
+}
+
+html.isan-boutique .concierge-fab {
+  min-height: 54px;
+  padding: 6px 16px 6px 6px;
+  gap: 10px;
+}
+
+html.isan-boutique :where(.chat-send, .chat-close) {
+  width: var(--site-control);
+  height: var(--site-control);
+}
+
+html.isan-boutique .chat-input-row {
+  align-items: center;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+html.isan-boutique .mobile-nav:not(.is-open) {
+  visibility: hidden;
+}
+
+html.isan-boutique .mobile-nav.is-open {
+  visibility: visible;
+}
+
+@media (max-width: 680px) {
+  html.isan-boutique .header-inner {
+    min-height: 64px;
+    gap: 10px;
+  }
+
+  html.isan-boutique :where(.hero-actions, .planner-actions) {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  html.isan-boutique :where(.hero-actions, .planner-actions) .btn {
+    width: 100%;
+  }
+
+  html.isan-boutique .mobile-nav-panel {
+    width: min(340px, 90vw);
+  }
+
+  html.isan-boutique .mobile-nav-links a {
+    min-height: 52px;
+  }
+
+  html.isan-boutique .journal-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  html.isan-boutique .j-tab {
+    width: 100%;
+    white-space: normal;
+  }
+
+  html.isan-boutique .footer-socials a {
+    width: 46px;
+    height: 46px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.isan-boutique *,
+  html.isan-boutique *::before,
+  html.isan-boutique *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
 /* ---------- OTOP STORE ---------- */
 body > .top .nav,
 .showcaseContent,
