@@ -582,8 +582,16 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
 
 @media (max-width: 680px) {
   :root {
-    --site-gutter: 16px;
+    --site-gutter: 20px;
     --site-radius-lg: 22px;
+  }
+
+  /* WORLDWIDE MOBILE ALIGNMENT LOCK
+   * Every public surface starts from one logical content rail. `start` and
+   * `padding-inline` keep the contract valid when future RTL locales arrive.
+   */
+  .site-page :where(h1, h2, h3, h4, p, .eyebrow, .sectionKicker) {
+    text-align: start;
   }
 
   .site-page--home .header-inner {
@@ -635,23 +643,44 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px 14px;
-    padding: 10px 16px 12px;
+    padding: 10px var(--site-gutter) 12px;
+  }
+
+  .site-page--map .brand-lockup {
+    justify-self: start;
   }
 
   .site-page--map .account-nav {
     grid-column: 1 / -1;
     width: 100%;
-    justify-content: flex-end;
+    justify-content: flex-start;
+    flex-wrap: wrap;
     padding-top: 10px;
     border-top: 1px solid rgba(237, 218, 183, .12);
   }
 
   .site-page--map main {
-    padding-inline: 16px;
+    padding-inline: var(--site-gutter);
   }
 
   .site-page--map .map-card-head {
-    padding-inline: 20px;
+    padding-inline: var(--site-gutter);
+  }
+
+  .site-page--map .map-card-head > div:first-child,
+  .site-page--map .province-panel-body {
+    width: 100%;
+    text-align: start;
+  }
+
+  .site-page--map .map-legend {
+    justify-content: flex-start;
+  }
+
+  .site-page--map .province-index,
+  .site-page--map .province-panel-body,
+  .site-page--map .map-footer {
+    padding-inline: var(--site-gutter);
   }
 
   .site-page--map .map-canvas-wrap {
@@ -660,6 +689,7 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
 
   .site-page--store .top .nav {
     min-height: 64px;
+    padding-inline: var(--site-gutter);
   }
 
   .site-page--store .top .cartBtn {
@@ -676,6 +706,24 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
     width: 100%;
   }
 
+  .site-page--store .showcaseContent,
+  .site-page--store .wrap,
+  .site-page--store .detailInfo,
+  .site-page--store .sheet {
+    padding-inline: var(--site-gutter);
+  }
+
+  .site-page--store .showcaseNote {
+    inset-inline: var(--site-gutter);
+    right: auto;
+    max-width: none;
+    text-align: start;
+  }
+
+  .site-page--store :where(.showcase h1, .showcaseLead, .intro, .sectionHead, .categoryHead, .cardBody) {
+    text-align: start;
+  }
+
   .site-page--store .detailInfo,
   .site-page--store .sheet {
     border-radius: 22px 22px 0 0;
@@ -687,6 +735,8 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
 
   .site-page--menu .hero {
     padding-top: 0;
+    padding-inline: 0;
+    text-align: start;
   }
 
   .site-page--menu .menu-home img {
@@ -699,8 +749,10 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
 
   .site-page--menu .truth {
     width: 100%;
+    justify-content: flex-start;
     border-radius: 16px;
     padding-inline: 14px;
+    text-align: start;
   }
 
   .site-page--menu .bar {
@@ -721,7 +773,7 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
   }
 
   .site-page--account .brand {
-    align-items: flex-start;
+    align-items: center;
   }
 
   .site-page--account .logo img {
@@ -734,6 +786,10 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
 
   .site-page--account .hero h1 {
     line-height: 1.12;
+  }
+
+  .site-page--account :where(.hero, .panel) {
+    text-align: start;
   }
 
   .site-page--account .panel {
@@ -772,7 +828,16 @@ html[lang="lo"] .site-page :where(h1, h2, h3, h4, p, a, button) {
   }
 
   .site-page--chess .tt-chess-main {
-    padding: 22px 14px 28px;
+    padding: 22px var(--site-gutter) 28px;
+  }
+
+  .site-page--chess .tt-chess-hero {
+    text-align: start;
+  }
+
+  .site-page--chess .tt-chess-side-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .site-page--chess .tt-chess-diff-grid {
