@@ -193,6 +193,19 @@ html.isan-boutique .nearby-maps-link {
 }
 
 @media (max-width: 680px) {
+  html.isan-boutique {
+    --site-mobile-gutter: 20px;
+  }
+
+  html.isan-boutique .container,
+  html.isan-boutique .hero-inner {
+    padding-inline: var(--site-mobile-gutter);
+  }
+
+  html.isan-boutique :where(.hero-copy, .section-head, .wp-content, .tt-chess-home-content) {
+    text-align: start;
+  }
+
   html.isan-boutique .header-inner {
     min-height: 64px;
     gap: 10px;
