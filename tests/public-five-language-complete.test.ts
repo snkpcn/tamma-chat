@@ -41,7 +41,7 @@ test('account is a complete five-language public surface', () => {
   assert.match(html, /assets\/scripts\/otop-product-translations\.js/);
   assert.match(i18n, /thammachat-lang-v1/);
   assert.match(html, /localizedOtopName\(i\.otop_products\)/);
-  assert.match(html, /language:accountLang\(\)/);
+  assert.match(html, /id="play-chess"/);
   assert.match(html, /inputmode="numeric" maxlength="5"/);
 
   const attrKeys = [...html.matchAll(/data-account-i18n(?:-placeholder)?="([^"]+)"/g)].map(m => m[1]);
@@ -50,7 +50,7 @@ test('account is a complete five-language public surface', () => {
     for (const key of new Set(attrKeys)) assert.match(block, new RegExp(`\\b${key}:`), `account ${lang} missing ${key}`);
     if (lang !== 'th') assert.equal(THAI.test(block), false, `account ${lang} dictionary leaks Thai`);
   }
-  for (const key of ['status_confirmed','shipping_delivered','payment_verified','no_orders','address_saved','redeem_now']) {
+  for (const key of ['status_confirmed','shipping_delivered','payment_verified','no_orders','address_saved','chess_desc']) {
     for (const [lang, next] of [['th','en'],['en','zh'],['zh','lo'],['lo','vi'],['vi',undefined]] as const) {
       assert.match(dictionaryBlock(i18n, lang, next), new RegExp(`\\b${key}:`), `account ${lang} missing dynamic key ${key}`);
     }
@@ -70,7 +70,7 @@ test('chess uses the shared five-language preference and exposes a language sele
   for (const [lang, next] of [['en','zh'],['zh','lo'],['lo','vi'],['vi',undefined]] as const) {
     const block = chessBlock(html, lang, next);
     assert.equal(THAI.test(block), false, `chess ${lang} dictionary leaks Thai`);
-    for (const key of ['page_title','choose_side_aria','board_aria','heading','reward_status_available']) {
+    for (const key of ['page_title','choose_side_aria','board_aria','heading','result_win_body']) {
       assert.match(block, new RegExp(`\\b${key}:`), `chess ${lang} missing ${key}`);
     }
   }

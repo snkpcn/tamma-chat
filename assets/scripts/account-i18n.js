@@ -7,7 +7,7 @@
     th:{
       page_title:'บัญชีของฉัน · ทำมา-ชาติ',back_web:'กลับหน้าเว็บ',member_eyebrow:'สมาชิกทำมา-ชาติ',account_title:'บัญชีของฉัน',
       hero_desc:'ดูข้อมูลสมาชิก แผนเที่ยว คำสั่งซื้อ และเรื่องที่ทีมทำมา-ชาติต้องติดตามได้ในหน้าเดียว โดยเชื่อมกับรหัสสมาชิกเดิม',
-      rewards_title:'รางวัลของฉัน',items_count:'{count} รายการ',rewards_desc:'รางวัลจากการเล่นหมากรุกกับทองไทย — ใช้ได้จริงในทำมา-ชาติ แสดงหน้าจอนี้ให้พนักงานเพื่อใช้สิทธิ์',play_chess:'เล่นหมากรุกกับทองไทย',
+      chess_title:'เล่นหมากรุกกับทองไทย',chess_desc:'เกมฝึกความคิดเพื่อความสนุกกับทองไทย',play_chess:'เริ่มเล่นหมากรุก',
       login:'เข้าสู่ระบบ',signup:'สมัครบัญชี',email:'อีเมล',password:'รหัสผ่าน',password_ph:'อย่างน้อย 8 ตัวอักษร',
       auth_privacy:'ระบบบัญชีใช้ Supabase Auth โดยตรง รหัสผ่านไม่ถูกส่งเข้า Thongthai Brain และไม่ถูกเก็บในฐานข้อมูลลูกค้าของทำมา-ชาติ',
       your_account:'บัญชีของคุณ',logout:'ออกจากระบบ',contact_info:'ข้อมูลติดต่อ',encrypted:'เข้ารหัสในระบบ',
@@ -35,14 +35,11 @@
       address_line_required:'กรุณากรอกบ้านเลขที่และที่อยู่',district_required:'กรุณากรอกอำเภอ/เขต',province_required:'กรุณากรอกจังหวัด',address_save_failed:'บันทึกที่อยู่ไม่สำเร็จ',
       address_saved:'บันทึกที่อยู่แล้ว',delete_confirm:'ลบที่อยู่นี้ออกจากสมุดที่อยู่ใช่ไหม',delete_failed:'ลบที่อยู่ไม่สำเร็จ',address_deleted:'ลบที่อยู่แล้ว',refresh_failed:'รีเฟรชไม่สำเร็จ',
       member_complete:'MEMBER · PROFILE COMPLETE',member_incomplete:'MEMBER · PROFILE INCOMPLETE',customer_account:'CUSTOMER ACCOUNT',
-      reward_available:'พร้อมใช้งาน',reward_partial:'ใช้ไปบางส่วน',reward_used:'ใช้สิทธิ์แล้ว',reward_expired:'หมดอายุแล้ว',reward_expiry:'ใช้ได้ถึงวันนี้ 23:59 น. ({date})',reward_expiry_simple:'ใช้ได้ถึงวันนี้ 23:59 น.',
-      reward_scope_all:'ใช้ได้ทุกโซน',reward_scope_one:'ใช้ได้ 1 โซน',redeem_now:'ใช้สิทธิ์ตอนนี้',redeemed:'ใช้สิทธิ์แล้ว',no_rewards:'ยังไม่มีรางวัลจากการเล่นหมากรุกกับทองไทย',rewards_load_failed:'โหลดรางวัลไม่สำเร็จ',
-      redeem_confirm_title:'ยืนยันการใช้สิทธิ์',redeem_confirm_body:'แสดงหน้าจอนี้ให้พนักงาน แล้วกดยืนยันเพื่อใช้สิทธิ์ส่วนลดนี้ที่โซนนี้ การใช้สิทธิ์นี้จะไม่สามารถย้อนกลับได้',confirm:'ยืนยัน'
     },
     en:{
       page_title:'My Account · Thammachat',back_web:'Back to website',member_eyebrow:'Thammachat Member',account_title:'My Account',
       hero_desc:'View your member details, journeys, orders, bookings and team follow-ups in one place, connected to your existing member identity.',
-      rewards_title:'My Rewards',items_count:'{count} items',rewards_desc:'Rewards earned by challenging Thongthai at chess. Show this screen to staff when you are ready to redeem.',play_chess:'Play chess with Thongthai',
+      chess_title:'Play chess with Thongthai',chess_desc:'A just-for-fun thinking game with Thongthai.',play_chess:'Start a chess game',
       login:'Sign in',signup:'Create account',email:'Email',password:'Password',password_ph:'At least 8 characters',
       auth_privacy:'Your account uses Supabase Auth directly. Passwords are never sent to Thongthai Brain or stored in Thammachat customer data.',
       your_account:'Your account',logout:'Sign out',contact_info:'Contact details',encrypted:'Encrypted',
@@ -70,14 +67,11 @@
       address_line_required:'Enter the street address',district_required:'Enter the district or city',province_required:'Enter the province or state',address_save_failed:'Could not save address',
       address_saved:'Address saved',delete_confirm:'Remove this address from your address book?',delete_failed:'Could not delete address',address_deleted:'Address deleted',refresh_failed:'Could not refresh',
       member_complete:'MEMBER · PROFILE COMPLETE',member_incomplete:'MEMBER · PROFILE INCOMPLETE',customer_account:'CUSTOMER ACCOUNT',
-      reward_available:'Available',reward_partial:'Partially used',reward_used:'Redeemed',reward_expired:'Expired',reward_expiry:'Valid until 23:59 today ({date})',reward_expiry_simple:'Valid until 23:59 today',
-      reward_scope_all:'Valid in all zones',reward_scope_one:'Valid in 1 zone',redeem_now:'Redeem now',redeemed:'Redeemed',no_rewards:'No chess rewards yet',rewards_load_failed:'Could not load rewards',
-      redeem_confirm_title:'Confirm redemption',redeem_confirm_body:'Show this screen to staff, then confirm to redeem the discount in this zone. Redemption cannot be reversed.',confirm:'Confirm'
     },
     zh:{
       page_title:'我的账户 · Thammachat',back_web:'返回网站',member_eyebrow:'Thammachat 会员',account_title:'我的账户',
       hero_desc:'在一个页面查看会员资料、行程、订单、预订和团队跟进事项，并与现有会员身份连接。',
-      rewards_title:'我的奖励',items_count:'{count} 项',rewards_desc:'与 Thongthai 下棋获得的奖励。准备使用时请向工作人员出示此页面。',play_chess:'与 Thongthai 下棋',
+      chess_title:'与 Thongthai 下棋',chess_desc:'和 Thongthai 一起轻松锻炼思维的棋局。',play_chess:'开始下棋',
       login:'登录',signup:'创建账户',email:'电子邮箱',password:'密码',password_ph:'至少 8 个字符',
       auth_privacy:'账户直接使用 Supabase Auth。密码不会发送到 Thongthai Brain，也不会存入 Thammachat 客户资料。',
       your_account:'你的账户',logout:'退出登录',contact_info:'联系方式',encrypted:'已加密',
@@ -105,14 +99,11 @@
       address_line_required:'请输入街道地址',district_required:'请输入区或城市',province_required:'请输入府、省或州',address_save_failed:'地址保存失败',
       address_saved:'地址已保存',delete_confirm:'确定从地址簿删除此地址吗？',delete_failed:'删除地址失败',address_deleted:'地址已删除',refresh_failed:'刷新失败',
       member_complete:'会员 · 资料完整',member_incomplete:'会员 · 资料未完整',customer_account:'客户账户',
-      reward_available:'可使用',reward_partial:'已部分使用',reward_used:'已使用',reward_expired:'已过期',reward_expiry:'今天 23:59 前有效（{date}）',reward_expiry_simple:'今天 23:59 前有效',
-      reward_scope_all:'所有区域可用',reward_scope_one:'1 个区域可用',redeem_now:'立即使用',redeemed:'已使用',no_rewards:'暂无棋局奖励',rewards_load_failed:'无法加载奖励',
-      redeem_confirm_title:'确认使用奖励',redeem_confirm_body:'向工作人员出示此页面，然后确认在该区域使用折扣。使用后无法撤销。',confirm:'确认'
     },
     lo:{
       page_title:'ບັນຊີຂອງຂ້ອຍ · Thammachat',back_web:'ກັບໄປເວັບໄຊ',member_eyebrow:'ສະມາຊິກ Thammachat',account_title:'ບັນຊີຂອງຂ້ອຍ',
       hero_desc:'ເບິ່ງຂໍ້ມູນສະມາຊິກ ແຜນທ່ອງທ່ຽວ ຄຳສັ່ງຊື້ ການຈອງ ແລະ ເລື່ອງທີ່ທີມຕ້ອງຕິດຕາມໃນໜ້າດຽວ.',
-      rewards_title:'ລາງວັນຂອງຂ້ອຍ',items_count:'{count} ລາຍການ',rewards_desc:'ລາງວັນຈາກການຫຼິ້ນໝາກຮຸກກັບ Thongthai. ສະແດງໜ້ານີ້ໃຫ້ພະນັກງານເມື່ອຈະໃຊ້ສິດ.',play_chess:'ຫຼິ້ນໝາກຮຸກກັບ Thongthai',
+      chess_title:'ຫຼິ້ນໝາກຮຸກກັບ Thongthai',chess_desc:'ເກມຝຶກຄວາມຄິດເພື່ອຄວາມມ່ວນກັບ Thongthai.',play_chess:'ເລີ່ມຫຼິ້ນໝາກຮຸກ',
       login:'ເຂົ້າລະບົບ',signup:'ສ້າງບັນຊີ',email:'ອີເມວ',password:'ລະຫັດຜ່ານ',password_ph:'ຢ່າງໜ້ອຍ 8 ຕົວອັກສອນ',
       auth_privacy:'ບັນຊີໃຊ້ Supabase Auth ໂດຍກົງ. ລະຫັດຜ່ານບໍ່ຖືກສົ່ງໃຫ້ Thongthai Brain ແລະ ບໍ່ຖືກເກັບໃນຂໍ້ມູນລູກຄ້າ Thammachat.',
       your_account:'ບັນຊີຂອງທ່ານ',logout:'ອອກຈາກລະບົບ',contact_info:'ຂໍ້ມູນຕິດຕໍ່',encrypted:'ເຂົ້າລະຫັດ',
@@ -140,14 +131,11 @@
       address_line_required:'ກອກທີ່ຢູ່',district_required:'ກອກເມືອງ/ເຂດ',province_required:'ກອກແຂວງ/ຈັງຫວັດ',address_save_failed:'ບັນທຶກທີ່ຢູ່ບໍ່ສຳເລັດ',
       address_saved:'ບັນທຶກທີ່ຢູ່ແລ້ວ',delete_confirm:'ລຶບທີ່ຢູ່ນີ້ອອກບໍ?',delete_failed:'ລຶບບໍ່ສຳເລັດ',address_deleted:'ລຶບທີ່ຢູ່ແລ້ວ',refresh_failed:'ໂຫຼດໃໝ່ບໍ່ສຳເລັດ',
       member_complete:'ສະມາຊິກ · ໂປຣໄຟລ໌ຄົບ',member_incomplete:'ສະມາຊິກ · ໂປຣໄຟລ໌ບໍ່ຄົບ',customer_account:'ບັນຊີລູກຄ້າ',
-      reward_available:'ພ້ອມໃຊ້',reward_partial:'ໃຊ້ບາງສ່ວນແລ້ວ',reward_used:'ໃຊ້ແລ້ວ',reward_expired:'ໝົດອາຍຸ',reward_expiry:'ໃຊ້ໄດ້ຮອດ 23:59 ມື້ນີ້ ({date})',reward_expiry_simple:'ໃຊ້ໄດ້ຮອດ 23:59 ມື້ນີ້',
-      reward_scope_all:'ໃຊ້ໄດ້ທຸກໂຊນ',reward_scope_one:'ໃຊ້ໄດ້ 1 ໂຊນ',redeem_now:'ໃຊ້ສິດຕອນນີ້',redeemed:'ໃຊ້ແລ້ວ',no_rewards:'ຍັງບໍ່ມີລາງວັນໝາກຮຸກ',rewards_load_failed:'ໂຫຼດລາງວັນບໍ່ສຳເລັດ',
-      redeem_confirm_title:'ຢືນຢັນການໃຊ້ສິດ',redeem_confirm_body:'ສະແດງໜ້ານີ້ໃຫ້ພະນັກງານ ແລ້ວຢືນຢັນເພື່ອໃຊ້ສ່ວນຫຼຸດໃນໂຊນນີ້. ການໃຊ້ສິດບໍ່ສາມາດຍ້ອນກັບໄດ້.',confirm:'ຢືນຢັນ'
     },
     vi:{
       page_title:'Tài khoản của tôi · Thammachat',back_web:'Về trang web',member_eyebrow:'Thành viên Thammachat',account_title:'Tài khoản của tôi',
       hero_desc:'Xem thông tin thành viên, hành trình, đơn hàng, đặt chỗ và các việc đội ngũ cần theo dõi trong một trang.',
-      rewards_title:'Phần thưởng của tôi',items_count:'{count} mục',rewards_desc:'Phần thưởng khi chơi cờ với Thongthai. Hãy đưa màn hình này cho nhân viên khi bạn muốn sử dụng.',play_chess:'Chơi cờ với Thongthai',
+      chess_title:'Chơi cờ với Thongthai',chess_desc:'Một ván cờ rèn tư duy chỉ để vui cùng Thongthai.',play_chess:'Bắt đầu chơi cờ',
       login:'Đăng nhập',signup:'Tạo tài khoản',email:'Email',password:'Mật khẩu',password_ph:'Ít nhất 8 ký tự',
       auth_privacy:'Tài khoản dùng Supabase Auth trực tiếp. Mật khẩu không được gửi đến Thongthai Brain và không được lưu trong dữ liệu khách hàng Thammachat.',
       your_account:'Tài khoản của bạn',logout:'Đăng xuất',contact_info:'Thông tin liên hệ',encrypted:'Đã mã hóa',
@@ -175,9 +163,6 @@
       address_line_required:'Nhập địa chỉ',district_required:'Nhập quận/huyện/thành phố',province_required:'Nhập tỉnh/bang',address_save_failed:'Không lưu được địa chỉ',
       address_saved:'Đã lưu địa chỉ',delete_confirm:'Xóa địa chỉ này khỏi sổ địa chỉ?',delete_failed:'Không xóa được địa chỉ',address_deleted:'Đã xóa địa chỉ',refresh_failed:'Không làm mới được',
       member_complete:'THÀNH VIÊN · HỒ SƠ HOÀN TẤT',member_incomplete:'THÀNH VIÊN · HỒ SƠ CHƯA ĐỦ',customer_account:'TÀI KHOẢN KHÁCH HÀNG',
-      reward_available:'Có thể dùng',reward_partial:'Đã dùng một phần',reward_used:'Đã sử dụng',reward_expired:'Đã hết hạn',reward_expiry:'Có hiệu lực đến 23:59 hôm nay ({date})',reward_expiry_simple:'Có hiệu lực đến 23:59 hôm nay',
-      reward_scope_all:'Dùng ở mọi khu vực',reward_scope_one:'Dùng ở 1 khu vực',redeem_now:'Sử dụng ngay',redeemed:'Đã sử dụng',no_rewards:'Chưa có phần thưởng cờ vua',rewards_load_failed:'Không tải được phần thưởng',
-      redeem_confirm_title:'Xác nhận sử dụng',redeem_confirm_body:'Đưa màn hình này cho nhân viên rồi xác nhận để dùng ưu đãi tại khu vực này. Không thể hoàn tác.',confirm:'Xác nhận'
     }
   };
   const FIRST_WAVE_ACCOUNT_PACKS=window.THAMMACHAT_FIRST_WAVE_LANGUAGE_PACKS?.account||{};

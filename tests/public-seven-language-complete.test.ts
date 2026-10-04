@@ -58,7 +58,7 @@ test('seven-language locale kernel and typography are first-class, not aliases',
 
 test('Japanese and Korean packs cover every current public content family', () => {
   const minimum:Record<string,number>={
-    home:375, account:160, chess:63, otop:119, menuUi:17,
+    home:375, account:145, chess:43, otop:119, menuUi:17,
     products:10, provinces:20, provinceNames:20,
     menuCategories:11, menuNames:49, menuIngredients:50,
   };
@@ -106,8 +106,8 @@ test('first-wave packs contain no leaked translation tokens and preserve critica
   assert.equal(packs.home.ko.time_part_evening,'저녁');
   assert.equal(packs.account.ja.shipping_returned,'返送済み');
   assert.equal(packs.chess.ja.hint,'ヒント');
-  assert.equal(packs.chess.ja.winner_pass_title,'Winner Pass');
-  assert.equal(packs.chess.ko.winner_pass_title,'Winner Pass');
+  assert.match(packs.chess.ja.result_win_body,/実力/u);
+  assert.match(packs.chess.ko.result_win_body,/실력/u);
   assert.equal(packs.otop.ja.free,'無料');
   assert.equal(packs.otop.ko.free,'무료');
   assert.equal(packs.menuIngredients.ja['ไข่ไก่'],'鶏卵');
