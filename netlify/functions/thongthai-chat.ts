@@ -5753,6 +5753,83 @@ async function boundedHorseDurationComparisonBeforePrimary(
   };
 }
 
+/**
+ * Small, source-backed read fast path for facts that need no model judgment.
+ * It protects the public gateway when Saved Agent is slow and keeps canonical
+ * prices in the operations DB. It never claims room availability; a room
+ * question without a date is answered only with the single missing question.
+ */
+export async function boundedWorldwideReadBeforePrimary(
+  request: Pick<BrainRequest, 'message'|'language'>,
+): Promise<BrainResponse | null> {
+  if (hasExplicitTransactionIntent(request.message)) return null;
+  const text = request.message.trim().toLowerCase();
+  const language = request.language;
+
+  const horse = language === 'th' ? /(?:ขี่ม้า|ม้า)/u.test(text)
+    : language === 'zh' ? /(?:骑马|騎馬|马|馬)/u.test(text)
+      : language === 'lo' ? /(?:ຂີ່ມ້າ|ມ້າ)/u.test(text)
+        : language === 'vi' ? /(?:cưỡi\s*ngựa|ngựa)/iu.test(text)
+          : /\bhorse(?:back)?(?:\s+(?:ride|riding))?\b/iu.test(text);
+  const price = language === 'th' ? /(?:ราคา|กี่บาท|เท่าไหร่|เท่าไร)/u.test(text)
+    : language === 'zh' ? /(?:多少钱|價格|价格|价钱)/u.test(text)
+      : language === 'lo' ? /(?:ລາຄາ|ເທົ່າໃດ)/u.test(text)
+        : language === 'vi' ? /(?:giá|bao\s*nhiêu)/iu.test(text)
+          : /(?:how\s*much|price|cost)/iu.test(text);
+  const thirtyMinutes = /(?:^|\D)30(?:\D|$)/u.test(text);
+
+  if (horse && price && thirtyMinutes) {
+    const facts = await loadActivityWorldFacts();
+    const factValue = facts.find(row => row.fact_key === 'activity_catalog_live')?.fact_value;
+    const activities = isObject(factValue) && Array.isArray(factValue.activities)
+      ? factValue.activities.filter(isObject)
+      : [];
+    const horseActivity = activities.find(activity =>
+      activity.activityCode === 'horse' || activity.resourceCode === 'activity-horse'
+    );
+    const durations = horseActivity && Array.isArray(horseActivity.durations)
+      ? horseActivity.durations.filter(isObject)
+      : [];
+    const option = durations.find(row => Number(row.durationMinutes) === 30);
+    const amount = option && Number.isFinite(Number(option.price)) ? Number(option.price) : null;
+    if (amount === null) return null;
+    const shown = amount.toLocaleString('en-US');
+    const message = language === 'th' ? `ขี่ม้า 30 นาที ราคา ${shown} บาทต่อท่านครับ`
+      : language === 'zh' ? `骑马 30 分钟，每位 ${shown} 泰铢。`
+        : language === 'lo' ? `ຂີ່ມ້າ 30 ນາທີ ລາຄາ ${shown} ບາດຕໍ່ຄົນ.`
+          : language === 'vi' ? `Cưỡi ngựa 30 phút giá ${shown} baht mỗi người.`
+            : `A 30-minute horse ride is THB ${shown} per person.`;
+    return {
+      message, intent:'information', contextUpdates:{}, journeyAction:{type:'none',journey:null},
+      suggestedActions:[], responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+    };
+  }
+
+  const room = language === 'th' ? /(?:ห้อง|ที่พัก)/u.test(text)
+    : language === 'zh' ? /(?:房|住宿)/u.test(text)
+      : language === 'lo' ? /(?:ຫ້ອງ|ທີ່ພັກ)/u.test(text)
+        : language === 'vi' ? /(?:phòng|chỗ\s*ở)/iu.test(text)
+          : /\b(?:room|accommodation)\b/iu.test(text);
+  const availability = language === 'th' ? /(?:ว่าง|มีไหม)/u.test(text)
+    : language === 'zh' ? /(?:空房|有房|可用)/u.test(text)
+      : language === 'lo' ? /(?:ວ່າງ|ມີ.*ບໍ)/u.test(text)
+        : language === 'vi' ? /(?:còn|trống|có.*không)/iu.test(text)
+          : /\b(?:available|availability|vacancy)\b/iu.test(text);
+  const hasDate = /\d{1,2}[\/-]\d{1,2}|\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b|(?:วันนี้|พรุ่งนี้|คืนนี้|วัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์)|วันที่\s*\d+)|(?:今天|明天|今晚|\d+日|\d+号)|(?:ມື້ນີ້|ມື້ອື່ນ)|(?:hôm\s*nay|ngày\s*mai|tối\s*nay|ngày\s*\d+)/iu.test(text);
+  if (room && availability && !hasDate) {
+    const message = language === 'th' ? 'ได้ครับ ขอวันเช็กอิน วันเช็กเอาต์ และจำนวนผู้เข้าพักก่อนครับ แล้วผมจะเช็กห้องว่างจากระบบให้'
+      : language === 'zh' ? '可以。请告诉我入住日期、退房日期和入住人数，我会从系统查询空房。'
+        : language === 'lo' ? 'ໄດ້ຄັບ ຂໍວັນທີເຂົ້າພັກ, ວັນທີອອກ ແລະ ຈຳນວນແຂກກ່ອນ ແລ້ວຈະກວດຫ້ອງວ່າງໃນລະບົບໃຫ້.'
+          : language === 'vi' ? 'Được. Vui lòng cho tôi ngày nhận phòng, ngày trả phòng và số khách; tôi sẽ kiểm tra phòng trống trong hệ thống.'
+            : 'Sure. What are your check-in date, check-out date, and number of guests? I’ll check live room availability in the system.';
+    return {
+      message, intent:'information', contextUpdates:{}, journeyAction:{type:'none',journey:null},
+      suggestedActions:[], responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[],
+    };
+  }
+  return null;
+}
+
 async function boundedBeginnerHorseSuitabilityBeforePrimary(
   request: BrainRequest,
 ): Promise<BrainResponse | null> {
@@ -6362,6 +6439,22 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   );
   const explicitTransactionIntent = commercialBoundary.currentTurnCommit;
   const transactionPrepareIntent = commercialBoundary.prepareEligible;
+
+  const worldwideReadFastPath = await boundedWorldwideReadBeforePrimary(request).catch(error => {
+    console.error('THONGTHAI_WORLDWIDE_READ_FASTPATH_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    return null;
+  });
+  if (worldwideReadFastPath) {
+    const polished = polishedResponse(worldwideReadFastPath, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    return coreResult(200, {
+      message: polished.message,
+      intent: polished.intent,
+      contextUpdates: polished.contextUpdates,
+      journeyAction: polished.journeyAction,
+      suggestedActions: polished.suggestedActions,
+    });
+  }
 
   const boundedDurationGuard = await boundedConsideredHorseDurationResponse(
     request,

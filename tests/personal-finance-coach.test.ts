@@ -207,11 +207,11 @@ test('evening close shows the day, asks about the real balance, and the owner re
 
   // "ข้อ 1 เสร็จแล้ว": completes that exact task, audited
   const done = await h.say('ข้อ 1 เสร็จแล้ว', { user: OWNER });
-  assert.match(done.reply ?? '', /ปิดงานใน SNK LIFE OS แล้ว/);
+  assert.match(done.reply ?? '', /ปิดงาน “ส่งใบเสนอราคา” แล้ว/);
   const row = (await h.db.query(`select status,completed_at from tasks where id=$1`, [ids.t1])).rows[0] as any;
   assert.equal(row.status, 'done');
   assert.ok(row.completed_at);
-  assert.equal(await h.count('activity_log', "action='TASK_COMPLETED'"), 1);
+  assert.equal(await h.count('activity_log', "action='SECRETARY_TASK_UPDATED'"), 1);
   assertPersona(done.reply);
 
   // "ย้ายไปพรุ่งนี้": remaining open items move to tomorrow
@@ -299,7 +299,7 @@ test('task commands are owner-only; replayed LINE events do not double-apply', a
 
   await h.say('ข้อ 1 เสร็จแล้ว', { user: OWNER, id: 'line-msg-1' });
   await h.say('ข้อ 1 เสร็จแล้ว', { user: OWNER, id: 'line-msg-1' });      // LINE redelivery
-  assert.equal(await h.count('activity_log', "action='TASK_COMPLETED'"), 1);
+  assert.equal(await h.count('activity_log', "action='SECRETARY_TASK_UPDATED'"), 1);
 });
 
 test('unknown chatter and completion words about non-tasks stay silent', async () => {

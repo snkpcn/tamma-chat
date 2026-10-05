@@ -11,14 +11,11 @@ import { composeReminder, runPersonalFinanceReminders } from '../netlify/functio
 
 const lookup = (h: Awaited<ReturnType<typeof harness>>, group: string) => new PfBindingClient(h.deps.rpc).lookup(h.deps.hash(group)!);
 
-test('mocked join event captures a PENDING binding that grants nothing', async () => {
+test('mocked join captures PENDING silently and grants nothing', async () => {
   const h = await harness();
   const joined = await h.raw({ type: 'join', user: null });
   assert.equal(joined.handled, false, 'a pending group still belongs to the normal chain');
-  assert.match(joined.reply!, /พบกลุ่มใหม่/);
-  assert.match(joined.reply!, /ยืนยันกลุ่มการเงิน/);
-  assert.doesNotMatch(joined.reply!, /SCB|บาท|ยอด/, 'join message discloses nothing');
-  assertPersona(joined.reply);
+  assert.equal(joined.reply, null, 'an unrelated new group must receive no finance disclosure');
   assert.equal((await lookup(h, GROUP)).status, 'PENDING');
   const row = (await h.db.query<any>('select * from finance_channel_bindings')).rows[0];
   assert.notEqual(row.group_id_enc, GROUP, 'group id is stored encrypted, not in clear');

@@ -149,73 +149,81 @@ function balanceLine(accounts: Json[]): string | null {
 
 export function composeMorning(data: Json, extraReminders: UpcomingItem[] = []): { text: string; context: CoachContext } {
   const today = String(data.today);
-  const items: CoachItem[] = [];
-  const seen = new Set<string>();
-  const add = (id: string, title: string): number | null => {
-    if (seen.has(id)) return null;
-    seen.add(id);
-    items.push({ n: items.length + 1, id, title });
-    return items.length;
-  };
+  const secretaryTasks = Array.isArray(data.secretary_tasks) ? data.secretary_tasks as Json[] : (data.tasks ?? []) as Json[];
+  const priorities = Array.isArray(data.top_three) ? data.top_three as Json[] : secretaryTasks;
+  const selected = (priorities.length ? priorities : secretaryTasks).slice(0, 3);
+  const items: CoachItem[] = selected.map((task, index) => ({ n: index + 1, id: String(task.id), title: String(task.title) }));
+  const lines: string[] = [`สวัสดีครับ วัน${weekdayName(today)}ที่ ${thaiDate(today)}`];
 
-  const lines: string[] = [`อรุณสวัสดิ์ครับ วัน${weekdayName(today)}ที่ ${thaiDate(today)}`];
-  const tasks = (data.tasks ?? []) as Json[];
-  const priorities = ((data.priorities ?? []) as Json[]).filter(p => p.title);
-
-  // focus = the owner's own top priorities; otherwise the most pressing task
-  const focus: string[] = [];
-  for (const p of priorities) {
-    const n = p.item_type === 'task' && p.item_id ? add(String(p.item_id), String(p.title)) : null;
-    focus.push(`${n ? `${n}. ` : '• '}${p.title}${p.done ? ' ✅' : ''}`);
-  }
-  if (!focus.length && tasks.length) {
-    const t = tasks[0];
-    const n = add(String(t.id), String(t.title));
-    focus.push(`${n}. ${t.title}${t.overdue ? ' (เลยกำหนด)' : ''}`);
-  }
-  if (focus.length) lines.push('🎯 โฟกัสวันนี้', ...focus);
-
-  const rest = tasks.filter(t => !seen.has(String(t.id)));
-  if (rest.length) {
-    lines.push('📋 งานที่ต้องจัดการ');
-    for (const t of rest.slice(0, 8)) {
-      const n = add(String(t.id), String(t.title));
-      lines.push(`${n}. ${t.title}${t.overdue ? ' (เลยกำหนด)' : t.due_time ? ` (${String(t.due_time).slice(0, 5)})` : ''}`);
-    }
-    if (rest.length > 8) lines.push(`…และอีก ${rest.length - 8} งานใน SNK LIFE OS`);
+  if (items.length) {
+    lines.push('Top 3 วันนี้');
+    items.forEach((item, index) => {
+      const task = selected[index];
+      const details: string[] = [];
+      if (task.state === 'OVERDUE' || task.overdue) details.push('เลยกำหนด');
+      else if (task.due_date === today) details.push('ครบกำหนดวันนี้');
+      if (Number(task.progress) > 0 && Number(task.progress) < 100) details.push(`${Number(task.progress)}%`);
+      if (task.next_action) details.push(`ต่อไป: ${String(task.next_action)}`);
+      lines.push(`${item.n}. ${item.title}${details.length ? ` — ${details.join(' · ')}` : ''}`);
+    });
   }
 
-  const events = eventsForDay(data, today);
+  const secretaryEvents = Array.isArray(data.secretary_events) ? data.secretary_events as Json[] : null;
+  const events = secretaryEvents
+    ? secretaryEvents.filter(e => e.start_time && bangkokDateOf(String(e.start_time)) === today)
+      .map(e => ({ title: String(e.title), start: String(e.start_time), allDay: Boolean(e.all_day), location: e.location ? String(e.location) : null }))
+      .sort((a, b) => (a.allDay === b.allDay ? a.start.localeCompare(b.start) : a.allDay ? -1 : 1))
+    : eventsForDay(data, today);
   if (events.length) {
-    lines.push('📅 ตารางวันนี้');
-    for (const e of events.slice(0, 8)) lines.push(`• ${e.allDay ? 'ทั้งวัน' : bangkokClock(e.start)} ${e.title}${e.location ? ` @${e.location}` : ''}`);
+    lines.push('นัดหมายวันนี้');
+    for (const event of events.slice(0, 4)) lines.push(`• ${event.allDay ? 'ทั้งวัน' : `${bangkokClock(event.start)} น.`} ${event.title}${event.location ? ` — ${event.location}` : ''}`);
   }
-  const deadlines = (data.deadlines ?? []) as Json[];
+  const deadlines = ((data.deadlines ?? []) as Json[]).slice(0, 2);
   if (deadlines.length) {
-    lines.push('⏳ ใกล้ถึงกำหนดส่ง');
-    for (const d of deadlines.slice(0, 4)) lines.push(`• ${d.title} (${thaiDate(bangkokDateOf(String(d.start_time)))})`);
+    lines.push('กำหนดส่งถัดไป');
+    for (const deadline of deadlines) lines.push(`• ${deadline.title} — ${thaiDate(bangkokDateOf(String(deadline.start_time)))}`);
   }
 
-  const due = ((data.money_due ?? []) as UpcomingItem[]).filter(i => i.days_until <= 3);
-  const ids = new Set(due.map(i => i.obligation_id));
-  const further = extraReminders.filter(i => !ids.has(i.obligation_id));
-  const money_lines = [...due, ...further].map(dueLine);
-  const accounts = ((data.accounts?.accounts ?? []) as Json[]);
-  const bal = balanceLine(accounts);
-  if (money_lines.length || bal) {
-    lines.push('💰 การเงิน');
-    if (money_lines.length) lines.push(...money_lines.slice(0, 8));
-    else lines.push('• ไม่มีรายการต้องจ่ายใน 3 วันนี้');
-    if (bal) lines.push(`• ยอดที่ผมมี: ${bal}`);
+  const waiting = (data.waiting ?? []) as Json[];
+  const waitingIds = new Set(waiting.map(task => String(task.id)));
+  if (waiting.length) {
+    lines.push('งานที่กำลังรอ');
+    for (const task of waiting.slice(0, 2)) {
+      const reason = task.waiting_for || task.blocker;
+      lines.push(`• ${task.title}${reason ? ` — รอ ${reason}` : ''}`);
+    }
+    if (waiting.length > 2) lines.push(`• ยังมีงานรออีก ${waiting.length - 2} รายการ`);
   }
 
-  const goals = ((data.goals ?? []) as Json[]).slice(0, 2);
-  if (goals.length) lines.push(`🏁 เป้าหมายสำคัญ: ${goals.map(g => g.title).join(' • ')}`);
+  const due = ((data.money_due ?? []) as UpcomingItem[]).filter(item => item.days_until <= 7);
+  const reminderIds = new Set(due.map(item => `${item.obligation_id}:${item.due_date}`));
+  const reminders = extraReminders.filter(item => !reminderIds.has(`${item.obligation_id}:${item.due_date}`));
+  const dueLines = [...due, ...reminders].slice(0, 3).map(dueLine);
+  if (dueLines.length) lines.push('เงินที่ใกล้ถึงกำหนด', ...dueLines);
 
-  if (lines.length === 1) lines.push('วันนี้ยังไม่มีงานค้าง นัดหมาย หรือรายการต้องจ่ายใน SNK LIFE OS ครับ');
-  lines.push('ระหว่างวันบอกผมได้เลยครับ เช่น “ข้อ 1 เสร็จแล้ว” หรือ “จ่ายค่าไฟ 1200”');
-  const context: CoachContext = { stage: 'MORNING', date: today, items, asked: [] };
-  return { text: finalizeReply(lines.join('\n')), context };
+  const followups = ((data.followups ?? []) as Json[]).filter(item => item.active !== false && !waitingIds.has(String(item.task_id)));
+  const checkinsToday = followups.filter(item => item.next_check_in_at && bangkokDateOf(String(item.next_check_in_at)) <= today);
+  if (checkinsToday.length) {
+    lines.push('ติดตามวันนี้');
+    for (const item of checkinsToday.slice(0, 2)) lines.push(`• ${item.title}`);
+    if (checkinsToday.length > 2) lines.push(`• มีรายการติดตามอีก ${checkinsToday.length - 2} งาน`);
+  }
+
+  const goals = ((data.goals ?? []) as Json[]).slice(0, 1);
+  if (goals.length) lines.push(`เป้าหมาย: ${goals[0].title}`);
+  const missed = ((data.missed_days ?? []) as unknown[]).map(value => String(value).slice(0, 10));
+  if (missed.length) lines.push(`มี ${missed.length} วันก่อนหน้านี้ที่ยังปิดวันไม่ครบครับ วันนี้เริ่มต่อได้เลย ไม่ต้องไล่ย้อนหลังทั้งหมด`);
+
+  const accountData = data.accounts?.accounts ?? data.accounts ?? [];
+  const accounts = Array.isArray(accountData) ? accountData as Json[] : [];
+  const balance = balanceLine(accounts);
+  if (balance) lines.push(`ยอดที่บันทึกไว้: ${balance}`);
+
+  if (!items.length && !events.length && !waiting.length && !dueLines.length && !checkinsToday.length && !goals.length && !missed.length) {
+    lines.push('วันนี้ยังไม่มีงานค้าง นัดหมาย หรือรายการต้องจ่ายใน SNK LIFE OS ครับ');
+  }
+  lines.push('อัปเดตความคืบหน้าหรือพิมพ์ “ข้อ 1 เสร็จแล้ว” ได้เลยครับ');
+  return { text: finalizeReply(lines.join('\n')), context: { stage: 'MORNING', date: today, items, asked: [] } };
 }
 
 function bangkokDateOf(iso: string): string {
@@ -224,43 +232,63 @@ function bangkokDateOf(iso: string): string {
 
 export function composeEvening(data: Json): { text: string; context: CoachContext } {
   const today = String(data.today);
+  const secretary = (data.secretary ?? {}) as Json;
   const lines: string[] = [`สรุปปิดวัน ${weekdayName(today)}ที่ ${thaiDate(today)} ครับ`];
 
   const income = Number(data.income ?? 0);
   const expense = Number(data.expense ?? 0);
-  lines.push('💰 วันนี้');
-  lines.push(`• รายรับ ${money(income)} (${data.income_count ?? 0} รายการ)  • รายจ่าย ${money(expense)} (${data.expense_count ?? 0} รายการ)`);
-  if (Number(data.pending_clarification) > 0) lines.push(`⏳ มี ${data.pending_clarification} รายการที่ยังไม่ได้ระบุบัญชี บอกผมได้เลยครับ`);
+  lines.push(`รายรับ ${money(income)} (${data.income_count ?? 0} รายการ) · รายจ่าย ${money(expense)} (${data.expense_count ?? 0} รายการ)`);
+  if (Number(data.pending_clarification) > 0) lines.push(`มี ${data.pending_clarification} รายการที่ยังไม่ได้ระบุบัญชี บอกชื่อบัญชีได้เลยครับ`);
 
-  const due = (data.money_due ?? []) as UpcomingItem[];
-  if (due.length) {
-    lines.push('🧾 ถึงกำหนด/เลยกำหนด', ...due.slice(0, 6).map(dueLine), 'จ่ายแล้วพิมพ์ “จ่ายแล้ว” ได้เลยครับ');
-  }
+  const due = ((data.money_due ?? []) as UpcomingItem[]).filter(item => item.days_until <= 3);
+  if (due.length) lines.push('รายการเงินที่ถึงกำหนด', ...due.slice(0, 3).map(dueLine));
 
-  const accounts = (data.accounts ?? []) as Json[];
-  const bal = balanceLine(accounts.map(a => ({ name: a.name, balance: a.balance, balance_status: a.balance_status })));
-  if (bal) lines.push(`🏦 ยอดตามที่ผมบันทึก: ${bal}`);
+  const accountData = data.accounts?.accounts ?? data.accounts ?? [];
+  const accounts = Array.isArray(accountData) ? accountsAsJson(accountData) : [];
+  const balance = balanceLine(accounts);
+  if (balance) lines.push(`ยอดที่บันทึกไว้: ${balance}`);
   const asked = accounts
-    // only a DERIVED balance (movements since the last confirmation) is worth asking about
-    .filter(a => a.moved_today && a.balance_status === 'DERIVED' && numberOrNull(a.balance) !== null)
+    .filter(account => account.moved_today && account.balance_status === 'DERIVED' && numberOrNull(account.balance) !== null)
     .slice(0, 3)
-    .map(a => ({ id: String(a.id), name: String(a.name), balance: numberOrNull(a.balance) }));
-  if (asked.length) {
-    lines.push(`❓ ยอดจริงในแอปธนาคารตรงกับนี้ไหมครับ (ผมไม่เชื่อมธนาคาร ถามเพื่อให้ยอดถูกต้อง) ตอบ “ยอดตรง” หรือ “${asked[0].name} จริงเหลือ …”`);
-  }
+    .map(account => ({ id: String(account.id), name: String(account.name), balance: numberOrNull(account.balance) }));
+  if (asked.length) lines.push(`ยอดจริงในแอปธนาคารตรงกับที่บันทึกไหมครับ (ผมไม่เชื่อมธนาคาร) ตอบ “ยอดตรง” หรือ “${asked[0].name} จริงเหลือ …” ได้เลย`);
 
   const done = (data.tasks_done ?? []) as Json[];
-  if (done.length) lines.push(`✅ เสร็จวันนี้ ${done.length} งาน: ${done.slice(0, 5).map(t => t.title).join(' • ')}`);
-  const open = ((data.tasks_open ?? []) as Json[]).slice(0, 8);
-  const items: CoachItem[] = open.map((t, i) => ({ n: i + 1, id: String(t.id), title: String(t.title) }));
+  if (done.length) lines.push(`เสร็จแล้ว ${done.length} งาน${done.length <= 3 ? `: ${done.map(task => task.title).join(' · ')}` : ` รวมถึง ${done.slice(0, 3).map(task => task.title).join(' · ')}`}`);
+
+  const secretaryTasks = Array.isArray(secretary.secretary_tasks) ? secretary.secretary_tasks as Json[] : (secretary.tasks ?? data.tasks_open ?? []) as Json[];
+  const top = Array.isArray(secretary.top_three) && (secretary.top_three as Json[]).length
+    ? secretary.top_three as Json[] : secretaryTasks;
+  const selected = top.slice(0, 3);
+  const items: CoachItem[] = selected.map((task, index) => ({ n: index + 1, id: String(task.id), title: String(task.title) }));
   if (items.length) {
-    lines.push('📌 ยังไม่เสร็จ', ...items.map(i => `${i.n}. ${i.title}`));
-    lines.push('ตอบ “ข้อ 2 เสร็จแล้ว” / “ย้ายไปพรุ่งนี้” (ย้ายทั้งหมด) / “ข้อ 2 ย้ายไปพรุ่งนี้” ได้เลยครับ');
-  } else if (!done.length) {
-    lines.push('วันนี้ไม่มีงานค้างใน SNK LIFE OS ครับ');
+    lines.push('งานที่ทำต่อพรุ่งนี้');
+    items.forEach(item => lines.push(`${item.n}. ${item.title}`));
+    const remaining = Math.max(0, secretaryTasks.length - items.length);
+    if (remaining) lines.push(`ยังมีอีก ${remaining} งานใน SNK LIFE OS`);
   }
-  lines.push('พิมพ์ “ปิดวัน” เมื่อเสร็จครับ');
+
+  const waiting = (secretary.waiting ?? []) as Json[];
+  if (waiting.length) {
+    lines.push(`งานที่รอคนอื่น/ติดขัด ${waiting.length} รายการ`);
+    for (const task of waiting.slice(0, 2)) lines.push(`• ${task.title}${task.waiting_for ? ` — รอ ${task.waiting_for}` : task.blocker ? ` — ติด ${task.blocker}` : ''}`);
+  }
+
+  const tomorrow = addDays(today, 1);
+  const tomorrowEvents = ((secretary.events ?? []) as Json[])
+    .filter(event => event.start_time && bangkokDateOf(String(event.start_time)) === tomorrow)
+    .slice(0, 3);
+  if (tomorrowEvents.length) lines.push('นัดหมายพรุ่งนี้', ...tomorrowEvents.map(event => `• ${bangkokClock(String(event.start_time))} น. ${event.title}`));
+
+  const missed = ((data.missed_days ?? []) as unknown[]).map(value => String(value).slice(0, 10));
+  if (missed.length) lines.push(`ยังมี ${missed.length} วันที่ไม่ได้ปิดวันครบครับ พรุ่งนี้เริ่มต่อจากงานที่จำเป็นได้เลย`);
+  if (!items.length && !waiting.length && !done.length) lines.push('วันนี้ไม่มีงานค้างใน SNK LIFE OS ครับ');
+  lines.push('ถ้ารายการถูกต้อง พิมพ์ “ปิดวัน” ได้เลยครับ');
   return { text: finalizeReply(lines.join('\n')), context: { stage: 'EVENING', date: today, items, asked } };
+}
+
+function accountsAsJson(value: unknown[]): Json[] {
+  return value.filter((account): account is Json => Boolean(account) && typeof account === 'object') as Json[];
 }
 
 // ================================================================== delivery (cron)
@@ -310,9 +338,9 @@ export async function runCoach(kind: CoachKind, deps: CoachDeps, opts: { ignoreW
           obligation_id: r.obligation_id, title: r.title, kind: r.kind as 'EXPENSE' | 'INCOME', amount: r.amount, due_date: r.due_date,
           days_until: r.days_until, overdue: r.overdue, frequency: '', default_account_id: null, projected: false,
         }));
-        composed = composeMorning(await ledger.coachMorningData(today), extra);
+        composed = composeMorning(await ledger.secretaryMorningData('system:coach', today), extra);
       } else {
-        composed = composeEvening(await ledger.coachEveningData(today));
+        composed = composeEvening(await ledger.secretaryEveningData('system:coach', today));
       }
       await ledger.dayCloseSetContext(today, composed.context as unknown as Json);
       await deps.push(groupId, composed.text);

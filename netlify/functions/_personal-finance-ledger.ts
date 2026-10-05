@@ -334,6 +334,30 @@ export class PfLedger {
   async taskDefer(taskId: string, to: string, actor: string, message: string, idem: string): Promise<{ ok: boolean; error?: string; duplicate?: boolean; task?: { id: string; title: string } }> {
     return this.call('finance_task_defer', { p_task: taskId, p_to: to, p_actor: actor, p_message: message, p_idem: idem });
   }
+  async secretaryApplyBatch(items: Json[], actor: string, message: string, idem: string, today: string): Promise<{
+    ok: boolean; count: number; items: Array<{ kind: 'task' | 'event' | 'goal' | 'obligation'; id: string; title: string; created: boolean }>;
+  }> {
+    return this.call('secretary_apply_batch', { p_items: items, p_actor: actor, p_message: message, p_idem: idem, p_today: today });
+  }
+  async secretaryUpdateTask(taskId: string, patch: Json, actor: string, message: string, idem: string): Promise<{
+    ok: boolean; error?: string; task?: { id: string; title: string; state: string };
+  }> {
+    return this.call('secretary_update_task', { p_task: taskId, p_patch: patch, p_actor: actor, p_message: message, p_idem: idem });
+  }
+  async secretaryUpdateEvent(eventId: string, patch: Json, actor: string, message: string, idem: string): Promise<{
+    ok: boolean; error?: string; event?: { id: string; title: string };
+  }> {
+    return this.call('secretary_update_event', { p_event: eventId, p_patch: patch, p_actor: actor, p_message: message, p_idem: idem });
+  }
+  async secretarySnapshot(actor: string, today: string): Promise<Json> {
+    return this.call('secretary_state_snapshot', { p_actor: actor, p_today: today });
+  }
+  async secretaryMorningData(actor: string, today: string): Promise<Json> {
+    return this.call('secretary_morning_data', { p_actor: actor, p_today: today });
+  }
+  async secretaryEveningData(actor: string, today: string): Promise<Json> {
+    return this.call('secretary_evening_data', { p_actor: actor, p_today: today });
+  }
   async dayCloseSetContext(date: string, context: Json): Promise<void> { await this.call('finance_day_close_set_context', { p_date: date, p_context: context }); }
   async dayCloseGet(since: string): Promise<{ local_date: string; status: 'OPEN' | 'CLOSED'; context: Json } | null> {
     return (await this.call<{ local_date: string; status: 'OPEN' | 'CLOSED'; context: Json } | null>('finance_day_close_get', { p_since: since })) ?? null;
