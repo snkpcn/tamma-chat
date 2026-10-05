@@ -162,6 +162,12 @@ export class PfLedger {
   async voidTransaction(i: { txId: string; reason: string; actor: string; message: string; idem: string }): Promise<Json> {
     return this.call('pf_void_transaction', { p_tx: i.txId, p_reason: i.reason, p_actor: i.actor, p_message: i.message, p_idem: i.idem });
   }
+  async countRange(from: string, to: string): Promise<{ count: number; total: number }> {
+    return this.call('pf_count_range', { p_from: from, p_to: to });
+  }
+  async voidRange(i: { from: string; to: string; reason: string; actor: string; message: string; idem: string }): Promise<{ ok: boolean; voided: number }> {
+    return this.call('pf_void_range', { p_from: i.from, p_to: i.to, p_reason: i.reason, p_actor: i.actor, p_message: i.message, p_idem: i.idem });
+  }
   async correctTransaction(i: {
     txId: string; kind?: string | null; amount?: number | null; accountId?: string | null; toAccountId?: string | null;
     category?: string | null; payee?: string | null; note?: string | null; occurredOn?: string | null;

@@ -110,7 +110,7 @@ const UNIT: Record<string, number> = { พัน: 1_000, หมื่น: 10_000
 export function findAmounts(input: string): FoundAmount[] {
   const text = normalizeText(input);
   const out: FoundAmount[] = [];
-  const re = /(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?\s*(พัน|หมื่น|แสน|ล้าน|k|K)?/g;
+  const re = /(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?\s*(พัน|หมื่น|แสน|ล้าน|[kK](?![A-Za-z]))?/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(text))) {
     const before = text.slice(Math.max(0, match.index - 12), match.index);
@@ -143,12 +143,12 @@ export function amountAppearsIn(text: string, amount: number): boolean {
 /** "ไม่ได้จ่ายประกัน", "ยังไม่จ่าย", "ยังไม่ได้โอน", "ไม่ต้องบันทึก", "อย่าลง" */
 export function isNegated(text: string): boolean {
   const t = normalizeText(text);
-  return /(?:ยัง)?ไม่(?:ได้)?\s*(?:จ่าย|ชำระ|โอน|ซื้อ|ได้รับ|รับ|ใช้|เสีย|ลง|บันทึก)|อย่า\s*(?:ลง|บันทึก|จด)|ไม่ต้อง(?:ลง|บันทึก|จด)|ยังไม่(?:ถึง)?(?:ได้)?(?:จ่าย|ชำระ|โอน)/.test(t);
+  return /(?:ยัง)?ไม่(?:ได้)?\s*(?:จ่าย|ชำระ|โอน|ซื้อ|ได้รับ|รับ|ใช้|เสีย|ลง|บันทึก|หัก|ตัด)|อย่า\s*(?:ลง|บันทึก|จด|หัก|ตัด)|ไม่ต้อง(?:ลง|บันทึก|จด|หัก|ตัด)|ยังไม่(?:ถึง)?(?:ได้)?(?:จ่าย|ชำระ|โอน)|เอาไว้ก่อน|รอก่อน|ยังก่อน|ไม่ใช่(?:รายจ่าย|รายรับ|ค่าใช้จ่าย)/.test(t);
 }
 
 /** "ไม่ใช่ ...", "ไม่ถูก", "ผิด" -- the owner is rejecting the previous record, not creating a new one. */
 export function isCorrectionCue(text: string): boolean {
-  return /(?:ไม่ใช่|ไม่ถูก|ลงผิด|ผิดนะ|ผิดครับ|ที่จริง|จริง ?ๆ แล้ว|แก้เป็น|แก้ใหม่|ต้องเป็น)/.test(normalizeText(text));
+  return /(?:ไม่ใช่|ไม่ถูก|ผิด|ที่จริง|จริง ?ๆ แล้ว|แก้เป็น|แก้ใหม่|ต้องเป็น)/.test(normalizeText(text));
 }
 
 export function isYes(text: string): boolean {

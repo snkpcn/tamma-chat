@@ -53,6 +53,13 @@ export type PfIntent =
   | { kind: 'CREATE_ACCOUNT'; name: string; accountKind: string | null }
   | { kind: 'CREATE_CATEGORY'; name: string }
   | { kind: 'SET_REMINDER_DAYS'; days: number[] }
+  | { kind: 'BULK_VOID'; period: Period }
+  | { kind: 'SET_BALANCES'; items: Array<{ name: string; amount: number }> }
+  | { kind: 'OBLIGATION_REMINDERS'; titleHint: string | null; days: number[] }
+  | { kind: 'OBLIGATION_SILENCE'; titleHint: string | null }
+  | { kind: 'OBLIGATION_RESCHEDULE'; titleHint: string | null; dayOfMonth: number }
+  | { kind: 'CHANGE_DATE_LAST'; date: string }
+  | { kind: 'ACK_MORNING' }
   | { kind: 'HELP' }
   | { kind: 'NEGATED' }
   | { kind: 'UNSUPPORTED_BULK' }
@@ -75,6 +82,7 @@ function result(intent: PfIntent, confidence: Confidence): Interpretation {
 
 function cleanTitle(raw: string): string {
   return raw
+    .replace(/(?:เดือนหน้า|เดือนนี้|สัปดาห์หน้า|อาทิตย์หน้า|พรุ่งนี้|มะรืน|วันนี้|เมื่อวาน|เมื่อกี้)/g, ' ')
     .replace(/(?:ต้อง)?(?:จ่าย|ชำระ|โอน|ซื้อ|เสียเงิน|เสีย|ได้เงิน|ได้รับ|รับเงิน|ได้)(?:ให้)?/g, ' ')
     .replace(/(?:ทุก(?:วันที่|เดือน|สัปดาห์|อาทิตย์|ปี)?|รายเดือน|รายปี|รายสัปดาห์|ของทุกเดือน|ต่อเดือน)/g, ' ')
     .replace(/(?:จาก|ด้วย|ผ่าน|เข้า|ออกจาก)\s*\S+/g, ' ')
@@ -160,15 +168,45 @@ function lastAmountAfter(t: string, amounts: FoundAmount[], word: RegExp): numbe
 
 function accountNameFromBalanceText(prefix: string): string | null {
   const name = normalizeText(prefix)
-    .replace(/^(?:ปรับ|แก้|อัพเดต|อัปเดต|ตั้ง|แจ้ง|ยอด|เงิน)\s*/g, '')
+    .replace(/^(?:ปรับ|แก้|อัพเดต|อัปเดต|ตั้ง|แจ้ง|ยอด|เงิน)(?:\s+|$)/g, '')
     .replace(/(?:ตอนนี้|ล่าสุด|ปัจจุบัน|วันนี้)/g, ' ')
-    .replace(/(?:ยอด|เงิน)\s*(?:ใน)?$/g, ' ')
+    .replace(/(?:^|\s)(?:ยอด|เงิน)\s*(?:ใน)?$/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return name.length ? name.slice(0, 80) : null;
 }
 
 const BALANCE_VERB = /(?:คงเหลือ|ยอดเหลือ|เหลือเงิน|เหลือ|มีเงินอยู่|มีเงิน|ยอดเงิน|ยอดบัญชี|ยอดคงเหลือ)/;
+
+function relativeDate(word: string, today: string): string | null {
+  const t = normalizeText(word);
+  if (/เมื่อวานซืน/.test(t)) return addDays(today, -2);
+  if (/เมื่อวาน/.test(t)) return addDays(today, -1);
+  if (/วันนี้/.test(t)) return today;
+  const dom = t.match(/วันที่\s*(\d{1,2})/);
+  if (dom) {
+    const day = Number(dom[1]);
+    if (day < 1 || day > 31) return null;
+    const [y, m, d] = today.split('-').map(Number);
+    const pick = (yy: number, mm: number) => `${yy}-${String(mm).padStart(2, '0')}-${String(Math.min(day, new Date(Date.UTC(yy, mm, 0)).getUTCDate())).padStart(2, '0')}`;
+    if (day <= d) return pick(y, m);
+    return m === 1 ? pick(y - 1, 12) : pick(y, m - 1);
+  }
+  return null;
+}
+
+const DATE_WORD = '(?:เมื่อวานซืน|เมื่อวาน|วันนี้|วันที่\\s*\\d{1,2})';
+
+function cleanObligationHint(raw: string): string | null {
+  const v = normalizeText(raw)
+    .replace(/(?:อันนี้|รายการนี้|ตัวนี้|อันนั้น|รายการนั้น|นี้|นะ|ครับ|ก็พอ|พอ|อีก|ให้|หน่อย)/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  return v.length >= 2 ? v.slice(0, 80) : null;
+}
+
+function parseDayList(raw: string): number[] {
+  return [...new Set(raw.split(/[,\s]+/).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n <= 60))].sort((a, b) => b - a);
+}
 
 export function interpretWithRules(input: string, ctx: NluContext): Interpretation {
   const t = normalizeText(input);
@@ -178,6 +216,25 @@ export function interpretWithRules(input: string, ctx: NluContext): Interpretati
 
   // -- meta / help ---------------------------------------------------------
   if (/(ช่วยอะไรได้บ้าง|ทำอะไรได้บ้าง|วิธีใช้|ใช้ยังไง|คำสั่งทั้งหมด|^help$|^เมนู$)/i.test(t)) return result({ kind: 'HELP' }, 'high');
+
+  // -- high-risk bulk delete of a period (always confirmed by the dispatcher) -----------------------
+  const bulk = t.match(/(?:ลบ|ยกเลิก|void)\s*(?:รายการ|ข้อมูล)?\s*ทั้งหมด\s*(เดือนนี้|เดือนที่แล้ว|เดือนก่อน|วันนี้|สัปดาห์นี้|อาทิตย์นี้)/i);
+  if (bulk) return result({ kind: 'BULK_VOID', period: parsePeriod(bulk[1]) }, 'high');
+
+  // -- initial setup of several balances in one message ---------------------------------------------
+  if (/(?:ตั้ง)?ยอดเริ่มต้น|ตั้งยอด(?:บัญชี)?/.test(t) && amounts.length >= 2) {
+    const body = normalizeText(t.replace(/(?:ตั้ง)?ยอดเริ่มต้น|ตั้งยอด(?:บัญชี)?/g, ' '));
+    const found = findAmounts(body);
+    const items: Array<{ name: string; amount: number }> = [];
+    let cursor = 0;
+    for (const a of found) {
+      const name = body.slice(cursor, a.index).replace(/(?:และ|กับ|เหลือ|มี|เป็น|ที่|ตอนนี้|[,;:=])/g, ' ').replace(/\s+/g, ' ').trim();
+      cursor = a.end + (/^\s*บาท/.test(body.slice(a.end)) ? body.slice(a.end).match(/^\s*บาท/)![0].length : 0);
+      if (name) items.push({ name: name.slice(0, 80), amount: a.value });
+    }
+    if (items.length >= 2 && items.length === found.length) return result({ kind: 'SET_BALANCES', items }, 'high');
+    return result({ kind: 'UNCLEAR', financeCue: true }, 'low');
+  }
 
   // -- undo / corrections on the most recent record -------------------------
   if (/(?:ยกเลิก|ลบ|ย้อน|void)\s*(?:รายการ|อัน)?\s*ทั้งหมด|ล้างข้อมูล|ลบทุกอย่าง|reset/i.test(t)) return result({ kind: 'UNSUPPORTED_BULK' }, 'high');
@@ -190,6 +247,34 @@ export function interpretWithRules(input: string, ctx: NluContext): Interpretati
   if (swap && !findAmounts(swap[2]).length) {
     const category = swap[2].replace(/(?:นะ|ครับ|จ้า|หน่อย)\s*$/g, '').trim();
     if (category) return result({ kind: 'CHANGE_CATEGORY_LAST', category: category.slice(0, 80), from: swap[1].trim().slice(0, 80) }, ctx.hasLastTransaction ? 'high' : 'medium');
+  }
+
+  // "ไม่ใช่ SCB เมื่อกี้จ่ายเงินสด" / "ไม่ได้จ่ายจาก SCB จ่ายเงินสด": the account AFTER the negated one wins
+  const negAcct = t.match(/ไม่(?:ใช่|ได้(?:จ่าย|ตัด|หัก)?(?:จาก)?)\s*(\S+)(.*)$/);
+  if (negAcct && !amounts.length) {
+    const hint = accountHintFromAction(negAcct[2], ctx.accounts);
+    const negated = accountHintFromAction(negAcct[1], ctx.accounts);
+    if (hint && hint !== negated && ctx.hasLastTransaction) return result({ kind: 'CHANGE_ACCOUNT_LAST', accountHint: hint }, 'high');
+  }
+  // "เมื่อกี้ไม่ใช่ค่ารถ เป็นค่าประกัน" -> relabel (or re-account when both sides are accounts)
+  const notX = t.match(/ไม่ใช่\s*(.+?)\s*เป็น\s*(.+)$/);
+  if (notX && !amounts.length) {
+    const to = notX[2].replace(/(?:นะ|ครับ|จ้า)\s*$/g, '').trim();
+    const toAcct = accountHintFromAction(to, ctx.accounts);
+    const fromAcct = accountHintFromAction(notX[1], ctx.accounts);
+    if (toAcct && fromAcct) return result({ kind: 'CHANGE_ACCOUNT_LAST', accountHint: toAcct }, ctx.hasLastTransaction ? 'high' : 'medium');
+    if (to) return result({ kind: 'CHANGE_CATEGORY_LAST', category: to.slice(0, 80), from: notX[1].trim().slice(0, 80) }, ctx.hasLastTransaction ? 'high' : 'medium');
+  }
+  // "เมื่อวานไม่ใช่วันนี้" -> the true date comes first
+  const dateFix = t.match(new RegExp(`(${DATE_WORD})\\s*ไม่ใช่\\s*(${DATE_WORD})`));
+  if (dateFix) {
+    const d = relativeDate(dateFix[1], ctx.today);
+    if (d) return result({ kind: 'CHANGE_DATE_LAST', date: d }, ctx.hasLastTransaction ? 'high' : 'medium');
+  }
+  const dateTo = t.match(new RegExp(`(?:ที่จริง|จริง ?ๆ)?(?:เป็น|ลง)\\s*(${DATE_WORD})`));
+  if (dateTo && !amounts.length && /(?:ที่จริง|จริง ?ๆ|แก้|เปลี่ยน|ผิดวัน)/.test(t)) {
+    const d = relativeDate(dateTo[1], ctx.today);
+    if (d) return result({ kind: 'CHANGE_DATE_LAST', date: d }, ctx.hasLastTransaction ? 'high' : 'medium');
   }
 
   if (isCorrectionCue(t) && amounts.length) {
@@ -226,10 +311,18 @@ export function interpretWithRules(input: string, ctx: NluContext): Interpretati
   }
 
   // -- reminders / structure ---------------------------------------------------
-  const remind = t.match(/(?:แจ้งเตือน|เตือน)(?:ล่วงหน้า)?\s*((?:\d{1,2}\s*[,\s]\s*)*\d{1,2})\s*วัน/);
+  if (/เตือนตอนเช้า|เตือนเช้า/.test(t)) return result({ kind: 'ACK_MORNING' }, 'high');
+  const silence = t.match(/(?:ไม่ต้องเตือน|เลิกเตือน|หยุดเตือน|ปิดเตือน)(.*)$/);
+  if (silence) return result({ kind: 'OBLIGATION_SILENCE', titleHint: cleanObligationHint(silence[1]) ?? cleanObligationHint(t.slice(0, silence.index)) }, 'high');
+  const remind = t.match(/^(.*?)(?:แจ้ง)?เตือน(?:ก่อน|ล่วงหน้า)?\s*((?:\d{1,2}\s*[,\s]\s*)*\d{1,2})\s*วัน/);
   if (remind) {
-    const days = [...new Set(remind[1].split(/[,\s]+/).map(Number).filter(n => n >= 0 && n <= 60))].sort((a, b) => b - a);
-    if (days.length) return result({ kind: 'SET_REMINDER_DAYS', days }, 'high');
+    const days = parseDayList(remind[2]);
+    const title = cleanObligationHint(remind[1].replace(/ตั้ง/g, ' '));
+    if (days.length) return result(title ? { kind: 'OBLIGATION_REMINDERS', titleHint: title, days } : { kind: 'SET_REMINDER_DAYS', days }, 'high');
+  }
+  const move = t.match(/เลื่อน(.*?)(?:ไป|เป็น)?\s*(?:วันที่)\s*(\d{1,2})/);
+  if (move && Number(move[2]) >= 1 && Number(move[2]) <= 31) {
+    return result({ kind: 'OBLIGATION_RESCHEDULE', titleHint: cleanObligationHint(move[1].replace(/(?:ไป|เป็น)/g, ' ')), dayOfMonth: Number(move[2]) }, 'high');
   }
   const newAccount = t.match(/^(?:เพิ่ม|สร้าง|เปิด)\s*(?:บัญชี|กระเป๋า|กองทุน)\s*(.{1,60})$/);
   if (newAccount) {
@@ -322,8 +415,8 @@ export function interpretWithRules(input: string, ctx: NluContext): Interpretati
   }
 
   // -- expense -----------------------------------------------------------------------------------
-  if (amount !== null && /(จ่าย|ซื้อ|เสียเงิน|เสีย|ชำระ|เติม|หมดไป|ใช้ไป|กิน|จ้าง|ค่า[ก-๙]|โอนค่า|ผ่อน)/.test(t)) {
-    const hasVerb = /(จ่าย|ซื้อ|เสียเงิน|ชำระ|เติม|หมดไป|ใช้ไป|กิน|จ้าง|โอนค่า)/.test(t);
+  if (amount !== null && /(จ่าย|ซื้อ|เสียเงิน|เสีย|ชำระ|เติม|หมดไป|ใช้ไป|กิน|จ้าง|ค่า[ก-๙]|โอนค่า|ผ่อน|หัก|ตัดเงิน)/.test(t)) {
+    const hasVerb = /(จ่าย|ซื้อ|เสียเงิน|ชำระ|เติม|หมดไป|ใช้ไป|กิน|จ้าง|โอนค่า|หัก|ตัดเงิน)/.test(t);
     return result({
       kind: 'EXPENSE', amount, accountHint: accountHintFromAction(t, ctx.accounts), category: guessCategory(t),
       title: titleFrom(t), date: parseDueDate(t, ctx.today).date,

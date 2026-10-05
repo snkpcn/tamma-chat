@@ -149,7 +149,11 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
         log('PF_BINDING_CAPTURE_FAILED', { error: error instanceof Error ? error.message.slice(0, 120) : 'unknown' });
       }
     }
-    return { handled: lookup.status === 'ACTIVE', reply: null };
+    const first = lookup.status === 'NONE';
+    return {
+      handled: lookup.status === 'ACTIVE',
+      reply: first ? finalizeReply('พบกลุ่มใหม่ครับ หากต้องการผูกกลุ่มนี้กับ SNK MONEY ให้เจ้าของพิมพ์ “ยืนยันกลุ่มการเงิน” เพื่อยืนยันการเชื่อมต่อครับ') : null,
+    };
   }
 
   if (event.type === 'leave') {
@@ -240,9 +244,10 @@ async function handleActivation(i: {
 const MUTATING = new Set([
   'SET_BALANCE', 'EXPENSE', 'INCOME', 'TRANSFER', 'CREATE_RECURRING', 'MARK_PAID', 'VOID_LAST', 'CORRECT_LAST',
   'CHANGE_CATEGORY_LAST', 'CHANGE_ACCOUNT_LAST', 'CREATE_ACCOUNT', 'CREATE_CATEGORY', 'SET_REMINDER_DAYS',
+  'BULK_VOID', 'SET_BALANCES', 'OBLIGATION_REMINDERS', 'OBLIGATION_SILENCE', 'OBLIGATION_RESCHEDULE', 'CHANGE_DATE_LAST',
 ]);
 // Members may record and read; the owner alone sets balances, edits history and changes structure/settings.
-const OWNER_ONLY = new Set(['SET_BALANCE', 'VOID_LAST', 'CORRECT_LAST', 'CHANGE_CATEGORY_LAST', 'CHANGE_ACCOUNT_LAST', 'CREATE_ACCOUNT', 'CREATE_CATEGORY', 'SET_REMINDER_DAYS']);
+const OWNER_ONLY = new Set(['SET_BALANCE', 'SET_BALANCES', 'VOID_LAST', 'BULK_VOID', 'CORRECT_LAST', 'CHANGE_CATEGORY_LAST', 'CHANGE_ACCOUNT_LAST', 'CHANGE_DATE_LAST', 'CREATE_ACCOUNT', 'CREATE_CATEGORY', 'SET_REMINDER_DAYS', 'OBLIGATION_REMINDERS', 'OBLIGATION_SILENCE', 'OBLIGATION_RESCHEDULE']);
 
 async function handleText(c: Ctx, text: string): Promise<string | null> {
   const { ledger } = c.deps;
@@ -268,9 +273,9 @@ function reply(text: string | null): string | null {
   return text ? finalizeReply(text) : null;
 }
 
-async function askConfirm(c: Ctx, interp: Interpretation, question: string): Promise<string> {
-  await c.deps.ledger.pendingSet(c.actor, 'CONFIRM', { interp, messageId: c.messageId }, 20);
-  return `${question}\nพิมพ์ “ยืนยัน” เพื่อบันทึก หรือ “ไม่” เพื่อยกเลิก`;
+async function askConfirm(c: Ctx, interp: Interpretation, question: string, strict = false): Promise<string> {
+  await c.deps.ledger.pendingSet(c.actor, 'CONFIRM', { interp, messageId: c.messageId, strict }, 20);
+  return `${question}\nพิมพ์ “ยืนยัน” เพื่อดำเนินการ หรือ “ไม่” เพื่อยกเลิก`;
 }
 
 async function route(c: Ctx, interp: Interpretation, accounts: LedgerAccount[], recent: LedgerTransaction[]): Promise<string | null> {
@@ -307,6 +312,7 @@ function describeIntent(intent: PfIntent): string {
     case 'TRANSFER': return `โอน ${money(intent.amount)} จาก ${intent.fromHint} ไป ${intent.toHint}`;
     case 'MARK_PAID': return `ปิดรายการที่จ่ายแล้ว${intent.titleHint ? ` “${intent.titleHint}”` : ''}`;
     case 'VOID_LAST': return 'ยกเลิกรายการล่าสุด';
+    case 'SET_BALANCES': return `ตั้งยอดเริ่มต้น ${intent.items.map(i => `${i.name} ${money(i.amount)}`).join(', ')}`;
     default: return intent.kind;
   }
 }
@@ -315,8 +321,9 @@ function describeIntent(intent: PfIntent): string {
 
 type AcctResult = { kind: 'one'; account: LedgerAccount } | { kind: 'none' } | { kind: 'ambiguous'; candidates: LedgerAccount[] };
 
-async function accountForHint(c: Ctx, hint: string | null, accounts: LedgerAccount[], opts: { create: boolean; kind?: string | null }): Promise<AcctResult> {
-  if (!hint) return { kind: 'none' };
+async function accountForHint(c: Ctx, hint: string | null, accounts: LedgerAccount[], opts: { create: boolean; kind?: string | null; useSingle?: boolean }): Promise<AcctResult> {
+  // Only one tracked account exists: that is the reliable default, so don't ask.
+  if (!hint) return opts.useSingle && accounts.length === 1 ? { kind: 'one', account: accounts[0] } : { kind: 'none' };
   const m = resolveAccount(hint, accounts);
   if (m.kind === 'one') return { kind: 'one', account: m.account as LedgerAccount };
   if (m.kind === 'ambiguous') return { kind: 'ambiguous', candidates: m.candidates as LedgerAccount[] };
@@ -388,7 +395,7 @@ async function execute(c: Ctx, intent: PfIntent, accounts: LedgerAccount[], rece
     // -- expense / income -------------------------------------------------------------------------------------------
     case 'EXPENSE':
     case 'INCOME': {
-      const target = await accountForHint(c, intent.accountHint, accounts, { create: true });
+      const target = await accountForHint(c, intent.accountHint, accounts, { create: true, useSingle: true });
       if (target.kind === 'ambiguous') return pickAccount(c, target.candidates, intent);
       const accountId = target.kind === 'one' ? target.account.id : null;
 
@@ -512,6 +519,65 @@ async function execute(c: Ctx, intent: PfIntent, accounts: LedgerAccount[], rece
       return res.ok ? `ย้ายรายการ ${txLine(tx)} ไปบัญชี ${target.account.name} แล้วครับ (รายการเดิมเก็บไว้เป็นประวัติ)${balanceNote(res.account ?? null)}` : 'แก้บัญชีไม่ได้ครับ';
     }
 
+    // -- high-risk bulk action -------------------------------------------------------------------------------------------------------
+    case 'BULK_VOID': {
+      const range = summaryRange(intent.period, c.today);
+      const n = await ledger.countRange(range.from, range.to);
+      if (!n.count) return `ไม่มีรายการใน${range.label}ให้ยกเลิกครับ`;
+      if (!c.confirmed) {
+        return askConfirm(c, { intent, confidence: 'high', source: 'rules' },
+          `⚠ จะยกเลิก ${n.count} รายการของ${range.label} (${thaiDate(range.from)} – ${thaiDate(range.to)}) ยอดรวม ${money(n.total)} และคืนยอดบัญชีตามรายการ (ประวัติยังเก็บไว้ ไม่ได้ลบทิ้ง)`, true);
+      }
+      const res = await ledger.voidRange({ from: range.from, to: range.to, reason: 'owner_bulk_void', actor: c.actor, message: c.messageId, idem: idem('bulkvoid') });
+      return `ยกเลิก ${res.voided} รายการของ${range.label}แล้วครับ (เก็บประวัติครบ ตรวจย้อนหลังได้)`;
+    }
+
+    // -- initial setup of several accounts -----------------------------------------------------------------------------------------------
+    case 'SET_BALANCES': {
+      const lines: string[] = [];
+      let total = 0;
+      for (const [n, item] of intent.items.entries()) {
+        const known = knownAccountFromText(item.name);
+        const target = await accountForHint(c, known?.name ?? item.name, accounts, { create: true, kind: known?.kind ?? null });
+        if (target.kind !== 'one') { lines.push(`• ${item.name}: ไม่แน่ใจว่าบัญชีไหน (ข้าม)`); continue; }
+        await ledger.setOwnerBalance({ accountId: target.account.id, amount: item.amount, actor: c.actor, message: c.messageId, idem: idem(`bal${n}`) });
+        lines.push(`• ${target.account.name}: ${money(item.amount)}`);
+        total += item.amount;
+      }
+      return [`ตั้งยอดเริ่มต้นเรียบร้อยครับ (เป็นยอดที่คุณยืนยัน)`, ...lines, `รวม ${money(total)}`].join('\n');
+    }
+
+    // -- per-bill reminder management ------------------------------------------------------------------------------------------------
+    case 'ACK_MORNING': return 'ผมส่งแจ้งเตือนตอนเช้าประมาณ 08:00 น. (เวลาไทย) ทุกวันอยู่แล้วครับ';
+    case 'OBLIGATION_REMINDERS':
+    case 'OBLIGATION_SILENCE':
+    case 'OBLIGATION_RESCHEDULE': {
+      const found = await resolveObligation(c, intent.titleHint);
+      if (found.kind === 'none') return intent.titleHint ? `ไม่พบรายการ “${intent.titleHint}” ครับ ผมยังไม่ได้แก้อะไร` : 'ไม่แน่ใจว่าหมายถึงรายการไหนครับ ระบุชื่อรายการด้วยได้ไหมครับ (เช่น “ค่ารถ”) ผมยังไม่ได้แก้อะไร';
+      if (found.kind === 'many') return `หมายถึงรายการไหนครับ: ${found.items.map(i => i.title).join(', ')} (พิมพ์ชื่อรายการมาด้วยครับ) ผมยังไม่ได้แก้อะไร`;
+      const item = found.item;
+      if (intent.kind === 'OBLIGATION_REMINDERS') {
+        await ledger.updateRecurring({ id: item.obligation_id, patch: { reminder_days: intent.days }, actor: c.actor, message: c.messageId, idem: idem('remind') });
+        return `ตั้งเตือน “${item.title}” ก่อนครบกำหนด ${intent.days.join('/')} วันแล้วครับ`;
+      }
+      if (intent.kind === 'OBLIGATION_SILENCE') {
+        await ledger.updateRecurring({ id: item.obligation_id, patch: { reminder_days: [] }, actor: c.actor, message: c.messageId, idem: idem('silence') });
+        return `โอเคครับ ไม่เตือน “${item.title}” อีกแล้ว (รายการยังอยู่ ดูได้ในสรุปและปิดด้วย “จ่ายแล้ว” ได้ตามปกติ)`;
+      }
+      const [y, m] = item.due_date.split('-').map(Number);
+      const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      const nextDue = `${y}-${String(m).padStart(2, '0')}-${String(Math.min(intent.dayOfMonth, last)).padStart(2, '0')}`;
+      await ledger.updateRecurring({ id: item.obligation_id, patch: { next_due_date: nextDue, day_of_month: intent.dayOfMonth }, actor: c.actor, message: c.messageId, idem: idem('move') });
+      return `เลื่อน “${item.title}” เป็นครบกำหนด ${thaiDate(nextDue)} แล้วครับ (รอบถัดไปจะยึดวันที่ ${intent.dayOfMonth})`;
+    }
+
+    case 'CHANGE_DATE_LAST': {
+      const tx = recent.find(t => t.kind !== 'ADJUSTMENT');
+      if (!tx) return 'ยังไม่มีรายการให้แก้ไขครับ';
+      const res = await ledger.correctTransaction({ txId: tx.id, occurredOn: intent.date, actor: c.actor, message: c.messageId, idem: idem('date') });
+      return res.ok ? `แก้วันที่ของรายการ ${txLine(tx)} เป็น ${thaiDate(intent.date)} แล้วครับ (รายการเดิมเก็บไว้เป็นประวัติ)${balanceNote(res.account ?? null)}` : 'แก้วันที่รายการนี้ไม่ได้ครับ';
+    }
+
     // -- structure / settings ------------------------------------------------------------------------------------------------------------
     case 'CREATE_ACCOUNT': {
       const res = await ledger.createAccount({ name: intent.name, kind: intent.accountKind, actor: c.actor, message: c.messageId, idem: idem('acct') });
@@ -587,6 +653,16 @@ async function execute(c: Ctx, intent: PfIntent, accounts: LedgerAccount[], rece
   }
 }
 
+type ObligationLookup = { kind: 'one'; item: UpcomingItem } | { kind: 'many'; items: UpcomingItem[] } | { kind: 'none' };
+
+async function resolveObligation(c: Ctx, titleHint: string | null): Promise<ObligationLookup> {
+  const all = firstPerObligation(await c.deps.ledger.listUpcoming(c.today, addDays(c.today, 400), 200));
+  const pool = titleHint ? all.filter(u => titleOverlap(u.title, titleHint)) : all.filter(u => u.overdue || u.days_until <= 7);
+  if (pool.length === 1) return { kind: 'one', item: pool[0] };
+  if (pool.length > 1) return { kind: 'many', items: pool.slice(0, 6) };
+  return { kind: 'none' };
+}
+
 const FREQUENCY_TH: Record<string, string> = {
   ONE_TIME: '(ครั้งเดียว)', WEEKLY: 'ทุกสัปดาห์', MONTHLY: 'ทุกเดือน', YEARLY: 'ทุกปี', CUSTOM_DAYS: 'ตามรอบที่กำหนด', INSTALLMENT: 'ผ่อนรายเดือน',
 };
@@ -648,7 +724,7 @@ function paidReply(res: Record<string, any>): string {
 }
 
 async function payObligation(c: Ctx, obligationId: string, title: string, accountHint: string | null, amount: number | null, accounts: LedgerAccount[]): Promise<string> {
-  const target = await accountForHint(c, accountHint, accounts, { create: true });
+  const target = await accountForHint(c, accountHint, accounts, { create: true, useSingle: true });
   if (target.kind === 'ambiguous') {
     await c.deps.ledger.pendingSet(c.actor, 'ASK_PAID_ACCOUNT', { obligationId, amount, messageId: c.messageId }, 30);
     return `ตัดจากบัญชีไหนครับ: ${target.candidates.map(a => a.name).join(', ')}`;
@@ -683,7 +759,8 @@ async function resolvePending(c: Ctx, text: string, pending: Pending, accounts: 
 
   switch (pending.kind) {
     case 'CONFIRM': {
-      if (isYes(t)) {
+      // high-risk actions accept only the explicit word "ยืนยัน", never a casual "ok"/"ใช่"
+      if (pending.payload.strict ? /^ยืนยัน(?:ครับ)?[\s!.]*$/.test(t) : isYes(t)) {
         await clear();
         const original = pending.payload.interp as Interpretation;
         const cc: Ctx = { ...c, messageId: String(pending.payload.messageId ?? c.messageId), confirmed: true };
@@ -842,7 +919,7 @@ async function resolveSlip(c: Ctx, t: string, pending: Pending, accounts: Ledger
   const income = /(รายรับ|ได้รับ|รับเงิน|เงินเข้า|โอนเข้า)/.test(t);
   const purpose = t.replace(/(?:จาก|ด้วย|ผ่าน|ตัด|เข้า)\s*\S+/g, ' ').replace(/(?:รายรับ|รายจ่าย|ค่า(?=\S)|นะ|ครับ)/g, m => (m === 'ค่า' ? 'ค่า' : ' ')).replace(/\s+/g, ' ').trim();
   if (!purpose && !hint) return { done: false, reply: null };
-  const target = await accountForHint(c, hint, accounts, { create: true });
+  const target = await accountForHint(c, hint, accounts, { create: true, useSingle: true });
   if (target.kind === 'ambiguous') return done(`หมายถึงบัญชีไหนครับ: ${target.candidates.map(a => a.name).join(', ')}`);
   const accountId = target.kind === 'one' ? target.account.id : null;
   const title = purpose || null;

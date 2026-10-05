@@ -15,7 +15,10 @@ test('mocked join event captures a PENDING binding that grants nothing', async (
   const h = await harness();
   const joined = await h.raw({ type: 'join', user: null });
   assert.equal(joined.handled, false, 'a pending group still belongs to the normal chain');
-  assert.equal(joined.reply, null, 'the bot stays silent on join');
+  assert.match(joined.reply!, /พบกลุ่มใหม่/);
+  assert.match(joined.reply!, /ยืนยันกลุ่มการเงิน/);
+  assert.doesNotMatch(joined.reply!, /SCB|บาท|ยอด/, 'join message discloses nothing');
+  assertPersona(joined.reply);
   assert.equal((await lookup(h, GROUP)).status, 'PENDING');
   const row = (await h.db.query<any>('select * from pf_channel_bindings')).rows[0];
   assert.notEqual(row.group_id_enc, GROUP, 'group id is stored encrypted, not in clear');
@@ -41,7 +44,7 @@ test('only the owner can activate: stranger and member are rejected, owner succe
   assertPersona(owner.reply);
   assert.equal(owner.handled, true);
   assert.equal((await lookup(h, GROUP)).status, 'ACTIVE');
-  assert.equal(await h.count('pf_audit_events', "action='BINDING_ACTIVATED'"), 1);
+  assert.equal(await h.count('pf_audit_events', "action='GROUP_BOUND'"), 1);
 });
 
 test('the group NAME is never an identity: the binding is keyed by the hashed group id only', async () => {

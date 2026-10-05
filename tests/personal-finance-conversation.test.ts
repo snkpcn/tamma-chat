@@ -30,6 +30,7 @@ test('01 "บัญชีใช้จ่ายตอนนี้เหลือ 
 test('02 "จ่ายประกัน 18500" without an account is parked, asks once, and "SCB" completes it', async () => {
   const h = await ready();
   await say(h, 'SCB ตอนนี้ 100000');
+  await say(h, 'KBank ตอนนี้ 5000');
   const r1 = await say(h, 'จ่ายประกัน 18500');
   assert.match(r1.reply!, /ตัดจากบัญชีไหน/);
   assert.equal(await h.count('pf_transactions', "status='PENDING_CLARIFICATION'"), 1);
@@ -92,6 +93,7 @@ test('04b slip that matches a due obligation offers to close it instead of creat
 test('05 "จ่ายแล้ว" resolves the due item, asks the account if unknown, and advances the next due date', async () => {
   const h = await ready();
   await say(h, 'SCB ตอนนี้ 20000');
+  await say(h, 'KBank ตอนนี้ 5000');
   await h.ledger.createRecurring({ title: 'ค่าไฟ', kind: 'EXPENSE', amount: 3000, frequency: 'MONTHLY', firstDue: '2026-10-05', actor: A, ...ids('o') });
   const r1 = await say(h, 'จ่ายแล้ว');
   assert.match(r1.reply!, /ตัดจากบัญชีไหน/);

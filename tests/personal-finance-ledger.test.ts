@@ -142,8 +142,8 @@ test('every mutation writes an audit event with before/after', async () => {
   const tx = (await ledger.createTransaction({ kind: 'EXPENSE', amount: 100, accountId: scb.id, actor: A, ...ids('t') })).transaction;
   await ledger.voidTransaction({ txId: tx.id, reason: 'r', actor: A, ...ids('v') });
   const actions = (await db.query<{ action: string }>('select action from pf_audit_events order by created_at, id')).rows.map(r => r.action);
-  for (const expected of ['ACCOUNT_CREATED', 'BALANCE_CONFIRMED', 'TRANSACTION_CREATED', 'TRANSACTION_VOIDED']) assert.ok(actions.includes(expected), expected);
-  const bc = (await db.query<{ before_data: any; after_data: any }>("select before_data, after_data from pf_audit_events where action='BALANCE_CONFIRMED'")).rows[0];
+  for (const expected of ['ACCOUNT_CREATED', 'BALANCE_SET', 'TRANSACTION_CREATED', 'TRANSACTION_VOIDED']) assert.ok(actions.includes(expected), expected);
+  const bc = (await db.query<{ before_data: any; after_data: any }>("select before_data, after_data from pf_audit_events where action='BALANCE_SET'")).rows[0];
   assert.equal(bc.after_data.balance, 1000);
   assert.equal(bc.before_data.balance_status, 'UNKNOWN');
 });

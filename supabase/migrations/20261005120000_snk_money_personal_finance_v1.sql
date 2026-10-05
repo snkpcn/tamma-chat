@@ -492,7 +492,7 @@ begin
          balance_confirmed_seq=v_tx.seq, updated_at=now()
    where id=v_acc.id;
 
-  perform public.pf_i_audit('BALANCE_CONFIRMED','account',v_acc.id::text,p_actor,p_message,v_before,public.pf_i_account_json(v_acc.id),
+  perform public.pf_i_audit(case when v_acc.balance is null then 'BALANCE_SET' else 'BALANCE_ADJUSTED' end,'account',v_acc.id::text,p_actor,p_message,v_before,public.pf_i_account_json(v_acc.id),
     jsonb_build_object('delta',v_delta,'adjustment_tx',v_tx.id,'previous_status',v_acc.balance_status));
   return public.pf_i_idem_put(p_idem,jsonb_build_object('ok',true,'account',public.pf_i_account_json(v_acc.id),
     'previous_balance',v_acc.balance,'previous_status',v_acc.balance_status,'delta',v_delta,'adjustment_id',v_tx.id));
@@ -572,6 +572,30 @@ begin
     'account',public.pf_i_account_json(v_tx.account_id),'to_account',public.pf_i_account_json(v_tx.to_account_id)));
 end $$;
 
+-- High-risk bulk action (caller must have obtained explicit confirmation).  Atomic: one transaction,
+-- every row goes through pf_void_transaction so each void keeps its own audit trail.
+create or replace function public.pf_count_range(p_from date, p_to date) returns jsonb language sql stable security definer set search_path=public as $$
+  select jsonb_build_object('count',count(*),'total',coalesce(sum(amount),0))
+    from public.pf_transactions
+   where occurred_on between p_from and p_to and kind in ('EXPENSE','INCOME','TRANSFER') and status in ('CONFIRMED','PENDING_CLARIFICATION');
+$$;
+
+create or replace function public.pf_void_range(p_from date, p_to date, p_reason text, p_actor text, p_message text, p_idem text)
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_prev jsonb; r record; v_n integer := 0; v_res jsonb;
+begin
+  v_prev := public.pf_i_idem_get(p_idem); if v_prev is not null then return v_prev; end if;
+  for r in select id from public.pf_transactions
+            where occurred_on between p_from and p_to and kind in ('EXPENSE','INCOME','TRANSFER') and status in ('CONFIRMED','PENDING_CLARIFICATION')
+            order by seq desc loop
+    v_res := public.pf_void_transaction(r.id,p_reason,p_actor,p_message,p_idem||':'||r.id::text);
+    if (v_res->>'ok')::boolean then v_n := v_n+1; end if;
+  end loop;
+  perform public.pf_i_audit('TRANSACTION_VOIDED','transaction_range',p_from::text||'..'||p_to::text,p_actor,p_message,'{}'::jsonb,
+    jsonb_build_object('voided',v_n),jsonb_build_object('reason',p_reason,'bulk',true));
+  return public.pf_i_idem_put(p_idem,jsonb_build_object('ok',true,'voided',v_n));
+end $$;
+
 -- Wrong amount / account / kind: reverse the original and post the replacement, linked both ways.
 create or replace function public.pf_correct_transaction(
   p_tx uuid, p_kind text, p_amount numeric, p_account uuid, p_to_account uuid, p_category_name text,
@@ -600,8 +624,8 @@ begin
   if v_old.obligation_id is not null then
     update public.pf_obligation_payments set transaction_id=v_new.id where transaction_id=v_old.id;
   end if;
-  perform public.pf_i_audit('TRANSACTION_CORRECTED','transaction',v_old.id::text,p_actor,p_message,v_before,public.pf_i_tx_json(v_new.id),
-    jsonb_build_object('replacement',v_new.id,'reversal',v_rev));
+  perform public.pf_i_audit('TRANSACTION_EDITED','transaction',v_old.id::text,p_actor,p_message,v_before,public.pf_i_tx_json(v_new.id),
+    jsonb_build_object('replacement',v_new.id,'reversal',v_rev,'edit','correction'));
   return public.pf_i_idem_put(p_idem,jsonb_build_object('ok',true,'original',public.pf_i_tx_json(v_old.id),'transaction',public.pf_i_tx_json(v_new.id),
     'account',public.pf_i_account_json(v_new.account_id),'to_account',public.pf_i_account_json(v_new.to_account_id)));
 end $$;
@@ -623,7 +647,7 @@ begin
       note=coalesce(nullif(left(trim(coalesce(p_note,'')),1000),''),note),
       payee=coalesce(nullif(left(trim(coalesce(p_payee,'')),180),''),payee)
    where id=v_tx.id;
-  perform public.pf_i_audit('TRANSACTION_UPDATED','transaction',v_tx.id::text,p_actor,p_message,v_before,public.pf_i_tx_json(v_tx.id));
+  perform public.pf_i_audit('TRANSACTION_EDITED','transaction',v_tx.id::text,p_actor,p_message,v_before,public.pf_i_tx_json(v_tx.id));
   return public.pf_i_idem_put(p_idem,jsonb_build_object('ok',true,'transaction',public.pf_i_tx_json(v_tx.id)));
 end $$;
 
@@ -740,7 +764,7 @@ begin
     day_of_month=case when p_patch ? 'day_of_month' then nullif(p_patch->>'day_of_month','')::integer else day_of_month end,
     updated_at=now()
    where id=v_o.id;
-  perform public.pf_i_audit('RECURRING_UPDATED','obligation',v_o.id::text,p_actor,p_message,v_before,public.pf_i_obligation_json(v_o.id));
+  perform public.pf_i_audit('RECURRING_EDITED','obligation',v_o.id::text,p_actor,p_message,v_before,public.pf_i_obligation_json(v_o.id));
   return public.pf_i_idem_put(p_idem,jsonb_build_object('ok',true,'obligation',public.pf_i_obligation_json(v_o.id)));
 end $$;
 
@@ -779,7 +803,7 @@ begin
     if v_o.end_date is not null and v_next>v_o.end_date then v_status := 'COMPLETED'; end if;
   end if;
   update public.pf_obligations set next_due_date=v_next,installments_paid=v_paid,status=v_status,updated_at=now() where id=v_o.id;
-  perform public.pf_i_audit('RECURRING_PAID','obligation',v_o.id::text,p_actor,p_message,v_before,public.pf_i_obligation_json(v_o.id),
+  perform public.pf_i_audit('PAYMENT_MARKED_PAID','obligation',v_o.id::text,p_actor,p_message,v_before,public.pf_i_obligation_json(v_o.id),
     jsonb_build_object('transaction',v_tx.id,'paid_due_date',v_o.next_due_date));
   return public.pf_i_idem_put(p_idem,jsonb_build_object('ok',true,'paid_due_date',v_o.next_due_date,'transaction',public.pf_i_tx_json(v_tx.id),
     'obligation',public.pf_i_obligation_json(v_o.id),'account',public.pf_i_account_json(v_acc)));
@@ -852,6 +876,7 @@ declare
 begin
   for o in select * from public.pf_obligations where status='ACTIVE' order by next_due_date for update skip locked loop
     exit when v_n>=p_limit;
+    continue when cardinality(o.reminder_days)=0;   -- owner turned reminders off for this item
     v_until := o.next_due_date-p_today;
     if v_until<0 then
       continue when v_until<-7;   -- overdue nags stop after a week; the item stays visible on the dashboard
@@ -937,7 +962,7 @@ create or replace function public.pf_set_reminder_days(p_days integer[], p_actor
 returns jsonb language plpgsql security definer set search_path=public as $$
 begin
   if p_days is null or cardinality(p_days)=0 or exists(select 1 from unnest(p_days) d where d<0 or d>60) then raise exception 'invalid_reminder_days'; end if;
-  perform public.pf_i_audit('SETTINGS_UPDATED','settings','reminder_days',p_actor,p_message,
+  perform public.pf_i_audit('PERMISSION_CHANGED','settings','reminder_days',p_actor,p_message,
     (select jsonb_build_object('reminder_days',value) from public.pf_settings where key='reminder_days'),jsonb_build_object('reminder_days',to_jsonb(p_days)));
   update public.pf_settings set value=to_jsonb(p_days),updated_at=now() where key='reminder_days';
   return jsonb_build_object('ok',true,'reminder_days',p_days);
@@ -1003,7 +1028,7 @@ begin
     return jsonb_build_object('ok',false,'error','not_verified');
   end if;
   update public.pf_channel_bindings set status='ACTIVE',verified_by_hash=nullif(p_actor,''),activated_at=now(),code_hash=null,code_expires_at=null,updated_at=now() where id=v_row.id;
-  perform public.pf_i_audit('BINDING_ACTIVATED','binding',v_row.id::text,p_actor,null,jsonb_build_object('status','PENDING'),jsonb_build_object('status','ACTIVE'),jsonb_build_object('method',v_how));
+  perform public.pf_i_audit('GROUP_BOUND','binding',v_row.id::text,p_actor,null,jsonb_build_object('status','PENDING'),jsonb_build_object('status','ACTIVE'),jsonb_build_object('method',v_how));
   return jsonb_build_object('ok',true,'method',v_how);
 end $$;
 
@@ -1014,7 +1039,7 @@ begin
   update public.pf_channel_bindings set status='REVOKED',revoked_at=now(),updated_at=now()
    where group_id_hash=p_group_hash and status in ('PENDING','ACTIVE') returning * into v_row;
   if v_row.id is null then return jsonb_build_object('ok',false,'error','no_binding'); end if;
-  perform public.pf_i_audit('BINDING_REVOKED','binding',v_row.id::text,p_actor,null,'{}'::jsonb,jsonb_build_object('status','REVOKED'));
+  perform public.pf_i_audit('GROUP_UNBOUND','binding',v_row.id::text,p_actor,null,'{}'::jsonb,jsonb_build_object('status','REVOKED'));
   return jsonb_build_object('ok',true);
 end $$;
 

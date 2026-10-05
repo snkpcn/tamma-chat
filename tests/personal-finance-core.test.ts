@@ -20,6 +20,8 @@ test('amounts: Thai/commas/units are parsed; dates, counts and durations are not
   assert.deepEqual(findAmounts('ทุก 10 วัน 500').map(a => a.value), [500]);
   assert.deepEqual(findAmounts('นัด 25/10 เวลา 10:30'), []);
   assert.equal(extractAmount('จ่ายไปเยอะเลย'), null);
+  assert.deepEqual(findAmounts('SCB 120000 KBank 45000').map(a => a.value), [120000, 45000], 'the K of KBank is not a thousands unit');
+  assert.equal(extractAmount('5k'), 5000);
   assert.ok(amountAppearsIn('จ่าย 1,200 บาท', 1200));
   assert.ok(!amountAppearsIn('จ่าย 1,200 บาท', 1300));
 });

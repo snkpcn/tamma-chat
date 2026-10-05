@@ -71,7 +71,7 @@ read them **server-side** with the service-role key. Forecasts are always labell
 
 `npm run audit:snk-money` (also part of `npm test`). The migration is executed for real against PGlite (Postgres 18 in WASM), so
 balance arithmetic, idempotency, constraints, audit immutability, grants and reminder claiming are tested against the actual SQL.
-Includes the 18 natural-language scenarios and the mocked join→pending→verify→active binding fixture (no bot invited).
+Includes the owner's exact 18 acceptance cases (`personal-finance-spec22.test.ts`), the broader scenario suite and the mocked join→pending→verify→active binding fixture (no bot invited).
 
 Known limits: PGlite is single-connection, so true multi-connection races are covered by design (row `FOR UPDATE` locks +
 transaction-scoped advisory lock on the idempotency key) and by retry-idempotency tests, not by a concurrent-connection test.
