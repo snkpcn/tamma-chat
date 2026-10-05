@@ -26,6 +26,16 @@
   schedule = "0 0 * * *"
 
 
+# SNK MONEY private finance reminders. 01:00-14:00 UTC = 08:00-21:00 Asia/Bangkok, hourly:
+# the first run of the day sends, later runs only retry failed deliveries (claims are idempotent).
+[functions."personal-finance-reminders"]
+  schedule = "0 1-14 * * *"
+
+# SNK MONEY daily life + money coach: morning brief (07:00-10:59) and evening close (21:00-23:59), Asia/Bangkok.
+# 00:05-03:05 and 14:05-16:05 UTC; the in-code window and the Postgres once-per-day claim make repeats harmless.
+[functions."personal-finance-coach"]
+  schedule = "5 0-3,14-16 * * *"
+
 # AI/API cost operations. Schedules are UTC.
 # Every 5 minutes: notify conversations idle at least 3 minutes.
 [functions."ai-cost-notify-idle"]

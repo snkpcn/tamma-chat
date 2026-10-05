@@ -5,6 +5,7 @@
   "description": "ทำมา-ชาติ — Experiences of Isan. Static site (index.html) plus the Thongthai AI concierge Netlify Functions backend.",
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts",
+    "audit:snk-money": "node --import tsx --test tests/personal-finance-core.test.ts tests/personal-finance-nlu.test.ts tests/personal-finance-ledger.test.ts tests/personal-finance-conversation.test.ts tests/personal-finance-binding.test.ts tests/personal-finance-spec22.test.ts tests/personal-finance-transport.test.ts tests/personal-finance-v2-sql.test.ts tests/personal-finance-coach.test.ts tests/personal-finance-concurrency.test.ts",
     "audit:preww": "node --import tsx --test tests/homepage-i18n-completeness.test.ts tests/otop-i18n-typography.test.ts tests/pre-worldwide-production-audit.test.ts tests/public-five-language-complete.test.ts && node scripts/pre-worldwide-readiness-gate.mjs",
     "audit:ww0": "node --import tsx --test tests/ww0-foundation-lock.test.ts",
     "eval:semantic:live": "tsx scripts/run-semantic-live-eval.ts",
@@ -32,6 +33,7 @@
     "chess.js": "^1.4.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@netlify/functions": "^2.8.1",
     "@types/node": "^20.14.0",
     "tsx": "^4.23.13",
