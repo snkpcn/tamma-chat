@@ -13,6 +13,7 @@ import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
 import { handleOwnerExpenseImage, handleOwnerExpenseText } from './_owner-expense-intake';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
+import { handleOwnerProjectText } from './_owner-project-os';
 import { handleTransferPurposeText } from './_inthanin-transfer-followup';
 import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
@@ -375,6 +376,18 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   });
   if (payrollTextReply) {
     await replyToLine(event.replyToken, payrollTextReply, accessToken);
+    return;
+  }
+
+  const ownerProjectReply = await handleOwnerProjectText({
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+    messageId: event.message.id ?? null,
+    timestamp: event.timestamp,
+  });
+  if (ownerProjectReply) {
+    await replyToLine(event.replyToken, ownerProjectReply, accessToken);
     return;
   }
 

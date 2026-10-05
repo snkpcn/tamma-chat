@@ -56,6 +56,7 @@ export type OwnerExpenseClassification = {
 
 type OwnerExpenseIntake = {
   id: string;
+  source_user_hash: string | null;
   status: 'awaiting_purpose' | 'awaiting_business' | 'categorized' | 'needs_review' | 'cancelled';
   amount: number | string | null;
   occurred_on: string;
@@ -182,7 +183,7 @@ async function existingIntakeByMessage(groupHash: string, messageId: string): Pr
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&source_channel=eq.line&evidence_message_id=eq.' + encodeURIComponent(messageId)
-    + '&select=id,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
   );
   return (await response.json() as OwnerExpenseIntake[])[0] ?? null;
 }
@@ -191,7 +192,7 @@ async function existingIntakeByImage(groupHash: string, sha256: string): Promise
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&evidence_sha256=eq.' + encodeURIComponent(sha256)
-    + '&select=id,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
   );
   return (await response.json() as OwnerExpenseIntake[])[0] ?? null;
 }
@@ -200,7 +201,7 @@ async function pendingIntakes(groupHash: string): Promise<OwnerExpenseIntake[]> 
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&status=' + PENDING_STATUSES
-    + '&select=id,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at'
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at'
     + '&order=created_at.asc&limit=12',
   );
   return await response.json() as OwnerExpenseIntake[];
@@ -592,10 +593,17 @@ export async function handleOwnerExpenseText(input: {
   });
   if (typedReply) return typedReply;
 
-  const rows = await pendingIntakes(groupHash);
+  const reference = referenceFromText(text);
+  const allRows = await pendingIntakes(groupHash);
+  if (!allRows.length) return null;
+  const actorHash = piiHash(input.userId) ?? '';
+  // Without an explicit #code, only continue the sender's own pending slip.
+  // This prevents two family members in the Owner group crossing answers.
+  const rows = reference.code
+    ? allRows
+    : allRows.filter(row => row.source_user_hash === actorHash);
   if (!rows.length) return null;
 
-  const reference = referenceFromText(text);
   let intake: OwnerExpenseIntake | undefined;
   if (reference.code) {
     intake = rows.find(row => row.id.replace(/-/g, '').toLowerCase().startsWith(reference.code!));
