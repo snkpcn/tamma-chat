@@ -135,10 +135,6 @@ function bangkokDate(timestamp?: number): string {
   }).format(new Date(Number.isFinite(timestamp) ? timestamp : Date.now()));
 }
 
-function localMonth(timestamp?: number): string {
-  return bangkokDate(timestamp).slice(0, 7) + '-01';
-}
-
 function normalizeText(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
 }
@@ -509,34 +505,6 @@ export async function handleOwnerExpenseImage(input: {
   ].filter(Boolean).join('\n');
 }
 
-async function monthlySummary(groupHash: string, timestamp?: number): Promise<string> {
-  const month = localMonth(timestamp);
-  const response = await dbFetch(
-    'financial_owner_expense_summary_v1?month_start=eq.' + encodeURIComponent(month)
-    + '&owner_group_hash=eq.' + encodeURIComponent(groupHash)
-    + '&select=business_unit_code,expense_class,total_amount,item_count,attention_count'
-    + '&order=total_amount.desc',
-  );
-  const rows = await response.json() as Array<{
-    business_unit_code: BusinessUnit;
-    expense_class: ExpenseClass;
-    total_amount: number | string;
-    item_count: number;
-    attention_count: number;
-  }>;
-  const capital = rows.filter(row => row.expense_class === 'capital_investment');
-  const total = capital.reduce((sum, row) => sum + Number(row.total_amount || 0), 0);
-  const attention = rows.reduce((sum, row) => sum + Number(row.attention_count || 0), 0);
-  if (!capital.length) return '📊 Owner Expense — เดือนนี้ยังไม่มีรายการลงทุนที่สรุปได้ครับ';
-  return [
-    '📊 Owner Expense — สรุปลงทุนเดือน ' + month.slice(0, 7),
-    'รวม: ' + money(total),
-    ...capital.map(row => '• ' + businessLabel(row.business_unit_code) + ' · ' + money(row.total_amount) + ' (' + row.item_count + ' รายการ)'),
-    attention ? '⚠️ รอระบุ/ตรวจสอบ ' + attention + ' รายการ' : '',
-    'ดูรายละเอียดและประวัติแก้ไขได้ใน Owner Expense Dashboard ครับ',
-  ].filter(Boolean).join('\n');
-}
-
 function resultReply(result: ResolveResult): string {
   return [
     '📁 Owner Expense — บันทึกเข้าหลังบ้านแล้วครับ',
@@ -611,10 +579,8 @@ export async function handleOwnerExpenseText(input: {
   if (team !== 'owner_general') return null;
 
   const text = normalizeText(input.text);
-  const summaryCommand = /^(?:สรุปลงทุน|สรุปค่าใช้จ่ายเจ้าของ|สรุปค่าใช้จ่ายลงทุน)$/iu.test(text);
   const groupHash = piiHash(input.targetId);
   if (!groupHash) throw new Error('owner_expense_group_hash_unavailable');
-  if (summaryCommand) return monthlySummary(groupHash, input.timestamp);
   if (!input.messageId) return null;
 
   const typedReply = await recordTypedInvestment({
