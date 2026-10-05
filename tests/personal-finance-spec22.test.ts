@@ -77,7 +77,7 @@ test('case 8: a due reminder reaches only the verified SNK MONEY group', async (
   await h.ledger.createRecurring({ title: 'ค่างวดรถ', kind: 'EXPENSE', amount: 35000, frequency: 'MONTHLY', firstDue: '2026-10-06', actor: A, ...ids('o') });
   const pushed: string[] = [];
   const out = await runPersonalFinanceReminders({
-    ledger: h.ledger, now: () => NOW, enabled: true, hash: h.deps.hash,
+    rpc: h.deps.rpc, now: () => NOW, enabled: true, hash: h.deps.hash,
     decrypt: v => v.slice(4), push: async to => { pushed.push(to); },
   });
   assert.equal(out.sent, 1);

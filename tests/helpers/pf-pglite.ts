@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { PfLedger, PfLedgerError, type Rpc } from '../../netlify/functions/_personal-finance-ledger';
 
 export const MIGRATION = join(process.cwd(), 'supabase/snk-os/20261005130000_snk_money_v1.sql');
+export const MIGRATION_V2 = join(process.cwd(), 'supabase/snk-os/20261005140000_snk_money_v2_coach_binding.sql');
 export const BASE_SCHEMA = join(process.cwd(), 'tests/fixtures/snk-os-base.sql');
 export const OWNER_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -21,6 +22,7 @@ export async function freshDb(): Promise<{ db: PGlite; rpc: Rpc; ledger: PfLedge
   await db.exec('create role service_role; create role anon; create role authenticated;');
   await db.exec(readFileSync(BASE_SCHEMA, 'utf8'));
   await db.exec(readFileSync(MIGRATION, 'utf8'));
+  await db.exec(readFileSync(MIGRATION_V2, 'utf8'));
   await db.query('insert into auth.users(id) values($1)', [OWNER_ID]);
   const rpc: Rpc = async (fn, args) => {
     const keys = Object.keys(args);

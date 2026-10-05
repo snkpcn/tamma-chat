@@ -5,12 +5,12 @@
 // Claiming happens inside Postgres, so concurrent / repeated cron runs cannot double-send.
 
 import { bangkokToday, finalizeReply, money, pfEnabled, thaiDate } from './_personal-finance-core';
-import { PfLedger, configuredOwnerId, supabaseRpc } from './_personal-finance-ledger';
+import { PfBindingClient, PfLedger, assertLedgerConfigured, supabaseRpc, type Rpc } from './_personal-finance-ledger';
 
 type Claimed = Awaited<ReturnType<PfLedger['claimReminders']>>[number];
 
 export type ReminderDeps = {
-  ledger: PfLedger;
+  rpc: Rpc;
   push: (groupId: string, text: string) => Promise<void>;
   decrypt: (value: string) => string | null;
   hash: (value: string) => string | null;
@@ -43,31 +43,38 @@ export function composeReminder(items: Claimed[]): string[] {
 }
 
 export async function runPersonalFinanceReminders(deps: ReminderDeps): Promise<ReminderResult> {
-  if (!deps.enabled) return { skipped: 'disabled', claimed: 0, sent: 0, failed: 0 };
-  const target = await deps.ledger.bindingActiveTarget();
-  if (!target?.group_id_enc) return { skipped: 'no_active_group', claimed: 0, sent: 0, failed: 0 };
-  const groupId = deps.decrypt(target.group_id_enc);
-  // Defence in depth: the decrypted id must hash to the ACTIVE binding it came from.
-  if (!groupId || deps.hash(groupId) !== target.group_id_hash) return { skipped: 'target_mismatch', claimed: 0, sent: 0, failed: 0 };
+  const total: ReminderResult = { claimed: 0, sent: 0, failed: 0 };
+  if (!deps.enabled) return { ...total, skipped: 'disabled' };
+  const targets = await new PfBindingClient(deps.rpc).activeTargets();
+  if (!targets.length) return { ...total, skipped: 'no_active_group' };
 
-  const claimed = await deps.ledger.claimReminders(bangkokToday(deps.now()), 50);
-  if (!claimed.length) return { claimed: 0, sent: 0, failed: 0 };
-
-  try {
-    for (const message of composeReminder(claimed)) await deps.push(groupId, message);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message.slice(0, 200) : 'push_failed';
-    for (const item of claimed) await deps.ledger.finishReminder(item.delivery_id, false, reason);
-    return { claimed: claimed.length, sent: 0, failed: claimed.length };
+  for (const target of targets) {
+    const groupId = target.group_id_enc ? deps.decrypt(target.group_id_enc) : null;
+    // Defence in depth: the decrypted id must hash to the ACTIVE binding it came from.
+    if (!groupId || deps.hash(groupId) !== target.group_id_hash) { total.skipped = 'target_mismatch'; continue; }
+    const ledger = new PfLedger(deps.rpc, target.owner_id);
+    const claimed = await ledger.claimReminders(bangkokToday(deps.now()), 50);
+    if (!claimed.length) continue;
+    total.claimed += claimed.length;
+    try {
+      for (const message of composeReminder(claimed)) await deps.push(groupId, message);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.slice(0, 200) : 'push_failed';
+      for (const item of claimed) await ledger.finishReminder(item.delivery_id, false, reason);
+      total.failed += claimed.length;
+      continue;
+    }
+    for (const item of claimed) await ledger.finishReminder(item.delivery_id, true);
+    total.sent += claimed.length;
   }
-  for (const item of claimed) await deps.ledger.finishReminder(item.delivery_id, true);
-  return { claimed: claimed.length, sent: claimed.length, failed: 0 };
+  return total;
 }
 
 export async function defaultReminderDeps(): Promise<ReminderDeps> {
   const { piiHash, decryptPii } = await import('./_operations-db');
+  assertLedgerConfigured();
   return {
-    ledger: new PfLedger(supabaseRpc, configuredOwnerId()),
+    rpc: supabaseRpc,
     decrypt: decryptPii,
     hash: piiHash,
     now: () => new Date(),

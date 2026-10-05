@@ -26,8 +26,11 @@ export async function harness(opts: {
   businessBound?: string[];
   slips?: Record<string, SlipExtraction | 'fail'>;
   images?: Record<string, string>;
+  /** false = production-like: no SNK_MONEY_OWNER_ID, the owner comes from a dashboard-issued binding code. */
+  pinnedOwner?: boolean;
+  env?: Record<string, string | undefined>;
 } = {}) {
-  const { db, ledger } = await freshDb();
+  const { db, ledger, rpc, owner } = await freshDb();
   const businessBound = new Set(opts.businessBound ?? []);
   const slips = opts.slips ?? {};
   const images = opts.images ?? {};
@@ -35,10 +38,11 @@ export async function harness(opts: {
   let counter = 0;
 
   const deps: PfDeps = {
-    ledger,
+    rpc,
+    envOwnerId: opts.pinnedOwner === false ? null : owner,
     llm: opts.llm ?? null,
     now: () => NOW,
-    env: { PF_OWNER_LINE_USER_IDS: OWNER, PF_FINANCE_MEMBER_LINE_USER_IDS: MEMBER },
+    env: opts.env ?? (opts.pinnedOwner === false ? {} : { PF_OWNER_LINE_USER_IDS: OWNER, PF_FINANCE_MEMBER_LINE_USER_IDS: MEMBER }),
     hash: v => sha(v.trim().toLowerCase()),
     encrypt: v => `enc:${v}`,
     isBusinessBound: async g => businessBound.has(g),

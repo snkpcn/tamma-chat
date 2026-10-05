@@ -8,8 +8,8 @@ create function auth.uid() returns uuid language sql stable as $$ select nullif(
 create function public.snk_touch_updated_at() returns trigger language plpgsql set search_path to '' as $$
 begin new.updated_at = now(); return new; end; $$;
 
-create table public.businesses(id uuid primary key default gen_random_uuid());
-create table public.projects(id uuid primary key default gen_random_uuid());
+create table public.businesses(id uuid primary key default gen_random_uuid(), name text, status text);
+create table public.projects(id uuid primary key default gen_random_uuid(), name text, status text);
 
 create table public.financial_accounts(
   id uuid primary key default gen_random_uuid(),
@@ -108,6 +108,52 @@ do $$ declare t text; begin
   end loop;
   foreach t in array array['financial_accounts','transaction_categories','transactions','recurring_transactions'] loop
     execute format('create trigger snk_touch_updated_at before update on public.%I for each row execute function public.snk_touch_updated_at()',t);
+  end loop;
+end $$;
+create table public.goals(
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  parent_goal_id uuid, title text not null, level text not null check (level in ('north_star','annual','quarter')),
+  target_value numeric, current_value numeric, unit text, tracking_configured boolean not null default false, deadline date,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(), description text, domain text,
+  status text default 'active', tracking_method text, priority text default 'medium', notes text, archived_at timestamptz
+);
+create table public.tasks(
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  title text not null, project_id uuid, business_id uuid, goal_id uuid, due_date date, is_today_priority boolean not null default false,
+  priority_rank smallint, completed_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  description text, status text default 'inbox', priority text default 'medium', due_time time, tags text[] not null default '{}',
+  notes text, position integer default 0, archived_at timestamptz
+);
+create table public.schedule_events(
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  title text not null, start_time timestamptz not null, end_time timestamptz,
+  category text not null default 'personal' check (category in ('business','personal','meeting','deadline','task')),
+  business_id uuid, project_id uuid, task_id uuid,
+  status text not null default 'scheduled' check (status in ('scheduled','completed','overdue','cancelled')),
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(), all_day boolean not null default false,
+  location text, notes text, priority text default 'medium', reminder_at timestamptz, archived_at timestamptz, rrule text
+);
+create table public.schedule_event_occurrences(
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  master_event_id uuid not null, occurrence_date date not null, action text not null check (action in ('skipped','modified')),
+  title text, start_time timestamptz, end_time timestamptz, location text, category text, status text, notes text, completed_at timestamptz,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create table public.top_priorities(
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  priority_date date not null default ((now() at time zone 'Asia/Bangkok')::date),
+  item_type text not null check (item_type in ('task','project','goal','business')), item_id uuid not null,
+  position smallint not null check (position>=1 and position<=3), created_at timestamptz not null default now()
+);
+do $$ declare t text; begin
+  foreach t in array array['goals','tasks','schedule_events','schedule_event_occurrences','top_priorities'] loop
+    execute format('alter table public.%I enable row level security',t);
+    execute format('create policy %I on public.%I for all using (owner_id = auth.uid()) with check (owner_id = auth.uid())',t||'_owner',t);
   end loop;
 end $$;
 -- Supabase default privileges

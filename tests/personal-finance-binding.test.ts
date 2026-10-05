@@ -6,10 +6,10 @@ import test from 'node:test';
 import { A, ids } from './helpers/pf-pglite';
 import { GROUP, MEMBER, NOW, OTHER_GROUP, OWNER, STRANGER, assertPersona, harness } from './helpers/pf-harness';
 import { routePersonalFinanceEvent } from '../netlify/functions/_personal-finance';
-import { PfLedgerError } from '../netlify/functions/_personal-finance-ledger';
+import { PfBindingClient, PfLedgerError } from '../netlify/functions/_personal-finance-ledger';
 import { composeReminder, runPersonalFinanceReminders } from '../netlify/functions/_personal-finance-reminders';
 
-const lookup = (h: Awaited<ReturnType<typeof harness>>, group: string) => h.ledger.bindingLookup(h.deps.hash(group)!);
+const lookup = (h: Awaited<ReturnType<typeof harness>>, group: string) => new PfBindingClient(h.deps.rpc).lookup(h.deps.hash(group)!);
 
 test('mocked join event captures a PENDING binding that grants nothing', async () => {
   const h = await harness();
@@ -154,11 +154,12 @@ test('bot removed from the group revokes the binding', async () => {
 
 test('failure modes: lookup error fails closed, missing migration does not block business groups', async () => {
   const h = await harness();
-  h.deps.ledger.bindingLookup = async () => { throw new Error('db timeout'); };
+  const real = h.deps.rpc;
+  h.deps.rpc = async (fn, args) => { if (fn === 'finance_binding_lookup_any') throw new Error('db timeout'); return real(fn, args); };
   const closed = await h.say('จ่ายประกัน 100');
   assert.equal(closed.handled, true);
   assert.equal(closed.reply, null);
-  h.deps.ledger.bindingLookup = async () => { throw new PfLedgerError('pf_rpc_missing'); };
+  h.deps.rpc = async (fn, args) => { if (fn === 'finance_binding_lookup_any') throw new PfLedgerError('pf_rpc_missing'); return real(fn, args); };
   assert.equal((await h.say('จ่ายประกัน 100')).handled, false);
   assert.ok(h.log.some(l => l.event === 'PF_BINDING_LOOKUP_FAILED'));
 });
@@ -200,7 +201,7 @@ async function reminderRig() {
   await h.ledger.createRecurring({ title: 'ค่าไฟ', kind: 'EXPENSE', amount: 3000, frequency: 'MONTHLY', firstDue: '2026-10-06', actor: A, ...ids('o') });
   const pushed: Array<{ to: string; text: string }> = [];
   const deps = {
-    ledger: h.ledger, now: () => NOW, enabled: true,
+    rpc: h.deps.rpc, now: () => NOW, enabled: true,
     hash: h.deps.hash, decrypt: (v: string) => (v.startsWith('enc:') ? v.slice(4) : null),
     push: async (to: string, text: string) => { pushed.push({ to, text }); },
   };

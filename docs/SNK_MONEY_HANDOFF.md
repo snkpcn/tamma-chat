@@ -51,38 +51,54 @@ archives the row (`archived_at`, which the existing dashboard stats already excl
 void_transaction, get_recent_transactions, create_recurring, update_recurring, mark_due_paid, list_upcoming, get_summary,
 create_category.
 
-## Secure group binding
+## Secure group binding (v2: the owner is resolved from the binding, nothing to configure)
 
-1. Bot is added → LINE `join` event → `finance_binding_capture` stores the **hashed** group id (+ AES-GCM encrypted id for pushes)
-   as `PENDING`. **Capturing grants nothing.** The bot stays silent.
-2. The owner types `ยืนยันกลุ่มการเงิน` in that group. Activation requires a PENDING (or owner-recovered) row **and** either
-   a sender whose LINE userId is in `PF_OWNER_LINE_USER_IDS`, or a valid one-time code (`finance_binding_issue_code`, stored as a
-   hash, 5-attempt lockout, 30-min expiry).
-3. Exactly one `ACTIVE` finance group is allowed (partial unique index). The group **name is never an identity**.
+1. Bot is added → LINE `join` → `finance_binding_capture_pending` stores the **hashed** group id (+ AES-GCM encrypted id for pushes)
+   as an **owner-less `PENDING`** row. **Capturing grants nothing.** Thongthai replies once ("พบกลุ่มใหม่ครับ …").
+2. In SNK LIFE OS → Money → Overview the signed-in owner presses *Generate code* (`finance_issue_binding_code`, authenticated only):
+   a 15-minute, single-use code, stored as a hash. The owner types `ยืนยันกลุ่มการเงิน SNK-xxxxxxxx` in the group.
+   `finance_binding_activate_code` verifies the hash, expiry, single use and a 5-attempt per-group lockout, then makes the group
+   `ACTIVE` for **the owner who minted the code** and records the typing LINE user (hashed) as `OWNER` in `finance_members`.
+3. Exactly one `ACTIVE` finance group per owner (partial unique index). The group **name is never an identity**.
 4. A group already bound to a business team (`ops_notification_channels`) can never become the finance group.
-5. An ACTIVE finance group is routed **exclusively** to the finance handler — business handlers (owner expense, payroll,
-   `ผูกทีม`, fuel, …) never see its messages. If the binding lookup fails the event is dropped (fail closed).
-6. Removing the bot (`leave`) revokes the binding.
+5. An ACTIVE finance group is routed **exclusively** to the finance handler — business handlers never see its messages. If the
+   binding lookup fails the event is dropped (fail closed). Removing the bot (`leave`) or *Disconnect* in the dashboard revokes it.
+6. Legacy/operator path (optional): if `SNK_MONEY_OWNER_ID` **and** `PF_OWNER_LINE_USER_IDS` are both set, that LINE user may activate
+   with the bare phrase (no code). Normally unset.
 
-Roles: `OWNER` (full), `AUTHORIZED_FINANCE_MEMBER` (`PF_FINANCE_MEMBER_LINE_USER_IDS`; record, mark paid, read — no balance
-setting, history edits, structure/settings), `UNAUTHORIZED_MEMBER` (gets no data; finance-looking text gets one neutral
-refusal and an `UNAUTHORIZED_ATTEMPT` audit row). With no owner ids configured nobody is an owner (fail closed).
+Roles: `OWNER` (DB member created by code activation, or env), `AUTHORIZED_FINANCE_MEMBER` (`PF_FINANCE_MEMBER_LINE_USER_IDS`; record,
+mark paid, read), `UNAUTHORIZED_MEMBER` (gets no data; one neutral refusal + audit row for finance-looking text).
 
-## Enabling in production (owner / operator checklist)
+## Daily life + money coach (verified SNK MONEY group only)
 
-1. The SNK OS migration is applied to `snk-life-os-private` (tracked in `snkpcn/snk-life-os`).
-2. Netlify env (site that serves `line-webhook`): `SNK_OS_SUPABASE_URL` (https://pbbihfipfbpiqbiqlagd.supabase.co),
-   `SNK_OS_SERVICE_ROLE_KEY` (the SNK OS project's service-role key — a secret, never committed), `SNK_MONEY_OWNER_ID`
-   (the owner's `auth.users.id` in the SNK OS project — NOT guessed; two users exist there), `PF_OWNER_LINE_USER_IDS`
-   (owner's LINE userId), optional `PF_FINANCE_MEMBER_LINE_USER_IDS`, and finally `SNK_MONEY_ENABLED=1`.
-   Existing `LINE_CHANNEL_*`, `CUSTOMER_PII_ENCRYPTION_KEY`, `OPENAI_API_KEY`/`GEMINI_API_KEY` are reused. The Thongthai
-   `SUPABASE_*` variables are never used for the ledger.
-3. Merge/deploy `tamma-chat` (webhook + scheduler) and `snk-life-os` (dashboard).
-4. Only then invite Thongthai to the "SNK MONEY" group and type `ยืนยันกลุ่มการเงิน`.
-5. Say `บัญชีใช้จ่ายตอนนี้เหลือ 85,000`, then `ช่วยอะไรได้บ้าง`.
+* **Morning** (hourly cron `5 0-3,14-16 * * *` UTC; window 07:00–10:59 Bangkok; claimed once per owner/day in
+  `finance_coach_deliveries`): one brief from real SNK LIFE OS rows — today's priorities, open/overdue tasks, today's schedule
+  (one-off + recurring expansion identical to the app's `generateOccurrences`, honouring skip/modify exceptions), upcoming deadlines,
+  important goals, money due ≤3 days (+ the 7/3/1/0 reminders, folded in so there is one message), known balances (UNKNOWN stays "ยังไม่ทราบยอด").
+* **During the day** the owner talks naturally: expenses/income/payments (existing engine) and `ข้อ 2 เสร็จแล้ว`, `<task name> เสร็จแล้ว`,
+  `ข้อ 3 ด่วน`, `ย้ายไปพรุ่งนี้` — executed by audited, idempotent RPCs on the real `tasks` rows.
+* **Evening** (window 21:00–23:59): one close — today's income/expense, pending clarifications, due/overdue, derived balances, a real-balance
+  question for DERIVED accounts that moved today ("ผมไม่เชื่อมธนาคาร"), tasks done/open with numbering, offer to carry work over.
+  Replies: `ยอดตรง` (confirms, **no transaction**), `จริงเหลือ 80200` / `SCB จริงเหลือ …` (gap → `OWNER_RECONCILIATION` adjustment, never an
+  expense), `ข้อสองยังไม่เสร็จ`, `ย้ายไปพรุ่งนี้`, `วันนี้พอแล้ว` / `ปิดวัน` (day closed), `กระทบยอด`.
+* Failure retries (≤3, next hourly run); disabled / outside window / no verified group ⇒ nothing is sent.
 
-If any of the three ledger env vars is missing the feature stays inert and business groups are unaffected.
-Rollback: `SNK_MONEY_ENABLED=0` (routing and reminders stop; data stays). The migration is additive.
+## Enabling in production (safe order — nothing activates partially)
+
+1. DB ready: migrations v1 + v2 applied to `snk-life-os-private` (done, tracked).
+2. Backend deployed: `tamma-chat` merged to `main` (Netlify auto-deploys; flag still OFF ⇒ inert).
+3. Dashboard deployed: `snk-life-os` merged to `main` (Vercel project `snk-life-os-final-stable2`; no new env vars needed).
+4. Env (Netlify site `tamma-chat` → Site configuration → Environment variables, Functions scope):
+   * `SNK_OS_SERVICE_ROLE_KEY` — **required**, secret (SNK OS project service-role key). Never put it in chat or git.
+   * `SNK_MONEY_ENABLED=1` — **last**, after the health checks below pass.
+   * Optional: `SNK_OS_SUPABASE_URL` (defaults to the SNK project URL), `SNK_MONEY_OWNER_ID` (auth user UUID, normally unset),
+     `PF_OWNER_LINE_USER_IDS` (LINE *userId*s `U…`, never a groupId), `PF_FINANCE_MEMBER_LINE_USER_IDS`.
+5. Health checks, then verify existing Thongthai business/customer flows, then invite Thongthai to the private group, press *Generate code*
+   in the dashboard and type `ยืนยันกลุ่มการเงิน SNK-xxxxxxxx` in the group.
+6. Live acceptance: `SCB ตอนนี้เหลือ 100000` → `จ่ายค่าประกัน 18500 จาก SCB` (SCB 81,500) → `SCB เหลือเท่าไหร่` → replay of the same LINE event adds nothing.
+
+If the service-role key is missing the feature stays inert and business groups are unaffected.
+Rollback: `SNK_MONEY_ENABLED=0` (routing, reminders and the coach stop; data stays). Migrations are additive.
 
 ## Dashboard (SNK OS Money)
 
@@ -94,30 +110,26 @@ the logged-in owner. Forecasts are always labelled as forecasts and never overwr
 
 ## Tests
 
-`npm run audit:snk-money` (also part of `npm test`). The migration is executed for real against PGlite (Postgres 18 in WASM), so
-balance arithmetic, idempotency, constraints, audit immutability, grants and reminder claiming are tested against the actual SQL.
-Includes the owner's exact 18 acceptance cases (`personal-finance-spec22.test.ts`), the broader scenario suite and the mocked join→pending→verify→active binding fixture (no bot invited).
+`npm run audit:snk-money` (also part of `npm test`). The migrations are executed for real against PGlite (Postgres in WASM), so balance
+arithmetic, idempotency, constraints, audit immutability, grants, reminder claiming, binding-by-code, coach data and task RPCs are tested
+against the actual SQL (`personal-finance-*.test.ts`, incl. the owner's exact 18 acceptance cases and a mocked join→pending→code→active fixture).
 
-Known limits: PGlite is single-connection, so true multi-connection races are covered by design (row `FOR UPDATE` locks +
-transaction-scoped advisory lock on the idempotency key) and by retry-idempotency tests, not by a concurrent-connection test.
+**Real concurrency** (`personal-finance-concurrency.test.ts`): a real PostgreSQL server (embedded-postgres, 24 connections) runs the same migrations
+and proves — same idempotency key ×30 in parallel ⇒ one transaction; 60 parallel different expenses ⇒ exact balance, no lost update; opposing
+transfers + income/expense mix ⇒ no deadlock, money conserved; stored balances equal an independent recomputation; set-balance racing
+expenses ⇒ consistent; 12 parallel redeliveries of one LINE message ⇒ one expense; repeated "paid" ⇒ balance equals payments recorded;
+25 parallel coach claimers ⇒ one winner; 15 parallel reminder crons ⇒ each reminder once; one-time code across 4 groups ⇒ one binding;
+brute-force lockout. embedded-postgres is intentionally **not** a dependency (binary download, refuses root): the file SKIPS without it;
+run `npm i --no-save embedded-postgres pg` and execute as a non-root user (or `PF_PGTEST_DIR=…`).
 
-## Production status (snk-life-os-private, applied this session)
+Residual (not provable offline): live LINE delivery semantics, live Netlify/Supabase latency under real load, and LINE retries arriving
+after very long delays beyond the idempotency table's lifetime.
 
-* Migration applied (10 tracked parts); function bodies verified identical to the tested file; Supabase security advisor clean for this
-  change (only the pre-existing Auth "leaked password protection" warning remains).
-* Verified on production inside a rolled-back transaction: set balance, expense/income/transfer arithmetic, webhook-retry idempotency,
-  correction, adjustment-not-expense, unknown-is-not-zero, pending-clarification parking, void semantics, recurring payment + next due,
-  dashboard (authenticated) writes flowing through the same derivation and being audited, clients unable to write balances, group
-  binding (unverified activation refused, owner activation works, second group refused), append-only audit. No residue was left.
-* The owner's two pre-existing, same-named accounts were not touched; they stay `UNKNOWN` until the owner states a balance. Because of
-  them there is deliberately no unique index on account names (the engine de-duplicates names for NEW accounts); the interpreter will
-  ask which one is meant if a name is ambiguous — rename one of them in the dashboard.
-* Which auth user is the owner? The user that owns the existing accounts is `3a2fc42f-0170-4cdf-a7f2-ee43f680663b`
-  (a second auth user exists). Set `SNK_MONEY_OWNER_ID` explicitly; this repo never guesses it.
+## Production status (snk-life-os-private)
 
-## Not done / needs the owner
-
-* Netlify env vars (secrets) and `SNK_MONEY_ENABLED=1`; merging/deploying `tamma-chat` and `snk-life-os` (branches
-  `claude/snk-life-os-audit-u77d7n` / `claude/snk-money-dashboard`; no PR was opened).
-* End-to-end test with a real LINE group (the bot is not in it yet, by design); LINE signature verification is the existing
-  `line-webhook` gate and was not changed.
+* v1 (10 tracked parts) and v2 (`snk_money_v2_p1…p9`) applied; function bodies tested; Supabase security advisor: only the intentional
+  `finance_issue_binding_code / finance_binding_status / finance_unbind_active` (authenticated owner-only, `auth.uid()`-scoped) and the
+  pre-existing Auth "leaked password protection" warning.
+* Verified on production inside rolled-back transactions (no residue): v1 engine paths, and v2 code binding, owner resolution, coach reads,
+  task done, claim-once.
+* The owner's two pre-existing same-named accounts were not touched; they stay `UNKNOWN` until a balance is stated.

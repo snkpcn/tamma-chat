@@ -34,6 +34,7 @@ import {
   weekRange,
   type PfRole,
 } from './_personal-finance-core';
+import { handleCoachText } from './_personal-finance-coach';
 import {
   interpret,
   openAiInterpreter,
@@ -44,10 +45,14 @@ import {
   type PfIntent,
 } from './_personal-finance-nlu';
 import {
+  PfBindingClient,
   PfLedger,
   PfLedgerError,
+  assertLedgerConfigured,
   configuredOwnerId,
   supabaseRpc,
+  type Rpc,
+  type BindingLookup,
   type LedgerAccount,
   type LedgerTransaction,
   type UpcomingItem,
@@ -73,7 +78,10 @@ export type SlipExtraction = {
 };
 
 export type PfDeps = {
-  ledger: PfLedger;
+  /** Transport to the SNK LIFE OS ledger RPCs.  The owner is resolved from the verified binding, never from LINE. */
+  rpc: Rpc;
+  /** Optional operator-pinned owner (SNK_MONEY_OWNER_ID); enables the "owner types the phrase" activation path. */
+  envOwnerId?: string | null;
   llm: LlmInterpreter | null;
   now: () => Date;
   env: Record<string, string | undefined>;
@@ -87,14 +95,17 @@ export type PfDeps = {
   log?: (event: string, data: Record<string, unknown>) => void;
 };
 
+/** Dependencies with the owner-scoped ledger resolved (the shape every handler below works with). */
+type PfRuntime = PfDeps & { ledger: PfLedger };
+
 export type PfOutcome = { handled: boolean; reply: string | null };
 
-const ACTIVATE_RE = /^(?:ยืนยันกลุ่มการเงิน|ยืนยัน\s*กลุ่ม\s*snk\s*money|ผูก(?:กลุ่ม)?\s*snk\s*money|ยืนยัน\s*snk\s*money)\s*(SNK-\d{6})?$/i;
-const CODE_ONLY_RE = /^(SNK-\d{6})$/i;
+const ACTIVATE_RE = /^(?:ยืนยันกลุ่มการเงิน|ยืนยัน\s*กลุ่ม\s*snk\s*money|ผูก(?:กลุ่ม)?\s*snk\s*money|ยืนยัน\s*snk\s*money)\s*(SNK-\d{6,8})?$/i;
+const CODE_ONLY_RE = /^(SNK-\d{6,8})$/i;
 const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
 
 type Ctx = {
-  deps: PfDeps;
+  deps: PfRuntime;
   actor: string;
   role: PfRole;
   messageId: string;
@@ -125,9 +136,10 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
   if (!groupHash) return none;
   const log = deps.log ?? (() => undefined);
 
-  let lookup;
+  const binding = new PfBindingClient(deps.rpc);
+  let lookup: BindingLookup;
   try {
-    lookup = await deps.ledger.bindingLookup(groupHash);
+    lookup = await binding.lookup(groupHash);
   } catch (error) {
     if (error instanceof PfLedgerError && (error.code === 'pf_rpc_missing' || error.code === 'pf_db_not_configured')) {
       // Feature flag on but the ledger is not set up (migration / env): no finance group can exist yet,
@@ -141,14 +153,30 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
   }
 
   const userId = event.source.userId ?? null;
-  const role = pfRoleFor(userId, deps.env);
   const actor = deps.hash(userId ?? 'unknown') ?? 'unknown';
+  let role: PfRole = pfRoleFor(userId, deps.env);
+  // Once ACTIVE the owner is the one that issued the dashboard code; bind the ledger to it.
+  let runtime: PfRuntime | null = null;
+  if (lookup.status === 'ACTIVE') {
+    if (!lookup.owner_id) { log('PF_ACTIVE_WITHOUT_OWNER', {}); return { handled: true, reply: null }; }
+    runtime = { ...deps, ledger: new PfLedger(deps.rpc, lookup.owner_id) };
+    if (role === 'UNAUTHORIZED_MEMBER') {
+      try {
+        const dbRole = await runtime.ledger.memberRole(actor);
+        if (dbRole === 'OWNER') role = 'OWNER';
+        else if (dbRole === 'AUTHORIZED_FINANCE_MEMBER') role = 'AUTHORIZED_FINANCE_MEMBER';
+      } catch (error) {
+        log('PF_ROLE_LOOKUP_FAILED', { error: error instanceof Error ? error.message.slice(0, 120) : 'unknown' });
+        return { handled: true, reply: null };
+      }
+    }
+  }
 
   // -- bot added to a group: capture only, never grants anything -----------------------------------
   if (event.type === 'join') {
     if (lookup.status === 'NONE' && !(await deps.isBusinessBound(groupId))) {
       try {
-        await deps.ledger.bindingCapture(groupHash, deps.encrypt(groupId), event.webhookEventId ?? `join:${event.timestamp ?? 0}`);
+        await binding.capture(groupHash, deps.encrypt(groupId), event.webhookEventId ?? `join:${event.timestamp ?? 0}`);
       } catch (error) {
         log('PF_BINDING_CAPTURE_FAILED', { error: error instanceof Error ? error.message.slice(0, 120) : 'unknown' });
       }
@@ -156,13 +184,13 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
     const first = lookup.status === 'NONE';
     return {
       handled: lookup.status === 'ACTIVE',
-      reply: first ? finalizeReply('พบกลุ่มใหม่ครับ หากต้องการผูกกลุ่มนี้กับ SNK MONEY ให้เจ้าของพิมพ์ “ยืนยันกลุ่มการเงิน” เพื่อยืนยันการเชื่อมต่อครับ') : null,
+      reply: first ? finalizeReply('พบกลุ่มใหม่ครับ หากต้องการผูกกลุ่มนี้กับ SNK MONEY ให้เจ้าของขอรหัสยืนยันจากหน้า Money ใน SNK LIFE OS แล้วพิมพ์ “ยืนยันกลุ่มการเงิน SNK-xxxxxxxx” ในกลุ่มนี้ครับ') : null,
     };
   }
 
   if (event.type === 'leave') {
     if (lookup.status !== 'NONE') {
-      try { await deps.ledger.bindingRevoke(groupHash, 'system:leave'); } catch { /* best effort */ }
+      try { await binding.revoke(groupHash, 'system:leave'); } catch { /* best effort */ }
     }
     return { handled: lookup.status !== 'NONE', reply: null };
   }
@@ -176,24 +204,24 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
     const act = ACTIVATE_RE.exec(text);
     const codeOnly = CODE_ONLY_RE.exec(text);
     if (act || codeOnly) {
-      return handleActivation({ deps, groupId, groupHash, lookup, role, actor, code: (act?.[1] ?? codeOnly?.[1] ?? null)?.toUpperCase() ?? null, explicit: Boolean(act) });
+      return handleActivation({ deps, binding, groupId, groupHash, lookup, role, actor, code: (act?.[1] ?? codeOnly?.[1] ?? null)?.toUpperCase() ?? null, explicit: Boolean(act) });
     }
   }
 
-  if (lookup.status !== 'ACTIVE') return none;
+  if (lookup.status !== 'ACTIVE' || !runtime) return none;
 
   // From here the group is the verified finance group: nothing below may leak to or from business handlers.
   const messageId = event.message?.id ?? deps.hash(`${event.timestamp ?? 0}:${text ?? event.message?.type ?? ''}:${actor}`) ?? 'unknown';
-  const base = { deps, actor, role, messageId, today: bangkokToday(deps.now()), confirmed: false } satisfies Ctx;
+  const base = { deps: runtime, actor, role, messageId, today: bangkokToday(deps.now()), confirmed: false } satisfies Ctx;
 
   try {
     if (role === 'UNAUTHORIZED_MEMBER') {
       if (text && /[0-9๐-๙]|บาท|บัญชี|ยอด|จ่าย|เงิน|โอน|สรุป|ล่าสุด|ยกเลิก/.test(text)) {
-        await deps.ledger.logAudit('UNAUTHORIZED_ATTEMPT', 'channel', null, actor, messageId, { kind: 'text' });
+        await runtime.ledger.logAudit('UNAUTHORIZED_ATTEMPT', 'channel', null, actor, messageId, { kind: 'text' });
         return { handled: true, reply: finalizeReply('ขออภัยครับ เรื่องบัญชีในกลุ่มนี้ผมคุยได้เฉพาะเจ้าของและผู้ที่ได้รับสิทธิ์เท่านั้นครับ') };
       }
       if (event.message?.type === 'image') {
-        await deps.ledger.logAudit('UNAUTHORIZED_ATTEMPT', 'channel', null, actor, messageId, { kind: 'image' });
+        await runtime.ledger.logAudit('UNAUTHORIZED_ATTEMPT', 'channel', null, actor, messageId, { kind: 'image' });
       }
       return { handled: true, reply: null };
     }
@@ -209,9 +237,9 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
 // ================================================================== binding
 
 async function handleActivation(i: {
-  deps: PfDeps; groupId: string; groupHash: string; lookup: { status: string }; role: PfRole; actor: string; code: string | null; explicit: boolean;
+  deps: PfDeps; binding: PfBindingClient; groupId: string; groupHash: string; lookup: BindingLookup; role: PfRole; actor: string; code: string | null; explicit: boolean;
 }): Promise<PfOutcome> {
-  const { deps, groupId, groupHash, lookup, role, actor, code } = i;
+  const { deps, binding, groupId, groupHash, lookup, role, actor, code } = i;
   if (lookup.status === 'ACTIVE') {
     return { handled: true, reply: role === 'UNAUTHORIZED_MEMBER' ? null : finalizeReply('กลุ่มนี้ยืนยันเป็นกลุ่มการเงินส่วนตัวไว้แล้วครับ') };
   }
@@ -219,20 +247,30 @@ async function handleActivation(i: {
   if (await deps.isBusinessBound(groupId)) {
     return { handled: role === 'OWNER', reply: role === 'OWNER' ? finalizeReply('กลุ่มนี้ผูกกับทีมธุรกิจอยู่แล้ว จึงใช้เป็นกลุ่มการเงินส่วนตัวไม่ได้ครับ ให้สร้างกลุ่ม SNK MONEY ใหม่แยกต่างหากครับ') : null };
   }
-  if (role !== 'OWNER' && !code) return { handled: false, reply: null };
+  const ownerPinned = Boolean(deps.envOwnerId) && role === 'OWNER';
+  // Without a dashboard code the only accepted proof is an env-configured owner LINE id AND an env-pinned owner id.
+  if (!code && !ownerPinned) {
+    return role !== 'OWNER'
+      ? { handled: false, reply: null }
+      : { handled: true, reply: finalizeReply('ต้องใช้รหัสยืนยันจากหน้า Money ใน SNK LIFE OS ครับ ขอรหัสแล้วพิมพ์ “ยืนยันกลุ่มการเงิน SNK-xxxxxxxx” ที่นี่ได้เลยครับ') };
+  }
 
   if (lookup.status === 'NONE') {
-    // Recover from a missed join event, but only on the owner's own say-so.
-    if (role !== 'OWNER') return { handled: false, reply: null };
-    await deps.ledger.bindingCapture(groupHash, deps.encrypt(groupId), 'owner_activation');
+    // Recover from a missed join event; the code (or the pinned owner) is the proof, not the group name.
+    await binding.capture(groupHash, deps.encrypt(groupId), 'activation');
   }
   const groupName = deps.groupName ? await deps.groupName(groupId).catch(() => null) : null;
-  const result = await deps.ledger.bindingActivate(groupHash, actor, role === 'OWNER', code, groupName);
+  let result: { ok: boolean; error?: string };
+  if (deps.envOwnerId) {
+    result = await new PfLedger(deps.rpc, deps.envOwnerId).bindingActivate(groupHash, actor, role === 'OWNER', code, groupName);
+  } else {
+    result = await binding.activateWithCode(groupHash, deps.encrypt(groupId), actor, code ?? '', groupName);
+  }
   if (result.ok) {
     return {
       handled: true,
       reply: finalizeReply([
-        'ยืนยันกลุ่ม SNK MONEY เรียบร้อยครับ ตั้งแต่นี้ผมจะดูแลบัญชีส่วนตัวในกลุ่มนี้เท่านั้น แยกจากงานธุรกิจทั้งหมด',
+        'ยืนยันกลุ่ม SNK MONEY เรียบร้อยครับ ตั้งแต่นี้ผมจะดูแลบัญชีส่วนตัวและงานประจำวันในกลุ่มนี้เท่านั้น แยกจากงานธุรกิจทั้งหมด',
         'ผมไม่เชื่อมธนาคาร ยอดทั้งหมดมาจากที่คุณบอก เริ่มได้เลยครับ เช่น “บัญชีใช้จ่ายตอนนี้เหลือ 85,000”',
       ].join('\n')),
     };
@@ -241,7 +279,7 @@ async function handleActivation(i: {
     return { handled: true, reply: finalizeReply('มีกลุ่มการเงินที่ยืนยันไว้แล้วอยู่ครับ ใช้ได้ทีละกลุ่มเดียว ถ้าต้องการย้ายกลุ่มต้องยกเลิกกลุ่มเดิมก่อนครับ') };
   }
   if (result.error === 'no_pending_binding') return { handled: false, reply: null };
-  return { handled: true, reply: finalizeReply('ยืนยันกลุ่มนี้ยังไม่ได้ครับ ต้องให้เจ้าของเป็นผู้ยืนยัน หรือใช้รหัสยืนยันที่ถูกต้องครับ') };
+  return { handled: true, reply: finalizeReply('ยืนยันกลุ่มนี้ยังไม่ได้ครับ ต้องใช้รหัสยืนยันที่ถูกต้องและยังไม่หมดอายุจากหน้า Money ใน SNK LIFE OS ครับ') };
 }
 
 // ================================================================== text
@@ -267,6 +305,12 @@ async function handleText(c: Ctx, text: string): Promise<string | null> {
     const handled = await resolvePending(c, text, pending, accounts);
     if (handled.done) return handled.reply;
     await ledger.pendingClear(c.actor);
+  }
+
+  const coach = await handleCoachText({ ledger, actor: c.actor, messageId: c.messageId, today: c.today, isOwner: c.role === 'OWNER' }, text, accounts);
+  if (coach) {
+    if ('reply' in coach) return coach.reply;
+    return reply(await route(c, { intent: coach.delegate, confidence: 'high', source: 'rules' }, accounts, recent));
   }
 
   const ctx: NluContext = { today: c.today, accounts, hasLastTransaction: recent.some(t => t.kind !== 'ADJUSTMENT') || recent.length > 0 };
@@ -946,8 +990,10 @@ async function resolveSlip(c: Ctx, t: string, pending: Pending, accounts: Ledger
 /** Real dependencies.  Imported lazily so unit tests never load LINE/AI/business modules. */
 export async function defaultPersonalFinanceDeps(): Promise<PfDeps> {
   const { piiHash, encryptPii } = await import('./_operations-db');
+  assertLedgerConfigured();
   return {
-    ledger: new PfLedger(supabaseRpc, configuredOwnerId()),
+    rpc: supabaseRpc,
+    envOwnerId: configuredOwnerId(),
     llm: openAiInterpreter,
     now: () => new Date(),
     env: process.env,

@@ -48,7 +48,7 @@ test('transport maps database errors to stable codes and never leaks the key', a
 });
 
 test('the owner id is a configured auth user uuid, never derived from LINE input', async () => {
-  await withEnv({}, async () => assert.throws(() => configuredOwnerId(), /pf_db_not_configured/));
+  await withEnv({}, async () => assert.equal(configuredOwnerId(), null));
   await withEnv({ SNK_MONEY_OWNER_ID: 'not-a-uuid' }, async () => assert.throws(() => configuredOwnerId(), /pf_db_not_configured/));
   await withEnv({ SNK_MONEY_OWNER_ID: '3a2fc42f-0170-4cdf-a7f2-ee43f680663b' }, async () => assert.equal(configuredOwnerId(), '3a2fc42f-0170-4cdf-a7f2-ee43f680663b'));
 });

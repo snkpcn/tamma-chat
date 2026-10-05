@@ -77,9 +77,12 @@ export type UpcomingItem = {
 
 export type BindingLookup = {
   status: 'NONE' | 'PENDING' | 'ACTIVE';
+  owner_id?: string | null;
   other_group_active?: boolean;
   failed_attempts?: number;
 };
+
+export type ActiveTarget = { id: string; owner_id: string; group_id_enc: string | null; group_id_hash: string };
 
 type Json = Record<string, any>;
 
@@ -88,18 +91,54 @@ type Json = Record<string, any>;
  * the Thongthai/customer project.  Hence its own URL + service-role key; the Thongthai SUPABASE_* variables
  * are deliberately never used as a fallback.
  */
+/** Public project URL of `snk-life-os-private` (not a secret); SNK_OS_SUPABASE_URL overrides it. */
+export const SNK_OS_DEFAULT_URL = 'https://pbbihfipfbpiqbiqlagd.supabase.co';
+
 function configured(): { url: string; key: string } {
-  const url = process.env.SNK_OS_SUPABASE_URL;
+  const url = process.env.SNK_OS_SUPABASE_URL || SNK_OS_DEFAULT_URL;
   const key = process.env.SNK_OS_SERVICE_ROLE_KEY;
   if (!url || !key) throw new PfLedgerError('pf_db_not_configured');
   return { url: url.replace(/\/$/, ''), key };
 }
 
-/** The single owner of the ledger: a Supabase auth user id configured server-side (never taken from LINE). */
-export function configuredOwnerId(): string {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Optional operator-pinned owner (a Supabase auth user id configured server-side, never taken from LINE).  When unset the owner is
+ * resolved from the verified binding, which a dashboard-issued one-time code created.  A malformed value is a configuration error.
+ */
+export function configuredOwnerId(): string | null {
   const id = (process.env.SNK_MONEY_OWNER_ID ?? '').trim();
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new PfLedgerError('pf_db_not_configured');
+  if (!id) return null;
+  if (!UUID_RE.test(id)) throw new PfLedgerError('pf_db_not_configured');
   return id;
+}
+
+/** Fails fast when the service-role key is missing: the whole feature is inert until it is set. */
+export function assertLedgerConfigured(): void {
+  configured();
+}
+
+export type BindingActivation = { ok: boolean; error?: string; method?: string; already_active?: boolean; owner_id?: string };
+
+/** Owner-less binding operations (a group is PENDING before any owner is known). */
+export class PfBindingClient {
+  constructor(private readonly rpc: Rpc) {}
+  async lookup(groupHash: string): Promise<BindingLookup> {
+    return (await this.rpc('finance_binding_lookup_any', { p_group_hash: groupHash })) as BindingLookup;
+  }
+  async capture(groupHash: string, groupEnc: string | null, eventId: string): Promise<Json> {
+    return (await this.rpc('finance_binding_capture_pending', { p_group_hash: groupHash, p_group_enc: groupEnc, p_event_id: eventId })) as Json;
+  }
+  async activateWithCode(groupHash: string, groupEnc: string | null, actor: string, code: string, groupName: string | null): Promise<BindingActivation> {
+    return (await this.rpc('finance_binding_activate_code', { p_group_hash: groupHash, p_group_enc: groupEnc, p_actor: actor, p_code: code, p_group_name: groupName })) as BindingActivation;
+  }
+  async revoke(groupHash: string, actor: string): Promise<Json> {
+    return (await this.rpc('finance_binding_revoke_group', { p_group_hash: groupHash, p_actor: actor })) as Json;
+  }
+  async activeTargets(): Promise<ActiveTarget[]> {
+    return ((await this.rpc('finance_active_targets', {})) as ActiveTarget[] | null) ?? [];
+  }
 }
 
 /** Production RPC transport: PostgREST with the service-role key (server side only). */
@@ -264,6 +303,43 @@ export class PfLedger {
   }
   async bindingActiveTarget(): Promise<{ id: string; group_id_enc: string | null; group_id_hash: string } | null> {
     return (await this.call<{ id: string; group_id_enc: string | null; group_id_hash: string } | null>('finance_binding_active_target')) ?? null;
+  }
+
+  // -- roles / coach ----------------------------------------------------------------------------------------------
+  async memberRole(actor: string): Promise<'OWNER' | 'AUTHORIZED_FINANCE_MEMBER' | 'NONE'> {
+    return (await this.call<'OWNER' | 'AUTHORIZED_FINANCE_MEMBER' | 'NONE'>('finance_member_role', { p_actor: actor })) ?? 'NONE';
+  }
+  async confirmBalance(accountId: string, expected: number | null, actor: string, message: string, idem: string): Promise<{
+    ok: boolean; error?: string; duplicate?: boolean; balance?: number | string; account?: LedgerAccount;
+  }> {
+    return this.call('finance_confirm_balance', { p_account: accountId, p_expected: expected, p_actor: actor, p_message: message, p_idem: idem });
+  }
+  async taskSetToday(taskId: string, flag: boolean, actor: string, message: string, idem: string): Promise<{ ok: boolean; error?: string; duplicate?: boolean; task?: { id: string; title: string } }> {
+    return this.call('finance_task_set_today', { p_task: taskId, p_flag: flag, p_actor: actor, p_message: message, p_idem: idem });
+  }
+  async coachMorningData(today: string): Promise<Json> { return this.call('finance_coach_morning_data', { p_today: today }); }
+  async coachEveningData(today: string): Promise<Json> { return this.call('finance_coach_evening_data', { p_today: today }); }
+  async coachOpenTasks(limit = 50): Promise<Array<{ id: string; title: string; due_date: string | null }>> {
+    return (await this.call('finance_coach_open_tasks', { p_limit: limit })) ?? [];
+  }
+  async coachClaim(kind: 'MORNING' | 'EVENING', date: string): Promise<{ claimed: boolean; delivery_id?: string }> {
+    return this.call('finance_coach_claim', { p_kind: kind, p_date: date });
+  }
+  async coachFinish(deliveryId: string, ok: boolean, error?: string | null): Promise<void> {
+    await this.call('finance_coach_finish', { p_delivery: deliveryId, p_ok: ok, p_error: error ?? null });
+  }
+  async taskSetDone(taskId: string, done: boolean, actor: string, message: string, idem: string): Promise<{ ok: boolean; error?: string; duplicate?: boolean; task?: { id: string; title: string } }> {
+    return this.call('finance_task_set_done', { p_task: taskId, p_done: done, p_actor: actor, p_message: message, p_idem: idem });
+  }
+  async taskDefer(taskId: string, to: string, actor: string, message: string, idem: string): Promise<{ ok: boolean; error?: string; duplicate?: boolean; task?: { id: string; title: string } }> {
+    return this.call('finance_task_defer', { p_task: taskId, p_to: to, p_actor: actor, p_message: message, p_idem: idem });
+  }
+  async dayCloseSetContext(date: string, context: Json): Promise<void> { await this.call('finance_day_close_set_context', { p_date: date, p_context: context }); }
+  async dayCloseGet(since: string): Promise<{ local_date: string; status: 'OPEN' | 'CLOSED'; context: Json } | null> {
+    return (await this.call<{ local_date: string; status: 'OPEN' | 'CLOSED'; context: Json } | null>('finance_day_close_get', { p_since: since })) ?? null;
+  }
+  async dayClose(date: string, note: string | null, actor: string, message: string): Promise<void> {
+    await this.call('finance_day_close', { p_date: date, p_note: note, p_actor: actor, p_message: message });
   }
 
   // -- reminders ---------------------------------------------------------------------------------------------------

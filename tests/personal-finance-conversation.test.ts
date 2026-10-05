@@ -323,7 +323,8 @@ test('correcting an amount reverses the original and keeps history', async () =>
 
 test('a database failure is reported honestly and never as success', async () => {
   const h = await ready();
-  h.deps.ledger.createTransaction = async () => { throw new Error('db down'); };
+  const real = h.deps.rpc;
+  h.deps.rpc = async (fn, args) => { if (fn === 'finance_record_transaction') throw new Error('db down'); return real(fn, args); };
   const r = await say(h, 'จ่ายค่าอาหาร 100 จาก SCB');
   assert.match(r.reply!, /บันทึกไม่สำเร็จ/);
   assert.doesNotMatch(r.reply!, /เรียบร้อย/);
