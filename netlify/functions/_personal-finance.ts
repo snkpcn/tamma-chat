@@ -35,6 +35,7 @@ import {
   type PfRole,
 } from './_personal-finance-core';
 import { handleCoachText } from './_personal-finance-coach';
+import { handleSecretaryText } from './_personal-secretary';
 import {
   interpret,
   openAiInterpreter,
@@ -181,11 +182,11 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
         log('PF_BINDING_CAPTURE_FAILED', { error: error instanceof Error ? error.message.slice(0, 120) : 'unknown' });
       }
     }
-    const first = lookup.status === 'NONE';
-    return {
-      handled: lookup.status === 'ACTIVE',
-      reply: first ? finalizeReply('พบกลุ่มใหม่ครับ หากต้องการผูกกลุ่มนี้กับ SNK MONEY ให้เจ้าของขอรหัสยืนยันจากหน้า Money ใน SNK LIFE OS แล้วพิมพ์ “ยืนยันกลุ่มการเงิน SNK-xxxxxxxx” ในกลุ่มนี้ครับ') : null,
-    };
+    // Joining an arbitrary LINE group is never consent to disclose that the
+    // bot has a private-finance capability. Capture a PENDING candidate
+    // silently so an owner-initiated dashboard code can still activate it,
+    // while unrelated/customer/business groups receive no SNK MONEY copy.
+    return { handled: lookup.status === 'ACTIVE', reply: null };
   }
 
   if (event.type === 'leave') {
@@ -197,7 +198,8 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
 
   if (event.type !== 'message') return { handled: lookup.status === 'ACTIVE', reply: null };
 
-  const text = event.message?.type === 'text' ? normalizeText(event.message.text ?? '') : null;
+  const rawText = event.message?.type === 'text' ? (event.message.text ?? '') : null;
+  const text = rawText === null ? null : normalizeText(rawText);
 
   // -- activation: only an exact phrase / code ------------------------------------------------------------
   if (text) {
@@ -226,7 +228,7 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
       return { handled: true, reply: null };
     }
     if (event.message?.type === 'image') return { handled: true, reply: await handleImage(base) };
-    if (text) return { handled: true, reply: await handleText(base, text) };
+    if (text) return { handled: true, reply: await handleText(base, text, rawText ?? text) };
     return { handled: true, reply: null };
   } catch (error) {
     log('PF_HANDLER_ERROR', { error: error instanceof Error ? error.message.slice(0, 200) : 'unknown' });
@@ -292,7 +294,7 @@ const MUTATING = new Set([
 // Members may record and read; the owner alone sets balances, edits history and changes structure/settings.
 const OWNER_ONLY = new Set(['SET_BALANCE', 'SET_BALANCES', 'VOID_LAST', 'BULK_VOID', 'CORRECT_LAST', 'CHANGE_CATEGORY_LAST', 'CHANGE_ACCOUNT_LAST', 'CHANGE_DATE_LAST', 'CREATE_ACCOUNT', 'CREATE_CATEGORY', 'SET_REMINDER_DAYS', 'OBLIGATION_REMINDERS', 'OBLIGATION_SILENCE', 'OBLIGATION_RESCHEDULE']);
 
-async function handleText(c: Ctx, text: string): Promise<string | null> {
+async function handleText(c: Ctx, text: string, rawText = text): Promise<string | null> {
   const { ledger } = c.deps;
   const [accountsRes, recent, pending] = await Promise.all([
     ledger.getAccounts(),
@@ -306,6 +308,11 @@ async function handleText(c: Ctx, text: string): Promise<string | null> {
     if (handled.done) return handled.reply;
     await ledger.pendingClear(c.actor);
   }
+
+  const secretary = await handleSecretaryText({
+    ledger, actor: c.actor, messageId: c.messageId, today: c.today, isOwner: c.role === 'OWNER',
+  }, rawText);
+  if (secretary) return secretary.reply;
 
   const coach = await handleCoachText({ ledger, actor: c.actor, messageId: c.messageId, today: c.today, isOwner: c.role === 'OWNER' }, text, accounts);
   if (coach) {

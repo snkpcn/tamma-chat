@@ -266,6 +266,7 @@ export type SemanticTurn = {
  *  the validated, structured result. */
 export type SemanticInterpretationMeta = {
   semanticVersion: string;
+  speechAct?: SemanticSpeechAct;
   domain: SemanticDomain;
   intent: string;
   action: SemanticAction;

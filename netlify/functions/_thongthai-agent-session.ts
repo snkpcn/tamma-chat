@@ -15,6 +15,8 @@ export const AGENT_MAX_TOOL_ROUNDS = 8;
 export const AGENT_MAX_TOOL_CALLS = 12;
 const MAX_POLL_ROUNDS = 80;
 const POLL_MS = 150;
+const AGENT_TURN_POLL_BUDGET_MS = 9_000;
+const AGENT_API_REQUEST_TIMEOUT_MS = 3_000;
 const USAGE_SETTLE_ATTEMPTS = 12;
 const USAGE_SETTLE_MS = 400;
 export const AGENT_TURN_RESERVE_THB = 2.75;
@@ -120,18 +122,29 @@ function apiKey(): string {
 }
 
 async function openai<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${apiKey()}`,
-      'Content-Type': 'application/json',
-      'OpenAI-Beta': BETA_HEADER,
-      ...(init.headers ?? {}),
-    },
-  });
-  const body = await response.text();
-  if (!response.ok) throw new Error(`OpenAI Agents API ${response.status} ${path}: ${body.slice(0, 500)}`);
-  return body ? JSON.parse(body) as T : ({} as T);
+  // A single stalled Agents API poll previously held a synchronous Netlify
+  // request open for 40–54 seconds and produced customer-facing 504s. Bound
+  // every network hop; the caller can then fall back truthfully before the
+  // gateway deadline instead of leaving the customer with no response.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AGENT_API_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey()}`,
+        'Content-Type': 'application/json',
+        'OpenAI-Beta': BETA_HEADER,
+        ...(init.headers ?? {}),
+      },
+    });
+    const body = await response.text();
+    if (!response.ok) throw new Error(`OpenAI Agents API ${response.status} ${path}: ${body.slice(0, 500)}`);
+    return body ? JSON.parse(body) as T : ({} as T);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -390,7 +403,9 @@ async function waitForCompletedTurn(
   const toolCalls: string[] = [];
   const toolCache = new Map<string, string>();
   let toolRounds = 0;
+  const deadlineAt = Date.now() + AGENT_TURN_POLL_BUDGET_MS;
   for (let poll = 0; poll < MAX_POLL_ROUNDS; poll += 1) {
+    if (Date.now() >= deadlineAt) break;
     const session = await retrieveSession(sessionId);
     if (session.status === 'failed') {
       throw new Error(`Agent session failed: ${JSON.stringify(session.error ?? 'unknown').slice(0, 300)}`);
@@ -408,14 +423,14 @@ async function waitForCompletedTurn(
     // still return the PREVIOUS completed turn. Never mistake that stale
     // turn for completion of the newly-submitted customer message.
     if (turn?.id && previousTurnId && turn.id === previousTurnId) {
-      await sleep(POLL_MS);
+      if (Date.now() < deadlineAt) await sleep(POLL_MS);
       continue;
     }
     if (turn?.status === 'completed') return { turn, toolCalls };
     if (turn?.status === 'failed' || turn?.status === 'cancelled') {
       throw new Error(`Agent turn ${turn.status}: ${turn.error?.message ?? turn.error?.code ?? 'unknown'}`);
     }
-    await sleep(POLL_MS);
+    if (Date.now() < deadlineAt) await sleep(POLL_MS);
   }
   throw new Error('Agent shadow turn timed out before completion.');
 }
@@ -689,4 +704,3 @@ export async function runThongthaiAgentPrimaryTurn(
     runtimeMode: 'primary',
   });
 }
-
