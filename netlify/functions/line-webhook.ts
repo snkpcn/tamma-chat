@@ -11,6 +11,7 @@ import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
+import { handleOwnerExpenseImage, handleOwnerExpenseText } from './_owner-expense-intake';
 import { handleTransferPurposeText } from './_inthanin-transfer-followup';
 import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
@@ -287,6 +288,17 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       return;
     }
 
+    const ownerExpenseReply = await handleOwnerExpenseImage({
+      targetId,
+      userId: event.source?.userId ?? null,
+      messageId: event.message.id,
+      timestamp: event.timestamp,
+    });
+    if (ownerExpenseReply) {
+      await replyToLine(event.replyToken, ownerExpenseReply, accessToken);
+      return;
+    }
+
     const cafeEvidenceReply = await handleCafeTestDailyCloseImage({
       targetId,
       userId: event.source?.userId ?? null,
@@ -355,6 +367,18 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   });
   if (payrollTextReply) {
     await replyToLine(event.replyToken, payrollTextReply, accessToken);
+    return;
+  }
+
+  const ownerExpenseTextReply = await handleOwnerExpenseText({
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+    messageId: event.message.id ?? null,
+    timestamp: event.timestamp,
+  });
+  if (ownerExpenseTextReply) {
+    await replyToLine(event.replyToken, ownerExpenseTextReply, accessToken);
     return;
   }
 
