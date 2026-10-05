@@ -78,3 +78,19 @@ test('the scheduled reminder function is a quiet no-op while disabled or unconfi
     assert.match(res.body, /pf_db_not_configured/);
   });
 });
+
+test('health probe reports booleans only and never leaks the key', async () => {
+  const { snkMoneyHealth } = await import('../netlify/functions/snk-money-health');
+  const noKey = await snkMoneyHealth(async () => { throw new Error('must not be called'); }, {});
+  assert.equal(noKey.ok, false);
+  assert.equal(noKey.serviceKeyConfigured, false);
+  assert.equal(noKey.flagEnabled, false);
+  const ok = await snkMoneyHealth(async () => [], { SNK_OS_SERVICE_ROLE_KEY: 'sekret-value', SNK_MONEY_ENABLED: '0' });
+  assert.deepEqual([ok.ok, ok.ledgerReachable, ok.migrationPresent, ok.activeGroup, ok.flagEnabled], [true, true, true, false, false]);
+  assert.doesNotMatch(JSON.stringify(ok), /sekret/);
+  const missing = await snkMoneyHealth(async () => { throw new PfLedgerError('pf_rpc_missing'); }, { SNK_OS_SERVICE_ROLE_KEY: 'k' });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.problem, 'migration not applied');
+  const active = await snkMoneyHealth(async () => [{ id: 'x', owner_id: 'o', group_id_enc: null, group_id_hash: 'h' }], { SNK_OS_SERVICE_ROLE_KEY: 'k', SNK_MONEY_ENABLED: '1' });
+  assert.deepEqual([active.activeGroup, active.flagEnabled], [true, true]);
+});
