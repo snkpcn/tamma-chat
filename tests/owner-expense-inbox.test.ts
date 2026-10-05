@@ -70,3 +70,17 @@ test('database migration is additive, private, deduplicated, and keeps an audit 
   assert.match(rlsPolicy, /as restrictive/iu);
   assert.match(rlsPolicy, /using \(false\)/iu);
 });
+
+test('backoffice cancellation removes a wrong item from active totals but retains evidence and audit', () => {
+  const migration = readFileSync(
+    'supabase/migrations/20261005112859_owner_expense_backoffice_cancel_v1.sql',
+    'utf8',
+  );
+  assert.match(migration, /financial_cancel_owner_expense_intake_v1/);
+  assert.match(migration, /set status='cancelled',updated_at=now\(\)/);
+  assert.match(migration, /'source','backoffice'|'cancelled',\s*'backoffice'/s);
+  assert.match(migration, /'evidence_retained',true/);
+  assert.match(migration, /grant execute[\s\S]*to service_role/);
+  assert.doesNotMatch(migration, /delete\s+from/iu);
+  assert.doesNotMatch(migration, /storage\.objects/iu);
+});
