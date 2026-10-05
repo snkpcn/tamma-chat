@@ -1,5 +1,6 @@
 import { handleBookingOpsCommand } from './_ops-booking-actions';
 import { decryptPii, encryptPii, piiHash } from './_operations-db';
+import { loadOwnerProjectWeeklySummary } from './_owner-project-weekly';
 import { safeTrackingUrl, shippingStatusLabel, type ShippingStatus } from './_member-delivery';
 
 export type OpsTeamCode = 'restaurant' | 'stay' | 'activity' | 'cafe' | 'cafe_test' | 'otop' | 'all' | 'owner_general' | 'ai_cost';
@@ -1064,7 +1065,7 @@ export async function sendOwnerWeeklyCashSummary(
   localDate = isoLocalDate(),
 ): Promise<'sent' | 'duplicate' | 'not_bound'> {
   const window = ownerWeeklyCashWindow(localDate);
-  const [bags, branches, closes] = await Promise.all([
+  const [bags, branches, closes, projectSummary] = await Promise.all([
     getJsonRows<OwnerCashBagRow>(
       'financial_cash_bag_owner_v1?environment=eq.live'
       + '&select=branch_code,branch_name,bag_balance,total_swept_to_bag,total_owner_pickup,last_movement_at'
@@ -1079,8 +1080,16 @@ export async function sendOwnerWeeklyCashSummary(
       + '&select=branch_id,local_date,status,payment_cash,cash_opening_float,cash_counted_closing'
       + '&order=local_date.asc',
     ),
+    loadOwnerProjectWeeklySummary(localDate).catch(error => {
+      console.error(
+        'OWNER_PROJECT_WEEKLY_SUMMARY_ERROR',
+        error instanceof Error ? error.message : String(error),
+      );
+      return '📋 สรุปงานและโครงการ\n⚠️ เปิดข้อมูลส่วนนี้ไม่ได้ชั่วคราว เงินสดด้านบนยังสรุปได้ตามปกติครับ';
+    }),
   ]);
-  const text = buildOwnerWeeklyCashSummary({ localDate, bags, branches, closes });
+  const text = buildOwnerWeeklyCashSummary({ localDate, bags, branches, closes })
+    + '\n\n' + projectSummary;
   return sendTeamMessage({
     teamCode: 'owner_general',
     entityType: 'daily_schedule',
