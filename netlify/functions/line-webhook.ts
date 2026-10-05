@@ -25,6 +25,7 @@ import {
   handleSettlementTransferProofPostback,
 } from './_settlement-line-proof';
 import { splitCustomerMessageForLine } from './_chat-copy-style';
+import { routePersonalFinanceEvent } from './_personal-finance';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -221,6 +222,12 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     hasReplyToken: Boolean(event.replyToken),
     text: event.message?.type === 'text' ? safeInboundLogText(event.message.text ?? '') : null,
   }));
+
+  // SNK MONEY (private personal finance): decided BEFORE any business handler.  An ACTIVE finance
+  // group is routed exclusively to the finance channel, so no business handler (owner expense,
+  // payroll, team binding, fuel, ...) can ever read or record its messages, and finance messages
+  // never reach the One-Mind chain.  Disabled (default) => returns false and nothing changes.
+  if (await routePersonalFinanceEvent(event, (token, text) => replyToLine(token, text, accessToken))) return;
 
   if (!event.replyToken) return;
   const targetId = sourceType === 'group' ? event.source?.groupId : event.source?.roomId;
