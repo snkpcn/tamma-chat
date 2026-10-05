@@ -40,16 +40,17 @@ test('owner expense inbox stores first and asks both purpose and business before
   assert.match(intake, /x-upsert': 'false'/);
 });
 
-test('Owner Group expense routing runs after private payroll and before cafe Daily Close', () => {
+test('Owner Group expense routing runs after owner read intelligence and before cafe Daily Close', () => {
   const webhook = readFileSync('netlify/functions/line-webhook.ts', 'utf8');
   const payrollImage = webhook.lastIndexOf('handleOwnerPayrollImage');
   const expenseImage = webhook.lastIndexOf('handleOwnerExpenseImage');
   const cafeImage = webhook.lastIndexOf('handleCafeTestDailyCloseImage');
   const payrollText = webhook.lastIndexOf('handleOwnerPayrollText');
+  const intelligenceText = webhook.lastIndexOf('handleOwnerBusinessQuestion');
   const expenseText = webhook.lastIndexOf('handleOwnerExpenseText');
   const dailyCloseText = webhook.lastIndexOf('handleCafeTestDailyCloseText');
   assert.ok(payrollImage >= 0 && expenseImage > payrollImage && cafeImage > expenseImage);
-  assert.ok(payrollText >= 0 && expenseText > payrollText && dailyCloseText > expenseText);
+  assert.ok(payrollText >= 0 && intelligenceText > payrollText && expenseText > intelligenceText && dailyCloseText > expenseText);
 });
 
 test('database migration is additive, private, deduplicated, and keeps an audit trail', () => {
