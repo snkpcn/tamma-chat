@@ -982,7 +982,14 @@ export async function routePersonalFinanceEvent(
 ): Promise<boolean> {
   if (!deps && !pfEnabled()) return false;
   if (event.source?.type !== 'group') return false;
-  const d = deps ?? await defaultPersonalFinanceDeps();
+  let d: PfDeps;
+  try {
+    d = deps ?? await defaultPersonalFinanceDeps();
+  } catch (error) {
+    // Flag on but the ledger is not configured (env missing): inert, and business groups carry on untouched.
+    console.warn('PF_NOT_CONFIGURED', error instanceof PfLedgerError ? error.code : 'unknown');
+    return false;
+  }
   let outcome: PfOutcome;
   try {
     outcome = await handlePersonalFinanceEvent(event, d);

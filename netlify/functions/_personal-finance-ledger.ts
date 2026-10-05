@@ -83,11 +83,23 @@ export type BindingLookup = {
 
 type Json = Record<string, any>;
 
+/**
+ * The finance ledger lives in the SNK LIFE OS Supabase project (the one the Money dashboard reads), NOT in
+ * the Thongthai/customer project.  Hence its own URL + service-role key; the Thongthai SUPABASE_* variables
+ * are deliberately never used as a fallback.
+ */
 function configured(): { url: string; key: string } {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new PfLedgerError('finance_db_not_configured');
+  const url = process.env.SNK_OS_SUPABASE_URL;
+  const key = process.env.SNK_OS_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new PfLedgerError('pf_db_not_configured');
   return { url: url.replace(/\/$/, ''), key };
+}
+
+/** The single owner of the ledger: a Supabase auth user id configured server-side (never taken from LINE). */
+export function configuredOwnerId(): string {
+  const id = (process.env.SNK_MONEY_OWNER_ID ?? '').trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new PfLedgerError('pf_db_not_configured');
+  return id;
 }
 
 /** Production RPC transport: PostgREST with the service-role key (server side only). */
@@ -107,8 +119,9 @@ export const supabaseRpc: Rpc = async (fn, args) => {
       message = parsed.message ?? text;
       code = parsed.code ?? '';
     } catch { /* keep raw text */ }
-    if (response.status === 404 || code === 'PGRST202') throw new PfLedgerError('finance_rpc_missing', `${fn} not found`);
-    throw new PfLedgerError(/^[a-z_]+$/.test(message) ? message : `pf_rpc_${response.status}`, `${fn}: ${message.slice(0, 200)}`);
+    if (response.status === 404 || code === 'PGRST202') throw new PfLedgerError('pf_rpc_missing', `${fn} not found`);
+    // only a deliberate `raise exception 'xyz'` (SQLSTATE P0001) from the engine becomes a domain code; anything else is generic
+    throw new PfLedgerError(code === 'P0001' && /^[a-z_]+$/.test(message) ? message : `pf_rpc_${response.status}`, `${fn}: ${message.slice(0, 200)}`);
   }
   return text ? JSON.parse(text) : null;
 };
@@ -118,7 +131,7 @@ export class PfLedger {
 
   /** Every call is scoped to the configured owner; the RPCs filter on it (they run as security definer). */
   private async call<T = Json>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
-    return (await this.rpc(fn, { p_owner: this.ownerId, ...args })) as T;
+    return (await this.rpc(fn, { ...args, p_owner: this.ownerId })) as T;
   }
 
   // -- accounts -------------------------------------------------------------------------------
@@ -132,7 +145,7 @@ export class PfLedger {
     return this.call('finance_create_account', { p_name: i.name, p_kind: i.kind ?? null, p_actor: i.actor, p_message: i.message, p_idem: i.idem });
   }
   async setOwnerBalance(i: { accountId: string; amount: number; actor: string; message: string; idem: string; note?: string | null }): Promise<{
-    ok: boolean; duplicate?: boolean; account: LedgerAccount; previous_balance: number | string | null; previous_status: string; delta: number | string | null;
+    ok: boolean; duplicate?: boolean; account: LedgerAccount; previous_balance: number | string | null; previous_status: string; delta: number | string | null; adjustment_id: string;
   }> {
     return this.call('finance_set_balance', { p_account: i.accountId, p_amount: i.amount, p_actor: i.actor, p_message: i.message, p_idem: i.idem, p_note: i.note ?? null });
   }

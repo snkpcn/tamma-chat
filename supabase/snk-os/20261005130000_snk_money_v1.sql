@@ -29,8 +29,8 @@ alter table public.financial_accounts
   add constraint financial_accounts_unknown_iff_null_chk check ((balance_status='UNKNOWN')=(current_balance is null)),
   add constraint financial_accounts_balance_range_chk check (current_balance is null or abs(current_balance)<=1000000000);
 
-create unique index if not exists financial_accounts_owner_name_uq
-  on public.financial_accounts(owner_id, lower(trim(name))) where archived_at is null;
+-- NOTE: no unique index on account names: the live data already holds two same-named accounts that must not be
+-- touched.  Name uniqueness for NEW accounts is enforced inside finance_create_account().
 
 -- ================================================================ transactions
 
@@ -75,6 +75,9 @@ create index if not exists transactions_file_hash_idx on public.transactions(own
 create index if not exists transactions_slip_ref_idx on public.transactions(owner_id, slip_ref) where slip_ref is not null;
 create index if not exists transactions_dupe_idx on public.transactions(owner_id, amount, occurred_on, payee_key) where payee_key is not null;
 create index if not exists transactions_owner_status_idx on public.transactions(owner_id, status) where archived_at is null;
+create index if not exists transactions_obligation_idx on public.transactions(obligation_id) where obligation_id is not null;
+create index if not exists transactions_corrects_idx on public.transactions(corrects_id) where corrects_id is not null;
+create index if not exists transactions_replaced_by_idx on public.transactions(replaced_by_id) where replaced_by_id is not null;
 
 -- ================================================================ recurring_transactions (= obligations)
 
@@ -184,8 +187,7 @@ begin
   if old.metadata->>'domain'='finance' then raise exception 'finance audit rows are append-only'; end if;
   return case when tg_op='DELETE' then old else new end;
 end $$;
-drop trigger if exists finance_activity_guard on public.activity_log;
-create trigger finance_activity_guard before update or delete on public.activity_log
+create or replace trigger finance_activity_guard before update or delete on public.activity_log
   for each row execute function public.finance_i_activity_guard();
 
 -- Only the finance engine writes balance columns (clients cannot override the single balance path).
@@ -205,8 +207,7 @@ begin
   end if;
   return new;
 end $$;
-drop trigger if exists finance_account_guard on public.financial_accounts;
-create trigger finance_account_guard before insert or update on public.financial_accounts
+create or replace trigger finance_account_guard before insert or update on public.financial_accounts
   for each row execute function public.finance_i_account_guard();
 
 -- Ledger rows written by the engine are never hard-deleted; adjustments are confirmation anchors.
@@ -226,8 +227,7 @@ begin
   end if;
   return new;
 end $$;
-drop trigger if exists finance_tx_guard on public.transactions;
-create trigger finance_tx_guard before update or delete on public.transactions
+create or replace trigger finance_tx_guard before update or delete on public.transactions
   for each row execute function public.finance_i_tx_guard();
 
 -- ================================================================ the single balance derivation
@@ -263,8 +263,7 @@ begin
   foreach v_id in array v_ids loop perform public.finance_i_recompute(v_id); end loop;
   return null;
 end $$;
-drop trigger if exists finance_tx_b_recompute on public.transactions;
-create trigger finance_tx_b_recompute after insert or update or delete on public.transactions
+create or replace trigger finance_tx_b_recompute after insert or update or delete on public.transactions
   for each row execute function public.finance_i_tx_recompute();
 
 -- Rows written outside the engine (the dashboard UI) are still audited.  Trigger name sorts before the
@@ -282,13 +281,12 @@ begin
       'after',jsonb_build_object('type',new.type,'amount',new.amount,'account_id',new.account_id,'transfer_account_id',new.transfer_account_id,'occurred_at',new.occurred_at,'archived_at',new.archived_at,'category_id',new.category_id)));
   return null;
 end $$;
-drop trigger if exists finance_tx_a_audit on public.transactions;
-create trigger finance_tx_a_audit after insert or update on public.transactions
+create or replace trigger finance_tx_a_audit after insert or update on public.transactions
   for each row execute function public.finance_i_tx_audit();
 
 -- ================================================================ internal helpers (no client can call these)
 
-create or replace function public.finance_i_engine() returns void language sql as $$ select set_config('snk.finance_engine','1',true); $$;
+create or replace function public.finance_i_engine() returns void language sql set search_path=public as $$ select set_config('snk.finance_engine','1',true); $$;
 
 create or replace function public.finance_i_active_group(p_owner uuid) returns text language sql stable set search_path=public as $$
   select group_id_hash from public.finance_channel_bindings where owner_id=p_owner and status='ACTIVE' limit 1;
@@ -325,7 +323,7 @@ begin
 end $$;
 
 -- 'EXPENSE'/'INCOME' (any case) -> 'expense'/'income'; anything else -> null
-create or replace function public.finance_i_dir(p text) returns text language sql immutable as $$
+create or replace function public.finance_i_dir(p text) returns text language sql immutable set search_path=public as $$
   select case lower(coalesce(p,'')) when 'expense' then 'expense' when 'income' then 'income' else null end;
 $$;
 
@@ -364,10 +362,10 @@ create or replace function public.finance_i_tx_json(p_id uuid) returns jsonb lan
   left join public.transaction_categories c on c.id=t.category_id;
 $$;
 
-create or replace function public.finance_i_freq_out(p text) returns text language sql immutable as $$
+create or replace function public.finance_i_freq_out(p text) returns text language sql immutable set search_path=public as $$
   select case p when 'once' then 'ONE_TIME' when 'custom_days' then 'CUSTOM_DAYS' else upper(p) end;
 $$;
-create or replace function public.finance_i_freq_in(p text) returns text language sql immutable as $$
+create or replace function public.finance_i_freq_in(p text) returns text language sql immutable set search_path=public as $$
   select case upper(coalesce(p,'')) when 'ONE_TIME' then 'once' when 'CUSTOM_DAYS' then 'custom_days' when 'INSTALLMENT' then 'installment'
     when 'WEEKLY' then 'weekly' when 'MONTHLY' then 'monthly' when 'YEARLY' then 'yearly' when 'DAILY' then 'daily' else null end;
 $$;
@@ -386,7 +384,7 @@ create or replace function public.finance_i_obligation_json(p_id uuid) returns j
 $$;
 
 create or replace function public.finance_i_next_due(p_frequency text, p_cur date, p_interval integer, p_dom integer)
-returns date language plpgsql immutable as $$
+returns date language plpgsql immutable set search_path=public as $$
 declare v_month date; v_last integer;
 begin
   if p_frequency='daily' then return p_cur+1; end if;
@@ -453,7 +451,7 @@ begin
   if length(v_name)=0 then raise exception 'account_name_required'; end if;
   v_kind := case v_kind when 'savings' then 'bank' when 'pool' then 'other' else v_kind end;      -- UI account types
   if v_kind not in ('bank','cash','credit','wallet','other') then v_kind := 'other'; end if;
-  select id into v_id from public.financial_accounts where owner_id=p_owner and lower(trim(name))=lower(v_name) and archived_at is null;
+  select id into v_id from public.financial_accounts where owner_id=p_owner and lower(trim(name))=lower(v_name) and archived_at is null order by created_at limit 1;
   if v_id is not null then
     return public.finance_i_idem_put(p_owner,p_idem,jsonb_build_object('ok',true,'created',false,'account',public.finance_i_account_json(v_id)));
   end if;
