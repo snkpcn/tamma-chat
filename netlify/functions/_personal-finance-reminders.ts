@@ -5,7 +5,7 @@
 // Claiming happens inside Postgres, so concurrent / repeated cron runs cannot double-send.
 
 import { bangkokToday, finalizeReply, money, pfEnabled, thaiDate } from './_personal-finance-core';
-import { PfLedger, supabaseRpc } from './_personal-finance-ledger';
+import { PfLedger, configuredOwnerId, supabaseRpc } from './_personal-finance-ledger';
 
 type Claimed = Awaited<ReturnType<PfLedger['claimReminders']>>[number];
 
@@ -67,7 +67,7 @@ export async function runPersonalFinanceReminders(deps: ReminderDeps): Promise<R
 export async function defaultReminderDeps(): Promise<ReminderDeps> {
   const { piiHash, decryptPii } = await import('./_operations-db');
   return {
-    ledger: new PfLedger(supabaseRpc),
+    ledger: new PfLedger(supabaseRpc, configuredOwnerId()),
     decrypt: decryptPii,
     hash: piiHash,
     now: () => new Date(),

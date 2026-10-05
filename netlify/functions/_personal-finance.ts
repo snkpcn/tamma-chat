@@ -46,6 +46,7 @@ import {
 import {
   PfLedger,
   PfLedgerError,
+  configuredOwnerId,
   supabaseRpc,
   type LedgerAccount,
   type LedgerTransaction,
@@ -81,6 +82,8 @@ export type PfDeps = {
   isBusinessBound: (groupId: string) => Promise<boolean>;
   fetchImage?: (messageId: string) => Promise<{ bytes: Buffer; mimeType: string; sha256: string }>;
   extractSlip?: (bytes: Buffer, mimeType: string) => Promise<SlipExtraction>;
+  /** Informational label only (never an identity): stored with the binding when LINE can tell us. */
+  groupName?: (groupId: string) => Promise<string | null>;
   log?: (event: string, data: Record<string, unknown>) => void;
 };
 
@@ -126,9 +129,10 @@ export async function handlePersonalFinanceEvent(event: PfEvent, deps: PfDeps): 
   try {
     lookup = await deps.ledger.bindingLookup(groupHash);
   } catch (error) {
-    if (error instanceof PfLedgerError && error.code === 'pf_rpc_missing') {
-      // Feature flag on but migration not applied: no finance group can exist yet.
-      log('PF_BINDING_RPC_MISSING', {});
+    if (error instanceof PfLedgerError && (error.code === 'pf_rpc_missing' || error.code === 'pf_db_not_configured')) {
+      // Feature flag on but the ledger is not set up (migration / env): no finance group can exist yet,
+      // so business groups must keep working untouched.
+      log('PF_LEDGER_NOT_AVAILABLE', { code: error.code });
       return none;
     }
     // Cannot prove this is not the private finance group: fail closed (business chain must not see it).
@@ -222,7 +226,8 @@ async function handleActivation(i: {
     if (role !== 'OWNER') return { handled: false, reply: null };
     await deps.ledger.bindingCapture(groupHash, deps.encrypt(groupId), 'owner_activation');
   }
-  const result = await deps.ledger.bindingActivate(groupHash, actor, role === 'OWNER', code);
+  const groupName = deps.groupName ? await deps.groupName(groupId).catch(() => null) : null;
+  const result = await deps.ledger.bindingActivate(groupHash, actor, role === 'OWNER', code, groupName);
   if (result.ok) {
     return {
       handled: true,
@@ -942,7 +947,7 @@ async function resolveSlip(c: Ctx, t: string, pending: Pending, accounts: Ledger
 export async function defaultPersonalFinanceDeps(): Promise<PfDeps> {
   const { piiHash, encryptPii } = await import('./_operations-db');
   return {
-    ledger: new PfLedger(supabaseRpc),
+    ledger: new PfLedger(supabaseRpc, configuredOwnerId()),
     llm: openAiInterpreter,
     now: () => new Date(),
     env: process.env,
@@ -954,6 +959,14 @@ export async function defaultPersonalFinanceDeps(): Promise<PfDeps> {
     },
     fetchImage: async messageId => (await import('./_inthanin-daily-close-image')).fetchLineImage(messageId),
     extractSlip: async (bytes, mimeType) => (await import('./_inthanin-daily-close-image')).extractFinancialEvidence(bytes, mimeType),
+    groupName: async groupId => {
+      const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+      if (!token) return null;
+      const res = await fetch(`https://api.line.me/v2/bot/group/${encodeURIComponent(groupId)}/summary`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return null;
+      const body = await res.json() as { groupName?: string };
+      return typeof body.groupName === 'string' ? body.groupName : null;
+    },
     log: (event, data) => console.log(event, JSON.stringify(data)),
   };
 }

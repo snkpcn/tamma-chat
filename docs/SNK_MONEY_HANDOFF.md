@@ -12,25 +12,44 @@ No new app, repo, Supabase/Vercel project or domain. **Default OFF** (`SNK_MONEY
 * All arithmetic is in Postgres (`pf_*` RPCs). The LLM only *proposes* a structured intent; amounts must literally appear in
   the owner's message and a model-proposed write is capped at "medium" confidence, i.e. it always asks first.
 
+## Where the data lives (decision: extend the EXISTING SNK OS Money model)
+
+The ledger is **not** in the Thongthai/customer Supabase project. It extends the existing SNK LIFE OS project
+(`snk-life-os-private`, `pbbihfipfbpiqbiqlagd`) that the Money dashboard already reads:
+
+| Existing table | Extended with |
+|---|---|
+| `financial_accounts` | `current_balance`, `balance_status` (CONFIRMED/DERIVED/UNKNOWN), `balance_confirmed_*` |
+| `transactions` | `type` now allows `transfer` + `adjustment`; `status`, `seq`, correction links, void fields, slip ref/hash, `source_*`, `idem_key`, generated `occurred_on`/`payee_key` |
+| `recurring_transactions` | frequencies `once/custom_days/installment`, `reminder_days`, installments, `status`, nullable `amount` (variable bills) |
+| `transaction_categories`, `user_settings`, `activity_log` | reused as-is (categories, reminder default, **audit trail**; finance audit rows are append-only) |
+
+New tables: `finance_channel_bindings`, `finance_obligation_payments`, `finance_reminder_deliveries`, `finance_idempotency`,
+`finance_pending_states`. Migration: `supabase/snk-os/20261005130000_snk_money_v1.sql` (identical copy tracked in
+`snkpcn/snk-life-os/supabase/migrations/`). It is deliberately **not** under `supabase/migrations/` of this repo (that folder
+belongs to the Thongthai project).
+
+**Single balance path.** `current_balance` is a pure derivation: last owner-confirmed amount + non-archived `CONFIRMED`
+movements recorded after it, recomputed by a trigger on every `transactions` change. Rows written by the chat engine *and*
+rows edited in the dashboard go through the same derivation; clients cannot write the balance columns (guard trigger). Voiding
+archives the row (`archived_at`, which the existing dashboard stats already exclude).
+
 ## Code map
 
 | Piece | File |
 |---|---|
-| Migration (tables, guards, engine, binding, reminders, views, RLS) | `supabase/migrations/20261005120000_snk_money_personal_finance_v1.sql` |
+| SNK OS migration (extensions, engine, binding, reminders, views, RLS) | `supabase/snk-os/20261005130000_snk_money_v1.sql` |
 | Pure helpers (amounts, negation, dates, accounts, roles, persona) | `netlify/functions/_personal-finance-core.ts` |
 | Interpreter (rules first, injectable LLM fallback, validator) | `netlify/functions/_personal-finance-nlu.ts` |
-| Typed RPC client (`finance.*` tool contract) | `netlify/functions/_personal-finance-ledger.ts` |
+| Typed RPC client (`finance.*` tool contract, owner-scoped) | `netlify/functions/_personal-finance-ledger.ts` |
 | Channel handler: binding, authz, state machine, slips, replies | `netlify/functions/_personal-finance.ts` |
 | Reminders (scheduled, hourly 08:00–21:00 Bangkok) | `netlify/functions/personal-finance-reminders.ts`, `_personal-finance-reminders.ts` |
 | Webhook hook (before every business handler) | `netlify/functions/line-webhook.ts` → `routePersonalFinanceEvent` |
+| Test fixture = faithful copy of the existing SNK schema | `tests/fixtures/snk-os-base.sql` |
 
 `finance.*` contract → `PfLedger`: get_accounts, get_balance, set_owner_balance, create_transaction, correct_transaction,
 void_transaction, get_recent_transactions, create_recurring, update_recurring, mark_due_paid, list_upcoming, get_summary,
 create_category.
-
-Data flow to AI vendors (existing pattern, no new vendor): the interpreter's LLM fallback sees only the single message text and
-account *names* (never balances) and only when the rules cannot place finance-looking text; slip images go through the existing
-`extractFinancialEvidence` (Gemini → OpenAI) and are **not stored** (only the SHA-256 is kept for de-duplication).
 
 ## Secure group binding
 
@@ -51,21 +70,27 @@ refusal and an `UNAUTHORIZED_ATTEMPT` audit row). With no owner ids configured n
 
 ## Enabling in production (owner / operator checklist)
 
-1. Apply the migration to the **existing production Supabase** (`supabase db push` or the SQL editor).
-2. Netlify env: `SNK_MONEY_ENABLED=1`, `PF_OWNER_LINE_USER_IDS=<owner LINE userId>` (comma list), optional
-   `PF_FINANCE_MEMBER_LINE_USER_IDS`. Existing `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `LINE_CHANNEL_*`,
-   `CUSTOMER_PII_ENCRYPTION_KEY`, `OPENAI_API_KEY`/`GEMINI_API_KEY` are reused.
-3. Deploy. Only then invite Thongthai to the "SNK MONEY" group and type `ยืนยันกลุ่มการเงิน`.
-4. Say `บัญชีใช้จ่ายตอนนี้เหลือ 85,000`, then `ช่วยอะไรได้บ้าง`.
+1. The SNK OS migration is applied to `snk-life-os-private` (tracked in `snkpcn/snk-life-os`).
+2. Netlify env (site that serves `line-webhook`): `SNK_OS_SUPABASE_URL` (https://pbbihfipfbpiqbiqlagd.supabase.co),
+   `SNK_OS_SERVICE_ROLE_KEY` (the SNK OS project's service-role key — a secret, never committed), `SNK_MONEY_OWNER_ID`
+   (the owner's `auth.users.id` in the SNK OS project — NOT guessed; two users exist there), `PF_OWNER_LINE_USER_IDS`
+   (owner's LINE userId), optional `PF_FINANCE_MEMBER_LINE_USER_IDS`, and finally `SNK_MONEY_ENABLED=1`.
+   Existing `LINE_CHANNEL_*`, `CUSTOMER_PII_ENCRYPTION_KEY`, `OPENAI_API_KEY`/`GEMINI_API_KEY` are reused. The Thongthai
+   `SUPABASE_*` variables are never used for the ledger.
+3. Merge/deploy `tamma-chat` (webhook + scheduler) and `snk-life-os` (dashboard).
+4. Only then invite Thongthai to the "SNK MONEY" group and type `ยืนยันกลุ่มการเงิน`.
+5. Say `บัญชีใช้จ่ายตอนนี้เหลือ 85,000`, then `ช่วยอะไรได้บ้าง`.
 
-Rollback: set `SNK_MONEY_ENABLED=0` (webhook routing and reminders stop instantly; data stays). The migration is additive.
+If any of the three ledger env vars is missing the feature stays inert and business groups are unaffected.
+Rollback: `SNK_MONEY_ENABLED=0` (routing and reminders stop; data stays). The migration is additive.
 
 ## Dashboard (SNK OS Money)
 
-Read-only, security-invoker views (service_role only; RLS denies clients): `pf_account_balances_summary_v1`,
-`pf_recent_transactions_summary_v1`, `pf_upcoming_obligations_summary_v1`, `pf_month_cashflow_summary_v1`; plus RPCs
-`pf_get_summary`, `pf_list_upcoming`, `pf_forecast`, `pf_get_accounts`. The SNK LIFE OS UI lives outside this repository and must
-read them **server-side** with the service-role key. Forecasts are always labelled as forecasts and never overwrite a balance.
+The existing Money overview now shows account balances with CONFIRMED / DERIVED / UNKNOWN badges, total available (known
+balances only), month income/expense/net, today/week/month, upcoming 7/30 days and overdue, with drill-down into the existing
+Transactions tab (`snkpcn/snk-life-os`, `components/money-cash-overview.tsx`). It reads owner-scoped, security-invoker views
+(`finance_account_balances_v1`, `finance_month_cashflow_v1`, `finance_upcoming_v1`, `finance_recent_transactions_v1`) through RLS as
+the logged-in owner. Forecasts are always labelled as forecasts and never overwrite a balance.
 
 ## Tests
 

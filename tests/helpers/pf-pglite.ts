@@ -1,11 +1,13 @@
-// Runs the REAL production migration against an in-process PostgreSQL (PGlite) so tests
+// Runs the REAL SNK OS migration (on top of a faithful copy of the existing SNK schema) against an in-process PostgreSQL (PGlite) so tests
 // exercise the actual balance engine, constraints, triggers and grants -- not a re-implementation.
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PfLedger, PfLedgerError, type Rpc } from '../../netlify/functions/_personal-finance-ledger';
 
-export const MIGRATION = join(process.cwd(), 'supabase/migrations/20261005120000_snk_money_personal_finance_v1.sql');
+export const MIGRATION = join(process.cwd(), 'supabase/snk-os/20261005130000_snk_money_v1.sql');
+export const BASE_SCHEMA = join(process.cwd(), 'tests/fixtures/snk-os-base.sql');
+export const OWNER_ID = '11111111-1111-4111-8111-111111111111';
 
 function param(value: unknown): unknown {
   if (value === undefined) return null;
@@ -14,10 +16,12 @@ function param(value: unknown): unknown {
   return value;
 }
 
-export async function freshDb(): Promise<{ db: PGlite; rpc: Rpc; ledger: PfLedger }> {
+export async function freshDb(): Promise<{ db: PGlite; rpc: Rpc; ledger: PfLedger; owner: string }> {
   const db = new PGlite();
   await db.exec('create role service_role; create role anon; create role authenticated;');
+  await db.exec(readFileSync(BASE_SCHEMA, 'utf8'));
   await db.exec(readFileSync(MIGRATION, 'utf8'));
+  await db.query('insert into auth.users(id) values($1)', [OWNER_ID]);
   const rpc: Rpc = async (fn, args) => {
     const keys = Object.keys(args);
     const sql = `select public.${fn}(${keys.map((k, n) => `${k} => $${n + 1}`).join(', ')}) as r`;
@@ -29,7 +33,7 @@ export async function freshDb(): Promise<{ db: PGlite; rpc: Rpc; ledger: PfLedge
       throw new PfLedgerError(/^[a-z_]+$/.test(message) ? message : 'pf_rpc_error', message);
     }
   };
-  return { db, rpc, ledger: new PfLedger(rpc) };
+  return { db, rpc, ledger: new PfLedger(rpc, OWNER_ID), owner: OWNER_ID };
 }
 
 export const A = 'actor_hash_owner';

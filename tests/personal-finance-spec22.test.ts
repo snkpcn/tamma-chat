@@ -30,7 +30,7 @@ test('cases 1-5: confirm 100000 -> insurance -> webhook retry -> rent income -> 
   assert.equal(await h.balanceOf('SCB'), 81500);
   // 3: LINE retries the very same event
   await say(h, 'จ่ายค่าประกัน 18500 จาก SCB', { id: 'line-evt-1' });
-  assert.equal(await h.count('pf_transactions', "kind='EXPENSE'"), 1);
+  assert.equal(await h.count('transactions', "type='expense'"), 1);
   assert.equal(await h.balanceOf('SCB'), 81500);
   // 4
   await say(h, 'ได้เงินค่าเช่า 25000 เข้า SCB');
@@ -39,15 +39,15 @@ test('cases 1-5: confirm 100000 -> insurance -> webhook retry -> rent income -> 
   const fix = await say(h, 'เมื่อกี้ 25000 ผิด เป็น 24000');
   assert.match(fix.reply!, /24,000 บาท/);
   assert.equal(await h.balanceOf('SCB'), 105500);
-  assert.equal(await h.count('pf_transactions', "status='REVERSED'"), 1);
-  assert.ok(await h.count('pf_audit_events', "action='TRANSACTION_EDITED'") >= 1);
+  assert.equal(await h.count('transactions', "status='REVERSED'"), 1);
+  assert.ok(await h.count('activity_log', "action='TRANSACTION_EDITED'") >= 1);
 });
 
 test('case 6: "ยังไม่จ่ายค่ารถนะ" creates no expense', async () => {
   const h = await ready();
   await say(h, 'SCB เหลือ 100000');
   await say(h, 'ยังไม่จ่ายค่ารถนะ');
-  assert.equal(await h.count('pf_transactions', "kind='EXPENSE'"), 0);
+  assert.equal(await h.count('transactions', "type='expense'"), 0);
   assert.equal(await h.balanceOf('SCB'), 100000);
 });
 
@@ -57,11 +57,11 @@ test('cases 7+9: future obligation, then "จ่ายแล้ว" resolves it 
   await say(h, 'KBank เหลือ 5000');
   const made = await say(h, 'เดือนหน้าวันที่ 15 ต้องจ่ายรถ 35000');
   assert.match(made.reply!, /35,000 บาท/);
-  const o = (await h.db.query<any>('select * from pf_obligations')).rows[0];
-  assert.equal(String(o.next_due_date.toISOString?.() ?? o.next_due_date).slice(0, 10), '2026-11-15');
+  const o = (await h.db.query<any>('select * from recurring_transactions')).rows[0];
+  assert.equal(String(o.next_occurrence.toISOString?.() ?? o.next_occurrence).slice(0, 10), '2026-11-15');
   assert.equal(await h.balanceOf('SCB'), 100000, 'a future obligation is not an expense yet');
   // bring it due, as the reminder would have
-  await h.db.query("update pf_obligations set next_due_date='2026-10-05' where id=$1", [o.id]);
+  await h.db.query("update recurring_transactions set next_occurrence='2026-10-05' where id=$1", [o.id]);
   const ask = await say(h, 'จ่ายแล้ว');
   assert.match(ask.reply!, /ตัดจากบัญชีไหน/);
   assert.equal(await h.balanceOf('SCB'), 100000);
@@ -69,7 +69,7 @@ test('cases 7+9: future obligation, then "จ่ายแล้ว" resolves it 
   assert.match(done.reply!, /ปิดรายการ/);
   assert.match(done.reply!, /65,000 บาท/);
   assert.equal(await h.balanceOf('SCB'), 65000);
-  assert.equal(await h.count('pf_obligation_payments'), 1);
+  assert.equal(await h.count('finance_obligation_payments'), 1);
 });
 
 test('case 8: a due reminder reaches only the verified SNK MONEY group', async () => {
@@ -89,11 +89,14 @@ test('case 10: "ปรับ SCB เหลือ 70000" is an ADJUSTMENT, never 
   await say(h, 'SCB เหลือ 100000');
   await say(h, 'ปรับ SCB เหลือ 70000');
   assert.equal(await h.balanceOf('SCB'), 70000);
-  assert.equal(await h.count('pf_transactions', "kind='ADJUSTMENT'"), 2);
-  assert.equal(await h.count('pf_transactions', "kind='EXPENSE'"), 0);
-  const adj = (await h.db.query<any>("select * from pf_audit_events where action='BALANCE_ADJUSTED'")).rows[0];
-  assert.equal(adj.before_data.balance, 100000);
-  assert.equal(adj.after_data.balance, 70000);
+  assert.equal(await h.count('transactions', "type='adjustment'"), 2);
+  assert.equal(await h.count('transactions', "type='expense'"), 0);
+  const adj = (await h.db.query<any>("select * from activity_log where action='BALANCE_ADJUSTED'")).rows[0];
+  assert.equal(adj.metadata.before.balance, 100000);
+  assert.equal(adj.metadata.after.balance, 70000);
+  assert.equal(adj.metadata.meta.reason, 'OWNER_RECONCILIATION');
+  assert.equal(adj.metadata.meta.previous_balance, 100000);
+  assert.equal(adj.metadata.meta.new_balance, 70000);
 });
 
 test('case 11: the same slip twice never double-debits', async () => {
@@ -107,7 +110,7 @@ test('case 11: the same slip twice never double-debits', async () => {
   const second = await h.image('b');
   assert.match(second.reply!, /บันทึกไว้แล้ว/);
   assert.equal(await h.balanceOf('SCB'), 75000);
-  assert.equal(await h.count('pf_transactions', "kind='EXPENSE'"), 1);
+  assert.equal(await h.count('transactions', "type='expense'"), 1);
 });
 
 test('cases 12-13: this-month spend and next-week obligations come from the structured DB', async () => {
@@ -128,7 +131,7 @@ test('cases 14-15: unauthorized member learns nothing and changes nothing', asyn
   const debit = await say(h, 'หัก SCB 10000', { user: STRANGER });
   assert.doesNotMatch(debit.reply ?? '', /100,000|90,000/);
   assert.equal(await h.balanceOf('SCB'), 100000);
-  assert.equal(await h.count('pf_transactions', "kind='EXPENSE'"), 0);
+  assert.equal(await h.count('transactions', "type='expense'"), 0);
   // the same words from the owner do work
   const owner = await say(h, 'หัก SCB 10000');
   assert.match(owner.reply!, /90,000 บาท/);
@@ -158,16 +161,16 @@ test('case 17: "ลบรายการทั้งหมดเดือนน�
   const ask = await say(h, 'ลบรายการทั้งหมดเดือนนี้');
   assert.match(ask.reply!, /ยกเลิก 2 รายการ/);
   assert.match(ask.reply!, /ยืนยัน/);
-  assert.equal(await h.count('pf_transactions', "status='VOIDED'"), 0);
+  assert.equal(await h.count('transactions', "status='VOIDED'"), 0);
   await say(h, 'ไม่');
-  assert.equal(await h.count('pf_transactions', "status='VOIDED'"), 0);
+  assert.equal(await h.count('transactions', "status='VOIDED'"), 0);
   await say(h, 'ลบรายการทั้งหมดเดือนนี้');
   await say(h, 'ok');   // casual words never confirm a bulk action
-  assert.equal(await h.count('pf_transactions', "status='VOIDED'"), 0);
+  assert.equal(await h.count('transactions', "status='VOIDED'"), 0);
   await say(h, 'ลบรายการทั้งหมดเดือนนี้');
   const done = await say(h, 'ยืนยัน');
   assert.match(done.reply!, /ยกเลิก 2 รายการ/);
-  assert.equal(await h.count('pf_transactions', "status='VOIDED'"), 2);
+  assert.equal(await h.count('transactions', "status='VOIDED'"), 2);
   assert.equal(await h.balanceOf('SCB'), 100000);
 });
 
@@ -191,7 +194,7 @@ test('§8 continuity: "จ่ายค่ารถ 35000" -> "หักจาก
   assert.match(ask.reply!, /ตัดจากบัญชีไหน/);
   await say(h, 'scb');
   assert.equal(await h.balanceOf('SCB'), 65000);
-  assert.equal(await h.count('pf_transactions', "kind='EXPENSE'"), 1);
+  assert.equal(await h.count('transactions', "type='expense'"), 1);
 });
 
 test('§8 no needless question: with exactly one account the answer is known', async () => {
@@ -208,7 +211,7 @@ test('§8 reclassify: "เมื่อกี้ไม่ใช่ค่ารถ
   await say(h, 'SCB เหลือ 100000');
   await say(h, 'จ่ายค่ารถ 500 จาก SCB');
   await say(h, 'เมื่อกี้ไม่ใช่ค่ารถ เป็นค่าประกัน');
-  const c = (await h.db.query<any>("select c.name from pf_transactions t join pf_categories c on c.id=t.category_id where t.kind='EXPENSE'")).rows[0];
+  const c = (await h.db.query<any>("select c.name from transactions t join transaction_categories c on c.id=t.category_id where t.type='expense'")).rows[0];
   assert.equal(c.name, 'ค่าประกัน');
   assert.equal(await h.balanceOf('SCB'), 99500);
 });
@@ -217,7 +220,7 @@ test('§8 negations: "ไม่ต้องหัก", "เอาไว้ก่
   const h = await ready();
   await say(h, 'SCB เหลือ 100000');
   for (const t of ['ไม่ต้องหัก SCB 500', 'เอาไว้ก่อน', 'อันนี้ไม่ใช่รายจ่าย 500', 'ยังไม่จ่าย']) await say(h, t);
-  assert.equal(await h.count('pf_transactions', "kind in ('EXPENSE','INCOME')"), 0);
+  assert.equal(await h.count('transactions', "type in ('expense','income')"), 0);
   assert.equal(await h.balanceOf('SCB'), 100000);
 });
 
@@ -231,8 +234,8 @@ test('§11 initial setup of several accounts in one message', async () => {
   assert.equal(await h.balanceOf('เงินสด'), 12000);
   const again = await say(h, 'SCB ตอนนี้เหลือ 92,430');
   assert.match(again.reply!, /ปรับยอด/);
-  const adj = (await h.db.query<any>("select * from pf_audit_events where action='BALANCE_ADJUSTED' and entity_type='account'")).rows[0];
-  assert.equal(adj.meta.delta, -27570);
+  const adj = (await h.db.query<any>("select * from activity_log where action='BALANCE_ADJUSTED' and entity_type='account'")).rows[0];
+  assert.equal(adj.metadata.meta.delta, -27570);
 });
 
 test('§12 reminder tuning: per-bill days, silence, reschedule, morning', async () => {
@@ -241,12 +244,12 @@ test('§12 reminder tuning: per-bill days, silence, reschedule, morning', async 
   await h.ledger.createRecurring({ title: 'ค่างวด', kind: 'EXPENSE', amount: 12000, frequency: 'MONTHLY', firstDue: '2026-10-15', actor: A, ...ids('o') });
   await h.ledger.createRecurring({ title: 'ค่าประกัน', kind: 'EXPENSE', amount: 18500, frequency: 'YEARLY', firstDue: '2026-10-18', actor: A, ...ids('o') });
   await say(h, 'ค่างวดนี้เตือนก่อน 3 วันก็พอ');
-  assert.deepEqual((await h.db.query<any>("select reminder_days from pf_obligations where title='ค่างวด'")).rows[0].reminder_days, [3]);
+  assert.deepEqual((await h.db.query<any>("select reminder_days from recurring_transactions where title='ค่างวด'")).rows[0].reminder_days, [3]);
   await say(h, 'ไม่ต้องเตือนค่าประกันอีก');
-  assert.deepEqual((await h.db.query<any>("select reminder_days from pf_obligations where title='ค่าประกัน'")).rows[0].reminder_days, []);
+  assert.deepEqual((await h.db.query<any>("select reminder_days from recurring_transactions where title='ค่าประกัน'")).rows[0].reminder_days, []);
   assert.equal((await h.ledger.claimReminders('2026-10-18')).filter(r => r.title === 'ค่าประกัน').length, 0, 'silenced bills never remind');
   await say(h, 'เลื่อนค่างวดไปวันที่ 20');
-  assert.equal(String((await h.db.query<any>("select next_due_date from pf_obligations where title='ค่างวด'")).rows[0].next_due_date.toISOString?.()).slice(0, 10), '2026-10-20');
+  assert.equal(String((await h.db.query<any>("select next_occurrence from recurring_transactions where title='ค่างวด'")).rows[0].next_occurrence.toISOString?.()).slice(0, 10), '2026-10-20');
   assert.match((await say(h, 'เตือนตอนเช้า')).reply!, /08:00/);
   const ambiguous = await say(h, 'ไม่ต้องเตือนอันนี้อีก');
   assert.match(ambiguous.reply!, /ไม่แน่ใจ|หมายถึงรายการไหน|ไม่เตือน/);
@@ -259,7 +262,7 @@ test('§16 corrections: "จำนวนผิด เป็น 8,900" and "เ�
   await say(h, 'จำนวนผิด เป็น 8,900');
   assert.equal(await h.balanceOf('SCB'), 91100);
   await say(h, 'เมื่อวานไม่ใช่วันนี้');
-  const live = (await h.db.query<any>("select occurred_on from pf_transactions where kind='EXPENSE' and status='CONFIRMED'")).rows;
+  const live = (await h.db.query<any>("select occurred_on from transactions where type='expense' and status='CONFIRMED'")).rows;
   assert.equal(live.length, 1);
   assert.equal(String(live[0].occurred_on.toISOString?.() ?? live[0].occurred_on).slice(0, 10), '2026-10-04');
   assert.equal(await h.balanceOf('SCB'), 91100);

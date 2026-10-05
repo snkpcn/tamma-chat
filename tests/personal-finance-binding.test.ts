@@ -20,14 +20,14 @@ test('mocked join event captures a PENDING binding that grants nothing', async (
   assert.doesNotMatch(joined.reply!, /SCB|บาท|ยอด/, 'join message discloses nothing');
   assertPersona(joined.reply);
   assert.equal((await lookup(h, GROUP)).status, 'PENDING');
-  const row = (await h.db.query<any>('select * from pf_channel_bindings')).rows[0];
+  const row = (await h.db.query<any>('select * from finance_channel_bindings')).rows[0];
   assert.notEqual(row.group_id_enc, GROUP, 'group id is stored encrypted, not in clear');
   assert.equal(row.group_id_hash, h.deps.hash(GROUP));
 
   // pending = no finance permission, even for the owner's finance sentences
   const out = await h.say('ปรับ SCB เหลือ 70000');
   assert.equal(out.handled, false);
-  assert.equal(await h.count('pf_accounts'), 0);
+  assert.equal(await h.count('financial_accounts'), 0);
 });
 
 test('only the owner can activate: stranger and member are rejected, owner succeeds', async () => {
@@ -44,7 +44,7 @@ test('only the owner can activate: stranger and member are rejected, owner succe
   assertPersona(owner.reply);
   assert.equal(owner.handled, true);
   assert.equal((await lookup(h, GROUP)).status, 'ACTIVE');
-  assert.equal(await h.count('pf_audit_events', "action='GROUP_BOUND'"), 1);
+  assert.equal(await h.count('activity_log', "action='GROUP_BOUND'"), 1);
 });
 
 test('the group NAME is never an identity: the binding is keyed by the hashed group id only', async () => {
@@ -56,7 +56,8 @@ test('the group NAME is never an identity: the binding is keyed by the hashed gr
   const out = await h.say('ปรับ SCB เหลือ 70000', { group: OTHER_GROUP });
   assert.equal(out.handled, false, 'a group called "SNK MONEY" is not trusted by name');
   const src = readFileSync('netlify/functions/_personal-finance.ts', 'utf8');
-  assert.doesNotMatch(src, /groupName|group_name|\.name\s*===?\s*['"]SNK/i);
+  // the name is only an informational label stored with the binding; it is never compared or used in a decision
+  assert.doesNotMatch(src, /groupName\s*(?:===?|!==?)\s*['"`](?!string)|groupName\.(?:includes|toLowerCase|startsWith)|\.name\s*===?\s*['"]SNK|SNK MONEY['"]\s*===?/i);
 });
 
 test('only one finance group can be ACTIVE; a second is refused', async () => {
@@ -66,8 +67,8 @@ test('only one finance group can be ACTIVE; a second is refused', async () => {
   const second = await h.say('ยืนยันกลุ่มการเงิน', { group: OTHER_GROUP });
   assert.match(second.reply!, /มีกลุ่มการเงินที่ยืนยันไว้แล้ว/);
   assert.equal((await lookup(h, OTHER_GROUP)).status, 'PENDING');
-  assert.equal(await h.count('pf_channel_bindings', "status='ACTIVE'"), 1);
-  await assert.rejects(() => h.db.query("insert into pf_channel_bindings(group_id_hash,status) values('x','ACTIVE')"), /pf_bindings_single_active_uq/);
+  assert.equal(await h.count('finance_channel_bindings', "status='ACTIVE'"), 1);
+  await assert.rejects(() => h.db.query("insert into finance_channel_bindings(owner_id,group_id_hash,status) values($1,'x','ACTIVE')", ['11111111-1111-4111-8111-111111111111']), /finance_bindings_single_active_uq/);
 });
 
 test('wrong group: finance sentences in any other group never reach the ledger', async () => {
@@ -78,8 +79,8 @@ test('wrong group: finance sentences in any other group never reach the ledger',
     assert.equal(out.handled, false);
     assert.equal(out.reply, null);
   }
-  assert.equal(await h.count('pf_accounts'), 0);
-  assert.equal(await h.count('pf_transactions'), 0);
+  assert.equal(await h.count('financial_accounts'), 0);
+  assert.equal(await h.count('transactions'), 0);
 });
 
 test('a business-bound group can never become the finance group', async () => {
@@ -88,7 +89,7 @@ test('a business-bound group can never become the finance group', async () => {
   assert.equal((await lookup(h, GROUP)).status, 'NONE', 'join in a business-bound group is not even captured');
   const out = await h.say('ยืนยันกลุ่มการเงิน', { user: OWNER });
   assert.match(out.reply!, /ผูกกับทีมธุรกิจ/);
-  assert.equal(await h.count('pf_channel_bindings'), 0);
+  assert.equal(await h.count('finance_channel_bindings'), 0);
   const stranger = await h.say('ยืนยันกลุ่มการเงิน', { user: STRANGER });
   assert.equal(stranger.reply, null);
 });
@@ -96,7 +97,7 @@ test('a business-bound group can never become the finance group', async () => {
 test('owner phrase recovers a missed join event; strangers cannot do that', async () => {
   const h = await harness();
   assert.equal((await h.say('ยืนยันกลุ่มการเงิน', { user: STRANGER })).handled, false);
-  assert.equal(await h.count('pf_channel_bindings'), 0);
+  assert.equal(await h.count('finance_channel_bindings'), 0);
   assert.equal((await h.say('ยืนยันกลุ่มการเงิน', { user: OWNER })).handled, true);
   assert.equal((await lookup(h, GROUP)).status, 'ACTIVE');
 });
@@ -105,9 +106,9 @@ test('one-time code activation: wrong code fails and locks, right code works onc
   const h = await harness();
   await h.raw({ type: 'join', user: null });
   const hash = h.deps.hash(GROUP)!;
-  const issued = (await h.ledger['rpc']('pf_binding_issue_code', { p_group_hash: hash, p_ttl_minutes: 30 })) as { code: string };
+  const issued = (await h.ledger['rpc']('finance_binding_issue_code', { p_owner: h.ledger['ownerId'], p_group_hash: hash, p_ttl_minutes: 30 })) as { code: string };
   assert.match(issued.code, /^SNK-\d{6}$/);
-  const stored = (await h.db.query<any>('select code_hash from pf_channel_bindings')).rows[0].code_hash;
+  const stored = (await h.db.query<any>('select code_hash from finance_channel_bindings')).rows[0].code_hash;
   assert.notEqual(stored, issued.code, 'only a hash of the code is stored');
 
   const wrong = await h.say('ยืนยันกลุ่มการเงิน SNK-000000', { user: STRANGER });
@@ -116,14 +117,14 @@ test('one-time code activation: wrong code fails and locks, right code works onc
   const right = await h.say(issued.code, { user: STRANGER });
   assert.match(right.reply!, /ยืนยันกลุ่ม SNK MONEY เรียบร้อย/);
   assert.equal((await lookup(h, GROUP)).status, 'ACTIVE');
-  assert.equal((await h.db.query<any>('select code_hash from pf_channel_bindings')).rows[0].code_hash, null, 'code is burned');
+  assert.equal((await h.db.query<any>('select code_hash from finance_channel_bindings')).rows[0].code_hash, null, 'code is burned');
 });
 
 test('repeated wrong codes lock the pending binding', async () => {
   const h = await harness();
   await h.raw({ type: 'join', user: null });
   const hash = h.deps.hash(GROUP)!;
-  const { code } = (await h.ledger['rpc']('pf_binding_issue_code', { p_group_hash: hash, p_ttl_minutes: 30 })) as { code: string };
+  const { code } = (await h.ledger['rpc']('finance_binding_issue_code', { p_owner: h.ledger['ownerId'], p_group_hash: hash, p_ttl_minutes: 30 })) as { code: string };
   for (let i = 0; i < 5; i++) await h.say('ยืนยันกลุ่มการเงิน SNK-111111', { user: STRANGER });
   const locked = await h.say(code, { user: STRANGER });
   assert.match(locked.reply!, /ยืนยันกลุ่มนี้ยังไม่ได้/);
@@ -147,7 +148,7 @@ test('bot removed from the group revokes the binding', async () => {
   await h.activate();
   await h.raw({ type: 'leave', user: null });
   assert.equal((await lookup(h, GROUP)).status, 'NONE');
-  assert.equal(await h.count('pf_channel_bindings', "status='REVOKED'"), 1);
+  assert.equal(await h.count('finance_channel_bindings', "status='REVOKED'"), 1);
   assert.equal((await h.say('ปรับ SCB เหลือ 1')).handled, false);
 });
 

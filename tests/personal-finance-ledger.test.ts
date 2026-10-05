@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { A, freshDb, ids } from './helpers/pf-pglite';
+import { A, OWNER_ID, freshDb, ids } from './helpers/pf-pglite';
 
 async function setup() {
   const { db, ledger, rpc } = await freshDb();
@@ -31,7 +31,6 @@ test('transactions on an UNKNOWN account never invent a balance', async () => {
   const { ledger, scb } = await setup();
   const res = await ledger.createTransaction({ kind: 'EXPENSE', amount: 500, accountId: scb.id, actor: A, ...ids('t') });
   assert.equal(res.transaction.status, 'CONFIRMED');
-  assert.equal(res.transaction.from_effect, null);
   const b = await bal(ledger, scb.id);
   assert.equal(b.balance, null);
   assert.equal(b.balance_status, 'UNKNOWN');
@@ -126,32 +125,79 @@ test('category change is an audited in-place relabel with no balance effect', as
   assert.equal(Number((await bal(ledger, scb.id)).balance), 900);
 });
 
-test('money fields are immutable and rows cannot be hard deleted; audit is append-only', async () => {
+test('ledger rows are never hard-deleted, adjustments are immutable anchors, audit is append-only', async () => {
   const { ledger, scb, db } = await setup();
+  const set = await ledger.setOwnerBalance({ accountId: scb.id, amount: 500, actor: A, ...ids('b') });
   const tx = (await ledger.createTransaction({ kind: 'EXPENSE', amount: 100, accountId: scb.id, actor: A, ...ids('t') })).transaction;
-  await assert.rejects(() => db.query('update pf_transactions set amount=1 where id=$1', [tx.id]), /immutable/);
-  await assert.rejects(() => db.query('delete from pf_transactions where id=$1', [tx.id]), /never hard-deleted/);
-  await assert.rejects(() => db.query('delete from pf_audit_events'), /append-only/);
-  await assert.rejects(() => db.query("update pf_audit_events set action='x'"), /append-only/);
-  await assert.rejects(() => db.query('truncate pf_audit_events'), /append-only/);
+  await assert.rejects(() => db.query('delete from transactions where id=$1', [tx.id]), /never_hard_deleted/);
+  await assert.rejects(() => db.query('delete from transactions where id=$1', [set.adjustment_id]), /never_hard_deleted/);
+  await assert.rejects(() => db.query('update transactions set amount=1 where id=$1', [set.adjustment_id]), /adjustments_are_immutable/);
+  await assert.rejects(() => db.query("update transactions set archived_at=now() where id=$1", [set.adjustment_id]), /adjustments_are_immutable|archived_matches_status/);
+  await assert.rejects(() => db.query('update transactions set seq=999999 where id=$1', [tx.id]), /(seq_is_immutable|only be updated to DEFAULT)/);
+  await assert.rejects(() => db.query("delete from activity_log where metadata->>'domain'='finance'"), /append-only/);
+  await assert.rejects(() => db.query("update activity_log set action='x' where metadata->>'domain'='finance'"), /append-only/);
 });
 
-test('every mutation writes an audit event with before/after', async () => {
+test('every mutation writes an owner-scoped audit event with before/after, channel and message id', async () => {
   const { ledger, scb, db } = await setup();
-  await ledger.setOwnerBalance({ accountId: scb.id, amount: 1000, actor: A, ...ids('b') });
+  const owner = OWNER_ID;
+  await ledger.setOwnerBalance({ accountId: scb.id, amount: 1000, actor: A, message: 'line-msg-1', idem: 'k1' });
   const tx = (await ledger.createTransaction({ kind: 'EXPENSE', amount: 100, accountId: scb.id, actor: A, ...ids('t') })).transaction;
   await ledger.voidTransaction({ txId: tx.id, reason: 'r', actor: A, ...ids('v') });
-  const actions = (await db.query<{ action: string }>('select action from pf_audit_events order by created_at, id')).rows.map(r => r.action);
+  const rows = (await db.query<{ action: string; owner_id: string; metadata: any }>("select action, owner_id, metadata from activity_log where metadata->>'domain'='finance' order by id")).rows;
+  const actions = rows.map(r => r.action);
   for (const expected of ['ACCOUNT_CREATED', 'BALANCE_SET', 'TRANSACTION_CREATED', 'TRANSACTION_VOIDED']) assert.ok(actions.includes(expected), expected);
-  const bc = (await db.query<{ before_data: any; after_data: any }>("select before_data, after_data from pf_audit_events where action='BALANCE_SET'")).rows[0];
-  assert.equal(bc.after_data.balance, 1000);
-  assert.equal(bc.before_data.balance_status, 'UNKNOWN');
+  assert.ok(rows.every(r => r.owner_id === owner));
+  const bc = rows.find(r => r.action === 'BALANCE_SET')!;
+  assert.equal(bc.metadata.after.balance, 1000);
+  assert.equal(bc.metadata.before.balance_status, 'UNKNOWN');
+  assert.equal(bc.metadata.message_id, 'line-msg-1');
+  assert.equal(bc.metadata.channel, 'LINE');
+  assert.equal(bc.metadata.meta.reason, 'OWNER_RECONCILIATION');
 });
 
-test('account balance/unknown invariant is enforced by the database', async () => {
+test('balance invariants are enforced by the database and only the engine may write balance columns', async () => {
   const { db, scb } = await setup();
-  await assert.rejects(() => db.query("update pf_accounts set balance=0 where id=$1", [scb.id]), /pf_accounts_unknown_iff_null_balance/);
-  await assert.rejects(() => db.query("update pf_accounts set balance_status='CONFIRMED' where id=$1", [scb.id]), /pf_accounts_unknown_iff_null_balance/);
+  await assert.rejects(() => db.query('update financial_accounts set current_balance=0 where id=$1', [scb.id]), /engine_managed/);
+  await assert.rejects(() => db.query("update financial_accounts set balance_status='CONFIRMED' where id=$1", [scb.id]), /engine_managed/);
+  await assert.rejects(() => db.query("insert into financial_accounts(owner_id,name,current_balance,balance_status) values($1,'X',5,'CONFIRMED')", [OWNER_ID]), /engine_managed/);
+  // even with the engine flag, the shape constraint still holds: a number must carry a status and UNKNOWN carries no number
+  await db.query("select set_config('snk.finance_engine','1',false)");
+  await assert.rejects(() => db.query('update financial_accounts set current_balance=0 where id=$1', [scb.id]), /unknown_iff_null/);
+  await assert.rejects(() => db.query("update financial_accounts set balance_status='CONFIRMED' where id=$1", [scb.id]), /unknown_iff_null/);
+});
+
+test('rows written from the dashboard (authenticated, RLS) flow through the SAME balance derivation and are audited', async () => {
+  const { db, ledger, scb } = await setup();
+  await ledger.setOwnerBalance({ accountId: scb.id, amount: 10000, actor: A, ...ids('b') });
+  const asOwner = async <T>(fn: () => Promise<T>): Promise<T> => {
+    await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub','${OWNER_ID}',false);`);
+    try { return await fn(); } finally { await db.exec('reset role'); }
+  };
+  const ins = await asOwner(() => db.query<{ id: string }>("insert into transactions(type,amount,account_id,description) values('expense',2500,$1,'ui row') returning id", [scb.id]));
+  assert.equal(Number((await ledger.getBalance(scb.id) as any).balance), 7500);
+  await asOwner(() => db.query('update transactions set amount=3000 where id=$1', [ins.rows[0].id]));
+  assert.equal(Number((await ledger.getBalance(scb.id) as any).balance), 7000, 'editing in the dashboard re-derives the balance');
+  await asOwner(() => db.query('update transactions set archived_at=now() where id=$1', [ins.rows[0].id]));
+  const after = (await ledger.getBalance(scb.id)) as any;
+  assert.equal(Number(after.balance), 10000, 'archiving restores it');
+  assert.equal(after.balance_status, 'CONFIRMED');
+  const audit = (await db.query<{ action: string; metadata: any }>("select action, metadata from activity_log where metadata->>'channel'='dashboard' order by id")).rows;
+  assert.deepEqual(audit.map(r => r.action), ['TRANSACTION_CREATED', 'TRANSACTION_EDITED', 'TRANSACTION_VOIDED']);
+  // clients can never write the balance columns themselves
+  await asOwner(async () => { await assert.rejects(() => db.query('update financial_accounts set current_balance=1 where id=$1', [scb.id]), /engine_managed/); });
+});
+
+test('legacy UI behaviour is preserved: transfers are now accepted and plain income/expense rows keep working', async () => {
+  const { db, ledger, scb, kbank } = await setup();
+  await ledger.setOwnerBalance({ accountId: scb.id, amount: 1000, actor: A, ...ids('b') });
+  await ledger.setOwnerBalance({ accountId: kbank.id, amount: 0, actor: A, ...ids('b') });
+  await db.query("insert into transactions(owner_id,type,amount,account_id,transfer_account_id) values($1,'transfer',400,$2,$3)", [OWNER_ID, scb.id, kbank.id]);
+  assert.equal(Number((await ledger.getBalance(scb.id) as any).balance), 600);
+  assert.equal(Number((await ledger.getBalance(kbank.id) as any).balance), 400);
+  await db.query("insert into transactions(owner_id,type,amount,description) values($1,'income',50,'legacy-style row with no account')", [OWNER_ID]);
+  assert.equal(Number((await ledger.getBalance(scb.id) as any).balance), 600, 'account-less rows never touch a balance');
+  await assert.rejects(() => db.query("insert into transactions(owner_id,type,amount) values($1,'bogus',1)", [OWNER_ID]), /transactions_type_check/);
 });
 
 test('recurring obligation: next due advances monthly with end-of-month clamping', async () => {
@@ -279,23 +325,47 @@ test('overdue reminders nag daily for a week then stop', async () => {
   assert.equal(await day('2026-10-20'), 0);
 });
 
-test('RLS and grants: nothing is reachable by anon/authenticated; service_role goes through RPCs', async () => {
+test('RLS and grants: new tables are owner-readable at most, clients cannot call the engine, service_role writes only via RPCs', async () => {
   const { db } = await setup();
-  const tables = (await db.query<{ relname: string; rowsecurity: boolean }>("select c.relname, c.relrowsecurity as rowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname like 'pf\\_%'")).rows;
-  assert.ok(tables.length >= 11);
-  for (const t of tables) assert.equal(t.rowsecurity, true, `${t.relname} must have RLS enabled`);
-  for (const role of ['anon', 'authenticated']) {
-    for (const t of tables) {
-      const g = await db.query<{ ok: boolean }>("select has_table_privilege($1, 'public.'||$2, 'select,insert,update,delete') as ok", [role, t.relname]);
-      assert.equal(g.rows[0].ok, false, `${role} must have no privilege on ${t.relname}`);
-    }
-    const fn = await db.query<{ ok: boolean }>("select has_function_privilege($1,'public.pf_set_balance(uuid,numeric,text,text,text,text)','execute') as ok", [role]);
-    assert.equal(fn.rows[0].ok, false);
+  const fresh = ['finance_obligation_payments', 'finance_reminder_deliveries', 'finance_idempotency', 'finance_pending_states', 'finance_channel_bindings'];
+  const rls = (await db.query<{ relname: string; rowsecurity: boolean }>("select c.relname, c.relrowsecurity as rowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname = any($1)", [fresh])).rows;
+  assert.equal(rls.length, fresh.length);
+  for (const t of rls) assert.equal(t.rowsecurity, true, `${t.relname} must have RLS enabled`);
+  for (const t of fresh) {
+    const anon = await db.query<{ ok: boolean }>("select has_table_privilege('anon','public.'||$1,'select,insert,update,delete') as ok", [t]);
+    assert.equal(anon.rows[0].ok, false, `anon must have no privilege on ${t}`);
+    const authWrite = await db.query<{ ok: boolean }>("select has_table_privilege('authenticated','public.'||$1,'insert') or has_table_privilege('authenticated','public.'||$1,'update') or has_table_privilege('authenticated','public.'||$1,'delete') as ok", [t]);
+    assert.equal(authWrite.rows[0].ok, false, `authenticated cannot write ${t}`);
+    const svcWrite = await db.query<{ ok: boolean }>("select has_table_privilege('service_role','public.'||$1,'insert') as ok", [t]);
+    assert.equal(svcWrite.rows[0].ok, false, `service_role writes ${t} only through the RPCs`);
   }
-  const svcWrite = await db.query<{ ok: boolean }>("select has_table_privilege('service_role','public.pf_transactions','insert') as ok");
-  assert.equal(svcWrite.rows[0].ok, false, 'service_role writes only through RPCs');
-  const svcExec = await db.query<{ ok: boolean }>("select has_function_privilege('service_role','public.pf_set_balance(uuid,numeric,text,text,text,text)','execute') as ok");
+  const hidden = await db.query<{ ok: boolean }>("select has_table_privilege('authenticated','public.finance_idempotency','select') or has_table_privilege('authenticated','public.finance_pending_states','select') as ok");
+  assert.equal(hidden.rows[0].ok, false, 'idempotency and conversation state are not even readable');
+  for (const role of ['anon', 'authenticated']) {
+    const fn = await db.query<{ ok: boolean }>("select has_function_privilege($1,'public.finance_set_balance(uuid,uuid,numeric,text,text,text,text)','execute') as ok", [role]);
+    assert.equal(fn.rows[0].ok, false, `${role} cannot execute the engine`);
+  }
+  const svcExec = await db.query<{ ok: boolean }>("select has_function_privilege('service_role','public.finance_set_balance(uuid,uuid,numeric,text,text,text,text)','execute') as ok");
   assert.equal(svcExec.rows[0].ok, true);
-  const internal = await db.query<{ ok: boolean }>("select has_function_privilege('service_role','public.pf_i_post_tx(text,numeric,uuid,uuid,uuid,text,text,date,text,text,text,text,text,uuid,date,uuid,boolean)','execute') as ok");
-  assert.equal(internal.rows[0].ok, false, 'internal helpers are not callable by clients');
+  const internal = await db.query<{ ok: boolean }>("select bool_or(has_function_privilege('service_role',p.oid,'execute')) as ok from pg_proc p where p.pronamespace='public'::regnamespace and (p.proname like 'finance\\_i\\_%')");
+  assert.equal(internal.rows[0].ok, false, 'internal helpers and trigger functions are not callable by clients');
+  // an owner sees only their own rows through the views; anon sees nothing
+  const views = await db.query<{ ok: boolean }>("select has_table_privilege('anon','public.finance_account_balances_v1','select') as ok");
+  assert.equal(views.rows[0].ok, false);
+});
+
+test('tenant isolation: another owner cannot see or touch this owner\'s ledger through the RPCs or the views', async () => {
+  const { db, ledger, scb, rpc } = await setup();
+  await ledger.setOwnerBalance({ accountId: scb.id, amount: 777, actor: A, ...ids('b') });
+  const other = '22222222-2222-4222-8222-222222222222';
+  await db.query('insert into auth.users(id) values($1)', [other]);
+  const intruder = new (ledger.constructor as any)(rpc, other);
+  assert.equal((await intruder.getAccounts()).accounts.length, 0);
+  assert.equal((await intruder.getBalance(scb.id)).error, 'account_not_found');
+  await assert.rejects(() => intruder.setOwnerBalance({ accountId: scb.id, amount: 1, actor: A, ...ids('x') }), /account_not_found/);
+  assert.equal((await intruder.voidTransaction({ txId: scb.id, reason: 'x', actor: A, ...ids('x') })).ok, false);
+  await db.exec(`set role authenticated; select set_config('request.jwt.claim.sub','${other}',false);`);
+  const seen = await db.query('select * from finance_account_balances_v1');
+  await db.exec('reset role');
+  assert.equal(seen.rows.length, 0);
 });
