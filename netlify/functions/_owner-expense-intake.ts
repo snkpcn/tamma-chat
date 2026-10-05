@@ -548,6 +548,58 @@ function resultReply(result: ResolveResult): string {
   ].join('\n');
 }
 
+function typedInvestmentCommand(text: string): { amount: number; paymentMethod: 'cash' | 'transfer' | 'card' | 'other'; title: string; businessUnit: BusinessUnit | null; category: string } | null {
+  if (!/^(?:ลงทุน(?:เงินสด)?|เงินสดลงทุน|บันทึกลงทุน)(?:\s|$)/iu.test(text)) return null;
+  const amountMatch = text.match(/(?:^|\s)([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?:\s|บาท|$)/u);
+  if (!amountMatch) return null;
+  const amount = Number(amountMatch[1].replace(/,/g, ''));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000) return null;
+  const classification = classifyOwnerExpensePurpose(text);
+  const paymentMethod = /เงินสด/u.test(text) ? 'cash' : /โอน|transfer/u.test(text) ? 'transfer' : /บัตร|card/u.test(text) ? 'card' : 'other';
+  const title = normalizeText(text
+    .replace(/^(?:ลงทุน(?:เงินสด)?|เงินสดลงทุน|บันทึกลงทุน)\s*/iu, '')
+    .replace(amountMatch[0], ' ')
+    .replace(/\b(?:บาท|เงินสด|โอน|transfer|บัตร|card)\b/giu, ' ')
+    .replace(/(?:ตำมา-ชาติ|ตำมาชาติ|inthanin|เฮือนสเตย์|ผจญภัย|otop|ส่วนกลาง|ใช้ร่วม)/giu, ' '));
+  return {
+    amount,
+    paymentMethod,
+    title: title || 'รายการลงทุน',
+    businessUnit: classification.businessUnit,
+    category: classification.expenseCategory,
+  };
+}
+
+async function recordTypedInvestment(input: { text: string; groupHash: string; userId?: string | null; messageId: string; timestamp?: number }): Promise<string | null> {
+  const parsed = typedInvestmentCommand(input.text);
+  if (!parsed) return null;
+  if (!parsed.businessUnit) {
+    return 'บันทึกรายการลงทุนได้ครับ แต่ขอระบุกิจการเพิ่ม เช่น “ลงทุนเงินสด 5,000 ซื้อชั้นวาง ตำมา-ชาติ” ครับ';
+  }
+  const result = await rpc<{ ok?: boolean; duplicate?: boolean; id?: string }>('financial_record_investment_v1', {
+    p_occurred_on: bangkokDate(input.timestamp),
+    p_business_unit_code: parsed.businessUnit,
+    p_title: parsed.title,
+    p_category: parsed.category,
+    p_amount: parsed.amount,
+    p_payment_method: parsed.paymentMethod,
+    p_vendor_name: null,
+    p_notes: input.text,
+    p_source_channel: 'line',
+    p_owner_group_hash: input.groupHash,
+    p_source_message_id: input.messageId,
+    p_actor_hash: piiHash(input.userId) ?? '',
+  });
+  if (result.duplicate) return '📈 Investment OS — รายการนี้รับไว้แล้วครับ';
+  return [
+    '📈 Investment OS — บันทึกรายการเงินสด/พิมพ์แล้วครับ',
+    'ยอด: ' + money(parsed.amount),
+    'กิจการ: ' + businessLabel(parsed.businessUnit),
+    'หมวด: ' + categoryLabel(parsed.category as ExpenseCategory),
+    'รายการจะขึ้นใน Investment OS แยกจาก Restaurant OS ครับ',
+  ].join('\n');
+}
+
 export async function handleOwnerExpenseText(input: {
   targetId: string;
   userId?: string | null;
@@ -564,6 +616,15 @@ export async function handleOwnerExpenseText(input: {
   if (!groupHash) throw new Error('owner_expense_group_hash_unavailable');
   if (summaryCommand) return monthlySummary(groupHash, input.timestamp);
   if (!input.messageId) return null;
+
+  const typedReply = await recordTypedInvestment({
+    text,
+    groupHash,
+    userId: input.userId,
+    messageId: input.messageId,
+    timestamp: input.timestamp,
+  });
+  if (typedReply) return typedReply;
 
   const rows = await pendingIntakes(groupHash);
   if (!rows.length) return null;
