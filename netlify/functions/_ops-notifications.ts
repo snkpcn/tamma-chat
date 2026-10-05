@@ -33,6 +33,30 @@ type DeliveryRow = {
   status: string;
 };
 
+export type OwnerCashBagRow = {
+  branch_code: string;
+  branch_name: string;
+  bag_balance: number | string | null;
+  total_swept_to_bag: number | string | null;
+  total_owner_pickup: number | string | null;
+  last_movement_at: string | null;
+};
+
+export type OwnerCashBranchRow = {
+  id: string;
+  code: string;
+  name: string;
+};
+
+export type OwnerCashCloseRow = {
+  branch_id: string;
+  local_date: string;
+  status: string;
+  payment_cash: number | string | null;
+  cash_opening_float: number | string | null;
+  cash_counted_closing: number | string | null;
+};
+
 type AiCostRow = {
   conversation_id: string;
   event_id?: string | null;
@@ -173,6 +197,110 @@ function dayBounds(localDate: string): { start: string; end: string } {
     start: new Date(`${localDate}T00:00:00${BANGKOK_OFFSET}`).toISOString(),
     end: new Date(`${nextIsoDate(localDate)}T00:00:00${BANGKOK_OFFSET}`).toISOString(),
   };
+}
+
+function shiftIsoDate(localDate: string, days: number): string {
+  const [year, month, day] = localDate.split('-').map(Number);
+  const cursor = new Date(Date.UTC(year, month - 1, day + days));
+  return cursor.toISOString().slice(0, 10);
+}
+
+function thaiCalendarDate(localDate: string, includeYear = true): string {
+  return new Intl.DateTimeFormat('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    day: 'numeric',
+    month: 'short',
+    ...(includeYear ? { year: 'numeric' as const } : {}),
+  }).format(new Date(`${localDate}T12:00:00${BANGKOK_OFFSET}`));
+}
+
+function ownerCashBaht(value: unknown): string {
+  return numberValue(value).toLocaleString('th-TH', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }) + ' บาท';
+}
+
+export function ownerWeeklyCashWindow(localDate: string): {
+  startDate: string;
+  endDate: string;
+  expectedDates: string[];
+} {
+  const startDate = shiftIsoDate(localDate, -6);
+  const expectedDates = Array.from({ length: 6 }, (_, index) => shiftIsoDate(startDate, index));
+  return { startDate, endDate: localDate, expectedDates };
+}
+
+export function buildOwnerWeeklyCashSummary(input: {
+  localDate: string;
+  bags: OwnerCashBagRow[];
+  branches: OwnerCashBranchRow[];
+  closes: OwnerCashCloseRow[];
+}): string {
+  const window = ownerWeeklyCashWindow(input.localDate);
+  const bags = [...input.bags].sort((a, b) => a.branch_name.localeCompare(b.branch_name, 'th'));
+  const bagByCode = new Map(bags.map(row => [row.branch_code, row]));
+  const displayBranches = [...input.branches]
+    .sort((a, b) => a.name.localeCompare(b.name, 'th'))
+    .map(branch => ({ code: branch.code, name: branch.name }));
+  for (const bag of bags) {
+    if (!displayBranches.some(branch => branch.code === bag.branch_code)) {
+      displayBranches.push({ code: bag.branch_code, name: bag.branch_name });
+    }
+  }
+
+  const totalReady = bags.reduce((sum, row) => sum + numberValue(row.bag_balance), 0);
+  const closeByBranchDate = new Map(
+    input.closes.map(row => [`${row.branch_id}:${row.local_date}`, row]),
+  );
+  const expectedCount = input.branches.length * window.expectedDates.length;
+  let recordedCount = 0;
+  let confirmedCount = 0;
+  const incomplete: string[] = [];
+  for (const branch of input.branches) {
+    for (const date of window.expectedDates) {
+      const close = closeByBranchDate.get(`${branch.id}:${date}`);
+      if (!close) {
+        incomplete.push(`${branch.name} · ${thaiCalendarDate(date, false)}`);
+        continue;
+      }
+      recordedCount += 1;
+      if (close.status === 'confirmed') confirmedCount += 1;
+      if (close.cash_opening_float === null || close.cash_counted_closing === null) {
+        incomplete.push(`${branch.name} · ${thaiCalendarDate(date, false)}`);
+      }
+    }
+  }
+
+  const branchLines = displayBranches.length
+    ? displayBranches.map(branch => {
+      const balance = bagByCode.get(branch.code)?.bag_balance ?? 0;
+      return `• ${branch.name} · ${ownerCashBaht(balance)}`;
+    })
+    : ['• ยังไม่มีสาขาที่เปิดใช้งานในระบบ'];
+  const periodLabel = `${thaiCalendarDate(window.startDate, false)}–${thaiCalendarDate(shiftIsoDate(window.endDate, -1))}`;
+  const incompletePreview = incomplete.slice(0, 8).join(', ');
+  const remainingIncomplete = incomplete.length > 8 ? ` และอีก ${incomplete.length - 8} วัน` : '';
+
+  return [
+    '💰 สรุปเงินสดหน้าร้านรอเจ้าของรับ',
+    `วันอาทิตย์ ${thaiCalendarDate(input.localDate)} · แจ้งเตือน 13:00 น.`,
+    '',
+    `ยอดพร้อมรับตามถุงเงินสด: ${ownerCashBaht(totalReady)}`,
+    ...branchLines,
+    '',
+    `ตรวจความครบถ้วน จ.–ส. (${periodLabel})`,
+    expectedCount > 0
+      ? `• มีข้อมูลปิดยอด ${recordedCount}/${expectedCount} วัน · ยืนยันแล้ว ${confirmedCount} วัน`
+      : '• ยังไม่มีสาขาที่ต้องตรวจปิดยอด',
+    incomplete.length
+      ? `⚠️ ยังไม่มีข้อมูลเงินสดครบ ${incomplete.length} วัน: ${incompletePreview}${remainingIncomplete}`
+      : '✅ ข้อมูลเงินสดครบทุกวันที่ตรวจ',
+    '',
+    'ยอดพร้อมรับนับเฉพาะเงินสดที่ย้ายเข้าถุงแล้ว วันที่ข้อมูลไม่ครบจะยังไม่ถูกบวกเพื่อป้องกันยอดผิด',
+    'กรุณาตรวจนับเงินจริงให้ตรงกับยอดก่อนเจ้าของรับครับ',
+    `หลังบ้าน: ${BACKOFFICE_URL}`,
+  ].join('\n');
 }
 
 export function parseTeamCode(raw: string): OpsTeamCode | null {
@@ -930,6 +1058,43 @@ export async function sendDailyOpsSummaries(localDate = isoLocalDate()): Promise
     results.push({ team: teamCode, status });
   }
   return results;
+}
+
+export async function sendOwnerWeeklyCashSummary(
+  localDate = isoLocalDate(),
+): Promise<'sent' | 'duplicate' | 'not_bound'> {
+  const window = ownerWeeklyCashWindow(localDate);
+  const [bags, branches, closes] = await Promise.all([
+    getJsonRows<OwnerCashBagRow>(
+      'financial_cash_bag_owner_v1?environment=eq.live'
+      + '&select=branch_code,branch_name,bag_balance,total_swept_to_bag,total_owner_pickup,last_movement_at'
+      + '&order=branch_name.asc',
+    ),
+    getJsonRows<OwnerCashBranchRow>(
+      'operations_business_branches?active=eq.true&select=id,code,name&order=name.asc',
+    ),
+    getJsonRows<OwnerCashCloseRow>(
+      'financial_daily_closes?environment=eq.live'
+      + `&local_date=gte.${window.startDate}&local_date=lt.${window.endDate}`
+      + '&select=branch_id,local_date,status,payment_cash,cash_opening_float,cash_counted_closing'
+      + '&order=local_date.asc',
+    ),
+  ]);
+  const text = buildOwnerWeeklyCashSummary({ localDate, bags, branches, closes });
+  return sendTeamMessage({
+    teamCode: 'owner_general',
+    entityType: 'daily_schedule',
+    deliveryType: 'daily_summary',
+    idempotencyKey: `owner_weekly_cash:${localDate}`,
+    text,
+    payload: {
+      summary_kind: 'owner_weekly_cash',
+      local_date: localDate,
+      period_start: window.startDate,
+      period_end_exclusive: window.endDate,
+      ready_amount: bags.reduce((sum, row) => sum + numberValue(row.bag_balance), 0),
+    },
+  });
 }
 
 
