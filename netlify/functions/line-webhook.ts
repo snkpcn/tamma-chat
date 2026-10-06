@@ -11,7 +11,7 @@ import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
-import { handleOwnerExpenseImage, handleOwnerExpenseText } from './_owner-expense-intake';
+import { handleOwnerExpenseImage, handleOwnerExpenseText, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
 import { handleOwnerProjectText } from './_owner-project-os';
 import { handleTransferPurposeText } from './_inthanin-transfer-followup';
@@ -379,6 +379,21 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     return;
   }
 
+  const isExpenseClassificationReply = isOwnerExpenseClassificationReply(event.message.text);
+  const ownerExpenseClassificationReply = isExpenseClassificationReply
+    ? await handleOwnerExpenseText({
+        targetId,
+        userId: event.source?.userId ?? null,
+        text: event.message.text,
+        messageId: event.message.id ?? null,
+        timestamp: event.timestamp,
+      })
+    : null;
+  if (ownerExpenseClassificationReply) {
+    await replyToLine(event.replyToken, ownerExpenseClassificationReply, accessToken);
+    return;
+  }
+
   const ownerProjectReply = await handleOwnerProjectText({
     targetId,
     userId: event.source?.userId ?? null,
@@ -401,7 +416,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     return;
   }
 
-  const ownerExpenseTextReply = await handleOwnerExpenseText({
+  const ownerExpenseTextReply = isExpenseClassificationReply ? null : await handleOwnerExpenseText({
     targetId,
     userId: event.source?.userId ?? null,
     text: event.message.text,
