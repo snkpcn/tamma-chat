@@ -266,7 +266,7 @@ function isReadOnlyQuestion(text: string): boolean {
   return /(?:ยอดขาย|ยอดจ่าย|จ่ายแล้ว|ลงทุนไป|จ่ายไป|ใช้จริง|ใช้ไป|คงเหลือ|เหลือเท่าไหร่|เท่าไหร่แล้ว|สรุป.*ลงทุน|ลงทุน.*อะไรบ้าง)/u.test(text);
 }
 
-const OWNER_PROJECT_QUERY = /(?:สรุปมา|สรุป(?:งาน|โครงการ|โปรเจค)|มีอะไรค้าง|มีงานอะไรค้าง|ตอนนี้ถึงไหนแล้ว|มีอะไรต้องทำต่อ|งานกลุ่มนี้เป็นไง|เหลืออะไร|มีอะไรต้องตาม|งานไหนรอกู|งานไหนรอผม|อันไหนเลยกำหนด|ยอดโครงการ.*(?:เท่าไหร่|เท่าไร)|โครงการ.*ยอดจ่าย|จ่ายไปเท่าไหร่แล้ว|มีจ่ายอะไรไปแล้ว)/u;
+const OWNER_PROJECT_QUERY = /(?:สรุปมา|สรุป(?:งาน|โครงการ|โปรเจค)|มี(?:งาน(?:อะไร)?|อะไร)?ค้าง(?:อยู่)?(?:ไหม|มั้ย|หรือเปล่า|รึป่าว|รึเปล่า)?|ตอนนี้ถึงไหนแล้ว|(?:ตอนนี้)?มีอะไรต้องทำ(?:ต่อ)?|งาน(?:ของ)?กลุ่มนี้(?:เป็นไง|เป็นยังไง|ถึงไหนแล้ว)|เหลือ(?:งาน)?อะไร(?:บ้าง)?|มีอะไร(?:ที่)?ต้องตาม(?:บ้าง)?|งานไหน(?:ที่)?รอ(?:กู|ผม|พี่|เจ้าของ)|อันไหน(?:ที่)?(?:เลย|เกิน)กำหนด|ยอดโครงการ.*(?:เท่าไหร่|เท่าไร)|โครงการ.*ยอดจ่าย|จ่ายไปเท่าไหร่แล้ว|มีจ่ายอะไรไปแล้ว)/u;
 type SummaryProject = { id: string; name: string; project_code: string };
 type SummaryTask = { id: string; project_id: string; title: string; task_kind: string; status: string; due_on: string | null; responsible_name: string | null };
 type SummaryInstallment = { id: string; project_id: string; title: string; amount: number | string; due_on: string | null; status: string };
@@ -318,7 +318,7 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const total = expenses.reduce((sum,row) => sum + row.amount,0);
   const project = new Map(projects.map(row => [row.id,row.name]));
   const query = normalizeText(input.text);
-  const onlyPending = /(?:ค้าง|เลยกำหนด|ต้องตาม)/u.test(query);
+  const onlyPending = /(?:ค้าง|เลยกำหนด|เกินกำหนด|ต้องตาม)/u.test(query);
   const onlyOwner = /(?:งานไหนรอกู|งานไหนรอผม|รอเจ้าของ|รอพี่ยืนยัน|รออนุมัติ)/u.test(query);
   const onlySpend = /(?:ยอดโครงการ|ยอดจ่าย|จ่ายไป|มีจ่ายอะไร)/u.test(query);
   const lines = ['สรุปจากหลังบ้านตอนนี้ครับ'];
