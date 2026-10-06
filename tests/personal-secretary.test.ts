@@ -80,6 +80,22 @@ test('the weekly owner brief parses tasks, a real appointment, a future bill, li
   assert.equal(parsed.items[7].owner_priority, 100);
 });
 
+test('a one-line date-prefixed task is acknowledged and stored for the requested day', async () => {
+  const message = 'พรุ่งนี้ - ทดสอบระบบเลขา SNK OS';
+  const parsed = parseSecretaryBatch(message, TODAY);
+  assert.equal(parsed.items.length, 1);
+  assert.equal(parsed.items[0].title, 'ทดสอบระบบเลขา SNK OS');
+  assert.equal(parsed.items[0].due_date, dayAt(1));
+
+  const { db, ledger, owner } = await freshDb();
+  const outcome = await handleSecretaryText(ctx(ledger, 'one-line-date-prefixed-task'), message);
+  assert.match(outcome?.reply ?? '', /จัดเข้าระบบแล้ว 1 รายการ/);
+  const rows = await db.query<{ title: string; due_date: string }>(
+    `select title,due_date::text due_date from public.tasks where owner_id=$1`, [owner],
+  );
+  assert.deepEqual(rows.rows, [{ title: 'ทดสอบระบบเลขา SNK OS', due_date: dayAt(1) }]);
+});
+
 test('14-day secretary simulation stays in canonical SNK OS rows and keeps daily summaries concise', async () => {
   const { db, ledger, owner } = await freshDb();
   const first = ctx(ledger, 'weekly-owner-batch-1');

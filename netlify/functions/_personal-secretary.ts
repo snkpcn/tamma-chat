@@ -206,8 +206,14 @@ function lineToItem(raw: string, index: number, today: string, inheritedDue: str
 
 /** Parses a natural 1–30 item dump.  Repeated/follow-up wording is left with
  * the same canonical key so Postgres attaches policy to the existing task. */
+function expandDatePrefixedTask(raw: string): string {
+  const match = raw.trim().match(/^(วันนี้|พรุ่งนี้|มะรืน)\s*[-–—:：]\s*(\S[\s\S]*)$/);
+  if (!match) return raw;
+  return `${match[1]}\n- ${match[2].trim()}`;
+}
+
 export function parseSecretaryBatch(raw: string, today: string): SecretaryParse {
-  const physical = raw.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  const physical = expandDatePrefixedTask(raw).split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   const bulletCount = physical.filter(x => /^(?:[-•*]|\d+[.)])\s*/.test(x)).length;
   let inheritedDue: string | null = null;
   const body: string[] = [];
@@ -223,7 +229,7 @@ export function parseSecretaryBatch(raw: string, today: string): SecretaryParse 
   }
 
   const multi = bulletCount >= 2 || body.length >= 2;
-  const clearSingle = body.length === 1 && /(?:เตือน|ต้องทำ|ทำ.*(?:วันนี้|พรุ่งนี้|ภายใน)|นัด|กำหนดส่ง|เป้าหมาย|ทุกวันจน|สำคัญสุด)/.test(body[0]);
+  const clearSingle = body.length === 1 && (Boolean(inheritedDue) || /(?:เตือน|ต้องทำ|ทำ.*(?:วันนี้|พรุ่งนี้|ภายใน)|นัด|กำหนดส่ง|เป้าหมาย|ทุกวันจน|สำคัญสุด)/.test(body[0]));
   if (!multi && !clearSingle) return { items: [] };
   if (body.length > 30) return { items: [], error: 'too_many_items' };
 
@@ -387,7 +393,8 @@ function uniqueResults(items: Array<{ kind: string; id: string; title: string; c
 export async function handleSecretaryText(c: SecretaryCtx, raw: string): Promise<SecretaryOutcome> {
   const text = normalizeText(raw);
   const lines = raw.split(/\r?\n/).filter(x => x.trim());
-  const hasCue = lines.length > 1 || /(?:งาน|นัด|ประชุม|เดดไลน์|กำหนดส่ง|เป้าหมาย|เสร็จ|จบแล้ว|ผ่านแล้ว|สำคัญ|ไม่รีบ|พรุ่งนี้ค่อย|พักไว้|รอ|ติด|ทุกวันจน|เตือน.*ทุกวัน|เหลือ\s+\S+|\d{1,3}\s*%|(?:ข้อมูล|ผล|คำตอบ|อนุมัติ).*(?:มาแล้ว|ได้แล้ว)|(?:คนอื่น|ทีม|ช่าง).*(?:ส่งกลับ|ตอบกลับ|เสร็จแล้ว))/i.test(text);
+  const dateTaskSyntax = /^(?:วันนี้|พรุ่งนี้|มะรืน)\s*[-–—:：]\s*\S/.test(raw.trim());
+  const hasCue = lines.length > 1 || dateTaskSyntax || /(?:งาน|นัด|ประชุม|เดดไลน์|กำหนดส่ง|เป้าหมาย|เสร็จ|จบแล้ว|ผ่านแล้ว|สำคัญ|ไม่รีบ|พรุ่งนี้ค่อย|พักไว้|รอ|ติด|ทุกวันจน|เตือน.*ทุกวัน|เหลือ\s+\S+|\d{1,3}\s*%|(?:ข้อมูล|ผล|คำตอบ|อนุมัติ).*(?:มาแล้ว|ได้แล้ว)|(?:คนอื่น|ทีม|ช่าง).*(?:ส่งกลับ|ตอบกลับ|เสร็จแล้ว))/i.test(text);
   const looksLikeBalance = /(?:ยอด)?จริง(?:ๆ)?\s*(?:เหลือ|คือ|อยู่ที่|เป็น)\s*[\d๐-๙,]+/.test(text)
     || (Boolean(knownAccountFromText(text)) && /(?:ยอด|เหลือ|คงเหลือ)\s*[\d๐-๙,]+/.test(text))
     || /^(?:(?:ตอนนี้|ยอด(?:คงเหลือ)?|คงเหลือ)\s*)?(?:เหลือ\s*)?[\d๐-๙][\d๐-๙,]*(?:\s*(?:บาท|฿))?$/.test(text);
