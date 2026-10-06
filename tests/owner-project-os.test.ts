@@ -118,7 +118,52 @@ test('recognizes stable task-number, task-code, and title completion commands', 
   assert.deepEqual(parseOwnerProjectTaskStateCommand('ติดตั้งโครง ยังไม่จบ'), {
     state: 'todo', referenceKind: 'title', reference: 'ติดตั้งโครง',
   });
+  assert.deepEqual(parseOwnerProjectTaskStateCommand('งานเฉลียงไม้ให้ลูกค้านั่ง จบแล้ว'), {
+    state: 'done', referenceKind: 'title', reference: 'เฉลียงไม้ให้ลูกค้านั่ง', explicitTask: true,
+  });
+  assert.deepEqual(parseOwnerProjectTaskStateCommand('โครงการเฉลียงไม้ จบแล้ว'), {
+    state: 'done', referenceKind: 'title', reference: 'โครงการเฉลียงไม้',
+  });
   assert.equal(parseOwnerProjectTaskStateCommand('งานไหนจบแล้ว'), null);
+});
+
+test('a project-name completion closes the project, while an unfinished task blocks it without auto-completion',async()=>{
+  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://unit.test';
+  process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
+  const paths:string[]=[];
+  let attempt=0;
+  globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
+    const url=new URL(String(input)),path=url.pathname,method=init?.method??'GET';
+    paths.push(`${method} ${path}`);
+    const body=init?.body?JSON.parse(String(init.body)):{};
+    let rows:any=[];
+    if(path.endsWith('/ops_notification_channels'))rows=[{team_code:'owner_general'}];
+    else if(path.endsWith('/owner_project_conversation_messages')&&method==='POST')rows=[{message_id:body.message_id}];
+    else if(path.endsWith('/owner_project_conversation_drafts'))rows=[];
+    else if(path.endsWith('/owner_projects'))rows=[{id:'p-wood',name:'เฉลียงไม้',project_code:'PJ-WOOD'}];
+    else if(path.endsWith('/rpc/owner_project_set_project_state_from_line_v1')){
+      assert.equal(body.p_project_id,'p-wood');
+      assert.equal(body.p_state,'completed');
+      rows=++attempt===1
+        ?[{ok:false,blocked:true,project_name:'เฉลียงไม้',pending_count:1,pending_tasks:[{code:'WK-WOOD',title:'เฉลียงไม้ให้ลูกค้านั่ง'}]}]
+        :[{ok:true,duplicate:false,project_name:'เฉลียงไม้',project_status:'completed'}];
+    }
+    return new Response(JSON.stringify(rows),{status:200});
+  }) as typeof fetch;
+  try{
+    const blocked=await handleOwnerProjectText({targetId:'owner-wood',userId:'owner-1',text:'เฉลียงไม้ จบแล้ว',messageId:'wood-pending'});
+    assert.match(blocked??'',/ยังมีงานค้าง 1 งาน.*ยังไม่ปิดโครงการ/u);
+    assert.match(blocked??'',/WK-WOOD/u);
+    const completed=await handleOwnerProjectText({targetId:'owner-wood',userId:'owner-1',text:'โครงการเฉลียงไม้ จบแล้ว',messageId:'wood-complete'});
+    assert.match(completed??'',/ปิดโครงการแล้ว/u);
+    assert.equal(attempt,2);
+    assert.ok(!paths.some(path=>path.includes('owner_project_set_task_state_from_line_v1')));
+  }finally{
+    globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;
+  }
 });
 
 test('LINE flow previews and confirms four tasks once, then completes only the selected task', async () => {

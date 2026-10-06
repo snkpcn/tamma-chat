@@ -48,16 +48,15 @@ export async function handleOwnerApiCostQuestion(input:{targetId:string;text:str
   for(const row of todayRows)channels.set(row.channel||'unknown',(channels.get(row.channel||'unknown')??0)+n(row.cost_thb));
   const highest=[...channels.entries()].sort((a,b)=>b[1]-a[1])[0];
   const labels:Record<string,string>={line:'LINE',web:'เว็บไซต์',facebook:'Messenger',messenger:'Messenger',unknown:'ไม่ทราบช่องทาง'};
-  const personTotals=new Map<string,number>();
-  for(const row of rows)personTotals.set(row.conversation_id,(personTotals.get(row.conversation_id)??0)+n(row.cost_thb));
-  const personIds=[...personTotals.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id])=>id);
+  const personIds=selectAiCostPersonIds(rows,todayRows,5);
+  const usageIds=new Set(rows.map(row=>row.conversation_id));
   const personLabels=await resolveAiCostPersonLabels(personIds);
   const personLines=buildAiCostPersonLines(rows,todayRows,personIds,personLabels);
   return [
     '💰 ค่าใช้จ่าย AI/API จากข้อมูลหลังบ้านครับ',
     `วันนี้ใช้ประมาณ ${baht(total(todayRows))} บาท (${todayRows.length} ครั้ง)`,
     `เดือนนี้สะสมประมาณ ${baht(total(rows))} บาท`,
-    ...(personLines.length?['รายคน (เดือนนี้ · วันนี้)',...personLines,...(personTotals.size>personIds.length?[`อีก ${personTotals.size-personIds.length} คน ดูรายละเอียดในสรุปรายวัน`]:[])]:[]),
+    ...(personLines.length?['แยกตามผู้ใช้ (เดือนนี้ · วันนี้)',...personLines,...(usageIds.size>personIds.length?[`อีก ${usageIds.size-personIds.length} รหัสผู้ใช้ ดูรายละเอียดในสรุปรายวัน`]:[])]:[]),
     highest?`ช่องทางที่ใช้สูงสุดวันนี้: ${labels[highest[0]]??highest[0]} · ${baht(highest[1])} บาท`:'วันนี้ยังไม่มีการใช้ API ที่บันทึกไว้',
     lastSuccess[0]?.occurred_at?`เรียกสำเร็จล่าสุด: ${thaiDateTime(lastSuccess[0].occurred_at)}`:'ยังไม่มีการเรียกสำเร็จที่บันทึกไว้',
     'ยอดเป็นค่าประเมินจาก usage ledger; ระบบอ่านยอดเครดิตคงเหลือจริงผ่าน API ที่รองรับไม่ได้ครับ',
@@ -195,6 +194,22 @@ function shortPersonCode(id:string):string{
   return code||'UNKNOWN';
 }
 
+// Show every source that spent money today before filling the small LINE reply
+// with older monthly leaders. A monthly-only top five can show five zeroes for
+// today even while the daily total is nonzero.
+export function selectAiCostPersonIds(
+  monthRows:readonly Pick<CostRow,'conversation_id'|'cost_thb'>[],
+  dayRows:readonly Pick<CostRow,'conversation_id'|'cost_thb'>[],
+  limit=5,
+):string[]{
+  const totals=(rows:readonly Pick<CostRow,'conversation_id'|'cost_thb'>[])=>{
+    const result=new Map<string,number>();
+    for(const row of rows)result.set(row.conversation_id,(result.get(row.conversation_id)??0)+n(row.cost_thb));
+    return [...result.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).map(([id])=>id);
+  };
+  return [...new Set([...totals(dayRows),...totals(monthRows)])].slice(0,limit);
+}
+
 export function buildAiCostPersonLines(
   monthRows:readonly Pick<CostRow,'conversation_id'|'cost_thb'>[],
   dayRows:readonly Pick<CostRow,'conversation_id'|'cost_thb'>[],
@@ -212,11 +227,11 @@ export function buildAiCostPersonLines(
       dayCost:dayTotals.get(conversationId)??0,
       label:labels.get(conversationId),
     }))
-    .sort((a,b)=>b.monthCost-a.monthCost||String(a.label??a.conversationId).localeCompare(String(b.label??b.conversationId),'th'))
+    .sort((a,b)=>b.dayCost-a.dayCost||b.monthCost-a.monthCost||String(a.label??a.conversationId).localeCompare(String(b.label??b.conversationId),'th'))
     .map(item=>{
       const person=item.label
         ?`${item.label} · ${shortPersonCode(item.conversationId)}`
-        :`บุคคล ${shortPersonCode(item.conversationId)}`;
+        :`รหัสผู้ใช้ ${shortPersonCode(item.conversationId)}`;
       return `• ${person} — เดือนนี้ ${baht(item.monthCost)} บาท · วันนี้ ${baht(item.dayCost)} บาท`;
     });
 }
@@ -451,14 +466,14 @@ export async function sendDailyAiCostSummary(now=new Date()){
   );
   const latestSuccess=lastSuccessRows[0]?.occurred_at;
   const text=[
-    '💰 สรุปค่าใช้จ่าย OpenAI แยกตามบุคคล',
+    '💰 สรุปค่าใช้จ่าย OpenAI แยกตามผู้ใช้',
     `วันนี้: ${date}`,
     '',
-    `วันนี้ใช้ประมาณ ${baht(s.cost)} บาท · ${s.calls} ครั้ง · ${totalConversationIds.size} คน`,
+    `วันนี้ใช้ประมาณ ${baht(s.cost)} บาท · ${s.calls} ครั้ง · ${totalConversationIds.size} รหัสผู้ใช้`,
     `เดือนนี้ใช้ประมาณ ${baht(monthTotal)} บาท`,
     failedCalls?`คำขอที่ล้มเหลววันนี้: ${failedCalls} ครั้ง (ไม่นับรวมเป็นยอดใช้)`:'',
     '',
-    'รายคน (เดือนนี้ · วันนี้)',
+    'แยกตามผู้ใช้ (เดือนนี้ · วันนี้)',
     ...(personLines.length?personLines:['• ยังไม่มีการใช้ OpenAI ในเดือนนี้']),
     '',
     latestSuccess?`OpenAI เรียกสำเร็จล่าสุด: ${thaiDateTime(latestSuccess)}`:'ยังไม่มีรายการเรียก OpenAI ที่สำเร็จ',
@@ -466,7 +481,7 @@ export async function sendDailyAiCostSummary(now=new Date()){
     'ตรวจยอดจริงที่ https://platform.openai.com/settings/organization/billing/overview',
     '',
     'หมายเหตุ: ยอดเงินบาทเป็นค่าประเมินจาก token ในระบบ อาจต่างจากบิล OpenAI เล็กน้อย',
-    `เฉลี่ยต่อคนวันนี้: ${baht(avgAll)} บาท · เฉลี่ยเฉพาะคนที่ใช้ OpenAI: ${baht(avgAi)} บาท`,
+    `เฉลี่ยต่อรหัสผู้ใช้วันนี้: ${baht(avgAll)} บาท · เฉลี่ยเฉพาะรหัสที่ใช้ OpenAI: ${baht(avgAi)} บาท`,
   ].filter(Boolean).join('\n');
   const status=await sendAiCostLineNotification({
     idempotencyKey:`ai_cost_daily:${date}`,

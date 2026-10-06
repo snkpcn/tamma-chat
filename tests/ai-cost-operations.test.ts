@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { persistAiCallCost, persistAiResponseTurn } from '../netlify/functions/_ai-cost-store';
-import { buildAiCostPersonLines, handleOwnerApiCostQuestion, sendDailyAiCostSummary } from '../netlify/functions/_ai-cost-notifier';
+import { buildAiCostPersonLines, handleOwnerApiCostQuestion, selectAiCostPersonIds, sendDailyAiCostSummary } from '../netlify/functions/_ai-cost-notifier';
 import { handler as idleHandler } from '../netlify/functions/ai-cost-notify-idle';
 import { handler as dailyHandler } from '../netlify/functions/ai-cost-notify-daily';
 import { handleLineOpsGroupMessage, hasActionableScheduleItems, sendAiCostLineNotification, sendDailyOpsSummaries } from '../netlify/functions/_ops-notifications';
@@ -81,7 +81,7 @@ test('daily AI cost breakdown reports stable per-person THB totals without expos
     new Map([[personA,'คุณสมชาย']]),
   );
   assert.deepEqual(lines,[
-    '• บุคคล D27492 — เดือนนี้ 0.50 บาท · วันนี้ 0.50 บาท',
+    '• รหัสผู้ใช้ D27492 — เดือนนี้ 0.50 บาท · วันนี้ 0.50 บาท',
     '• คุณสมชาย · 4B7C01 — เดือนนี้ 0.35 บาท · วันนี้ 0.15 บาท',
   ]);
   assert.doesNotMatch(lines.join('\n'),/f83b8a2d|167a3909/i);
@@ -133,8 +133,8 @@ test('owner asks API cost at any time: replies from live usage ledger and never 
     const answer=await handleOwnerApiCostQuestion({targetId:'owner-api-query-group',text:'ค่า API วันนี้เท่าไหร่',now:new Date('2026-10-06T05:00:00.000Z')});
     assert.match(answer??'',/วันนี้ใช้ประมาณ 0\.25 บาท/u);
     assert.match(answer??'',/เดือนนี้สะสมประมาณ 1\.00 บาท/u);
-    assert.match(answer??'',/บุคคล C1 — เดือนนี้ 0\.25 บาท · วันนี้ 0\.25 บาท/u);
-    assert.match(answer??'',/บุคคล C2 — เดือนนี้ 0\.75 บาท · วันนี้ 0\.00 บาท/u);
+    assert.match(answer??'',/รหัสผู้ใช้ C1 — เดือนนี้ 0\.25 บาท · วันนี้ 0\.25 บาท/u);
+    assert.match(answer??'',/รหัสผู้ใช้ C2 — เดือนนี้ 0\.75 บาท · วันนี้ 0\.00 บาท/u);
     assert.match(answer??'',/ระบบอ่านยอดเครดิตคงเหลือจริงผ่าน API ที่รองรับไม่ได้/u);
     assert.equal(harness.postsTo('line_push').length,0);
     const shortAnswer=await handleOwnerApiCostQuestion({targetId:'owner-api-query-group',text:'วันนี้ใช้กี่บาท',now:new Date('2026-10-06T05:00:00.000Z')});
@@ -151,10 +151,36 @@ test('short สรุปมา in the bound AI cost group reads current cost led
     const answer=await handleOwnerApiCostQuestion({targetId:'ai-cost-summary-group',text:'สรุปมา',now:new Date('2026-10-06T05:00:00.000Z')});
     assert.match(answer??'',/วันนี้ใช้ประมาณ 0\.25 บาท/u);
     assert.match(answer??'',/เดือนนี้สะสมประมาณ 0\.25 บาท/u);
-    assert.match(answer??'',/รายคน \(เดือนนี้ · วันนี้\)/u);
-    assert.match(answer??'',/บุคคล C1 — เดือนนี้ 0\.25 บาท · วันนี้ 0\.25 บาท/u);
+    assert.match(answer??'',/แยกตามผู้ใช้ \(เดือนนี้ · วันนี้\)/u);
+    assert.match(answer??'',/รหัสผู้ใช้ C1 — เดือนนี้ 0\.25 บาท · วันนี้ 0\.25 บาท/u);
     assert.equal(harness.postsTo('line_push').length,0);
   });
+});
+
+test('AI cost short reply includes the real spender today even below the monthly top five',async()=>{
+  await withHarness(async harness=>{
+    harness.programOpsChannel('ai_cost','ai-cost-ranking-group');
+    harness.programAiCostRows([
+      ...[10,9,8,7,6].map((amount,index)=>({
+        conversation_id:`old-${index+1}`,event_id:`old-event-${index+1}`,channel:'line',model:'gpt',
+        call_purpose:'answer',input_tokens:10,cached_input_tokens:0,output_tokens:2,
+        cost_thb:amount,status:'completed',occurred_at:'2026-10-05T03:00:00.000Z',
+      })),
+      {conversation_id:'today-spender',event_id:'today-event',channel:'web',model:'gpt',
+        call_purpose:'answer',input_tokens:10,cached_input_tokens:0,output_tokens:2,
+        cost_thb:1.9093,status:'completed',occurred_at:'2026-10-06T11:40:00.000Z'},
+    ]);
+    const answer=await handleOwnerApiCostQuestion({targetId:'ai-cost-ranking-group',text:'สรุปมา',now:new Date('2026-10-06T11:50:00Z')});
+    assert.match(answer??'',/วันนี้ใช้ประมาณ 1\.9093 บาท \(1 ครั้ง\)/u);
+    assert.match(answer??'',/รหัสผู้ใช้ PENDER — เดือนนี้ 1\.9093 บาท · วันนี้ 1\.9093 บาท/u);
+    assert.match(answer??'',/อีก 1 รหัสผู้ใช้/u);
+    assert.equal((answer?.match(/• /gu)??[]).length,5);
+    assert.equal(harness.postsTo('line_push').length,0);
+  });
+  assert.deepEqual(selectAiCostPersonIds(
+    [1,2,3,4,5,6].map(value=>({conversation_id:`id-${value}`,cost_thb:10-value})),
+    [{conversation_id:'id-6',cost_thb:1}],5,
+  )[0],'id-6');
 });
 
 test('daily API digest is idempotent when the scheduler runs twice for one date',async()=>{
