@@ -1,4 +1,4 @@
-import { sendAiCostLineNotification } from './_ops-notifications';
+import { boundLineOpsTeam, sendAiCostLineNotification } from './_ops-notifications';
 import { aiCostPolicy } from './_ai-cost-policy';
 import { decryptPii } from './_operations-db';
 
@@ -26,6 +26,35 @@ async function get<T>(path:string):Promise<T[]>{
   const r=await fetch(`${c.url}/rest/v1/${path}`,{headers:{apikey:c.key,Authorization:`Bearer ${c.key}`}});
   if(!r.ok)throw new Error(`AI cost notification query failed ${r.status}`);
   return await r.json() as T[];
+}
+export async function handleOwnerApiCostQuestion(input:{targetId:string;text:string;now?:Date}):Promise<string|null>{
+  const mentionsApi=/(?:api|openai|โอเพนเอไอ|เอไอ|ai)/iu.test(input.text);
+  const costQuestion=/(?:ค่า|ใช้ไป|เสียไป|กี่บาท|เท่าไหร่|เท่าไร|เหลือ|balance|เครดิต)/iu.test(input.text);
+  const shortTodayCost=/(?:วันนี้|เดือนนี้)\s*(?:ใช้|เสีย|หมด|จ่าย)?\s*(?:ไป)?\s*(?:กี่บาท|เท่าไหร่|เท่าไร)/u.test(input.text);
+  if(!(mentionsApi&&costQuestion)&&!shortTodayCost)return null;
+  const team=await boundLineOpsTeam(input.targetId);
+  if(team!=='owner_general'&&team!=='ai_cost')return null;
+  if(!cfg())return 'ตอนนี้อ่านข้อมูลค่า API จากหลังบ้านไม่ได้ครับ จึงยังยืนยันยอดวันนี้หรือยอดคงเหลือไม่ได้';
+  const now=input.now??new Date(),today=localDate(now),bounds=dayBounds(today),monthStart=dayBounds(`${today.slice(0,7)}-01`).start;
+  const [rows,lastSuccess]=await Promise.all([
+    get<CostRow & {status:string}>('ai_api_cost_events?environment=eq.live&status=eq.completed&occurred_at=gte.'+enc(monthStart)+'&occurred_at=lte.'+enc(now.toISOString())+'&select=conversation_id,channel,cost_thb,occurred_at,status&order=occurred_at.asc&limit=10000'),
+    get<{occurred_at:string}>('ai_api_cost_events?environment=eq.live&status=eq.completed&select=occurred_at&order=occurred_at.desc&limit=1'),
+  ]);
+  const todayRows=rows.filter(row=>row.occurred_at>=bounds.start&&row.occurred_at<=now.toISOString());
+  const total=(items:CostRow[])=>items.reduce((sum,row)=>sum+n(row.cost_thb),0);
+  const channels=new Map<string,number>();
+  for(const row of todayRows)channels.set(row.channel||'unknown',(channels.get(row.channel||'unknown')??0)+n(row.cost_thb));
+  const highest=[...channels.entries()].sort((a,b)=>b[1]-a[1])[0];
+  const labels:Record<string,string>={line:'LINE',web:'เว็บไซต์',facebook:'Messenger',messenger:'Messenger',unknown:'ไม่ทราบช่องทาง'};
+  return [
+    '💰 ค่าใช้จ่าย AI/API จากข้อมูลหลังบ้านครับ',
+    `วันนี้ใช้ประมาณ ${baht(total(todayRows))} บาท (${todayRows.length} ครั้ง)`,
+    `เดือนนี้สะสมประมาณ ${baht(total(rows))} บาท`,
+    highest?`ช่องทางที่ใช้สูงสุดวันนี้: ${labels[highest[0]]??highest[0]} · ${baht(highest[1])} บาท`:'วันนี้ยังไม่มีการใช้ API ที่บันทึกไว้',
+    lastSuccess[0]?.occurred_at?`เรียกสำเร็จล่าสุด: ${thaiDateTime(lastSuccess[0].occurred_at)}`:'ยังไม่มีการเรียกสำเร็จที่บันทึกไว้',
+    'ยอดเป็นค่าประเมินจาก usage ledger; ระบบอ่านยอดเครดิตคงเหลือจริงผ่าน API ที่รองรับไม่ได้ครับ',
+    'ตรวจยอดเครดิตจริง: https://platform.openai.com/settings/organization/billing/overview',
+  ].join('\n');
 }
 function enc(v:string){return encodeURIComponent(v)}
 function n(v:unknown){const x=Number(v);return Number.isFinite(x)?x:0}
@@ -367,20 +396,20 @@ export async function sendIdleAiCostConversationSummaries(now=new Date()){
 }
 
 export async function sendDailyAiCostSummary(now=new Date()){
-  // Scheduled just after midnight Bangkok. Report yesterday and month-to-date
-  // so a previous LINE quota outage is reflected in the next successful report.
-  const date=previousDate(localDate(now)),b=dayBounds(date);
+  if(!cfg())throw new Error('Operations database is not configured');
+  // One digest late in the Bangkok evening, after almost the full local day.
+  const date=localDate(now),b=dayBounds(date),cutoff=now.toISOString();
   const monthStart=dayBounds(`${date.slice(0,7)}-01`).start;
   const [monthRows,turns,lastSuccessRows]=await Promise.all([
     get<CostRow>(
       'ai_api_cost_events?environment=eq.live&occurred_at=gte.'+enc(monthStart)
-      +'&occurred_at=lt.'+enc(b.end)
+      +'&occurred_at=lte.'+enc(cutoff)
       +'&select=conversation_id,event_id,channel,model,call_purpose,input_tokens,cached_input_tokens,output_tokens,cost_thb,call_index_conversation,status,occurred_at'
       +'&order=occurred_at.asc&limit=10000',
     ),
     get<TurnRow>(
       'ai_response_turns?environment=eq.live&occurred_at=gte.'+enc(b.start)
-      +'&occurred_at=lt.'+enc(b.end)
+      +'&occurred_at=lte.'+enc(cutoff)
       +'&select=conversation_id,model_reply_used,grounded_knowledge_supplied,zero_cost_turn,occurred_at&limit=5000',
     ),
     get<{occurred_at:string}>(
@@ -389,9 +418,10 @@ export async function sendDailyAiCostSummary(now=new Date()){
     ),
   ]);
   const completedMonthRows=monthRows.filter(row=>row.status==='completed');
-  const dayRows=monthRows.filter(row=>row.occurred_at>=b.start&&row.occurred_at<b.end);
+  const dayRows=monthRows.filter(row=>row.occurred_at>=b.start&&row.occurred_at<=cutoff);
   const completedDayRows=dayRows.filter(row=>row.status==='completed');
   const failedCalls=dayRows.filter(row=>row.status==='failed').length;
+  if(!completedDayRows.length&&!failedCalls)return {date,status:'no_usage',costThb:0,monthCostThb:monthRows.filter(row=>row.status==='completed').reduce((sum,row)=>sum+n(row.cost_thb),0),calls:0,failedCalls:0,conversations:0,people:0};
   const s=summarize(completedDayRows,turns);
   const aiConversations=new Set(completedDayRows.map(x=>x.conversation_id)).size;
   const totalConversationIds=new Set(turns.map(x=>x.conversation_id));
@@ -414,13 +444,13 @@ export async function sendDailyAiCostSummary(now=new Date()){
   const latestSuccess=lastSuccessRows[0]?.occurred_at;
   const text=[
     '💰 สรุปค่าใช้จ่าย OpenAI แยกตามบุคคล',
-    `เมื่อวาน: ${date}`,
+    `วันนี้: ${date}`,
     '',
-    `เมื่อวานใช้ประมาณ ${baht(s.cost)} บาท · ${s.calls} ครั้ง · ${totalConversationIds.size} คน`,
+    `วันนี้ใช้ประมาณ ${baht(s.cost)} บาท · ${s.calls} ครั้ง · ${totalConversationIds.size} คน`,
     `เดือนนี้ใช้ประมาณ ${baht(monthTotal)} บาท`,
-    failedCalls?`คำขอที่ล้มเหลวเมื่อวาน: ${failedCalls} ครั้ง (ไม่นับรวมเป็นยอดใช้)`:'',
+    failedCalls?`คำขอที่ล้มเหลววันนี้: ${failedCalls} ครั้ง (ไม่นับรวมเป็นยอดใช้)`:'',
     '',
-    'รายคน (เดือนนี้ · เมื่อวาน)',
+    'รายคน (เดือนนี้ · วันนี้)',
     ...(personLines.length?personLines:['• ยังไม่มีการใช้ OpenAI ในเดือนนี้']),
     '',
     latestSuccess?`OpenAI เรียกสำเร็จล่าสุด: ${thaiDateTime(latestSuccess)}`:'ยังไม่มีรายการเรียก OpenAI ที่สำเร็จ',
@@ -428,7 +458,7 @@ export async function sendDailyAiCostSummary(now=new Date()){
     'ตรวจยอดจริงที่ https://platform.openai.com/settings/organization/billing/overview',
     '',
     'หมายเหตุ: ยอดเงินบาทเป็นค่าประเมินจาก token ในระบบ อาจต่างจากบิล OpenAI เล็กน้อย',
-    `เฉลี่ยต่อคนเมื่อวาน: ${baht(avgAll)} บาท · เฉลี่ยเฉพาะคนที่ใช้ OpenAI: ${baht(avgAi)} บาท`,
+    `เฉลี่ยต่อคนวันนี้: ${baht(avgAll)} บาท · เฉลี่ยเฉพาะคนที่ใช้ OpenAI: ${baht(avgAi)} บาท`,
   ].filter(Boolean).join('\n');
   const status=await sendAiCostLineNotification({
     idempotencyKey:`ai_cost_daily:${date}`,

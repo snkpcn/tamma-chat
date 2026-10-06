@@ -1024,10 +1024,13 @@ async function teamSummaryBody(teamCode: OpsTeamCode, localDate: string): Promis
 }
 
 export async function buildTeamScheduleSummary(teamCode: OpsTeamCode, localDate: string): Promise<string> {
+  return renderTeamScheduleSummary(teamCode, localDate, await teamSummaryBody(teamCode, localDate));
+}
+
+function renderTeamScheduleSummary(teamCode: OpsTeamCode, localDate: string, body: string): string {
   const dateLabel = new Intl.DateTimeFormat('th-TH', {
     timeZone: 'Asia/Bangkok', day: 'numeric', month: 'long', year: 'numeric',
   }).format(new Date(`${localDate}T12:00:00${BANGKOK_OFFSET}`));
-  const body = await teamSummaryBody(teamCode, localDate);
   return [
     `📋 ตารางงาน — ${TEAM_LABELS[teamCode]}`,
     dateLabel,
@@ -1036,6 +1039,12 @@ export async function buildTeamScheduleSummary(teamCode: OpsTeamCode, localDate:
     '',
     `หลังบ้าน: ${BACKOFFICE_URL}`,
   ].join('\n');
+}
+
+export function hasActionableScheduleItems(body: string): boolean {
+  const noAction = /^(?:ยังไม่มีงานในตาราง|ไม่มีรายการค้างที่ต้องติดตาม|ไม่มีออเดอร์ค้างที่ต้องจัดการ)$/u;
+  const headings = new Set(Object.values(TEAM_LABELS));
+  return body.split('\n').map(line => line.trim()).filter(Boolean).some(line => !headings.has(line) && !noAction.test(line));
 }
 
 export async function sendDailyOpsSummaries(localDate = isoLocalDate()): Promise<Array<{ team: OpsTeamCode; status: string }>> {
@@ -1047,7 +1056,12 @@ export async function sendDailyOpsSummaries(localDate = isoLocalDate()): Promise
   for (const channel of channels) {
     const teamCode = channel.team_code;
     if (teamCode === 'ai_cost') continue;
-    const text = await buildTeamScheduleSummary(teamCode, localDate);
+    const body = await teamSummaryBody(teamCode, localDate);
+    if (!hasActionableScheduleItems(body)) {
+      results.push({ team: teamCode, status: 'no_actionable_event' });
+      continue;
+    }
+    const text = renderTeamScheduleSummary(teamCode, localDate, body);
     const status = await sendTeamMessage({
       teamCode,
       entityType: 'daily_schedule',

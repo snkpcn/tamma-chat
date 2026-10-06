@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { persistAiCallCost, persistAiResponseTurn } from '../netlify/functions/_ai-cost-store';
-import { buildAiCostPersonLines } from '../netlify/functions/_ai-cost-notifier';
+import { buildAiCostPersonLines, handleOwnerApiCostQuestion, sendDailyAiCostSummary } from '../netlify/functions/_ai-cost-notifier';
 import { handler as idleHandler } from '../netlify/functions/ai-cost-notify-idle';
 import { handler as dailyHandler } from '../netlify/functions/ai-cost-notify-daily';
-import { handleLineOpsGroupMessage, sendAiCostLineNotification } from '../netlify/functions/_ops-notifications';
+import { handleLineOpsGroupMessage, hasActionableScheduleItems, sendAiCostLineNotification, sendDailyOpsSummaries } from '../netlify/functions/_ops-notifications';
+import { encryptPii, piiHash } from '../netlify/functions/_operations-db';
 import { withHarness } from './helpers/canonical-core-harness';
 
 const originalFetch=globalThis.fetch;
@@ -102,7 +103,52 @@ test('AI cost migration is RLS-protected and LINE binding is dedicated',()=>{
   const toml=readFileSync('netlify.toml','utf8');
   assert.doesNotMatch(toml,/\[functions\."ai-cost-notify-idle"\]/);
   assert.match(toml,/\[functions\."ai-cost-notify-daily"\]/);
-  assert.match(toml,/schedule = "5 17 \* \* \*"/);
+  assert.match(toml,/schedule = "55 16 \* \* \*"/);
+});
+
+test('no actionable scan result stays silent, while a real schedule item can be sent',async()=>{
+  assert.equal(hasActionableScheduleItems('ยังไม่มีงานในตาราง'),false);
+  assert.equal(hasActionableScheduleItems('ทำมา-ชาติ ผจญภัย\nยังไม่มีงานในตาราง\nตำมา-ชาติ / ร้านอาหาร\nไม่มีรายการค้างที่ต้องติดตาม'),false);
+  assert.equal(hasActionableScheduleItems('10:00 BK-123 4 คน — ATV'),true);
+  await withHarness(async harness=>{
+    const targetId='line-group-activity',targetEnc=encryptPii(targetId)!;
+    const oldFetch=globalThis.fetch;
+    globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
+      if(String(input).includes('/rest/v1/ops_notification_channels?'))return new Response(JSON.stringify([{id:'ch',team_code:'activity',target_type:'group',target_id_enc:targetEnc,target_id_hash:piiHash(targetId),display_name:'ผจญภัย',enabled:true}]),{status:200});
+      return oldFetch(input,init);
+    }) as typeof fetch;
+    let result;try{result=await sendDailyOpsSummaries('2026-10-06')}finally{globalThis.fetch=oldFetch}
+    assert.deepEqual(result,[{team:'activity',status:'no_actionable_event'}]);
+    assert.equal(harness.postsTo('line_push').length,0);
+  });
+});
+
+test('owner asks API cost at any time: replies from live usage ledger and never pushes',async()=>{
+  await withHarness(async harness=>{
+    harness.programOpsChannel('owner_general','owner-api-query-group');
+    harness.programAiCostRows([
+      {conversation_id:'c1',event_id:'e1',channel:'line',model:'gpt',call_purpose:'answer',input_tokens:10,cached_input_tokens:0,output_tokens:2,cost_thb:0.25,status:'completed',occurred_at:'2026-10-06T03:00:00.000Z'},
+      {conversation_id:'c2',event_id:'e2',channel:'web',model:'gpt',call_purpose:'answer',input_tokens:10,cached_input_tokens:0,output_tokens:2,cost_thb:0.75,status:'completed',occurred_at:'2026-10-05T03:00:00.000Z'},
+    ]);
+    const answer=await handleOwnerApiCostQuestion({targetId:'owner-api-query-group',text:'ค่า API วันนี้เท่าไหร่',now:new Date('2026-10-06T05:00:00.000Z')});
+    assert.match(answer??'',/วันนี้ใช้ประมาณ 0\.25 บาท/u);
+    assert.match(answer??'',/เดือนนี้สะสมประมาณ 1\.00 บาท/u);
+    assert.match(answer??'',/ระบบอ่านยอดเครดิตคงเหลือจริงผ่าน API ที่รองรับไม่ได้/u);
+    assert.equal(harness.postsTo('line_push').length,0);
+    const shortAnswer=await handleOwnerApiCostQuestion({targetId:'owner-api-query-group',text:'วันนี้ใช้กี่บาท',now:new Date('2026-10-06T05:00:00.000Z')});
+    assert.match(shortAnswer??'',/วันนี้ใช้ประมาณ 0\.25 บาท/u);
+  });
+});
+
+test('daily API digest is idempotent when the scheduler runs twice for one date',async()=>{
+  await withHarness(async harness=>{
+    harness.programOpsChannel('ai_cost');
+    harness.programAiCostRows([{conversation_id:'person-1',event_id:'event-1',channel:'line',model:'gpt',call_purpose:'answer',input_tokens:10,cached_input_tokens:0,output_tokens:2,cost_thb:0.25,call_index_conversation:1,status:'completed',occurred_at:'2026-10-06T03:00:00.000Z'}]);
+    const now=new Date('2026-10-06T16:55:00.000Z');
+    const first=await sendDailyAiCostSummary(now),second=await sendDailyAiCostSummary(now);
+    assert.equal(first.status,'sent');assert.equal(second.status,'duplicate');
+    assert.equal(harness.postsTo('line_push').length,1);
+  });
 });
 
 
