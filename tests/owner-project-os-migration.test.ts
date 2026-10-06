@@ -11,6 +11,10 @@ const indexMigration = readFileSync(
   'supabase/migrations/20261005150008_owner_project_os_fk_indexes_v1.sql',
   'utf8',
 );
+const expenseLineMigration = readFileSync(
+  'supabase/migrations/20261006025000_owner_expense_line_reclassification_v1.sql',
+  'utf8',
+);
 
 async function database(): Promise<PGlite> {
   const db = new PGlite();
@@ -64,6 +68,18 @@ async function database(): Promise<PGlite> {
       status text not null default 'categorized',
       updated_at timestamptz not null default now()
     );
+    create table public.financial_owner_expense_audit_events(
+      id uuid primary key default gen_random_uuid(),
+      intake_id uuid not null references public.financial_owner_expense_intakes(id) on delete restrict,
+      action text not null,
+      source text not null,
+      actor_hash text,
+      message_id text,
+      reason text,
+      before_data jsonb not null default '{}'::jsonb,
+      after_data jsonb not null default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    );
     create function public.financial_record_investment_v1(
       p_occurred_on date,p_business_unit_code text,p_title text,p_category text,
       p_amount numeric,p_payment_method text,p_vendor_name text,p_notes text,
@@ -86,6 +102,7 @@ async function database(): Promise<PGlite> {
   `);
   await db.exec(migration);
   await db.exec(indexMigration);
+  await db.exec(expenseLineMigration);
   return db;
 }
 
@@ -108,6 +125,62 @@ async function addDraft(db: PGlite, messageId: string, budget: number) {
   `, [JSON.stringify(data), messageId]);
   return inserted.rows[0]!.id;
 }
+
+test('Owner LINE category confirmation updates one reviewed slip once and records an audit', async () => {
+  const db = await database();
+  try {
+    const inserted = await db.query<{ id: string }>(`
+      insert into public.financial_owner_expense_intakes(
+        amount,business_unit_code,expense_class,expense_category,expense_subcategory,
+        purpose_raw,status
+      ) values (
+        1000,'other','capital_investment','construction','งานไม้/แปรรูปไม้',
+        'จ่ายค่าแปรรูปไม้ ของโครงการเฉลียงไม้','needs_review'
+      ) returning id
+    `);
+    const id = inserted.rows[0]!.id;
+
+    const first = await db.query<{ result: any }>(`
+      select public.financial_reclassify_owner_expense_from_line_v1(
+        $1,'shared_infrastructure','capital_investment','construction','งานไม้/แปรรูปไม้',$2,$3
+      ) as result
+    `, [id,'owner-hash','line-message-1']);
+    assert.equal(first.rows[0]!.result.duplicate, false);
+    assert.equal(first.rows[0]!.result.status, 'categorized');
+
+    const retry = await db.query<{ result: any }>(`
+      select public.financial_reclassify_owner_expense_from_line_v1(
+        $1,'shared_infrastructure','capital_investment','construction','งานไม้/แปรรูปไม้',$2,$3
+      ) as result
+    `, [id,'owner-hash','line-message-1']);
+    assert.equal(retry.rows[0]!.result.duplicate, true);
+
+    const row = await db.query<{ count: number; amount: string; status: string; business_unit_code: string }>(`
+      select count(*)::int as count, min(amount)::text as amount, min(status) as status,
+             min(business_unit_code) as business_unit_code
+      from public.financial_owner_expense_intakes where id=$1
+    `, [id]);
+    assert.deepEqual(row.rows[0], {
+      count: 1, amount: '1000.00', status: 'categorized', business_unit_code: 'shared_infrastructure',
+    });
+    const audit = await db.query<{ count: number; source: string; message_id: string }>(`
+      select count(*)::int as count, min(source) as source, min(message_id) as message_id
+      from public.financial_owner_expense_audit_events
+      where intake_id=$1 and action='reclassified'
+    `, [id]);
+    assert.deepEqual(audit.rows[0], { count: 1, source: 'line', message_id: 'line-message-1' });
+
+    const privileges = await db.query<{ anon: boolean; service: boolean }>(`
+      select
+        has_function_privilege('anon','public.financial_reclassify_owner_expense_from_line_v1(uuid,text,text,text,text,text,text)','execute') as anon,
+        has_function_privilege('service_role','public.financial_reclassify_owner_expense_from_line_v1(uuid,text,text,text,text,text,text)','execute') as service
+    `);
+    assert.equal(privileges.rows[0]!.anon, false);
+    assert.equal(privileges.rows[0]!.service, true);
+  } finally {
+    await db.close();
+  }
+});
 
 test('migration confirms drafts transactionally, splits exact installments, and is idempotent', async () => {
   const db = await database();
