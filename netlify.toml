@@ -37,10 +37,7 @@
   schedule = "5 0-3,14-16 * * *"
 
 # AI/API cost operations. Schedules are UTC.
-# Every 5 minutes: notify conversations idle at least 3 minutes.
-[functions."ai-cost-notify-idle"]
-  schedule = "*/5 * * * *"
-
-# 17:05 UTC = 00:05 Asia/Bangkok: report the complete PREVIOUS local day.
+# 17:05 UTC = 00:05 Asia/Bangkok: report per-person usage, month-to-date totals,
+# and the latest known OpenAI availability once per day.
 [functions."ai-cost-notify-daily"]
   schedule = "5 17 * * *"

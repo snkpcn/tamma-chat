@@ -8,6 +8,6 @@ export const handler:Handler=async()=>{
     return {statusCode:200,body:JSON.stringify({ok:true,count:results.length})};
   }catch(error){
     console.error('AI_COST_IDLE_NOTIFY_ERROR',error instanceof Error?error.message.slice(0,240):'unknown');
-    return {statusCode:200,body:JSON.stringify({ok:false})};
+    return {statusCode:500,body:JSON.stringify({ok:false})};
   }
 };

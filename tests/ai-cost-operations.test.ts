@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { persistAiCallCost, persistAiResponseTurn } from '../netlify/functions/_ai-cost-store';
+import { buildAiCostPersonLines } from '../netlify/functions/_ai-cost-notifier';
 import { handler as idleHandler } from '../netlify/functions/ai-cost-notify-idle';
 import { handler as dailyHandler } from '../netlify/functions/ai-cost-notify-daily';
 import { handleLineOpsGroupMessage, sendAiCostLineNotification } from '../netlify/functions/_ops-notifications';
@@ -51,15 +52,38 @@ test('AI cost store persists provider usage only, never prompts/transcripts/secr
   assert.doesNotMatch(serialized,/OPENAI_API_KEY|prompt|transcript|semanticOutput|customer_message/i);
 });
 
-test('AI cost scheduled notification handlers never fail customer infrastructure when unconfigured', async()=>{
+test('AI cost scheduled notification handlers expose missing config instead of reporting success', async()=>{
   delete process.env.SUPABASE_URL;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   try{
     const idle=await idleHandler({} as any,{} as any);
     const daily=await dailyHandler({} as any,{} as any);
-    assert.equal(idle.statusCode,200);
-    assert.equal(daily.statusCode,200);
+    assert.equal((idle as any).statusCode,200);
+    assert.equal((daily as any).statusCode,500);
   }finally{restore()}
+});
+
+test('daily AI cost breakdown reports stable per-person THB totals without exposing conversation UUIDs',()=>{
+  const personA='f83b8a2d-3123-452d-9a19-88d8f54b7c01';
+  const personB='167a3909-d117-479b-a45e-9fca11d27492';
+  const lines=buildAiCostPersonLines(
+    [
+      {conversation_id:personA,cost_thb:0.2},
+      {conversation_id:personA,cost_thb:0.15},
+      {conversation_id:personB,cost_thb:0.5},
+    ],
+    [
+      {conversation_id:personA,cost_thb:0.15},
+      {conversation_id:personB,cost_thb:0.5},
+    ],
+    [personA,personB],
+    new Map([[personA,'คุณสมชาย']]),
+  );
+  assert.deepEqual(lines,[
+    '• บุคคล D27492 — เดือนนี้ 0.50 บาท · เมื่อวาน 0.50 บาท',
+    '• คุณสมชาย · 4B7C01 — เดือนนี้ 0.35 บาท · เมื่อวาน 0.15 บาท',
+  ]);
+  assert.doesNotMatch(lines.join('\n'),/f83b8a2d|167a3909/i);
 });
 
 test('AI cost migration is RLS-protected and LINE binding is dedicated',()=>{
@@ -76,8 +100,7 @@ test('AI cost migration is RLS-protected and LINE binding is dedicated',()=>{
   assert.match(ops,/ผูกกลุ่มนี้กับค่าใช้จ่าย AI \/ API แล้วครับ/u);
 
   const toml=readFileSync('netlify.toml','utf8');
-  assert.match(toml,/\[functions\."ai-cost-notify-idle"\]/);
-  assert.match(toml,/schedule = "\*\/5 \* \* \* \*"/);
+  assert.doesNotMatch(toml,/\[functions\."ai-cost-notify-idle"\]/);
   assert.match(toml,/\[functions\."ai-cost-notify-daily"\]/);
   assert.match(toml,/schedule = "5 17 \* \* \*"/);
 });
