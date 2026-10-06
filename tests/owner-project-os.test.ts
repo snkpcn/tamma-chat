@@ -13,6 +13,8 @@ test('starts a project draft from natural Owner-group Thai but leaves read quest
   assert.equal(classifyOwnerProjectStart('ทองไทย เพิ่มงานที่ต้องทำทุกวันอาทิตย์'), 'weekly_task');
   assert.equal(classifyOwnerProjectStart('แม่ เดี๋ยวเราคุยเรื่องลงทุนกัน'), null);
   assert.equal(classifyOwnerProjectStart('วันนี้ยอดขายเป็นไง'), null);
+  assert.equal(classifyOwnerProjectStart('โครงการไม้ยอดจ่ายเท่าไหร่'), null);
+  assert.equal(classifyOwnerProjectStart('โครงการเฉลียงไม้จ่ายแล้วเท่าไหร่'), null);
   assert.equal(classifyOwnerProjectStart('ครัวลงทุนไปเท่าไหร่แล้ว'), null);
   assert.equal(classifyOwnerProjectStart('ลงทุนเงินสด 5,000 ซื้อชั้นวาง ตำมา-ชาติ'), null);
 });
@@ -79,4 +81,3 @@ test('pending slip answers are scoped to the sender unless an explicit item code
   assert.match(intake, /source_user_hash === actorHash/u);
   assert.match(intake, /reference\.code\s*\?\s*allRows/u);
 });
-
