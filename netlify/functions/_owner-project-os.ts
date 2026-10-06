@@ -76,6 +76,12 @@ type TaskStateResult = {
   batch_position?: number | null;
 };
 
+type MultiTaskStateResult = {
+  ok?: boolean;
+  tasks?: TaskStateResult[];
+  task_count?: number;
+};
+
 const DASHBOARD_URL = 'https://tamma-backoffice.netlify.app/investments.html';
 const CONTINUATION_WINDOW_MS = 15 * 60 * 1000;
 const BUSINESS_UNITS: Array<[RegExp, string]> = [
@@ -383,6 +389,102 @@ type SummaryInstallment = { id: string; project_id: string; title: string; amoun
 
 const summaryMoney = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' บาท';
 
+const TEAM_PROJECT_BUSINESS: Record<string, string> = {
+  restaurant: 'tamma_restaurant',
+  stay: 'huenstay',
+  activity: 'adventure',
+  cafe: 'inthanin',
+  otop: 'otop',
+};
+
+async function domainProjectSummary(team: string, query: string, today: string): Promise<string> {
+  const business = TEAM_PROJECT_BUSINESS[team];
+  const schedule = await buildTeamScheduleSummary(team as Parameters<typeof buildTeamScheduleSummary>[0], today);
+  if (!business) return schedule;
+  const projects = await (await dbFetch('owner_projects?business_unit_code=eq.' + business
+    + '&status=neq.cancelled&select=id,name,project_code&order=created_at.desc&limit=50')).json() as SummaryProject[];
+  const onlyPending = /(?:ค้าง|เลยกำหนด|เกินกำหนด|ต้องตาม)/u.test(query);
+  const onlyOwner = /(?:งานไหนรอกู|งานไหนรอผม|รอเจ้าของ|รอพี่ยืนยัน|รออนุมัติ)/u.test(query);
+  const onlySpend = /(?:ยอดโครงการ|ยอดจ่าย|จ่ายไป|มีจ่ายอะไร)/u.test(query);
+  const spendRows = onlySpend || (!onlyPending && !onlyOwner) ? await (async () => {
+    const [intakes, ledger] = await Promise.all([
+      dbFetch('financial_owner_expense_intakes?business_unit_code=eq.' + business + '&status=eq.categorized&select=owner_project_id,amount,purpose_raw,evidence_message_id&order=occurred_on.desc&limit=300')
+        .then(r => r.json() as Promise<Array<{ owner_project_id:string; amount:number|string; purpose_raw:string; evidence_message_id:string|null }>>),
+      dbFetch('financial_investment_entries?business_unit_code=eq.' + business + '&status=eq.recorded&select=owner_project_id,amount,title,source_message_id&order=occurred_on.desc&limit=300')
+        .then(r => r.json() as Promise<Array<{ owner_project_id:string; amount:number|string; title:string; source_message_id:string|null }>>),
+    ]);
+    const ledgerMessages = new Set(ledger.map(row => row.source_message_id).filter(Boolean));
+    return [
+      ...ledger.map(row => ({ project_id:row.owner_project_id, title:row.title, amount:Number(row.amount||0) })),
+      ...intakes.filter(row => !row.evidence_message_id || !ledgerMessages.has(row.evidence_message_id))
+        .map(row => ({ project_id:row.owner_project_id, title:row.purpose_raw, amount:Number(row.amount||0) })),
+    ];
+  })() : [];
+  if (!projects.length) {
+    if (/(?:ยอดโครงการ|โครงการ.*ยอดจ่าย)/u.test(query)) return 'หลังบ้านยังไม่มีโครงการของทีมนี้ให้ตรวจยอดจ่ายครับ';
+    const lines = ['สรุปข้อมูลของกลุ่มนี้จากหลังบ้านครับ',schedule];
+    if (spendRows.length) lines.push(`💰 รายจ่ายหมวดนี้ที่บันทึก: ${summaryMoney(spendRows.reduce((sum,row) => sum+row.amount,0))}`,
+      ...spendRows.slice(0,4).map(row => `• ${row.title} · ${summaryMoney(row.amount)} — ยังไม่ผูกโครงการ`));
+    return lines.join('\n');
+  }
+  const ids = encodeURIComponent('(' + projects.map(row => row.id).join(',') + ')');
+  if (onlySpend) {
+    const projectTotal = /(?:ยอดโครงการ|โครงการ.*ยอดจ่าย)/u.test(query);
+    const projectIds = new Set(projects.map(row => row.id));
+    const entries = projectTotal ? spendRows.filter(row => projectIds.has(row.project_id)) : spendRows;
+    const names = new Map(projects.map(row => [row.id,row.name]));
+    if (!entries.length) return projectTotal
+      ? 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการของทีมนี้ครับ จึงยังยืนยันยอดจ่ายโครงการไม่ได้'
+      : 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วในหมวดของทีมนี้ครับ';
+    const total = entries.reduce((sum,row) => sum + row.amount,0);
+    return [
+      `${projectTotal ? 'ยอดจ่ายโครงการที่ผูกกับรายการจริง' : 'รายจ่ายหมวดของกลุ่มนี้ที่บันทึก'}: ${summaryMoney(total)}`,
+      ...entries.slice(0,8).map(row => `• ${names.get(row.project_id) ?? 'ยังไม่ผูกโครงการ'}: ${row.title} · ${summaryMoney(row.amount)}`),
+      ...(projectTotal && spendRows.length > entries.length ? ['มีรายจ่ายหมวดนี้ที่ยังไม่ผูกโครงการ ไม่รวมในยอดโครงการครับ'] : []),
+    ].join('\n');
+  }
+
+  const tasks = await (await dbFetch('owner_project_tasks?project_id=in.' + ids
+    + '&status=neq.cancelled&select=id,project_id,task_code,title,task_kind,status,due_on,responsible_name,source_message_id,source_batch_position,confirmed_at,created_at'
+    + '&order=confirmed_at.desc.nullslast,source_batch_position.asc.nullslast,created_at.desc&limit=300')).json() as SummaryTask[];
+  const weekly = tasks.filter(row => row.task_kind === 'weekly');
+  const weekStart = new Date(`${today}T00:00:00Z`);
+  weekStart.setUTCDate(weekStart.getUTCDate() - ((weekStart.getUTCDay() + 6) % 7));
+  const checkins = weekly.length ? await (await dbFetch('owner_project_task_checkins?week_start=eq.' + weekStart.toISOString().slice(0,10)
+    + '&task_id=in.' + encodeURIComponent('(' + weekly.map(row => row.id).join(',') + ')')
+    + '&select=task_id,state&limit=300')).json() as Array<{task_id:string;state:string}> : [];
+  const checked = new Map(checkins.map(row => [row.task_id,row.state]));
+  const state = (row: SummaryTask) => row.task_kind === 'weekly' ? checked.get(row.id) ?? row.status : row.status;
+  const names = new Map(projects.map(row => [row.id,row.name]));
+  const latestBatch = tasks.find(row => row.source_batch_position && row.source_message_id)?.source_message_id;
+  const taskLine = (row: SummaryTask) => {
+    const label = row.source_batch_position && row.source_message_id === latestBatch ? `งาน ${row.source_batch_position}` : row.task_code;
+    return `• ${label} — ${names.get(row.project_id)}: ${row.title}${row.due_on ? ` — กำหนด ${row.due_on}` : ''}`;
+  };
+  const overdue = tasks.filter(row => state(row) !== 'done' && row.due_on && row.due_on < today);
+  const waiting = tasks.filter(row => ['todo','blocked'].includes(state(row)) && !overdue.includes(row));
+  const active = tasks.filter(row => state(row) === 'in_progress' && !overdue.includes(row));
+  const complete = tasks.filter(row => state(row) === 'done');
+  const ownerWait = tasks.filter(row => state(row) !== 'done' && /(?:รอเจ้าของ|รอยืนยัน|รออนุมัติ|owner approval)/iu.test(row.title));
+  const lines = ['สรุปข้อมูลของกลุ่มนี้จากหลังบ้านครับ'];
+  if (onlyOwner) {
+    lines.push('', '⏳ รอเจ้าของตัดสินใจ', ...(ownerWait.length ? ownerWait.slice(0,8).map(taskLine) : ['• ยังไม่มีงานที่ระบุว่ารอเจ้าของตัดสินใจครับ']));
+  } else if (onlyPending) {
+    const pending = [...overdue,...waiting,...active];
+    lines.push('', '🔴 งานค้าง/ต้องตาม', ...(pending.length ? pending.slice(0,10).map(taskLine) : ['• ยังไม่มีงานค้างในโครงการของทีมนี้ครับ']));
+  } else {
+    for (const [label,rows] of [['🔴 เลยกำหนด',overdue],['⏳ ค้าง/รอดำเนินการ',waiting],['🟡 กำลังทำ',active],['✅ เสร็จแล้ว',complete]] as const) {
+      if (rows.length) lines.push('',label,...rows.slice(0,6).map(taskLine));
+    }
+    if (!tasks.length) lines.push('', 'ยังไม่มีงานโครงการที่บันทึกไว้ของทีมนี้ครับ');
+    if (!schedule.includes('\nยังไม่มีงานในตาราง\n') && !schedule.includes('\nไม่มีรายการค้างที่ต้องติดตาม\n')
+      && !schedule.includes('\nไม่มีออเดอร์ค้างที่ต้องจัดการ\n')) lines.push('',schedule);
+    if (spendRows.length) lines.push('',`💰 รายจ่ายหมวดนี้ที่บันทึก: ${summaryMoney(spendRows.reduce((sum,row) => sum + row.amount,0))}`,
+      ...spendRows.slice(0,4).map(row => `• ${row.title} · ${summaryMoney(row.amount)}${row.project_id ? '' : ' — ยังไม่ผูกโครงการ'}`));
+  }
+  return lines.join('\n');
+}
+
 export async function handleOwnerProjectQuery(input: { targetId: string; text: string; timestamp?: number }): Promise<string | null> {
   if (!OWNER_PROJECT_QUERY.test(normalizeText(input.text))) return null;
   const team = await boundLineOpsTeam(input.targetId);
@@ -390,7 +492,7 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   if (team !== 'owner_general') {
     if (['restaurant','stay','activity','cafe','cafe_test','otop'].includes(team)) {
       const today = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Bangkok', year:'numeric', month:'2-digit', day:'2-digit' }).format(input.timestamp ?? Date.now());
-      return 'สรุปข้อมูลของกลุ่มนี้จากหลังบ้านครับ\n' + await buildTeamScheduleSummary(team, today);
+      return domainProjectSummary(team, normalizeText(input.text), today);
     }
     return `กลุ่มนี้ผูกกับทีม ${team} ครับ คำสรุปแบบนี้ยังไม่มีขอบเขตข้อมูลที่ตั้งค่าไว้`;
   }
@@ -403,8 +505,8 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const [tasks, installments, intakes, ledger] = await Promise.all([
     dbFetch('owner_project_tasks?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,task_code,title,task_kind,status,due_on,responsible_name,source_message_id,source_batch_position,confirmed_at,created_at&order=confirmed_at.desc.nullslast,source_batch_position.asc.nullslast,created_at.desc&limit=300').then(r => r.json() as Promise<SummaryTask[]>),
     dbFetch('owner_project_installments?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,title,amount,due_on,status&order=due_on.asc.nullslast&limit=300').then(r => r.json() as Promise<SummaryInstallment[]>),
-    dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=neq.cancelled&select=id,owner_project_id,occurred_on,amount,purpose_raw,status,evidence_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; purpose_raw:string; status:string; evidence_message_id:string|null }>>),
-    dbFetch('financial_investment_entries?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=eq.recorded&select=id,owner_project_id,occurred_on,amount,title,source_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; title:string; source_message_id:string|null }>>),
+    dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&status=neq.cancelled&select=id,owner_project_id,occurred_on,amount,purpose_raw,status,evidence_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string|null; occurred_on:string; amount:number|string; purpose_raw:string; status:string; evidence_message_id:string|null }>>),
+    dbFetch('financial_investment_entries?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&status=eq.recorded&select=id,owner_project_id,occurred_on,amount,title,source_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string|null; occurred_on:string; amount:number|string; title:string; source_message_id:string|null }>>),
   ]);
   const today = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Bangkok', year:'numeric', month:'2-digit', day:'2-digit' }).format(input.timestamp ?? Date.now());
   const weekStartDate = new Date(`${today}T00:00:00Z`);
@@ -424,8 +526,7 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const ledgerSources = new Set(ledger.map(row => row.source_message_id).filter(Boolean));
   const pendingReceipts = intakes.filter(row => row.status !== 'categorized');
   const receipts = intakes.filter(row => row.status === 'categorized' && (!row.evidence_message_id || !ledgerSources.has(row.evidence_message_id)));
-  const expenses = [...ledger.map(row => ({name:row.title,amount:Number(row.amount||0),date:row.occurred_on})), ...receipts.map(row => ({name:row.purpose_raw,amount:Number(row.amount||0),date:row.occurred_on}))].sort((a,b) => (b.date||'').localeCompare(a.date||''));
-  const total = expenses.reduce((sum,row) => sum + row.amount,0);
+  const expenses = [...ledger.map(row => ({name:row.title,amount:Number(row.amount||0),date:row.occurred_on,projectId:row.owner_project_id})), ...receipts.map(row => ({name:row.purpose_raw,amount:Number(row.amount||0),date:row.occurred_on,projectId:row.owner_project_id}))].sort((a,b) => (b.date||'').localeCompare(a.date||''));
   const project = new Map(projects.map(row => [row.id,row.name]));
   const latestBatchSource = tasks.find(row => row.source_batch_position && row.source_message_id)?.source_message_id ?? null;
   const taskLabel = (row: SummaryTask) => row.source_batch_position && row.source_message_id === latestBatchSource
@@ -436,6 +537,9 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const onlyPending = /(?:ค้าง|เลยกำหนด|เกินกำหนด|ต้องตาม)/u.test(query);
   const onlyOwner = /(?:งานไหนรอกู|งานไหนรอผม|รอเจ้าของ|รอพี่ยืนยัน|รออนุมัติ)/u.test(query);
   const onlySpend = /(?:ยอดโครงการ|ยอดจ่าย|จ่ายไป|มีจ่ายอะไร)/u.test(query);
+  const projectSpend = /(?:ยอดโครงการ|โครงการ.*ยอดจ่าย)/u.test(query);
+  const selectedExpenses = onlySpend && projectSpend ? expenses.filter(row => row.projectId && project.has(row.projectId)) : expenses;
+  const total = selectedExpenses.reduce((sum,row) => sum + row.amount,0);
   const lines = ['สรุปจากหลังบ้านตอนนี้ครับ'];
   if (onlyOwner) return [...lines,'','⏳ รอเจ้าของตัดสินใจ',...(ownerWait.length?ownerWait.map(row=>taskLine(row)):['• หลังบ้านยังไม่มีงานที่ระบุว่ารอเจ้าของตัดสินใจครับ'])].join('\n');
   if (onlyPending) {
@@ -451,8 +555,9 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
     if (late.length) lines.push('','💸 งวดเลยกำหนด',...late.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} ${summaryMoney(Number(row.amount))}`));
   } else if (due.length) lines.push('','💸 งวดที่ยังจ่าย',...due.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} ${summaryMoney(Number(row.amount))}${row.due_on?' — '+row.due_on:''}`));
   if (onlySpend || (!onlyPending && expenses.length)) {
-    lines.push('','💰 จ่ายแล้วตามรายการที่บันทึก: '+summaryMoney(total),...expenses.slice(0,5).map(row=>`• ${row.name} · ${summaryMoney(row.amount)}`));
-    if (!expenses.length) lines.push('• หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการนี้ครับ');
+    if (selectedExpenses.length) lines.push('',`💰 ${projectSpend ? 'จ่ายแล้วที่ผูกกับโครงการ' : 'รายจ่ายที่บันทึกในกลุ่ม'}: `+summaryMoney(total),
+      ...selectedExpenses.slice(0,5).map(row=>`• ${row.name} · ${summaryMoney(row.amount)}${row.projectId ? '' : ' — ยังไม่ผูกโครงการ'}`));
+    else lines.push('',projectSpend ? 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการนี้ครับ' : 'หลังบ้านยังไม่มีรายจ่ายที่ยืนยันแล้วในกลุ่มนี้ครับ');
     if (pendingReceipts.length) lines.push(`• มีสลิปรอจัดหมวด/ตรวจข้อมูลอีก ${pendingReceipts.length} รายการ ไม่รวมในยอดจ่ายยืนยัน`);
   }
   if (!complete.length && !active.length && !waiting.length && !overdue.length && !due.length && !expenses.length) lines.push('ยังไม่มีงานค้าง งวดจ่าย หรือรายจ่ายที่บันทึกของกลุ่มนี้ครับ');
@@ -673,9 +778,12 @@ function correctionSignal(text: string): boolean {
 
 export type OwnerProjectTaskStateCommand = {
   state: 'done' | 'todo';
-  referenceKind: 'position' | 'code' | 'title';
+  referenceKind: 'position' | 'positions' | 'code' | 'title' | 'titles';
   reference: string;
   position?: number;
+  positions?: number[];
+  titles?: string[];
+  projectName?: string;
 };
 
 export function parseOwnerProjectTaskStateCommand(rawText: string): OwnerProjectTaskStateCommand | null {
@@ -696,17 +804,35 @@ export function parseOwnerProjectTaskStateCommand(rawText: string): OwnerProject
   }
   if (!reference || /(?:งานไหน|อะไร|อันไหน)/u.test(reference)) return null;
 
+  // A project qualifier selects that project's latest numbered batch. It is
+  // never used to widen the search beyond the LINE group's binding.
+  const scoped = reference.match(/^(.+?)\s+ของ(?:โครงการ|โปรเจ(?:ค|กต์))?\s*(.+)$/u);
+  const projectName = scoped?.[2]?.trim();
+  if (scoped) reference = scoped[1]!.trim();
+
+  const numericList = reference.replace(/^งาน\s*/u, '').trim();
+  if (/^[0-9]{1,3}(?:\s*(?:,|，|กับ|และ|&|\+|\/)\s*(?:งาน\s*)?[0-9]{1,3})+$/u.test(numericList)) {
+    const positions = [...new Set((numericList.match(/[0-9]{1,3}/g) ?? []).map(Number))];
+    if (positions.length >= 2 && positions.length <= 20 && positions.every(value => value >= 1 && value <= 100)) {
+      return { state, referenceKind: 'positions', reference: positions.join(', '), positions, ...(projectName ? { projectName } : {}) };
+    }
+  }
+
   const code = reference.match(/\b(WK-[A-Z0-9]{4,16})\b/iu)?.[1];
-  if (code) return { state, referenceKind: 'code', reference: code.toUpperCase() };
+  if (code) return { state, referenceKind: 'code', reference: code.toUpperCase(), ...(projectName ? { projectName } : {}) };
   const numbered = reference.match(/^(?:งาน\s*)?([0-9]{1,3})$/u);
   if (numbered) {
     const position = Number(numbered[1]);
     if (position >= 1 && position <= 100) {
-      return { state, referenceKind: 'position', reference: String(position), position };
+      return { state, referenceKind: 'position', reference: String(position), position, ...(projectName ? { projectName } : {}) };
     }
   }
+  const titleList = reference.replace(/^งาน(?:ชื่อ)?\s*/u, '').split(/\s+(?:กับ|และ)\s+/u).map(value => value.trim()).filter(Boolean);
+  if (titleList.length >= 2 && titleList.length <= 10 && titleList.every(value => value.length >= 2)) {
+    return { state, referenceKind: 'titles', reference: titleList.join(' กับ '), titles: titleList, ...(projectName ? { projectName } : {}) };
+  }
   const title = reference.replace(/^งาน(?:ชื่อ)?\s*/u, '').trim();
-  return title ? { state, referenceKind: 'title', reference: title } : null;
+  return title ? { state, referenceKind: 'title', reference: title, ...(projectName ? { projectName } : {}) } : null;
 }
 
 type TaskLookup = SummaryTask & { project_name: string };
@@ -718,40 +844,66 @@ function normalizeTaskLookup(value: string): string {
 async function resolveOwnerProjectTask(
   groupHash: string,
   command: OwnerProjectTaskStateCommand,
-): Promise<{ task: TaskLookup | null; reply?: string }> {
+): Promise<{ tasks: TaskLookup[]; reply?: string }> {
   const projects = await (await dbFetch('owner_projects?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&status=neq.cancelled&select=id,name&order=created_at.desc&limit=100')).json() as Array<{id:string;name:string}>;
-  if (!projects.length) return { task: null, reply: 'หลังบ้านยังไม่มีโครงการที่ผูกกับกลุ่มนี้ครับ' };
+  if (!projects.length) return { tasks: [], reply: 'หลังบ้านยังไม่มีโครงการที่ผูกกับกลุ่มนี้ครับ' };
+  let allowedProjects = projects;
+  if (command.projectName) {
+    const needle = normalizeTaskLookup(command.projectName);
+    allowedProjects = projects.filter(row => normalizeTaskLookup(row.name) === needle);
+    if (allowedProjects.length !== 1) return { tasks: [], reply: `ยังไม่พบโครงการ “${command.projectName}” ในกลุ่มนี้ครับ` };
+  }
   const ids = encodeURIComponent('(' + projects.map(row => row.id).join(',') + ')');
   const rows = await (await dbFetch('owner_project_tasks?project_id=in.' + ids
     + '&status=neq.cancelled&select=id,project_id,task_code,title,task_kind,status,due_on,responsible_name,source_message_id,source_batch_position,confirmed_at,created_at'
     + '&order=confirmed_at.desc.nullslast,source_batch_position.asc.nullslast,created_at.desc&limit=500')).json() as SummaryTask[];
   const names = new Map(projects.map(row => [row.id, row.name]));
-  const tasks = rows.map(row => ({ ...row, project_name: names.get(row.project_id) ?? 'ไม่ทราบโครงการ' }));
+  const allowedIds = new Set(allowedProjects.map(row => row.id));
+  const tasks = rows.filter(row => allowedIds.has(row.project_id))
+    .map(row => ({ ...row, project_name: names.get(row.project_id) ?? 'ไม่ทราบโครงการ' }));
   let matches: TaskLookup[] = [];
 
   if (command.referenceKind === 'code') {
     matches = tasks.filter(row => row.task_code?.toUpperCase() === command.reference);
-  } else if (command.referenceKind === 'position') {
+  } else if (command.referenceKind === 'position' || command.referenceKind === 'positions') {
     const latestBatch = tasks.find(row => row.source_batch_position && row.source_message_id)?.source_message_id;
+    const requested = command.positions ?? [command.position!];
     matches = latestBatch
-      ? tasks.filter(row => row.source_message_id === latestBatch && row.source_batch_position === command.position)
+      ? requested.map(position => tasks.find(row => row.source_message_id === latestBatch && row.source_batch_position === position)).filter((row): row is TaskLookup => Boolean(row))
       : [];
+    if (matches.length !== requested.length) {
+      const found = new Set(matches.map(row => row.source_batch_position));
+      return { tasks: [], reply: `ยังไม่พบงาน ${requested.filter(position => !found.has(position)).join(', ')} ในชุดงานล่าสุดของกลุ่มนี้ครับ\nพิมพ์ “มีงานค้างไหม” เพื่อดูรายการล่าสุด` };
+    }
+  } else if (command.referenceKind === 'titles') {
+    const selected: TaskLookup[] = [];
+    for (const title of command.titles ?? []) {
+      const needle = normalizeTaskLookup(title);
+      const exact = tasks.filter(row => normalizeTaskLookup(row.title) === needle);
+      const candidates = exact.length ? exact : tasks.filter(row => normalizeTaskLookup(row.title).includes(needle));
+      if (candidates.length !== 1 || selected.some(row => row.id === candidates[0]!.id)) {
+        return { tasks: [], reply: `ยังจับคู่งาน “${title}” ได้ไม่ชัดครับ พิมพ์ “มีงานค้างไหม” แล้วระบุเลขงานหรือรหัสงาน` };
+      }
+      selected.push(candidates[0]!);
+    }
+    matches = selected;
   } else {
     const needle = normalizeTaskLookup(command.reference);
     const exact = tasks.filter(row => normalizeTaskLookup(row.title) === needle);
     matches = exact.length ? exact : tasks.filter(row => normalizeTaskLookup(row.title).includes(needle));
   }
 
-  if (matches.length === 1) return { task: matches[0]! };
+  if (matches.length === 1 || (command.referenceKind === 'positions' && matches.length === command.positions?.length)
+    || (command.referenceKind === 'titles' && matches.length === command.titles?.length)) return { tasks: matches };
   if (!matches.length) {
     return {
-      task: null,
+      tasks: [],
       reply: `ยังไม่พบงาน “${command.reference}” ในหลังบ้านของกลุ่มนี้ครับ\nพิมพ์ “มีงานค้างไหม” เพื่อดูรายการล่าสุด`,
     };
   }
   return {
-    task: null,
+    tasks: [],
     reply: [
       `พบชื่องานใกล้กัน ${matches.length} รายการครับ กรุณาระบุรหัสงาน`,
       ...matches.slice(0, 5).map(row => `• ${row.task_code} — ${row.project_name}: ${row.title}`),
@@ -901,23 +1053,54 @@ export async function handleOwnerProjectText(input: {
   if (taskStateCommand) {
     const claim = await claimMessage({ groupHash, actorHash, messageId: input.messageId, text });
     if (!claim.claimed) return claim.reply;
+    if (taskStateCommand.referenceKind === 'position' || taskStateCommand.referenceKind === 'positions'
+      || taskStateCommand.referenceKind === 'title' || taskStateCommand.referenceKind === 'titles') {
+      const pendingDraft = await activeDraft(groupHash, actorHash);
+      const draftTitles = pendingDraft?.data.bulk_tasks?.map(task => normalizeTaskLookup(task.title)) ?? [];
+      const requestedTitles = taskStateCommand.titles ?? [taskStateCommand.reference];
+      const targetsDraft = taskStateCommand.referenceKind === 'position' || taskStateCommand.referenceKind === 'positions'
+        || requestedTitles.some(title => draftTitles.some(draftTitle => draftTitle.includes(normalizeTaskLookup(title))));
+      if (pendingDraft?.status === 'awaiting_confirmation' && draftTitles.length >= 2 && targetsDraft) {
+        const reply = 'ชุดงานนี้ยังเป็นร่างครับ พิมพ์ “ยืนยัน” เพื่อบันทึกก่อน แล้วค่อยแจ้งว่างานไหนจบครับ';
+        await storeReply(input.messageId, pendingDraft.id, reply);
+        return reply;
+      }
+    }
     const resolved = await resolveOwnerProjectTask(groupHash, taskStateCommand);
-    if (!resolved.task) {
+    if (!resolved.tasks.length) {
       const reply = resolved.reply ?? 'ยังจับคู่งานกับหลังบ้านไม่ได้ครับ';
       await storeReply(input.messageId, null, reply);
       return reply;
     }
-    const result = await rpc<TaskStateResult>('owner_project_set_task_state_from_line_v1', {
-      p_task_id: resolved.task.id,
-      p_group_hash: groupHash,
-      p_state: taskStateCommand.state,
-      p_actor_hash: actorHash,
-      p_message_id: input.messageId,
+    let results: TaskStateResult[];
+    if (resolved.tasks.length > 1) {
+      const changed = await rpc<MultiTaskStateResult>('owner_project_set_task_states_from_line_v1', {
+        p_task_ids: resolved.tasks.map(task => task.id),
+        p_group_hash: groupHash,
+        p_state: taskStateCommand.state,
+        p_actor_hash: actorHash,
+        p_message_id: input.messageId,
+      });
+      results = changed.tasks ?? [];
+      if (results.length !== resolved.tasks.length) throw new Error('Owner Project OS bulk task update returned incomplete results');
+    } else {
+      results = [await rpc<TaskStateResult>('owner_project_set_task_state_from_line_v1', {
+        p_task_id: resolved.tasks[0]!.id,
+        p_group_hash: groupHash,
+        p_state: taskStateCommand.state,
+        p_actor_hash: actorHash,
+        p_message_id: input.messageId,
+      })];
+    }
+    const lines = results.map((result, index) => {
+      const original = resolved.tasks[index]!;
+      const label = result.batch_position ? `งาน ${result.batch_position}` : (result.task_code ?? original.task_code);
+      return `${label} — ${result.task_title ?? original.title}${result.duplicate ? ' (สถานะเดิม)' : ''}`;
     });
-    const label = result.batch_position ? `งาน ${result.batch_position}` : (result.task_code ?? resolved.task.task_code);
+    const allDuplicate = results.every(result => result.duplicate);
     const reply = taskStateCommand.state === 'done'
-      ? `${result.duplicate ? 'งานนี้ถูกติ๊กว่าเสร็จไว้แล้วครับ' : '✅ ติ๊กว่าเสร็จแล้วครับ'}\n${label} — ${result.task_title ?? resolved.task.title}\nประวัติยังอยู่ในหลังบ้านและงานนี้จะไม่ถูกรวมในงานค้าง`
-      : `${result.duplicate ? 'งานนี้อยู่ในรายการค้างแล้วครับ' : '↩️ ย้ายกลับเป็นงานค้างแล้วครับ'}\n${label} — ${result.task_title ?? resolved.task.title}`;
+      ? `${allDuplicate ? 'งานที่ระบุเสร็จอยู่แล้วครับ' : results.length === 1 ? '✅ ติ๊กว่าเสร็จแล้วครับ' : `✅ ติ๊กว่าเสร็จ ${results.length} งานแล้วครับ`}\n${lines.join('\n')}\nประวัติยังอยู่ในหลังบ้าน และ${results.length === 1 ? 'งานนี้' : 'งานที่ระบุ'}จะไม่ถูกรวมในงานค้าง`
+      : `${allDuplicate ? 'งานที่ระบุอยู่ในรายการค้างแล้วครับ' : results.length === 1 ? '↩️ ย้ายกลับเป็นงานค้างแล้วครับ' : `↩️ ย้าย ${results.length} งานกลับเป็นงานค้างแล้วครับ`}\n${lines.join('\n')}`;
     await storeReply(input.messageId, null, reply);
     return reply;
   }

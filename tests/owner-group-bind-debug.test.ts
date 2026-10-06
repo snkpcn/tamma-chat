@@ -1,4 +1,3 @@
-process.env.SNK_OS_PRIVATE_WEBHOOK_URL='https://snk-life-os-final-stable2.vercel.app/api/line/snk-money';
 // URGENT LINE GROUP BIND DEBUG: owner reported typing "ผูกทีม เจ้าของ"/
 // "ผูกทีม owner"/"ผูกทีม admin" in a newly-created LINE group with no bot
 // response at all. Investigation (see THONGTHAI_HANDOFF.md's "Owner Group
@@ -122,9 +121,11 @@ test('5. LINE reply-send failure: logged safely (redacted), webhook still return
 
   global.fetch = (async (url: string | URL, init?: RequestInit) => {
     const href = String(url);
-    if(href===process.env.SNK_OS_PRIVATE_WEBHOOK_URL) {
-      const body=JSON.parse(String(init?.body ?? '{}'));
-      return new Response(JSON.stringify({ok:true,statuses:body.groups.map((_group:unknown,index:number)=>({index,status:'NONE'}))}),{status:200});
+    if (href.includes('/api/line/snk-money')) {
+      const request = JSON.parse(String(init?.body ?? '{}')) as { action?: string; groups?: unknown[] };
+      assert.equal(request.action, 'probe');
+      return new Response(JSON.stringify({ ok:true, statuses:(request.groups ?? []).map((_group,index) => ({ index,status:'NONE' })) }),
+        { status:200,headers:{'Content-Type':'application/json'} });
     }
     if (href.includes('api.line.me/v2/bot/message/reply')) {
       return new Response('rate limited', { status: 429 });
