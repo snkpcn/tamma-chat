@@ -31,9 +31,11 @@ export async function handleOwnerApiCostQuestion(input:{targetId:string;text:str
   const mentionsApi=/(?:api|openai|โอเพนเอไอ|เอไอ|ai)/iu.test(input.text);
   const costQuestion=/(?:ค่า|ใช้ไป|เสียไป|กี่บาท|เท่าไหร่|เท่าไร|เหลือ|balance|เครดิต)/iu.test(input.text);
   const shortTodayCost=/(?:วันนี้|เดือนนี้)\s*(?:ใช้|เสีย|หมด|จ่าย)?\s*(?:ไป)?\s*(?:กี่บาท|เท่าไหร่|เท่าไร)/u.test(input.text);
-  if(!(mentionsApi&&costQuestion)&&!shortTodayCost)return null;
+  const groupSummary=/^(?:@?ทองไทย\s*)?(?:สรุปมา|สรุปให้หน่อย|สรุปวันนี้|ตอนนี้ถึงไหนแล้ว|วันนี้เป็นไง)(?:ครับ|หน่อย)?$/u.test(input.text.trim());
+  if(!(mentionsApi&&costQuestion)&&!shortTodayCost&&!groupSummary)return null;
   const team=await boundLineOpsTeam(input.targetId);
   if(team!=='owner_general'&&team!=='ai_cost')return null;
+  if(groupSummary&&team!=='ai_cost')return null;
   if(!cfg())return 'ตอนนี้อ่านข้อมูลค่า API จากหลังบ้านไม่ได้ครับ จึงยังยืนยันยอดวันนี้หรือยอดคงเหลือไม่ได้';
   const now=input.now??new Date(),today=localDate(now),bounds=dayBounds(today),monthStart=dayBounds(`${today.slice(0,7)}-01`).start;
   const [rows,lastSuccess]=await Promise.all([
