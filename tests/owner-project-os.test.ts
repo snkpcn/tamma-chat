@@ -237,13 +237,22 @@ test('group summary reads current project task and receipt data from its group b
     const rows=path.endsWith('/ops_notification_channels')?[{team_code:'owner_general'}]
       :path.endsWith('/owner_projects')?[{id:'p1',name:'เฉลียงไม้',project_code:'PJ-1'}]
       :path.endsWith('/owner_project_tasks')?[{id:'t1',project_id:'p1',title:'แปรรูปไม้',task_kind:'one_time',status:'todo',due_on:null,responsible_name:'ช่างชล'}]
-      :path.endsWith('/financial_owner_expense_intakes')?[{id:'e1',owner_project_id:'p1',occurred_on:'2026-10-06',amount:'1000',purpose_raw:'ค่าแปรรูปไม้',evidence_message_id:'m1'}]
+      :path.endsWith('/financial_owner_expense_intakes')?[
+        {id:'e1',owner_project_id:'p1',occurred_on:'2026-10-06',amount:'1000',purpose_raw:'ค่าแปรรูปไม้',status:'categorized',evidence_message_id:'m1'},
+        {id:'e2',owner_project_id:null,occurred_on:'2026-10-06',amount:'50000',purpose_raw:'ค่าก่อสร้างครัว ตำมาชาติ',status:'categorized',evidence_message_id:'m2'},
+        {id:'e3',owner_project_id:null,occurred_on:'2026-10-06',amount:'50000',purpose_raw:'ค่าก่อสร้างงวดสอง',status:'categorized',evidence_message_id:'m3'},
+      ]
       :[];
     return new Response(JSON.stringify(rows),{status:200});
   }) as typeof fetch;
   try{
     const summary=await handleOwnerProjectQuery({targetId:'owner-group-1',text:'สรุปมา',timestamp:Date.parse('2026-10-06T06:00:00Z')});
     assert.match(summary??'',/เฉลียงไม้/u);assert.match(summary??'',/ค่าแปรรูปไม้ · 1,000 บาท/u);
+    assert.match(summary??'',/รายจ่ายที่บันทึกในกลุ่ม: 101,000 บาท/u);
+    assert.match(summary??'',/ค่าก่อสร้างครัว ตำมาชาติ · 50,000 บาท — ยังไม่ผูกโครงการ/u);
+    const projectSpend=await handleOwnerProjectQuery({targetId:'owner-group-1',text:'ยอดโครงการเท่าไหร่แล้ว',timestamp:Date.parse('2026-10-06T06:00:00Z')});
+    assert.match(projectSpend??'',/จ่ายแล้วที่ผูกกับโครงการ: 1,000 บาท/u);
+    assert.doesNotMatch(projectSpend??'',/50,000|101,000/u);
     const pending=await handleOwnerProjectQuery({targetId:'owner-group-1',text:'มีอะไรค้าง',timestamp:Date.parse('2026-10-06T06:00:00Z')});
     assert.match(pending??'',/ค้าง\/เลยกำหนด\/ต้องตาม/u);assert.match(pending??'',/แปรรูปไม้/u);
     for(const text of ['มีงานค้างไหม','มีงานค้างมั้ย','มีงานอะไรค้างรึป่าว','ตอนนี้มีอะไรต้องทำ','เหลืองานอะไรบ้าง']){
