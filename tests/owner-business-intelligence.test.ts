@@ -5,6 +5,8 @@ import {
   buildInvestmentSnapshot,
   buildSalesSnapshot,
   classifyOwnerBusinessQuestion,
+  matchOwnerProjectQuery,
+  renderOwnerProjectSpend,
   renderInvestmentSnapshot,
   renderSalesSnapshot,
 } from '../netlify/functions/_owner-business-intelligence';
@@ -34,6 +36,46 @@ test('owner questions understand natural investment and sales wording without st
     null,
     'typed investment writes must continue to the intake handler',
   );
+});
+
+test('Owner asks project spend by a unique short project name and only linked rows are included', () => {
+  const intent = classifyOwnerBusinessQuestion('โครงการไม้ยอดจ่ายเท่าไหร่');
+  assert.equal(intent?.investment, true);
+  assert.equal(intent?.projectNameQuery, 'ไม้');
+
+  const projects = [
+    { id: 'wood-project', name: 'เฉลียงไม้', status: 'active', budget_amount: 10_000 },
+    { id: 'cancelled-wood', name: 'โรงไม้เก่า', status: 'cancelled', budget_amount: 0 },
+  ];
+  const match = matchOwnerProjectQuery(intent!.projectNameQuery!, projects);
+  assert.equal(match.kind, 'matched');
+  if (match.kind !== 'matched') return;
+
+  const snapshot = buildInvestmentSnapshot({
+    manual: [],
+    slips: [
+      { id: 'slip-wood', occurred_on: '2026-10-06', purpose_raw: 'ค่าแปรรูปไม้', expense_category: 'construction', amount: 1_000, status: 'needs_review', owner_project_id: 'wood-project' },
+      { id: 'slip-other', occurred_on: '2026-10-06', purpose_raw: 'ค่าปรับปรุง', expense_category: 'construction', amount: 9_000, status: 'categorized', owner_project_id: 'other-project' },
+    ],
+    legacy: [{ source_id: 'legacy-kitchen', occurred_on: '2026-09-26', title: 'ก่อสร้างครัว', amount: 100_000, budget_amount: 300_000, status: 'ชำระแล้ว' }],
+    adjustments: [],
+  });
+  const answer = renderOwnerProjectSpend(match.project, snapshot);
+  assert.match(answer, /โครงการ เฉลียงไม้/u);
+  assert.match(answer, /ยอดจ่ายแล้ว: 1,000 บาท/u);
+  assert.match(answer, /งบโครงการ: 10,000 บาท · เหลือตามงบ: 9,000 บาท/u);
+  assert.doesNotMatch(answer, /ค่าปรับปรุง/u);
+  assert.doesNotMatch(answer, /100,000/u);
+  assert.match(answer, /รอตรวจหมวด\/กิจการ/u);
+});
+
+test('short project query asks for the full name when more than one active project matches', () => {
+  assert.equal(classifyOwnerBusinessQuestion('โครงการไม้จ่ายแล้วเท่าไหร่')?.projectNameQuery, 'ไม้');
+  const match = matchOwnerProjectQuery('ไม้', [
+    { id: 'porch', name: 'เฉลียงไม้', status: 'active' },
+    { id: 'yard', name: 'ลานไม้', status: 'active' },
+  ]);
+  assert.equal(match.kind, 'ambiguous');
 });
 
 test('canonical investment answer keeps kitchen actual at 100,000 and treats the 50,000 slip as evidence', () => {
@@ -120,6 +162,9 @@ test('today sales answer covers all five businesses and labels draft or missing 
 
 test('sales source contract matches the executive dashboard and remains owner-group only', () => {
   const source = readFileSync('netlify/functions/_owner-business-intelligence.ts', 'utf8');
+  assert.match(source, /owner_projects\?status=neq\.cancelled&select=id,name,status,budget_amount/u);
+  assert.match(source, /owner_project_id/);
+  assert.match(source, /renderOwnerProjectSpend/);
   assert.match(source, /financial_daily_close_owner_v2\?business_unit_code=eq\.inthanin/);
   assert.match(source, /environment=eq\.live/);
   assert.match(source, /status=neq\.void/);

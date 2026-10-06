@@ -263,7 +263,7 @@ function isMotherConversation(text: string): boolean {
 }
 
 function isReadOnlyQuestion(text: string): boolean {
-  return /(?:ยอดขาย|ลงทุนไป|จ่ายไป|ใช้ไป|คงเหลือ|เหลือเท่าไหร่|เท่าไหร่แล้ว|สรุป.*ลงทุน|ลงทุน.*อะไรบ้าง)/u.test(text);
+  return /(?:ยอดขาย|ยอดจ่าย|จ่ายแล้ว|ลงทุนไป|จ่ายไป|ใช้จริง|ใช้ไป|คงเหลือ|เหลือเท่าไหร่|เท่าไหร่แล้ว|สรุป.*ลงทุน|ลงทุน.*อะไรบ้าง)/u.test(text);
 }
 
 export function classifyOwnerProjectStart(rawText: string): OwnerProjectIntent | null {
@@ -571,6 +571,7 @@ export async function handleOwnerProjectText(input: {
   const explicitlyAddressed = /(?:ทองไทย|@ทองไทย)/u.test(text);
 
   if (isMotherConversation(text) && !explicitlyAddressed) return null;
+  if (isReadOnlyQuestion(text)) return null;
 
   let preview: { data: OwnerProjectDraftData; changed: boolean } | null = null;
   if (draft?.status === 'collecting' && (recent || explicitlyAddressed || isResume(text))) {
