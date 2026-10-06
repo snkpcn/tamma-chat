@@ -256,10 +256,13 @@ async function existingIntakeByImage(groupHash: string, sha256: string): Promise
   return (await response.json() as OwnerExpenseIntake[])[0] ?? null;
 }
 
-async function pendingIntakes(groupHash: string): Promise<OwnerExpenseIntake[]> {
+async function pendingIntakes(groupHash: string, includeNeedsReview = false): Promise<OwnerExpenseIntake[]> {
+  const statuses = includeNeedsReview
+    ? 'in.(awaiting_purpose,awaiting_business,needs_review)'
+    : PENDING_STATUSES;
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
-    + '&status=' + PENDING_STATUSES
+    + '&status=' + statuses
     + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
     + '&order=created_at.asc&limit=12',
   );
@@ -467,6 +470,11 @@ function referenceFromText(text: string): { code: string | null; purpose: string
 
 function isNotExpense(text: string): boolean {
   return /^(?:ไม่ใช่ค่าใช้จ่าย|ไม่ใช่สลิป|ยกเลิกรายการ|ยกเลิก)$/iu.test(normalizeText(text));
+}
+
+export function isOwnerExpenseClassificationReply(rawText: string): boolean {
+  const text = normalizeText(rawText).replace(/[.!?。！？]+$/u, '').trim();
+  return /^(?:(?:เป็น|จัดเป็น)\s*)?(?:(?:หมวด|กิจการ|ของ(?:กิจการ)?)\s*)?(?:ส่วนกลาง|โครงสร้างพื้นฐาน|ใช้ร่วม(?:หลายกิจการ)?|อินทนิล|inthanin|ตำมา[\s-]*ชาติ|ตํามา[\s-]*ชาติ|เฮือนสเตย์|huenstay|ผจญภัย|adventure|otop|โอทอป)\s*(?:ครับ|ค่ะ|คับ|นะครับ|นะคะ)?$/iu.test(text);
 }
 
 function isPurposeNoise(text: string): boolean {
@@ -736,7 +744,8 @@ export async function handleOwnerExpenseText(input: {
   if (typedReply) return typedReply;
 
   const reference = referenceFromText(text);
-  const allRows = await pendingIntakes(groupHash);
+  const classificationReply = isOwnerExpenseClassificationReply(text);
+  const allRows = await pendingIntakes(groupHash, classificationReply);
   if (!allRows.length) return null;
   const actorHash = piiHash(input.userId) ?? '';
   // Without an explicit #code, only continue the sender's own pending slip.
@@ -771,6 +780,39 @@ export async function handleOwnerExpenseText(input: {
     return [
       '📁 Owner Expense — ทำเครื่องหมายว่าไม่ใช่ค่าใช้จ่ายแล้วครับ',
       'หลักฐานและประวัติเดิมยังเก็บอยู่ในหลังบ้าน ไม่ลบข้อมูลครับ',
+    ].join('\n');
+  }
+
+  if (intake.status === 'needs_review' && classificationReply) {
+    const classification = classifyOwnerExpensePurpose(
+      normalizeText([intake.purpose_raw, purpose].filter(Boolean).join(' ')),
+    );
+    if (!classification.businessUnit) {
+      return 'ยังจับคู่หมวดกิจการไม่ได้ครับ ช่วยพิมพ์ชื่อให้ชัด เช่น “ส่วนกลาง” ครับ';
+    }
+    const expenseClass = intake.expense_class ?? classification.expenseClass;
+    const expenseCategory = intake.expense_category ?? classification.expenseCategory;
+    const expenseSubcategory = intake.expense_subcategory ?? classification.expenseSubcategory;
+    const result = await rpc<ResolveResult>('financial_reclassify_owner_expense_from_line_v1', {
+      p_intake_id: intake.id,
+      p_business_unit_code: classification.businessUnit,
+      p_expense_class: expenseClass,
+      p_expense_category: expenseCategory,
+      p_expense_subcategory: expenseSubcategory,
+      p_user_hash: actorHash,
+      p_message_id: input.messageId,
+    });
+    if (result.duplicate) return '📁 คำยืนยันหมวดนี้บันทึกไว้แล้วครับ ไม่ได้เพิ่มยอดซ้ำ';
+    return [
+      '✅ รับทราบครับ อัปเดตรายการเดิมแล้ว ไม่ได้เพิ่มยอดซ้ำ',
+      'รายการ: ' + (intake.purpose_raw || 'ค่าใช้จ่าย'),
+      'ยอด: ' + (intake.amount === null ? 'รอตรวจจากหลักฐาน' : money(intake.amount)),
+      'กิจการ/ส่วน: ' + businessLabel(result.business_unit_code ?? classification.businessUnit),
+      'หมวดค่าใช้จ่าย: ' + classLabel(result.expense_class ?? expenseClass)
+        + ' · ' + categoryLabel(result.expense_category ?? expenseCategory),
+      result.status === 'needs_review'
+        ? 'รายการยังอยู่ในคิวตรวจหมวดค่าใช้จ่ายครับ'
+        : 'หลักฐานเดิมและโครงการที่ผูกไว้ยังอยู่ในรายการเดิมครับ',
     ].join('\n');
   }
 
