@@ -5,6 +5,7 @@ import {
   buildInvestmentSnapshot,
   buildSalesSnapshot,
   classifyOwnerBusinessQuestion,
+  handleOwnerBusinessQuestion,
   matchOwnerProjectQuery,
   renderOwnerProjectSpend,
   renderInvestmentSnapshot,
@@ -76,6 +77,43 @@ test('short project query asks for the full name when more than one active proje
     { id: 'yard', name: 'ลานไม้', status: 'active' },
   ]);
   assert.equal(match.kind, 'ambiguous');
+});
+
+test('Owner LINE project spend question reads the linked Production-shaped expense row', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.SUPABASE_URL;
+  const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = 'https://supabase.test';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role';
+  const projectId = '11e56d02-3bf8-4fe4-be9b-64254d1e0249';
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL(String(input)).pathname.split('/').at(-1);
+    const rows: Record<string, unknown[]> = {
+      ops_notification_channels: [{ id: 'owner-channel', team_code: 'owner_general', target_type: 'group', target_id_enc: 'ciphertext', target_id_hash: 'hash', display_name: 'Owner', enabled: true }],
+      financial_investment_entries: [],
+      financial_owner_expense_intakes: [{
+        id: 'a2a6412b-f08f-424a-be1f-950151f37110', occurred_on: '2026-10-06', business_unit_code: 'other',
+        purpose_raw: 'จ่ายค่าแปรรูปไม้ ของโครงการเฉลียงไม้', expense_category: 'construction', amount: '1000.00',
+        vendor_label: null, status: 'needs_review', created_at: '2026-10-06T01:30:44Z', owner_project_id: projectId,
+      }],
+      financial_investment_legacy_v1: [],
+      financial_investment_legacy_adjustment_audit_events: [],
+      owner_projects: [{ id: projectId, name: 'เฉลียงไม้', status: 'active', budget_amount: null }],
+    };
+    return new Response(JSON.stringify(rows[path ?? ''] ?? []), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    const reply = await handleOwnerBusinessQuestion({ targetId: 'Cowner-project-spend-test', text: 'โครงการไม้ยอดจ่ายเท่าไหร่' });
+    assert.match(reply ?? '', /โครงการ เฉลียงไม้/u);
+    assert.match(reply ?? '', /ยอดจ่ายแล้ว: 1,000 บาท/u);
+    assert.match(reply ?? '', /จ่ายค่าแปรรูปไม้ ของโครงการเฉลียงไม้ · 1,000 บาท · รอตรวจหมวด\/กิจการ/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+  }
 });
 
 test('canonical investment answer keeps kitchen actual at 100,000 and treats the 50,000 slip as evidence', () => {
