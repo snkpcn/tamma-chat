@@ -13,6 +13,10 @@ const bulkMigration = readFileSync(
   'supabase/migrations/20261006081244_owner_project_bulk_tasks_v1.sql',
   'utf8',
 );
+const multiStateMigration = readFileSync(
+  'supabase/migrations/20261006102000_owner_project_multi_task_state_v1.sql',
+  'utf8',
+);
 
 async function database(): Promise<PGlite> {
   const db = new PGlite();
@@ -34,6 +38,7 @@ async function database(): Promise<PGlite> {
   `);
   await db.exec(baseMigration);
   await db.exec(bulkMigration);
+  await db.exec(multiStateMigration);
   return db;
 }
 
@@ -162,4 +167,38 @@ test('new bulk and LINE state RPCs are service-role only', async () => {
   } finally {
     await db.close();
   }
+});
+
+test('one LINE message completes two tasks atomically, respects group boundaries, and retains audit history',async()=>{
+  assert.doesNotMatch(multiStateMigration,/drop\s+table|delete\s+from/iu);
+  const db=await database();
+  try{
+    const draftId=await addBulkDraft(db);
+    const confirmed=await db.query<{result:any}>('select public.owner_project_confirm_bulk_tasks_v1($1,$2,$3) as result',[draftId,'bulk-confirm-two','b'.repeat(64)]);
+    const ids=confirmed.rows[0]!.result.tasks.map((row:any)=>row.id);
+    const first=await db.query<{result:any}>('select public.owner_project_set_task_states_from_line_v1($1::uuid[],$2,$3,$4,$5) as result',[[ids[2],ids[3]],'a'.repeat(64),'done','b'.repeat(64),'multi-done']);
+    assert.equal(first.rows[0]!.result.changed_count,2);
+    assert.deepEqual(first.rows[0]!.result.tasks.map((row:any)=>row.batch_position),[3,4]);
+    const statuses=await db.query<{source_batch_position:number;status:string}>('select source_batch_position::int,status from public.owner_project_tasks order by source_batch_position');
+    assert.deepEqual(statuses.rows.map(row=>row.status),['todo','todo','done','done']);
+
+    const retry=await db.query<{result:any}>('select public.owner_project_set_task_states_from_line_v1($1::uuid[],$2,$3,$4,$5) as result',[[ids[2],ids[3]],'a'.repeat(64),'done','b'.repeat(64),'multi-done']);
+    assert.equal(retry.rows[0]!.result.changed_count,0);
+    assert.deepEqual(retry.rows[0]!.result.tasks.map((row:any)=>row.duplicate),[true,true]);
+    const audit=await db.query<{n:number}>(`select count(*)::int as n from public.owner_project_audit_events where action='status_changed' and message_id='multi-done'`);
+    assert.equal(audit.rows[0]!.n,2);
+
+    await assert.rejects(db.query('select public.owner_project_set_task_states_from_line_v1($1::uuid[],$2,$3,$4,$5)',[[ids[0],ids[1]],'wrong-group'.repeat(6),'done','b'.repeat(64),'wrong-group']),/owner_project_task_not_found_for_group/u);
+    await assert.rejects(db.query('select public.owner_project_set_task_states_from_line_v1($1::uuid[],$2,$3,$4,$5)',[[ids[0],'00000000-0000-0000-0000-000000000001'],'a'.repeat(64),'done','b'.repeat(64),'second-missing']),/owner_project_task_not_found_for_group/u);
+    const otherGroup=await db.query<{n:number}>(`select count(*)::int as n from public.owner_project_tasks where status='todo'`);
+    assert.equal(otherGroup.rows[0]!.n,2);
+    await assert.rejects(db.query('select public.owner_project_set_task_states_from_line_v1($1::uuid[],$2,$3,$4,$5)',[[ids[0],ids[0]],'a'.repeat(64),'done','b'.repeat(64),'duplicate-ids']),/duplicate_or_null_owner_project_task_id/u);
+    const privileges=await db.query<{anon:boolean;authenticated:boolean;service:boolean}>(`
+      select
+      has_function_privilege('anon','public.owner_project_set_task_states_from_line_v1(uuid[],text,text,text,text)','execute') as anon,
+      has_function_privilege('authenticated','public.owner_project_set_task_states_from_line_v1(uuid[],text,text,text,text)','execute') as authenticated,
+      has_function_privilege('service_role','public.owner_project_set_task_states_from_line_v1(uuid[],text,text,text,text)','execute') as service
+    `);
+    assert.deepEqual(privileges.rows[0],{anon:false,authenticated:false,service:true});
+  }finally{await db.close()}
 });
