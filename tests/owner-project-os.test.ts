@@ -111,6 +111,10 @@ test('group summary reads current project task and receipt data from its group b
     assert.match(summary??'',/เฉลียงไม้/u);assert.match(summary??'',/ค่าแปรรูปไม้ · 1,000 บาท/u);
     const pending=await handleOwnerProjectQuery({targetId:'owner-group-1',text:'มีอะไรค้าง',timestamp:Date.parse('2026-10-06T06:00:00Z')});
     assert.match(pending??'',/ค้าง\/เลยกำหนด\/ต้องตาม/u);assert.match(pending??'',/แปรรูปไม้/u);
+    for(const text of ['มีงานค้างไหม','มีงานค้างมั้ย','มีงานอะไรค้างรึป่าว','ตอนนี้มีอะไรต้องทำ','เหลืองานอะไรบ้าง']){
+      const natural=await handleOwnerProjectQuery({targetId:'owner-group-1',text,timestamp:Date.parse('2026-10-06T06:00:00Z')});
+      assert.match(natural??'',/แปรรูปไม้/u,`must understand natural owner query: ${text}`);
+    }
     assert.ok(paths.some(path=>path.includes('/owner_project_task_checkins?')));
     assert.ok(paths.some(path=>path.includes('/financial_owner_expense_intakes?owner_group_hash=')));
   }finally{globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey}
