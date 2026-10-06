@@ -135,6 +135,8 @@ test('owner asks API cost at any time: replies from live usage ledger and never 
     assert.match(answer??'',/เดือนนี้สะสมประมาณ 1\.00 บาท/u);
     assert.match(answer??'',/ระบบอ่านยอดเครดิตคงเหลือจริงผ่าน API ที่รองรับไม่ได้/u);
     assert.equal(harness.postsTo('line_push').length,0);
+    const shortAnswer=await handleOwnerApiCostQuestion({targetId:'owner-api-query-group',text:'วันนี้ใช้กี่บาท',now:new Date('2026-10-06T05:00:00.000Z')});
+    assert.match(shortAnswer??'',/วันนี้ใช้ประมาณ 0\.25 บาท/u);
   });
 });
 

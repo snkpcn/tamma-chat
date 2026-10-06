@@ -293,7 +293,7 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const [tasks, installments, intakes, ledger] = await Promise.all([
     dbFetch('owner_project_tasks?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,title,task_kind,status,due_on,responsible_name&order=due_on.asc.nullslast&limit=300').then(r => r.json() as Promise<SummaryTask[]>),
     dbFetch('owner_project_installments?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,title,amount,due_on,status&order=due_on.asc.nullslast&limit=300').then(r => r.json() as Promise<SummaryInstallment[]>),
-    dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=neq.cancelled&select=id,owner_project_id,occurred_on,amount,purpose_raw,evidence_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; purpose_raw:string; evidence_message_id:string|null }>>),
+    dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=neq.cancelled&select=id,owner_project_id,occurred_on,amount,purpose_raw,status,evidence_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; purpose_raw:string; status:string; evidence_message_id:string|null }>>),
     dbFetch('financial_investment_entries?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=eq.recorded&select=id,owner_project_id,occurred_on,amount,title,source_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; title:string; source_message_id:string|null }>>),
   ]);
   const today = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Bangkok', year:'numeric', month:'2-digit', day:'2-digit' }).format(input.timestamp ?? Date.now());
@@ -312,7 +312,8 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const ownerWait = tasks.filter(row => /(?:รอเจ้าของ|รอยืนยัน|รออนุมัติ|owner approval)/iu.test(row.title));
   const due = installments.filter(row => !/^(?:paid|cancelled)$/iu.test(row.status));
   const ledgerSources = new Set(ledger.map(row => row.source_message_id).filter(Boolean));
-  const receipts = intakes.filter(row => !row.evidence_message_id || !ledgerSources.has(row.evidence_message_id));
+  const pendingReceipts = intakes.filter(row => row.status !== 'categorized');
+  const receipts = intakes.filter(row => row.status === 'categorized' && (!row.evidence_message_id || !ledgerSources.has(row.evidence_message_id)));
   const expenses = [...ledger.map(row => ({name:row.title,amount:Number(row.amount||0),date:row.occurred_on})), ...receipts.map(row => ({name:row.purpose_raw,amount:Number(row.amount||0),date:row.occurred_on}))].sort((a,b) => (b.date||'').localeCompare(a.date||''));
   const total = expenses.reduce((sum,row) => sum + row.amount,0);
   const project = new Map(projects.map(row => [row.id,row.name]));
@@ -329,13 +330,15 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
     for (const [label,rows] of [['✅ เสร็จแล้ว',complete],['🟡 กำลังทำ',active],['⏳ ค้าง/รอดำเนินการ',waiting]] as const) if (rows.length) lines.push('',label,...rows.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title}${row.responsible_name?' — '+row.responsible_name:''}`));
     if (overdue.length) lines.push('','🔴 เลยกำหนด',...overdue.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} — กำหนด ${row.due_on}`));
   }
+  if (!onlyPending && !onlyOwner && pendingReceipts.length) lines.push('','⏳ สลิปที่รอจัดหมวด/ตรวจข้อมูล',...pendingReceipts.slice(0,5).map(row=>`• ${row.purpose_raw||'สลิปรอระบุ'} · ${summaryMoney(Number(row.amount||0))}`));
   if (onlyPending) {
     const late = due.filter(row => row.due_on && row.due_on < today);
     if (late.length) lines.push('','💸 งวดเลยกำหนด',...late.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} ${summaryMoney(Number(row.amount))}`));
   } else if (due.length) lines.push('','💸 งวดที่ยังจ่าย',...due.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} ${summaryMoney(Number(row.amount))}${row.due_on?' — '+row.due_on:''}`));
   if (onlySpend || (!onlyPending && expenses.length)) {
     lines.push('','💰 จ่ายแล้วตามรายการที่บันทึก: '+summaryMoney(total),...expenses.slice(0,5).map(row=>`• ${row.name} · ${summaryMoney(row.amount)}`));
-    if (!expenses.length) lines.push('• หลังบ้านยังไม่มีรายการจ่ายที่ผูกกับโครงการนี้ครับ');
+    if (!expenses.length) lines.push('• หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการนี้ครับ');
+    if (pendingReceipts.length) lines.push(`• มีสลิปรอจัดหมวด/ตรวจข้อมูลอีก ${pendingReceipts.length} รายการ ไม่รวมในยอดจ่ายยืนยัน`);
   }
   if (!complete.length && !active.length && !waiting.length && !overdue.length && !due.length && !expenses.length) lines.push('ยังไม่มีงานค้าง งวดจ่าย หรือรายจ่ายที่บันทึกของกลุ่มนี้ครับ');
   return lines.join('\n');

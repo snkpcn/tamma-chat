@@ -28,7 +28,10 @@ async function get<T>(path:string):Promise<T[]>{
   return await r.json() as T[];
 }
 export async function handleOwnerApiCostQuestion(input:{targetId:string;text:string;now?:Date}):Promise<string|null>{
-  if(!/(?:api|openai|โอเพนเอไอ|เอไอ|ai)/iu.test(input.text)||!/(?:ค่า|ใช้ไป|เสียไป|กี่บาท|เท่าไหร่|เท่าไร|เหลือ|balance|เครดิต)/iu.test(input.text))return null;
+  const mentionsApi=/(?:api|openai|โอเพนเอไอ|เอไอ|ai)/iu.test(input.text);
+  const costQuestion=/(?:ค่า|ใช้ไป|เสียไป|กี่บาท|เท่าไหร่|เท่าไร|เหลือ|balance|เครดิต)/iu.test(input.text);
+  const shortTodayCost=/(?:วันนี้|เดือนนี้)\s*(?:ใช้|เสีย|หมด|จ่าย)?\s*(?:ไป)?\s*(?:กี่บาท|เท่าไหร่|เท่าไร)/u.test(input.text);
+  if(!(mentionsApi&&costQuestion)&&!shortTodayCost)return null;
   const team=await boundLineOpsTeam(input.targetId);
   if(team!=='owner_general'&&team!=='ai_cost')return null;
   if(!cfg())return 'ตอนนี้อ่านข้อมูลค่า API จากหลังบ้านไม่ได้ครับ จึงยังยืนยันยอดวันนี้หรือยอดคงเหลือไม่ได้';
