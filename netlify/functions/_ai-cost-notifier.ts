@@ -48,10 +48,16 @@ export async function handleOwnerApiCostQuestion(input:{targetId:string;text:str
   for(const row of todayRows)channels.set(row.channel||'unknown',(channels.get(row.channel||'unknown')??0)+n(row.cost_thb));
   const highest=[...channels.entries()].sort((a,b)=>b[1]-a[1])[0];
   const labels:Record<string,string>={line:'LINE',web:'เว็บไซต์',facebook:'Messenger',messenger:'Messenger',unknown:'ไม่ทราบช่องทาง'};
+  const personTotals=new Map<string,number>();
+  for(const row of rows)personTotals.set(row.conversation_id,(personTotals.get(row.conversation_id)??0)+n(row.cost_thb));
+  const personIds=[...personTotals.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id])=>id);
+  const personLabels=await resolveAiCostPersonLabels(personIds);
+  const personLines=buildAiCostPersonLines(rows,todayRows,personIds,personLabels);
   return [
     '💰 ค่าใช้จ่าย AI/API จากข้อมูลหลังบ้านครับ',
     `วันนี้ใช้ประมาณ ${baht(total(todayRows))} บาท (${todayRows.length} ครั้ง)`,
     `เดือนนี้สะสมประมาณ ${baht(total(rows))} บาท`,
+    ...(personLines.length?['รายคน (เดือนนี้ · วันนี้)',...personLines,...(personTotals.size>personIds.length?[`อีก ${personTotals.size-personIds.length} คน ดูรายละเอียดในสรุปรายวัน`]:[])]:[]),
     highest?`ช่องทางที่ใช้สูงสุดวันนี้: ${labels[highest[0]]??highest[0]} · ${baht(highest[1])} บาท`:'วันนี้ยังไม่มีการใช้ API ที่บันทึกไว้',
     lastSuccess[0]?.occurred_at?`เรียกสำเร็จล่าสุด: ${thaiDateTime(lastSuccess[0].occurred_at)}`:'ยังไม่มีการเรียกสำเร็จที่บันทึกไว้',
     'ยอดเป็นค่าประเมินจาก usage ledger; ระบบอ่านยอดเครดิตคงเหลือจริงผ่าน API ที่รองรับไม่ได้ครับ',
@@ -211,7 +217,7 @@ export function buildAiCostPersonLines(
       const person=item.label
         ?`${item.label} · ${shortPersonCode(item.conversationId)}`
         :`บุคคล ${shortPersonCode(item.conversationId)}`;
-      return `• ${person} — เดือนนี้ ${baht(item.monthCost)} บาท · เมื่อวาน ${baht(item.dayCost)} บาท`;
+      return `• ${person} — เดือนนี้ ${baht(item.monthCost)} บาท · วันนี้ ${baht(item.dayCost)} บาท`;
     });
 }
 

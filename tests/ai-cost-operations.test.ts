@@ -81,8 +81,8 @@ test('daily AI cost breakdown reports stable per-person THB totals without expos
     new Map([[personA,'คุณสมชาย']]),
   );
   assert.deepEqual(lines,[
-    '• บุคคล D27492 — เดือนนี้ 0.50 บาท · เมื่อวาน 0.50 บาท',
-    '• คุณสมชาย · 4B7C01 — เดือนนี้ 0.35 บาท · เมื่อวาน 0.15 บาท',
+    '• บุคคล D27492 — เดือนนี้ 0.50 บาท · วันนี้ 0.50 บาท',
+    '• คุณสมชาย · 4B7C01 — เดือนนี้ 0.35 บาท · วันนี้ 0.15 บาท',
   ]);
   assert.doesNotMatch(lines.join('\n'),/f83b8a2d|167a3909/i);
 });
@@ -133,6 +133,8 @@ test('owner asks API cost at any time: replies from live usage ledger and never 
     const answer=await handleOwnerApiCostQuestion({targetId:'owner-api-query-group',text:'ค่า API วันนี้เท่าไหร่',now:new Date('2026-10-06T05:00:00.000Z')});
     assert.match(answer??'',/วันนี้ใช้ประมาณ 0\.25 บาท/u);
     assert.match(answer??'',/เดือนนี้สะสมประมาณ 1\.00 บาท/u);
+    assert.match(answer??'',/บุคคล C1 — เดือนนี้ 0\.25 บาท · วันนี้ 0\.25 บาท/u);
+    assert.match(answer??'',/บุคคล C2 — เดือนนี้ 0\.75 บาท · วันนี้ 0\.00 บาท/u);
     assert.match(answer??'',/ระบบอ่านยอดเครดิตคงเหลือจริงผ่าน API ที่รองรับไม่ได้/u);
     assert.equal(harness.postsTo('line_push').length,0);
     const shortAnswer=await handleOwnerApiCostQuestion({targetId:'owner-api-query-group',text:'วันนี้ใช้กี่บาท',now:new Date('2026-10-06T05:00:00.000Z')});
@@ -149,6 +151,8 @@ test('short สรุปมา in the bound AI cost group reads current cost led
     const answer=await handleOwnerApiCostQuestion({targetId:'ai-cost-summary-group',text:'สรุปมา',now:new Date('2026-10-06T05:00:00.000Z')});
     assert.match(answer??'',/วันนี้ใช้ประมาณ 0\.25 บาท/u);
     assert.match(answer??'',/เดือนนี้สะสมประมาณ 0\.25 บาท/u);
+    assert.match(answer??'',/รายคน \(เดือนนี้ · วันนี้\)/u);
+    assert.match(answer??'',/บุคคล C1 — เดือนนี้ 0\.25 บาท · วันนี้ 0\.25 บาท/u);
     assert.equal(harness.postsTo('line_push').length,0);
   });
 });
