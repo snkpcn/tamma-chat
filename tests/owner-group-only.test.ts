@@ -1,3 +1,4 @@
+process.env.SNK_OS_PRIVATE_WEBHOOK_URL='https://snk-life-os-final-stable2.vercel.app/api/line/snk-money';
 // URGENT: OWNER GROUP ONLY -- OTHER LINE GROUPS WORK, OWNER GROUP IS SILENT.
 //
 // New live evidence this round: an EXISTING, already-bound "activity"
@@ -42,6 +43,10 @@ function installLineReplyCapture(): { restore: () => void; replies: CapturedRepl
   const replies: CapturedReply[] = [];
   global.fetch = (async (url: string | URL, init?: RequestInit) => {
     const href = String(url);
+    if(href===process.env.SNK_OS_PRIVATE_WEBHOOK_URL) {
+      const body=JSON.parse(String(init?.body ?? '{}'));
+      return new Response(JSON.stringify({ok:true,statuses:body.groups.map((_group:unknown,index:number)=>({index,status:'NONE'}))}),{status:200});
+    }
     if (href.includes('api.line.me/v2/bot/message/reply')) {
       const body = JSON.parse(String(init?.body ?? '{}')) as CapturedReply;
       replies.push(body);

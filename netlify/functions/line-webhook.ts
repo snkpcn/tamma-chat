@@ -2,7 +2,7 @@ import type { Handler, HandlerEvent, HandlerResponse } from '@netlify/functions'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handler as coreHandler } from './_line-webhook-core';
 import { registerLineContact } from './_operations-db';
-import { handleLineOpsGroupMessage } from './_ops-notifications';
+import { handleLineOpsGroupMessage, boundLineOpsTeam } from './_ops-notifications';
 import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
 import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
 import { handleStaffBookingPostback, type LineMessage } from './_ops-line-ui';
@@ -28,7 +28,7 @@ import {
   handleSettlementTransferProofPostback,
 } from './_settlement-line-proof';
 import { splitCustomerMessageForLine } from './_chat-copy-style';
-import { routePersonalFinanceEvent } from './_personal-finance';
+import { routePrivateOpsEvents, type PrivateProbe, type PrivateDispatch } from './_snk-private-bridge';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -75,6 +75,31 @@ function verifyLineSignature(rawBody: string, signature: string | undefined, cha
 
 function signInternalBody(rawBody: string, channelSecret: string): string {
   return createHmac('sha256', channelSecret).update(rawBody, 'utf8').digest('base64');
+}
+
+async function postToPrivateOs(body: Record<string, unknown>, channelSecret: string): Promise<Record<string, unknown>> {
+  const endpoint=(process.env.SNK_OS_PRIVATE_WEBHOOK_URL ?? 'https://snk-life-os-final-stable2.vercel.app/api/line/snk-money').trim();
+  if (!endpoint) throw new Error('private_route_not_configured');
+  const url=new URL(endpoint);
+  if (url.protocol!=='https:' || !/^snk-life-os-final-stable2(?:-[a-z0-9-]+)?\.vercel\.app$/u.test(url.hostname) || url.pathname!=='/api/line/snk-money') throw new Error('private_route_invalid_endpoint');
+  const rawBody=JSON.stringify(body);
+  const response=await fetch(endpoint,{
+    method:'POST',headers:{'Content-Type':'application/json','x-line-signature':createHmac('sha256',channelSecret).update(rawBody,'utf8').digest('base64')},
+    body:rawBody,signal:AbortSignal.timeout(body.action==='probe' ? 8_000 : 25_000),
+  });
+  if (!response.ok) throw new Error('private_route_http_'+response.status);
+  const result=await response.json() as Record<string,unknown>;
+  if (result.ok!==true) throw new Error('private_route_bad_response');
+  return result;
+}
+async function routePrivateOsEvents(events: LineWebhookEvent[],secret:string):Promise<Set<number>> {
+  return routePrivateOpsEvents<LineWebhookEvent>(
+    events,
+    async ids=>await postToPrivateOs({action:'probe',groups:ids.map(groupId=>({groupId}))},secret) as PrivateProbe,
+    async id=>Boolean(await boundLineOpsTeam(id)),
+    async candidates=>await postToPrivateOs({events:candidates},secret) as PrivateDispatch,
+    (name,data)=>console.log(name,JSON.stringify(data)),
+  );
 }
 
 /** Stable UUID-shaped anonymous id used everywhere in Thongthai memory. */
@@ -226,11 +251,6 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     text: event.message?.type === 'text' ? safeInboundLogText(event.message.text ?? '') : null,
   }));
 
-  // SNK MONEY (private personal finance): decided BEFORE any business handler.  An ACTIVE finance
-  // group is routed exclusively to the finance channel, so no business handler (owner expense,
-  // payroll, team binding, fuel, ...) can ever read or record its messages, and finance messages
-  // never reach the One-Mind chain.  Disabled (default) => returns false and nothing changes.
-  if (await routePersonalFinanceEvent(event, (token, text) => replyToLine(token, text, accessToken))) return;
 
   if (!event.replyToken) return;
   const targetId = sourceType === 'group' ? event.source?.groupId : event.source?.roomId;
@@ -587,7 +607,14 @@ export const handler: Handler = async (event, context) => {
     return { statusCode: 400, body: 'Invalid JSON' };
   }
 
-  const allEvents = Array.isArray(payload.events) ? payload.events : [];
+  const incomingEvents = Array.isArray(payload.events) ? payload.events : [];
+  let privateHandled: Set<number>;
+  try { privateHandled=await routePrivateOsEvents(incomingEvents,channelSecret); }
+  catch (error) {
+    console.error('SNK_PRIVATE_ROUTE_UNAVAILABLE',error instanceof Error ? error.message.slice(0,120) : 'unknown');
+    return { statusCode:503,headers:{'Cache-Control':'no-store'},body:'Private route unavailable' };
+  }
+  const allEvents=incomingEvents.filter((_item,index)=>!privateHandled.has(index));
   for (const item of allEvents) {
     logEventReceived(item);
     const { route, reason } = classifyRoute(item);
