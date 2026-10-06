@@ -12,6 +12,11 @@ export type OwnerProjectMissingField =
   | 'schedule'
   | 'responsible';
 
+export type OwnerProjectBulkTask = {
+  position: number;
+  title: string;
+};
+
 export type OwnerProjectDraftData = {
   project_name?: string;
   project_purpose?: string;
@@ -28,6 +33,7 @@ export type OwnerProjectDraftData = {
   first_installment_on?: string;
   schedule_text?: string;
   recurrence_weekdays?: number[];
+  bulk_tasks?: OwnerProjectBulkTask[];
   unknown_fields?: OwnerProjectMissingField[];
 };
 
@@ -54,7 +60,20 @@ type ConfirmResult = {
   project_name?: string;
   task_id?: string;
   task_code?: string;
+  task_count?: number;
+  tasks?: Array<{ id: string; task_code: string; title: string; position: number }>;
   installment_count?: number;
+};
+
+type TaskStateResult = {
+  ok?: boolean;
+  duplicate?: boolean;
+  task_id?: string;
+  task_code?: string;
+  task_title?: string;
+  task_status?: 'todo' | 'done';
+  project_name?: string;
+  batch_position?: number | null;
 };
 
 const DASHBOARD_URL = 'https://tamma-backoffice.netlify.app/investments.html';
@@ -115,8 +134,12 @@ async function rpc<T>(name: string, payload: Record<string, unknown>): Promise<T
   return (Array.isArray(raw) ? raw[0] : raw) as T;
 }
 
+function normalizeDigits(value: string): string {
+  return value.replace(/[๐-๙]/g, digit => String('๐๑๒๓๔๕๖๗๘๙'.indexOf(digit)));
+}
+
 function normalizeText(value: string): string {
-  return value.trim().replace(/[๐-๙]/g, digit => String('๐๑๒๓๔๕๖๗๘๙'.indexOf(digit))).replace(/\s+/g, ' ');
+  return normalizeDigits(value).trim().replace(/\s+/g, ' ');
 }
 
 function cleanAnswer(value: string): string {
@@ -125,6 +148,80 @@ function cleanAnswer(value: string): string {
     .replace(/^(?:ตอบ|คำตอบ|คือ)\s*/u, '')
     .replace(/[.。]+$/u, '')
     .trim();
+}
+
+const BULK_TASK_SIGNAL = /(?:งาน(?:ที่)?ค้าง(?:สำหรับ|ของ)?(?:อาทิตย์|สัปดาห์)นี้|งาน(?:สำหรับ|ของ)?(?:อาทิตย์|สัปดาห์)นี้|งานอาทิตย์นี้|งานสัปดาห์นี้|รายการงาน|หลายงาน|หลายอัน)/u;
+
+function cleanBulkTaskTitle(value: string): string {
+  return normalizeText(value)
+    .replace(/^(?:งาน(?:ที่|ลำดับ)\s*|ข้อ\s*)/u, '')
+    .replace(/^[\-–—:：.)\s]+/u, '')
+    .replace(/[.。]+$/u, '')
+    .trim()
+    .slice(0, 240);
+}
+
+/** Parse a LINE message containing several task lines while preserving their order. */
+export function parseOwnerProjectBulkTasks(rawText: string): OwnerProjectBulkTask[] {
+  const normalizedRaw = normalizeDigits(rawText.replace(/\r/g, ''));
+  const lines = normalizedRaw.split('\n').map(line => line.trim()).filter(Boolean);
+  const hasBulkSignal = BULK_TASK_SIGNAL.test(normalizeText(rawText));
+  const tasks: OwnerProjectBulkTask[] = [];
+
+  for (const [lineIndex, originalLine] of lines.entries()) {
+    const line = originalLine.replace(/^(?:@?ทองไทย|น้องทองไทย)[,:：\-–—\s]*/iu, '').trim();
+    if (!line) continue;
+
+    const numbered = line.match(/^(?:งาน\s*)?([0-9]{1,3})(?:\s*[.)\-:：]\s*(.*)|\s+(.+))?$/u);
+    if (numbered) {
+      const itemNumber = Number(numbered[1]);
+      const remainder = (numbered[2] ?? numbered[3] ?? '').trim();
+      const title = remainder
+        ? cleanBulkTaskTitle(remainder)
+        : (/^งาน\s*[0-9]/u.test(line) ? `งาน ${itemNumber}` : '');
+      if (title) tasks.push({ position: tasks.length + 1, title });
+      continue;
+    }
+
+    const bullet = line.match(/^(?:[-*•▪◦]|☐|☑|✅|\[\s?\])\s*(.+)$/u);
+    if (bullet) {
+      const title = cleanBulkTaskTitle(bullet[1]);
+      if (title) tasks.push({ position: tasks.length + 1, title });
+      continue;
+    }
+
+    if (hasBulkSignal && lineIndex > 0
+      && !/^(?:โครงการ|โปรเจ(?:ค|กต์)|กำหนด|ผู้รับผิดชอบ|คนรับผิดชอบ)/iu.test(line)
+      && !BULK_TASK_SIGNAL.test(line)) {
+      const title = cleanBulkTaskTitle(line);
+      if (title) tasks.push({ position: tasks.length + 1, title });
+    }
+  }
+
+  return tasks.slice(0, 40).map((task, index) => ({ ...task, position: index + 1 }));
+}
+
+function parseBulkProjectName(rawText: string): string | null {
+  for (const rawLine of rawText.replace(/\r/g, '').split('\n')) {
+    const line = normalizeText(rawLine);
+    const match = line.match(/(?:ของ\s*)?(?:โครงการ|โปรเจ(?:ค|กต์))\s*(?:ชื่อ\s*)?[:：]?\s*(.+)$/iu);
+    if (!match) continue;
+    const value = match[1]
+      .replace(/\s*(?:มีดังนี้|ดังนี้|งาน(?:สำหรับ|ของ)?(?:อาทิตย์|สัปดาห์)นี้).*$/u, '')
+      .replace(/[,:：\-–—]+$/u, '')
+      .trim();
+    if (value && value.length >= 2 && value.length <= 180) return value;
+  }
+  return null;
+}
+
+function bangkokWeekEnd(timestamp: number): string {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(timestamp);
+  const date = new Date(`${today}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + ((7 - date.getUTCDay()) % 7));
+  return date.toISOString().slice(0, 10);
 }
 
 function isConversationNoise(value: string): boolean {
@@ -268,7 +365,20 @@ function isReadOnlyQuestion(text: string): boolean {
 
 const OWNER_PROJECT_QUERY = /(?:สรุปมา|สรุป(?:งาน|โครงการ|โปรเจค)|มี(?:งาน(?:อะไร)?|อะไร)?ค้าง(?:อยู่)?(?:ไหม|มั้ย|หรือเปล่า|รึป่าว|รึเปล่า)?|ตอนนี้ถึงไหนแล้ว|(?:ตอนนี้)?มีอะไรต้องทำ(?:ต่อ)?|งาน(?:ของ)?กลุ่มนี้(?:เป็นไง|เป็นยังไง|ถึงไหนแล้ว)|เหลือ(?:งาน)?อะไร(?:บ้าง)?|มีอะไร(?:ที่)?ต้องตาม(?:บ้าง)?|งานไหน(?:ที่)?รอ(?:กู|ผม|พี่|เจ้าของ)|อันไหน(?:ที่)?(?:เลย|เกิน)กำหนด|ยอดโครงการ.*(?:เท่าไหร่|เท่าไร)|โครงการ.*ยอดจ่าย|จ่ายไปเท่าไหร่แล้ว|มีจ่ายอะไรไปแล้ว)/u;
 type SummaryProject = { id: string; name: string; project_code: string };
-type SummaryTask = { id: string; project_id: string; title: string; task_kind: string; status: string; due_on: string | null; responsible_name: string | null };
+type SummaryTask = {
+  id: string;
+  project_id: string;
+  task_code: string;
+  title: string;
+  task_kind: string;
+  status: string;
+  due_on: string | null;
+  responsible_name: string | null;
+  source_message_id: string | null;
+  source_batch_position: number | null;
+  confirmed_at: string | null;
+  created_at: string;
+};
 type SummaryInstallment = { id: string; project_id: string; title: string; amount: number | string; due_on: string | null; status: string };
 
 const summaryMoney = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' บาท';
@@ -291,7 +401,7 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   if (!projects.length) return 'หลังบ้านยังไม่มีโครงการที่ผูกกับกลุ่มนี้ครับ';
   const ids = encodeURIComponent('(' + projects.map(row => row.id).join(',') + ')');
   const [tasks, installments, intakes, ledger] = await Promise.all([
-    dbFetch('owner_project_tasks?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,title,task_kind,status,due_on,responsible_name&order=due_on.asc.nullslast&limit=300').then(r => r.json() as Promise<SummaryTask[]>),
+    dbFetch('owner_project_tasks?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,task_code,title,task_kind,status,due_on,responsible_name,source_message_id,source_batch_position,confirmed_at,created_at&order=confirmed_at.desc.nullslast,source_batch_position.asc.nullslast,created_at.desc&limit=300').then(r => r.json() as Promise<SummaryTask[]>),
     dbFetch('owner_project_installments?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,title,amount,due_on,status&order=due_on.asc.nullslast&limit=300').then(r => r.json() as Promise<SummaryInstallment[]>),
     dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=neq.cancelled&select=id,owner_project_id,occurred_on,amount,purpose_raw,status,evidence_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; purpose_raw:string; status:string; evidence_message_id:string|null }>>),
     dbFetch('financial_investment_entries?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=eq.recorded&select=id,owner_project_id,occurred_on,amount,title,source_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; title:string; source_message_id:string|null }>>),
@@ -317,18 +427,23 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const expenses = [...ledger.map(row => ({name:row.title,amount:Number(row.amount||0),date:row.occurred_on})), ...receipts.map(row => ({name:row.purpose_raw,amount:Number(row.amount||0),date:row.occurred_on}))].sort((a,b) => (b.date||'').localeCompare(a.date||''));
   const total = expenses.reduce((sum,row) => sum + row.amount,0);
   const project = new Map(projects.map(row => [row.id,row.name]));
+  const latestBatchSource = tasks.find(row => row.source_batch_position && row.source_message_id)?.source_message_id ?? null;
+  const taskLabel = (row: SummaryTask) => row.source_batch_position && row.source_message_id === latestBatchSource
+    ? `งาน ${row.source_batch_position}`
+    : row.task_code || 'งาน';
+  const taskLine = (row: SummaryTask, suffix = '') => `• ${taskLabel(row)} — ${project.get(row.project_id)}: ${row.title}${suffix}`;
   const query = normalizeText(input.text);
   const onlyPending = /(?:ค้าง|เลยกำหนด|เกินกำหนด|ต้องตาม)/u.test(query);
   const onlyOwner = /(?:งานไหนรอกู|งานไหนรอผม|รอเจ้าของ|รอพี่ยืนยัน|รออนุมัติ)/u.test(query);
   const onlySpend = /(?:ยอดโครงการ|ยอดจ่าย|จ่ายไป|มีจ่ายอะไร)/u.test(query);
   const lines = ['สรุปจากหลังบ้านตอนนี้ครับ'];
-  if (onlyOwner) return [...lines,'','⏳ รอเจ้าของตัดสินใจ',...(ownerWait.length?ownerWait.map(row=>`• ${project.get(row.project_id)}: ${row.title}`):['• หลังบ้านยังไม่มีงานที่ระบุว่ารอเจ้าของตัดสินใจครับ'])].join('\n');
+  if (onlyOwner) return [...lines,'','⏳ รอเจ้าของตัดสินใจ',...(ownerWait.length?ownerWait.map(row=>taskLine(row)):['• หลังบ้านยังไม่มีงานที่ระบุว่ารอเจ้าของตัดสินใจครับ'])].join('\n');
   if (onlyPending) {
     const follow = [...new Map([...waiting,...overdue].map(row=>[row.id,row])).values()];
-    if (follow.length) lines.push('','🔴 ค้าง/เลยกำหนด/ต้องตาม',...follow.slice(0,8).map(row=>`• ${project.get(row.project_id)}: ${row.title}${row.due_on?' — กำหนด '+row.due_on:''}`));
+    if (follow.length) lines.push('','🔴 ค้าง/เลยกำหนด/ต้องตาม',...follow.slice(0,8).map(row=>taskLine(row,row.due_on?' — กำหนด '+row.due_on:'')));
   } else if (!onlySpend) {
-    for (const [label,rows] of [['✅ เสร็จแล้ว',complete],['🟡 กำลังทำ',active],['⏳ ค้าง/รอดำเนินการ',waiting]] as const) if (rows.length) lines.push('',label,...rows.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title}${row.responsible_name?' — '+row.responsible_name:''}`));
-    if (overdue.length) lines.push('','🔴 เลยกำหนด',...overdue.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} — กำหนด ${row.due_on}`));
+    for (const [label,rows] of [['✅ เสร็จแล้ว',complete],['🟡 กำลังทำ',active],['⏳ ค้าง/รอดำเนินการ',waiting]] as const) if (rows.length) lines.push('',label,...rows.slice(0,5).map(row=>taskLine(row,row.responsible_name?' — '+row.responsible_name:'')));
+    if (overdue.length) lines.push('','🔴 เลยกำหนด',...overdue.slice(0,5).map(row=>taskLine(row,` — กำหนด ${row.due_on}`)));
   }
   if (!onlyPending && !onlyOwner && pendingReceipts.length) lines.push('','⏳ สลิปที่รอจัดหมวด/ตรวจข้อมูล',...pendingReceipts.slice(0,5).map(row=>`• ${row.purpose_raw||'สลิปรอระบุ'} · ${summaryMoney(Number(row.amount||0))}`));
   if (onlyPending) {
@@ -349,10 +464,13 @@ export function classifyOwnerProjectStart(rawText: string): OwnerProjectIntent |
   if (!text || isMotherConversation(text) || isReadOnlyQuestion(text)) return null;
   if (/^(?:ลงทุน(?:เงินสด)?|เงินสดลงทุน|บันทึกลงทุน)\s+[0-9][0-9,]*(?:\.[0-9]{1,2})?/u.test(text)) return null;
 
+  const bulkTasks = parseOwnerProjectBulkTasks(rawText);
   const directed = /(?:ทองไทย|@ทองไทย|จดให้หน่อย|ช่วยจด|บันทึกให้|เพิ่มงาน|สร้างโครงการ|สร้างโปรเจค)/u.test(text);
   const projectSignal = /(?:จะ|อยาก|ต้อง|มี|ขอ)?\s*(?:ลงทุนใหม่|ลงทุนเพิ่ม|สร้างโครงการ|สร้างโปรเจค|โปรเจคสร้างใหม่|โครงการสร้างใหม่|เปิดร้านใหม่|ทำโครงการใหม่)/u.test(text);
   const weeklySignal = /(?:งานประจำ|งานรายสัปดาห์|ทำทุกอาทิตย์|ทำทุกสัปดาห์|ทุกวัน(?:จันทร์|อังคาร|พุธ|พฤหัส|ศุกร์|เสาร์|อาทิตย์))/u.test(text);
-  const taskSignal = /(?:งานก่อนเปิดร้าน|งานต้องทำ|เพิ่มงาน|มีงานใหม่|ต้องทำก่อนเปิด)/u.test(text);
+  const taskSignal = /(?:งานก่อนเปิดร้าน|งานต้องทำ|เพิ่มงาน|มีงานใหม่|ต้องทำก่อนเปิด|งาน(?:สำหรับ|ของ)?(?:อาทิตย์|สัปดาห์)นี้|รายการงาน)/u.test(text);
+  const explicitNumberedWorkList = /^\s*งาน\s*[0-9๐-๙]{1,3}(?:\s|[.)\-:：]|$)/mu.test(rawText);
+  if (bulkTasks.length >= 2 && (directed || taskSignal || BULK_TASK_SIGNAL.test(text) || explicitNumberedWorkList)) return 'one_time_task';
   if (!directed && !projectSignal && !weeklySignal && !taskSignal) return null;
   if (weeklySignal) return 'weekly_task';
   if (/(?:สร้างโครงการ|สร้างโปรเจค|โปรเจคสร้างใหม่|โครงการสร้างใหม่|เปิดร้านใหม่|โครงการใหม่|โปรเจคใหม่)/u.test(text)) return 'new_project';
@@ -366,7 +484,9 @@ export function ownerProjectMissingFields(
 ): OwnerProjectMissingField[] {
   const missing: OwnerProjectMissingField[] = [];
   if (!data.project_name) missing.push('project_name');
-  if (!data.work_title) missing.push('work_title');
+  const bulkTasks = data.bulk_tasks?.filter(task => task.title.trim()) ?? [];
+  if (!data.work_title && !bulkTasks.length) missing.push('work_title');
+  if (bulkTasks.length >= 2) return missing;
   if (intent === 'weekly_task') {
     if (!(data.recurrence_weekdays?.length || data.schedule_text || unknown(data, 'schedule'))) missing.push('schedule');
     if (!(data.responsible_name || unknown(data, 'responsible'))) missing.push('responsible');
@@ -391,6 +511,7 @@ export function applyOwnerProjectText(input: {
   const expected = input.expectedField ?? null;
   const before = JSON.stringify(data);
   const timestamp = Number.isFinite(input.timestamp) ? Number(input.timestamp) : Date.now();
+  const bulkTasks = parseOwnerProjectBulkTasks(input.text);
 
   if (expected && isUnknown(text) && !['project_name','work_title'].includes(expected)) {
     addUnknown(data, expected);
@@ -441,6 +562,19 @@ export function applyOwnerProjectText(input: {
 
   const business = detectBusinessUnit(text);
   if (business) data.business_unit_code = business;
+  if (bulkTasks.length >= 2) {
+    data.bulk_tasks = bulkTasks;
+    data.work_title = `ชุดงานสัปดาห์นี้ ${bulkTasks.length} งาน`;
+    data.task_kind = 'one_time';
+    delete data.recurrence_weekdays;
+    data.schedule_text = 'ภายในสัปดาห์นี้';
+    data.due_on = bangkokWeekEnd(timestamp);
+    const bulkProjectName = parseBulkProjectName(input.text);
+    if (bulkProjectName) {
+      data.project_name = bulkProjectName;
+      removeUnknown(data, 'project_name');
+    }
+  }
   if (!data.task_kind) {
     data.task_kind = input.intent === 'weekly_task' ? 'weekly'
       : /ก่อนเปิด/u.test(text) ? 'pre_opening' : 'one_time';
@@ -470,6 +604,19 @@ function weekdayLabels(values: number[] | undefined): string {
 }
 
 export function renderOwnerProjectDraftSummary(intent: OwnerProjectIntent, data: OwnerProjectDraftData): string {
+  const bulkTasks = data.bulk_tasks?.filter(task => task.title.trim()) ?? [];
+  if (bulkTasks.length >= 2) {
+    return [
+      'ขอสรุปชุดงานก่อนบันทึกครับ',
+      `โครงการ: ${data.project_name || 'ยังไม่ระบุ'}`,
+      `กำหนด: ${data.schedule_text || data.due_on || 'ภายในสัปดาห์นี้'}`,
+      '',
+      ...bulkTasks.map(task => `${task.position}. ${task.title}`),
+      '',
+      `รวม ${bulkTasks.length} งาน — แต่ละงานจะค้างแยกกันจนกว่าคุณจะแจ้งว่า “งาน 1 จบแล้ว” หรือบอกชื่องานครับ`,
+      'ถ้าถูกต้อง พิมพ์ “ยืนยัน” เพื่อบันทึกทุกงานเข้าหลังบ้านพร้อมกัน',
+    ].join('\n');
+  }
   const schedule = data.schedule_text || data.due_on || weekdayLabels(data.recurrence_weekdays) || 'ยังไม่รู้';
   const installments = data.installment_count
     ? `${data.installment_count} งวด${data.first_installment_on ? ' · งวดแรก ' + data.first_installment_on : ''}`
@@ -522,6 +669,94 @@ function isResume(text: string): boolean {
 
 function correctionSignal(text: string): boolean {
   return /(?:แก้|เปลี่ยน|งบ|บาท|งวด|จ้าง|ซื้อจาก|ผู้รับผิดชอบ|วันที่|ภายใน|เงินสด|โอน)/u.test(text);
+}
+
+export type OwnerProjectTaskStateCommand = {
+  state: 'done' | 'todo';
+  referenceKind: 'position' | 'code' | 'title';
+  reference: string;
+  position?: number;
+};
+
+export function parseOwnerProjectTaskStateCommand(rawText: string): OwnerProjectTaskStateCommand | null {
+  const text = cleanAnswer(rawText).replace(/(?:ครับ|ค่ะ|คะ|คับ)$/u, '').trim();
+  let state: 'done' | 'todo';
+  let reference = '';
+  const reopen = text.match(/^(.+?)\s*(?:ยังไม่จบ|ยังไม่เสร็จ|เอากลับมาค้าง|กลับมาค้าง|เปิดกลับเป็นงานค้าง)$/u);
+  const done = text.match(/^(?:ติ๊ก(?:ว่า)?\s*)?(.+?)\s*(?:จบแล้ว|เสร็จแล้ว|เสร็จ|เรียบร้อยแล้ว|ติ๊กจบ)$/u)
+    ?? text.match(/^(?:ปิดงาน|ติ๊กงาน)\s*(.+)$/u);
+  if (reopen) {
+    state = 'todo';
+    reference = reopen[1].trim();
+  } else if (done) {
+    state = 'done';
+    reference = done[1].trim();
+  } else {
+    return null;
+  }
+  if (!reference || /(?:งานไหน|อะไร|อันไหน)/u.test(reference)) return null;
+
+  const code = reference.match(/\b(WK-[A-Z0-9]{4,16})\b/iu)?.[1];
+  if (code) return { state, referenceKind: 'code', reference: code.toUpperCase() };
+  const numbered = reference.match(/^(?:งาน\s*)?([0-9]{1,3})$/u);
+  if (numbered) {
+    const position = Number(numbered[1]);
+    if (position >= 1 && position <= 100) {
+      return { state, referenceKind: 'position', reference: String(position), position };
+    }
+  }
+  const title = reference.replace(/^งาน(?:ชื่อ)?\s*/u, '').trim();
+  return title ? { state, referenceKind: 'title', reference: title } : null;
+}
+
+type TaskLookup = SummaryTask & { project_name: string };
+
+function normalizeTaskLookup(value: string): string {
+  return normalizeText(value).toLocaleLowerCase('th-TH').replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+async function resolveOwnerProjectTask(
+  groupHash: string,
+  command: OwnerProjectTaskStateCommand,
+): Promise<{ task: TaskLookup | null; reply?: string }> {
+  const projects = await (await dbFetch('owner_projects?owner_group_hash=eq.' + encodeURIComponent(groupHash)
+    + '&status=neq.cancelled&select=id,name&order=created_at.desc&limit=100')).json() as Array<{id:string;name:string}>;
+  if (!projects.length) return { task: null, reply: 'หลังบ้านยังไม่มีโครงการที่ผูกกับกลุ่มนี้ครับ' };
+  const ids = encodeURIComponent('(' + projects.map(row => row.id).join(',') + ')');
+  const rows = await (await dbFetch('owner_project_tasks?project_id=in.' + ids
+    + '&status=neq.cancelled&select=id,project_id,task_code,title,task_kind,status,due_on,responsible_name,source_message_id,source_batch_position,confirmed_at,created_at'
+    + '&order=confirmed_at.desc.nullslast,source_batch_position.asc.nullslast,created_at.desc&limit=500')).json() as SummaryTask[];
+  const names = new Map(projects.map(row => [row.id, row.name]));
+  const tasks = rows.map(row => ({ ...row, project_name: names.get(row.project_id) ?? 'ไม่ทราบโครงการ' }));
+  let matches: TaskLookup[] = [];
+
+  if (command.referenceKind === 'code') {
+    matches = tasks.filter(row => row.task_code?.toUpperCase() === command.reference);
+  } else if (command.referenceKind === 'position') {
+    const latestBatch = tasks.find(row => row.source_batch_position && row.source_message_id)?.source_message_id;
+    matches = latestBatch
+      ? tasks.filter(row => row.source_message_id === latestBatch && row.source_batch_position === command.position)
+      : [];
+  } else {
+    const needle = normalizeTaskLookup(command.reference);
+    const exact = tasks.filter(row => normalizeTaskLookup(row.title) === needle);
+    matches = exact.length ? exact : tasks.filter(row => normalizeTaskLookup(row.title).includes(needle));
+  }
+
+  if (matches.length === 1) return { task: matches[0]! };
+  if (!matches.length) {
+    return {
+      task: null,
+      reply: `ยังไม่พบงาน “${command.reference}” ในหลังบ้านของกลุ่มนี้ครับ\nพิมพ์ “มีงานค้างไหม” เพื่อดูรายการล่าสุด`,
+    };
+  }
+  return {
+    task: null,
+    reply: [
+      `พบชื่องานใกล้กัน ${matches.length} รายการครับ กรุณาระบุรหัสงาน`,
+      ...matches.slice(0, 5).map(row => `• ${row.task_code} — ${row.project_name}: ${row.title}`),
+    ].join('\n'),
+  };
 }
 
 async function activeDraft(groupHash: string, actorHash: string): Promise<DraftRow | null> {
@@ -610,6 +845,21 @@ async function createDraft(input: {
   return (await response.json() as DraftRow[])[0]!;
 }
 
+async function fillSoleProjectForBulk(groupHash: string, data: OwnerProjectDraftData): Promise<OwnerProjectDraftData> {
+  if (data.project_name || (data.bulk_tasks?.length ?? 0) < 2) return data;
+  const response = await dbFetch(
+    'owner_projects?owner_group_hash=eq.' + encodeURIComponent(groupHash)
+    + '&status=in.(planning,approved,active,paused)&select=name,business_unit_code&order=updated_at.desc&limit=2',
+  );
+  const projects = await response.json() as Array<{ name: string; business_unit_code: string | null }>;
+  if (projects.length !== 1) return data;
+  return {
+    ...data,
+    project_name: projects[0]!.name,
+    business_unit_code: data.business_unit_code ?? projects[0]!.business_unit_code ?? undefined,
+  };
+}
+
 async function updateDraft(
   draft: DraftRow,
   patch: Partial<Pick<DraftRow, 'status' | 'data' | 'missing_fields' | 'last_message_id'>>,
@@ -641,27 +891,52 @@ export async function handleOwnerProjectText(input: {
   const groupHash = piiHash(input.targetId);
   const actorHash = piiHash(input.userId);
   if (!groupHash || !actorHash) return null;
-
-  let draft = await activeDraft(groupHash, actorHash);
-  const startIntent = classifyOwnerProjectStart(text);
   const now = Number.isFinite(input.timestamp) ? Number(input.timestamp) : Date.now();
-  const recent = draft ? now - new Date(draft.updated_at).getTime() <= CONTINUATION_WINDOW_MS : false;
   const explicitlyAddressed = /(?:ทองไทย|@ทองไทย)/u.test(text);
 
   if (isMotherConversation(text) && !explicitlyAddressed) return null;
   if (isReadOnlyQuestion(text)) return null;
 
+  const taskStateCommand = parseOwnerProjectTaskStateCommand(text);
+  if (taskStateCommand) {
+    const claim = await claimMessage({ groupHash, actorHash, messageId: input.messageId, text });
+    if (!claim.claimed) return claim.reply;
+    const resolved = await resolveOwnerProjectTask(groupHash, taskStateCommand);
+    if (!resolved.task) {
+      const reply = resolved.reply ?? 'ยังจับคู่งานกับหลังบ้านไม่ได้ครับ';
+      await storeReply(input.messageId, null, reply);
+      return reply;
+    }
+    const result = await rpc<TaskStateResult>('owner_project_set_task_state_from_line_v1', {
+      p_task_id: resolved.task.id,
+      p_group_hash: groupHash,
+      p_state: taskStateCommand.state,
+      p_actor_hash: actorHash,
+      p_message_id: input.messageId,
+    });
+    const label = result.batch_position ? `งาน ${result.batch_position}` : (result.task_code ?? resolved.task.task_code);
+    const reply = taskStateCommand.state === 'done'
+      ? `${result.duplicate ? 'งานนี้ถูกติ๊กว่าเสร็จไว้แล้วครับ' : '✅ ติ๊กว่าเสร็จแล้วครับ'}\n${label} — ${result.task_title ?? resolved.task.title}\nประวัติยังอยู่ในหลังบ้านและงานนี้จะไม่ถูกรวมในงานค้าง`
+      : `${result.duplicate ? 'งานนี้อยู่ในรายการค้างแล้วครับ' : '↩️ ย้ายกลับเป็นงานค้างแล้วครับ'}\n${label} — ${result.task_title ?? resolved.task.title}`;
+    await storeReply(input.messageId, null, reply);
+    return reply;
+  }
+
+  let draft = await activeDraft(groupHash, actorHash);
+  const startIntent = classifyOwnerProjectStart(input.text);
+  const recent = draft ? now - new Date(draft.updated_at).getTime() <= CONTINUATION_WINDOW_MS : false;
+
   let preview: { data: OwnerProjectDraftData; changed: boolean } | null = null;
   if (draft?.status === 'collecting' && (recent || explicitlyAddressed || isResume(text))) {
     preview = applyOwnerProjectText({
-      text,
+      text: input.text,
       intent: draft.intent,
       data: draft.data,
       expectedField: draft.missing_fields[0] ?? null,
       timestamp: now,
     });
   } else if (draft?.status === 'awaiting_confirmation' && correctionSignal(text)) {
-    preview = applyOwnerProjectText({ text, intent: draft.intent, data: draft.data, timestamp: now });
+    preview = applyOwnerProjectText({ text: input.text, intent: draft.intent, data: draft.data, timestamp: now });
   }
 
   const shouldHandle = Boolean(
@@ -697,11 +972,30 @@ export async function handleOwnerProjectText(input: {
       await storeReply(input.messageId, draft.id, reply);
       return reply;
     }
-    const result = await rpc<ConfirmResult>('owner_project_confirm_draft_v1', {
+    const bulkTasks = draft.data.bulk_tasks?.filter(task => task.title.trim()) ?? [];
+    const result = await rpc<ConfirmResult>(bulkTasks.length >= 2
+      ? 'owner_project_confirm_bulk_tasks_v1'
+      : 'owner_project_confirm_draft_v1', {
       p_draft_id: draft.id,
       p_message_id: input.messageId,
       p_actor_hash: actorHash,
     });
+    if (bulkTasks.length >= 2) {
+      const savedTasks = result.tasks?.length
+        ? result.tasks
+        : bulkTasks.map(task => ({ id: '', task_code: '—', title: task.title, position: task.position }));
+      const reply = [
+        result.duplicate ? 'ชุดงานนี้บันทึกไว้แล้วครับ' : `✅ บันทึก ${result.task_count ?? savedTasks.length} งานเข้าหลังบ้านแล้วครับ`,
+        `โครงการ: ${result.project_name ?? draft.data.project_name} (${result.project_code ?? '—'})`,
+        ...savedTasks.map(task => `งาน ${task.position}: ${task.title}${task.task_code ? ` (${task.task_code})` : ''}`),
+        '',
+        'ทุกงานยังเป็น “งานค้าง” และจะแยกกันอยู่จนกว่าคุณจะแจ้งว่างานนั้นจบแล้ว',
+        'ตัวอย่าง: “งาน 2 จบแล้ว” หรือ “ตัดไม้เสร็จแล้ว”',
+        `ดูหลังบ้าน: ${DASHBOARD_URL}`,
+      ].join('\n');
+      await storeReply(input.messageId, draft.id, reply);
+      return reply;
+    }
     const reply = [
       result.duplicate ? 'รายการนี้บันทึกไว้แล้วครับ' : '✅ บันทึกเข้าหลังบ้านแล้วครับ',
       `โครงการ: ${result.project_name ?? draft.data.project_name} (${result.project_code ?? '—'})`,
@@ -715,7 +1009,8 @@ export async function handleOwnerProjectText(input: {
   }
 
   if (!draft && startIntent) {
-    const parsed = applyOwnerProjectText({ text, intent: startIntent, timestamp: now });
+    const parsed = applyOwnerProjectText({ text: input.text, intent: startIntent, timestamp: now });
+    parsed.data = await fillSoleProjectForBulk(groupHash, parsed.data);
     const missing = ownerProjectMissingFields(startIntent, parsed.data);
     try {
       draft = await createDraft({
