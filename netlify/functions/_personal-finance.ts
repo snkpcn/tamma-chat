@@ -468,7 +468,7 @@ async function execute(c: Ctx, intent: PfIntent, accounts: LedgerAccount[], rece
       }
       const res = await ledger.createTransaction({
         kind: intent.kind, amount: intent.amount, accountId, category: intent.category, payee: intent.title,
-        occurredOn: intent.date, actor: c.actor, message: c.messageId, idem: idem('tx'),
+        occurredOn: intent.date ?? c.today, actor: c.actor, message: c.messageId, idem: idem('tx'),
       });
       const tx = res.transaction;
       const label = tx.category ?? intent.title ?? (intent.kind === 'EXPENSE' ? 'รายจ่าย' : 'รายรับ');
@@ -488,7 +488,7 @@ async function execute(c: Ctx, intent: PfIntent, accounts: LedgerAccount[], rece
       if (from.kind !== 'one' || to.kind !== 'one' || from.account.id === to.account.id) return 'ระบุบัญชีต้นทางและปลายทางที่ต่างกันให้ชัดอีกนิดครับ ผมยังไม่ได้บันทึกอะไร';
       const res = await ledger.createTransaction({
         kind: 'TRANSFER', amount: intent.amount, accountId: from.account.id, toAccountId: to.account.id,
-        actor: c.actor, message: c.messageId, idem: idem('tx'),
+        occurredOn: c.today, actor: c.actor, message: c.messageId, idem: idem('tx'),
       });
       return `บันทึกโอนภายใน ${money(intent.amount)} จาก ${from.account.name} ไป ${to.account.name} เรียบร้อยครับ (เป็นการย้ายเงินในบัญชีของคุณ ไม่นับเป็นรายจ่าย)${balanceNote(res.account)}${balanceNote(res.to_account)}`;
     }
