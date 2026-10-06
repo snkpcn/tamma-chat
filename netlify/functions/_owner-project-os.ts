@@ -82,6 +82,16 @@ type MultiTaskStateResult = {
   task_count?: number;
 };
 
+type ProjectStateResult = {
+  ok?: boolean;
+  duplicate?: boolean;
+  blocked?: boolean;
+  project_name?: string;
+  project_status?: string;
+  pending_count?: number;
+  pending_tasks?: Array<{code:string;title:string}>;
+};
+
 const DASHBOARD_URL = 'https://tamma-backoffice.netlify.app/investments.html';
 const CONTINUATION_WINDOW_MS = 15 * 60 * 1000;
 const BUSINESS_UNITS: Array<[RegExp, string]> = [
@@ -784,6 +794,7 @@ export type OwnerProjectTaskStateCommand = {
   positions?: number[];
   titles?: string[];
   projectName?: string;
+  explicitTask?: boolean;
 };
 
 export function parseOwnerProjectTaskStateCommand(rawText: string): OwnerProjectTaskStateCommand | null {
@@ -832,7 +843,9 @@ export function parseOwnerProjectTaskStateCommand(rawText: string): OwnerProject
     return { state, referenceKind: 'titles', reference: titleList.join(' กับ '), titles: titleList, ...(projectName ? { projectName } : {}) };
   }
   const title = reference.replace(/^งาน(?:ชื่อ)?\s*/u, '').trim();
-  return title ? { state, referenceKind: 'title', reference: title, ...(projectName ? { projectName } : {}) } : null;
+  return title ? { state, referenceKind: 'title', reference: title,
+    ...(/^งาน(?:ชื่อ)?\s*/u.test(reference) ? { explicitTask: true } : {}),
+    ...(projectName ? { projectName } : {}) } : null;
 }
 
 type TaskLookup = SummaryTask & { project_name: string };
@@ -844,7 +857,7 @@ function normalizeTaskLookup(value: string): string {
 async function resolveOwnerProjectTask(
   groupHash: string,
   command: OwnerProjectTaskStateCommand,
-): Promise<{ tasks: TaskLookup[]; reply?: string }> {
+): Promise<{ tasks: TaskLookup[]; project?: {id:string;name:string}; reply?: string }> {
   const projects = await (await dbFetch('owner_projects?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&status=neq.cancelled&select=id,name&order=created_at.desc&limit=100')).json() as Array<{id:string;name:string}>;
   if (!projects.length) return { tasks: [], reply: 'หลังบ้านยังไม่มีโครงการที่ผูกกับกลุ่มนี้ครับ' };
@@ -853,6 +866,11 @@ async function resolveOwnerProjectTask(
     const needle = normalizeTaskLookup(command.projectName);
     allowedProjects = projects.filter(row => normalizeTaskLookup(row.name) === needle);
     if (allowedProjects.length !== 1) return { tasks: [], reply: `ยังไม่พบโครงการ “${command.projectName}” ในกลุ่มนี้ครับ` };
+  }
+  if (command.referenceKind === 'title' && !command.explicitTask) {
+    const projectReference = command.reference.replace(/^(?:โครงการ|โปรเจ(?:ค|กต์))\s*/u,'');
+    const exactProject = allowedProjects.filter(row => normalizeTaskLookup(row.name) === normalizeTaskLookup(projectReference));
+    if (exactProject.length === 1) return { tasks: [], project: exactProject[0] };
   }
   const ids = encodeURIComponent('(' + projects.map(row => row.id).join(',') + ')');
   const rows = await (await dbFetch('owner_project_tasks?project_id=in.' + ids
@@ -1067,6 +1085,22 @@ export async function handleOwnerProjectText(input: {
       }
     }
     const resolved = await resolveOwnerProjectTask(groupHash, taskStateCommand);
+    if (resolved.project) {
+      const result = await rpc<ProjectStateResult>('owner_project_set_project_state_from_line_v1', {
+        p_project_id: resolved.project.id,
+        p_group_hash: groupHash,
+        p_state: taskStateCommand.state === 'done' ? 'completed' : 'active',
+        p_actor_hash: actorHash,
+        p_message_id: input.messageId,
+      });
+      const reply = result.blocked
+        ? `โครงการ “${resolved.project.name}” ยังมีงานค้าง ${result.pending_count} งานครับ ยังไม่ปิดโครงการ\n${(result.pending_tasks ?? []).map(row => `• ${row.code} — ${row.title}`).join('\n')}\nแจ้งงานที่เสร็จทีละงานก่อนครับ`
+        : taskStateCommand.state === 'done'
+          ? `${result.duplicate ? 'โครงการนี้ปิดไว้แล้วครับ' : '✅ ปิดโครงการแล้วครับ'}\nโครงการ: ${resolved.project.name}\nงานและประวัติรายจ่ายยังอยู่ในหลังบ้าน`
+          : `${result.duplicate ? 'โครงการนี้เปิดอยู่แล้วครับ' : '↩️ เปิดโครงการกลับมาดำเนินการแล้วครับ'}\nโครงการ: ${resolved.project.name}`;
+      await storeReply(input.messageId, null, reply);
+      return reply;
+    }
     if (!resolved.tasks.length) {
       const reply = resolved.reply ?? 'ยังจับคู่งานกับหลังบ้านไม่ได้ครับ';
       await storeReply(input.messageId, null, reply);
