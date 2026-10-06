@@ -104,6 +104,8 @@ test('coach: morning data uses real SNK tasks/goals/events/priorities, evening d
   assert.equal(d2.duplicate, true);
   const df = (await db.query(`select public.finance_task_defer($1,$2,'2026-10-06',$3,'msg2','idem-t2') r`, [OWNER_ID, t2, A])).rows[0].r;
   assert.equal(df.ok, true);
+  // Keep this fixture on its declared business day even when the test runs after midnight.
+  await db.query(`update public.tasks set completed_at=$2::timestamptz where id=$1`, [t1, `${today}T12:00:00+07:00`]);
   const e = (await db.query(`select public.finance_coach_evening_data($1,$2) r`, [OWNER_ID, today])).rows[0].r;
   assert.equal(e.tasks_done.length, 1);
   assert.equal(e.tasks_open.length, 0);
