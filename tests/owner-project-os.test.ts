@@ -281,6 +281,10 @@ test('restaurant group sees confirmed restaurant project tasks from Owner withou
     const rows=url.pathname.endsWith('/ops_notification_channels')?[{team_code:'restaurant'}]
       :url.pathname.endsWith('/bookings')?[]
       :url.pathname.endsWith('/owner_projects')?[{id:'p-restaurant',name:'ตำมาชาติ',project_code:'PJ-REST'}]
+      :url.pathname.endsWith('/financial_owner_expense_intakes')?[
+        {owner_project_id:null,amount:50000,purpose_raw:'ค่าก่อสร้างครัว ตำมาชาติ',evidence_message_id:'slip-one'},
+        {owner_project_id:null,amount:50000,purpose_raw:'ค่าก่อสร้างงวดสอง',evidence_message_id:'slip-two'},
+      ]
       :url.pathname.endsWith('/owner_project_tasks')?[
         {id:'t1',project_id:'p-restaurant',task_code:'WK-ONE',title:'รายการหลัก Menu พร้อม',task_kind:'one_time',status:'todo',due_on:'2026-10-11',source_batch_position:1,source_message_id:'batch-1',confirmed_at:'2026-10-06T10:44:00Z'},
         {id:'t3',project_id:'p-restaurant',task_code:'WK-THREE',title:'แยก Station ครัวครบ',task_kind:'one_time',status:'done',due_on:'2026-10-11',source_batch_position:3,source_message_id:'batch-1',confirmed_at:'2026-10-06T10:44:00Z'},
@@ -291,11 +295,18 @@ test('restaurant group sees confirmed restaurant project tasks from Owner withou
     const summary=await handleOwnerProjectQuery({targetId:'restaurant-group',text:'สรุปมา',timestamp:Date.parse('2026-10-06T10:50:00Z')});
     assert.match(summary??'',/งาน 1 — ตำมาชาติ: รายการหลัก Menu พร้อม/u);
     assert.match(summary??'',/งาน 3 — ตำมาชาติ: แยก Station ครัวครบ/u);
+    assert.match(summary??'',/รายจ่ายหมวดนี้ที่บันทึก: 100,000 บาท/u);
     assert.doesNotMatch(summary??'',/เฉลียงไม้|ยังไม่มีงานในตาราง/u);
     const pending=await handleOwnerProjectQuery({targetId:'restaurant-group',text:'มีอะไรค้าง',timestamp:Date.parse('2026-10-06T10:50:00Z')});
     assert.match(pending??'',/รายการหลัก Menu พร้อม/u);
     assert.doesNotMatch(pending??'',/แยก Station ครัวครบ/u);
+    assert.doesNotMatch(pending??'',/100,000/u);
+    const spend=await handleOwnerProjectQuery({targetId:'restaurant-group',text:'มีจ่ายอะไรไปแล้ว',timestamp:Date.parse('2026-10-06T10:50:00Z')});
+    assert.match(spend??'',/100,000 บาท/u);
+    const projectSpend=await handleOwnerProjectQuery({targetId:'restaurant-group',text:'ยอดโครงการเท่าไหร่แล้ว',timestamp:Date.parse('2026-10-06T10:50:00Z')});
+    assert.match(projectSpend??'',/ยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการ/u);
     assert.ok(paths.some(path=>path.includes('business_unit_code=eq.tamma_restaurant')));
+    assert.ok(paths.some(path=>path.includes('status=eq.categorized')));
     assert.ok(!paths.some(path=>path.includes('owner_group_hash=')));
   }finally{globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey}
 });
