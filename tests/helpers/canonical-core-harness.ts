@@ -391,6 +391,17 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     const path = u.replace(/^https?:\/\/[^/]+\/rest\/v1\//, '').replace(/^https?:\/\/[^/]+\//, '');
     const query = decodeQuery(u);
 
+    // The shared LINE webhook asks the separate private OS only for group
+    // binding metadata before routing an unbound business group. These
+    // business fixtures have no private binding; no message is dispatched.
+    if (u.includes('/api/line/snk-money') && method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as { action?: string; groups?: unknown[] };
+      if (body.action === 'probe' && Array.isArray(body.groups)) {
+        return jsonResponse({ ok:true, statuses:body.groups.map((_group,index) => ({ index,status:'NONE' })) });
+      }
+      return jsonResponse({ error:'unexpected private dispatch in business fixture' }, 500);
+    }
+
     // --- LLM semantic supervisor (OpenAI Responses API) ---
     // The public test helper keeps the historical programGeminiReply name as
     // a compatibility alias, but the runtime provider under test is OpenAI-only.
