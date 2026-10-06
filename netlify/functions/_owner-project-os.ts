@@ -505,8 +505,8 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const [tasks, installments, intakes, ledger] = await Promise.all([
     dbFetch('owner_project_tasks?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,task_code,title,task_kind,status,due_on,responsible_name,source_message_id,source_batch_position,confirmed_at,created_at&order=confirmed_at.desc.nullslast,source_batch_position.asc.nullslast,created_at.desc&limit=300').then(r => r.json() as Promise<SummaryTask[]>),
     dbFetch('owner_project_installments?project_id=in.' + ids + '&status=neq.cancelled&select=id,project_id,title,amount,due_on,status&order=due_on.asc.nullslast&limit=300').then(r => r.json() as Promise<SummaryInstallment[]>),
-    dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=neq.cancelled&select=id,owner_project_id,occurred_on,amount,purpose_raw,status,evidence_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; purpose_raw:string; status:string; evidence_message_id:string|null }>>),
-    dbFetch('financial_investment_entries?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&owner_project_id=in.' + ids + '&status=eq.recorded&select=id,owner_project_id,occurred_on,amount,title,source_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string; occurred_on:string; amount:number|string; title:string; source_message_id:string|null }>>),
+    dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&status=neq.cancelled&select=id,owner_project_id,occurred_on,amount,purpose_raw,status,evidence_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string|null; occurred_on:string; amount:number|string; purpose_raw:string; status:string; evidence_message_id:string|null }>>),
+    dbFetch('financial_investment_entries?owner_group_hash=eq.' + encodeURIComponent(groupHash) + '&status=eq.recorded&select=id,owner_project_id,occurred_on,amount,title,source_message_id&order=occurred_on.desc&limit=300').then(r => r.json() as Promise<Array<{ id:string; owner_project_id:string|null; occurred_on:string; amount:number|string; title:string; source_message_id:string|null }>>),
   ]);
   const today = new Intl.DateTimeFormat('en-CA', { timeZone:'Asia/Bangkok', year:'numeric', month:'2-digit', day:'2-digit' }).format(input.timestamp ?? Date.now());
   const weekStartDate = new Date(`${today}T00:00:00Z`);
@@ -526,8 +526,7 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const ledgerSources = new Set(ledger.map(row => row.source_message_id).filter(Boolean));
   const pendingReceipts = intakes.filter(row => row.status !== 'categorized');
   const receipts = intakes.filter(row => row.status === 'categorized' && (!row.evidence_message_id || !ledgerSources.has(row.evidence_message_id)));
-  const expenses = [...ledger.map(row => ({name:row.title,amount:Number(row.amount||0),date:row.occurred_on})), ...receipts.map(row => ({name:row.purpose_raw,amount:Number(row.amount||0),date:row.occurred_on}))].sort((a,b) => (b.date||'').localeCompare(a.date||''));
-  const total = expenses.reduce((sum,row) => sum + row.amount,0);
+  const expenses = [...ledger.map(row => ({name:row.title,amount:Number(row.amount||0),date:row.occurred_on,projectId:row.owner_project_id})), ...receipts.map(row => ({name:row.purpose_raw,amount:Number(row.amount||0),date:row.occurred_on,projectId:row.owner_project_id}))].sort((a,b) => (b.date||'').localeCompare(a.date||''));
   const project = new Map(projects.map(row => [row.id,row.name]));
   const latestBatchSource = tasks.find(row => row.source_batch_position && row.source_message_id)?.source_message_id ?? null;
   const taskLabel = (row: SummaryTask) => row.source_batch_position && row.source_message_id === latestBatchSource
@@ -538,6 +537,9 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const onlyPending = /(?:ค้าง|เลยกำหนด|เกินกำหนด|ต้องตาม)/u.test(query);
   const onlyOwner = /(?:งานไหนรอกู|งานไหนรอผม|รอเจ้าของ|รอพี่ยืนยัน|รออนุมัติ)/u.test(query);
   const onlySpend = /(?:ยอดโครงการ|ยอดจ่าย|จ่ายไป|มีจ่ายอะไร)/u.test(query);
+  const projectSpend = /(?:ยอดโครงการ|โครงการ.*ยอดจ่าย)/u.test(query);
+  const selectedExpenses = onlySpend && projectSpend ? expenses.filter(row => row.projectId && project.has(row.projectId)) : expenses;
+  const total = selectedExpenses.reduce((sum,row) => sum + row.amount,0);
   const lines = ['สรุปจากหลังบ้านตอนนี้ครับ'];
   if (onlyOwner) return [...lines,'','⏳ รอเจ้าของตัดสินใจ',...(ownerWait.length?ownerWait.map(row=>taskLine(row)):['• หลังบ้านยังไม่มีงานที่ระบุว่ารอเจ้าของตัดสินใจครับ'])].join('\n');
   if (onlyPending) {
@@ -553,8 +555,9 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
     if (late.length) lines.push('','💸 งวดเลยกำหนด',...late.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} ${summaryMoney(Number(row.amount))}`));
   } else if (due.length) lines.push('','💸 งวดที่ยังจ่าย',...due.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} ${summaryMoney(Number(row.amount))}${row.due_on?' — '+row.due_on:''}`));
   if (onlySpend || (!onlyPending && expenses.length)) {
-    lines.push('','💰 จ่ายแล้วตามรายการที่บันทึก: '+summaryMoney(total),...expenses.slice(0,5).map(row=>`• ${row.name} · ${summaryMoney(row.amount)}`));
-    if (!expenses.length) lines.push('• หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการนี้ครับ');
+    if (selectedExpenses.length) lines.push('',`💰 ${projectSpend ? 'จ่ายแล้วที่ผูกกับโครงการ' : 'รายจ่ายที่บันทึกในกลุ่ม'}: `+summaryMoney(total),
+      ...selectedExpenses.slice(0,5).map(row=>`• ${row.name} · ${summaryMoney(row.amount)}${row.projectId ? '' : ' — ยังไม่ผูกโครงการ'}`));
+    else lines.push('',projectSpend ? 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการนี้ครับ' : 'หลังบ้านยังไม่มีรายจ่ายที่ยืนยันแล้วในกลุ่มนี้ครับ');
     if (pendingReceipts.length) lines.push(`• มีสลิปรอจัดหมวด/ตรวจข้อมูลอีก ${pendingReceipts.length} รายการ ไม่รวมในยอดจ่ายยืนยัน`);
   }
   if (!complete.length && !active.length && !waiting.length && !overdue.length && !due.length && !expenses.length) lines.push('ยังไม่มีงานค้าง งวดจ่าย หรือรายจ่ายที่บันทึกของกลุ่มนี้ครับ');
