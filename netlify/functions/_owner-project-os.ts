@@ -406,30 +406,41 @@ async function domainProjectSummary(team: string, query: string, today: string):
   const onlyPending = /(?:ค้าง|เลยกำหนด|เกินกำหนด|ต้องตาม)/u.test(query);
   const onlyOwner = /(?:งานไหนรอกู|งานไหนรอผม|รอเจ้าของ|รอพี่ยืนยัน|รออนุมัติ)/u.test(query);
   const onlySpend = /(?:ยอดโครงการ|ยอดจ่าย|จ่ายไป|มีจ่ายอะไร)/u.test(query);
-  if (!projects.length) return onlySpend
-    ? 'หลังบ้านยังไม่มีโครงการของทีมนี้ให้ตรวจยอดจ่ายครับ'
-    : 'สรุปข้อมูลของกลุ่มนี้จากหลังบ้านครับ\n' + schedule;
-
-  const ids = encodeURIComponent('(' + projects.map(row => row.id).join(',') + ')');
-  if (onlySpend) {
+  const spendRows = onlySpend || (!onlyPending && !onlyOwner) ? await (async () => {
     const [intakes, ledger] = await Promise.all([
-      dbFetch('financial_owner_expense_intakes?owner_project_id=in.' + ids + '&status=eq.categorized&select=owner_project_id,amount,purpose_raw,evidence_message_id&limit=300')
+      dbFetch('financial_owner_expense_intakes?business_unit_code=eq.' + business + '&status=eq.categorized&select=owner_project_id,amount,purpose_raw,evidence_message_id&order=occurred_on.desc&limit=300')
         .then(r => r.json() as Promise<Array<{ owner_project_id:string; amount:number|string; purpose_raw:string; evidence_message_id:string|null }>>),
-      dbFetch('financial_investment_entries?owner_project_id=in.' + ids + '&status=eq.recorded&select=owner_project_id,amount,title,source_message_id&limit=300')
+      dbFetch('financial_investment_entries?business_unit_code=eq.' + business + '&status=eq.recorded&select=owner_project_id,amount,title,source_message_id&order=occurred_on.desc&limit=300')
         .then(r => r.json() as Promise<Array<{ owner_project_id:string; amount:number|string; title:string; source_message_id:string|null }>>),
     ]);
     const ledgerMessages = new Set(ledger.map(row => row.source_message_id).filter(Boolean));
-    const entries = [
+    return [
       ...ledger.map(row => ({ project_id:row.owner_project_id, title:row.title, amount:Number(row.amount||0) })),
       ...intakes.filter(row => !row.evidence_message_id || !ledgerMessages.has(row.evidence_message_id))
         .map(row => ({ project_id:row.owner_project_id, title:row.purpose_raw, amount:Number(row.amount||0) })),
     ];
+  })() : [];
+  if (!projects.length) {
+    if (/(?:ยอดโครงการ|โครงการ.*ยอดจ่าย)/u.test(query)) return 'หลังบ้านยังไม่มีโครงการของทีมนี้ให้ตรวจยอดจ่ายครับ';
+    const lines = ['สรุปข้อมูลของกลุ่มนี้จากหลังบ้านครับ',schedule];
+    if (spendRows.length) lines.push(`💰 รายจ่ายหมวดนี้ที่บันทึก: ${summaryMoney(spendRows.reduce((sum,row) => sum+row.amount,0))}`,
+      ...spendRows.slice(0,4).map(row => `• ${row.title} · ${summaryMoney(row.amount)} — ยังไม่ผูกโครงการ`));
+    return lines.join('\n');
+  }
+  const ids = encodeURIComponent('(' + projects.map(row => row.id).join(',') + ')');
+  if (onlySpend) {
+    const projectTotal = /(?:ยอดโครงการ|โครงการ.*ยอดจ่าย)/u.test(query);
+    const projectIds = new Set(projects.map(row => row.id));
+    const entries = projectTotal ? spendRows.filter(row => projectIds.has(row.project_id)) : spendRows;
     const names = new Map(projects.map(row => [row.id,row.name]));
-    if (!entries.length) return 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการของทีมนี้ครับ จึงยังยืนยันยอดจ่ายโครงการไม่ได้';
+    if (!entries.length) return projectTotal
+      ? 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการของทีมนี้ครับ จึงยังยืนยันยอดจ่ายโครงการไม่ได้'
+      : 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วในหมวดของทีมนี้ครับ';
     const total = entries.reduce((sum,row) => sum + row.amount,0);
     return [
-      `ยอดจ่ายโครงการของกลุ่มนี้ที่ผูกกับรายการจริง: ${summaryMoney(total)}`,
-      ...entries.slice(0,8).map(row => `• ${names.get(row.project_id)}: ${row.title} · ${summaryMoney(row.amount)}`),
+      `${projectTotal ? 'ยอดจ่ายโครงการที่ผูกกับรายการจริง' : 'รายจ่ายหมวดของกลุ่มนี้ที่บันทึก'}: ${summaryMoney(total)}`,
+      ...entries.slice(0,8).map(row => `• ${names.get(row.project_id) ?? 'ยังไม่ผูกโครงการ'}: ${row.title} · ${summaryMoney(row.amount)}`),
+      ...(projectTotal && spendRows.length > entries.length ? ['มีรายจ่ายหมวดนี้ที่ยังไม่ผูกโครงการ ไม่รวมในยอดโครงการครับ'] : []),
     ].join('\n');
   }
 
@@ -468,6 +479,8 @@ async function domainProjectSummary(team: string, query: string, today: string):
     if (!tasks.length) lines.push('', 'ยังไม่มีงานโครงการที่บันทึกไว้ของทีมนี้ครับ');
     if (!schedule.includes('\nยังไม่มีงานในตาราง\n') && !schedule.includes('\nไม่มีรายการค้างที่ต้องติดตาม\n')
       && !schedule.includes('\nไม่มีออเดอร์ค้างที่ต้องจัดการ\n')) lines.push('',schedule);
+    if (spendRows.length) lines.push('',`💰 รายจ่ายหมวดนี้ที่บันทึก: ${summaryMoney(spendRows.reduce((sum,row) => sum + row.amount,0))}`,
+      ...spendRows.slice(0,4).map(row => `• ${row.title} · ${summaryMoney(row.amount)}${row.project_id ? '' : ' — ยังไม่ผูกโครงการ'}`));
   }
   return lines.join('\n');
 }
