@@ -66,8 +66,24 @@ type OwnerExpenseIntake = {
   expense_class: ExpenseClass | null;
   expense_category: ExpenseCategory | null;
   expense_subcategory: string | null;
+  owner_project_id?: string | null;
+  owner_project_task_id?: string | null;
+  owner_project_installment_id?: string | null;
   created_at: string;
 };
+
+export type OwnerExpenseProject = {
+  id: string;
+  name: string;
+  business_unit_code: BusinessUnit | null;
+  status: string;
+};
+
+export type OwnerProjectMention =
+  | { kind: 'not_mentioned' }
+  | { kind: 'not_found' }
+  | { kind: 'ambiguous' }
+  | { kind: 'matched'; project: OwnerExpenseProject };
 
 type CaptureResult = {
   ok?: boolean;
@@ -140,6 +156,49 @@ function normalizeText(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
 }
 
+function compactProjectText(value: string): string {
+  return normalizeText(value).toLowerCase().replace(/[\s"'“”‘’()[\]{}:：,，.。!?！？]/gu, '');
+}
+
+export function matchOwnerProjectMention(
+  rawText: string,
+  projects: OwnerExpenseProject[],
+): OwnerProjectMention {
+  const text = compactProjectText(rawText);
+  const markers = ['โครงการ', 'โปรเจกต์', 'project'];
+  let markerIndex = -1;
+  let marker = '';
+  for (const candidate of markers) {
+    const index = text.lastIndexOf(candidate);
+    if (index > markerIndex) {
+      markerIndex = index;
+      marker = candidate;
+    }
+  }
+  if (markerIndex < 0) return { kind: 'not_mentioned' };
+
+  const tail = text.slice(markerIndex + marker.length).replace(/^(?:ชื่อ|คือ)/u, '');
+  const matches = projects
+    .filter(project => project.status === 'active' && compactProjectText(project.name).length > 0)
+    .filter(project => tail.startsWith(compactProjectText(project.name)))
+    .sort((left, right) => compactProjectText(right.name).length - compactProjectText(left.name).length);
+  if (!matches.length) return { kind: 'not_found' };
+  const longest = compactProjectText(matches[0].name).length;
+  const bestMatches = matches.filter(project => compactProjectText(project.name).length === longest);
+  return bestMatches.length === 1
+    ? { kind: 'matched', project: bestMatches[0] }
+    : { kind: 'ambiguous' };
+}
+
+async function ownerProjectMention(rawText: string): Promise<OwnerProjectMention> {
+  const hasMarker = /(?:โครงการ|โปรเจกต์|project)/iu.test(rawText);
+  if (!hasMarker) return { kind: 'not_mentioned' };
+  const response = await dbFetch(
+    'owner_projects?status=eq.active&select=id,name,business_unit_code,status&order=created_at.desc&limit=500',
+  );
+  return matchOwnerProjectMention(rawText, await response.json() as OwnerExpenseProject[]);
+}
+
 function money(value: unknown): string {
   const numeric = Number(value);
   return (Number.isFinite(numeric) ? numeric : 0).toLocaleString('th-TH', {
@@ -201,7 +260,7 @@ async function pendingIntakes(groupHash: string): Promise<OwnerExpenseIntake[]> 
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&status=' + PENDING_STATUSES
-    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at'
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
     + '&order=created_at.asc&limit=12',
   );
   return await response.json() as OwnerExpenseIntake[];
@@ -293,9 +352,11 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
 
   let expenseCategory: ExpenseCategory = 'other';
   let expenseSubcategory: string | null = null;
-  if (includesAny(text, [/ก่อสร้าง/u, /ต่อเติม/u, /รีโนเวท/u, /ปรับปรุงอาคาร/u])) {
+  if (includesAny(text, [/ก่อสร้าง/u, /ต่อเติม/u, /รีโนเวท/u, /ปรับปรุงอาคาร/u, /แปรรูปไม้/u, /งานไม้/u, /เลื่อยไม้/u])) {
     expenseCategory = 'construction';
-    expenseSubcategory = 'งานก่อสร้าง/ต่อเติม';
+    expenseSubcategory = includesAny(text, [/แปรรูปไม้/u, /งานไม้/u, /เลื่อยไม้/u])
+      ? 'งานไม้/แปรรูปไม้'
+      : 'งานก่อสร้าง/ต่อเติม';
   } else if (includesAny(text, [/ถมดิน/u, /ที่ดิน/u, /ลานจอด/u, /ถนน/u, /รั้ว/u, /ระบบน้ำ/u, /ประปา/u, /ระบบไฟ/u, /โครงสร้างพื้นฐาน/u])) {
     expenseCategory = 'land_infrastructure';
     expenseSubcategory = 'ที่ดิน/ส่วนกลาง';
@@ -517,6 +578,87 @@ function resultReply(result: ResolveResult): string {
   ].join('\n');
 }
 
+async function resolveExpenseToProject(input: {
+  intake: OwnerExpenseIntake;
+  project: OwnerExpenseProject;
+  purpose: string;
+  classification: OwnerExpenseClassification;
+  userHash: string;
+  messageId: string;
+}): Promise<string> {
+  const { intake, project } = input;
+  if (intake.owner_project_id && intake.owner_project_id !== project.id) {
+    return 'รายการนี้ผูกกับโครงการอื่นอยู่แล้วครับ ผมยังไม่เปลี่ยนโครงการให้เพื่อกันยอดย้ายผิดครับ';
+  }
+
+  if (!intake.owner_project_id) {
+    await rpc('owner_project_link_financial_v1', {
+      p_financial_kind: 'owner_expense',
+      p_financial_id: intake.id,
+      p_project_id: project.id,
+      p_task_id: intake.owner_project_task_id ?? null,
+      p_installment_id: intake.owner_project_installment_id ?? null,
+      p_source: 'line',
+      p_actor_hash: input.userHash,
+      p_reason: 'ผูกจากข้อความระบุชื่อโครงการในคำอธิบายสลิป',
+    });
+  }
+
+  const classification = input.classification;
+  const businessUnit = classification.businessUnit ?? project.business_unit_code ?? 'other';
+  const expenseCategory = classification.expenseCategory !== 'other'
+    ? classification.expenseCategory
+    : intake.expense_category || classification.expenseCategory;
+  const expenseClass = classification.expenseClass !== 'uncategorized'
+    ? classification.expenseClass
+    : intake.expense_class || classification.expenseClass;
+  const confidence = Math.max(classification.confidence, 0.72);
+  const result = await rpc<ResolveResult>('financial_resolve_owner_expense_intake_v1', {
+    p_intake_id: intake.id,
+    p_purpose: intake.status === 'awaiting_business' && intake.purpose_raw
+      ? intake.purpose_raw
+      : input.purpose,
+    p_business_unit_code: businessUnit,
+    p_expense_class: expenseClass,
+    p_expense_category: expenseCategory,
+    p_expense_subcategory: classification.expenseSubcategory ?? intake.expense_subcategory,
+    p_confidence: confidence,
+    p_user_hash: input.userHash,
+    p_message_id: input.messageId,
+  });
+
+  return [
+    '📁 Owner Expense — ผูกยอดกับโครงการแล้วครับ',
+    'รหัสรายการ: #' + intakeCode(intake.id),
+    'โครงการ: ' + project.name,
+    result.amount === null || result.amount === undefined ? 'ยอด: รอตรวจจากหลักฐาน' : 'ยอด: ' + money(result.amount),
+    'หมวด: ' + categoryLabel(result.expense_category || expenseCategory),
+    result.status === 'needs_review'
+      ? 'เก็บหลักฐานและผูกโครงการแล้วครับ รายการจะแยกไว้ตรวจหมวด/กิจการในหลังบ้าน โดยไม่ต้องตอบชื่อกิจการซ้ำ'
+      : 'บันทึกเข้าหลังบ้านแล้วครับ',
+  ].join('\n');
+}
+
+async function stageProjectMentionForClarification(input: {
+  intake: OwnerExpenseIntake;
+  purpose: string;
+  classification: OwnerExpenseClassification;
+  userHash: string;
+  messageId: string;
+}): Promise<void> {
+  if (input.intake.status !== 'awaiting_purpose') return;
+  await rpc('financial_stage_owner_expense_purpose_v1', {
+    p_intake_id: input.intake.id,
+    p_purpose: input.purpose,
+    p_expense_class: input.classification.expenseClass,
+    p_expense_category: input.classification.expenseCategory,
+    p_expense_subcategory: input.classification.expenseSubcategory,
+    p_confidence: input.classification.confidence,
+    p_user_hash: input.userHash,
+    p_message_id: input.messageId,
+  });
+}
+
 function typedInvestmentCommand(text: string): { amount: number; paymentMethod: 'cash' | 'transfer' | 'card' | 'other'; title: string; businessUnit: BusinessUnit | null; category: string } | null {
   if (!/^(?:ลงทุน(?:เงินสด)?|เงินสดลงทุน|บันทึกลงทุน)(?:\s|$)/iu.test(text)) return null;
   const amountMatch = text.match(/(?:^|\s)([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?:\s|บาท|$)/u);
@@ -630,6 +772,32 @@ export async function handleOwnerExpenseText(input: {
       '📁 Owner Expense — ทำเครื่องหมายว่าไม่ใช่ค่าใช้จ่ายแล้วครับ',
       'หลักฐานและประวัติเดิมยังเก็บอยู่ในหลังบ้าน ไม่ลบข้อมูลครับ',
     ].join('\n');
+  }
+
+  const combinedPurpose = normalizeText([intake.purpose_raw, purpose].filter(Boolean).join(' '));
+  const mentionedProject = await ownerProjectMention(combinedPurpose);
+  const projectClassification = classifyOwnerExpensePurpose(combinedPurpose);
+  if (mentionedProject.kind === 'matched') {
+    return resolveExpenseToProject({
+      intake,
+      project: mentionedProject.project,
+      purpose,
+      classification: projectClassification,
+      userHash: piiHash(input.userId) ?? '',
+      messageId: input.messageId,
+    });
+  }
+  if (mentionedProject.kind === 'ambiguous' || mentionedProject.kind === 'not_found') {
+    await stageProjectMentionForClarification({
+      intake,
+      purpose: intake.purpose_raw || purpose,
+      classification: projectClassification,
+      userHash: piiHash(input.userId) ?? '',
+      messageId: input.messageId,
+    });
+    return mentionedProject.kind === 'ambiguous'
+      ? 'ผมเห็นว่าระบุโครงการแล้ว แต่มีชื่อใกล้กันหลายรายการครับ ช่วยพิมพ์ชื่อโครงการให้ครบอีกครั้งครับ'
+      : 'ผมเห็นว่าระบุโครงการแล้ว แต่ยังหาโครงการชื่อนี้ในหลังบ้านไม่เจอครับ ช่วยพิมพ์ชื่อโครงการที่ยืนยันไว้ให้ตรงอีกครั้งครับ';
   }
 
   if (intake.status === 'awaiting_purpose') {
