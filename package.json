@@ -5,7 +5,6 @@
   "description": "ทำมา-ชาติ — Experiences of Isan. Static site (index.html) plus the Thongthai AI concierge Netlify Functions backend.",
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts",
-    "audit:snk-money": "node --import tsx --test tests/personal-finance-core.test.ts tests/personal-finance-nlu.test.ts tests/personal-finance-ledger.test.ts tests/personal-finance-conversation.test.ts tests/personal-finance-binding.test.ts tests/personal-finance-spec22.test.ts tests/personal-finance-transport.test.ts tests/personal-finance-v2-sql.test.ts tests/personal-finance-coach.test.ts tests/personal-finance-concurrency.test.ts",
     "audit:preww": "node --import tsx --test tests/homepage-i18n-completeness.test.ts tests/otop-i18n-typography.test.ts tests/pre-worldwide-production-audit.test.ts tests/public-five-language-complete.test.ts && node scripts/pre-worldwide-readiness-gate.mjs",
     "audit:ww0": "node --import tsx --test tests/ww0-foundation-lock.test.ts",
     "eval:semantic:live": "tsx scripts/run-semantic-live-eval.ts",
@@ -27,7 +26,8 @@
     "audit:ww10": "node --import tsx --test tests/ww10-thongthai-worldwide.test.ts tests/thongthai-worldwide-service-bridge.test.ts tests/ww9-global-fulfillment.test.ts tests/ww8-international-checkout.test.ts tests/ww7-customs-compliance.test.ts tests/ww6-global-shipping.test.ts tests/ww5-global-payments.test.ts tests/ww4-multi-currency.test.ts",
     "audit:ww11": "node --import tsx --test tests/ww11-stripe-global-payment.test.ts tests/ww11-first-wave-providers.test.ts tests/ww11-first-wave-country-targets.test.ts tests/ww11-country-certification.test.ts tests/ww11-country-certification-migration.test.ts tests/ww10-thongthai-worldwide.test.ts tests/thongthai-worldwide-service-bridge.test.ts tests/ww9-global-fulfillment.test.ts tests/ww8-international-checkout.test.ts tests/ww7-customs-compliance.test.ts tests/ww6-global-shipping.test.ts tests/ww5-global-payments.test.ts tests/ww4-multi-currency.test.ts",
     "audit:ww12": "node --import tsx --test tests/ww12-global-scale.test.ts tests/ww11-country-certification.test.ts tests/ww11-country-certification-migration.test.ts tests/ww10-thongthai-worldwide.test.ts tests/ww9-global-fulfillment.test.ts tests/ww8-international-checkout.test.ts tests/ww7-customs-compliance.test.ts tests/ww6-global-shipping.test.ts tests/ww5-global-payments.test.ts tests/ww4-multi-currency.test.ts",
-    "audit:i18n7": "node --import tsx --test tests/public-seven-language-complete.test.ts tests/phase6-global-language-egress.test.ts tests/ww3-public-locale-kernel.test.ts tests/ww3-storefront-locale.test.ts"
+    "audit:i18n7": "node --import tsx --test tests/public-seven-language-complete.test.ts tests/phase6-global-language-egress.test.ts tests/ww3-public-locale-kernel.test.ts tests/ww3-storefront-locale.test.ts",
+    "audit:snk-router": "node --import tsx --test tests/snk-private-bridge.test.ts"
   },
   "dependencies": {
     "chess.js": "^1.4.0"
