@@ -65,7 +65,7 @@ const BUSINESS_UNITS: Array<[RegExp, string]> = [
   [/(?:เฮือนสเตย์|huenstay|ที่พัก|บ้านพัก)/iu, 'huenstay'],
   [/(?:ผจญภัย|adventure|กิจกรรม|atv|ขี่ม้า)/iu, 'adventure'],
   [/(?:otop|โอทอป|สินค้าชุมชน|ของฝาก)/iu, 'otop'],
-  [/(?:ส่วนกลาง|ลานจอด|ถนน|รั้ว|ระบบน้ำ|โครงสร้างพื้นฐาน)/iu, 'shared_infrastructure'],
+  [/(?:ส่วนกลาง|ลานจอด|ถนน|รั้ว|ระบบน้ำ|โครงสร้างพื้นฐาน|เฉลียง|ศาลา|ทางเดิน|ลานนั่ง)/iu, 'shared_infrastructure'],
   [/(?:ใช้ร่วม|หลายกิจการ)/iu, 'shared'],
 ];
 

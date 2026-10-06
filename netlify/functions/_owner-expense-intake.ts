@@ -76,6 +76,7 @@ export type OwnerExpenseProject = {
   id: string;
   name: string;
   business_unit_code: BusinessUnit | null;
+  purpose?: string | null;
   status: string;
 };
 
@@ -194,7 +195,7 @@ async function ownerProjectMention(rawText: string): Promise<OwnerProjectMention
   const hasMarker = /(?:โครงการ|โปรเจกต์|project)/iu.test(rawText);
   if (!hasMarker) return { kind: 'not_mentioned' };
   const response = await dbFetch(
-    'owner_projects?status=eq.active&select=id,name,business_unit_code,status&order=created_at.desc&limit=500',
+    'owner_projects?status=eq.active&select=id,name,business_unit_code,purpose,status&order=created_at.desc&limit=500',
   );
   return matchOwnerProjectMention(rawText, await response.json() as OwnerExpenseProject[]);
 }
@@ -350,7 +351,10 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
   else if (includesAny(text, [/เฮือนสเตย์/u, /huenstay/u, /ที่พัก/u, /ห้องพัก/u, /รีสอร์ต/u])) businessUnit = 'huenstay';
   else if (includesAny(text, [/ผจญภัย/u, /adventure/u, /แอดเวนเจอร์/u, /atv/u, /zipline/u, /ล่องแก่ง/u])) businessUnit = 'adventure';
   else if (includesAny(text, [/otop/u, /โอทอป/u, /ของฝาก/u])) businessUnit = 'otop';
-  else if (includesAny(text, [/ส่วนกลาง/u, /ลานจอด/u, /ถนน/u, /ถมดิน/u, /ที่ดิน/u, /รั้ว/u, /ระบบน้ำ/u, /ประปา/u, /ไฟฟ้ากลาง/u, /โครงสร้างพื้นฐาน/u])) businessUnit = 'shared_infrastructure';
+  else if (includesAny(text, [
+    /ส่วนกลาง/u, /ลานจอด/u, /ถนน/u, /ถมดิน/u, /ที่ดิน/u, /รั้ว/u, /ระบบน้ำ/u, /ประปา/u,
+    /ไฟฟ้ากลาง/u, /โครงสร้างพื้นฐาน/u, /เฉลียง/u, /ศาลา/u, /ทางเดิน/u, /ลานนั่ง/u,
+  ])) businessUnit = 'shared_infrastructure';
   else if (includesAny(text, [/ใช้ร่วม/u, /หลายกิจการ/u, /กลางโครงการ/u])) businessUnit = 'shared';
 
   let expenseCategory: ExpenseCategory = 'other';
@@ -636,14 +640,22 @@ async function resolveExpenseToProject(input: {
   });
 
   return [
-    '📁 Owner Expense — ผูกยอดกับโครงการแล้วครับ',
+    result.duplicate
+      ? '📁 Owner Expense — รายการนี้มีอยู่ในหลังบ้านแล้วครับ'
+      : '📁 Owner Expense — ตรวจรายการและจัดหมวดให้แล้วครับ',
     'รหัสรายการ: #' + intakeCode(intake.id),
     'โครงการ: ' + project.name,
+    'รายการ: ' + input.purpose,
+    'กิจการ/ส่วน: ' + businessLabel(result.business_unit_code ?? businessUnit),
+    'ประเภท: ' + classLabel(result.expense_class ?? expenseClass)
+      + ' · ' + categoryLabel(result.expense_category || expenseCategory)
+      + (result.expense_subcategory || classification.expenseSubcategory
+        ? ' · ' + (result.expense_subcategory || classification.expenseSubcategory)
+        : ''),
     result.amount === null || result.amount === undefined ? 'ยอด: รอตรวจจากหลักฐาน' : 'ยอด: ' + money(result.amount),
-    'หมวด: ' + categoryLabel(result.expense_category || expenseCategory),
     result.status === 'needs_review'
-      ? 'เก็บหลักฐานและผูกโครงการแล้วครับ รายการจะแยกไว้ตรวจหมวด/กิจการในหลังบ้าน โดยไม่ต้องตอบชื่อกิจการซ้ำ'
-      : 'บันทึกเข้าหลังบ้านแล้วครับ',
+      ? 'ผูกหลักฐานกับโครงการแล้ว แต่มีข้อมูลที่ยังไม่ชัด จึงพักรายการเดิมไว้ให้ตรวจในหลังบ้านครับ'
+      : 'จัดหมวดและผูกยอดกับโครงการในหลังบ้านแล้วครับ ไม่ได้สร้างยอดหรือรายการซ้ำ',
   ].join('\n');
 }
 
@@ -818,8 +830,14 @@ export async function handleOwnerExpenseText(input: {
 
   const combinedPurpose = normalizeText([intake.purpose_raw, purpose].filter(Boolean).join(' '));
   const mentionedProject = await ownerProjectMention(combinedPurpose);
-  const projectClassification = classifyOwnerExpensePurpose(combinedPurpose);
   if (mentionedProject.kind === 'matched') {
+    // A named project is context, not just a foreign key. Use its stored
+    // purpose as well as the owner's slip description to classify the same
+    // expense against the Owner OS business-unit taxonomy.
+    const projectClassification = classifyOwnerExpensePurpose(normalizeText([
+      combinedPurpose,
+      mentionedProject.project.purpose ?? '',
+    ].filter(Boolean).join(' ')));
     return resolveExpenseToProject({
       intake,
       project: mentionedProject.project,
@@ -830,6 +848,7 @@ export async function handleOwnerExpenseText(input: {
     });
   }
   if (mentionedProject.kind === 'ambiguous' || mentionedProject.kind === 'not_found') {
+    const projectClassification = classifyOwnerExpensePurpose(combinedPurpose);
     await stageProjectMentionForClarification({
       intake,
       purpose: intake.purpose_raw || purpose,

@@ -44,6 +44,16 @@ test('collects project, work, budget, vendor, installments, and schedule one sim
   assert.match(renderOwnerProjectDraftSummary(intent, data), /พิมพ์ “ยืนยัน” เพื่อบันทึกเข้าหลังบ้านทันที/u);
 });
 
+test('infers a veranda project belongs to shared infrastructure', () => {
+  const data = applyOwnerProjectText({
+    text: 'เฉลียงไม้',
+    intent: 'new_project',
+    expectedField: 'project_name',
+  }).data;
+  assert.equal(data.project_name, 'เฉลียงไม้');
+  assert.equal(data.business_unit_code, 'shared_infrastructure');
+});
+
 test('extracts a complete project request in one message and accepts unknown optional answers', () => {
   const intent = classifyOwnerProjectStart(
     'ทองไทย สร้างโปรเจคครัวใหม่ ทำครัว งบ 100,000 จ้างช่างสมชาย แบ่ง 2 งวด ภายในเดือนนี้',
