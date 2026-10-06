@@ -140,6 +140,19 @@ test('owner asks API cost at any time: replies from live usage ledger and never 
   });
 });
 
+test('short สรุปมา in the bound AI cost group reads current cost ledger without a push',async()=>{
+  await withHarness(async harness=>{
+    harness.programOpsChannel('ai_cost','ai-cost-summary-group');
+    harness.programAiCostRows([
+      {conversation_id:'c1',event_id:'e1',channel:'line',model:'gpt',call_purpose:'answer',input_tokens:10,cached_input_tokens:0,output_tokens:2,cost_thb:0.25,status:'completed',occurred_at:'2026-10-06T03:00:00.000Z'},
+    ]);
+    const answer=await handleOwnerApiCostQuestion({targetId:'ai-cost-summary-group',text:'สรุปมา',now:new Date('2026-10-06T05:00:00.000Z')});
+    assert.match(answer??'',/วันนี้ใช้ประมาณ 0\.25 บาท/u);
+    assert.match(answer??'',/เดือนนี้สะสมประมาณ 0\.25 บาท/u);
+    assert.equal(harness.postsTo('line_push').length,0);
+  });
+});
+
 test('daily API digest is idempotent when the scheduler runs twice for one date',async()=>{
   await withHarness(async harness=>{
     harness.programOpsChannel('ai_cost');
