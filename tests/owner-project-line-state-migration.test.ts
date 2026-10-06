@@ -1,9 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 
-const base=readFileSync('supabase/migrations/20261005132314_owner_project_task_os_v1.sql','utf8');
+const basePath=[
+  'supabase/migrations/20261005145713_owner_project_task_os_v1.sql',
+  '../project-chat-src/supabase/migrations/20261005145713_owner_project_task_os_v1.sql',
+  'supabase/migrations/20261005132314_owner_project_task_os_v1.sql',
+].find(existsSync)!;
+const base=readFileSync(basePath,'utf8');
 const lineState=readFileSync('supabase/migrations/20261006120000_owner_project_line_state_v1.sql','utf8');
 
 test('LINE project completion checks every task, audits once, and respects the Owner group boundary',async()=>{
