@@ -13,7 +13,8 @@ import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
 import { handleOwnerExpenseImage, handleOwnerExpenseText, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
-import { handleOwnerProjectText } from './_owner-project-os';
+import { handleOwnerProjectQuery, handleOwnerProjectText } from './_owner-project-os';
+import { handleOwnerApiCostQuestion } from './_ai-cost-notifier';
 import { handleTransferPurposeText } from './_inthanin-transfer-followup';
 import { paymentConfirmationGuard, paymentTypedConfirmationGuard } from './_payment-guard';
 import {
@@ -391,6 +392,18 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     : null;
   if (ownerExpenseClassificationReply) {
     await replyToLine(event.replyToken, ownerExpenseClassificationReply, accessToken);
+    return;
+  }
+
+  const ownerApiCostReply = await handleOwnerApiCostQuestion({ targetId, text: event.message.text, now: new Date(event.timestamp ?? Date.now()) });
+  if (ownerApiCostReply) {
+    await replyToLine(event.replyToken, ownerApiCostReply, accessToken);
+    return;
+  }
+
+  const ownerProjectQueryReply = await handleOwnerProjectQuery({ targetId, text: event.message.text, timestamp: event.timestamp });
+  if (ownerProjectQueryReply) {
+    await replyToLine(event.replyToken, ownerProjectQueryReply, accessToken);
     return;
   }
 

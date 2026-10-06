@@ -136,6 +136,25 @@ test('5. brand-new/unbound group sends ordinary chatter ("hello"): safely ignore
   });
 });
 
+test('bound Owner group “สรุปมา” queries its backend records and uses Reply API', async()=>{
+  await withHarnessAndLine(async(harness,replies)=>{
+    const groupId='owner-group-real-summary';harness.programOpsChannel('owner_general',groupId);
+    const original=globalThis.fetch;
+    globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
+      const path=new URL(String(input)).pathname;
+      const data=path.endsWith('/owner_projects')?[{id:'p1',name:'เฉลียงไม้',project_code:'PJ-1'}]
+        :path.endsWith('/owner_project_tasks')?[{id:'t1',project_id:'p1',title:'แปรรูปไม้',task_kind:'one_time',status:'todo',due_on:null,responsible_name:'ช่างชล'}]
+        :path.endsWith('/financial_owner_expense_intakes')?[{id:'e1',owner_project_id:'p1',occurred_on:'2026-10-06',amount:'1000',purpose_raw:'ค่าแปรรูปไม้',evidence_message_id:'m1'}]:null;
+      if(data)return new Response(JSON.stringify(data),{status:200});
+      return original(input,init);
+    }) as typeof fetch;
+    try{await callLineWebhook([groupEvent('สรุปมา',groupId)])}finally{globalThis.fetch=original}
+    assert.equal(replies.length,1);
+    assert.match(replies[0]!.messages[0]?.text??'',/เฉลียงไม้/u);
+    assert.match(replies[0]!.messages[0]?.text??'',/ค่าแปรรูปไม้ · 1,000 บาท/u);
+  });
+});
+
 test('6. authorization configured: an unauthorized sender in a brand-new group gets an explicit unauthorized reply, never silence', async () => {
   const original = process.env.LINE_OPS_ADMIN_USER_IDS;
   process.env.LINE_OPS_ADMIN_USER_IDS = 'authorized-user-only';
