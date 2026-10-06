@@ -5,7 +5,10 @@ import {
   applyOwnerProjectText,
   classifyOwnerProjectStart,
   handleOwnerProjectQuery,
+  handleOwnerProjectText,
   ownerProjectMissingFields,
+  parseOwnerProjectBulkTasks,
+  parseOwnerProjectTaskStateCommand,
   renderOwnerProjectDraftSummary,
 } from '../netlify/functions/_owner-project-os';
 
@@ -70,6 +73,106 @@ test('extracts a complete project request in one message and accepts unknown opt
     text: 'ยังหาอยู่', intent: 'investment_plan', data: {}, expectedField: 'counterparty',
   }).data;
   assert.deepEqual(unknownVendor.unknown_fields, ['counterparty']);
+});
+
+test('splits a weekly work list into independent one-time tasks that remain pending until explicitly completed', () => {
+  const text = [
+    'ทองไทย งานอาทิตย์นี้ของโครงการเฉลียงไม้',
+    '1. ตัดไม้ตามขนาด',
+    '2. ทาน้ำยารักษาไม้',
+    '3. ติดตั้งโครง',
+    '4. เก็บรายละเอียด',
+  ].join('\n');
+  assert.equal(classifyOwnerProjectStart(text), 'one_time_task');
+  assert.deepEqual(parseOwnerProjectBulkTasks(text).map(task => task.title), [
+    'ตัดไม้ตามขนาด', 'ทาน้ำยารักษาไม้', 'ติดตั้งโครง', 'เก็บรายละเอียด',
+  ]);
+  const data = applyOwnerProjectText({
+    text, intent: 'one_time_task', timestamp: Date.parse('2026-10-06T01:00:00Z'),
+  }).data;
+  assert.equal(data.project_name, 'เฉลียงไม้');
+  assert.equal(data.task_kind, 'one_time');
+  assert.equal(data.due_on, '2026-10-11');
+  assert.equal(data.bulk_tasks?.length, 4);
+  assert.deepEqual(ownerProjectMissingFields('one_time_task', data), []);
+  assert.match(renderOwnerProjectDraftSummary('one_time_task', data), /4\. เก็บรายละเอียด/u);
+  assert.match(renderOwnerProjectDraftSummary('one_time_task', data), /แต่ละงานจะค้างแยกกัน/u);
+});
+
+test('recognizes stable task-number, task-code, and title completion commands', () => {
+  assert.deepEqual(parseOwnerProjectTaskStateCommand('งาน 2 จบแล้ว'), {
+    state: 'done', referenceKind: 'position', reference: '2', position: 2,
+  });
+  assert.deepEqual(parseOwnerProjectTaskStateCommand('WK-ABC12345 เสร็จแล้ว'), {
+    state: 'done', referenceKind: 'code', reference: 'WK-ABC12345',
+  });
+  assert.deepEqual(parseOwnerProjectTaskStateCommand('ติดตั้งโครง ยังไม่จบ'), {
+    state: 'todo', referenceKind: 'title', reference: 'ติดตั้งโครง',
+  });
+  assert.equal(parseOwnerProjectTaskStateCommand('งานไหนจบแล้ว'), null);
+});
+
+test('LINE flow previews and confirms four tasks once, then completes only the selected task', async () => {
+  const oldFetch = globalThis.fetch;
+  const oldUrl = process.env.SUPABASE_URL;
+  const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = 'https://unit.test';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-key';
+  let draft: any = null;
+  const paths: string[] = [];
+  const tasks = [1, 2, 3, 4].map(position => ({
+    id: `t${position}`, project_id: 'p1', task_code: `WK-TASK000${position}`,
+    title: `งานจริง ${position}`, task_kind: 'one_time', status: 'todo', due_on: '2026-10-11',
+    responsible_name: null, source_message_id: 'confirm-bulk', source_batch_position: position,
+    confirmed_at: '2026-10-06T08:00:00Z', created_at: '2026-10-06T08:00:00Z',
+  }));
+  globalThis.fetch = (async(input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const path = url.pathname;
+    const method = init?.method ?? 'GET';
+    paths.push(`${method} ${path}`);
+    const body = init?.body ? JSON.parse(String(init.body)) : {};
+    let rows: any = [];
+    if (path.endsWith('/ops_notification_channels')) rows = [{ team_code: 'owner_general' }];
+    else if (path.endsWith('/owner_project_conversation_messages') && method === 'POST') rows = [{ message_id: body.message_id }];
+    else if (path.endsWith('/owner_project_conversation_messages') && method === 'PATCH') rows = [];
+    else if (path.endsWith('/owner_project_conversation_drafts') && method === 'GET') rows = draft ? [draft] : [];
+    else if (path.endsWith('/owner_project_conversation_drafts') && method === 'POST') {
+      draft = {
+        id: 'draft-bulk', ...body, updated_at: '2026-10-06T08:00:00Z',
+        expires_at: '2026-10-13T08:00:00Z',
+      };
+      rows = [draft];
+    } else if (path.endsWith('/owner_projects')) rows = [{ id: 'p1', name: 'เฉลียงไม้', project_code: 'PJ-WOOD' }];
+    else if (path.endsWith('/owner_project_tasks')) rows = tasks;
+    else if (path.endsWith('/rpc/owner_project_confirm_bulk_tasks_v1')) {
+      rows = [{ ok: true, duplicate: false, project_id: 'p1', project_code: 'PJ-WOOD', project_name: 'เฉลียงไม้', task_count: 4,
+        tasks: tasks.map(task => ({ id: task.id, task_code: task.task_code, title: task.title, position: task.source_batch_position })) }];
+    } else if (path.endsWith('/rpc/owner_project_set_task_state_from_line_v1')) {
+      rows = [{ ok: true, duplicate: false, task_id: 't2', task_code: 'WK-TASK0002', task_title: 'งานจริง 2', task_status: 'done', project_name: 'เฉลียงไม้', batch_position: 2 }];
+    }
+    return new Response(JSON.stringify(rows), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const list = ['ทองไทย งานอาทิตย์นี้ของโครงการเฉลียงไม้', '1. งานจริง 1', '2. งานจริง 2', '3. งานจริง 3', '4. งานจริง 4'].join('\n');
+    const preview = await handleOwnerProjectText({ targetId: 'bulk-owner-group', userId: 'owner-1', text: list, messageId: 'start-bulk', timestamp: Date.parse('2026-10-06T08:00:00Z') });
+    assert.match(preview ?? '', /รวม 4 งาน/u);
+    assert.match(preview ?? '', /4\. งานจริง 4/u);
+
+    const confirmed = await handleOwnerProjectText({ targetId: 'bulk-owner-group', userId: 'owner-1', text: 'ยืนยัน', messageId: 'confirm-bulk', timestamp: Date.parse('2026-10-06T08:01:00Z') });
+    assert.match(confirmed ?? '', /บันทึก 4 งาน/u);
+    assert.match(confirmed ?? '', /งาน 2: งานจริง 2/u);
+
+    const completed = await handleOwnerProjectText({ targetId: 'bulk-owner-group', userId: 'owner-1', text: 'งาน 2 จบแล้ว', messageId: 'complete-2', timestamp: Date.parse('2026-10-06T08:02:00Z') });
+    assert.match(completed ?? '', /✅ ติ๊กว่าเสร็จแล้ว/u);
+    assert.match(completed ?? '', /งาน 2 — งานจริง 2/u);
+    assert.ok(paths.includes('POST /rest/v1/rpc/owner_project_confirm_bulk_tasks_v1'));
+    assert.ok(paths.includes('POST /rest/v1/rpc/owner_project_set_task_state_from_line_v1'));
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
+    if (oldKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+  }
 });
 
 test('project route is Owner-only, confirmation-gated, idempotent, and before read-only intelligence', () => {
