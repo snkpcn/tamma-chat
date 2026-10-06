@@ -41,6 +41,16 @@ test('owner investment classifier separates businesses and investment categories
     expenseSubcategory: 'งานไม้/แปรรูปไม้',
     confidence: 0.65,
   });
+
+  assert.deepEqual(classifyOwnerExpensePurpose(
+    'จ่ายค่าแปรรูปไม้ ของโครงการเฉลียงไม้ · เฉลียงไม้ให้ลูกค้านั่ง',
+  ), {
+    businessUnit: 'shared_infrastructure',
+    expenseClass: 'capital_investment',
+    expenseCategory: 'construction',
+    expenseSubcategory: 'งานไม้/แปรรูปไม้',
+    confidence: 0.91,
+  });
 });
 
 test('owner project matching requires an explicit, unique active project name', () => {
@@ -65,7 +75,7 @@ test('owner project matching requires an explicit, unique active project name', 
   );
 });
 
-test('project-mentioned slip links to the existing project instead of asking business again', async t => {
+test('project-mentioned slip reads project purpose, classifies from context, and links the existing project', async t => {
   const oldUrl = process.env.SUPABASE_URL;
   const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   process.env.SUPABASE_URL = 'https://supabase.test';
@@ -112,6 +122,7 @@ test('project-mentioned slip links to the existing project instead of asking bus
         id: '11e56d02-3bf8-4fe4-be9b-64254d1e0249',
         name: 'เฉลียงไม้',
         business_unit_code: null,
+        purpose: 'เฉลียงไม้ให้ลูกค้านั่ง',
         status: 'active',
       }]), { status: 200 });
     }
@@ -122,11 +133,12 @@ test('project-mentioned slip links to the existing project instead of asking bus
       return new Response(JSON.stringify({
         ok: true,
         intake_id: intakeId,
-        status: 'needs_review',
+        status: 'categorized',
         amount: 1000,
-        business_unit_code: 'other',
+        business_unit_code: 'shared_infrastructure',
         expense_class: 'capital_investment',
         expense_category: 'construction',
+        expense_subcategory: 'งานไม้/แปรรูปไม้',
       }), { status: 200 });
     }
     throw new Error('Unexpected mocked fetch: ' + url);
@@ -140,13 +152,21 @@ test('project-mentioned slip links to the existing project instead of asking bus
     timestamp: Date.parse('2026-10-06T01:31:00Z'),
   });
 
-  assert.match(reply || '', /ผูกยอดกับโครงการแล้ว/u);
+  assert.match(reply || '', /ตรวจรายการและจัดหมวดให้แล้ว/u);
   assert.match(reply || '', /โครงการ: เฉลียงไม้/u);
+  assert.match(reply || '', /กิจการ\/ส่วน: ส่วนกลาง\/โครงสร้างพื้นฐาน/u);
+  assert.match(reply || '', /งานไม้\/แปรรูปไม้/u);
+  assert.match(reply || '', /ยอด: 1,000 บาท/u);
+  assert.match(reply || '', /จัดหมวดและผูกยอดกับโครงการในหลังบ้านแล้ว/u);
   assert.doesNotMatch(reply || '', /กิจการ\/ส่วนไหน|ตอบได้ เช่น/u);
   const link = calls.find(call => call.url.includes('/rpc/owner_project_link_financial_v1'));
   assert.equal(link?.body?.p_financial_id, intakeId);
   assert.equal(link?.body?.p_project_id, '11e56d02-3bf8-4fe4-be9b-64254d1e0249');
-  assert.ok(calls.some(call => call.url.includes('/rpc/financial_resolve_owner_expense_intake_v1')));
+  const resolve = calls.find(call => call.url.includes('/rpc/financial_resolve_owner_expense_intake_v1'));
+  assert.equal(resolve?.body?.p_business_unit_code, 'shared_infrastructure');
+  assert.equal(resolve?.body?.p_expense_class, 'capital_investment');
+  assert.equal(resolve?.body?.p_expense_category, 'construction');
+  assert.equal(resolve?.body?.p_expense_subcategory, 'งานไม้/แปรรูปไม้');
   assert.ok(!calls.some(call => call.url.includes('/rpc/financial_stage_owner_expense_purpose_v1')));
 });
 
@@ -157,7 +177,7 @@ test('owner expense inbox stores first and asks both purpose and business before
   assert.match(intake, /financial_stage_owner_expense_purpose_v1/);
   assert.match(intake, /financial_resolve_owner_expense_intake_v1/);
   assert.match(intake, /owner_project_link_financial_v1/);
-  assert.match(intake, /ผูกยอดกับโครงการแล้วครับ/u);
+  assert.match(intake, /จัดหมวดและผูกยอดกับโครงการในหลังบ้านแล้วครับ/u);
   assert.match(intake, /financial_mark_owner_expense_not_expense_v1/);
   assert.match(intake, /owner-expense-evidence/);
   assert.match(intake, /x-upsert': 'false'/);
