@@ -379,7 +379,7 @@ function isReadOnlyQuestion(text: string): boolean {
   return /(?:ยอดขาย|ยอดจ่าย|จ่ายแล้ว|ลงทุนไป|จ่ายไป|ใช้จริง|ใช้ไป|คงเหลือ|เหลือเท่าไหร่|เท่าไหร่แล้ว|สรุป.*ลงทุน|ลงทุน.*อะไรบ้าง)/u.test(text);
 }
 
-const OWNER_PROJECT_QUERY = /(?:สรุปมา|สรุป(?:งาน|โครงการ|โปรเจค)|มี(?:งาน(?:อะไร)?|อะไร)?ค้าง(?:อยู่)?(?:ไหม|มั้ย|หรือเปล่า|รึป่าว|รึเปล่า)?|ตอนนี้ถึงไหนแล้ว|(?:ตอนนี้)?มีอะไรต้องทำ(?:ต่อ)?|งาน(?:ของ)?กลุ่มนี้(?:เป็นไง|เป็นยังไง|ถึงไหนแล้ว)|เหลือ(?:งาน)?อะไร(?:บ้าง)?|มีอะไร(?:ที่)?ต้องตาม(?:บ้าง)?|งานไหน(?:ที่)?รอ(?:กู|ผม|พี่|เจ้าของ)|อันไหน(?:ที่)?(?:เลย|เกิน)กำหนด|ยอดโครงการ.*(?:เท่าไหร่|เท่าไร)|โครงการ.*ยอดจ่าย|จ่ายไปเท่าไหร่แล้ว|มีจ่ายอะไรไปแล้ว)/u;
+const OWNER_PROJECT_QUERY = /(?:สรุปมา|สรุป(?:งาน|โครงการ|โปรเจค)|มี(?:งาน(?:อะไร)?|อะไร)?ค้าง(?:อยู่)?(?:ไหม|มั้ย|หรือเปล่า|รึป่าว|รึเปล่า)?|ตอนนี้ถึงไหนแล้ว|(?:ตอนนี้)?มีอะไรต้องทำ(?:ต่อ)?|งาน(?:ของ)?กลุ่มนี้(?:เป็นไง|เป็นยังไง|ถึงไหนแล้ว)|เหลือ(?:งาน)?อะไร(?:บ้าง)?|มีอะไร(?:ที่)?ต้องตาม(?:บ้าง)?|งานไหน(?:ที่)?รอ(?:กู|ผม|พี่|เจ้าของ)|อันไหน(?:ที่)?(?:เลย|เกิน)กำหนด|ยอดโครงการ.*(?:เท่าไหร่|เท่าไร)|โครงการ.*ยอดจ่าย|จ่ายไปเท่าไหร่(?:แล้ว)?|มีจ่ายอะไรไปแล้ว)/u;
 type SummaryProject = { id: string; name: string; project_code: string };
 type SummaryTask = {
   id: string;
@@ -398,6 +398,24 @@ type SummaryTask = {
 type SummaryInstallment = { id: string; project_id: string; title: string; amount: number | string; due_on: string | null; status: string };
 
 const summaryMoney = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 2 }) + ' บาท';
+const normalizeProjectLookup = (value: string) => normalizeText(value).toLocaleLowerCase('th-TH').replace(/[^\p{L}\p{M}\p{N}]+/gu, '');
+
+function expenseSummaryTitle(title: string, projectName?: string): string {
+  if (projectName && /^ตำมา[\s-]*ชาติ$/u.test(projectName)) {
+    return title.replace(/ตำมา[\s-]*ชาติ/gu, 'ตำมา-ชาติ');
+  }
+  return title;
+}
+
+function projectSpendLines(
+  expenses: Array<{ amount: number; projectId: string | null }>,
+  projects: SummaryProject[],
+): string[] {
+  return projects.map(project => ({
+    name: project.name,
+    total: expenses.filter(row => row.projectId === project.id).reduce((sum, row) => sum + row.amount, 0),
+  })).filter(row => row.total > 0).map(row => `• ${row.name}: ${summaryMoney(row.total)}`);
+}
 
 const TEAM_PROJECT_BUSINESS: Record<string, string> = {
   restaurant: 'tamma_restaurant',
@@ -547,8 +565,14 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   const onlyPending = /(?:ค้าง|เลยกำหนด|เกินกำหนด|ต้องตาม)/u.test(query);
   const onlyOwner = /(?:งานไหนรอกู|งานไหนรอผม|รอเจ้าของ|รอพี่ยืนยัน|รออนุมัติ)/u.test(query);
   const onlySpend = /(?:ยอดโครงการ|ยอดจ่าย|จ่ายไป|มีจ่ายอะไร)/u.test(query);
-  const projectSpend = /(?:ยอดโครงการ|โครงการ.*ยอดจ่าย)/u.test(query);
-  const selectedExpenses = onlySpend && projectSpend ? expenses.filter(row => row.projectId && project.has(row.projectId)) : expenses;
+  const normalizedQuery = normalizeProjectLookup(query);
+  const namedProjects = onlySpend ? projects.filter(row => {
+    const name = normalizeProjectLookup(row.name);
+    return name.length >= 3 && normalizedQuery.includes(name);
+  }) : [];
+  const projectSpend = namedProjects.length > 0 || /(?:ยอดโครงการ|โครงการ.*ยอดจ่าย)/u.test(query);
+  const selectedExpenses = projectSpend ? expenses.filter(row => row.projectId && project.has(row.projectId)
+    && (!namedProjects.length || namedProjects.some(project => project.id === row.projectId))) : expenses;
   const total = selectedExpenses.reduce((sum,row) => sum + row.amount,0);
   const lines = ['สรุปจากหลังบ้านตอนนี้ครับ'];
   if (onlyOwner) return [...lines,'','⏳ รอเจ้าของตัดสินใจ',...(ownerWait.length?ownerWait.map(row=>taskLine(row)):['• หลังบ้านยังไม่มีงานที่ระบุว่ารอเจ้าของตัดสินใจครับ'])].join('\n');
@@ -565,8 +589,10 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
     if (late.length) lines.push('','💸 งวดเลยกำหนด',...late.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} ${summaryMoney(Number(row.amount))}`));
   } else if (due.length) lines.push('','💸 งวดที่ยังจ่าย',...due.slice(0,5).map(row=>`• ${project.get(row.project_id)}: ${row.title} ${summaryMoney(Number(row.amount))}${row.due_on?' — '+row.due_on:''}`));
   if (onlySpend || (!onlyPending && expenses.length)) {
-    if (selectedExpenses.length) lines.push('',`💰 ${projectSpend ? 'จ่ายแล้วที่ผูกกับโครงการ' : 'รายจ่ายที่บันทึกในกลุ่ม'}: `+summaryMoney(total),
-      ...selectedExpenses.slice(0,5).map(row=>`• ${row.name} · ${summaryMoney(row.amount)}${row.projectId ? '' : ' — ยังไม่ผูกโครงการ'}`));
+    const namedProject = namedProjects.length === 1 ? namedProjects[0] : null;
+    if (selectedExpenses.length) lines.push('',`💰 ${namedProject ? `จ่ายแล้วของโครงการ${namedProject.name}` : projectSpend ? 'จ่ายแล้วที่ผูกกับโครงการ' : 'รายจ่ายที่บันทึกในกลุ่ม'}: `+summaryMoney(total),
+      ...projectSpendLines(selectedExpenses, namedProjects.length ? namedProjects : projects),
+      ...selectedExpenses.slice(0,5).map(row=>`• ${row.projectId && project.has(row.projectId) ? `${project.get(row.projectId)} — ` : ''}${expenseSummaryTitle(row.name, row.projectId ? project.get(row.projectId) : undefined)} · ${summaryMoney(row.amount)}${row.projectId ? '' : ' — ยังไม่ผูกโครงการ'}`));
     else lines.push('',projectSpend ? 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการนี้ครับ' : 'หลังบ้านยังไม่มีรายจ่ายที่ยืนยันแล้วในกลุ่มนี้ครับ');
     if (pendingReceipts.length) lines.push(`• มีสลิปรอจัดหมวด/ตรวจข้อมูลอีก ${pendingReceipts.length} รายการ ไม่รวมในยอดจ่ายยืนยัน`);
   }
