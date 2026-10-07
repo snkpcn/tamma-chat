@@ -158,7 +158,24 @@ function normalizeText(value: string): string {
 }
 
 function compactProjectText(value: string): string {
-  return normalizeText(value).toLowerCase().replace(/[\s"'“”‘’()[\]{}:：,，.。!?！？]/gu, '');
+  return normalizeText(value).toLowerCase().replace(/[\s"'“”‘’()[\]{}:：,，.。!?！？\-‐‑–—]/gu, '');
+}
+
+export function matchNamedProjectForOwnerPaidExpense(
+  rawText: string,
+  projects: OwnerExpenseProject[],
+): OwnerProjectMention {
+  const text = compactProjectText(rawText);
+  const matches = projects
+    .filter(project => project.status === 'active' && compactProjectText(project.name).length >= 4)
+    .filter(project => text.includes(compactProjectText(project.name)))
+    .sort((left, right) => compactProjectText(right.name).length - compactProjectText(left.name).length);
+  if (!matches.length) return /(?:โครงการ|โปรเจกต์|project)/iu.test(rawText)
+    ? { kind: 'not_found' }
+    : { kind: 'not_mentioned' };
+  const longest = compactProjectText(matches[0]!.name).length;
+  const best = matches.filter(project => compactProjectText(project.name).length === longest);
+  return best.length === 1 ? { kind: 'matched', project: best[0]! } : { kind: 'ambiguous' };
 }
 
 export function matchOwnerProjectMention(
@@ -388,7 +405,7 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
   } else if (includesAny(text, [/วัตถุดิบ/u, /อาหาร/u, /นม/u, /เนื้อ/u, /ผัก/u])) {
     expenseCategory = 'ingredients';
     expenseSubcategory = 'วัตถุดิบ';
-  } else if (includesAny(text, [/กาแฟ/u, /ชา/u, /เครื่องดื่ม/u])) {
+  } else if (includesAny(text, [/กาแฟ/u, /ชา(?!ติ)/u, /เครื่องดื่ม/u])) {
     expenseCategory = 'beverages';
     expenseSubcategory = 'เครื่องดื่ม';
   } else if (includesAny(text, [/แก้ว/u, /ถุง/u, /แพ็กเกจ/u, /บรรจุภัณฑ์/u])) {
@@ -430,7 +447,7 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
   } else if (includesAny(text, [/วัสดุสิ้นเปลือง/u])) {
     expenseCategory = 'consumables';
     expenseSubcategory = 'วัสดุสิ้นเปลือง';
-  } else if (includesAny(text, [/เครื่อง/u, /อุปกรณ์/u, /เครื่องมือ/u])) {
+  } else if (includesAny(text, [/แอร์/u, /เครื่องปรับอากาศ/u, /เครื่อง/u, /อุปกรณ์/u, /เครื่องมือ/u])) {
     expenseCategory = 'equipment';
     expenseSubcategory = 'อุปกรณ์/เครื่องมือ';
   }
@@ -731,6 +748,84 @@ async function recordTypedInvestment(input: { text: string; groupHash: string; u
   ].join('\n');
 }
 
+export function parseTypedOwnerPaidExpense(rawText: string): {
+  amount: number;
+  title: string;
+  category: ExpenseCategory;
+  businessUnit: BusinessUnit | null;
+  paymentMethod: 'cash' | 'transfer' | 'card' | 'other';
+} | null {
+  const text = normalizeText(rawText);
+  if (!/^(?:จ่าย(?:เงิน|ค่า)|ชำระ(?:เงิน|ค่า)|โอนจ่าย)/u.test(text)) return null;
+  if (/[?？]|(?:ไหม|หรือยัง|เท่าไหร่|กี่บาท|จะจ่าย|ยังไม่จ่าย)/u.test(text)) return null;
+  const amountMatch = text.match(/(?:^|\s)([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?:\s|บาท|$)/u);
+  if (!amountMatch) return null;
+  const amount = Number(amountMatch[1]!.replace(/,/g, ''));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100000000) return null;
+  const classification = classifyOwnerExpensePurpose(text);
+  const title = normalizeText(text
+    .replace(/^(?:จ่าย(?:เงิน|ค่า)|ชำระ(?:เงิน|ค่า)|โอนจ่าย)\s*/u, '')
+    .replace(amountMatch[0], ' ')
+    .replace(/(?:โครงการ|โปรเจกต์|project)\s*/giu, ' ')
+    .replace(/(?:ตำมา[\s-]*ชาติ|ทำมา[\s-]*ชาติ|inthanin|เฮือนสเตย์|ผจญภัย|otop|ส่วนกลาง|ใช้ร่วม)/giu, ' ')
+    .replace(/(?:บาท|เงินสด|โอน|บัตร|transfer|card)/giu, ' '));
+  if (title.length < 2) return null;
+  return {
+    amount,
+    title,
+    category: classification.expenseCategory,
+    businessUnit: classification.businessUnit,
+    paymentMethod: /เงินสด/u.test(text) ? 'cash' : /โอน|transfer/u.test(text) ? 'transfer' : /บัตร|card/u.test(text) ? 'card' : 'other',
+  };
+}
+
+async function recordTypedOwnerPaidExpense(input: {
+  text: string;
+  groupHash: string;
+  userId?: string | null;
+  messageId: string;
+  timestamp?: number;
+}): Promise<string | null> {
+  const parsed = parseTypedOwnerPaidExpense(input.text);
+  if (!parsed) return null;
+  const response = await dbFetch(
+    'owner_projects?owner_group_hash=eq.' + encodeURIComponent(input.groupHash)
+    + '&status=eq.active&select=id,name,business_unit_code,purpose,status&order=created_at.desc&limit=500',
+  );
+  const mention = matchNamedProjectForOwnerPaidExpense(input.text, await response.json() as OwnerExpenseProject[]);
+  if (mention.kind === 'ambiguous') return 'พบชื่อโครงการที่ตรงกันมากกว่าหนึ่งรายการครับ ช่วยระบุชื่อโครงการให้ชัดอีกครั้งครับ';
+  if (mention.kind === 'not_found') return 'ยังไม่พบโครงการที่ระบุในหลังบ้านครับ ช่วยระบุชื่อโครงการที่ยืนยันไว้ครับ';
+  const project = mention.kind === 'matched' ? mention.project : null;
+  const businessUnit = project?.business_unit_code ?? parsed.businessUnit;
+  if (!businessUnit) return 'รายการจ่ายนี้เป็นของกิจการหรือโครงการไหนครับ? ผมจะบันทึกยอดเมื่อทราบส่วนที่ถูกต้องครับ';
+  if (project && parsed.businessUnit && project.business_unit_code && parsed.businessUnit !== project.business_unit_code) {
+    return 'ชื่อกิจการกับโครงการที่ระบุไม่ตรงกันครับ ช่วยยืนยันชื่อโครงการก่อนบันทึกครับ';
+  }
+  const result = await rpc<{ ok?: boolean; duplicate?: boolean; id?: string }>('owner_project_record_line_investment_v1', {
+    p_occurred_on: bangkokDate(input.timestamp),
+    p_business_unit_code: businessUnit,
+    p_title: parsed.title,
+    p_category: parsed.category,
+    p_amount: parsed.amount,
+    p_payment_method: parsed.paymentMethod,
+    p_vendor_name: null,
+    p_notes: input.text,
+    p_owner_group_hash: input.groupHash,
+    p_source_message_id: input.messageId,
+    p_actor_hash: piiHash(input.userId) ?? '',
+    p_project_id: project?.id ?? null,
+  });
+  if (result.duplicate) return '✅ รายจ่ายนี้บันทึกไว้แล้วครับ ไม่ได้เพิ่มยอดซ้ำ';
+  return [
+    '✅ บันทึกรายจ่ายเข้าหลังบ้านแล้วครับ',
+    'รายการ: ' + parsed.title,
+    'ยอด: ' + money(parsed.amount),
+    project ? 'โครงการ: ' + project.name : 'กิจการ: ' + businessLabel(businessUnit),
+    'หมวด: ' + categoryLabel(parsed.category),
+    parsed.paymentMethod === 'other' ? 'วิธีจ่าย: ยังไม่ระบุ' : '',
+  ].filter(Boolean).join('\n');
+}
+
 export async function handleOwnerExpenseText(input: {
   targetId: string;
   userId?: string | null;
@@ -755,17 +850,26 @@ export async function handleOwnerExpenseText(input: {
   });
   if (typedReply) return typedReply;
 
+  const paidExpense = parseTypedOwnerPaidExpense(text);
+
   const reference = referenceFromText(text);
   const classificationReply = isOwnerExpenseClassificationReply(text);
   const allRows = await pendingIntakes(groupHash, classificationReply);
-  if (!allRows.length) return null;
+  if (!allRows.length) return paidExpense
+    ? recordTypedOwnerPaidExpense({ text, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
+    : null;
   const actorHash = piiHash(input.userId) ?? '';
   // Without an explicit #code, only continue the sender's own pending slip.
   // This prevents two family members in the Owner group crossing answers.
-  const rows = reference.code
+  const ownRows = reference.code
     ? allRows
     : allRows.filter(row => row.source_user_hash === actorHash);
-  if (!rows.length) return null;
+  const rows = paidExpense && !reference.code
+    ? ownRows.filter(row => row.amount !== null && Number(row.amount) === paidExpense.amount)
+    : ownRows;
+  if (!rows.length) return paidExpense
+    ? recordTypedOwnerPaidExpense({ text, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
+    : null;
 
   let intake: OwnerExpenseIntake | undefined;
   if (reference.code) {
