@@ -99,17 +99,20 @@ export function parseOwnerPayrollCommand(text:string):{
   payPeriod:string|null;
 }|null{
   const value=text.trim().replace(/\s+/g,' ');
-  const patterns:Array<[PayrollEventType,RegExp]>=[
-    ['salary_advance',/^(?:เบิกเงินเดือน|เบิกเงินเดือนล่วงหน้า|เบิกเงินล่วงหน้า|เงินเดือนล่วงหน้า)\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?(?:\s+เดือน\s+(.+))?$/u],
+  const patterns:Array<[PayrollEventType,RegExp,boolean?]>=[
+    ['salary_advance',/^(?:เบิกเงินเดือน(?:ล่วงหน้า)?|เบิกเงินล่วงหน้า|เงินเดือนล่วงหน้า)\s*(.+?)\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?(?:\s+เดือน\s+(.+))?$/u],
+    ['salary_advance',/^([\p{L}\p{M}]{2,40})\s*เบิกเงินเดือน(?:ล่วงหน้า)?\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?(?:\s+เดือน\s+(.+))?$/u,true],
     ['salary_payment',/^(?:จ่ายเงินเดือน|โอนเงินเดือน)\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?(?:\s+เดือน\s+(.+))?$/u],
     ['advance_deduction',/^(?:หักเบิก|หักเงินเบิก|หักเงินเดือนล่วงหน้า)\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?(?:\s+เดือน\s+(.+))?$/u],
   ];
-  for(const [eventType,pattern] of patterns){
+  for(const [eventType,pattern,employeeFirst] of patterns){
     const match=value.match(pattern);
     if(!match)continue;
     const amount=parseAmount(match[2]);
     const employeeLabel=match[1]?.trim().slice(0,120)??'';
     if(!amount||!employeeLabel)return null;
+    if(employeeFirst&&(/^(?:แม่|คุณแม่|ผม|กู|พ่อ)$/u.test(employeeLabel)
+      ||/(?:บอกว่า|ถามว่า|ยังไม่|จะ)/u.test(employeeLabel)))continue;
     return {
       eventType,
       employeeLabel,
@@ -229,6 +232,13 @@ export async function handleOwnerPayrollText(input:{
     });
   }catch(error){
     if(error instanceof Error&&error.message.includes('payroll_slip_pending')){
+      const pending=await pendingPayrollEvent(groupHash);
+      if(pending?.event_type===command!.eventType
+        && pending.employee_key===employeeKey(command!.employeeLabel)
+        && Number(pending.amount)===command!.amount){
+        return '🔒 Owner Payroll — รายการ '+command!.employeeLabel+' '+money(command!.amount)
+          +' รอสลิปอยู่แล้วครับ ไม่เพิ่มยอดซ้ำ';
+      }
       return '🔒 Owner Payroll — ยังมีรายการก่อนหน้ารอสลิปอยู่ครับ ส่งสลิปของรายการนั้นก่อน แล้วค่อยบันทึกรายการใหม่';
     }
     throw error;
