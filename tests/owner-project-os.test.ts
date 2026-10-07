@@ -309,6 +309,48 @@ test('group summary reads current project task and receipt data from its group b
   }finally{globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey}
 });
 
+test('Owner summary treats ตำมา-ชาติ and ตำมาชาติ as one project, while keeping wood separate', async () => {
+  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
+  globalThis.fetch=(async(input:string|URL|Request)=>{
+    const path=new URL(String(input)).pathname;
+    const rows=path.endsWith('/ops_notification_channels')?[{team_code:'owner_general'}]
+      :path.endsWith('/owner_projects')?[
+        {id:'restaurant',name:'ตำมา-ชาติ',project_code:'PJ-REST'},
+        {id:'wood',name:'เฉลียงไม้',project_code:'PJ-WOOD'},
+      ]
+      :path.endsWith('/financial_investment_entries')?[
+        {id:'air',owner_project_id:'restaurant',occurred_on:'2026-10-07',amount:15000,title:'ค่าติดตั้งแอร์',source_message_id:'air-message'},
+      ]
+      :path.endsWith('/financial_owner_expense_intakes')?[
+        {id:'wood-slip',owner_project_id:'wood',occurred_on:'2026-10-06',amount:1000,purpose_raw:'จ่ายค่าแปรรูปไม้',status:'categorized',evidence_message_id:'wood-message'},
+        {id:'kitchen-one',owner_project_id:'restaurant',occurred_on:'2026-10-06',amount:50000,purpose_raw:'ค่าก่อสร้างครัว ตำมาชาติ',status:'categorized',evidence_message_id:'kitchen-one-message'},
+        {id:'kitchen-two',owner_project_id:'restaurant',occurred_on:'2026-10-03',amount:50000,purpose_raw:'ค่าก่อสร้างงวดสอง ของ ตำมา-ชาติ',status:'categorized',evidence_message_id:'kitchen-two-message'},
+      ] : [];
+    return new Response(JSON.stringify(rows),{status:200});
+  }) as typeof fetch;
+  try {
+    const input={targetId:'owner-group-restaurant-and-wood',timestamp:Date.parse('2026-10-07T09:13:00Z')};
+    const summary=await handleOwnerProjectQuery({...input,text:'สรุปมา'});
+    assert.match(summary??'',/รายจ่ายที่บันทึกในกลุ่ม: 116,000 บาท/u);
+    assert.match(summary??'',/• ตำมา-ชาติ: 115,000 บาท/u);
+    assert.match(summary??'',/• เฉลียงไม้: 1,000 บาท/u);
+    assert.match(summary??'',/ค่าก่อสร้างครัว ตำมา-ชาติ · 50,000 บาท/u);
+    for (const text of ['ยอดโครงการตำมาชาติเท่าไหร่แล้ว','ยอดโครงการตำมา-ชาติเท่าไหร่แล้ว','ตำมา-ชาติ จ่ายไปเท่าไหร่']) {
+      const answer=await handleOwnerProjectQuery({...input,text});
+      assert.match(answer??'',/จ่ายแล้วของโครงการตำมา-ชาติ: 115,000 บาท/u,text);
+      assert.doesNotMatch(answer??'',/เฉลียงไม้|116,000|1,000 บาท/u,text);
+    }
+    const unqualified=await handleOwnerProjectQuery({...input,text:'ยอดโครงการเท่าไหร่แล้ว'});
+    assert.match(unqualified??'',/• ตำมา-ชาติ: 115,000 บาท/u);
+    assert.match(unqualified??'',/• เฉลียงไม้: 1,000 บาท/u);
+  } finally {
+    globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;
+  }
+});
+
 test('configured cafe group summary reads only cafe-scoped backend records',async()=>{
   const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
   process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
