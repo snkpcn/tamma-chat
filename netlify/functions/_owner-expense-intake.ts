@@ -208,13 +208,16 @@ export function matchOwnerProjectMention(
     : { kind: 'ambiguous' };
 }
 
-async function ownerProjectMention(rawText: string): Promise<OwnerProjectMention> {
-  const hasMarker = /(?:โครงการ|โปรเจกต์|project)/iu.test(rawText);
-  if (!hasMarker) return { kind: 'not_mentioned' };
+async function ownerProjectMention(rawText: string, groupHash: string): Promise<OwnerProjectMention> {
   const response = await dbFetch(
-    'owner_projects?status=eq.active&select=id,name,business_unit_code,purpose,status&order=created_at.desc&limit=500',
+    'owner_projects?owner_group_hash=eq.' + encodeURIComponent(groupHash)
+    + '&status=eq.active&select=id,name,business_unit_code,purpose,status&order=created_at.desc&limit=500',
   );
-  return matchOwnerProjectMention(rawText, await response.json() as OwnerExpenseProject[]);
+  const projects = await response.json() as OwnerExpenseProject[];
+  const explicit = matchOwnerProjectMention(rawText, projects);
+  return explicit.kind === 'not_mentioned'
+    ? matchNamedProjectForOwnerPaidExpense(rawText, projects)
+    : explicit;
 }
 
 function money(value: unknown): string {
@@ -933,7 +936,7 @@ export async function handleOwnerExpenseText(input: {
   }
 
   const combinedPurpose = normalizeText([intake.purpose_raw, purpose].filter(Boolean).join(' '));
-  const mentionedProject = await ownerProjectMention(combinedPurpose);
+  const mentionedProject = await ownerProjectMention(combinedPurpose, groupHash);
   if (mentionedProject.kind === 'matched') {
     // A named project is context, not just a foreign key. Use its stored
     // purpose as well as the owner's slip description to classify the same
