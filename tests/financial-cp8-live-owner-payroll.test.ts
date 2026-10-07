@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { parseOwnerPayrollCommand } from '../netlify/functions/_owner-payroll';
+import { handleOwnerPayrollText, parseOwnerPayrollCommand } from '../netlify/functions/_owner-payroll';
 
 test('owner payroll commands parse salary advance payment and deduction',()=>{
   assert.deepEqual(parseOwnerPayrollCommand('เบิกเงินเดือน ปอ 2,000 บาท'),{
@@ -13,6 +13,44 @@ test('owner payroll commands parse salary advance payment and deduction',()=>{
   assert.deepEqual(parseOwnerPayrollCommand('หักเบิก ปอ 2,000'),{
     eventType:'advance_deduction',employeeLabel:'ปอ',amount:2000,payPeriod:null,
   });
+  for(const text of ['เบิกเงินเดือนเจิด 200','เจิดเบิกเงินเดือน 200','เจิด เบิกเงินเดือน 200']){
+    assert.deepEqual(parseOwnerPayrollCommand(text),{
+      eventType:'salary_advance',employeeLabel:'เจิด',amount:200,payPeriod:null,
+    },text);
+  }
+  assert.equal(parseOwnerPayrollCommand('แม่บอกว่าเจิดเบิกเงินเดือน 200'),null);
+});
+
+test('Owner payroll accepts a joined Thai command and does not record its repeated wording twice',async()=>{
+  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
+  let attempts=0;
+  globalThis.fetch=(async(input:string|URL|Request)=>{
+    const path=new URL(String(input)).pathname;
+    if(path.endsWith('/ops_notification_channels'))return new Response(JSON.stringify([{team_code:'owner_general'}]),{status:200});
+    if(path.endsWith('/rpc/financial_create_owner_payroll_event_v1')){
+      attempts++;
+      return attempts===1
+        ?new Response(JSON.stringify({ok:true,event_id:'event-1',status:'awaiting_slip',amount:200}),{status:200})
+        :new Response('payroll_slip_pending',{status:409});
+    }
+    if(path.endsWith('/financial_employee_payroll_events'))return new Response(JSON.stringify([{
+      id:'event-1',event_type:'salary_advance',employee_label:'เจิด',employee_key:'เจิด',amount:200,
+      status:'awaiting_slip',owner_group_hash:'group-hash',created_at:'2026-10-07T11:34:00Z',
+    }]),{status:200});
+    return new Response('[]',{status:200});
+  }) as typeof fetch;
+  try{
+    const first=await handleOwnerPayrollText({targetId:'owner-group',userId:'owner',text:'เบิกเงินเดือนเจิด 200',messageId:'line-msg-1'});
+    const repeat=await handleOwnerPayrollText({targetId:'owner-group',userId:'owner',text:'เจิดเบิกเงินเดือน 200',messageId:'line-msg-2'});
+    assert.match(first??'',/เจิด[\s\S]*200 บาท[\s\S]*ส่งรูปสลิป/u);
+    assert.match(repeat??'',/รอสลิปอยู่แล้วครับ ไม่เพิ่มยอดซ้ำ/u);
+    assert.equal(attempts,2);
+  }finally{
+    globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;
+  }
 });
 
 test('payroll privacy is hard-routed to owner_general and separate storage',()=>{
