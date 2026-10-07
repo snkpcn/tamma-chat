@@ -408,13 +408,21 @@ function expenseSummaryTitle(title: string, projectName?: string): string {
 }
 
 function projectSpendLines(
-  expenses: Array<{ amount: number; projectId: string | null }>,
+  expenses: Array<{ name: string; amount: number; projectId: string | null }>,
   projects: SummaryProject[],
 ): string[] {
-  return projects.map(project => ({
-    name: project.name,
-    total: expenses.filter(row => row.projectId === project.id).reduce((sum, row) => sum + row.amount, 0),
-  })).filter(row => row.total > 0).map(row => `• ${row.name}: ${summaryMoney(row.total)}`);
+  const withSpend = projects.map(project => ({
+    project,
+    rows: expenses.filter(row => row.projectId === project.id),
+  })).filter(item => item.rows.length);
+  const lines = withSpend.slice(0, 5).flatMap(({project, rows}) => [
+    `• ${project.name}: ${summaryMoney(rows.reduce((sum, row) => sum + row.amount, 0))}`,
+    ...rows.slice(0, 3).map(row => `  - ${expenseSummaryTitle(row.name, project.name)} · ${summaryMoney(row.amount)}`),
+  ]);
+  if (withSpend.length > 5) lines.push(`• อีก ${withSpend.length - 5} โครงการในยอดรวม`);
+  lines.push(...expenses.filter(row => !row.projectId || !projects.some(project => project.id === row.projectId))
+    .slice(0, 3).map(row => `• ${row.name} · ${summaryMoney(row.amount)} — ยังไม่ผูกโครงการ`));
+  return lines;
 }
 
 const TEAM_PROJECT_BUSINESS: Record<string, string> = {
@@ -591,8 +599,7 @@ export async function handleOwnerProjectQuery(input: { targetId: string; text: s
   if (onlySpend || (!onlyPending && expenses.length)) {
     const namedProject = namedProjects.length === 1 ? namedProjects[0] : null;
     if (selectedExpenses.length) lines.push('',`💰 ${namedProject ? `จ่ายแล้วของโครงการ${namedProject.name}` : projectSpend ? 'จ่ายแล้วที่ผูกกับโครงการ' : 'รายจ่ายที่บันทึกในกลุ่ม'}: `+summaryMoney(total),
-      ...projectSpendLines(selectedExpenses, namedProjects.length ? namedProjects : projects),
-      ...selectedExpenses.slice(0,5).map(row=>`• ${row.projectId && project.has(row.projectId) ? `${project.get(row.projectId)} — ` : ''}${expenseSummaryTitle(row.name, row.projectId ? project.get(row.projectId) : undefined)} · ${summaryMoney(row.amount)}${row.projectId ? '' : ' — ยังไม่ผูกโครงการ'}`));
+      ...projectSpendLines(selectedExpenses, namedProjects.length ? namedProjects : projects));
     else lines.push('',projectSpend ? 'หลังบ้านยังไม่มีรายการจ่ายที่ยืนยันแล้วผูกกับโครงการนี้ครับ' : 'หลังบ้านยังไม่มีรายจ่ายที่ยืนยันแล้วในกลุ่มนี้ครับ');
     if (pendingReceipts.length) lines.push(`• มีสลิปรอจัดหมวด/ตรวจข้อมูลอีก ${pendingReceipts.length} รายการ ไม่รวมในยอดจ่ายยืนยัน`);
   }
