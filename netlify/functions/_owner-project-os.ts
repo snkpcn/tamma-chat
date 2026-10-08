@@ -35,6 +35,7 @@ export type OwnerProjectDraftData = {
   recurrence_weekdays?: number[];
   bulk_tasks?: OwnerProjectBulkTask[];
   unknown_fields?: OwnerProjectMissingField[];
+  origin_paid_expense_message_id?: string;
 };
 
 type DraftRow = {
@@ -93,7 +94,7 @@ type ProjectStateResult = {
 };
 
 const DASHBOARD_URL = 'https://tamma-backoffice.netlify.app/investments.html';
-const CONTINUATION_WINDOW_MS = 15 * 60 * 1000;
+const CONTINUATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const BUSINESS_UNITS: Array<[RegExp, string]> = [
   [/(?:อินทนิล|inthanin|คาเฟ่|ร้านกาแฟ)/iu, 'inthanin'],
   [/(?:ตำมา-ชาติ|ตำมาชาติ|ตํามา|ร้านอาหาร)/iu, 'tamma_restaurant'],
@@ -644,6 +645,7 @@ export function ownerProjectMissingFields(
   if (!(data.counterparty_name || unknown(data, 'counterparty'))) missing.push('counterparty');
   if (!(typeof data.installment_count === 'number' || unknown(data, 'payment_plan'))) missing.push('payment_plan');
   if (!(data.due_on || data.schedule_text || unknown(data, 'schedule'))) missing.push('schedule');
+  if (!(data.responsible_name || unknown(data, 'responsible'))) missing.push('responsible');
   return missing;
 }
 
@@ -782,6 +784,7 @@ export function renderOwnerProjectDraftSummary(intent: OwnerProjectIntent, data:
       ? `ผู้รับผิดชอบ: ${data.responsible_name || 'ยังไม่รู้'}`
       : `การจ่าย: ${installments}${data.payment_method ? ' · ' + ({cash:'เงินสด',transfer:'โอน',card:'บัตร',other:'อื่น ๆ'} as Record<string,string>)[data.payment_method] : ''}`,
     intent === 'weekly_task' ? '' : `กำหนด: ${schedule}`,
+    intent === 'weekly_task' ? '' : `ผู้รับผิดชอบ: ${data.responsible_name || 'ยังไม่รู้'}`,
     '',
     'ถ้าถูกต้อง พิมพ์ “ยืนยัน” เพื่อบันทึกเข้าหลังบ้านทันที',
     'ถ้าต้องแก้ พิมพ์ เช่น “แก้งบเป็น 300,000 บาท” หรือ “เปลี่ยนเป็น 3 งวด” ครับ',
@@ -1081,6 +1084,32 @@ function nextDraftReply(draft: DraftRow): string {
     : renderOwnerProjectDraftSummary(draft.intent, draft.data);
 }
 
+// A recorded payment is evidence, not the total budget. Keep the payment in
+// the ledger and collect a separate confirmed plan for the same project.
+export async function startOwnerProjectPlanAfterPaidExpense(input: {
+  targetId: string; userId: string | null | undefined; messageId: string;
+  projectName: string | null; workTitle: string; businessUnit: string | null;
+  paymentMethod: 'cash' | 'transfer' | 'card' | 'other';
+}): Promise<string> {
+  const groupHash = piiHash(input.targetId);
+  const actorHash = piiHash(input.userId);
+  if (!groupHash || !actorHash) return '';
+  const current = await activeDraft(groupHash, actorHash);
+  if (current) return `มีแผนที่กำลังถามค้างอยู่ครับ\n${nextDraftReply(current)}`;
+  const data: OwnerProjectDraftData = {
+    project_name: input.projectName ?? undefined,
+    work_title: input.workTitle,
+    business_unit_code: input.businessUnit ?? undefined,
+    payment_method: input.paymentMethod === 'other' ? undefined : input.paymentMethod,
+    task_kind: 'one_time',
+    origin_paid_expense_message_id: input.messageId,
+  };
+  const missing = ownerProjectMissingFields('investment_plan', data);
+  const draft = await createDraft({groupHash, actorHash, messageId: input.messageId,
+    intent: 'investment_plan', data, missing});
+  return nextDraftReply(draft);
+}
+
 export async function handleOwnerProjectText(input: {
   targetId: string;
   userId?: string | null;
@@ -1099,6 +1128,9 @@ export async function handleOwnerProjectText(input: {
 
   if (isMotherConversation(text) && !explicitlyAddressed) return null;
   if (isReadOnlyQuestion(text)) return null;
+  // A new paid transaction must go to the expense ledger. It must never be
+  // mistaken for the budget answer of an older project draft.
+  if (/^(?:จ่าย(?:เงิน|ค่า)|ชำระ(?:เงิน|ค่า)|โอนจ่าย)/u.test(text)) return null;
 
   const taskStateCommand = parseOwnerProjectTaskStateCommand(text);
   if (taskStateCommand) {
@@ -1230,6 +1262,14 @@ export async function handleOwnerProjectText(input: {
       p_message_id: input.messageId,
       p_actor_hash: actorHash,
     });
+    if (draft.data.origin_paid_expense_message_id && result.project_id) {
+      // Confirming fresh work on a previously completed project opens it again.
+      // The payment record and its amount remain untouched.
+      await rpc('owner_project_set_project_state_from_line_v1', {
+        p_project_id:result.project_id,p_group_hash:groupHash,p_state:'active',
+        p_actor_hash:actorHash,p_message_id:input.messageId + ':reopen',
+      });
+    }
     if (bulkTasks.length >= 2) {
       const savedTasks = result.tasks?.length
         ? result.tasks
