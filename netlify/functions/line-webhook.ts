@@ -11,7 +11,7 @@ import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
-import { handleOwnerExpenseImage, handleOwnerExpenseText, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
+import { handleOwnerExpenseImage, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
 import { handleOwnerProjectQuery, handleOwnerProjectText } from './_owner-project-os';
 import { handleOwnerApiCostQuestion } from './_ai-cost-notifier';
@@ -412,6 +412,15 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     : null;
   if (ownerExpenseClassificationReply) {
     await replyToLine(event.replyToken, ownerExpenseClassificationReply, accessToken);
+    return;
+  }
+
+  const paidMethodReply = await handleOwnerPaidExpenseMethodFollowup({
+    targetId, userId:event.source?.userId ?? null,
+    text:event.message.text, messageId:event.message.id ?? null,
+  });
+  if (paidMethodReply) {
+    await replyToLine(event.replyToken, paidMethodReply, accessToken);
     return;
   }
 
