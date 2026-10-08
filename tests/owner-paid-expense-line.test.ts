@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { piiHash } from '../netlify/functions/_operations-db';
 import {
   handleOwnerExpenseText,
+  handleOwnerPaidExpenseMethodFollowup,
   matchNamedProjectForOwnerPaidExpense,
   parseTypedOwnerPaidExpense,
 } from '../netlify/functions/_owner-expense-intake';
@@ -23,6 +24,9 @@ test('a natural paid expense recognizes the existing restaurant project and equi
     { id: 'restaurant-project', name: 'ตำมาชาติ', business_unit_code: 'tamma_restaurant', status: 'active' },
     { id: 'wood-project', name: 'เฉลียงไม้', business_unit_code: 'shared_infrastructure', status: 'completed' },
   ]).kind, 'matched');
+  assert.equal(matchNamedProjectForOwnerPaidExpense('จ่ายเงินค่าก่อสร้างเฉลียงไม้ 5000', [
+    { id:'wood-project',name:'เฉลียงไม้',business_unit_code:null,status:'completed' },
+  ]).kind,'matched');
 });
 
 test('Owner LINE expense uses the bound group, one source message and a project-linked transaction', async () => {
@@ -41,6 +45,8 @@ test('Owner LINE expense uses the bound group, one source message and a project-
       : url.pathname.endsWith('/owner_projects') ? [{
         id: 'restaurant-project', name: 'ตำมาชาติ', business_unit_code: 'tamma_restaurant', status: 'active',
       }]
+      : url.pathname.endsWith('/owner_project_conversation_drafts') && init?.method === 'POST'
+        ? [{id:'draft-air',data:body?.data,missing_fields:body?.missing_fields}]
       : url.pathname.endsWith('/rpc/owner_project_record_line_investment_v1')
         ? { ok: true, duplicate: false, id: 'expense-id' }
         : [];
@@ -55,6 +61,7 @@ test('Owner LINE expense uses the bound group, one source message and a project-
     assert.match(reply ?? '', /บันทึกรายจ่ายเข้าหลังบ้าน/);
     assert.match(reply ?? '', /โครงการ: ตำมาชาติ/);
     assert.match(reply ?? '', /15,000 บาท/);
+    assert.match(reply ?? '', /ตั้งเงินไว้ประมาณเท่าไร/u);
     const projectRead = calls.find(call => call.path.startsWith('/rest/v1/owner_projects'))!;
     assert.match(projectRead.path, new RegExp('owner_group_hash=eq\\.' + piiHash('owner-group')));
     const write = calls.find(call => call.path.endsWith('/rpc/owner_project_record_line_investment_v1'))!;
@@ -76,6 +83,79 @@ test('Owner LINE expense uses the bound group, one source message and a project-
     if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
     if (oldKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
   }
+});
+
+test('the short เงินสด reply updates the same paid entry and continues the existing plan', async () => {
+  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
+  const calls:Array<{path:string;body?:Record<string,unknown>}>=[];
+  globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
+    const url=new URL(String(input));const body=init?.body?JSON.parse(String(init.body)):undefined;
+    calls.push({path:url.pathname+url.search,body});
+    const rows=url.pathname.endsWith('/ops_notification_channels')?[{team_code:'owner_general'}]
+      :url.pathname.endsWith('/owner_project_conversation_drafts')&&init?.method!=='PATCH'?[{
+        id:'draft-wood',data:{project_name:'เฉลียงไม้',work_title:'ค่าก่อสร้างเฉลียงไม้'},
+        missing_fields:['budget','counterparty','payment_plan','schedule','responsible'],
+        source_message_id:'line-paid-wood',expires_at:'2099-01-01T00:00:00Z',
+      }]
+      :url.pathname.endsWith('/financial_investment_entries')?[{id:'wood-expense',payment_method:'other'}]
+      :{ok:true,duplicate:false};
+    return new Response(JSON.stringify(rows),{status:200});
+  }) as typeof fetch;
+  try{
+    const reply=await handleOwnerPaidExpenseMethodFollowup({targetId:'owner-group',userId:'owner-user',
+      text:'เงินสด',messageId:'line-cash-reply'});
+    assert.match(reply??'',/ไม่เพิ่มยอดซ้ำ/u);
+    assert.match(reply??'',/ตั้งเงินไว้ประมาณเท่าไร/u);
+    const write=calls.find(call=>call.path.endsWith('/rpc/owner_project_set_line_payment_method_v1'));
+    assert.equal(write?.body?.p_entry_id,'wood-expense');
+    assert.equal(write?.body?.p_method,'cash');
+    assert.equal(calls.filter(call=>call.path.endsWith('/rpc/owner_project_record_line_investment_v1')).length,0);
+  }finally{globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;}
+});
+
+test('a payment for completed เฉลียงไม้ links the old project and asks for total budget without treating 5,000 as the budget', async()=>{
+  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
+  const calls:Array<{path:string;body?:Record<string,unknown>}>=[];
+  globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
+    const url=new URL(String(input));const body=init?.body?JSON.parse(String(init.body)):undefined;
+    calls.push({path:url.pathname+url.search,body});
+    const rows=url.pathname.endsWith('/ops_notification_channels')?[{team_code:'owner_general'}]
+      :url.pathname.endsWith('/financial_owner_expense_intakes')?[]
+      :url.pathname.endsWith('/owner_projects')?[{id:'wood-project',name:'เฉลียงไม้',business_unit_code:null,status:'completed'}]
+      :url.pathname.endsWith('/owner_project_conversation_drafts')&&init?.method==='POST'
+        ?[{id:'draft-wood',data:body?.data,missing_fields:body?.missing_fields}]
+      :url.pathname.endsWith('/rpc/owner_project_record_line_investment_v1')?{ok:true,duplicate:false,id:'wood-payment'}
+      :[];
+    return new Response(JSON.stringify(rows),{status:200});
+  }) as typeof fetch;
+  try{
+    const reply=await handleOwnerExpenseText({targetId:'owner-group',userId:'owner-user',
+      text:'จ่ายเงินค่าก่อสร้างเฉลียงไม้ 5000',messageId:'line-wood-5000'});
+    assert.match(reply??'',/โครงการ: เฉลียงไม้/u);
+    assert.match(reply??'',/ตั้งเงินไว้ประมาณเท่าไร/u);
+    const write=calls.find(call=>call.path.endsWith('/rpc/owner_project_record_line_investment_v1'));
+    assert.equal(write?.body?.p_project_id,'wood-project');
+    assert.equal(write?.body?.p_amount,5000);
+    const draft=calls.find(call=>call.path.endsWith('/owner_project_conversation_drafts')&&call.body);
+    assert.equal((draft?.body?.data as Record<string,unknown>)?.budget_amount,undefined);
+    assert.equal((draft?.body?.data as Record<string,unknown>)?.project_name,'เฉลียงไม้');
+  }finally{globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;}
+});
+
+test('continuation RPC keeps group, sender, amount and audit boundaries',()=>{
+  const sql=readFileSync('supabase/migrations/20261008070000_owner_paid_expense_continuation_v1.sql','utf8');
+  assert.match(sql,/status<>'cancelled'/u);
+  assert.match(sql,/business_unit_code is null or business_unit_code=p_business_unit_code/u);
+  assert.match(sql,/source_user_hash is distinct from trim\(p_actor_hash\)/u);
+  assert.match(sql,/financial_investment_entry_audit_events/u);
+  assert.match(sql,/to service_role/u);
+  assert.doesNotMatch(sql,/delete\s+from|drop\s+table/iu);
 });
 
 test('LINE RPC is service-role-only and checks group binding before writing', () => {

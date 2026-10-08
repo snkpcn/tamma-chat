@@ -23,11 +23,11 @@ test('starts a project draft from natural Owner-group Thai but leaves read quest
   assert.equal(classifyOwnerProjectStart('ลงทุนเงินสด 5,000 ซื้อชั้นวาง ตำมา-ชาติ'), null);
 });
 
-test('collects project, work, budget, vendor, installments, and schedule one simple answer at a time', () => {
+test('collects project, work, budget, vendor, installments, schedule, and owner one answer at a time', () => {
   const intent = 'new_project' as const;
   let data = applyOwnerProjectText({ text: 'ทองไทย สร้างโปรเจคใหม่', intent }).data;
   assert.deepEqual(ownerProjectMissingFields(intent, data), [
-    'project_name', 'work_title', 'budget', 'counterparty', 'payment_plan', 'schedule',
+    'project_name', 'work_title', 'budget', 'counterparty', 'payment_plan', 'schedule', 'responsible',
   ]);
 
   data = applyOwnerProjectText({ text: 'ครัวใหม่', intent, data, expectedField: 'project_name' }).data;
@@ -36,6 +36,8 @@ test('collects project, work, budget, vendor, installments, and schedule one sim
   data = applyOwnerProjectText({ text: 'ช่างสมชาย', intent, data, expectedField: 'counterparty' }).data;
   data = applyOwnerProjectText({ text: 'แบ่ง 2 งวด โอน', intent, data, expectedField: 'payment_plan' }).data;
   data = applyOwnerProjectText({ text: 'ภายในเดือนนี้', intent, data, expectedField: 'schedule' }).data;
+  assert.deepEqual(ownerProjectMissingFields(intent, data), ['responsible']);
+  data = applyOwnerProjectText({ text: 'ผมเอง', intent, data, expectedField: 'responsible' }).data;
 
   assert.deepEqual(ownerProjectMissingFields(intent, data), []);
   assert.equal(data.project_name, 'ครัวใหม่');
@@ -67,7 +69,7 @@ test('extracts a complete project request in one message and accepts unknown opt
     text: 'ทองไทย สร้างโปรเจคครัวใหม่ ทำครัว งบ 100,000 จ้างช่างสมชาย แบ่ง 2 งวด ภายในเดือนนี้',
     intent: intent!,
   }).data;
-  assert.deepEqual(ownerProjectMissingFields(intent!, parsed), []);
+  assert.deepEqual(ownerProjectMissingFields(intent!, parsed), ['responsible']);
 
   const unknownVendor = applyOwnerProjectText({
     text: 'ยังหาอยู่', intent: 'investment_plan', data: {}, expectedField: 'counterparty',

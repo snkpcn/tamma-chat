@@ -1,5 +1,6 @@
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
+import { ownerProjectQuestion, startOwnerProjectPlanAfterPaidExpense } from './_owner-project-os';
 import {
   extractFinancialEvidence,
   extensionForMime,
@@ -167,7 +168,7 @@ export function matchNamedProjectForOwnerPaidExpense(
 ): OwnerProjectMention {
   const text = compactProjectText(rawText);
   const matches = projects
-    .filter(project => project.status === 'active' && compactProjectText(project.name).length >= 4)
+    .filter(project => project.status !== 'cancelled' && compactProjectText(project.name).length >= 4)
     .filter(project => text.includes(compactProjectText(project.name)))
     .sort((left, right) => compactProjectText(right.name).length - compactProjectText(left.name).length);
   if (!matches.length) return /(?:โครงการ|โปรเจกต์|project)/iu.test(rawText)
@@ -782,8 +783,50 @@ export function parseTypedOwnerPaidExpense(rawText: string): {
   };
 }
 
+export async function handleOwnerPaidExpenseMethodFollowup(input: {
+  targetId: string; userId?: string | null; text: string; messageId?: string | null;
+}): Promise<string | null> {
+  const method = /^(?:เงินสด|จ่ายเงินสด)$/u.test(input.text.trim()) ? 'cash'
+    : /^(?:โอน|โอนเงิน)$/u.test(input.text.trim()) ? 'transfer'
+    : /^(?:บัตร|บัตรเครดิต)$/u.test(input.text.trim()) ? 'card' : null;
+  if (!method || !input.messageId || !input.userId) return null;
+  if (await boundLineOpsTeam(input.targetId) !== 'owner_general') return null;
+  const groupHash = piiHash(input.targetId), actorHash = piiHash(input.userId);
+  if (!groupHash || !actorHash) return null;
+  const draftsResponse = await dbFetch('owner_project_conversation_drafts?owner_group_hash=eq.'
+    + encodeURIComponent(groupHash) + '&actor_hash=eq.' + encodeURIComponent(actorHash)
+    + '&status=eq.collecting&select=id,data,missing_fields,source_message_id,expires_at'
+    + '&order=updated_at.desc&limit=1');
+  const draft = (await draftsResponse.json() as Array<{
+    id:string; data:Record<string,unknown>; missing_fields:string[];
+    source_message_id:string; expires_at:string;
+  }>)[0];
+  if (!draft || new Date(draft.expires_at).getTime() <= Date.now()) return null;
+  const entriesResponse = await dbFetch('financial_investment_entries?source_channel=eq.line'
+    + '&source_message_id=eq.' + encodeURIComponent(draft.source_message_id)
+    + '&owner_group_hash=eq.' + encodeURIComponent(groupHash)
+    + '&source_user_hash=eq.' + encodeURIComponent(actorHash)
+    + '&status=eq.recorded&select=id,payment_method&limit=1');
+  const entry = (await entriesResponse.json() as Array<{id:string;payment_method:string}>)[0];
+  if (!entry || !['other',method].includes(entry.payment_method)) return null;
+  await rpc('owner_project_set_line_payment_method_v1', {
+    p_entry_id:entry.id,p_group_hash:groupHash,p_actor_hash:actorHash,
+    p_method:method,p_message_id:input.messageId,
+  });
+  await dbFetch('owner_project_conversation_drafts?id=eq.' + draft.id, {
+    method:'PATCH',headers:{Prefer:'return=minimal'},
+    body:JSON.stringify({data:{...draft.data,payment_method:method},
+      last_message_id:input.messageId,updated_at:new Date().toISOString()}),
+  });
+  const question = draft.missing_fields[0]
+    ? ownerProjectQuestion(draft.missing_fields[0] as Parameters<typeof ownerProjectQuestion>[0])
+    : 'ถ้าข้อมูลแผนถูกต้อง พิมพ์ “ยืนยัน” ครับ';
+  return `รับแล้วครับ รายจ่ายเดิมระบุวิธีจ่ายเป็น ${method==='cash'?'เงินสด':method==='transfer'?'โอน':'บัตร'} ไม่เพิ่มยอดซ้ำ\n${question}`;
+}
+
 async function recordTypedOwnerPaidExpense(input: {
   text: string;
+  targetId: string;
   groupHash: string;
   userId?: string | null;
   messageId: string;
@@ -793,7 +836,7 @@ async function recordTypedOwnerPaidExpense(input: {
   if (!parsed) return null;
   const response = await dbFetch(
     'owner_projects?owner_group_hash=eq.' + encodeURIComponent(input.groupHash)
-    + '&status=eq.active&select=id,name,business_unit_code,purpose,status&order=created_at.desc&limit=500',
+    + '&status=neq.cancelled&select=id,name,business_unit_code,purpose,status&order=created_at.desc&limit=500',
   );
   const mention = matchNamedProjectForOwnerPaidExpense(input.text, await response.json() as OwnerExpenseProject[]);
   if (mention.kind === 'ambiguous') return 'พบชื่อโครงการที่ตรงกันมากกว่าหนึ่งรายการครับ ช่วยระบุชื่อโครงการให้ชัดอีกครั้งครับ';
@@ -819,6 +862,11 @@ async function recordTypedOwnerPaidExpense(input: {
     p_project_id: project?.id ?? null,
   });
   if (result.duplicate) return '✅ รายจ่ายนี้บันทึกไว้แล้วครับ ไม่ได้เพิ่มยอดซ้ำ';
+  const planQuestion = await startOwnerProjectPlanAfterPaidExpense({
+    targetId: input.targetId, userId: input.userId, messageId: input.messageId,
+    projectName: project?.name ?? null, workTitle: parsed.title,
+    businessUnit, paymentMethod: parsed.paymentMethod,
+  });
   return [
     '✅ บันทึกรายจ่ายเข้าหลังบ้านแล้วครับ',
     'รายการ: ' + parsed.title,
@@ -826,6 +874,8 @@ async function recordTypedOwnerPaidExpense(input: {
     project ? 'โครงการ: ' + project.name : 'กิจการ: ' + businessLabel(businessUnit),
     'หมวด: ' + categoryLabel(parsed.category),
     parsed.paymentMethod === 'other' ? 'วิธีจ่าย: ยังไม่ระบุ' : '',
+    planQuestion ? 'แผนงานและงบยังเป็นร่าง รอคำว่า “ยืนยัน” ก่อนบันทึกครับ' : '',
+    planQuestion,
   ].filter(Boolean).join('\n');
 }
 
@@ -859,7 +909,7 @@ export async function handleOwnerExpenseText(input: {
   const classificationReply = isOwnerExpenseClassificationReply(text);
   const allRows = await pendingIntakes(groupHash, classificationReply);
   if (!allRows.length) return paidExpense
-    ? recordTypedOwnerPaidExpense({ text, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
+    ? recordTypedOwnerPaidExpense({ text, targetId: input.targetId, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
     : null;
   const actorHash = piiHash(input.userId) ?? '';
   // Without an explicit #code, only continue the sender's own pending slip.
@@ -871,7 +921,7 @@ export async function handleOwnerExpenseText(input: {
     ? ownRows.filter(row => row.amount !== null && Number(row.amount) === paidExpense.amount)
     : ownRows;
   if (!rows.length) return paidExpense
-    ? recordTypedOwnerPaidExpense({ text, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
+    ? recordTypedOwnerPaidExpense({ text, targetId: input.targetId, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
     : null;
 
   let intake: OwnerExpenseIntake | undefined;
