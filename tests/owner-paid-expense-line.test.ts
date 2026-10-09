@@ -261,6 +261,9 @@ test('fresh 200 baht slip description wins over the draft and links a completed 
     return new Response(JSON.stringify(rows),{status:200});
   }) as typeof fetch;
   try {
+    const motherChat=await handleOwnerRecentSlipProjectPurpose({targetId:'owner-group',userId:'owner-user',
+      text:'แม่ โครงการเฉลียงไม้คุยกันก่อน',messageId:'mother-chat'});
+    assert.equal(motherChat,null);
     const reply=await handleOwnerRecentSlipProjectPurpose({targetId:'owner-group',userId:'owner-user',
       text:'ค่าน้ำมันตัดไม้ โครงการเฉลียงไม้',messageId:'slip-description'});
     assert.match(reply??'',/โครงการ: เฉลียงไม้/u);
