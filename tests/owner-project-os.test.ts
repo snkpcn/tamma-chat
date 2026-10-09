@@ -440,7 +440,7 @@ test('reported paid total checks the current group project ledger and keeps the 
     assert.match(reply??'',/ยืนยันจ่ายแล้ว 6,200 บาท/u);
     assert.match(reply??'',/ตรงกับยอดรวม 6,200 บาท/u);
     assert.match(reply??'',/ไม่เพิ่มรายการ 6,200 บาท ซ้ำ/u);
-    assert.match(reply??'',/ต้องทำหรือเริ่มจ่ายเมื่อไร/u);
+    assert.match(reply??'',/งวดถัดไปตั้งใจจ่ายเมื่อไร/u);
     assert.ok(calls.some(call=>call.path.includes('owner_group_hash=eq.')));
     assert.ok(calls.some(call=>call.path.includes('owner_project_id=eq.wood')));
     assert.ok(!calls.some(call=>call.path.includes('/rpc/financial_record_investment_v1')));
