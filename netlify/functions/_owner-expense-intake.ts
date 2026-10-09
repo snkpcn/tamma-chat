@@ -954,7 +954,8 @@ export async function handleOwnerExpenseText(input: {
   // This prevents two family members in the Owner group crossing answers.
   const ownRows = reference.code
     ? allRows
-    : allRows.filter(row => row.source_user_hash === actorHash);
+    : allRows.filter(row => row.source_user_hash === actorHash
+      && Date.now() - new Date(row.created_at).getTime() <= 10 * 60 * 1000);
   const rows = paidExpense && !reference.code
     ? ownRows.filter(row => row.amount !== null && Number(row.amount) === paidExpense.amount)
     : ownRows;
