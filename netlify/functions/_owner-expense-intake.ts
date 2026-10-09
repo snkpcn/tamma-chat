@@ -1,6 +1,7 @@
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
 import { ownerProjectQuestion, startOwnerProjectPlanAfterPaidExpense } from './_owner-project-os';
+import { parseOwnerReportedPaidTotal } from './_owner-paid-total';
 import {
   extractFinancialEvidence,
   extensionForMime,
@@ -198,7 +199,7 @@ export function matchOwnerProjectMention(
 
   const tail = text.slice(markerIndex + marker.length).replace(/^(?:ชื่อ|คือ)/u, '');
   const matches = projects
-    .filter(project => project.status === 'active' && compactProjectText(project.name).length > 0)
+    .filter(project => project.status !== 'cancelled' && compactProjectText(project.name).length > 0)
     .filter(project => tail.startsWith(compactProjectText(project.name)))
     .sort((left, right) => compactProjectText(right.name).length - compactProjectText(left.name).length);
   if (!matches.length) return { kind: 'not_found' };
@@ -212,7 +213,7 @@ export function matchOwnerProjectMention(
 async function ownerProjectMention(rawText: string, groupHash: string): Promise<OwnerProjectMention> {
   const response = await dbFetch(
     'owner_projects?owner_group_hash=eq.' + encodeURIComponent(groupHash)
-    + '&status=eq.active&select=id,name,business_unit_code,purpose,status&order=created_at.desc&limit=500',
+    + '&status=neq.cancelled&select=id,name,business_unit_code,purpose,status&order=created_at.desc&limit=500',
   );
   const projects = await response.json() as OwnerExpenseProject[];
   const explicit = matchOwnerProjectMention(rawText, projects);
@@ -380,7 +381,7 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
 
   let expenseCategory: ExpenseCategory = 'other';
   let expenseSubcategory: string | null = null;
-  if (includesAny(text, [/ก่อสร้าง/u, /ต่อเติม/u, /รีโนเวท/u, /ปรับปรุงอาคาร/u, /แปรรูปไม้/u, /งานไม้/u, /เลื่อยไม้/u])) {
+  if (includesAny(text, [/ก่อสร้าง/u, /ต่อเติม/u, /รีโนเวท/u, /ปรับปรุงอาคาร/u, /แปรรูปไม้/u, /งานไม้/u, /เลื่อยไม้/u, /น้ำมัน(?:สำหรับ)?(?:ตัดไม้|เลื่อยไม้|แปรรูปไม้)/u])) {
     expenseCategory = 'construction';
     expenseSubcategory = includesAny(text, [/แปรรูปไม้/u, /งานไม้/u, /เลื่อยไม้/u])
       ? 'งานไม้/แปรรูปไม้'
@@ -649,8 +650,8 @@ async function resolveExpenseToProject(input: {
   const result = await rpc<ResolveResult>('financial_resolve_owner_expense_intake_v1', {
     p_intake_id: intake.id,
     p_purpose: intake.status === 'awaiting_business' && intake.purpose_raw
-      ? intake.purpose_raw
-      : input.purpose,
+      && parseOwnerReportedPaidTotal(intake.purpose_raw) === null
+      ? intake.purpose_raw : input.purpose,
     p_business_unit_code: businessUnit,
     p_expense_class: expenseClass,
     p_expense_category: expenseCategory,
@@ -879,6 +880,38 @@ async function recordTypedOwnerPaidExpense(input: {
   ].filter(Boolean).join('\n');
 }
 
+/** A just-uploaded slip owns its explicit project description, even during an older plan draft. */
+export async function handleOwnerRecentSlipProjectPurpose(input: {
+  targetId: string; userId?: string | null; text: string;
+  messageId?: string | null;
+}): Promise<string | null> {
+  if (!input.messageId || !input.userId
+    || !/(?:โครงการ|โปรเจกต์|project)/iu.test(input.text)
+    || /(?:สร้างโครงการใหม่|โปรเจคใหม่|เริ่มโครงการใหม่|เพิ่มงาน|ยืนยัน)/u.test(input.text)
+    || parseOwnerReportedPaidTotal(input.text) !== null) return null;
+  if (await boundLineOpsTeam(input.targetId) !== 'owner_general') return null;
+  const groupHash = piiHash(input.targetId), actorHash = piiHash(input.userId);
+  if (!groupHash || !actorHash) return null;
+  const response = await dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.'
+    + encodeURIComponent(groupHash) + '&source_user_hash=eq.' + encodeURIComponent(actorHash)
+    + '&status=' + PENDING_STATUSES
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
+    + '&order=created_at.desc&limit=5');
+  const recent = (await response.json() as OwnerExpenseIntake[])
+    .filter(row => Date.now() - new Date(row.created_at).getTime() <= 10 * 60 * 1000);
+  if (!recent.length) return null;
+  const mention = await ownerProjectMention(input.text, groupHash);
+  if (mention.kind !== 'matched') return null;
+  if (recent.length !== 1) return pendingChoiceReply(recent);
+  const classification = classifyOwnerExpensePurpose(normalizeText([
+    input.text, mention.project.purpose ?? '',
+  ].filter(Boolean).join(' ')));
+  return resolveExpenseToProject({
+    intake: recent[0]!, project: mention.project, purpose: normalizeText(input.text),
+    classification, userHash: actorHash, messageId: input.messageId,
+  });
+}
+
 export async function handleOwnerExpenseText(input: {
   targetId: string;
   userId?: string | null;
@@ -904,6 +937,9 @@ export async function handleOwnerExpenseText(input: {
   if (typedReply) return typedReply;
 
   const paidExpense = parseTypedOwnerPaidExpense(text);
+  if (parseOwnerReportedPaidTotal(text) !== null) {
+    return 'รับยอดรวมที่แจ้งแล้วครับ แต่ยังไม่ทราบว่าเป็นของโครงการไหน กรุณาบอกชื่อโครงการเพื่อเทียบกับยอดหลังบ้าน ผมยังไม่เพิ่มรายการจ่ายซ้ำครับ';
+  }
 
   const reference = referenceFromText(text);
   const classificationReply = isOwnerExpenseClassificationReply(text);
