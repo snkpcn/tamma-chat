@@ -1128,7 +1128,6 @@ export async function handleOwnerProjectText(input: {
   const explicitlyAddressed = /(?:ทองไทย|@ทองไทย)/u.test(text);
 
   if (isMotherConversation(text) && !explicitlyAddressed) return null;
-  if (isReadOnlyQuestion(text)) return null;
   const reportedTotal = parseOwnerReportedPaidTotal(text);
   if (reportedTotal !== null) {
     const active = await activeDraft(groupHash, actorHash);
@@ -1169,6 +1168,7 @@ export async function handleOwnerProjectText(input: {
     await storeReply(input.messageId, active.id, reply);
     return reply;
   }
+  if (isReadOnlyQuestion(text)) return null;
   // A new paid transaction must go to the expense ledger. It must never be
   // mistaken for the budget answer of an older project draft.
   if (/^(?:จ่าย(?:เงิน|ค่า)|ชำระ(?:เงิน|ค่า)|โอนจ่าย)/u.test(text)) return null;
