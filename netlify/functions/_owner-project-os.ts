@@ -1163,7 +1163,9 @@ export async function handleOwnerProjectText(input: {
       matches
         ? `ตรงกับยอดรวม ${summaryMoney(reportedTotal)} ที่แจ้งมา ไม่เพิ่มรายการ ${summaryMoney(reportedTotal)} ซ้ำ`
         : `ยอดที่แจ้ง ${summaryMoney(reportedTotal)} ต่างจากหลังบ้าน ${summaryMoney(Math.abs(reportedTotal - confirmed))} ครับ ยังไม่เพิ่มยอดซ้ำหรือเดาว่ารายการไหนหาย`,
-      nextDraftReply(active),
+      active.missing_fields[0] === 'schedule' && active.intent === 'investment_plan'
+        ? 'งวดถัดไปตั้งใจจ่ายเมื่อไรครับ? ถ้ายังไม่รู้ ตอบ “ยังไม่รู้” ได้ครับ'
+        : nextDraftReply(active),
     ].join('\n');
     await storeReply(input.messageId, active.id, reply);
     return reply;
