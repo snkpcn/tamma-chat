@@ -259,7 +259,7 @@ test('project route is Owner-only, confirmation-gated, idempotent, and before re
   const project = webhook.lastIndexOf('handleOwnerProjectText');
   const intelligence = webhook.lastIndexOf('handleOwnerBusinessQuestion');
   const expense = webhook.lastIndexOf('handleOwnerExpenseText');
-  assert.ok(project >= 0 && intelligence > project && expense > intelligence);
+  assert.ok(expense >= 0 && project > expense && intelligence > project);
 
   const implementation = readFileSync('netlify/functions/_owner-project-os.ts', 'utf8');
   assert.match(implementation, /team !== 'owner_general'/u);

@@ -182,6 +182,7 @@ test('a kitchen slip description without the word โครงการ links on
     const rows=url.pathname.endsWith('/ops_notification_channels')?[{team_code:'owner_general'}]
       :url.pathname.endsWith('/financial_owner_expense_intakes')?[{
         id:'kitchen-slip-3',source_user_hash:piiHash('owner-user'),status:'awaiting_purpose',
+        created_at:new Date().toISOString(),
         amount:50000,occurred_on:'2026-10-07',document_type:'transfer_slip',purpose_raw:null,
         owner_project_id:null,owner_project_task_id:null,owner_project_installment_id:null,
       }]

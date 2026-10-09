@@ -216,7 +216,7 @@ test('Owner clarification reclassifies the existing reviewed slip once without c
       assert.match(url.searchParams.get('status') ?? '', /needs_review/u);
       return new Response(JSON.stringify([{
         id: 'a2a6412b-f08f-424a-be1f-950151f37110', source_user_hash: actorHash,
-        status: 'needs_review', amount: '1000.00', occurred_on: '2026-10-06',
+        status: 'needs_review', created_at: new Date().toISOString(), amount: '1000.00', occurred_on: '2026-10-06',
         document_type: 'transfer_slip',
         purpose_raw: 'จ่ายค่าแปรรูปไม้ ของโครงการเฉลียงไม้',
         business_unit_code: 'other', expense_class: 'capital_investment',
