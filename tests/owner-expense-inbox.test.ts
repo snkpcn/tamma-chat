@@ -104,6 +104,7 @@ test('project-mentioned slip reads project purpose, classifies from context, and
         id: intakeId,
         source_user_hash: piiHash(userId),
         status: 'awaiting_business',
+        created_at: new Date().toISOString(),
         amount: 1000,
         occurred_on: '2026-10-06',
         document_type: 'transfer_slip',
