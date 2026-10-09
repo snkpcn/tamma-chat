@@ -445,6 +445,18 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     return;
   }
 
+  const ownerExpenseTextReply = isExpenseClassificationReply ? null : await handleOwnerExpenseText({
+    targetId,
+    userId: event.source?.userId ?? null,
+    text: event.message.text,
+    messageId: event.message.id ?? null,
+    timestamp: event.timestamp,
+  });
+  if (ownerExpenseTextReply) {
+    await replyToLine(event.replyToken, ownerExpenseTextReply, accessToken);
+    return;
+  }
+
   const ownerProjectReply = await handleOwnerProjectText({
     targetId,
     userId: event.source?.userId ?? null,
@@ -467,17 +479,6 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     return;
   }
 
-  const ownerExpenseTextReply = isExpenseClassificationReply ? null : await handleOwnerExpenseText({
-    targetId,
-    userId: event.source?.userId ?? null,
-    text: event.message.text,
-    messageId: event.message.id ?? null,
-    timestamp: event.timestamp,
-  });
-  if (ownerExpenseTextReply) {
-    await replyToLine(event.replyToken, ownerExpenseTextReply, accessToken);
-    return;
-  }
 
   const dailyCloseReply = await handleCafeTestDailyCloseText({
     targetId,

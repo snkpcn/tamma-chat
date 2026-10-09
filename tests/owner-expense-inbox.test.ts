@@ -104,6 +104,7 @@ test('project-mentioned slip reads project purpose, classifies from context, and
         id: intakeId,
         source_user_hash: piiHash(userId),
         status: 'awaiting_business',
+        created_at: new Date().toISOString(),
         amount: 1000,
         occurred_on: '2026-10-06',
         document_type: 'transfer_slip',
@@ -215,7 +216,7 @@ test('Owner clarification reclassifies the existing reviewed slip once without c
       assert.match(url.searchParams.get('status') ?? '', /needs_review/u);
       return new Response(JSON.stringify([{
         id: 'a2a6412b-f08f-424a-be1f-950151f37110', source_user_hash: actorHash,
-        status: 'needs_review', amount: '1000.00', occurred_on: '2026-10-06',
+        status: 'needs_review', created_at: new Date().toISOString(), amount: '1000.00', occurred_on: '2026-10-06',
         document_type: 'transfer_slip',
         purpose_raw: 'จ่ายค่าแปรรูปไม้ ของโครงการเฉลียงไม้',
         business_unit_code: 'other', expense_class: 'capital_investment',
@@ -251,17 +252,19 @@ test('Owner clarification reclassifies the existing reviewed slip once without c
   assert.equal(rpcCalls[0]!.payload.p_message_id, 'owner-clarification-1');
 });
 
-test('Owner Group expense routing runs after owner read intelligence and before cafe Daily Close', () => {
+test('Owner Group prioritizes fresh slip answers before project drafts, intelligence, and cafe Daily Close', () => {
   const webhook = readFileSync('netlify/functions/line-webhook.ts', 'utf8');
   const payrollImage = webhook.lastIndexOf('handleOwnerPayrollImage');
   const expenseImage = webhook.lastIndexOf('handleOwnerExpenseImage');
   const cafeImage = webhook.lastIndexOf('handleCafeTestDailyCloseImage');
   const payrollText = webhook.lastIndexOf('handleOwnerPayrollText');
-  const intelligenceText = webhook.lastIndexOf('handleOwnerBusinessQuestion');
   const expenseText = webhook.lastIndexOf('handleOwnerExpenseText');
+  const projectText = webhook.lastIndexOf('handleOwnerProjectText');
+  const intelligenceText = webhook.lastIndexOf('handleOwnerBusinessQuestion');
   const dailyCloseText = webhook.lastIndexOf('handleCafeTestDailyCloseText');
   assert.ok(payrollImage >= 0 && expenseImage > payrollImage && cafeImage > expenseImage);
-  assert.ok(payrollText >= 0 && intelligenceText > payrollText && expenseText > intelligenceText && dailyCloseText > expenseText);
+  assert.ok(payrollText >= 0 && expenseText > payrollText && projectText > expenseText);
+  assert.ok(intelligenceText > projectText && dailyCloseText > intelligenceText);
 });
 
 test('explicit expense-category replies run before active project drafts can consume them', () => {
@@ -306,4 +309,51 @@ test('backoffice cancellation removes a wrong item from active totals but retain
   assert.match(migration, /grant execute[\s\S]*to service_role/);
   assert.doesNotMatch(migration, /delete\s+from/iu);
   assert.doesNotMatch(migration, /storage\.objects/iu);
+});
+
+test('stale pending slip does not consume an unrelated short Owner message', async t => {
+  const oldUrl = process.env.SUPABASE_URL;
+  const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = 'https://supabase.test';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-test';
+  t.after(() => {
+    if (oldUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = oldUrl;
+    if (oldKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;
+  });
+  const actorHash = piiHash('owner-stale-test-user');
+  const calls: string[] = [];
+  t.mock.method(globalThis, 'fetch', async input => {
+    const url = new URL(String(input));
+    calls.push(url.pathname);
+    if (url.pathname.endsWith('/ops_notification_channels')) {
+      return new Response(JSON.stringify([{ team_code: 'owner_general' }]), { status: 200 });
+    }
+    if (url.pathname.endsWith('/financial_owner_expense_intakes')) {
+      return new Response(JSON.stringify([{
+        id: 'stale-slip',
+        source_user_hash: actorHash,
+        status: 'awaiting_purpose',
+        amount: 300,
+        occurred_on: '2026-10-09',
+        document_type: 'transfer_slip',
+        purpose_raw: null,
+        business_unit_code: null,
+        expense_class: null,
+        expense_category: null,
+        expense_subcategory: null,
+        created_at: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      }]), { status: 200 });
+    }
+    throw new Error('Unexpected stale-slip route: ' + url.pathname);
+  });
+  const reply = await handleOwnerExpenseText({
+    targetId: 'owner-stale-test-group',
+    userId: 'owner-stale-test-user',
+    text: 'เจิดเบิก',
+    messageId: 'owner-unrelated-message',
+  });
+  assert.equal(reply, null);
+  assert.ok(!calls.some(path => path.includes('/rpc/')));
 });

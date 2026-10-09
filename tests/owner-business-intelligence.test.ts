@@ -221,7 +221,8 @@ test('owner read questions route before expense follow-up and cafe Daily Close p
   const intelligence = webhook.lastIndexOf('handleOwnerBusinessQuestion({');
   const expense = webhook.lastIndexOf('handleOwnerExpenseText({');
   const dailyClose = webhook.lastIndexOf('handleCafeTestDailyCloseText({');
-  assert.ok(payroll >= 0 && intelligence > payroll && expense > intelligence && dailyClose > expense);
+  const project = webhook.lastIndexOf('handleOwnerProjectText({');
+  assert.ok(payroll >= 0 && expense > payroll && project > expense && intelligence > project && dailyClose > intelligence);
 
   const intake = readFileSync('netlify/functions/_owner-expense-intake.ts', 'utf8');
   assert.doesNotMatch(intake, /financial_owner_expense_summary_v1/);
