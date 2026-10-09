@@ -408,3 +408,44 @@ test('restaurant group sees confirmed restaurant project tasks from Owner withou
     assert.ok(!paths.some(path=>path.includes('owner_group_hash=')));
   }finally{globalThis.fetch=oldFetch;if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey}
 });
+
+test('reported paid total checks the current group project ledger and keeps the schedule question open', async()=>{
+  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
+  const calls:Array<{path:string;method:string}>=[];
+  globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
+    const url=new URL(String(input)),path=url.pathname,method=init?.method??'GET';
+    calls.push({path:url.pathname+url.search,method});
+    const rows=path.endsWith('/ops_notification_channels')?[{team_code:'owner_general'}]
+      :path.endsWith('/owner_project_conversation_drafts')?[{
+        id:'draft-wood',status:'collecting',intent:'investment_plan',
+        data:{project_name:'เฉลียงไม้',work_title:'ค่าก่อสร้างเฉลียงไม้',
+          budget_amount:100000,counterparty_name:'ช่างฮง',installment_count:5},
+        missing_fields:['schedule','responsible'],updated_at:new Date().toISOString(),
+        expires_at:'2099-01-01T00:00:00Z',
+      }]
+      :path.endsWith('/owner_projects')?[{id:'wood',name:'เฉลียงไม้'}]
+      :path.endsWith('/financial_investment_entries')?[{amount:5000,source_message_id:'cash-5k'}]
+      :path.endsWith('/financial_owner_expense_intakes')?[
+        {amount:1000,evidence_message_id:'slip-1k'},
+        {amount:200,evidence_message_id:'slip-200'},
+      ]
+      :path.endsWith('/owner_project_conversation_messages')&&method==='POST'?[{message_id:'total-6200'}]
+      :[];
+    return new Response(JSON.stringify(rows),{status:200});
+  }) as typeof fetch;
+  try {
+    const reply=await handleOwnerProjectText({targetId:'owner-group',userId:'owner-user',
+      text:'จ่ายไปแล้ว 6200',messageId:'total-6200'});
+    assert.match(reply??'',/ยืนยันจ่ายแล้ว 6,200 บาท/u);
+    assert.match(reply??'',/ตรงกับยอดรวม 6,200 บาท/u);
+    assert.match(reply??'',/ไม่เพิ่มรายการ 6,200 บาท ซ้ำ/u);
+    assert.match(reply??'',/ต้องทำหรือเริ่มจ่ายเมื่อไร/u);
+    assert.ok(calls.some(call=>call.path.includes('owner_group_hash=eq.')));
+    assert.ok(calls.some(call=>call.path.includes('owner_project_id=eq.wood')));
+    assert.ok(!calls.some(call=>call.path.includes('/rpc/financial_record_investment_v1')));
+    assert.ok(!calls.some(call=>call.path.includes('/rpc/owner_project_confirm_draft_v1')));
+  } finally {globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;}
+});
