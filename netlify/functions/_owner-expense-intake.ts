@@ -886,6 +886,8 @@ export async function handleOwnerRecentSlipProjectPurpose(input: {
   messageId?: string | null;
 }): Promise<string | null> {
   if (!input.messageId || !input.userId
+    || (/^(?:แม่|คุณแม่|ม๊า|ม้า)(?:\s|,|:|ครับ|คะ|ค่ะ|จ๋า)/u.test(normalizeText(input.text))
+      && !/(?:ทองไทย|@ทองไทย)/u.test(input.text))
     || !/(?:โครงการ|โปรเจกต์|project)/iu.test(input.text)
     || /(?:สร้างโครงการใหม่|โปรเจคใหม่|เริ่มโครงการใหม่|เพิ่มงาน|ยืนยัน)/u.test(input.text)
     || parseOwnerReportedPaidTotal(input.text) !== null) return null;
