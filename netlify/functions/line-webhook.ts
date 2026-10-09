@@ -11,7 +11,7 @@ import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
-import { handleOwnerExpenseImage, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
+import { handleOwnerExpenseImage, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, handleOwnerRecentSlipProjectPurpose, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
 import { handleOwnerProjectQuery, handleOwnerProjectText } from './_owner-project-os';
 import { handleOwnerApiCostQuestion } from './_ai-cost-notifier';
@@ -433,6 +433,15 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   const ownerProjectQueryReply = await handleOwnerProjectQuery({ targetId, text: event.message.text, timestamp: event.timestamp });
   if (ownerProjectQueryReply) {
     await replyToLine(event.replyToken, ownerProjectQueryReply, accessToken);
+    return;
+  }
+
+  const recentSlipProjectReply = await handleOwnerRecentSlipProjectPurpose({
+    targetId, userId: event.source?.userId ?? null,
+    text: event.message.text, messageId: event.message.id ?? null,
+  });
+  if (recentSlipProjectReply) {
+    await replyToLine(event.replyToken, recentSlipProjectReply, accessToken);
     return;
   }
 

@@ -4,10 +4,12 @@ import { readFileSync } from 'node:fs';
 import { piiHash } from '../netlify/functions/_operations-db';
 import {
   handleOwnerExpenseText,
+  handleOwnerRecentSlipProjectPurpose,
   handleOwnerPaidExpenseMethodFollowup,
   matchNamedProjectForOwnerPaidExpense,
   parseTypedOwnerPaidExpense,
 } from '../netlify/functions/_owner-expense-intake';
+import { parseOwnerReportedPaidTotal } from '../netlify/functions/_owner-paid-total';
 
 test('a natural paid expense recognizes the existing restaurant project and equipment category', () => {
   assert.deepEqual(parseTypedOwnerPaidExpense('จ่ายเงินค่าติดตั้งแอร์ ตำมา-ชาติ 15,000'), {
@@ -206,4 +208,76 @@ test('a kitchen slip description without the word โครงการ links on
     if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
     if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;
   }
+});
+
+test('a paid-total statement is reconciliation, not a new transaction or purpose for a 200 baht slip', async () => {
+  assert.equal(parseOwnerReportedPaidTotal('จ่ายไปแล้ว 6200'), 6200);
+  assert.equal(parseOwnerReportedPaidTotal('ยอดจ่ายไปแล้ว 6,200 บาท'), 6200);
+  assert.equal(parseOwnerReportedPaidTotal('จ่ายเงินค่าก่อสร้าง 6200'), null);
+  const oldFetch=globalThis.fetch, oldUrl=process.env.SUPABASE_URL, oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
+  const paths:string[]=[];
+  globalThis.fetch=(async(input:string|URL|Request)=>{
+    const path=new URL(String(input)).pathname;paths.push(path);
+    return new Response(JSON.stringify(path.endsWith('/ops_notification_channels')?[{team_code:'owner_general'}]
+      :path.endsWith('/financial_owner_expense_intakes')?[{
+        id:'slip-200',source_user_hash:piiHash('owner-user'),amount:200,status:'awaiting_purpose',
+        occurred_on:'2026-10-09',document_type:'transfer_slip',created_at:new Date().toISOString(),
+      }]:[]),{status:200});
+  }) as typeof fetch;
+  try {
+    const reply=await handleOwnerExpenseText({targetId:'owner-group',userId:'owner-user',
+      text:'จ่ายไปแล้ว 6200',messageId:'total-6200'});
+    assert.match(reply??'',/ยังไม่เพิ่มรายการจ่ายซ้ำ/u);
+    assert.ok(!paths.some(path=>path.includes('/rpc/financial_stage_owner_expense_purpose_v1')));
+    assert.ok(!paths.some(path=>path.includes('/rpc/financial_record_investment_v1')));
+  } finally {globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;}
+});
+
+test('fresh 200 baht slip description wins over the draft and links a completed wood project', async()=>{
+  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
+  const calls:Array<{path:string;body?:Record<string,unknown>}>=[];
+  globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
+    const url=new URL(String(input));const body=init?.body?JSON.parse(String(init.body)):undefined;
+    calls.push({path:url.pathname+url.search,body});
+    const rows=url.pathname.endsWith('/ops_notification_channels')?[{team_code:'owner_general'}]
+      :url.pathname.endsWith('/financial_owner_expense_intakes')?[{
+        id:'slip-200',source_user_hash:piiHash('owner-user'),status:'awaiting_purpose',
+        amount:200,occurred_on:'2026-10-09',document_type:'transfer_slip',purpose_raw:null,
+        owner_project_id:null,owner_project_task_id:null,owner_project_installment_id:null,
+        created_at:new Date().toISOString(),
+      }]
+      :url.pathname.endsWith('/owner_projects')?[{
+        id:'wood-project',name:'เฉลียงไม้',business_unit_code:null,
+        purpose:'เฉลียงไม้ให้ลูกค้านั่ง',status:'completed',
+      }]
+      :url.pathname.endsWith('/rpc/financial_resolve_owner_expense_intake_v1')?{
+        ok:true,amount:200,business_unit_code:'shared_infrastructure',
+        expense_class:'capital_investment',expense_category:'construction',status:'categorized',
+      }:{ok:true};
+    return new Response(JSON.stringify(rows),{status:200});
+  }) as typeof fetch;
+  try {
+    const motherChat=await handleOwnerRecentSlipProjectPurpose({targetId:'owner-group',userId:'owner-user',
+      text:'แม่ โครงการเฉลียงไม้คุยกันก่อน',messageId:'mother-chat'});
+    assert.equal(motherChat,null);
+    const reply=await handleOwnerRecentSlipProjectPurpose({targetId:'owner-group',userId:'owner-user',
+      text:'ค่าน้ำมันตัดไม้ โครงการเฉลียงไม้',messageId:'slip-description'});
+    assert.match(reply??'',/โครงการ: เฉลียงไม้/u);
+    assert.match(reply??'',/200 บาท/u);
+    const link=calls.find(call=>call.path.endsWith('/rpc/owner_project_link_financial_v1'));
+    assert.equal(link?.body?.p_financial_id,'slip-200');
+    assert.equal(link?.body?.p_project_id,'wood-project');
+    const classify=calls.find(call=>call.path.endsWith('/rpc/financial_resolve_owner_expense_intake_v1'));
+    assert.equal(classify?.body?.p_purpose,'ค่าน้ำมันตัดไม้ โครงการเฉลียงไม้');
+    assert.equal(classify?.body?.p_expense_category,'construction');
+    assert.ok(!calls.some(call=>call.path.includes('owner_project_conversation_drafts')));
+    assert.ok(!calls.some(call=>call.path.includes('financial_record_investment_v1')));
+    assert.ok(calls.some(call=>call.path.includes('source_user_hash=eq.'+piiHash('owner-user'))));
+  } finally {globalThis.fetch=oldFetch;
+    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;}
 });

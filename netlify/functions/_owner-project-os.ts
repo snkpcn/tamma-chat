@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam, buildTeamScheduleSummary } from './_ops-notifications';
+import { parseOwnerReportedPaidTotal } from './_owner-paid-total';
 
 export type OwnerProjectIntent = 'new_project' | 'investment_plan' | 'weekly_task' | 'one_time_task';
 export type OwnerProjectMissingField =
@@ -1127,6 +1128,48 @@ export async function handleOwnerProjectText(input: {
   const explicitlyAddressed = /(?:ทองไทย|@ทองไทย)/u.test(text);
 
   if (isMotherConversation(text) && !explicitlyAddressed) return null;
+  const reportedTotal = parseOwnerReportedPaidTotal(text);
+  if (reportedTotal !== null) {
+    const active = await activeDraft(groupHash, actorHash);
+    if (!active?.data.project_name) return null;
+    const projects = await (await dbFetch('owner_projects?owner_group_hash=eq.'
+      + encodeURIComponent(groupHash) + '&name=eq.'
+      + encodeURIComponent(active.data.project_name) + '&status=neq.cancelled&select=id,name&limit=2'
+    )).json() as Array<{ id: string; name: string }>;
+    if (projects.length !== 1) {
+      return 'ยังจับคู่โครงการของร่างนี้กับหลังบ้านได้ไม่ชัดครับ ผมยังไม่บันทึกยอดซ้ำ กรุณาระบุชื่อโครงการอีกครั้ง';
+    }
+    const project = projects[0]!;
+    const [ledger, slips] = await Promise.all([
+      dbFetch('financial_investment_entries?owner_group_hash=eq.' + encodeURIComponent(groupHash)
+        + '&owner_project_id=eq.' + project.id
+        + '&status=eq.recorded&select=amount,source_message_id&limit=500')
+        .then(response => response.json() as Promise<Array<{ amount: number | string; source_message_id: string | null }>>),
+      dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
+        + '&owner_project_id=eq.' + project.id
+        + '&status=eq.categorized&select=amount,evidence_message_id&limit=500')
+        .then(response => response.json() as Promise<Array<{ amount: number | string | null; evidence_message_id: string | null }>>),
+    ]);
+    const ledgerSources = new Set(ledger.map(row => row.source_message_id).filter(Boolean));
+    const confirmed = [...ledger.map(row => Number(row.amount)),
+      ...slips.filter(row => !row.evidence_message_id || !ledgerSources.has(row.evidence_message_id))
+        .map(row => Number(row.amount || 0))]
+      .reduce((sum, amount) => sum + (Number.isFinite(amount) ? amount : 0), 0);
+    const claim = await claimMessage({ groupHash, actorHash, messageId: input.messageId, text });
+    if (!claim.claimed) return claim.reply;
+    const matches = Math.round(confirmed * 100) === Math.round(reportedTotal * 100);
+    const reply = [
+      `โครงการ${project.name}: หลังบ้านยืนยันจ่ายแล้ว ${summaryMoney(confirmed)} ครับ`,
+      matches
+        ? `ตรงกับยอดรวม ${summaryMoney(reportedTotal)} ที่แจ้งมา ไม่เพิ่มรายการ ${summaryMoney(reportedTotal)} ซ้ำ`
+        : `ยอดที่แจ้ง ${summaryMoney(reportedTotal)} ต่างจากหลังบ้าน ${summaryMoney(Math.abs(reportedTotal - confirmed))} ครับ ยังไม่เพิ่มยอดซ้ำหรือเดาว่ารายการไหนหาย`,
+      active.missing_fields[0] === 'schedule' && active.intent === 'investment_plan'
+        ? 'งวดถัดไปตั้งใจจ่ายเมื่อไรครับ? ถ้ายังไม่รู้ ตอบ “ยังไม่รู้” ได้ครับ'
+        : nextDraftReply(active),
+    ].join('\n');
+    await storeReply(input.messageId, active.id, reply);
+    return reply;
+  }
   if (isReadOnlyQuestion(text)) return null;
   // A new paid transaction must go to the expense ledger. It must never be
   // mistaken for the budget answer of an older project draft.
