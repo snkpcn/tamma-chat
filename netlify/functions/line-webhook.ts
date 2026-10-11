@@ -1,3 +1,4 @@
+import { isOwnerFamilyConversation } from './_owner-staff-intent';
 import type { Handler, HandlerEvent, HandlerResponse } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handler as coreHandler } from './_line-webhook-core';
@@ -196,7 +197,7 @@ function classifyRoute(event: LineWebhookEvent): { route: LineRoute; reason: str
  *  channel secret/access token or a full group/user id. */
 function safeInboundLogText(text:string):string{
   const value=text.trim();
-  if(/(?:เบิกเงินเดือน|เบิกเงินล่วงหน้า|เงินเดือนล่วงหน้า|จ่ายเงินเดือน|โอนเงินเดือน|หักเบิก|หักเงินเบิก|หักเงินเดือนล่วงหน้า)/u.test(value)){
+  if(/(?:เบิก|เงินเดือน)/u.test(value)){
     return '[PRIVATE_OWNER_PAYROLL_COMMAND]';
   }
   return value.slice(0,120);
@@ -387,6 +388,8 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     if (bindReply) await replyToLine(event.replyToken, bindReply, accessToken);
     return;
   }
+
+  if (isOwnerFamilyConversation(event.message.text) && await boundLineOpsTeam(targetId) === 'owner_general') return;
 
   const ownerStaffSlipReply = await handleOwnerStaffSlipText({
     targetId, userId: event.source?.userId ?? null,
