@@ -434,3 +434,10 @@ test('an additional amount is not discarded as a date or pay-period label',async
   await handleOwnerStaffSlipText({...input,text:'เจิดเบิกเงินเดือน อีก500บาท'});
   assert.ok(!h.calls.some(x=>x.method==='POST'));
 });
+
+for (const text of ['เจิดเบิกเงินเดือน 0 บาท','เจิดเบิกเงินเดือน 200.567 บาท','เบิกเงินเดือน เจิด 20,0 บาท']) {
+  test('legacy payroll also rejects invalid money precision and grouping: '+text,()=>{
+    assert.equal(parseOwnerPayrollCommand(text),null);
+    assert.equal(parseOwnerStaffTurn(text),null);
+  });
+}

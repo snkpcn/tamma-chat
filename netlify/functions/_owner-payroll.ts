@@ -90,6 +90,7 @@ function employeeKey(label:string):string{
 }
 
 function parseAmount(value:string):number|null{
+  if(!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/u.test(value))return null;
   const n=Number(value.replace(/,/g,''));
   return Number.isFinite(n)&&n>0?Math.round(n*100)/100:null;
 }
