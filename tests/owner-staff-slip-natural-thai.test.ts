@@ -560,3 +560,20 @@ test('a new unclassified image beside an older staff question needs selection be
   assert.match(await handleOwnerStaffSlipText({...input,text:'เบิกเงินเดือนล่วงหน้า'})??'',/2 รายการ/);
   assert.ok(!h.calls.some(x=>x.method==='POST'));
 });
+
+test('signed LINE completes a saved equipment purpose after a pause without asking it again',async t=>{
+  t.mock.method(Date,'now',()=>at);t.mock.method(console,'log',()=>{});
+  const row=equipmentSlip({status:'awaiting_business',purpose_raw:'ค่าอุปกรณ์ไฟฟ้า',
+    created_at:new Date(at-20*60000).toISOString(),expense_class:'capital_investment',
+    expense_category:'equipment',expense_subcategory:'อุปกรณ์/เครื่องมือ'});
+  const h=harness(t,[row,slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+  await deliverStaffWebhook('ตำมา-ชาติ','delayed-equipment-business');
+  const reply=h.calls.find(x=>x.path==='/v2/bot/message/reply')!;
+  assert.match(reply.body.messages[0].text,/6,474 บาท/);
+  assert.match(reply.body.messages[0].text,/ตำมา-ชาติ/);
+  assert.doesNotMatch(reply.body.messages[0].text,/เป็นของกิจการ.*ไหน|เงินเดือน/);
+  const resolve=h.calls.find(x=>x.path.endsWith('/financial_resolve_owner_expense_intake_v1'))!;
+  assert.equal(resolve.body.p_intake_id,row.id);
+  assert.equal(resolve.body.p_purpose,'ค่าอุปกรณ์ไฟฟ้า');
+  assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
+});

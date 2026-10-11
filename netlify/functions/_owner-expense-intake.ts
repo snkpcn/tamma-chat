@@ -954,12 +954,17 @@ export async function handleOwnerExpenseText(input: {
     ? recordTypedOwnerPaidExpense({ text, targetId: input.targetId, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
     : null;
   const actorHash = piiHash(input.userId) ?? '';
-  // Without an explicit #code, only continue the sender's own pending slip.
-  // This prevents two family members in the Owner group crossing answers.
+  // A saved purpose awaiting its business can be completed after a pause.
+  // Unrelated short chat still requires a fresh slip from the same sender.
+  const now = Number.isFinite(input.timestamp) ? Number(input.timestamp) : Date.now();
   const ownRows = reference.code
     ? allRows
-    : allRows.filter(row => row.source_user_hash === actorHash
-      && Date.now() - new Date(row.created_at).getTime() <= 10 * 60 * 1000);
+    : allRows.filter(row => {
+      const age = now - new Date(row.created_at).getTime();
+      const continuingBusiness = classificationReply && row.status === 'awaiting_business' && row.purpose_raw;
+      return row.source_user_hash === actorHash && age >= -60_000
+        && age <= (continuingBusiness ? 24 * 60 * 60 * 1000 : 10 * 60 * 1000);
+    });
   // A business answer belongs to an expense or a staff purchase, not to an
   // advance that is still waiting for its payroll/purchase type.
   const relevantRows = classificationReply && !reference.code
@@ -1165,7 +1170,9 @@ export async function handleOwnerStaffSlipText(input: {
     && (row.status === 'awaiting_purpose' || row.status === 'awaiting_business')
     && !parseOwnerStaffTurn(row.purpose_raw ?? '')
     && now - new Date(row.created_at).getTime() >= -60_000
-    && now - new Date(row.created_at).getTime() <= 10 * 60 * 1000)) return null;
+    && now - new Date(row.created_at).getTime() <=
+      (businessReply && row.status === 'awaiting_business' && row.purpose_raw
+        ? 24 * 60 * 60 * 1000 : 10 * 60 * 1000))) return null;
   const staffContext = candidates.filter(row => {
     const prior = parseOwnerStaffTurn(row.purpose_raw ?? '');
     return Boolean(prior && (!businessReply || prior.kind === 'purchase')
