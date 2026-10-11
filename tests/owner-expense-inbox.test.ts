@@ -174,7 +174,7 @@ test('project-mentioned slip reads project purpose, classifies from context, and
 test('owner expense inbox stores first and asks both purpose and business before it categorizes', () => {
   const intake = readFileSync('netlify/functions/_owner-expense-intake.ts', 'utf8');
   assert.match(intake, /สลิปนี้จ่ายค่าอะไร และเป็นของกิจการ\/ส่วนไหนครับ/u);
-  assert.match(intake, /financial_capture_owner_expense_slip_v1/);
+  assert.match(intake, /financial_capture_owner_slip_review_v1/);
   assert.match(intake, /financial_stage_owner_expense_purpose_v1/);
   assert.match(intake, /financial_resolve_owner_expense_intake_v1/);
   assert.match(intake, /owner_project_link_financial_v1/);
