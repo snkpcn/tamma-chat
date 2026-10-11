@@ -2,18 +2,22 @@ import { isOwnerFamilyConversation } from './_owner-staff-intent';
 import type { Handler, HandlerEvent, HandlerResponse } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { handler as coreHandler } from './_line-webhook-core';
-import { registerLineContact } from './_operations-db';
+import { registerLineContact, piiHash } from './_operations-db';
 import { handleLineOpsGroupMessage, boundLineOpsTeam } from './_ops-notifications';
 import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
 import { hasPendingLineFuelSession } from './_ops-fuel-session-guard';
 import { handleStaffBookingPostback, type LineMessage } from './_ops-line-ui';
 import { handleRestaurantPreorderPostback, handleRestaurantStockText } from './_restaurant-sot';
-import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
+import { handleCafeTestDailyCloseText, type RecordedDailyClose } from './_inthanin-daily-close-line';
+import {prepareSundayCashReply,finishSundayCashReply,suppressDuplicateSundayReceipt,WeeklyReplyReservationError,type PreparedWeeklyReply} from './_inthanin-weekly-cash-reply';
+import {dailyCloseCardForReceipt,handleDailyCloseCardAction} from './_inthanin-daily-close-card-actions';
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
 import { handleOwnerExpenseImage, handleOwnerStaffSlipText, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, handleOwnerRecentSlipProjectPurpose, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
-import { handleOwnerSlipReviewText, slipReviewLineMessage } from './_owner-slip-review';
+import { handleOwnerSlipReviewText } from './_owner-slip-review';
+import { handleOwnerSlipPostback, ownerSlipReplyCard } from './_owner-slip-cards';
+import { handleOwnerDocumentIntent, isExplicitOwnerReviewText } from './_owner-document-intent';
 import { partitionOwnerSlipMaintenance, notifyOwnerSlipMaintenance, OWNER_SLIP_MAINTENANCE_REPLY, OwnerSlipMaintenanceNoticeError } from './_owner-slip-maintenance';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
 import { handleOwnerProjectQuery, handleOwnerProjectText } from './_owner-project-os';
@@ -42,10 +46,11 @@ type LineSource = {
 
 type LineWebhookEvent = {
   type?: string;
+  webhookEventId?: string;
   replyToken?: string;
   timestamp?: number;
   source?: LineSource;
-  message?: { id?: string; type?: string; text?: string };
+  message?: { id?: string; type?: string; text?: string; quotedMessageId?:string };
   postback?: {
     data?: string;
     params?: { datetime?: string; date?: string; time?: string };
@@ -229,7 +234,7 @@ function logRouteSelected(event: LineWebhookEvent, route: LineRoute, reason: str
   }));
 }
 
-async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Promise<void> {
+async function handleOpsEvent(event: LineWebhookEvent, accessToken: string, receivedAt=Date.now()): Promise<void> {
   const sourceType = event.source?.type;
   if (sourceType !== 'group' && sourceType !== 'room') return;
 
@@ -260,6 +265,12 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   if (!targetId) return;
 
   if (event.type === 'postback' && typeof event.postback?.data === 'string') {
+    const dailyCardReply=await handleDailyCloseCardAction({targetHash:sourceType==='group'?piiHash(targetId):null,userId:event.source?.userId,data:event.postback.data,receivedAt});
+    if(dailyCardReply){await replyToLine(event.replyToken,dailyCardReply as LineMessage[],accessToken);return;}
+    const documentCard=await handleOwnerDocumentIntent({targetId,userId:event.source?.userId,data:event.postback.data,timestamp:event.timestamp});
+    if(documentCard){await replyToLine(event.replyToken,documentCard,accessToken);return;}
+    const ownerSlipCard=await handleOwnerSlipPostback({targetId,userId:event.source?.userId,data:event.postback.data,messageId:event.webhookEventId,timestamp:event.timestamp});
+    if(ownerSlipCard){await replyToLine(event.replyToken,ownerSlipCard,accessToken);return;}
     const paymentMessages = await handleLinePaymentPostback({
       targetId,
       userId: event.source?.userId ?? null,
@@ -328,7 +339,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       timestamp: event.timestamp,
     });
     if (ownerExpenseReply) {
-      try {await replyToLine(event.replyToken, slipReviewLineMessage(ownerExpenseReply), accessToken);}
+      try {await replyToLine(event.replyToken, await ownerSlipReplyCard({targetId,userId:event.source?.userId,text:ownerExpenseReply}), accessToken);}
       catch(error){
         if(ownerExpenseReply===OWNER_SLIP_MAINTENANCE_REPLY)throw new OwnerSlipMaintenanceNoticeError('owner_slip_notice_failed');
         throw error;
@@ -397,12 +408,16 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
 
   if (isOwnerFamilyConversation(event.message.text) && await boundLineOpsTeam(targetId) === 'owner_general') return;
 
-  const slipReviewReply = await handleOwnerSlipReviewText({
+  const documentReply=await handleOwnerDocumentIntent({targetId,userId:event.source?.userId,text:event.message.text,quotedMessageId:event.message.quotedMessageId,timestamp:event.timestamp});
+  if(documentReply){await replyToLine(event.replyToken,documentReply,accessToken);return;}
+  const explicitReview=isExplicitOwnerReviewText(event.message.text);
+  if(!explicitReview && (event.message.quotedMessageId || /ใบเสนอราคา|ตามสัญญา|เสนอราคา/u.test(event.message.text)) && await boundLineOpsTeam(targetId)==='owner_general')return;
+  const slipReviewReply = explicitReview ? await handleOwnerSlipReviewText({
     targetId, userId: event.source?.userId ?? null,
-    text: event.message.text, messageId: event.message.id ?? null,
-  });
+    text: event.message.text.replace(/^ทองไทย(?:ครับ|คะ|ค่ะ)?[\s,]*/u,''), messageId: event.message.id ?? null,
+  }) : null;
   if (slipReviewReply) {
-    await replyToLine(event.replyToken, slipReviewLineMessage(slipReviewReply), accessToken);
+    await replyToLine(event.replyToken, await ownerSlipReplyCard({targetId,userId:event.source?.userId,text:slipReviewReply}), accessToken);
     return;
   }
 
@@ -428,7 +443,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     return;
   }
 
-  const isExpenseClassificationReply = isOwnerExpenseClassificationReply(event.message.text);
+  const isExpenseClassificationReply = explicitReview && isOwnerExpenseClassificationReply(event.message.text);
   const ownerExpenseClassificationReply = isExpenseClassificationReply
     ? await handleOwnerExpenseText({
         targetId,
@@ -464,16 +479,16 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     return;
   }
 
-  const recentSlipProjectReply = await handleOwnerRecentSlipProjectPurpose({
+  const recentSlipProjectReply = explicitReview ? await handleOwnerRecentSlipProjectPurpose({
     targetId, userId: event.source?.userId ?? null,
     text: event.message.text, messageId: event.message.id ?? null,
-  });
+  }) : null;
   if (recentSlipProjectReply) {
     await replyToLine(event.replyToken, recentSlipProjectReply, accessToken);
     return;
   }
 
-  const ownerExpenseTextReply = isExpenseClassificationReply ? null : await handleOwnerExpenseText({
+  const ownerExpenseTextReply = isExpenseClassificationReply || !explicitReview ? null : await handleOwnerExpenseText({
     targetId,
     userId: event.source?.userId ?? null,
     text: event.message.text,
@@ -508,15 +523,48 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   }
 
 
+  let recordedDailyClose:RecordedDailyClose|null=null;
   const dailyCloseReply = await handleCafeTestDailyCloseText({
     targetId,
     userId: event.source?.userId ?? null,
     text: event.message.text,
     messageId: event.message.id ?? null,
     timestamp: event.timestamp,
+    onRecorded:close=>{recordedDailyClose=close;},
   });
   if (dailyCloseReply) {
-    await replyToLine(event.replyToken, dailyCloseReply, accessToken);
+    if(suppressDuplicateSundayReceipt({targetHash:sourceType==='group'?piiHash(targetId):null,close:recordedDailyClose,eventTimestamp:event.timestamp??0}))return;
+    let dailyCard:Record<string,unknown>|null=null;
+    try {
+      if(Date.now()-receivedAt<25000)dailyCard=await dailyCloseCardForReceipt({targetHash:sourceType==='group'?piiHash(targetId):null,close:recordedDailyClose,missingText:dailyCloseReply});
+    }
+    catch(error){console.error('INTHANIN_DAILY_CARD_ERROR',error instanceof Error?error.message:'unknown');}
+    let weekly:PreparedWeeklyReply|null=null;
+    try {
+      const prepared=await prepareSundayCashReply({targetHash:sourceType==='group'?piiHash(targetId):null,
+        close:recordedDailyClose,eventTimestamp:event.timestamp??0,receivedAt});
+      if(prepared){
+        if('suppressReply' in prepared)return; // Same webhook must not consume the reserved token.
+        weekly=prepared;
+      }
+    } catch(error) {
+      console.error('INTHANIN_WEEKLY_REPLY_PREPARE_ERROR',error instanceof Error?error.message:'unknown');
+      if(error instanceof WeeklyReplyReservationError)return;
+    }
+    // One reply API request: ordinary receipt text plus one carousel. Never push.
+    try {
+      const receiptMessages:LineMessage[]=dailyCard
+        ?[dailyCard as LineMessage,{type:'text',text:dailyCloseReply} as LineMessage]
+        :[{type:'text',text:dailyCloseReply} as LineMessage];
+      if(weekly)receiptMessages.push(weekly.message as LineMessage);
+      await replyToLine(event.replyToken,receiptMessages,accessToken);
+    } catch(error) {
+      if(weekly)await finishSundayCashReply(weekly.deliveryId,false).catch(()=>undefined);
+      throw error;
+    }
+    if(weekly)await finishSundayCashReply(weekly.deliveryId,true).catch(error=>{
+      console.error('INTHANIN_WEEKLY_REPLY_AUDIT_ERROR',error instanceof Error?error.message:'unknown');
+    });
     return;
   }
 
@@ -628,6 +676,7 @@ async function handleCustomerPaymentEvent(
 }
 
 export const handler: Handler = async (event, context) => {
+  const receivedAt=Date.now();
   if (event.httpMethod !== 'POST') {
     const coreResponse = await coreHandler(event, context);
     if (!coreResponse) return { statusCode: 500, body: 'LINE core handler returned no response' };
@@ -690,7 +739,7 @@ export const handler: Handler = async (event, context) => {
   }
 
   if (opsEvents.length) {
-    const results = await Promise.allSettled(opsEvents.map(item => handleOpsEvent(item, accessToken)));
+    const results = await Promise.allSettled(opsEvents.map(item => handleOpsEvent(item, accessToken, receivedAt)));
     if(results.some(result=>result.status==='rejected'&&result.reason instanceof OwnerSlipMaintenanceNoticeError)){
       return {statusCode:503,headers:{'Cache-Control':'no-store','Retry-After':'60'},body:'Owner slip maintenance unavailable'};
     }

@@ -7,6 +7,10 @@ import { parseOwnerReportedPaidTotal } from './_owner-paid-total';
 import { stageSlipReview, visibleSlipDate } from './_owner-slip-review';
 import { ownerSlipMaintenancePaused, OWNER_SLIP_MAINTENANCE_REPLY } from './_owner-slip-maintenance';
 import {
+  isAuthorizedOwnerPaymentActor, ownerPaymentDocumentGate, ownerPaymentDocumentClarification,
+  type OwnerExpenseImageIntent,
+} from './_owner-payment-document';
+import {
   extractFinancialEvidence,
   extensionForMime,
   fetchLineImage,
@@ -67,6 +71,8 @@ type OwnerExpenseIntake = {
   amount: number | string | null;
   occurred_on: string;
   document_type: string;
+  extraction_data?: FinancialImageExtraction | null;
+  review_state?: 'draft' | 'confirmed' | 'cancelled' | null;
   purpose_raw: string | null;
   business_unit_code: BusinessUnit | null;
   expense_class: ExpenseClass | null;
@@ -269,7 +275,7 @@ async function existingIntakeByMessage(groupHash: string, messageId: string): Pr
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&source_channel=eq.line&evidence_message_id=eq.' + encodeURIComponent(messageId)
-    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,extraction_data,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
   );
   return (await response.json() as OwnerExpenseIntake[])[0] ?? null;
 }
@@ -278,7 +284,7 @@ async function existingIntakeByImage(groupHash: string, sha256: string): Promise
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&evidence_sha256=eq.' + encodeURIComponent(sha256)
-    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,extraction_data,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
   );
   return (await response.json() as OwnerExpenseIntake[])[0] ?? null;
 }
@@ -290,10 +296,10 @@ async function pendingIntakes(groupHash: string, includeNeedsReview = false): Pr
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&review_state=is.null&status=' + statuses
-    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,review_state,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
     + '&order=created_at.desc&limit=20',
   );
-  return await response.json() as OwnerExpenseIntake[];
+  return (await response.json() as OwnerExpenseIntake[]).filter(row => row.review_state == null);
 }
 
 function documentLabel(documentType: string | null | undefined): string {
@@ -383,6 +389,7 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
   ])) businessUnit = 'shared_infrastructure';
   else if (includesAny(text, [/ใช้ร่วม/u, /หลายกิจการ/u, /กลางโครงการ/u])) businessUnit = 'shared';
 
+  const garmentSupply = !includesAny(text, [/เงินเดือน/u, /ค่าแรง/u, /ค่าจ้าง/u, /เครื่อง(?!แบบ)/u, /เครื่องมือ/u, /อุปกรณ์/u]) && includesAny(text, [/ตัวอย่าง\s*เสื้อ(?!สูบ)/u, /เสื้อ(?!สูบ)\s*(?:ตัวอย่าง|พนักงาน|ยูนิฟอร์ม|ทีมงาน)/u, /ชุด\s*(?:พนักงาน|ยูนิฟอร์ม|ทำงาน)/u, /เครื่องแบบ/u, /ยูนิฟอร์ม/u, /ผ้ากันเปื้อน/u, /\buniforms?\b/iu]);
   let expenseCategory: ExpenseCategory = 'other';
   let expenseSubcategory: string | null = null;
   if (includesAny(text, [/ก่อสร้าง/u, /ต่อเติม/u, /รีโนเวท/u, /ปรับปรุงอาคาร/u, /แปรรูปไม้/u, /งานไม้/u, /เลื่อยไม้/u, /น้ำมัน(?:สำหรับ)?(?:ตัดไม้|เลื่อยไม้|แปรรูปไม้)/u])) {
@@ -432,7 +439,7 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
   } else if (includesAny(text, [/ค่าส่ง/u, /ขนส่ง/u, /น้ำมัน/u, /เดินทาง/u])) {
     expenseCategory = 'transport';
     expenseSubcategory = 'ขนส่ง/เดินทาง';
-  } else if (includesAny(text, [/เงินเดือน/u, /ค่าแรง/u, /ค่าจ้าง/u, /พนักงาน/u])) {
+  } else if (includesAny(text, [/เงินเดือน/u, /ค่าแรง/u, /ค่าจ้าง/u]) || (!garmentSupply && /พนักงาน/u.test(text))) {
     expenseCategory = 'staff';
     expenseSubcategory = 'พนักงาน/ค่าแรง';
   } else if (includesAny(text, [/โฆษณา/u, /การตลาด/u, /marketing/u])) {
@@ -456,6 +463,12 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
   } else if (includesAny(text, [/วัสดุสิ้นเปลือง/u])) {
     expenseCategory = 'consumables';
     expenseSubcategory = 'วัสดุสิ้นเปลือง';
+  } else if (garmentSupply) {
+    // A business garment/sample is an operating supply proposal, never payroll or an asset.
+    // Stock/resale and other explicit categories above keep their existing precedence.
+    expenseCategory = 'consumables';
+    expenseSubcategory = /ตัวอย่าง\s*เสื้อ|เสื้อ\s*ตัวอย่าง/u.test(text)
+      ? 'ตัวอย่างเสื้อ' : 'เสื้อพนักงาน/เครื่องแบบ';
   } else if (includesAny(text, [/แอร์/u, /เครื่องปรับอากาศ/u, /เครื่อง/u, /อุปกรณ์/u, /เครื่องมือ/u])) {
     expenseCategory = 'equipment';
     expenseSubcategory = 'อุปกรณ์/เครื่องมือ';
@@ -463,6 +476,7 @@ export function classifyOwnerExpensePurpose(rawText: string): OwnerExpenseClassi
 
   let expenseClass: ExpenseClass = 'uncategorized';
   if (includesAny(text, [/ส่วนตัว/u, /personal/u, /ใช้ส่วนตัว/u])) expenseClass = 'owner_private';
+  else if (expenseCategory==='consumables' && ['ตัวอย่างเสื้อ','เสื้อพนักงาน/เครื่องแบบ'].includes(expenseSubcategory??'')) expenseClass = 'operating_expense';
   else if (
     ['construction','land_infrastructure','kitchen_equipment','furniture_fixtures','activity_assets','technology','licenses'].includes(expenseCategory)
     || includesAny(text, [/ลงทุน/u, /ก่อสร้าง/u, /ต่อเติม/u, /รีโนเวท/u, /ปรับปรุง/u, /ติดตั้ง/u, /ซื้อเครื่อง/u, /อุปกรณ์/u, /เฟอร์นิเจอร์/u, /ครุภัณฑ์/u, /ถมดิน/u, /ถมที่/u, /ที่ดิน/u, /ซอฟต์แวร์/u, /license/u])
@@ -515,6 +529,8 @@ function isPurposeNoise(text: string): boolean {
 function storedExtractionFallback(): FinancialImageExtraction {
   return {
     document_type: 'other',
+    document_kind: 'unknown',
+    funds_direction: 'unknown',
     amount_total: null,
     document_date_local: null,
     merchant: null,
@@ -532,12 +548,26 @@ function storedExtractionFallback(): FinancialImageExtraction {
   };
 }
 
+function existingIntakeImageReply(row: OwnerExpenseIntake, prefix: string): string {
+  const gate = ownerPaymentDocumentGate(row.extraction_data ?? storedExtractionFallback());
+  return gate.kind === 'payment_evidence'
+    ? detailReply(row, prefix)
+    : ownerPaymentDocumentClarification(gate);
+}
+
 export async function handleOwnerExpenseImage(input: {
   targetId: string;
   userId?: string | null;
   messageId: string;
   timestamp?: number;
+  /** Explicit bot-addressed, image-targeted user request; group images alone have no intent. */
+  intent?: OwnerExpenseImageIntent;
+  /** Only a direction explicitly supplied/selected by the authorized owner. */
+  fundsDirection?: 'incoming' | 'outgoing';
 }): Promise<string | null> {
+  // Do not fetch, OCR, reply to, upload, or persist ordinary group conversation images.
+  if (!input.intent || !['payment_review','document_help'].includes(input.intent)) return null;
+  if (!isAuthorizedOwnerPaymentActor(input.userId)) return null;
   const team = await boundLineOpsTeam(input.targetId);
   if (team !== 'owner_general') return null;
 
@@ -549,13 +579,13 @@ export async function handleOwnerExpenseImage(input: {
 
   const priorMessage = await existingIntakeByMessage(groupHash, input.messageId);
   if (priorMessage) {
-    return detailReply(priorMessage, '📁 Owner Expense — รูปนี้เคยรับไว้แล้วครับ');
+    return existingIntakeImageReply(priorMessage, '📁 Owner Expense — รูปนี้เคยรับไว้แล้วครับ');
   }
 
   const image = await fetchLineImage(input.messageId);
   const priorImage = await existingIntakeByImage(groupHash, image.sha256);
   if (priorImage) {
-    return detailReply(priorImage, '📁 Owner Expense — รูปหลักฐานนี้เคยรับไว้แล้ว จึงไม่ลงซ้ำครับ');
+    return existingIntakeImageReply(priorImage, '📁 Owner Expense — รูปหลักฐานนี้เคยรับไว้แล้ว จึงไม่ลงซ้ำครับ');
   }
 
   let extraction: FinancialImageExtraction;
@@ -565,9 +595,12 @@ export async function handleOwnerExpenseImage(input: {
     extraction = storedExtractionFallback();
   }
 
-  if ((extraction.payment_document_count ?? 1) > 1) {
-    return 'รูปนี้มีหลายสลิปครับ กรุณาส่งแยกรูปละสลิปพร้อมโน้ต เพื่อจับคู่ยอดและงวดให้ถูกต้อง ยังไม่บันทึกรายจ่ายครับ';
+  const documentGate = ownerPaymentDocumentGate(extraction, { fundsDirection: input.fundsDirection });
+  if (documentGate.kind !== 'payment_evidence' || input.intent !== 'payment_review') {
+    // Clarification is an ordinary reply, never a blank financial draft.
+    return ownerPaymentDocumentClarification(documentGate);
   }
+  if (input.fundsDirection) extraction = { ...extraction, funds_direction: input.fundsDirection };
 
   const occurredOn = visibleSlipDate(extraction.document_date_local) || bangkokDate(input.timestamp);
   const path = [
@@ -805,6 +838,7 @@ export function parseTypedOwnerPaidExpense(rawText: string): {
 export async function handleOwnerPaidExpenseMethodFollowup(input: {
   targetId: string; userId?: string | null; text: string; messageId?: string | null;
 }): Promise<string | null> {
+  if (!isAuthorizedOwnerPaymentActor(input.userId)) return null;
   const method = /^(?:เงินสด|จ่ายเงินสด)$/u.test(input.text.trim()) ? 'cash'
     : /^(?:โอน|โอนเงิน)$/u.test(input.text.trim()) ? 'transfer'
     : /^(?:บัตร|บัตรเครดิต)$/u.test(input.text.trim()) ? 'card' : null;
@@ -903,6 +937,7 @@ export async function handleOwnerRecentSlipProjectPurpose(input: {
   targetId: string; userId?: string | null; text: string;
   messageId?: string | null;
 }): Promise<string | null> {
+  if (!isAuthorizedOwnerPaymentActor(input.userId)) return null;
   if (!input.messageId || !input.userId
     || (/^(?:แม่|คุณแม่|ม๊า|ม้า)(?:\s|,|:|ครับ|คะ|ค่ะ|จ๋า)/u.test(normalizeText(input.text))
       && !/(?:ทองไทย|@ทองไทย)/u.test(input.text))
@@ -914,11 +949,11 @@ export async function handleOwnerRecentSlipProjectPurpose(input: {
   if (!groupHash || !actorHash) return null;
   const response = await dbFetch('financial_owner_expense_intakes?owner_group_hash=eq.'
     + encodeURIComponent(groupHash) + '&source_user_hash=eq.' + encodeURIComponent(actorHash)
-    + '&status=' + PENDING_STATUSES
-    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
+    + '&review_state=is.null&status=' + PENDING_STATUSES
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,review_state,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
     + '&order=created_at.desc&limit=5');
   const recent = (await response.json() as OwnerExpenseIntake[])
-    .filter(row => Date.now() - new Date(row.created_at).getTime() <= 10 * 60 * 1000);
+    .filter(row => row.review_state == null && Date.now() - new Date(row.created_at).getTime() <= 10 * 60 * 1000);
   if (!recent.length) return null;
   const mention = await ownerProjectMention(input.text, groupHash);
   if (mention.kind !== 'matched') return null;
@@ -939,6 +974,7 @@ export async function handleOwnerExpenseText(input: {
   messageId?: string | null;
   timestamp?: number;
 }): Promise<string | null> {
+  if (!isAuthorizedOwnerPaymentActor(input.userId)) return null;
   const team = await boundLineOpsTeam(input.targetId);
   if (team !== 'owner_general') return null;
 
@@ -1152,6 +1188,7 @@ export async function handleOwnerStaffSlipText(input: {
   targetId: string; userId?: string | null; text: string;
   messageId?: string | null; timestamp?: number;
 }): Promise<string | null> {
+  if (!isAuthorizedOwnerPaymentActor(input.userId)) return null;
   if (!input.messageId || !input.userId) return null;
   const text = referenceFromText(normalizeText(input.text));
   if (isOwnerFamilyConversation(text.purpose)) return null;
@@ -1295,3 +1332,4 @@ export async function handleOwnerStaffSlipText(input: {
   return label + 'เบิก ' + amountLabel
     + ' ตามสลิปนี้ครับ เป็นเบิกเงินเดือนล่วงหน้าหรือเบิกไปซื้อของครับ?';
 }
+

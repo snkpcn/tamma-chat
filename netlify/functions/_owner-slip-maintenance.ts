@@ -5,7 +5,8 @@ import { isOwnerFamilyConversation } from './_owner-staff-intent';
 type SlipEvent = {
   type?:string; replyToken?:string; timestamp?:number;
   source?:{type?:string;groupId?:string;roomId?:string;userId?:string};
-  message?:{type?:string;id?:string;text?:string};
+  message?:{type?:string;id?:string;text?:string;quotedMessageId?:string};
+  postback?:{data?:string};
 };
 type Intake = {id:string;source_user_hash?:string|null;status:string};
 type Dependencies = {
@@ -67,16 +68,17 @@ export async function partitionOwnerSlipMaintenance<T extends SlipEvent>(
     if(!paused&&!stale){allowed.push(event);continue;}
     const source=event.source;
     const target=source?.type==='group'?source.groupId:source?.type==='room'?source.roomId:null;
+    if(target&&event.type==='postback'&&(event.postback?.data?.startsWith('owner-slip:')||event.postback?.data?.startsWith('owner-doc:'))&&await deps.team(target)==='owner_general'){blocked.push(event);continue;}
     if(!target||event.type!=='message'||!['image','text'].includes(event.message?.type||'')
       ||await deps.team(target)!=='owner_general'){allowed.push(event);continue;}
     let affected=false;
-    if(event.message?.type==='image')affected=!(await deps.payrollPending(target));
+    if(event.message?.type==='image')affected=false; // Unaddressed images are quiet; targeted payroll retains its own route.
     else {
-      const text=event.message?.text?.trim()||'';
-      if(text&&!/^ผูกทีม\s+/iu.test(text)&&!isOwnerFamilyConversation(text)){
+      const text=(event.message?.text?.trim()||'').replace(/^ทองไทย(?:ครับ|คะ|ค่ะ)?[\s,]*/u,'');
+      if(text&&/^(?:ตรวจสลิป|บันทึกสลิป|ดูสลิป|ดู(?:รูป|เอกสาร)นี้|ช่วยดู(?:รูป|เอกสาร)นี้|#|สรุป|แก้|ยอด\s*\d|วันที่\s*20\d\d-|ยืนยัน|ยกเลิก)/u.test(text)&&!/^ผูกทีม\s+/iu.test(text)&&!isOwnerFamilyConversation(text)){
         const refs=[...text.matchAll(/#([a-f0-9]{6,32})\b/giu)].map(m=>m[1].toLowerCase());
         // Canonical review actions must never fall through even after a schema/code rollback.
-        affected=/^(?:ยืนยัน\s+(?:#[a-f0-9]{6,32}\s+)?v\d+|ยกเลิก\s+#[a-f0-9]{6,32})(?:\s|$)/iu.test(text);
+        affected=!!event.message?.quotedMessageId&&/^(?:ตรวจสลิป|บันทึกสลิป|ดูสลิป|ดู(?:รูป|เอกสาร)นี้|ช่วยดู(?:รูป|เอกสาร)นี้)/u.test(text) || /^(?:ยืนยัน\s+(?:#[a-f0-9]{6,32}\s+)?v\d+|ยกเลิก\s+#[a-f0-9]{6,32})(?:\s|$)/iu.test(text);
         if(!affected){
           const pending=await deps.pendingIntakes(target),actor=deps.actorHash(source?.userId);
           affected=pending.some(row=>refs.length?refs.some(ref=>row.id.replace(/-/gu,'').startsWith(ref))
@@ -98,3 +100,4 @@ export async function notifyOwnerSlipMaintenance<T extends SlipEvent>(
     await reply(event.replyToken,OWNER_SLIP_MAINTENANCE_REPLY);
   }
 }
+
