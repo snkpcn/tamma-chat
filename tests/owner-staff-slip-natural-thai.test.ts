@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
+import { handler as lineWebhookHandler } from '../netlify/functions/line-webhook';
 import { applyOwnerProjectText, handleOwnerProjectText } from '../netlify/functions/_owner-project-os';
 import { handleOwnerStaffSlipText } from '../netlify/functions/_owner-expense-intake';
 import { recordOwnerPayrollFromStoredSlip } from '../netlify/functions/_owner-payroll';
@@ -49,9 +50,13 @@ const slip = (overrides:Partial<Slip>={}):Slip => ({
 });
 function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicate?:boolean;createEventType?:string;tampered?:boolean;uploadStatus?:number;pendingError?:boolean;attachError?:boolean;team?:string}={}) {
   const oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const oldSecret=process.env.LINE_CHANNEL_SECRET,oldToken=process.env.LINE_CHANNEL_ACCESS_TOKEN;
   process.env.SUPABASE_URL='https://staff-slip.test';process.env.SUPABASE_SERVICE_ROLE_KEY='mock-key';
+  process.env.LINE_CHANNEL_SECRET='mock-line-secret';process.env.LINE_CHANNEL_ACCESS_TOKEN='mock-line-token';
   t.after(()=>{if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
-    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;});
+    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;
+    if(oldSecret===undefined)delete process.env.LINE_CHANNEL_SECRET;else process.env.LINE_CHANNEL_SECRET=oldSecret;
+    if(oldToken===undefined)delete process.env.LINE_CHANNEL_ACCESS_TOKEN;else process.env.LINE_CHANNEL_ACCESS_TOKEN=oldToken;});
   const bytes=Buffer.from('synthetic payroll evidence');
   const sha=createHash('sha256').update(bytes).digest('hex');
   const calls:Array<{path:string;method:string;body:any}>=[];
@@ -61,13 +66,13 @@ function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicat
     calls.push({path,method:init.method??'GET',body});
     if(path.endsWith('/ops_notification_channels'))return Response.json([{team_code:config.team??'owner_general'}]);
     if(path.endsWith('/financial_owner_expense_intakes')){
-      if(url.searchParams.has('id'))return Response.json(rows.map(row=>({...row,
+      if(url.searchParams.has('id'))return Response.json(rows.filter(row=>url.searchParams.get('id')==='eq.'+row.id).map(row=>({...row,
         owner_group_hash:'irrelevant-returned-group',evidence_message_id:'original-line-image',
         evidence_sha256:sha,storage_bucket:'owner-expense-evidence',
         storage_path:'owner-group/2026-10-11/stored.png',mime_type:'image/png',
         extraction_confidence:0.95,extraction_data:{document_type:'transfer_slip',amount_total:row.amount,confidence:0.95},
       })));
-      return Response.json(rows);
+      return Response.json(rows.filter(row=>['awaiting_purpose','awaiting_business'].includes(row.status)));
     }
     if(path.endsWith('/financial_create_owner_payroll_event_v1')){
       if(config.pendingError)return new Response('payroll_slip_pending',{status:400});
@@ -83,7 +88,11 @@ function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicat
     }
     if(path.endsWith('/financial_mark_owner_expense_not_expense_v1'))return Response.json({ok:true,status:'cancelled'});
     if(path.endsWith('/financial_employee_advance_owner_v1'))return Response.json([{advance_outstanding:200}]);
-    if(path.endsWith('/financial_stage_owner_expense_purpose_v1'))return Response.json({ok:true,status:'awaiting_business'});
+    if(path.endsWith('/financial_stage_owner_expense_purpose_v1')){
+      const row=rows.find(row=>row.id===body.p_intake_id);if(row){row.purpose_raw=body.p_purpose;row.status='awaiting_business';}
+      return Response.json({ok:true,status:'awaiting_business'});
+    }
+    if(path==='/v2/bot/message/reply')return Response.json({});
     if(path.endsWith('/financial_resolve_owner_expense_intake_v1'))return Response.json({ok:true,status:'needs_review'});
     throw new Error('Unexpected route '+path);
   });
@@ -269,4 +278,42 @@ test('an explicit salary period is preserved when reusing the original slip',asy
   const create=h.calls.find(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'))!;
   assert.equal(create.body.p_event_type,'salary_payment');
   assert.equal(create.body.p_pay_period,'ตุลาคม 2569');
+});
+
+async function deliverStaffWebhook(text:string,messageId:string,validSignature=true) {
+  const body=JSON.stringify({events:[{
+    type:'message',replyToken:'mock-reply-'+messageId,timestamp:at,
+    source:{type:'group',groupId:input.targetId,userId:input.userId},
+    message:{id:messageId,type:'text',text},
+  }]});
+  const signature=createHmac('sha256','mock-line-secret').update(body).digest('base64');
+  return lineWebhookHandler({httpMethod:'POST',body,headers:{'x-line-signature':validSignature?signature:'invalid'}} as never,{} as never);
+}
+test('signed LINE receiver routes a family staff slip through clarification to payroll without project or private transport',async t=>{
+  const h=harness(t,[slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+  t.mock.method(console,'log',()=>{});
+  assert.equal((await deliverStaffWebhook('เจิดเบิก','staff-first') as any).statusCode,200);
+  assert.equal((await deliverStaffWebhook('เงินเดือน','staff-salary') as any).statusCode,200);
+  const replies=h.calls.filter(x=>x.path==='/v2/bot/message/reply');
+  assert.equal(replies.length,2);
+  assert.match(replies[0].body.messages[0].text,/เจิดเบิก 200 บาท.*เงินเดือนล่วงหน้าหรือเบิกไปซื้อของ/);
+  assert.match(replies[1].body.messages[0].text,/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
+  assert.equal(h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1')).length,1);
+  assert.ok(!h.calls.some(x=>/owner_project|snk-money|investment/.test(x.path)));
+  assert.equal(replies[1].body.replyToken,'mock-reply-staff-salary');
+});
+test('signed LINE receiver asks which ambiguous slip and does not create payroll',async t=>{
+  const h=harness(t,[slip(),slip({id:'another-slip',amount:500})]);
+  t.mock.method(console,'log',()=>{});
+  assert.equal((await deliverStaffWebhook('เจิดเบิก','ambiguous') as any).statusCode,200);
+  const replies=h.calls.filter(x=>x.path==='/v2/bot/message/reply');
+  assert.equal(replies.length,1);
+  assert.match(replies[0].body.messages[0].text,/2 รายการ/);
+  assert.ok(!h.calls.some(x=>x.method==='POST'&&x.path!=='/v2/bot/message/reply'));
+});
+test('invalid LINE signature cannot read a staff slip, write a ledger, or send a reply',async t=>{
+  const h=harness(t,[slip()]);
+  t.mock.method(console,'error',()=>{});
+  assert.equal((await deliverStaffWebhook('เจิดเบิก','invalid',false) as any).statusCode,401);
+  assert.equal(h.calls.length,0);
 });
