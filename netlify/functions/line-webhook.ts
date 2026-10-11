@@ -11,7 +11,7 @@ import { handleCafeTestDailyCloseText } from './_inthanin-daily-close-line';
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
-import { handleOwnerExpenseImage, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, handleOwnerRecentSlipProjectPurpose, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
+import { handleOwnerExpenseImage, handleOwnerStaffSlipText, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, handleOwnerRecentSlipProjectPurpose, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
 import { handleOwnerProjectQuery, handleOwnerProjectText } from './_owner-project-os';
 import { handleOwnerApiCostQuestion } from './_ai-cost-notifier';
@@ -385,6 +385,16 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       text: event.message.text,
     });
     if (bindReply) await replyToLine(event.replyToken, bindReply, accessToken);
+    return;
+  }
+
+  const ownerStaffSlipReply = await handleOwnerStaffSlipText({
+    targetId, userId: event.source?.userId ?? null,
+    text: event.message.text, messageId: event.message.id ?? null,
+    timestamp: event.timestamp,
+  });
+  if (ownerStaffSlipReply) {
+    await replyToLine(event.replyToken, ownerStaffSlipReply, accessToken);
     return;
   }
 
