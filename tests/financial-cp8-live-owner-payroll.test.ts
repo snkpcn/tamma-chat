@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { handleOwnerPayrollText, parseOwnerPayrollCommand } from '../netlify/functions/_owner-payroll';
+import { piiHash } from '../netlify/functions/_operations-db';
 
 test('owner payroll commands parse salary advance payment and deduction',()=>{
   assert.deepEqual(parseOwnerPayrollCommand('เบิกเงินเดือน ปอ 2,000 บาท'),{
@@ -23,6 +24,8 @@ test('owner payroll commands parse salary advance payment and deduction',()=>{
 
 test('Owner payroll accepts a joined Thai command and does not record its repeated wording twice',async()=>{
   const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const oldOwners=process.env.OWNER_FINANCE_LINE_USER_HASHES;
+  process.env.OWNER_FINANCE_LINE_USER_HASHES=piiHash('owner')!;
   process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
   let attempts=0;
   globalThis.fetch=(async(input:string|URL|Request)=>{
@@ -50,6 +53,7 @@ test('Owner payroll accepts a joined Thai command and does not record its repeat
     globalThis.fetch=oldFetch;
     if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
     if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;
+    if(oldOwners===undefined)delete process.env.OWNER_FINANCE_LINE_USER_HASHES;else process.env.OWNER_FINANCE_LINE_USER_HASHES=oldOwners;
   }
 });
 

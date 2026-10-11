@@ -2,6 +2,7 @@ import { isOwnerStaffUnsafeText, isOwnerStaffCorrectionText, normalizeOwnerStaff
 import { createHash } from 'node:crypto';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
+import { isAuthorizedOwnerPaymentActor, ownerPaymentDocumentGate, ownerPaymentDocumentClarification } from './_owner-payment-document';
 import {
   extractFinancialEvidence,
   extensionForMime,
@@ -194,6 +195,7 @@ export async function handleOwnerPayrollText(input:{
   messageId?:string|null;
   timestamp?:number;
 }):Promise<string|null>{
+  if(!isAuthorizedOwnerPaymentActor(input.userId))return null;
   const command=parseOwnerPayrollCommand(input.text);
   const summaryCommand=/^(?:สรุปเบิกเงินเดือน|ยอดเบิกเงินเดือน)$/u.test(input.text.trim());
   if(!command&&!summaryCommand)return null;
@@ -278,13 +280,19 @@ export async function handleOwnerPayrollImage(input:{
   messageId:string;
   timestamp?:number;
 }):Promise<string|null>{
+  if(!isAuthorizedOwnerPaymentActor(input.userId))return null;
   const team=await boundLineOpsTeam(input.targetId);
   if(team!=='owner_general')return null;
 
   const groupHash=piiHash(input.targetId);
   if(!groupHash)return null;
   const pending=await pendingPayrollEvent(groupHash);
-  if(!pending)return null;
+  // Only the authenticated initiator's targeted salary/advance session owns an image.
+  // Another owner or a newly added group member cannot consume a pending session.
+  if(!pending || pending.created_by_hash!==piiHash(input.userId)
+    || pending.owner_group_hash!==groupHash
+    || !['awaiting_slip','needs_review'].includes(pending.status)
+    || !['salary_advance','salary_payment'].includes(pending.event_type))return null;
 
   const image=await fetchLineImage(input.messageId);
   let extraction:FinancialImageExtraction;
@@ -293,6 +301,8 @@ export async function handleOwnerPayrollImage(input:{
   }catch{
     extraction={
       document_type:'other',
+      document_kind:'unknown',
+      funds_direction:'unknown',
       amount_total:null,
       document_date_local:null,
       merchant:null,
@@ -309,6 +319,12 @@ export async function handleOwnerPayrollImage(input:{
       extraction_model:'none',
     };
   }
+
+  // A targeted owner-created salary session establishes outgoing intent, but never
+  // changes an unpaid/unknown document or incoming funds into proof of payment.
+  const documentGate=ownerPaymentDocumentGate(extraction,{fundsDirection:'outgoing'});
+  if(documentGate.kind!=='payment_evidence')return ownerPaymentDocumentClarification(documentGate);
+  extraction={...extraction,funds_direction:'outgoing'};
 
   const date=bangkokDate(input.timestamp);
   const path=[
@@ -371,6 +387,7 @@ export async function recordOwnerPayrollFromStoredSlip(input: {
   employeeLabel: string; eventType: 'salary_advance' | 'salary_payment';
   payPeriod?: string | null; declaredAmount?: number | null;
 }): Promise<string> {
+  if (!isAuthorizedOwnerPaymentActor(input.userId)) return 'ยังไม่ได้เปิดสิทธิ์บันทึกการเงินพนักงานให้บัญชี LINE นี้ครับ';
   if (await boundLineOpsTeam(input.targetId) !== 'owner_general') {
     return 'รายการเงินพนักงานใช้เฉพาะกลุ่ม Owner ครับ';
   }
@@ -389,6 +406,8 @@ export async function recordOwnerPayrollFromStoredSlip(input: {
   if (!slip || !['awaiting_purpose','awaiting_business'].includes(slip.status)) {
     return 'ยังจับคู่สลิปกับรายการเบิกนี้ไม่ได้ครับ ช่วยระบุสลิปอีกครั้งครับ';
   }
+  const documentGate = ownerPaymentDocumentGate(slip.extraction_data, { fundsDirection: 'outgoing' });
+  if (documentGate.kind !== 'payment_evidence') return ownerPaymentDocumentClarification(documentGate);
   const amount = slip.amount === null ? Number(input.declaredAmount ?? 0) : Number(slip.amount);
   if (!Number.isFinite(amount) || amount <= 0) {
     return 'ผมทราบว่าเป็นเงินพนักงานแล้ว แต่ยอดจากสลิปอ่านไม่ชัดครับ ช่วยยืนยันจำนวนเงินก่อนครับ';
@@ -473,3 +492,4 @@ export async function recordOwnerPayrollFromStoredSlip(input: {
       : 'เก็บในรายการเงินเดือนฝั่ง Owner ไม่เพิ่มยอดลงทุนซ้ำครับ',
   ].filter(Boolean).join('\n');
 }
+

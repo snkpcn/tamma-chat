@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
@@ -8,6 +8,17 @@ import {
   matchOwnerProjectMention,
 } from '../netlify/functions/_owner-expense-intake';
 import { piiHash } from '../netlify/functions/_operations-db';
+
+// Existing successful cases use explicitly authorized synthetic finance owners.
+let previousFinanceOwners:string|undefined;
+beforeEach(()=>{
+ previousFinanceOwners=process.env.OWNER_FINANCE_LINE_USER_HASHES;
+ process.env.OWNER_FINANCE_LINE_USER_HASHES=["U-owner-test", "owner-test-user", "owner-stale-test-user"].map(user=>piiHash(user)).join(',');
+});
+afterEach(()=>{
+ if(previousFinanceOwners===undefined)delete process.env.OWNER_FINANCE_LINE_USER_HASHES;
+ else process.env.OWNER_FINANCE_LINE_USER_HASHES=previousFinanceOwners;
+});
 
 test('owner investment classifier separates businesses and investment categories', () => {
   assert.deepEqual(classifyOwnerExpensePurpose('ซื้อเครื่องชง Inthanin'), {
@@ -356,4 +367,25 @@ test('stale pending slip does not consume an unrelated short Owner message', asy
   });
   assert.equal(reply, null);
   assert.ok(!calls.some(path => path.includes('/rpc/')));
+});
+
+
+test('business garment samples and uniforms propose operating consumables, not assets or payroll',()=>{
+ for(const note of ['ตัวอย่างเสื้อ','เสื้อตัวอย่าง','ตัวอย่าง เสื้อ','เสื้อพนักงาน','ชุดพนักงาน','ซื้อเครื่องแบบ','ซื้อยูนิฟอร์ม','ผ้ากันเปื้อน','staff uniform']) {
+  const c=classifyOwnerExpensePurpose(note);
+  assert.equal(c.expenseCategory,'consumables',note);assert.equal(c.expenseClass,'operating_expense',note);
+  assert.ok(['ตัวอย่างเสื้อ','เสื้อพนักงาน/เครื่องแบบ'].includes(c.expenseSubcategory!),note);
+ }
+ assert.equal(classifyOwnerExpensePurpose('ตัวอย่างเสื้อ ส่วนตัว').expenseClass,'owner_private');
+ assert.equal(classifyOwnerExpensePurpose('เสื้อ').expenseCategory,'other');
+ assert.equal(classifyOwnerExpensePurpose('ตัวอย่างเสื้อสูบ').expenseCategory,'other');
+ assert.equal(classifyOwnerExpensePurpose('สต๊อกสินค้าเสื้อตัวอย่าง').expenseCategory,'inventory');
+ assert.equal(classifyOwnerExpensePurpose('ค่าแรงพนักงาน').expenseCategory,'staff');
+ assert.equal(classifyOwnerExpensePurpose('ค่าแรงตัดเสื้อพนักงาน').expenseCategory,'staff');
+ for(const note of ['ซื้อเครื่องพิมพ์เสื้อตัวอย่าง','ซื้อเครื่องตัดเสื้อยูนิฟอร์ม','ซื้อเครื่องตัดยูนิฟอร์ม']) {
+  assert.equal(classifyOwnerExpensePurpose(note).expenseCategory,'equipment',note);
+  assert.equal(classifyOwnerExpensePurpose(note).expenseClass,'capital_investment',note);
+ }
+ assert.equal(classifyOwnerExpensePurpose('ภาษีเสื้อพนักงาน').expenseCategory,'tax');
+ assert.equal(classifyOwnerExpensePurpose('ค่าธรรมเนียมเสื้อพนักงาน').expenseCategory,'fees');
 });

@@ -1,7 +1,18 @@
-import { test } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { piiHash } from '../netlify/functions/_operations-db';
+
+// Existing successful cases use explicitly authorized synthetic finance owners.
+let previousFinanceOwners:string|undefined;
+beforeEach(()=>{
+ previousFinanceOwners=process.env.OWNER_FINANCE_LINE_USER_HASHES;
+ process.env.OWNER_FINANCE_LINE_USER_HASHES=["owner-user"].map(user=>piiHash(user)).join(',');
+});
+afterEach(()=>{
+ if(previousFinanceOwners===undefined)delete process.env.OWNER_FINANCE_LINE_USER_HASHES;
+ else process.env.OWNER_FINANCE_LINE_USER_HASHES=previousFinanceOwners;
+});
 import {
   handleOwnerExpenseText,
   handleOwnerRecentSlipProjectPurpose,
@@ -282,3 +293,4 @@ test('fresh 200 baht slip description wins over the draft and links a completed 
     if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
     if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;}
 });
+

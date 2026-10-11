@@ -1,10 +1,21 @@
-import { test } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { handler as lineWebhookHandler } from '../netlify/functions/line-webhook';
 import { applyOwnerProjectText, handleOwnerProjectText } from '../netlify/functions/_owner-project-os';
 import { handleOwnerExpenseText, handleOwnerStaffSlipText } from '../netlify/functions/_owner-expense-intake';
 import { piiHash } from '../netlify/functions/_operations-db';
+
+// Existing successful cases use explicitly authorized synthetic finance owners.
+let previousFinanceOwners:string|undefined;
+beforeEach(()=>{
+ previousFinanceOwners=process.env.OWNER_FINANCE_LINE_USER_HASHES;
+ process.env.OWNER_FINANCE_LINE_USER_HASHES=["son-test-user"].map(user=>piiHash(user)).join(',');
+});
+afterEach(()=>{
+ if(previousFinanceOwners===undefined)delete process.env.OWNER_FINANCE_LINE_USER_HASHES;
+ else process.env.OWNER_FINANCE_LINE_USER_HASHES=previousFinanceOwners;
+});
 import { parseOwnerPayrollCommand, recordOwnerPayrollFromStoredSlip } from '../netlify/functions/_owner-payroll';
 import { parseOwnerStaffTurn, isOwnerScheduleAnswer, isOwnerFamilyConversation } from '../netlify/functions/_owner-staff-intent';
 
@@ -68,10 +79,10 @@ function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicat
     if(path.endsWith('/ops_notification_channels'))return Response.json([{team_code:config.team??'owner_general'}]);
     if(path.endsWith('/financial_owner_expense_intakes')){
       if(url.searchParams.has('id'))return Response.json(rows.filter(row=>url.searchParams.get('id')==='eq.'+row.id).map(row=>({...row,
-        owner_group_hash:'irrelevant-returned-group',evidence_message_id:'original-line-image',
+        owner_group_hash:piiHash('owner-test-group'),evidence_message_id:'original-line-image',
         evidence_sha256:sha,storage_bucket:'owner-expense-evidence',
         storage_path:'owner-group/2026-10-11/stored.png',mime_type:'image/png',
-        extraction_confidence:0.95,extraction_data:{document_type:'transfer_slip',amount_total:row.amount,confidence:0.95},
+        extraction_confidence:0.95,extraction_data:{document_type:row.document_type,document_kind:row.document_type==='transfer_slip'?'transfer_evidence':'unknown',funds_direction:row.document_type==='transfer_slip'?'outgoing':'unknown',amount_total:row.amount,confidence:0.95},
       })));
       return Response.json(rows.filter(row=>['awaiting_purpose','awaiting_business'].includes(row.status)));
     }
@@ -512,12 +523,12 @@ test('business reply to a known equipment expense wins over a pending staff purc
   assert.equal(await handleOwnerStaffSlipText({...input,text:'ตำมา-ชาติ'}),null);
   assert.ok(!h.calls.some(x=>x.method==='POST'));
 });
-test('the actual signed LINE sequence finishes equipment then accepts the staff salary answer once',async t=>{
+test('explicit signed LINE equipment references finish the same slip before the staff salary answer',async t=>{
   t.mock.method(Date,'now',()=>at);t.mock.method(console,'log',()=>{});
   const row=equipmentSlip();
   const h=harness(t,[row,slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
-  await deliverStaffWebhook('ค่าอุปกรณ์ไฟฟ้า','equipment-purpose');
-  await deliverStaffWebhook('ตำมา-ชาติ','equipment-business');
+  await deliverStaffWebhook('#a6c43e ค่าอุปกรณ์ไฟฟ้า','equipment-purpose');
+  await deliverStaffWebhook('#a6c43e ตำมา-ชาติ','equipment-business');
   await deliverStaffWebhook('เบิกเงินเดือนล่วงหน้า','staff-final');
   const replies=h.calls.filter(x=>x.path==='/v2/bot/message/reply');
   assert.equal(replies.length,3);
@@ -532,11 +543,11 @@ test('the actual signed LINE sequence finishes equipment then accepts the staff 
   assert.equal(payroll.length,1);assert.equal(payroll[0].body.p_amount,200);
   assert.equal(payroll[0].body.p_employee_label,'เจิด');
 });
-test('signed LINE accepts a six-character slip code without requiring a hash',async t=>{
+test('signed LINE scopes a legacy expense with an explicit six-character slip reference',async t=>{
   t.mock.method(Date,'now',()=>at);t.mock.method(console,'log',()=>{});
   const h=harness(t,[equipmentSlip(),slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
-  await deliverStaffWebhook('a6c43e ซื้ออุปกรณ์ไฟฟ้า','bare-equipment-code');
-  await deliverStaffWebhook('ตำมา-ชาติ','bare-code-business');
+  await deliverStaffWebhook('#a6c43e ซื้ออุปกรณ์ไฟฟ้า','explicit-equipment-code');
+  await deliverStaffWebhook('#a6c43e ตำมา-ชาติ','explicit-code-business');
   const stages=h.calls.filter(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'));
   assert.equal(stages.length,1);assert.equal(stages[0].body.p_intake_id,equipmentSlip().id);
   const resolve=h.calls.find(x=>x.path.endsWith('/financial_resolve_owner_expense_intake_v1'))!;
@@ -567,7 +578,7 @@ test('signed LINE completes a saved equipment purpose after a pause without aski
     created_at:new Date(at-20*60000).toISOString(),expense_class:'capital_investment',
     expense_category:'equipment',expense_subcategory:'อุปกรณ์/เครื่องมือ'});
   const h=harness(t,[row,slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
-  await deliverStaffWebhook('ตำมา-ชาติ','delayed-equipment-business');
+  await deliverStaffWebhook('#a6c43e ตำมา-ชาติ','delayed-equipment-business');
   const reply=h.calls.find(x=>x.path==='/v2/bot/message/reply')!;
   assert.match(reply.body.messages[0].text,/6,474 บาท/);
   assert.match(reply.body.messages[0].text,/ตำมา-ชาติ/);
@@ -577,3 +588,4 @@ test('signed LINE completes a saved equipment purpose after a pause without aski
   assert.equal(resolve.body.p_purpose,'ค่าอุปกรณ์ไฟฟ้า');
   assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
 });
+

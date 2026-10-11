@@ -257,12 +257,17 @@ function successReply(
   return lines.join('\n');
 }
 
+export type RecordedDailyClose = {
+  dailyCloseId:string; localDate:string; environment:'test'|'live'; status:string; messageId:string; duplicate?:boolean;
+};
+
 export async function handleCafeTestDailyCloseText(input:{
   targetId:string;
   userId:string|null;
   text:string;
   messageId:string|null;
   timestamp?:number;
+  onRecorded?:(close:RecordedDailyClose)=>void;
 }):Promise<string|null>{
   if(!looksLikeInthaninDailyCloseText(input.text))return null;
 
@@ -382,6 +387,10 @@ export async function handleCafeTestDailyCloseText(input:{
     transferPurposeDeduped:Number(transferDedupe?.deduped_count||0),
   }));
 
+  if(result.daily_close_id){
+    input.onRecorded?.({dailyCloseId:result.daily_close_id,localDate:result.local_date??parsed.localDate,
+      environment,status:result.status??'draft',messageId:input.messageId,duplicate:Boolean(result.duplicate)});
+  }
   return successReply(
     parsed,
     result,
@@ -392,3 +401,4 @@ export async function handleCafeTestDailyCloseText(input:{
     effectivePurchaseCash+effectiveExpenseCash,
   );
 }
+
