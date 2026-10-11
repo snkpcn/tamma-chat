@@ -1131,7 +1131,8 @@ export async function handleOwnerStaffSlipText(input: {
   const continuation = isOwnerExpenseClassificationReply(text.purpose)
     || /ซื้อ|ค่า|ของกิจการ|ของร้าน/u.test(text.purpose)
     || /^(?:เป็น)?(?:เบิก)?เงินเดือน(?:ล่วงหน้า)?(?:ครับ|คับ)?$|^ล่วงหน้า$|^(?:เบิก)?(?:ไป)?ซื้อของ|^สำรองจ่าย/u.test(text.purpose)
-    || /^[\p{L}\p{M}]{1,40}$/u.test(text.purpose);
+    || /^[\p{L}\p{M}]{1,40}$/u.test(text.purpose)
+    || /^[\d,]+(?:\.\d{1,2})?\s*(?:บาท)?$/u.test(text.purpose);
   if (!direct && !continuation) return null;
   const team = await boundLineOpsTeam(input.targetId);
   if (team !== 'owner_general') return null;
@@ -1163,11 +1164,21 @@ export async function handleOwnerStaffSlipText(input: {
   let purpose = turn.employeeLabel
     ? turn.employeeLabel + 'เบิก' + (turn.kind === 'salary_advance' ? 'เงินเดือนล่วงหน้า'
       : turn.kind === 'purchase' ? 'ไปซื้อของ' : '')
-    : 'พนักงานเบิก';
+    : 'พนักงานเบิก' + (turn.kind === 'salary_advance' ? 'เงินเดือนล่วงหน้า' : turn.kind === 'purchase' ? 'ไปซื้อของ' : '');
   if (turn.employeeLabel && (turn.kind === 'salary_advance' || turn.kind === 'salary_payment')) {
+    if (slipAmount === null && turn.amount === null) {
+      await rpc<ResolveResult>('financial_stage_owner_expense_purpose_v1', {
+        p_intake_id: intake.id, p_purpose: purpose,
+        p_expense_class: 'uncategorized', p_expense_category: 'staff',
+        p_expense_subcategory: 'พนักงานเบิก/รอตรวจยอด', p_confidence: 0.65,
+        p_user_hash: piiHash(input.userId) ?? '', p_message_id: input.messageId,
+      });
+      return 'ทราบว่าเป็นเงินเดือนล่วงหน้าของ ' + turn.employeeLabel
+        + 'แล้วครับ แต่ยอดจากสลิปอ่านไม่ชัด เบิกจำนวนกี่บาทครับ?';
+    }
     return recordOwnerPayrollFromStoredSlip({
       targetId: input.targetId, userId: input.userId, intakeId: intake.id,
-      employeeLabel: turn.employeeLabel, eventType: turn.kind,
+      employeeLabel: turn.employeeLabel, eventType: turn.kind, declaredAmount: turn.amount,
     });
   }
   if (turn.kind === 'purchase') {

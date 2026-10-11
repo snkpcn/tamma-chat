@@ -18,18 +18,19 @@ function employee(text: string): string | null {
 /** Ordinary Thai around a slip. A bare "เบิก" never implies salary. */
 export function parseOwnerStaffTurn(rawText: string, priorPurpose?: string | null): OwnerStaffTurn | null {
   const text = clean(rawText);
-  if (/(?:ยังไม่(?:ได้)?เบิก|ไม่ได้เบิก|ไม่เบิก|ไม่ต้องเบิก|จะเบิก|ยกเลิก|เท่าไหร่|เท่าไร|เบิกอะไร|เบิกได้ไหม|\?)/u.test(text)) return null;
+  if (/(?:ยังไม่(?:ได้)?เบิก|ไม่ได้เบิก|ไม่เบิก|ไม่ต้องเบิก|(?:ไม่ได้ให้|ไม่ให้|ไม่มี)[^\n]{0,30}เบิก|(?:จะ|เดี๋ยว|พรุ่งนี้)[^\n]{0,30}เบิก|จะเบิก|ยกเลิก|เท่าไหร่|เท่าไร|เบิกอะไร|เบิกได้ไหม|\?)/u.test(text)) return null;
   const prior = priorPurpose ? parseOwnerStaffTurn(priorPurpose) : null;
   const hasAdvance = /เบิก/u.test(text);
   const isSalaryReply = /^(?:เป็น)?(?:เบิก)?เงินเดือน(?:ล่วงหน้า)?(?:\s|$)|^ล่วงหน้า$/u.test(text);
   const isPurchaseReply = /(?:เบิก(?:เงิน)?(?:ไป)?ซื้อ|เบิก(?:เงิน)?(?:ไป)?จ่าย|เบิกไป|ไปซื้อ|ซื้อของ|สำรองจ่าย)/u.test(text);
-  const isBusinessReply = /^(?:เป็น|ของ)?(?:กิจการ|ร้าน)?\s*(?:ส่วนกลาง|อินทนิล|อินทนิน|inthanin|ตำมา[\s-]*ชาติ|เฮือนสเตย์|ผจญภัย|otop)\s*$/iu.test(text);
+  const isBusinessReply = /^(?:เป็น|ของ)?(?:กิจการ|ร้าน)?\s*(?:ส่วนกลาง|ครัว|ร้านอาหาร|ร้านกาแฟ|อินทนิล|อินทนิน|inthanin|ตำมา[\s-]*ชาติ|เฮือนสเตย์|ผจญภัย|otop)\s*$/iu.test(text);
   const isPurchaseDetail = Boolean(prior?.kind === 'purchase'
     && /ซื้อ|ค่า|ของกิจการ|ของร้าน|อินทนิล|อินทนิน|inthanin|ตำมา|เฮือนสเตย์|ผจญภัย|ส่วนกลาง/iu.test(text));
+  const isAmountReply = Boolean(prior && /^[\d,]+(?:\.\d{1,2})?\s*(?:บาท)?$/u.test(text));
   const isSalaryPayment = /^(?:จ่าย|โอน)เงินเดือน/u.test(text);
   const isNameReply = Boolean(prior && !prior.employeeLabel && employee(text)
     && !/เงินเดือน|ซื้อ|จ่าย|ส่วนกลาง|กิจการ|ร้าน|โครงการ/u.test(text));
-  if (!hasAdvance && !isSalaryPayment && !(prior && (isSalaryReply || isPurchaseReply || isNameReply || isBusinessReply || isPurchaseDetail))) return null;
+  if (!hasAdvance && !isSalaryPayment && !(prior && (isSalaryReply || isPurchaseReply || isNameReply || isBusinessReply || isPurchaseDetail || isAmountReply))) return null;
 
   const kind: OwnerStaffTurn['kind'] = isPurchaseReply ? 'purchase'
     : isSalaryPayment ? 'salary_payment'

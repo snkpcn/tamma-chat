@@ -22,7 +22,7 @@ test('employee, amount and short type follow-ups are understood without guessing
   assert.equal(parseOwnerStaffTurn('ซื้ออาหารม้า ผจญภัย','เจิดเบิกไปซื้อของ')?.kind,'purchase');
   assert.equal(parseOwnerStaffTurn('เงินเดือน'),null);
 });
-for (const text of ['เจิดไม่เบิก','เจิดไม่ได้เบิก','เจิดยังไม่เบิก','เจิดจะเบิก','เจิดเบิกอะไร','เบิกได้ไหม','แม่ เดี๋ยวคุยกัน']) {
+for (const text of ['เจิดไม่เบิก','เจิดไม่ได้เบิก','เจิดยังไม่เบิก','เจิดจะเบิก','ไม่มีใครเบิก','ไม่ได้ให้เจิดเบิก','พรุ่งนี้เจิดเบิก','เจิดเบิกอะไร','เบิกได้ไหม','แม่ เดี๋ยวคุยกัน']) {
   test('negation, future intent and questions are not payroll: ' + text, () => {
     assert.equal(parseOwnerStaffTurn(text),null);
   });
@@ -219,4 +219,21 @@ test('project handler releases a financial topic before it reads or patches the 
   const h=harness(t,[slip()]);
   assert.equal(await handleOwnerProjectText({...input,text:'เจิดเบิก'}),null);
   assert.ok(!h.calls.some(x=>x.path.includes('owner_project')));
+});
+
+test('known salary type is preserved when employee name is supplied later',async t=>{
+  harness(t,[slip({purpose_raw:'พนักงานเบิกเงินเดือนล่วงหน้า'})]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'เจิด'})??'',/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
+});
+test('unreadable amount asks one missing question and preserves salary context',async t=>{
+  const h=harness(t,[slip({amount:null,purpose_raw:'เจิดเบิก'})]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'เงินเดือน'})??'',/จำนวนกี่บาท/);
+  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'))?.body.p_purpose,'เจิดเบิกเงินเดือนล่วงหน้า');
+  assert.ok(!h.calls.some(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1')));
+});
+test('owner amount clarification still needs evidence review when original slip was unreadable',async t=>{
+  const h=harness(t,[slip({amount:null,purpose_raw:'เจิดเบิกเงินเดือนล่วงหน้า'})],{attachStatus:'needs_review'});
+  assert.match(await handleOwnerStaffSlipText({...input,text:'200'})??'',/ยังไม่ยืนยันยอด/);
+  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'))?.body.p_amount,200);
+  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_attach_owner_payroll_slip_v1'))?.body.p_slip_amount,null);
 });

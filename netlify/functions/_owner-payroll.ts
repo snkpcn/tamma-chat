@@ -366,7 +366,7 @@ export async function handleOwnerPayrollImage(input:{
 export async function recordOwnerPayrollFromStoredSlip(input: {
   targetId: string; userId?: string | null; intakeId: string;
   employeeLabel: string; eventType: 'salary_advance' | 'salary_payment';
-  payPeriod?: string | null;
+  payPeriod?: string | null; declaredAmount?: number | null;
 }): Promise<string> {
   if (await boundLineOpsTeam(input.targetId) !== 'owner_general') {
     return 'รายการเงินพนักงานใช้เฉพาะกลุ่ม Owner ครับ';
@@ -386,7 +386,7 @@ export async function recordOwnerPayrollFromStoredSlip(input: {
   if (!slip || !['awaiting_purpose','awaiting_business'].includes(slip.status)) {
     return 'ยังจับคู่สลิปกับรายการเบิกนี้ไม่ได้ครับ ช่วยระบุสลิปอีกครั้งครับ';
   }
-  const amount = Number(slip.amount);
+  const amount = slip.amount === null ? Number(input.declaredAmount ?? 0) : Number(slip.amount);
   if (!Number.isFinite(amount) || amount <= 0) {
     return 'ผมทราบว่าเป็นเงินพนักงานแล้ว แต่ยอดจากสลิปอ่านไม่ชัดครับ ช่วยยืนยันจำนวนเงินก่อนครับ';
   }
