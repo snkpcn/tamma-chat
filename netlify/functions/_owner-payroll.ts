@@ -1,3 +1,4 @@
+import { isOwnerStaffUnsafeText, isOwnerStaffCorrectionText, normalizeOwnerStaffEmployee } from './_owner-staff-intent';
 import { createHash } from 'node:crypto';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
@@ -89,6 +90,7 @@ function employeeKey(label:string):string{
 }
 
 function parseAmount(value:string):number|null{
+  if(!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/u.test(value))return null;
   const n=Number(value.replace(/,/g,''));
   return Number.isFinite(n)&&n>0?Math.round(n*100)/100:null;
 }
@@ -99,6 +101,7 @@ export function parseOwnerPayrollCommand(text:string):{
   amount:number;
   payPeriod:string|null;
 }|null{
+  if(isOwnerStaffUnsafeText(text)||isOwnerStaffCorrectionText(text))return null;
   const value=text.trim().replace(/\s+/g,' ');
   const patterns:Array<[PayrollEventType,RegExp,boolean?]>=[
     ['salary_advance',/^(?:เบิกเงินเดือน(?:ล่วงหน้า)?|เบิกเงินล่วงหน้า|เงินเดือนล่วงหน้า)\s*(.+?)\s+([\d,]+(?:\.\d+)?)\s*(?:บาท)?(?:\s+เดือน\s+(.+))?$/u],
@@ -110,7 +113,7 @@ export function parseOwnerPayrollCommand(text:string):{
     const match=value.match(pattern);
     if(!match)continue;
     const amount=parseAmount(match[2]);
-    const employeeLabel=match[1]?.trim().slice(0,120)??'';
+    const employeeLabel=normalizeOwnerStaffEmployee(match[1]??'')??'';
     if(!amount||!employeeLabel)return null;
     if(employeeFirst&&(/^(?:แม่|คุณแม่|ผม|กู|พ่อ)$/u.test(employeeLabel)
       ||/(?:บอกว่า|ถามว่า|ยังไม่|จะ)/u.test(employeeLabel)))continue;

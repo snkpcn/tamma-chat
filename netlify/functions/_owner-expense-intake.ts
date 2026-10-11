@@ -1,4 +1,4 @@
-import { parseOwnerStaffTurn } from './_owner-staff-intent';
+import { parseOwnerStaffTurn, isOwnerFamilyConversation, isOwnerStaffCorrectionText, isOwnerStaffAmbiguousText } from './_owner-staff-intent';
 import { parseOwnerPayrollCommand, recordOwnerPayrollFromStoredSlip } from './_owner-payroll';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
@@ -1126,9 +1126,12 @@ export async function handleOwnerStaffSlipText(input: {
 }): Promise<string | null> {
   if (!input.messageId || !input.userId) return null;
   const text = referenceFromText(normalizeText(input.text));
+  if (isOwnerFamilyConversation(text.purpose)) return null;
+  const correction = isOwnerStaffCorrectionText(text.purpose);
+  const ambiguous = isOwnerStaffAmbiguousText(text.purpose);
   const direct = parseOwnerStaffTurn(text.purpose);
   // Only read continuation state for concise type/name answers, not all chat.
-  const continuation = isOwnerExpenseClassificationReply(text.purpose)
+  const continuation = correction || ambiguous || isOwnerExpenseClassificationReply(text.purpose)
     || /ซื้อ|ค่า|ของกิจการ|ของร้าน/u.test(text.purpose)
     || /^(?:เป็น)?(?:เบิก)?เงินเดือน(?:ล่วงหน้า)?(?:ครับ|คับ)?$|^ล่วงหน้า$|^(?:เบิก)?(?:ไป)?ซื้อของ|^สำรองจ่าย/u.test(text.purpose)
     || /^[\p{L}\p{M}]{1,40}$/u.test(text.purpose)
@@ -1144,9 +1147,20 @@ export async function handleOwnerStaffSlipText(input: {
     ? row.id.replace(/-/g, '').toLowerCase().startsWith(text.code)
     : now - new Date(row.created_at).getTime() >= -60_000
       && now - new Date(row.created_at).getTime() <= 24 * 60 * 60 * 1000);
-  const rows = direct ? candidates : candidates.filter(row => parseOwnerStaffTurn(row.purpose_raw ?? ''));
-  if (!direct && !rows.length) return null;
+  const rows = direct || ambiguous || (correction && text.code) ? candidates : candidates.filter(row => {
+    const prior = parseOwnerStaffTurn(row.purpose_raw ?? '');
+    return Boolean(prior && (!correction || /เบิก|เงินเดือน|พนักงาน|ลูกน้อง/u.test(text.purpose)
+      || (prior.employeeLabel && text.purpose.includes(prior.employeeLabel))));
+  });
+  if (!direct && !rows.length) {
+    if (correction && (text.code || /เบิก|เงินเดือน|พนักงาน/u.test(text.purpose))) {
+      return 'ยังไม่พบสลิปพนักงานที่รอแก้ไขครับ ช่วยระบุรหัสสลิปหรือรายการเดิม ผมจะไม่แก้รายการที่ยืนยันแล้วให้เองครับ';
+    }
+    return null;
+  }
+  if (ambiguous) return 'ข้อความนี้มีหลายคนหรือหลายรายการเบิกครับ ช่วยแยกว่าพนักงานคนไหน ยอดเท่าไร และใช้สลิปรหัสไหนก่อนครับ ผมยังไม่บันทึกยอดให้เองครับ';
   if (!rows.length) {
+    if (correction) return 'ยังไม่พบสลิปที่รอแก้ไขครับ ช่วยระบุรหัสสลิปหรือรายการเดิม ผมจะไม่เพิ่มหรือแก้ยอดที่ยืนยันแล้วให้เองครับ';
     if (direct?.kind === 'salary_advance' || direct?.kind === 'salary_payment') return null;
     return 'เข้าใจว่าเป็นรายการพนักงานเบิกเงินครับ แต่ยังไม่พบสลิปที่จับคู่ได้ ช่วยส่งสลิปของรายการนี้หรือระบุรหัสสลิปเดิมครับ';
   }
@@ -1156,7 +1170,16 @@ export async function handleOwnerStaffSlipText(input: {
   if (amountMatches.length !== 1) return pendingChoiceReply(amountMatches.length ? amountMatches : rows);
   const intake = amountMatches[0]!;
   const turn = parseOwnerStaffTurn(text.purpose, intake.purpose_raw);
-  if (!turn) return null;
+  if (!turn) {
+    if (!correction) return null;
+    await rpc<ResolveResult>('financial_stage_owner_expense_purpose_v1', {
+      p_intake_id: intake.id, p_purpose: 'รอแก้ไขรายละเอียดสลิป: ' + text.purpose,
+      p_expense_class: 'uncategorized', p_expense_category: 'other',
+      p_expense_subcategory: 'รอเจ้าของแก้ไขรายละเอียด', p_confidence: 0,
+      p_user_hash: piiHash(input.userId) ?? '', p_message_id: input.messageId,
+    });
+    return 'รับคำแก้ไขของสลิป #' + intakeCode(intake.id) + ' แล้วครับ ผมพักข้อมูลพนักงานเดิมไว้ก่อน และยังไม่ลงเงินเดือนหรือค่าใช้จ่ายครับ สลิปนี้เป็นเงินของใครและจ่ายอะไรครับ?';
+  }
   const slipAmount = intake.amount === null ? null : Number(intake.amount);
   if (turn.amount !== null && slipAmount !== null && Math.abs(turn.amount - slipAmount) >= 0.01) {
     return 'ยอดที่แจ้งไม่ตรงกับสลิป ' + money(slipAmount) + ' ครับ ผมยังไม่เปลี่ยนยอดหรือจับคู่ให้เอง กรุณาระบุสลิปที่ถูกต้องครับ';
@@ -1185,7 +1208,7 @@ export async function handleOwnerStaffSlipText(input: {
     });
   }
   if (turn.kind === 'purchase') {
-    purpose = normalizeText([purpose, intake.purpose_raw, text.purpose].filter(Boolean).join(' '));
+    purpose = normalizeText([purpose, correction ? null : intake.purpose_raw, text.purpose].filter(Boolean).join(' '));
     const classification = classifyOwnerExpensePurpose(purpose);
     if (classification.businessUnit && turn.employeeLabel) {
       await rpc<ResolveResult>('financial_resolve_owner_expense_intake_v1', {

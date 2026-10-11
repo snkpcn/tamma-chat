@@ -4,8 +4,8 @@ import { createHash, createHmac } from 'node:crypto';
 import { handler as lineWebhookHandler } from '../netlify/functions/line-webhook';
 import { applyOwnerProjectText, handleOwnerProjectText } from '../netlify/functions/_owner-project-os';
 import { handleOwnerStaffSlipText } from '../netlify/functions/_owner-expense-intake';
-import { recordOwnerPayrollFromStoredSlip } from '../netlify/functions/_owner-payroll';
-import { parseOwnerStaffTurn, isOwnerScheduleAnswer } from '../netlify/functions/_owner-staff-intent';
+import { parseOwnerPayrollCommand, recordOwnerPayrollFromStoredSlip } from '../netlify/functions/_owner-payroll';
+import { parseOwnerStaffTurn, isOwnerScheduleAnswer, isOwnerFamilyConversation } from '../netlify/functions/_owner-staff-intent';
 
 for (const text of ['เจิดเบิก','เจิด เบิก','เจิดเบิกครับ','ทองไทย เจิดเบิก','เบิกให้เจิด']) {
   test('natural employee advance: ' + text, () => {
@@ -317,3 +317,127 @@ test('invalid LINE signature cannot read a staff slip, write a ledger, or send a
   assert.equal((await deliverStaffWebhook('เจิดเบิก','invalid',false) as any).statusCode,401);
   assert.equal(h.calls.length,0);
 });
+
+for (const text of ['สลิปนี้เจิดเบิก','อันนี้ของเจิดนะ เบิกเงินเดือน','รายการนี้เป็นของพนักงานเจิด เบิกเงินเดือน']) {
+  test('conversational framing is never included in a payroll name: '+text,()=>{
+    assert.equal(parseOwnerStaffTurn(text)?.employeeLabel,'เจิด');
+  });
+}
+for (const text of ['เจิดเบิกไปแล้ว','เจิดเบิกไปแล้วเมื่อวาน','เจิดเบิกไปเมื่อเช้า']) {
+  test('completed advance does not imply purchasing: '+text,()=>{
+    assert.deepEqual(parseOwnerStaffTurn(text),{employeeLabel:'เจิด',kind:'unknown',amount:null});
+  });
+}
+for (const text of ['ไม่ใช่เจิดเบิก เป็นของช่าง','ไม่ใช่เจิดเบิกเงินเดือน 200','เจิดเบิกใช่ไหม','เจิดเบิกได้มั้ย','ไม่มีใครเบิกเงินเดือน 200','เจิดยังไม่ได้เบิกเงินเดือน 200','แม่ เจิดเบิกเงินเดือน 200','แม่ครับ เจิดเบิกเงินเดือน 200','แม่บอกว่าเจิดเบิกเงินเดือน 200','เจิดกับปอเบิกเงินเดือน 200','เจิดเบิกเงินเดือน -200']) {
+  test('unsafe staff prose cannot fall through into legacy payroll: '+text,()=>{
+    assert.equal(parseOwnerStaffTurn(text),null);
+    assert.equal(parseOwnerPayrollCommand(text),null);
+  });
+}
+for (const [text,amount] of [['เจิดเบิก200บาท',200],['เจิดเบิก๒๐๐บาท',200],['เจิดเบิก200.50บาท',200.5],['เบิกเงินเดือนให้เจิด 200',200],['เจิดเบิกเงินเดือนสองพันบาท',2000]] as const) {
+  test('joined amounts and Thai money are checked against the slip: '+text,()=>{
+    assert.equal(parseOwnerStaffTurn(text)?.amount,amount);
+  });
+}
+test('a payment recipient is extracted without retaining transfer wording',()=>{
+  assert.deepEqual(parseOwnerStaffTurn('โอนให้เจิด 200 เป็นเงินเบิก'),{employeeLabel:'เจิด',kind:'unknown',amount:200});
+});
+test('employee corrections replace the old name and ask type again instead of inheriting payroll',()=>{
+  assert.deepEqual(parseOwnerStaffTurn('ไม่ใช่เจิด เป็นปอ','เจิดเบิกเงินเดือนล่วงหน้า'),{employeeLabel:'ปอ',kind:'unknown',amount:null});
+  assert.equal(parseOwnerStaffTurn('เปลี่ยนชื่อคนเบิกเป็นปอ','เจิดเบิก')?.employeeLabel,'ปอ');
+});
+test('a type correction keeps the person but uses only the positive replacement',()=>{
+  assert.deepEqual(parseOwnerStaffTurn('ไม่ใช่เงินเดือน ไปซื้ออาหารม้า','เจิดเบิก'),{employeeLabel:'เจิด',kind:'purchase',amount:null});
+  assert.deepEqual(parseOwnerStaffTurn('เจิดไม่ได้เบิกซื้อของ เป็นเงินเดือน','เจิดเบิกไปซื้อของ'),{employeeLabel:'เจิด',kind:'salary_advance',amount:null});
+});
+test('family-directed prose cannot answer any project field',()=>{
+  assert.equal(isOwnerFamilyConversation('แม่ เจิดเบิก'),true);
+  assert.equal(isOwnerFamilyConversation('ทองไทย เจิดเบิก'),false);
+  for (const expectedField of ['project_name','work_title','budget','counterparty','payment_plan','schedule','responsible'] as const) {
+    const data={project_name:'เฉลียงไม้'};
+    assert.deepEqual(applyOwnerProjectText({text:'แม่ วันนี้ต้องเสร็จนะ',intent:'investment_plan',data,expectedField}),{data,changed:false});
+  }
+});
+test('correction to a non-staff purpose clears old staff context without any payroll or expense write',async t=>{
+  const row=slip({purpose_raw:'เจิดเบิกเงินเดือนล่วงหน้า'});
+  const h=harness(t,[row]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'ไม่ใช่เจิดเบิก เป็นของช่าง'})??'',/พักข้อมูลพนักงานเดิม/);
+  const stage=h.calls.find(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'))!;
+  assert.match(stage.body.p_purpose,/^รอแก้ไขรายละเอียดสลิป:/);
+  assert.equal(stage.body.p_confidence,0);
+  assert.equal(parseOwnerStaffTurn(row.purpose_raw??''),null);
+  assert.equal(await handleOwnerStaffSlipText({...input,text:'เงินเดือน'}),null);
+  assert.ok(!h.calls.some(x=>/payroll_event|financial_resolve/.test(x.path)));
+});
+test('correction to a different employee stages the corrected name and asks type',async t=>{
+  const h=harness(t,[slip({purpose_raw:'เจิดเบิกเงินเดือนล่วงหน้า'})]);
+  const reply=await handleOwnerStaffSlipText({...input,text:'ไม่ใช่เจิด เป็นปอ'});
+  assert.match(reply??'',/ปอเบิก 200 บาท/);
+  assert.match(reply??'',/เงินเดือนล่วงหน้าหรือเบิกไปซื้อของ/);
+  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'))?.body.p_purpose,'ปอเบิก');
+  assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
+});
+test('joined conflicting amounts never use a different slip amount for payroll',async t=>{
+  const h=harness(t,[slip()]);
+  await handleOwnerStaffSlipText({...input,text:'เจิดเบิกเงินเดือน500บาท'});
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});
+test('several slips cannot be changed by an unreferenced person correction',async t=>{
+  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'}),slip({id:'another-slip',purpose_raw:'เจิดเบิก'})]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'ไม่ใช่เจิด เป็นปอ'})??'',/2 รายการ/);
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});
+test('an unrelated project-name correction leaves the pending staff slip untouched',async t=>{
+  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})]);
+  assert.equal(await handleOwnerStaffSlipText({...input,text:'ไม่ใช่เฉลียง เป็นครัว'}),null);
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});
+test('signed LINE family chat is ignored without changing staff slips or projects',async t=>{
+  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})]);
+  t.mock.method(console,'log',()=>{});
+  assert.equal((await deliverStaffWebhook('แม่ เจิดเบิกเงินเดือน 200','mother-talk') as any).statusCode,200);
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+  assert.ok(!h.calls.some(x=>/financial_owner|owner_project/.test(x.path)));
+});
+test('signed LINE can clarify completed advances without calling them purchases',async t=>{
+  const h=harness(t,[slip()]);
+  t.mock.method(console,'log',()=>{});
+  await deliverStaffWebhook('เจิดเบิกไปแล้วเมื่อวาน','completed-advance');
+  const reply=h.calls.find(x=>x.path==='/v2/bot/message/reply')!;
+  assert.match(reply.body.messages[0].text,/เงินเดือนล่วงหน้าหรือเบิกไปซื้อของ/);
+  assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
+});
+test('signed LINE person correction keeps the original evidence and records only the corrected employee after clarification',async t=>{
+  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})]);
+  t.mock.method(console,'log',()=>{});
+  await deliverStaffWebhook('ไม่ใช่เจิด เป็นปอ','correct-person');
+  await deliverStaffWebhook('เงินเดือน','correct-type');
+  const creates=h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'));
+  assert.equal(creates.length,1);
+  assert.equal(creates[0].body.p_employee_label,'ปอ');
+  assert.equal(creates[0].body.p_amount,200);
+  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_attach_owner_payroll_slip_v1'))?.body.p_slip_message_id,'original-line-image');
+  assert.equal(h.calls.filter(x=>x.path==='/v2/bot/message/reply').length,2);
+});
+
+for (const text of ['เจิดเบิกเงินเดือน0บาท','เจิดเบิกเงินเดือนศูนย์บาท','เจิดเบิกเงินเดือน200.567บาท','เจิดเบิกเงินเดือน20,0บาท']) {
+  test('an invalid stated amount cannot silently fall back to the stored slip: '+text,async t=>{
+    assert.equal(parseOwnerStaffTurn(text),null);
+    const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})]);
+    assert.equal(await handleOwnerStaffSlipText({...input,text}),null);
+    assert.ok(!h.calls.some(x=>x.method==='POST'));
+  });
+}
+test('an additional amount is not discarded as a date or pay-period label',async t=>{
+  assert.equal(parseOwnerStaffTurn('เจิดเบิกเงินเดือน อีก500บาท')?.amount,500);
+  const h=harness(t,[slip()]);
+  await handleOwnerStaffSlipText({...input,text:'เจิดเบิกเงินเดือน อีก500บาท'});
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});
+
+for (const text of ['เจิดเบิกเงินเดือน 0 บาท','เจิดเบิกเงินเดือน 200.567 บาท','เบิกเงินเดือน เจิด 20,0 บาท']) {
+  test('legacy payroll also rejects invalid money precision and grouping: '+text,()=>{
+    assert.equal(parseOwnerPayrollCommand(text),null);
+    assert.equal(parseOwnerStaffTurn(text),null);
+  });
+}

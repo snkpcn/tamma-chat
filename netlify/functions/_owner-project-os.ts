@@ -1,4 +1,4 @@
-import { isOwnerFinancialTopic, isOwnerScheduleAnswer } from './_owner-staff-intent';
+import { isOwnerFamilyConversation, isOwnerFinancialTopic, isOwnerScheduleAnswer } from './_owner-staff-intent';
 import { createHash } from 'node:crypto';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam, buildTeamScheduleSummary } from './_ops-notifications';
@@ -662,7 +662,7 @@ export function applyOwnerProjectText(input: {
   const text = normalizeText(input.text);
   const expected = input.expectedField ?? null;
   const before = JSON.stringify(data);
-  if (isOwnerFinancialTopic(text)) return { data, changed: false };
+  if (isOwnerFinancialTopic(text) || isOwnerFamilyConversation(text)) return { data, changed: false };
   const timestamp = Number.isFinite(input.timestamp) ? Number(input.timestamp) : Date.now();
   const bulkTasks = parseOwnerProjectBulkTasks(input.text);
 
@@ -1175,7 +1175,7 @@ export async function handleOwnerProjectText(input: {
   if (isReadOnlyQuestion(text)) return null;
   // A new paid transaction must go to the expense ledger. It must never be
   // mistaken for the budget answer of an older project draft.
-  if (isOwnerFinancialTopic(text)) return null;
+  if (isOwnerFinancialTopic(text) || isOwnerFamilyConversation(text)) return null;
 
   const taskStateCommand = parseOwnerProjectTaskStateCommand(text);
   if (taskStateCommand) {
