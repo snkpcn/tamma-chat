@@ -956,7 +956,7 @@ export async function handleOwnerExpenseText(input: {
   const actorHash = piiHash(input.userId) ?? '';
   // A saved purpose awaiting its business can be completed after a pause.
   // Unrelated short chat still requires a fresh slip from the same sender.
-  const now = Number.isFinite(input.timestamp) ? Number(input.timestamp) : Date.now();
+  const now = Date.now();
   const ownRows = reference.code
     ? allRows
     : allRows.filter(row => {
