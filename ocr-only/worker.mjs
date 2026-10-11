@@ -1,16 +1,20 @@
 import {readFileSync} from 'node:fs';
+import {terminalHttpReason,readProviderReason} from './diagnostics.mjs';
 export function guardedFetch(realFetch, stats) {
   return async(input, init={})=>{
-    if(stats.halted) throw new Error('blocked');
+    if(stats.halted || stats.calls>=1) {stats.reason ||= 'REQUEST_LIMIT_REACHED';throw new Error('blocked');}
     const url=new URL(String(input));
     if(url.origin!=='https://generativelanguage.googleapis.com'||url.username||url.password||url.search||url.hash
-      ||!/^\/v1beta\/models\/gemini-3\.[56]-flash:generateContent$/.test(url.pathname)
-      ||init.method!=='POST'||stats.calls>=2){stats.halted=true;stats.reason='NETWORK_BLOCKED';throw new Error('blocked');}
+      ||!/^\/v1beta\/models\/gemini-3\.6-flash:generateContent$/.test(url.pathname)
+      ||init.method!=='POST'){stats.halted=true;stats.reason='NETWORK_BLOCKED';throw new Error('blocked');}
     stats.calls++;
-    const response=await realFetch(url,{...init,redirect:'error'});
+    let response;
+    try {response=await realFetch(url,{...init,redirect:'error'});}
+    catch {stats.halted=true;stats.reason='TRANSPORT_FAILED';throw new Error('blocked');}
     stats.httpStatuses.push(response.status);
-    // Authentication or invalid-key errors stop even the extractor's model fallback.
-    if([400,401,403].includes(response.status)){stats.halted=true;stats.reason='KEY_REJECTED';}
+    // Stop client rejections without inferring a bad key from HTTP 400 alone.
+    const reason=terminalHttpReason(response.status);
+    if(reason){stats.halted=true;stats.reason=reason;stats.providerReason=await readProviderReason(response);}
     return response;
   };
 }
@@ -33,6 +37,6 @@ if(process.argv[1]===new URL(import.meta.url).pathname){
     const checks=checksFor(extraction);
     result={status:Object.values(checks).every(Boolean)?'PASS':'CHECKS_FAILED',checks};
   }catch{result={status:stats.reason||'PROVIDER_FAILED'};}
-  process.stdout.write(JSON.stringify({...result,providerRequests:stats.calls,httpStatuses:stats.httpStatuses}));
+  process.stdout.write(JSON.stringify({...result,providerRequests:stats.calls,httpStatuses:stats.httpStatuses,providerReason:stats.providerReason}));
   process.exitCode=result.status==='PASS'?0:1;
 }

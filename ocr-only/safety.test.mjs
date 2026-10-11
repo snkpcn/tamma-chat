@@ -59,11 +59,11 @@ test('isolated build config and actual extractor bundle are unchanged',()=>{
  assert.equal(hash(readFileSync(new URL('../'+manifest.sourcePath,import.meta.url))),manifest.sourceSha256);
 });
 const endpoint='https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent';
-test('hard limit of two requests and redirect rejection',async()=>{
+test('hard limit of one request and redirect rejection',async()=>{
  const s={calls:0,httpStatuses:[]}; let calls=0;
  const f=guardedFetch(async(_u,i)=>{calls++;assert.equal(i.redirect,'error');return {status:200};},s);
- await f(endpoint,{method:'POST'});await f(endpoint,{method:'POST'});
- await assert.rejects(()=>f(endpoint,{method:'POST'})); assert.equal(calls,2);
+ await f(endpoint,{method:'POST'});
+ await assert.rejects(()=>f(endpoint,{method:'POST'})); assert.equal(calls,1);
 });
 test('key rejection stops subsequent calls',async()=>{
  const s={calls:0,httpStatuses:[]};const f=guardedFetch(async()=>({status:403}),s);

@@ -2,6 +2,7 @@ import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {preflight,ocrChildEnvironment} from './guard.mjs';
+import {safeResult} from './diagnostics.mjs';
 const report = status => console.log(JSON.stringify({ocrOnly:true,status,providerRequests:0}));
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   const gate=preflight(process.env);
@@ -21,12 +22,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
     // The worker exports only fixed booleans, bounded counters, and enum statuses.
     // Never relay raw stdout/stderr or exception/provider strings.
     const result=JSON.parse(child.stdout);
-    const statuses=['PASS','CHECKS_FAILED','PROVIDER_FAILED','KEY_REJECTED','NETWORK_BLOCKED'];
-    if(!statuses.includes(result.status)||!Number.isInteger(result.providerRequests)
-      ||result.providerRequests<0||result.providerRequests>2) throw new Error();
-    const safe={ocrOnly:true,status:result.status,providerRequests:result.providerRequests,
-      checks:Object.fromEntries(['amount','date','reference','bottomNote','singleSlip'].map(k=>[k,result.checks?.[k]===true])),
-      httpStatuses:(result.httpStatuses||[]).filter(n=>Number.isInteger(n)&&n>=100&&n<=599).slice(0,2)};
+    const safe=safeResult(result);
     console.log('OCR_ONLY_RESULT '+JSON.stringify(safe));
     if(child.status!==0||safe.status!=='PASS'){process.exitCode=1;}
     else {

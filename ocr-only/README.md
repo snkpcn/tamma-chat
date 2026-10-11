@@ -1,7 +1,8 @@
 # Disposable one-run OCR preview — DO NOT MERGE
 
-Owner approved one private Netlify Deploy Preview and at most two Gemini requests
-for the marked-invalid synthetic slip. This branch is a test harness, not a release.
+This local revision is prepared for a separately approved single Gemini request
+for the marked-invalid synthetic slip. No new provider request is authorized yet.
+This branch is a test harness, not a release.
 Do not rebuild, retry, push additional commits, or merge it without fresh approval.
 
 The extractor bundle is generated from the actual `extractFinancialEvidence`
@@ -21,16 +22,23 @@ public, so output is restricted to booleans, counters, enums and HTTP status cod
 
 The build rejects other contexts/branches/sites and database/LINE/OpenAI
 credentials. OCR runs in a child with only GEMINI_API_KEY. Its fetch wrapper
-permits only the two existing Google model endpoints, forbids redirects, caps
-requests at two, and halts on 400/401/403. No production-key fallback is permitted.
+permits only gemini-3.6-flash, forbids redirects, and caps requests at ONE,
+including concurrent attempts, errors, timeouts, and model fallback. The unchanged
+hash-pinned extractor may attempt internal fallback, but the wrapper blocks it
+before network dispatch and the child has no OpenAI credential.
+No production-key fallback is permitted.
 Only one synthetic fixture is read. Nothing persists to a financial database.
 
-Local verification: `node --test safety.test.mjs` (mocked fetch; no provider calls).
+Local verification: `node --test safety.test.mjs diagnostics.test.mjs` (mocked fetch; no provider calls).
 `node run.mjs` outside Netlify must fail with BLOCKED_CONTEXT and zero calls.
 
 Limitations: masked preview credential presence does not prove key validity or
 separate billing. This verifies provider OCR only, not staging DB/auth integration.
 The request cap is enforced per invocation; the operator must not trigger retries.
+
+Error diagnostics include HTTP status and a fixed allowlist of Google ErrorInfo
+reason codes from at most 64 KiB of an error response. Messages, metadata, raw
+bodies and credentials are never printed or saved. Unknown reasons are null.
 
 ## Local guard correction — not yet pushed or approved to run
 
