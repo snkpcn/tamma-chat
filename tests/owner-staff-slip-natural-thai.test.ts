@@ -189,10 +189,13 @@ test('purchase advance waits for receipts and is excluded from shop costs',async
   assert.equal(write.body.p_confidence,0.65);
   assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
 });
-test('a bare business answer does not classify an unknown advance as an expense',async t=>{
-  const h=harness(t,[slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
-  assert.match(await handleOwnerStaffSlipText({...input,text:'ส่วนกลาง'})??'',/เงินเดือนล่วงหน้าหรือเบิกไปซื้อของ/);
-  assert.ok(!h.calls.some(x=>/financial_resolve|payroll_event/.test(x.path)));
+test('a bare business answer releases an unknown advance without repeating its type question or changing it',async t=>{
+  const row=slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'});
+  const h=harness(t,[row]);
+  assert.equal(await handleOwnerStaffSlipText({...input,text:'ส่วนกลาง'}),null);
+  assert.equal(await handleOwnerExpenseText({...input,text:'ส่วนกลาง'}),null);
+  assert.equal(row.purpose_raw,'เจิดเบิก');
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
 });
 test('low-confidence evidence remains under review and does not enter confirmed totals',async t=>{
   const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})],{attachStatus:'needs_review'});
