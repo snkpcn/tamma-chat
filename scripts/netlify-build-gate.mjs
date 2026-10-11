@@ -1,6 +1,44 @@
 import { spawnSync } from 'node:child_process';
 
 const NODE = process.execPath;
+// Release verification uses existing production build credentials in place.
+// It exposes no runtime endpoint and never prints secrets, bodies or financial rows.
+if (process.env.CONTEXT === 'production') {
+  const checks = [];
+  try {
+    const base = process.env.SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!base || !key || base.replace(/\/$/, '') !== 'https://upaokrprawzhgzeqsdke.supabase.co') {
+      throw new Error('verification_environment');
+    }
+    const headers = { apikey: key, Authorization: 'Bearer ' + key };
+    for (const [name, path] of [
+      ['review_columns', 'financial_owner_expense_intakes?select=id,review_state,review_revision,review_data,review_message_id&limit=0'],
+      ['installment_task_relationship', 'owner_project_installments?select=id,task:owner_project_tasks(title)&limit=0'],
+    ]) {
+      const response = await fetch(base.replace(/\/$/, '') + '/rest/v1/' + path, {
+        method: 'GET', headers, redirect: 'error', signal: AbortSignal.timeout(15000),
+      });
+      const data = await response.json();
+      checks.push({ name, status: response.status, pass: response.ok && Array.isArray(data) && data.length === 0 });
+    }
+    const response = await fetch(base.replace(/\/$/, '') + '/rest/v1/', {
+      method: 'GET', headers: { ...headers, Accept: 'application/openapi+json' },
+      redirect: 'error', signal: AbortSignal.timeout(15000),
+    });
+    const spec = await response.json();
+    for (const name of ['financial_capture_owner_slip_review_v1', 'financial_stage_owner_slip_review_v1',
+      'financial_confirm_owner_slip_review_v1', 'financial_handoff_owner_slip_payroll_v1']) {
+      checks.push({ name, status: response.status, pass: response.ok && Boolean(spec?.paths?.['/rpc/' + name]?.post) });
+    }
+    if (!checks.every(check => check.pass)) throw new Error('verification_failed');
+    console.log('OWNER_SLIP_HOSTED_READONLY:' + JSON.stringify({ status: 'PASS', checks }));
+  } catch {
+    console.log('OWNER_SLIP_HOSTED_READONLY:' + JSON.stringify({ status: 'FAIL', checks }));
+    process.exit(70);
+  }
+}
+
 const steps = [
   ['apply-isan-boutique-phase1', NODE, ['scripts/apply-isan-boutique-phase1.mjs']],
   ['public-i18n-build-gate', NODE, ['scripts/public-i18n-build-gate.mjs']],
