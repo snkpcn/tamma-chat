@@ -13,6 +13,8 @@ import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-con
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
 import { handleOwnerExpenseImage, handleOwnerStaffSlipText, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, handleOwnerRecentSlipProjectPurpose, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
+import { handleOwnerSlipReviewText } from './_owner-slip-review';
+import { partitionOwnerSlipMaintenance, notifyOwnerSlipMaintenance, OWNER_SLIP_MAINTENANCE_REPLY, OwnerSlipMaintenanceNoticeError } from './_owner-slip-maintenance';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
 import { handleOwnerProjectQuery, handleOwnerProjectText } from './_owner-project-os';
 import { handleOwnerApiCostQuestion } from './_ai-cost-notifier';
@@ -326,7 +328,11 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       timestamp: event.timestamp,
     });
     if (ownerExpenseReply) {
-      await replyToLine(event.replyToken, ownerExpenseReply, accessToken);
+      try {await replyToLine(event.replyToken, ownerExpenseReply, accessToken);}
+      catch(error){
+        if(ownerExpenseReply===OWNER_SLIP_MAINTENANCE_REPLY)throw new OwnerSlipMaintenanceNoticeError('owner_slip_notice_failed');
+        throw error;
+      }
       return;
     }
 
@@ -390,6 +396,15 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
   }
 
   if (isOwnerFamilyConversation(event.message.text) && await boundLineOpsTeam(targetId) === 'owner_general') return;
+
+  const slipReviewReply = await handleOwnerSlipReviewText({
+    targetId, userId: event.source?.userId ?? null,
+    text: event.message.text, messageId: event.message.id ?? null,
+  });
+  if (slipReviewReply) {
+    await replyToLine(event.replyToken, slipReviewReply, accessToken);
+    return;
+  }
 
   const ownerStaffSlipReply = await handleOwnerStaffSlipText({
     targetId, userId: event.source?.userId ?? null,
@@ -639,7 +654,17 @@ export const handler: Handler = async (event, context) => {
     return { statusCode: 400, body: 'Invalid JSON' };
   }
 
-  const incomingEvents = Array.isArray(payload.events) ? payload.events : [];
+  let incomingEvents = Array.isArray(payload.events) ? payload.events : [];
+  try {
+    const maintenance=await partitionOwnerSlipMaintenance(incomingEvents);
+    await notifyOwnerSlipMaintenance(maintenance.blocked,
+      async(token,text)=>{await replyToLine(token,text,accessToken);});
+    incomingEvents=maintenance.allowed;
+  } catch {
+    // No other route has run. Never turn a failed rejection notice into HTTP 200.
+    console.error('OWNER_SLIP_MAINTENANCE_UNAVAILABLE');
+    return {statusCode:503,headers:{'Cache-Control':'no-store','Retry-After':'60'},body:'Owner slip maintenance unavailable'};
+  }
   let privateHandled: Set<number>;
   try { privateHandled=await routePrivateOsEvents(incomingEvents,channelSecret); }
   catch (error) {
@@ -666,6 +691,9 @@ export const handler: Handler = async (event, context) => {
 
   if (opsEvents.length) {
     const results = await Promise.allSettled(opsEvents.map(item => handleOpsEvent(item, accessToken)));
+    if(results.some(result=>result.status==='rejected'&&result.reason instanceof OwnerSlipMaintenanceNoticeError)){
+      return {statusCode:503,headers:{'Cache-Control':'no-store','Retry-After':'60'},body:'Owner slip maintenance unavailable'};
+    }
     results.forEach((result, index) => {
       if (result.status === 'rejected') {
         const message = result.reason instanceof Error ? result.reason.message : 'Unknown LINE ops group error';

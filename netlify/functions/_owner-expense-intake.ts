@@ -4,6 +4,8 @@ import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
 import { ownerProjectQuestion, startOwnerProjectPlanAfterPaidExpense } from './_owner-project-os';
 import { parseOwnerReportedPaidTotal } from './_owner-paid-total';
+import { stageSlipReview, visibleSlipDate } from './_owner-slip-review';
+import { ownerSlipMaintenancePaused, OWNER_SLIP_MAINTENANCE_REPLY } from './_owner-slip-maintenance';
 import {
   extractFinancialEvidence,
   extensionForMime,
@@ -287,7 +289,7 @@ async function pendingIntakes(groupHash: string, includeNeedsReview = false): Pr
     : PENDING_STATUSES;
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
-    + '&status=' + statuses
+    + '&review_state=is.null&status=' + statuses
     + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
     + '&order=created_at.desc&limit=20',
   );
@@ -539,6 +541,9 @@ export async function handleOwnerExpenseImage(input: {
   const team = await boundLineOpsTeam(input.targetId);
   if (team !== 'owner_general') return null;
 
+  // Defense in depth if a payroll session disappears after webhook preflight.
+  if (ownerSlipMaintenancePaused()) return OWNER_SLIP_MAINTENANCE_REPLY;
+
   const groupHash = piiHash(input.targetId);
   if (!groupHash) throw new Error('owner_expense_group_hash_unavailable');
 
@@ -560,7 +565,11 @@ export async function handleOwnerExpenseImage(input: {
     extraction = storedExtractionFallback();
   }
 
-  const occurredOn = extraction.document_date_local || bangkokDate(input.timestamp);
+  if ((extraction.payment_document_count ?? 1) > 1) {
+    return 'รูปนี้มีหลายสลิปครับ กรุณาส่งแยกรูปละสลิปพร้อมโน้ต เพื่อจับคู่ยอดและงวดให้ถูกต้อง ยังไม่บันทึกรายจ่ายครับ';
+  }
+
+  const occurredOn = visibleSlipDate(extraction.document_date_local) || bangkokDate(input.timestamp);
   const path = [
     'owner-group',
     occurredOn,
@@ -570,7 +579,7 @@ export async function handleOwnerExpenseImage(input: {
   await uploadEvidence(image.bytes, image.mimeType, path);
   let result: CaptureResult;
   try {
-    result = await rpc<CaptureResult>('financial_capture_owner_expense_slip_v1', {
+    result = await rpc<CaptureResult>('financial_capture_owner_slip_review_v1', {
       p_group_hash: groupHash,
       p_message_id: input.messageId,
       p_user_hash: piiHash(input.userId) ?? '',
@@ -593,6 +602,12 @@ export async function handleOwnerExpenseImage(input: {
       result.intake_id ? 'รหัสรายการ: #' + intakeCode(result.intake_id) : '',
     ].filter(Boolean).join('\n');
   }
+
+  if (result.intake_id) return stageSlipReview({
+    id: result.intake_id, groupHash, actorHash: piiHash(input.userId) ?? '',
+    messageId: input.messageId + ':review', revision: 0,
+    note: extraction.visible_payment_note ?? '', extraction,
+  });
 
   const amount = result.amount === null || result.amount === undefined ? 'ยอดจากรูป: อ่านไม่ชัด' : 'ยอดที่อ่านได้: ' + money(result.amount);
   return [
