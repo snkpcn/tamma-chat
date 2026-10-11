@@ -237,3 +237,36 @@ test('owner amount clarification still needs evidence review when original slip 
   assert.equal(h.calls.find(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'))?.body.p_amount,200);
   assert.equal(h.calls.find(x=>x.path.endsWith('/financial_attach_owner_payroll_slip_v1'))?.body.p_slip_amount,null);
 });
+
+test('payroll summaries and deductions leave pending staff slips untouched',async t=>{
+  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})]);
+  for(const text of ['สรุปเบิกเงินเดือน','ยอดเบิกเงินเดือน','หักเบิก เจิด 200','หักเงินเดือนล่วงหน้า เจิด 200']){
+    assert.equal(parseOwnerStaffTurn(text),null);
+    assert.equal(await handleOwnerStaffSlipText({...input,text}),null);
+  }
+  assert.equal(h.calls.filter(x=>x.method==='POST').length,0);
+});
+test('an unnamed salary payment retains payment kind while asking for a name',async t=>{
+  const h=harness(t,[slip()]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'จ่ายเงินเดือน'})??'',/พนักงานคนไหน/);
+  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'))?.body.p_purpose,'จ่ายเงินเดือน พนักงาน');
+});
+test('a name answer to a salary payment does not become an advance',async t=>{
+  const h=harness(t,[slip({purpose_raw:'จ่ายเงินเดือน พนักงาน'})]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'เจิด'})??'',/บันทึกจ่ายเงินเดือนของ เจิด/);
+  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'))?.body.p_event_type,'salary_payment');
+});
+test('an unreadable salary payment retains kind before asking only for amount',async t=>{
+  const h=harness(t,[slip({amount:null})]);
+  const reply=await handleOwnerStaffSlipText({...input,text:'จ่ายเงินเดือน เจิด'});
+  assert.match(reply??'',/การจ่ายเงินเดือนของ เจิด/);
+  assert.doesNotMatch(reply??'',/ล่วงหน้า/);
+  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'))?.body.p_purpose,'จ่ายเงินเดือน เจิด');
+});
+test('an explicit salary period is preserved when reusing the original slip',async t=>{
+  const h=harness(t,[slip()]);
+  await handleOwnerStaffSlipText({...input,text:'จ่ายเงินเดือน เจิด 200 บาท เดือน ตุลาคม 2569'});
+  const create=h.calls.find(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'))!;
+  assert.equal(create.body.p_event_type,'salary_payment');
+  assert.equal(create.body.p_pay_period,'ตุลาคม 2569');
+});

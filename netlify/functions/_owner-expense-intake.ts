@@ -1,5 +1,5 @@
 import { parseOwnerStaffTurn } from './_owner-staff-intent';
-import { recordOwnerPayrollFromStoredSlip } from './_owner-payroll';
+import { parseOwnerPayrollCommand, recordOwnerPayrollFromStoredSlip } from './_owner-payroll';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
 import { ownerProjectQuestion, startOwnerProjectPlanAfterPaidExpense } from './_owner-project-os';
@@ -1161,7 +1161,9 @@ export async function handleOwnerStaffSlipText(input: {
   if (turn.amount !== null && slipAmount !== null && Math.abs(turn.amount - slipAmount) >= 0.01) {
     return 'ยอดที่แจ้งไม่ตรงกับสลิป ' + money(slipAmount) + ' ครับ ผมยังไม่เปลี่ยนยอดหรือจับคู่ให้เอง กรุณาระบุสลิปที่ถูกต้องครับ';
   }
-  let purpose = turn.employeeLabel
+  let purpose = turn.kind === 'salary_payment'
+    ? 'จ่ายเงินเดือน ' + (turn.employeeLabel ?? 'พนักงาน')
+    : turn.employeeLabel
     ? turn.employeeLabel + 'เบิก' + (turn.kind === 'salary_advance' ? 'เงินเดือนล่วงหน้า'
       : turn.kind === 'purchase' ? 'ไปซื้อของ' : '')
     : 'พนักงานเบิก' + (turn.kind === 'salary_advance' ? 'เงินเดือนล่วงหน้า' : turn.kind === 'purchase' ? 'ไปซื้อของ' : '');
@@ -1173,12 +1175,13 @@ export async function handleOwnerStaffSlipText(input: {
         p_expense_subcategory: 'พนักงานเบิก/รอตรวจยอด', p_confidence: 0.65,
         p_user_hash: piiHash(input.userId) ?? '', p_message_id: input.messageId,
       });
-      return 'ทราบว่าเป็นเงินเดือนล่วงหน้าของ ' + turn.employeeLabel
-        + 'แล้วครับ แต่ยอดจากสลิปอ่านไม่ชัด เบิกจำนวนกี่บาทครับ?';
+      return 'ทราบว่าเป็น' + (turn.kind === 'salary_payment' ? 'การจ่ายเงินเดือน' : 'เงินเดือนล่วงหน้า')
+        + 'ของ ' + turn.employeeLabel + 'แล้วครับ แต่ยอดจากสลิปอ่านไม่ชัด จำนวนกี่บาทครับ?';
     }
     return recordOwnerPayrollFromStoredSlip({
       targetId: input.targetId, userId: input.userId, intakeId: intake.id,
       employeeLabel: turn.employeeLabel, eventType: turn.kind, declaredAmount: turn.amount,
+      payPeriod: parseOwnerPayrollCommand(text.purpose)?.payPeriod ?? null,
     });
   }
   if (turn.kind === 'purchase') {

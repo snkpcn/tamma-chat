@@ -18,6 +18,7 @@ function employee(text: string): string | null {
 /** Ordinary Thai around a slip. A bare "เบิก" never implies salary. */
 export function parseOwnerStaffTurn(rawText: string, priorPurpose?: string | null): OwnerStaffTurn | null {
   const text = clean(rawText);
+  if (/^(?:สรุป|ยอด|หักเบิก|หักเงินเบิก|หักเงินเดือน)/u.test(text)) return null;
   if (/(?:ยังไม่(?:ได้)?เบิก|ไม่ได้เบิก|ไม่เบิก|ไม่ต้องเบิก|(?:ไม่ได้ให้|ไม่ให้|ไม่มี)[^\n]{0,30}เบิก|(?:จะ|เดี๋ยว|พรุ่งนี้)[^\n]{0,30}เบิก|จะเบิก|ยกเลิก|เท่าไหร่|เท่าไร|เบิกอะไร|เบิกได้ไหม|\?)/u.test(text)) return null;
   const prior = priorPurpose ? parseOwnerStaffTurn(priorPurpose) : null;
   const hasAdvance = /เบิก/u.test(text);
