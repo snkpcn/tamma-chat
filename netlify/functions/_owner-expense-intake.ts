@@ -1,4 +1,4 @@
-import { parseOwnerStaffTurn, isOwnerFamilyConversation, isOwnerStaffCorrectionText, isOwnerStaffAmbiguousText } from './_owner-staff-intent';
+import { parseOwnerStaffTurn, isOwnerFamilyConversation, isOwnerStaffCorrectionText, isOwnerStaffAmbiguousText, isOwnerStaffTypeReply } from './_owner-staff-intent';
 import { parseOwnerPayrollCommand, recordOwnerPayrollFromStoredSlip } from './_owner-payroll';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
@@ -489,10 +489,11 @@ function pendingChoiceReply(rows: OwnerExpenseIntake[]): string {
 }
 
 function referenceFromText(text: string): { code: string | null; purpose: string } {
-  const match = text.match(/#([a-f0-9-]{6,36})\b/iu);
+  const match = text.match(/#([a-f0-9-]{6,36})\b/iu)
+    ?? text.match(/^([a-f0-9-]{6,36})(?=\s|$)/iu);
   return {
     code: match?.[1]?.replace(/-/g, '').toLowerCase() ?? null,
-    purpose: normalizeText(text.replace(/#[a-f0-9-]{6,36}\b/iu, '')),
+    purpose: normalizeText(match ? text.replace(match[0], '') : text),
   };
 }
 
@@ -947,21 +948,33 @@ export async function handleOwnerExpenseText(input: {
   }
 
   const reference = referenceFromText(text);
-  const classificationReply = isOwnerExpenseClassificationReply(text);
+  const classificationReply = isOwnerExpenseClassificationReply(reference.purpose);
   const allRows = await pendingIntakes(groupHash, classificationReply);
   if (!allRows.length) return paidExpense
     ? recordTypedOwnerPaidExpense({ text, targetId: input.targetId, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
     : null;
   const actorHash = piiHash(input.userId) ?? '';
-  // Without an explicit #code, only continue the sender's own pending slip.
-  // This prevents two family members in the Owner group crossing answers.
+  // A saved purpose awaiting its business can be completed after a pause.
+  // Unrelated short chat still requires a fresh slip from the same sender.
+  const now = Date.now();
   const ownRows = reference.code
     ? allRows
-    : allRows.filter(row => row.source_user_hash === actorHash
-      && Date.now() - new Date(row.created_at).getTime() <= 10 * 60 * 1000);
+    : allRows.filter(row => {
+      const age = now - new Date(row.created_at).getTime();
+      const continuingBusiness = classificationReply && row.status === 'awaiting_business' && row.purpose_raw;
+      return row.source_user_hash === actorHash && age >= -60_000
+        && age <= (continuingBusiness ? 24 * 60 * 60 * 1000 : 10 * 60 * 1000);
+    });
+  // A business answer belongs to an expense or a staff purchase, not to an
+  // advance that is still waiting for its payroll/purchase type.
+  const relevantRows = classificationReply && !reference.code
+    ? ownRows.filter(row => {
+      const staff = parseOwnerStaffTurn(row.purpose_raw ?? '');
+      return !staff || staff.kind === 'purchase';
+    }) : ownRows;
   const rows = paidExpense && !reference.code
-    ? ownRows.filter(row => row.amount !== null && Number(row.amount) === paidExpense.amount)
-    : ownRows;
+    ? relevantRows.filter(row => row.amount !== null && Number(row.amount) === paidExpense.amount)
+    : relevantRows;
   if (!rows.length) return paidExpense
     ? recordTypedOwnerPaidExpense({ text, targetId: input.targetId, groupHash, userId: input.userId, messageId: input.messageId, timestamp: input.timestamp })
     : null;
@@ -1130,8 +1143,10 @@ export async function handleOwnerStaffSlipText(input: {
   const correction = isOwnerStaffCorrectionText(text.purpose);
   const ambiguous = isOwnerStaffAmbiguousText(text.purpose);
   const direct = parseOwnerStaffTurn(text.purpose);
+  const typeReply = isOwnerStaffTypeReply(text.purpose);
+  const businessReply = isOwnerExpenseClassificationReply(text.purpose);
   // Only read continuation state for concise type/name answers, not all chat.
-  const continuation = correction || ambiguous || isOwnerExpenseClassificationReply(text.purpose)
+  const continuation = correction || ambiguous || typeReply || businessReply
     || /ซื้อ|ค่า|ของกิจการ|ของร้าน/u.test(text.purpose)
     || /^(?:เป็น)?(?:เบิก)?เงินเดือน(?:ล่วงหน้า)?(?:ครับ|คับ)?$|^ล่วงหน้า$|^(?:เบิก)?(?:ไป)?ซื้อของ|^สำรองจ่าย/u.test(text.purpose)
     || /^[\p{L}\p{M}]{1,40}$/u.test(text.purpose)
@@ -1147,11 +1162,36 @@ export async function handleOwnerStaffSlipText(input: {
     ? row.id.replace(/-/g, '').toLowerCase().startsWith(text.code)
     : now - new Date(row.created_at).getTime() >= -60_000
       && now - new Date(row.created_at).getTime() <= 24 * 60 * 60 * 1000);
-  const rows = direct || ambiguous || (correction && text.code) ? candidates : candidates.filter(row => {
+  // Business-only replies must reach the expense that needs its business.
+  // A pending salary question has no business field to answer.
+  const expenseContinuation = businessReply || (!direct && !typeReply && /^(?:เป็น)?(?:ไป)?(?:ซื้อ|ค่า)/u.test(text.purpose));
+  if (expenseContinuation && !text.code && candidates.some(row =>
+    row.source_user_hash === piiHash(input.userId)
+    && (row.status === 'awaiting_purpose' || row.status === 'awaiting_business')
+    && !parseOwnerStaffTurn(row.purpose_raw ?? '')
+    && now - new Date(row.created_at).getTime() >= -60_000
+    && now - new Date(row.created_at).getTime() <=
+      (businessReply && row.status === 'awaiting_business' && row.purpose_raw
+        ? 24 * 60 * 60 * 1000 : 10 * 60 * 1000))) return null;
+  const staffContext = candidates.filter(row => {
     const prior = parseOwnerStaffTurn(row.purpose_raw ?? '');
-    return Boolean(prior && (!correction || /เบิก|เงินเดือน|พนักงาน|ลูกน้อง/u.test(text.purpose)
-      || (prior.employeeLabel && text.purpose.includes(prior.employeeLabel))));
+    return Boolean(prior && (!businessReply || prior.kind === 'purchase')
+      && (!correction || /เบิก|เงินเดือน|พนักงาน|ลูกน้อง/u.test(text.purpose)
+        || (prior.employeeLabel && text.purpose.includes(prior.employeeLabel))));
   });
+  const freshUnclassified = candidates.filter(row => row.status === 'awaiting_purpose' && !row.purpose_raw
+    && row.source_user_hash === piiHash(input.userId)
+    && now - new Date(row.created_at).getTime() >= -60_000
+    && now - new Date(row.created_at).getTime() <= 10 * 60 * 1000);
+  if (typeReply && !text.code && staffContext.length && freshUnclassified.length) {
+    return pendingChoiceReply([...staffContext, ...freshUnclassified]);
+  }
+  // "เบิกเงินเดือนล่วงหน้า" is an answer to the pending staff question.
+  // It cannot turn an unrelated equipment receipt into a payroll candidate.
+  const rows = typeReply && !text.code
+    ? (staffContext.length ? staffContext : candidates.filter(row =>
+      row.status === 'awaiting_purpose' && !row.purpose_raw))
+    : direct || ambiguous || (correction && text.code) ? candidates : staffContext;
   if (!direct && !rows.length) {
     if (correction && (text.code || /เบิก|เงินเดือน|พนักงาน/u.test(text.purpose))) {
       return 'ยังไม่พบสลิปพนักงานที่รอแก้ไขครับ ช่วยระบุรหัสสลิปหรือรายการเดิม ผมจะไม่แก้รายการที่ยืนยันแล้วให้เองครับ';

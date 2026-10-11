@@ -26,6 +26,11 @@ export function isOwnerStaffAmbiguousText(rawText: string): boolean {
   return /เบิก|เงินเดือน/u.test(text) && /(?:และ|กับ|อีกคน|คนละ|แบ่งให้|ทั้งสอง|ทั้งคู่)/u.test(text);
 }
 
+/** A short type answer continues a staff slip, without naming another receipt. */
+export function isOwnerStaffTypeReply(rawText: string): boolean {
+  return /^(?:เป็น)?(?:เบิก)?(?:เงินเดือน(?:ล่วงหน้า)?|ล่วงหน้า|(?:ไป)?ซื้อของ|สำรองจ่าย)(?:\s*\d[\d,.]*\s*(?:บาท)?)?$/u.test(clean(rawText));
+}
+
 /** Guard also used by legacy payroll, so rejected prose cannot fall through. */
 export function isOwnerStaffUnsafeText(rawText: string): boolean {
   const text = clean(rawText);
@@ -41,7 +46,7 @@ export function normalizeOwnerStaffEmployee(rawLabel: string): string | null {
     .replace(/^(?:พนักงาน|ลูกน้อง)\s*/u, '')
     .replace(/\s*(?:นะครับ|ครับ|คับ|นะคะ|ค่ะ|นะ)$/u, '').trim();
   if (!label || /^(?:ไปซื้อ|ไปจ่าย|เงินเดือน|ซื้อของ|ส่วนกลาง|กิจการ|เบิก|ของ|เป็น|ให้|ค่า)/u.test(label)
-    || /^(?:พนักงาน|ลูกน้อง|เงินเดือน|เงิน|ไป|ให้|ซื้อของ|ใคร|ของ|ค่า|ไม่|ยัง)$/u.test(label)
+    || /^(?:พนักงาน|ลูกน้อง|เงินเดือน|เงิน|ล่วงหน้า|ไป|ให้|ซื้อของ|ใคร|ของ|ค่า|ไม่|ยัง)$/u.test(label)
     || /ไม่ใช่|ไม่ได้|ยังไม่|บอกว่า|ถามว่า|คนไหน|อะไร|สลิป|รายการ|อันนี้|(?:และ|กับ|หรือ)/u.test(label)
     || isOwnerFamilyConversation(label)) return null;
   return /^[\p{L}\p{M}][\p{L}\p{M} .-]{0,59}$/u.test(label) ? label : null;
@@ -94,9 +99,10 @@ export function parseOwnerStaffTurn(rawText: string, priorPurpose?: string | nul
   if (isOwnerStaffUnsafeText(text)) return null;
   const prior = priorPurpose ? parseOwnerStaffTurn(priorPurpose) : null;
   const hasAdvance = /เบิก/u.test(text);
-  const isSalaryReply = /^(?:เป็น)?(?:เบิก)?เงินเดือน(?:ล่วงหน้า)?(?:\s|$)|^ล่วงหน้า$/u.test(text);
+  const isSalaryReply = /^(?:เป็น)?(?:เบิก)?(?:เงินเดือน(?:ล่วงหน้า)?|ล่วงหน้า)(?:\s|$)/u.test(text);
   const isPurchaseReply = /(?:เบิก(?:เงิน)?(?:ไป)?ซื้อ|เบิก(?:เงิน)?(?:ไป)?จ่าย|ไปซื้อ|ซื้อของ|สำรองจ่าย|^(?:เป็น)?(?:ไป)?ซื้อ)/u.test(text);
   const isBusinessReply = /^(?:เป็น|ของ)?(?:กิจการ|ร้าน)?\s*(?:ส่วนกลาง|ครัว|ร้านอาหาร|ร้านกาแฟ|อินทนิล|อินทนิน|inthanin|ตำมา[\s-]*ชาติ|เฮือนสเตย์|ผจญภัย|otop)\s*$/iu.test(text);
+  if (isBusinessReply && prior?.kind !== 'purchase') return null;
   const isPurchaseDetail = Boolean(prior?.kind === 'purchase'
     && /ซื้อ|ค่า|ของกิจการ|ของร้าน|อินทนิล|อินทนิน|inthanin|ตำมา|เฮือนสเตย์|ผจญภัย|ส่วนกลาง/iu.test(text));
   const isAmountReply = Boolean(prior && /^[\d,]+(?:\.\d{1,2})?\s*(?:บาท)?$/u.test(text));
