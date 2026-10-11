@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { handler as lineWebhookHandler } from '../netlify/functions/line-webhook';
 import { applyOwnerProjectText, handleOwnerProjectText } from '../netlify/functions/_owner-project-os';
-import { handleOwnerStaffSlipText } from '../netlify/functions/_owner-expense-intake';
+import { handleOwnerExpenseText, handleOwnerStaffSlipText } from '../netlify/functions/_owner-expense-intake';
+import { piiHash } from '../netlify/functions/_operations-db';
 import { parseOwnerPayrollCommand, recordOwnerPayrollFromStoredSlip } from '../netlify/functions/_owner-payroll';
 import { parseOwnerStaffTurn, isOwnerScheduleAnswer, isOwnerFamilyConversation } from '../netlify/functions/_owner-staff-intent';
 
@@ -41,7 +42,7 @@ test('a schedule accepts dates and timing, not arbitrary names or financial text
   assert.equal(data.schedule_text,undefined);
 });
 
-type Slip = {id:string; source_user_hash:string|null; status:string; amount:number|null; created_at:string; purpose_raw:string|null; occurred_on:string; document_type:string};
+type Slip = {id:string; source_user_hash:string|null; status:string; amount:number|null; created_at:string; purpose_raw:string|null; occurred_on:string; document_type:string;business_unit_code?:string|null;expense_class?:string|null;expense_category?:string|null;expense_subcategory?:string|null};
 const at = Date.parse('2026-10-11T03:00:00Z');
 const slip = (overrides:Partial<Slip>={}):Slip => ({
   id:'87044d4b-b8a8-41ab-a393-e8ab8a7b5597', source_user_hash:'mother-hash',
@@ -88,12 +89,19 @@ function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicat
     }
     if(path.endsWith('/financial_mark_owner_expense_not_expense_v1'))return Response.json({ok:true,status:'cancelled'});
     if(path.endsWith('/financial_employee_advance_owner_v1'))return Response.json([{advance_outstanding:200}]);
+    if(path.endsWith('/owner_projects'))return Response.json([]);
     if(path.endsWith('/financial_stage_owner_expense_purpose_v1')){
-      const row=rows.find(row=>row.id===body.p_intake_id);if(row){row.purpose_raw=body.p_purpose;row.status='awaiting_business';}
+      const row=rows.find(row=>row.id===body.p_intake_id);if(row){row.purpose_raw=body.p_purpose;row.status='awaiting_business';row.expense_class=body.p_expense_class;row.expense_category=body.p_expense_category;row.expense_subcategory=body.p_expense_subcategory;}
       return Response.json({ok:true,status:'awaiting_business'});
     }
     if(path==='/v2/bot/message/reply')return Response.json({});
-    if(path.endsWith('/financial_resolve_owner_expense_intake_v1'))return Response.json({ok:true,status:'needs_review'});
+    if(path.endsWith('/financial_resolve_owner_expense_intake_v1')){
+      const row=rows.find(row=>row.id===body.p_intake_id);
+      if(row){row.purpose_raw=body.p_purpose;row.business_unit_code=body.p_business_unit_code;row.status='needs_review';}
+      return Response.json({ok:true,status:'needs_review',intake_id:row?.id,amount:row?.amount,
+        business_unit_code:body.p_business_unit_code,expense_class:body.p_expense_class,
+        expense_category:body.p_expense_category,expense_subcategory:body.p_expense_subcategory});
+    }
     throw new Error('Unexpected route '+path);
   });
   return {calls};
@@ -441,3 +449,111 @@ for (const text of ['เจิดเบิกเงินเดือน 0 บ�
     assert.equal(parseOwnerStaffTurn(text),null);
   });
 }
+
+const equipmentSlip=(overrides:Partial<Slip>={}):Slip=>slip({
+  id:'a6c43e20-be6c-4ee2-b4a9-32eb424fd07d',amount:6474,
+  source_user_hash:piiHash(input.userId),created_at:new Date(at-60000).toISOString(),
+  occurred_on:'2026-10-10',...overrides,
+});
+test('business-only answer is not a payroll type answer for an old staff slip',()=>{
+  assert.equal(parseOwnerStaffTurn('ตำมา-ชาติ','เจิดเบิก'),null);
+  assert.equal(parseOwnerStaffTurn('Inthanin','เจิดเบิกเงินเดือนล่วงหน้า'),null);
+  assert.equal(parseOwnerStaffTurn('Inthanin','เจิดเบิกไปซื้อของ')?.kind,'purchase');
+});
+for(const text of ['เบิกล่วงหน้า','เบิกเงินเดือนล่วงหน้า','เงินเดือนล่วงหน้า','เงินเดือน']){
+  test('short payroll type continues only the staff slip beside an equipment receipt: '+text,async t=>{
+    const h=harness(t,[equipmentSlip({status:'awaiting_business',purpose_raw:'ค่าอุปกรณ์ไฟฟ้า'}),
+      slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+    const reply=await handleOwnerStaffSlipText({...input,text});
+    assert.match(reply??'',/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
+    const creates=h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'));
+    assert.equal(creates.length,1);assert.equal(creates[0].body.p_employee_label,'เจิด');
+    assert.equal(creates[0].body.p_amount,200);
+    assert.ok(!h.calls.some(x=>/financial_resolve|financial_stage/.test(x.path)));
+  });
+}
+test('a type-only answer cannot overwrite a known non-staff expense as payroll',async t=>{
+  const h=harness(t,[equipmentSlip({status:'awaiting_business',purpose_raw:'ค่าอุปกรณ์ไฟฟ้า'})]);
+  assert.equal(await handleOwnerStaffSlipText({...input,text:'เบิกเงินเดือนล่วงหน้า'}),null);
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});
+test('several staff slips remain ambiguous without listing an unrelated equipment receipt',async t=>{
+  const h=harness(t,[equipmentSlip({status:'awaiting_business',purpose_raw:'ค่าอุปกรณ์ไฟฟ้า'}),
+    slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'}),
+    slip({id:'another-staff-slip',status:'awaiting_business',purpose_raw:'ปอเบิก',amount:300})]);
+  const reply=await handleOwnerStaffSlipText({...input,text:'เบิกเงินเดือนล่วงหน้า'});
+  assert.match(reply??'',/2 รายการ/);assert.doesNotMatch(reply??'',/6,474/);
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});
+test('equipment purpose and its business finish the same slip without reopening the old payroll question',async t=>{
+  t.mock.method(Date,'now',()=>at);
+  const row=equipmentSlip();
+  const h=harness(t,[row,slip({status:'awaiting_business',purpose_raw:'เจิดเบิก',
+    source_user_hash:piiHash(input.userId),created_at:new Date(at-120000).toISOString()})]);
+  // An explicit selection is retained by the staged expense fields.
+  assert.equal(await handleOwnerStaffSlipText({...input,text:'a6c43e ค่าอุปกรณ์ไฟฟ้า'}),null);
+  assert.match(await handleOwnerExpenseText({...input,text:'a6c43e ค่าอุปกรณ์ไฟฟ้า'})??'',/กิจการ/);
+  assert.equal(await handleOwnerStaffSlipText({...input,text:'ตำมา-ชาติ'}),null);
+  const reply=await handleOwnerExpenseText({...input,text:'ตำมา-ชาติ',messageId:'equipment-business'});
+  assert.match(reply??'',/6,474 บาท/);assert.match(reply??'',/ตำมา-ชาติ/);
+  assert.equal(row.purpose_raw,'ค่าอุปกรณ์ไฟฟ้า');
+  assert.equal(row.business_unit_code,'tamma_restaurant');
+  const resolve=h.calls.find(x=>x.path.endsWith('/financial_resolve_owner_expense_intake_v1'))!;
+  assert.equal(resolve.body.p_intake_id,row.id);assert.equal(resolve.body.p_expense_category,'equipment');
+  assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
+});
+test('business reply to a known equipment expense wins over a pending staff purchase',async t=>{
+  t.mock.method(Date,'now',()=>at);
+  const h=harness(t,[equipmentSlip({status:'awaiting_business',purpose_raw:'ค่าอุปกรณ์ไฟฟ้า'}),
+    slip({status:'awaiting_business',purpose_raw:'เจิดเบิกไปซื้อของ'})]);
+  assert.equal(await handleOwnerStaffSlipText({...input,text:'ตำมา-ชาติ'}),null);
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});
+test('the actual signed LINE sequence finishes equipment then accepts the staff salary answer once',async t=>{
+  t.mock.method(Date,'now',()=>at);t.mock.method(console,'log',()=>{});
+  const row=equipmentSlip();
+  const h=harness(t,[row,slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+  await deliverStaffWebhook('ค่าอุปกรณ์ไฟฟ้า','equipment-purpose');
+  await deliverStaffWebhook('ตำมา-ชาติ','equipment-business');
+  await deliverStaffWebhook('เบิกเงินเดือนล่วงหน้า','staff-final');
+  const replies=h.calls.filter(x=>x.path==='/v2/bot/message/reply');
+  assert.equal(replies.length,3);
+  assert.match(replies[0].body.messages[0].text,/กิจการ/);
+  assert.match(replies[1].body.messages[0].text,/6,474 บาท/);
+  assert.doesNotMatch(replies[1].body.messages[0].text,/เจิด|เบิกเงินเดือน/);
+  assert.match(replies[2].body.messages[0].text,/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
+  assert.doesNotMatch(replies[2].body.messages[0].text,/หลักฐานรอระบุ|2 รายการ/);
+  const resolves=h.calls.filter(x=>x.path.endsWith('/financial_resolve_owner_expense_intake_v1'));
+  assert.equal(resolves.length,1);assert.equal(resolves[0].body.p_intake_id,row.id);
+  const payroll=h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'));
+  assert.equal(payroll.length,1);assert.equal(payroll[0].body.p_amount,200);
+  assert.equal(payroll[0].body.p_employee_label,'เจิด');
+});
+test('signed LINE accepts a six-character slip code without requiring a hash',async t=>{
+  t.mock.method(Date,'now',()=>at);t.mock.method(console,'log',()=>{});
+  const h=harness(t,[equipmentSlip(),slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+  await deliverStaffWebhook('a6c43e ซื้ออุปกรณ์ไฟฟ้า','bare-equipment-code');
+  await deliverStaffWebhook('ตำมา-ชาติ','bare-code-business');
+  const stages=h.calls.filter(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'));
+  assert.equal(stages.length,1);assert.equal(stages[0].body.p_intake_id,equipmentSlip().id);
+  const resolve=h.calls.find(x=>x.path.endsWith('/financial_resolve_owner_expense_intake_v1'))!;
+  assert.equal(resolve.body.p_intake_id,equipmentSlip().id);
+  assert.equal(resolve.body.p_business_unit_code,'tamma_restaurant');
+  assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
+});
+
+test('ordinary purchase wording follows the fresh equipment image rather than the older staff question',async t=>{
+  t.mock.method(Date,'now',()=>at);
+  const row=equipmentSlip();
+  const h=harness(t,[row,slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+  assert.equal(await handleOwnerStaffSlipText({...input,text:'ซื้ออุปกรณ์ไฟฟ้า'}),null);
+  assert.match(await handleOwnerExpenseText({...input,text:'ซื้ออุปกรณ์ไฟฟ้า'})??'',/กิจการ/);
+  const stage=h.calls.find(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'))!;
+  assert.equal(stage.body.p_intake_id,row.id);
+  assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
+});
+test('a new unclassified image beside an older staff question needs selection before a type-only answer',async t=>{
+  const h=harness(t,[equipmentSlip(),slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'เบิกเงินเดือนล่วงหน้า'})??'',/2 รายการ/);
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});
