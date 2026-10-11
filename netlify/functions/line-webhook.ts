@@ -13,7 +13,7 @@ import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-con
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
 import { handleOwnerExpenseImage, handleOwnerStaffSlipText, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, handleOwnerRecentSlipProjectPurpose, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
-import { handleOwnerSlipReviewText } from './_owner-slip-review';
+import { handleOwnerSlipReviewText, slipReviewLineMessage } from './_owner-slip-review';
 import { partitionOwnerSlipMaintenance, notifyOwnerSlipMaintenance, OWNER_SLIP_MAINTENANCE_REPLY, OwnerSlipMaintenanceNoticeError } from './_owner-slip-maintenance';
 import { handleOwnerBusinessQuestion } from './_owner-business-intelligence';
 import { handleOwnerProjectQuery, handleOwnerProjectText } from './_owner-project-os';
@@ -328,7 +328,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
       timestamp: event.timestamp,
     });
     if (ownerExpenseReply) {
-      try {await replyToLine(event.replyToken, ownerExpenseReply, accessToken);}
+      try {await replyToLine(event.replyToken, slipReviewLineMessage(ownerExpenseReply), accessToken);}
       catch(error){
         if(ownerExpenseReply===OWNER_SLIP_MAINTENANCE_REPLY)throw new OwnerSlipMaintenanceNoticeError('owner_slip_notice_failed');
         throw error;
@@ -402,7 +402,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string): Pro
     text: event.message.text, messageId: event.message.id ?? null,
   });
   if (slipReviewReply) {
-    await replyToLine(event.replyToken, slipReviewReply, accessToken);
+    await replyToLine(event.replyToken, slipReviewLineMessage(slipReviewReply), accessToken);
     return;
   }
 
@@ -731,3 +731,4 @@ export const handler: Handler = async (event, context) => {
 
   return response;
 };
+

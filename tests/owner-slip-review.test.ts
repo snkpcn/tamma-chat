@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { prepareSlipProposal, handleOwnerSlipReviewText, stageSlipReview } from '../netlify/functions/_owner-slip-review';
+import { prepareSlipProposal, handleOwnerSlipReviewText, stageSlipReview, slipReviewLineMessage } from '../netlify/functions/_owner-slip-review';
 import { normalizeFinancialImageExtraction } from '../netlify/functions/_inthanin-daily-close-image';
 import { handleOwnerExpenseImage } from '../netlify/functions/_owner-expense-intake';
 import { handler as webhook } from '../netlify/functions/line-webhook';
@@ -38,7 +38,7 @@ test('missing and ambiguous facts never invent projects, purposes, budgets or in
  assert.equal(noAmount.questions.length,2);
 });
 
-async function harness(t:any, evidence=extraction, availableInstallments=installments) {
+async function harness(t:any, evidence=extraction, availableInstallments=installments, availableProjects:Parameters<typeof prepareSlipProposal>[0]['projects']=projects) {
  const db=await reviewDatabase();t.after(()=>db.close());
  const old={...process.env};
  process.env.SUPABASE_URL='https://owner-slip-fixture.test';process.env.SUPABASE_SERVICE_ROLE_KEY='fixture-only';
@@ -67,7 +67,7 @@ async function harness(t:any, evidence=extraction, availableInstallments=install
   if(url.pathname.startsWith('/storage/'))return Response.json({});
   if(url.pathname.endsWith('/ops_notification_channels'))return Response.json([{team_code:'owner_general'}]);
   if(url.pathname.includes('/rpc/'))return Response.json(await rpc(url.pathname.split('/').pop()!,body));
-  if(url.pathname.endsWith('/owner_projects'))return Response.json(projects);
+  if(url.pathname.endsWith('/owner_projects'))return Response.json(availableProjects);
   if(url.pathname.endsWith('/owner_project_installments'))return Response.json(availableInstallments);
   if(url.pathname.endsWith('/financial_owner_expense_intakes')) {
    let rows=(await db.query<any>('select * from financial_owner_expense_intakes')).rows;
@@ -313,4 +313,115 @@ test('separate mentions of a short project and its named extension remain ambigu
  const catalogue=[...projects,{...projects[0],id:'extension-project',name:'ตำมา-ชาติส่วนขยาย'}];
  const one=prepareSlipProposal({note:'ค่าอุปกรณ์ไฟฟ้า ตำมาชาติส่วนขยาย',extraction,projects:catalogue,installments:[]});assert.equal(one.project_id,'extension-project');
  const both=prepareSlipProposal({note:'ค่าอุปกรณ์ไฟฟ้า ตำมาชาติ และ ตำมาชาติส่วนขยาย',extraction,projects:catalogue,installments:[]});assert.equal(both.project_id,null);assert.ok(both.questions.length);
+});
+
+
+test('an existing named project with missing business asks only for business, never for its name again',()=>{
+ const deck={...projects[0],name:'เฉลียงไม้',business_unit_code:null,status:'completed'};
+ for(const name of ['เฉลียงไม้','เฉลียง-ไม้','เฉลียง ไม้']) {
+  const p=prepareSlipProposal({note:`อุปกรณ์ช่างไม้ ${name}`,extraction,projects:[deck],installments:[]});
+  assert.equal(p.project_id,projectId);assert.equal(p.project_name,'เฉลียงไม้');
+  assert.equal(p.business_unit_code,null);assert.equal(p.expense_class,'capital_investment');
+  assert.equal(p.questions.length,1);assert.match(p.questions[0],/พบโครงการ.*เฉลียงไม้.*กิจการไหน/);
+  assert.doesNotMatch(p.questions[0],/เป็นของโครงการไหน|ระบุชื่อโครงการ/);
+ }
+ const p=prepareSlipProposal({note:'อุปกรณ์ช่างไม้ เฉลียงไม้',extraction,projects:[{...deck,business_unit_code:'tamma_restaurant'}],installments:[]});
+ assert.deepEqual(p.questions,[]);assert.equal(p.business_unit_code,'tamma_restaurant');
+});
+
+test('duplicate aliases and disjoint projects remain ambiguous; unknown names cannot acquire a project',()=>{
+ const deck={...projects[0],name:'เฉลียงไม้',business_unit_code:null};
+ const ambiguous=prepareSlipProposal({note:'อุปกรณ์ช่างไม้ เฉลียงไม้',extraction,projects:[deck,{...deck,id:'second',name:'เฉลียง-ไม้'}],installments:[]});
+ assert.equal(ambiguous.project_id,null);assert.equal(ambiguous.questions.length,1);
+ assert.match(ambiguous.questions[0],/ระบุโครงการเดียว/);
+ const separate=prepareSlipProposal({note:'อุปกรณ์ช่างไม้ เฉลียงไม้ และ ศาลา',extraction,projects:[deck,{...deck,id:'second',name:'ศาลา'}],installments:[]});
+ assert.equal(separate.project_id,null);assert.match(separate.questions[0],/ระบุโครงการเดียว/);
+ const unknown=prepareSlipProposal({note:'อุปกรณ์ช่างไม้ โครงการที่ไม่มี',extraction,projects:[deck],installments:[]});
+ assert.equal(unknown.project_id,null);assert.ok(unknown.questions.length);
+});
+
+test('business-only reply retains the completed project and investment route; one-tap confirmation writes once',async t=>{
+ const deck={...projects[0],name:'เฉลียงไม้',business_unit_code:null,status:'completed'};
+ const evidence={...extraction,amount_total:3540,document_date_local:'2026-10-10',visible_payment_note:'อุปกรณ์ช่างไม้'};
+ const h=await harness(t,evidence,[],[deck]);
+ await h.db.exec("delete from owner_project_installments; update owner_projects set name='เฉลียงไม้', normalized_name='เฉลียงไม้', business_unit_code=null,status='completed'");
+ const c=await h.capture();
+ const p=prepareSlipProposal({note:'อุปกรณ์ช่างไม้',extraction:evidence,projects:[deck],installments:[]});
+ await h.stage(c.intake_id,0,p);
+ assert.match((await h.text('เฉลียงไม้'))!,/พบโครงการ.*เฉลียงไม้.*กิจการไหน/);
+ // An early confirmation cannot skip the business question or write money.
+ assert.match((await h.text('ยืนยัน'))!,/กิจการไหน/);
+ assert.equal((await h.db.query<any>('select amount from financial_owner_expense_intakes')).rows[0].amount,null);
+ const ready=await h.text('ส่วนกลาง');
+ assert.match(ready!,/โครงการ: เฉลียงไม้ · กิจการ: ส่วนกลาง\/โครงสร้างพื้นฐาน/);
+ assert.match(ready!,/กดปุ่ม “ยืนยัน”/);assert.doesNotMatch(ready!,/กิจการไหน|เป็นของโครงการไหน/);
+ const draft=(await h.db.query<any>('select * from financial_owner_expense_intakes')).rows[0];
+ assert.equal(draft.review_data.project_id,projectId);assert.equal(draft.review_data.expense_class,'capital_investment');
+ assert.equal(draft.review_data.installment_id,null);assert.equal(draft.amount,null);
+ const button=slipReviewLineMessage(ready!).quickReply!.items[0];
+ assert.equal(button.action.label,'ยืนยัน');
+ assert.match((await h.text(button.action.text))!,/บันทึกสลิป/);
+ assert.match((await h.text(`ยืนยัน #${short(c.intake_id)}`))!,/ไม่เพิ่มยอดซ้ำ/);
+ const saved=(await h.db.query<any>('select * from financial_owner_expense_intakes')).rows[0];
+ assert.equal(saved.amount,'3540.00');assert.equal(saved.owner_project_id,projectId);assert.equal(saved.business_unit_code,'shared_infrastructure');
+ assert.equal((await h.db.query<any>('select business_unit_code from owner_projects')).rows[0].business_unit_code,null);
+ assert.equal((await h.db.query<any>("select count(*) n from financial_owner_expense_audit_events where action='categorized'")).rows[0].n,1);
+ assert.equal((await h.db.query('select * from financial_investment_entries')).rows.length,0);
+});
+
+test('one-tap confirmation is still bound to its reviewed revision before a concurrent correction',async t=>{
+ const h=await harness(t),c=await h.capture();await h.stage(c.intake_id);
+ const original=globalThis.fetch;
+ t.mock.method(globalThis,'fetch',async(input:any,init:any)=>{
+  if(String(input).includes('/rpc/financial_confirm_owner_slip_review_v1')) {
+   await h.stage(c.intake_id,1,{...proposal(),amount:1200},'concurrent-correction');
+  }
+  return original(input,init);
+ });
+ assert.match((await h.text(`ยืนยัน #${short(c.intake_id)} v1`))!,/ไม่ใช่สรุปล่าสุด/);
+ const row=(await h.db.query<any>('select * from financial_owner_expense_intakes')).rows[0];
+ assert.equal(row.review_state,'draft');assert.equal(row.amount,null);assert.equal(row.review_revision,2);
+});
+
+test('one-tap actions are versioned; no action for incomplete, unrelated, or forged note content',()=>{
+ const ready=slipReviewLineMessage('ตรวจสลิป #ABCDEF · ฉบับ 7 (ยังไม่บันทึกรายจ่าย)\nยอด: 3,540 บาท\nกดปุ่ม “ยืนยัน” ด้านล่างเพื่อบันทึกครับ หรือพิมพ์ “ยืนยัน #ABCDEF v7”\nแก้ไข: #ABCDEF แก้เป็น [รายละเอียดที่ถูกต้อง]');
+ assert.deepEqual(ready.quickReply?.items,[{type:'action',action:{type:'message',label:'ยืนยัน',text:'ยืนยัน #ABCDEF v7'}}]);
+ for(const text of ['สวัสดีครับ','ตรวจสลิป #ABCDEF · ฉบับ 7 (ยังไม่บันทึกรายจ่าย)\nกิจการไหนครับ\nตอบข้อมูลที่ถามได้เลยครับ\nแก้ไข: ...',ready.text.replace('ยืนยัน #ABCDEF v7','ยืนยัน #ABCDEF v6'),ready.text+'\nคำถามยังไม่ครบ\nตอบข้อมูลที่ถามได้เลยครับ\nแก้ไข: ...']) {
+  assert.equal(slipReviewLineMessage(text).quickReply,undefined);
+ }
+});
+
+test('bare confirmations never allocate a current or later slip, even when replayed after clarification',async t=>{
+ const h=await harness(t),a=await h.capture();await h.stage(a.intake_id);
+ assert.match((await h.text('ยืนยัน','plain-confirm'))!,/ยังไม่บันทึก/);
+ assert.equal((await h.db.query<any>('select amount from financial_owner_expense_intakes')).rows[0].amount,null);
+ await h.confirm(a.intake_id);
+ const b=await h.capture();await h.stage(b.intake_id);
+ assert.match((await h.text('ยืนยัน','plain-confirm'))!,/ยังไม่บันทึก/);
+ const row=(await h.db.query<any>('select * from financial_owner_expense_intakes where id=$1',[b.intake_id])).rows[0];
+ assert.equal(row.review_state,'draft');assert.equal(row.amount,null);
+ assert.match((await h.text(`ยืนยัน #${short(a.intake_id)} v1`))!,/ไม่เพิ่มยอดซ้ำ/);
+});
+
+test('catalogue other business fails closed with a metadata remediation instead of an impossible confirmation',()=>{
+ const p=prepareSlipProposal({note:'อุปกรณ์ช่างไม้ เฉลียงไม้',extraction,projects:[{...projects[0],name:'เฉลียงไม้',business_unit_code:'other'}],installments:[]});
+ assert.equal(p.project_id,projectId);assert.ok(p.questions.some(q=>q.includes('แก้กิจการของโครงการในหลังบ้าน')));
+});
+
+test('signed LINE summary sends a native revision-bound button; an old button cannot confirm corrected or later slips',async t=>{
+ const h=await harness(t),a=await h.capture();await h.stage(a.intake_id);
+ const body=JSON.stringify({events:[{type:'message',replyToken:'fixture-summary-reply',source:{type:'group',groupId:group,userId:user},message:{type:'text',id:'fixture-summary',text:`#${short(a.intake_id)} สรุป`},timestamp:Date.now()}]});
+ const signature=createHmac('sha256','fixture-secret').update(body).digest('base64');
+ const response=await webhook({httpMethod:'POST',headers:{'x-line-signature':signature},body} as any,{} as any);
+ assert.equal(response?.statusCode,200);
+ const reply=h.calls.find(c=>c.body?.replyToken==='fixture-summary-reply');
+ const button=reply.body.messages.at(-1).quickReply.items[0];
+ assert.deepEqual(button,{type:'action',action:{type:'message',label:'ยืนยัน',text:`ยืนยัน #${short(a.intake_id)} v1`}});
+ await h.stage(a.intake_id,1,{...proposal(),amount:1200},'correct-before-click');
+ assert.match((await h.text(button.action.text))!,/ไม่ใช่สรุปล่าสุด/);
+ await h.confirm(a.intake_id,2);
+ const b=await h.capture();await h.stage(b.intake_id);
+ assert.match((await h.text(button.action.text))!,/ไม่เพิ่มยอดซ้ำ/);
+ const row=(await h.db.query<any>('select * from financial_owner_expense_intakes where id=$1',[b.intake_id])).rows[0];
+ assert.equal(row.review_state,'draft');assert.equal(row.amount,null);
 });
