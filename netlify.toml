@@ -1,32 +1,9 @@
+# DISPOSABLE TEST BRANCH. DO NOT MERGE. One owner-approved preview only.
 [build]
-  command = "node scripts/netlify-build-gate.mjs"
-  publish = "."
-  functions = "netlify/functions"
-
+  base = "ocr-only"
+  command = "node run.mjs"
+  publish = "public"
+  functions = "empty-functions"
 [build.environment]
-  # Human Conversation Recovery: One-Mind owns shared semantic/context/task
-  # decisions on web and LINE. It may create a non-executing action proposal
-  # only after explicit commitment and grounded checks; it never calls a
-  # booking/order/payment executor. Legacy deterministic executors remain the
-  # separate transaction boundary where still supported.
-  THONGTHAI_ONE_MIND_CUTOVER = "1"
-
-
-[images]
-  remote_images = ["https://upaokrprawzhgzeqsdke.supabase.co/.*"]
-
-[functions]
-  node_bundler = "esbuild"
-
-[functions."thongthai-chat"]
-  included_files = ["src/data/experiences.ts"]
-
-# Netlify schedules are UTC. 00:00 UTC = 07:00 Asia/Bangkok.
-[functions."ops-daily-schedule"]
-  schedule = "0 0 * * *"
-
-
-# AI/API cost operations. Schedules are UTC.
-# 16:55 UTC = 23:55 Asia/Bangkok: aggregate the current day once, just before local midnight.
-[functions."ai-cost-notify-daily"]
-  schedule = "55 16 * * *"
+  NODE_VERSION = "24"
+  NPM_FLAGS = "--ignore-scripts --no-audit --no-fund"

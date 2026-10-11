@@ -1,0 +1,8 @@
+{
+  "sourceCommit": "2ed21d6e4ce9a88129289b870a92fd7e724f4a4d",
+  "sourcePath": "netlify/functions/_inthanin-daily-close-image.ts",
+  "sourceSha256": "5f836fe140442df6cbaa13d25c874cdd6d113366cc4e1e512b351d9d5d990f17",
+  "bundleSha256": "d4f23d1437e4203d08e5602e4802e35ef44c06b482a79ea75ee785460ffda634",
+  "fixtureSha256": "9179d3a74863f751a60d2bd285d2b27911e98591c34cde292b7c1d9045fbda27",
+  "maximumProviderRequests": 2
+}
