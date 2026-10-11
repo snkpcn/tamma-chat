@@ -81,7 +81,11 @@ export function prepareSlipProposal(input:{note:string; extraction:FinancialImag
   const businesses=businessPatterns.filter(([p])=>p.test(note)).map(([,b])=>b);
   const business=project?.business_unit_code ?? (businesses.length===1?businesses[0]:null);
   if(businesses.length>1 || (project?.business_unit_code && businesses.some(b=>b!==project.business_unit_code))) questions.push('กิจการที่ระบุไม่ตรงกัน กรุณาแก้ชื่อกิจการ/โครงการ');
-  if(!business) questions.push('เป็นของโครงการไหนครับ ระบุชื่อโครงการที่มีอยู่ หรือกิจการหากไม่ผูกโครงการ');
+  if(business==='other') questions.push('โครงการนี้ระบุกิจการเป็น “อื่น ๆ” ครับ กรุณาแก้กิจการของโครงการในหลังบ้านก่อนตรวจสลิปอีกครั้ง');
+  else if(!business) {
+    if(project) questions.push('พบโครงการ “'+project.name+'” แล้วครับ แต่ยังไม่ระบุกิจการ รายการนี้เป็นของกิจการไหนครับ: ตำมา-ชาติ / Inthanin / เฮือนสเตย์ / ผจญภัย / OTOP / ส่วนกลาง / ใช้ร่วม');
+    else if(best.length===0) questions.push('เป็นของโครงการไหนครับ ระบุชื่อโครงการที่มีอยู่ หรือกิจการหากไม่ผูกโครงการ');
+  }
   else if(investmentRequested && !project && best.length===0) questions.push('ผูกกับโครงการลงทุนที่มีอยู่โครงการไหนครับ');
   if(!purpose || classification.expenseCategory==='other') questions.push('จ่ายค่าอะไรครับ (โน้ตยังไม่ชัดพอที่จะจัดหมวด)');
   if(classification.expenseClass==='owner_private') questions.push('โน้ตระบุว่าเป็นรายการส่วนตัว กรุณายืนยันว่าเป็นค่าใช้จ่ายธุรกิจใด หรือยกเลิกสลิปนี้');
@@ -122,9 +126,20 @@ export function slipReviewReply(row:Pick<Review,'id'|'review_revision'|'review_d
     'ปลายทาง: '+(p.expense_class==='capital_investment'?'หน่วยการลงทุน (รายการจากสลิป Owner)':p.expense_class==='operating_expense'?'ค่าใช้จ่ายดำเนินงาน':'รอตรวจ'),
     'งวด: '+(p.installment_label||'ไม่ผูกงวด'),
     ...p.questions,
-    p.questions.length?'ตอบพร้อม #'+code(row.id)+' ได้เลยครับ':`พิมพ์ “ยืนยัน #${code(row.id)} v${row.review_revision}” เพื่อบันทึกครับ`,
+    p.questions.length?'ตอบข้อมูลที่ถามได้เลยครับ':`กดปุ่ม “ยืนยัน” ด้านล่างเพื่อบันทึกครับ หรือพิมพ์ “ยืนยัน #${code(row.id)} v${row.review_revision}”`,
     `แก้ไข: #${code(row.id)} แก้เป็น [รายละเอียดที่ถูกต้อง] · ยกเลิก: ยกเลิก #${code(row.id)}`,
   ].join('\n');
+}
+
+/** The one-tap label stays simple; the action retains the exact reviewed slip/version. */
+export function slipReviewLineMessage(text:string) {
+  const header=text.match(/^(?:ฉบับนี้ไม่ใช่สรุปล่าสุดครับ\n)?ตรวจสลิป #([A-F0-9]{6}) · ฉบับ (\d+) \(ยังไม่บันทึกรายจ่าย\)\n/u);
+  if(!header) return {type:'text' as const,text};
+  const command=`ยืนยัน #${header[1]} v${header[2]}`;
+  const lines=text.split('\n');
+  if(lines.at(-2)!==`กดปุ่ม “ยืนยัน” ด้านล่างเพื่อบันทึกครับ หรือพิมพ์ “${command}”`) return {type:'text' as const,text};
+  return {type:'text' as const,text,quickReply:{items:[{type:'action' as const,
+    action:{type:'message' as const,label:'ยืนยัน',text:command}}]}};
 }
 
 export async function stageSlipReview(input:{id:string;groupHash:string;actorHash:string;messageId:string;revision:number;note:string;extraction:FinancialImageExtraction}):Promise<string> {
@@ -199,3 +214,4 @@ export async function handleOwnerSlipReviewText(input:{targetId:string;userId?:s
     :corrected?content:[previous?.purpose??row.extraction_data.visible_payment_note,content].filter(Boolean).join(' ');
   return stageSlipReview({id:row.id,groupHash,actorHash,messageId:input.messageId,revision:row.review_revision,note,extraction});
 }
+
