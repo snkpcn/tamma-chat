@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
 import {
@@ -355,4 +356,117 @@ export async function handleOwnerPayrollImage(input:{
     'เหตุผล: '+(result.review_reason||'ต้องตรวจ'),
     'ส่งสลิปที่ถูกต้องใหม่ได้ หรือให้ตรวจใน Owner Payroll ครับ',
   ].join('\n');
+}
+
+
+/** Reuse a previously captured Owner slip after the owner identifies payroll.
+ * The original remains auditable; only the Payroll event contributes to totals.
+ * The stable intake id is the idempotency key, across users and webhook retries.
+ */
+export async function recordOwnerPayrollFromStoredSlip(input: {
+  targetId: string; userId?: string | null; intakeId: string;
+  employeeLabel: string; eventType: 'salary_advance' | 'salary_payment';
+  payPeriod?: string | null; declaredAmount?: number | null;
+}): Promise<string> {
+  if (await boundLineOpsTeam(input.targetId) !== 'owner_general') {
+    return 'รายการเงินพนักงานใช้เฉพาะกลุ่ม Owner ครับ';
+  }
+  const groupHash = piiHash(input.targetId);
+  if (!groupHash) throw new Error('owner_group_hash_unavailable');
+  type StoredSlip = {
+    id: string; owner_group_hash: string; status: string; amount: number | string | null;
+    occurred_on: string; document_type: string; evidence_message_id: string;
+    evidence_sha256: string; storage_bucket: string; storage_path: string; mime_type: string;
+    extraction_confidence: number | string | null; extraction_data: FinancialImageExtraction;
+  };
+  const response = await dbFetch('financial_owner_expense_intakes?id=eq.' + encodeURIComponent(input.intakeId)
+    + '&owner_group_hash=eq.' + encodeURIComponent(groupHash)
+    + '&select=id,owner_group_hash,status,amount,occurred_on,document_type,evidence_message_id,evidence_sha256,storage_bucket,storage_path,mime_type,extraction_confidence,extraction_data&limit=1');
+  const slip = (await response.json() as StoredSlip[])[0];
+  if (!slip || !['awaiting_purpose','awaiting_business'].includes(slip.status)) {
+    return 'ยังจับคู่สลิปกับรายการเบิกนี้ไม่ได้ครับ ช่วยระบุสลิปอีกครั้งครับ';
+  }
+  const amount = slip.amount === null ? Number(input.declaredAmount ?? 0) : Number(slip.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return 'ผมทราบว่าเป็นเงินพนักงานแล้ว แต่ยอดจากสลิปอ่านไม่ชัดครับ ช่วยยืนยันจำนวนเงินก่อนครับ';
+  }
+  if (slip.storage_bucket !== 'owner-expense-evidence' || !slip.storage_path
+    || !slip.evidence_message_id || !/^[a-f0-9]{64}$/u.test(slip.evidence_sha256)) {
+    throw new Error('owner_payroll_stored_evidence_invalid');
+  }
+  let event: PayrollResult;
+  try {
+    event = await rpc('financial_create_owner_payroll_event_v1', {
+      p_event_type: input.eventType, p_employee_label: input.employeeLabel, p_amount: amount,
+      p_event_date: slip.occurred_on, p_pay_period: input.payPeriod ?? null,
+      p_group_hash: groupHash, p_user_hash: piiHash(input.userId) ?? '',
+      p_message_id: 'owner-slip-payroll:' + slip.id,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('payroll_slip_pending')) {
+      return 'ยังมีรายการเงินพนักงานก่อนหน้ารอสลิปอยู่ครับ ผมเก็บสลิปนี้ไว้แล้ว กรุณาจับคู่รายการก่อนหน้าให้เรียบร้อยก่อนครับ';
+    }
+    throw error;
+  }
+  if (!event.event_id) throw new Error('owner_payroll_event_id_missing');
+  if (event.event_type && event.event_type !== input.eventType
+    || event.employee_label && employeeKey(event.employee_label) !== employeeKey(input.employeeLabel)
+    || event.amount !== undefined && Math.abs(Number(event.amount) - amount) >= 0.01) {
+    return 'สลิปนี้มีรายการเงินพนักงานที่ระบุไว้แล้วและข้อมูลไม่ตรงกันครับ ผมยังไม่เปลี่ยนชื่อหรือประเภทให้เอง กรุณาตรวจรายการเดิมครับ';
+  }
+  let result = event;
+  if (event.status !== 'paid') {
+    const c = dbConfig();
+    const stored = await fetch(c.url + '/storage/v1/object/authenticated/'
+      + slip.storage_bucket + '/' + encodedObjectPath(slip.storage_path), {
+      headers: { apikey: c.key, Authorization: 'Bearer ' + c.key },
+    });
+    if (!stored.ok) throw new Error('owner_payroll_evidence_download_' + stored.status);
+    const bytes = Buffer.from(await stored.arrayBuffer());
+    if (!bytes.length || bytes.length > MAX_IMAGE_BYTES
+      || createHash('sha256').update(bytes).digest('hex') !== slip.evidence_sha256) {
+      throw new Error('owner_payroll_evidence_hash_mismatch');
+    }
+    const path = 'owner-only/' + slip.occurred_on + '/' + event.event_id
+      + '/' + slip.evidence_sha256 + '.' + extensionForMime(slip.mime_type);
+    const upload = await fetch(c.url + '/storage/v1/object/' + BUCKET + '/' + encodedObjectPath(path), {
+      method: 'POST',
+      headers: { apikey: c.key, Authorization: 'Bearer ' + c.key,
+        'Content-Type': slip.mime_type, 'x-upsert': 'false' },
+      body: bytes,
+    });
+    if (!upload.ok) {
+      const error = await upload.json().catch(() => ({})) as { statusCode?: string; error?: string };
+      if (upload.status !== 409 && !(upload.status === 400 && error.statusCode === '409' && error.error === 'Duplicate')) {
+        throw new Error('owner_payroll_evidence_upload_' + upload.status);
+      }
+    }
+    result = await rpc('financial_attach_owner_payroll_slip_v1', {
+      p_event_id: event.event_id, p_slip_message_id: slip.evidence_message_id,
+      p_slip_sha256: slip.evidence_sha256, p_storage_bucket: BUCKET, p_storage_path: path,
+      p_mime_type: slip.mime_type, p_document_type: slip.document_type,
+      p_slip_amount: slip.amount, p_confidence: Number(slip.extraction_confidence ?? 0),
+      p_extracted_data: slip.extraction_data,
+    });
+  }
+  if (!['paid','needs_review'].includes(result.status ?? '')) {
+    throw new Error('owner_payroll_slip_attachment_incomplete');
+  }
+  // This RPC preserves the original evidence and writes a cancellation audit.
+  await rpc('financial_mark_owner_expense_not_expense_v1', {
+    p_intake_id: slip.id, p_reason: 'ย้ายหลักฐานเข้ารายการ Payroll ' + event.event_id,
+    p_user_hash: piiHash(input.userId) ?? '', p_message_id: 'owner-slip-payroll-close:' + slip.id,
+  });
+  if (result.status === 'needs_review') {
+    return 'เก็บรายการ ' + eventLabel(input.eventType) + 'ของ ' + input.employeeLabel + ' ' + money(amount)
+      + ' พร้อมสลิปเดิมแล้วครับ แต่หลักฐานยังต้องตรวจ จึงยังไม่ยืนยันยอดหรือเพิ่มเป็นค่าใช้จ่ายร้านครับ';
+  }
+  const outstanding = input.eventType === 'salary_advance' ? await advanceOutstanding(input.employeeLabel) : null;
+  return [
+    '✅ บันทึก' + eventLabel(input.eventType) + 'ของ ' + input.employeeLabel + ' ' + money(amount) + ' พร้อมสลิปเดิมแล้วครับ',
+    outstanding !== null ? 'ยอดเบิกล่วงหน้าค้างหัก: ' + money(outstanding) : '',
+    input.eventType === 'salary_advance'
+      ? 'รอหักจากเงินเดือนภายหลัง ไม่เพิ่มเป็นค่าใช้จ่ายร้านหรือเงินลงทุนครับ'
+      : 'เก็บในรายการเงินเดือนฝั่ง Owner ไม่เพิ่มยอดลงทุนซ้ำครับ',
+  ].filter(Boolean).join('\n');
 }

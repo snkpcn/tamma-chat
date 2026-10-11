@@ -1,3 +1,5 @@
+import { parseOwnerStaffTurn } from './_owner-staff-intent';
+import { parseOwnerPayrollCommand, recordOwnerPayrollFromStoredSlip } from './_owner-payroll';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
 import { ownerProjectQuestion, startOwnerProjectPlanAfterPaidExpense } from './_owner-project-os';
@@ -287,7 +289,7 @@ async function pendingIntakes(groupHash: string, includeNeedsReview = false): Pr
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&status=' + statuses
     + '&select=id,source_user_hash,status,amount,occurred_on,document_type,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,owner_project_id,owner_project_task_id,owner_project_installment_id,created_at'
-    + '&order=created_at.asc&limit=12',
+    + '&order=created_at.desc&limit=20',
   );
   return await response.json() as OwnerExpenseIntake[];
 }
@@ -925,6 +927,7 @@ export async function handleOwnerExpenseText(input: {
   if (team !== 'owner_general') return null;
 
   const text = normalizeText(input.text);
+  if (/เบิก|เงินเดือน/u.test(text)) return null;
   const groupHash = piiHash(input.targetId);
   if (!groupHash) throw new Error('owner_expense_group_hash_unavailable');
   if (!input.messageId) return null;
@@ -1112,4 +1115,105 @@ export async function handleOwnerExpenseText(input: {
   return result.duplicate
     ? '📁 Owner Expense — คำตอบนี้บันทึกไว้แล้วครับ'
     : resultReply(result);
+}
+
+/** In a bound Owner group, either owner may clarify one unambiguous slip.
+ * Never choose the newest of several receipts, or borrow an old project draft.
+ */
+export async function handleOwnerStaffSlipText(input: {
+  targetId: string; userId?: string | null; text: string;
+  messageId?: string | null; timestamp?: number;
+}): Promise<string | null> {
+  if (!input.messageId || !input.userId) return null;
+  const text = referenceFromText(normalizeText(input.text));
+  const direct = parseOwnerStaffTurn(text.purpose);
+  // Only read continuation state for concise type/name answers, not all chat.
+  const continuation = isOwnerExpenseClassificationReply(text.purpose)
+    || /ซื้อ|ค่า|ของกิจการ|ของร้าน/u.test(text.purpose)
+    || /^(?:เป็น)?(?:เบิก)?เงินเดือน(?:ล่วงหน้า)?(?:ครับ|คับ)?$|^ล่วงหน้า$|^(?:เบิก)?(?:ไป)?ซื้อของ|^สำรองจ่าย/u.test(text.purpose)
+    || /^[\p{L}\p{M}]{1,40}$/u.test(text.purpose)
+    || /^[\d,]+(?:\.\d{1,2})?\s*(?:บาท)?$/u.test(text.purpose);
+  if (!direct && !continuation) return null;
+  const team = await boundLineOpsTeam(input.targetId);
+  if (team !== 'owner_general') return null;
+  const groupHash = piiHash(input.targetId);
+  if (!groupHash) return null;
+  const now = Number.isFinite(input.timestamp) ? Number(input.timestamp) : Date.now();
+  const allRows = await pendingIntakes(groupHash);
+  const candidates = allRows.filter(row => text.code
+    ? row.id.replace(/-/g, '').toLowerCase().startsWith(text.code)
+    : now - new Date(row.created_at).getTime() >= -60_000
+      && now - new Date(row.created_at).getTime() <= 24 * 60 * 60 * 1000);
+  const rows = direct ? candidates : candidates.filter(row => parseOwnerStaffTurn(row.purpose_raw ?? ''));
+  if (!direct && !rows.length) return null;
+  if (!rows.length) {
+    if (direct?.kind === 'salary_advance' || direct?.kind === 'salary_payment') return null;
+    return 'เข้าใจว่าเป็นรายการพนักงานเบิกเงินครับ แต่ยังไม่พบสลิปที่จับคู่ได้ ช่วยส่งสลิปของรายการนี้หรือระบุรหัสสลิปเดิมครับ';
+  }
+  const amountMatches = direct?.amount !== null && direct?.amount !== undefined
+    ? rows.filter(row => row.amount !== null && Math.abs(Number(row.amount) - direct.amount!) < 0.01)
+    : rows;
+  if (amountMatches.length !== 1) return pendingChoiceReply(amountMatches.length ? amountMatches : rows);
+  const intake = amountMatches[0]!;
+  const turn = parseOwnerStaffTurn(text.purpose, intake.purpose_raw);
+  if (!turn) return null;
+  const slipAmount = intake.amount === null ? null : Number(intake.amount);
+  if (turn.amount !== null && slipAmount !== null && Math.abs(turn.amount - slipAmount) >= 0.01) {
+    return 'ยอดที่แจ้งไม่ตรงกับสลิป ' + money(slipAmount) + ' ครับ ผมยังไม่เปลี่ยนยอดหรือจับคู่ให้เอง กรุณาระบุสลิปที่ถูกต้องครับ';
+  }
+  let purpose = turn.kind === 'salary_payment'
+    ? 'จ่ายเงินเดือน ' + (turn.employeeLabel ?? 'พนักงาน')
+    : turn.employeeLabel
+    ? turn.employeeLabel + 'เบิก' + (turn.kind === 'salary_advance' ? 'เงินเดือนล่วงหน้า'
+      : turn.kind === 'purchase' ? 'ไปซื้อของ' : '')
+    : 'พนักงานเบิก' + (turn.kind === 'salary_advance' ? 'เงินเดือนล่วงหน้า' : turn.kind === 'purchase' ? 'ไปซื้อของ' : '');
+  if (turn.employeeLabel && (turn.kind === 'salary_advance' || turn.kind === 'salary_payment')) {
+    if (slipAmount === null && turn.amount === null) {
+      await rpc<ResolveResult>('financial_stage_owner_expense_purpose_v1', {
+        p_intake_id: intake.id, p_purpose: purpose,
+        p_expense_class: 'uncategorized', p_expense_category: 'staff',
+        p_expense_subcategory: 'พนักงานเบิก/รอตรวจยอด', p_confidence: 0.65,
+        p_user_hash: piiHash(input.userId) ?? '', p_message_id: input.messageId,
+      });
+      return 'ทราบว่าเป็น' + (turn.kind === 'salary_payment' ? 'การจ่ายเงินเดือน' : 'เงินเดือนล่วงหน้า')
+        + 'ของ ' + turn.employeeLabel + 'แล้วครับ แต่ยอดจากสลิปอ่านไม่ชัด จำนวนกี่บาทครับ?';
+    }
+    return recordOwnerPayrollFromStoredSlip({
+      targetId: input.targetId, userId: input.userId, intakeId: intake.id,
+      employeeLabel: turn.employeeLabel, eventType: turn.kind, declaredAmount: turn.amount,
+      payPeriod: parseOwnerPayrollCommand(text.purpose)?.payPeriod ?? null,
+    });
+  }
+  if (turn.kind === 'purchase') {
+    purpose = normalizeText([purpose, intake.purpose_raw, text.purpose].filter(Boolean).join(' '));
+    const classification = classifyOwnerExpensePurpose(purpose);
+    if (classification.businessUnit && turn.employeeLabel) {
+      await rpc<ResolveResult>('financial_resolve_owner_expense_intake_v1', {
+        p_intake_id: intake.id, p_purpose: purpose, p_business_unit_code: classification.businessUnit,
+        p_expense_class: 'uncategorized', p_expense_category: 'petty_cash',
+        p_expense_subcategory: 'พนักงานเบิกซื้อของ/รอใบเสร็จ', p_confidence: 0.65,
+        p_user_hash: piiHash(input.userId) ?? '', p_message_id: input.messageId,
+      });
+      return 'เก็บรายการ ' + turn.employeeLabel + 'เบิกไปซื้อของ '
+        + (slipAmount === null ? 'ยอดจากสลิปอ่านไม่ชัด' : money(slipAmount))
+        + ' พร้อมสลิปและรายละเอียดแล้วครับ รอใบเสร็จและตรวจค่าใช้จ่าย จึงยังไม่เพิ่มเป็นยอดค่าใช้จ่ายร้านหรือเงินลงทุนครับ';
+    }
+  }
+  await rpc<ResolveResult>('financial_stage_owner_expense_purpose_v1', {
+    p_intake_id: intake.id, p_purpose: purpose,
+    p_expense_class: 'uncategorized', p_expense_category: 'staff',
+    p_expense_subcategory: turn.kind === 'purchase' ? 'พนักงานเบิกซื้อของ/รอตรวจ' : 'พนักงานเบิก/รอระบุประเภท',
+    p_confidence: 0.65, p_user_hash: piiHash(input.userId) ?? '', p_message_id: input.messageId,
+  });
+  const label = turn.employeeLabel ?? 'พนักงาน';
+  const amountLabel = slipAmount === null ? 'ยอดจากสลิปอ่านไม่ชัด' : money(slipAmount);
+  if (!turn.employeeLabel) {
+    return 'รับรายการพนักงานเบิก ' + amountLabel + ' ตามสลิปนี้ครับ พนักงานคนไหนเบิกครับ?';
+  }
+  if (turn.kind === 'purchase') {
+    return 'รับรายการ ' + label + 'เบิกไปซื้อของ ' + amountLabel
+      + ' ตามสลิปนี้ครับ ซื้ออะไรและเป็นของกิจการไหนครับ?';
+  }
+  return label + 'เบิก ' + amountLabel
+    + ' ตามสลิปนี้ครับ เป็นเบิกเงินเดือนล่วงหน้าหรือเบิกไปซื้อของครับ?';
 }

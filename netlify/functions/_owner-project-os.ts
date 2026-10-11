@@ -1,3 +1,4 @@
+import { isOwnerFinancialTopic, isOwnerScheduleAnswer } from './_owner-staff-intent';
 import { createHash } from 'node:crypto';
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam, buildTeamScheduleSummary } from './_ops-notifications';
@@ -661,6 +662,7 @@ export function applyOwnerProjectText(input: {
   const text = normalizeText(input.text);
   const expected = input.expectedField ?? null;
   const before = JSON.stringify(data);
+  if (isOwnerFinancialTopic(text)) return { data, changed: false };
   const timestamp = Number.isFinite(input.timestamp) ? Number(input.timestamp) : Date.now();
   const bulkTasks = parseOwnerProjectBulkTasks(input.text);
 
@@ -705,7 +707,7 @@ export function applyOwnerProjectText(input: {
     if (schedulePhrase) {
       data.schedule_text = schedulePhrase.slice(0, 240);
       removeUnknown(data, 'schedule');
-    } else if (expected === 'schedule' && !isUnknown(text) && !isConversationNoise(text) && cleanAnswer(text).length >= 2) {
+    } else if (expected === 'schedule' && !isUnknown(text) && !isConversationNoise(text) && isOwnerScheduleAnswer(text)) {
       data.schedule_text = cleanAnswer(text).slice(0, 240);
       removeUnknown(data, 'schedule');
     }
@@ -1173,7 +1175,7 @@ export async function handleOwnerProjectText(input: {
   if (isReadOnlyQuestion(text)) return null;
   // A new paid transaction must go to the expense ledger. It must never be
   // mistaken for the budget answer of an older project draft.
-  if (/^(?:จ่าย(?:เงิน|ค่า)|ชำระ(?:เงิน|ค่า)|โอนจ่าย)/u.test(text)) return null;
+  if (isOwnerFinancialTopic(text)) return null;
 
   const taskStateCommand = parseOwnerProjectTaskStateCommand(text);
   if (taskStateCommand) {
