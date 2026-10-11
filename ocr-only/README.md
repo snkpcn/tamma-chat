@@ -31,3 +31,23 @@ Local verification: `node --test safety.test.mjs` (mocked fetch; no provider cal
 Limitations: masked preview credential presence does not prove key validity or
 separate billing. This verifies provider OCR only, not staging DB/auth integration.
 The request cap is enforced per invocation; the operator must not trigger retries.
+
+## Local guard correction — not yet pushed or approved to run
+
+The first approved build stopped with BLOCKED_CONTEXT and zero provider requests.
+Its initialization log L5 says `Preparing Git Reference pull/617/head`. The original
+guard incorrectly compared BRANCH to `codex/ocr-only-preview-once`. Netlify defines
+BRANCH as the checkout ref and HEAD as the Git provider's source branch name:
+https://docs.netlify.com/build/configure-builds/environment-variables/#git-metadata
+
+The local correction requires all of: NETLIFY=true, CONTEXT=deploy-preview, the
+exact site ID, PULL_REQUEST=true, REVIEW_ID=617, HEAD=codex/ocr-only-preview-once,
+and BRANCH=pull/617/head. It does not accept arbitrary PR refs, main, a merge ref,
+or a missing HEAD. Diagnostics contain only hardcoded labels and booleans.
+Database/LINE/other-provider credentials still abort; alternate database aliases
+are also rejected. Only Gemini is passed to the OCR child process.
+
+`context-fixtures.json` models the documented metadata and observed ref using
+fake credentials; it is not a dump of Netlify's environment. Local Node 24 tests
+pass 34/34 with mocked provider functions and no real provider calls. Any new
+push/build requires fresh approval. Recheck nonproduction SSO before that push.

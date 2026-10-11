@@ -1,19 +1,12 @@
 import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {preflight,ocrChildEnvironment} from './guard.mjs';
 const report = status => console.log(JSON.stringify({ocrOnly:true,status,providerRequests:0}));
-export function preflight(env) {
-  if (env.CONTEXT !== 'deploy-preview' || env.BRANCH !== 'codex/ocr-only-preview-once'
-      || env.SITE_ID !== '8c1f4d60-68c9-4940-9152-89e9c967e22c' || env.NETLIFY !== 'true') return 'BLOCKED_CONTEXT';
-  if (Object.entries(env).some(([key,value]) => value && (
-    /^(LINE_|OPENAI_API_KEY$|DATABASE_URL$|POSTGRES_URL$|PGPASSWORD$)/.test(key)
-    || (/^SUPABASE_/.test(key) && key !== 'SUPABASE_URL')))) return 'BLOCKED_CREDENTIALS';
-  if (!env.GEMINI_API_KEY) return 'BLOCKED_MISSING_GEMINI';
-  return null;
-}
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  const blocked=preflight(process.env);
-  if(blocked){report(blocked);process.exit(1);}
+  const gate=preflight(process.env);
+  console.log('OCR_ONLY_PREFLIGHT '+JSON.stringify({ocrOnly:true,...gate,providerRequests:0}));
+  if(gate.status!=='READY')process.exit(1);
   try {
     const manifest=JSON.parse(readFileSync(new URL('./manifest.json',import.meta.url),'utf8'));
     const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -23,7 +16,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
     writeFileSync(new URL('./.provider-run-started',import.meta.url),'single approved invocation',{flag:'wx'});
     // No database, LINE, OpenAI, proxy, diagnostic, or Netlify credentials reach OCR.
     const child=spawnSync(process.execPath,[new URL('./worker.mjs',import.meta.url).pathname],{
-      env:{GEMINI_API_KEY:process.env.GEMINI_API_KEY},encoding:'utf8',timeout:45000,maxBuffer:8192,
+      env:ocrChildEnvironment(process.env),encoding:'utf8',timeout:45000,maxBuffer:8192,
     });
     // The worker exports only fixed booleans, bounded counters, and enum statuses.
     // Never relay raw stdout/stderr or exception/provider strings.

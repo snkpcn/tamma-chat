@@ -1,0 +1,44 @@
+{
+  "provenance": {
+    "deploy": "6acb31b57b9914000887d083",
+    "initializationLogLine": "Preparing Git Reference pull/617/head",
+    "docs": "https://docs.netlify.com/build/configure-builds/environment-variables/#git-metadata",
+    "note": "Nonsecret model of documented metadata, observed checkout ref and connector-verified PR identity; not an export of the failed build's process environment. Credential values below are invented test sentinels."
+  },
+  "valid": {
+    "NETLIFY": "true",
+    "CONTEXT": "deploy-preview",
+    "SITE_ID": "8c1f4d60-68c9-4940-9152-89e9c967e22c",
+    "PULL_REQUEST": "true",
+    "REVIEW_ID": "617",
+    "HEAD": "codex/ocr-only-preview-once",
+    "BRANCH": "pull/617/head",
+    "GEMINI_API_KEY": "synthetic-local-test-token"
+  },
+  "cases": [
+    {"name":"observed PR checkout ref", "overrides":{}, "status":"READY"},
+    {"name":"wrong PR checkout ref", "overrides":{"BRANCH":"pull/618/head"}, "status":"BLOCKED_CHECKOUT_REF"},
+    {"name":"unobserved refs prefix fails closed", "overrides":{"BRANCH":"refs/pull/617/head"}, "status":"BLOCKED_CHECKOUT_REF"},
+    {"name":"merge ref is not approved head ref", "overrides":{"BRANCH":"pull/617/merge"}, "status":"BLOCKED_CHECKOUT_REF"},
+    {"name":"source branch is not checkout ref", "overrides":{"BRANCH":"codex/ocr-only-preview-once"}, "status":"BLOCKED_CHECKOUT_REF"},
+    {"name":"wrong head cannot borrow approved PR ref", "overrides":{"HEAD":"codex/something-else"}, "status":"BLOCKED_HEAD"},
+    {"name":"production head", "overrides":{"HEAD":"main"}, "status":"BLOCKED_HEAD"},
+    {"name":"missing head is not inferred from ref", "overrides":{"HEAD":""}, "status":"BLOCKED_HEAD"},
+    {"name":"production context with preview-shaped metadata", "overrides":{"CONTEXT":"production"}, "status":"BLOCKED_CONTEXT"},
+    {"name":"branch deploy", "overrides":{"CONTEXT":"branch-deploy"}, "status":"BLOCKED_CONTEXT"},
+    {"name":"local dev", "overrides":{"CONTEXT":"dev"}, "status":"BLOCKED_CONTEXT"},
+    {"name":"missing context", "overrides":{"CONTEXT":""}, "status":"BLOCKED_CONTEXT"},
+    {"name":"wrong site", "overrides":{"SITE_ID":"other-site"}, "status":"BLOCKED_SITE"},
+    {"name":"not Netlify", "overrides":{"NETLIFY":"false"}, "status":"BLOCKED_NOT_NETLIFY"},
+    {"name":"missing Netlify marker", "overrides":{"NETLIFY":""}, "status":"BLOCKED_NOT_NETLIFY"},
+    {"name":"not pull request", "overrides":{"PULL_REQUEST":"false"}, "status":"BLOCKED_NOT_PR"},
+    {"name":"wrong PR number", "overrides":{"REVIEW_ID":"618"}, "status":"BLOCKED_REVIEW"},
+    {"name":"no Gemini value", "overrides":{"GEMINI_API_KEY":""}, "status":"BLOCKED_MISSING_GEMINI"},
+    {"name":"service role credential", "overrides":{"SUPABASE_SERVICE_ROLE_KEY":"synthetic-forbidden-value"}, "status":"BLOCKED_DATABASE_CREDENTIALS"},
+    {"name":"alternate database credential", "overrides":{"DATABASE_URL":"synthetic-forbidden-value"}, "status":"BLOCKED_DATABASE_CREDENTIALS"},
+    {"name":"LINE token", "overrides":{"LINE_CHANNEL_ACCESS_TOKEN":"synthetic-forbidden-value"}, "status":"BLOCKED_LINE_CREDENTIALS"},
+    {"name":"OpenAI key", "overrides":{"OPENAI_API_KEY":"synthetic-forbidden-value"}, "status":"BLOCKED_OTHER_PROVIDER_CREDENTIALS"},
+    {"name":"empty nonproduction values are not credentials", "overrides":{"SUPABASE_SERVICE_ROLE_KEY":"","LINE_CHANNEL_SECRET":"","OPENAI_API_KEY":""}, "status":"READY"},
+    {"name":"shared database URL alone is not a credential", "overrides":{"SUPABASE_URL":"https://fixture.invalid"}, "status":"READY"}
+  ]
+}
