@@ -419,3 +419,18 @@ test('signed LINE person correction keeps the original evidence and records only
   assert.equal(h.calls.find(x=>x.path.endsWith('/financial_attach_owner_payroll_slip_v1'))?.body.p_slip_message_id,'original-line-image');
   assert.equal(h.calls.filter(x=>x.path==='/v2/bot/message/reply').length,2);
 });
+
+for (const text of ['เจิดเบิกเงินเดือน0บาท','เจิดเบิกเงินเดือนศูนย์บาท','เจิดเบิกเงินเดือน200.567บาท','เจิดเบิกเงินเดือน20,0บาท']) {
+  test('an invalid stated amount cannot silently fall back to the stored slip: '+text,async t=>{
+    assert.equal(parseOwnerStaffTurn(text),null);
+    const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})]);
+    assert.equal(await handleOwnerStaffSlipText({...input,text}),null);
+    assert.ok(!h.calls.some(x=>x.method==='POST'));
+  });
+}
+test('an additional amount is not discarded as a date or pay-period label',async t=>{
+  assert.equal(parseOwnerStaffTurn('เจิดเบิกเงินเดือน อีก500บาท')?.amount,500);
+  const h=harness(t,[slip()]);
+  await handleOwnerStaffSlipText({...input,text:'เจิดเบิกเงินเดือน อีก500บาท'});
+  assert.ok(!h.calls.some(x=>x.method==='POST'));
+});

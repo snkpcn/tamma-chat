@@ -56,16 +56,17 @@ function replacementForCorrection(text: string): string | null {
     ?? null;
 }
 
-function amountFromText(text: string): number | null {
+function amountFromText(text: string): number | 'invalid' | null {
   // Joined Thai such as "เจิดเบิก200บาท" must still participate in slip matching.
   // Dates/pay-period labels are not amounts.
   const withoutDates = text.replace(/\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}[-.]\d{1,2}[-.]\d{2,4}/gu, '')
     .replace(/วันที่\s*\d+/gu, '')
-    .replace(/(?:^|\s)(?:เดือน|ปี|อีก)\s*[\p{L}\p{M}]*\s*\d+/gu, '');
-  const amountText = withoutDates.match(/\d[\d,]*(?:\.\d{1,2})?/u)?.[0];
+    .replace(/(?:^|\s)(?:เดือน|ปี)\s*[\p{L}\p{M}]*\s*\d+/gu, '');
+  const amountText = withoutDates.match(/\d[\d,]*(?:\.\d+)?/u)?.[0];
   if (amountText) {
+    if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/u.test(amountText)) return 'invalid';
     const value = Number(amountText.replace(/,/g, ''));
-    return Number.isFinite(value) && value > 0 ? value : null;
+    return Number.isFinite(value) && value > 0 ? value : 'invalid';
   }
   const words = text.match(/((?:(?:ศูนย์|หนึ่ง|สอง|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า|เอ็ด|ยี่|สิบ|ร้อย|พัน|หมื่น|แสน|ล้าน))+)\s*บาท/u)?.[1];
   if (!words) return null;
@@ -78,7 +79,7 @@ function amountFromText(text: string): number | null {
     else { total += (pending ?? 1) * scales[word]!; pending = null; }
   }
   const value = total + (pending ?? 0);
-  return value > 0 ? value : null;
+  return value > 0 ? value : 'invalid';
 }
 
 /** Ordinary Thai around a slip. A bare "เบิก" never implies salary or purchasing. */
@@ -117,7 +118,8 @@ export function parseOwnerStaffTurn(rawText: string, priorPurpose?: string | nul
     : isSalaryPayment ? 'salary_payment'
     : (/เบิกเงินเดือน|เงินเดือนล่วงหน้า/u.test(text) || (prior && isSalaryReply)) ? 'salary_advance'
     : renamed ? 'unknown' : prior?.kind ?? 'unknown';
-  return { employeeLabel, kind, amount: amountFromText(text) };
+  const amount = amountFromText(text);
+  return amount === 'invalid' ? null : { employeeLabel, kind, amount };
 }
 
 /** Financial turns must never fill arbitrary fields of a construction draft. */
