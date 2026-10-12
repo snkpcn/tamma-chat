@@ -9,6 +9,7 @@ export type OwnerBusinessQuestion = {
   businessUnit: string | null;
   investmentTopics: string[];
   projectNameQuery: string | null;
+  groupByProject?: boolean;
 };
 
 type InvestmentItem = {
@@ -18,7 +19,7 @@ type InvestmentItem = {
   title: string;
   category: string;
   amount: number;
-  budget_amount: number;
+  budget_amount: number | null;
   payment_method: string;
   vendor_name: string | null;
   status: string;
@@ -26,7 +27,14 @@ type InvestmentItem = {
   owner_project_id: string | null;
   source_kind: 'manual' | 'slip' | 'legacy_restaurant';
   counted_in_total: boolean;
-  linked_legacy_source_id: string | null;
+  pending_confirmation: boolean;
+  amount_known: boolean;
+  source_message_id: string | null;
+  evidence_keys: string[];
+  source_channel: string | null;
+  confirmation_basis: string;
+  currency: string;
+  possible_legacy_source_ids: string[];
   reconciliation_note: string | null;
 };
 
@@ -42,6 +50,7 @@ export type InvestmentSnapshot = {
   items: InvestmentItem[];
   counted: InvestmentItem[];
   evidenceOnly: InvestmentItem[];
+  pending: InvestmentItem[];
   spent: number;
   budget: number;
   remaining: number;
@@ -145,6 +154,13 @@ async function rows<T>(path: string, schema = 'public'): Promise<T[]> {
   return await response.json() as T[];
 }
 
+async function completeInvestmentRows<T>(path: string): Promise<T[]> {
+  const result = await rows<T>(path);
+  const limit = Number(new URLSearchParams(path.split('?')[1]).get('limit'));
+  if (limit > 0 && result.length >= limit) throw new Error('Investment source reached its read limit; completeness is unknown');
+  return result;
+}
+
 function normalize(value: string): string {
   return value.trim().toLocaleLowerCase('th-TH').replace(/[?!？]+/gu, '').replace(/\s+/g, ' ');
 }
@@ -180,8 +196,12 @@ export function classifyOwnerBusinessQuestion(rawText: string): OwnerBusinessQue
     return null;
   }
 
-  const projectNameQuery = extractProjectNameQuery(text);
-  const questionSignal = /(?:เท่าไหร่|กี่บาท|เป็นไง|เปนไง|สรุป|อะไรบ้าง|รายการ|ทั้งหมด|ใช้ไป|จ่ายไป|ยอดจ่าย|จ่ายแล้ว|คงเหลือ|เหลือเท่าไหร่|งบ)/u.test(text);
+  // A request to group by projects/common costs is not a named-project filter.
+  const grouping = /(?:แยก|แบ่ง)(?:ตาม|เป็น)?\s*(?:(?:โครงการ|โปรเจกต์|โปรเจค)(?:\s*(?:และ|กับ|รวมถึง)\s*ส่วนกลาง)?|ส่วนกลาง\s*(?:และ|กับ)\s*โครงการ)/gu;
+  const groupByProject = grouping.test(text) || /(?:ภาพรวม.*ลงทุน|สรุป(?:การ)?ลงทุนทั้งหมด)/u.test(text);
+  const filterText = text.replace(grouping, '').replace(/(?:ราย|แต่ละ|ทุก)โครงการ(?:\s*(?:และ|กับ)\s*ส่วนกลาง)?/gu, '');
+  const projectNameQuery = extractProjectNameQuery(filterText);
+  const questionSignal = /(?:ภาพรวม|เท่าไหร่|กี่บาท|เป็นไง|เปนไง|สรุป|อะไรบ้าง|รายการ|ทั้งหมด|ใช้ไป|จ่ายไป|ยอดจ่าย|จ่ายแล้ว|คงเหลือ|เหลือเท่าไหร่|งบ)/u.test(text);
   const explicitInvestment = /(?:ลงทุน|เงินลงทุน|งบลงทุน|investment)/iu.test(text) && questionSignal;
   const topicInvestment = detectInvestmentTopics(text).length > 0
     && /(?:เท่าไหร่|กี่บาท|ใช้จริง|ใช้ไป|จ่ายไป|ยอดจ่าย|จ่ายแล้ว|งบ|คงเหลือ|เหลือ)/u.test(text);
@@ -199,9 +219,10 @@ export function classifyOwnerBusinessQuestion(rawText: string): OwnerBusinessQue
   return {
     investment,
     salesPeriod,
-    businessUnit: detectBusinessUnit(text),
-    investmentTopics: detectInvestmentTopics(text),
+    businessUnit: detectBusinessUnit(filterText),
+    investmentTopics: detectInvestmentTopics(filterText),
     projectNameQuery,
+    groupByProject,
   };
 }
 
@@ -216,6 +237,7 @@ function extractProjectNameQuery(text: string): string | null {
   if (!last) return null;
 
   const tail = text.slice(last.index + last[0].length);
+  if (/^(?:และ|ทั้งหมด|ต่าง\s*ๆ|แต่ละ|ทุก|ราย|บอก|ที่บันทึก)/u.test(tail.trim())) return null;
   const end = tail.search(/(?:ยอดจ่าย|จ่ายแล้ว|ยอดที่จ่าย|จ่ายไป|ใช้ไป|ใช้จริง|ยอดลงทุน|ลงทุนไป|เงินลงทุน|คงเหลือ|เหลือ|เท่าไหร่|กี่บาท|งบ|ทั้งหมด|สรุป)/u);
   if (end < 0) return null;
   const query = compactProjectName(tail.slice(0, end).replace(/^(?:ของ|คือ|ชื่อ)/u, '').trim());
@@ -228,6 +250,8 @@ export type OwnerProjectQueryCandidate = {
   name: string;
   status: string;
   budget_amount?: number | string | null;
+  confirmed_at?: string | null;
+  business_unit_code?: string | null;
 };
 
 export function matchOwnerProjectQuery(
@@ -247,24 +271,132 @@ export function matchOwnerProjectQuery(
   return { kind: 'not_found' };
 }
 
+function itemAmount(item: InvestmentItem): string {
+  return item.amount_known ? money(item.amount) : 'ยังไม่มียอดที่ยืนยัน';
+}
+
+function provenance(item: InvestmentItem): string {
+  return item.confirmation_basis;
+}
+
+function renderPending(items: InvestmentItem[], limit = 8): string[] {
+  return items.length ? [
+    `⏳ รอยืนยัน/ตรวจข้อมูล ${items.length} รายการ · ไม่รวมยอดจ่าย`,
+    ...items.slice(0, limit).map(item => `• ${item.title.slice(0, 180)} · ${itemAmount(item)} · ${provenance(item)}${item.reconciliation_note ? ' · ' + item.reconciliation_note : ''}`),
+    items.length > limit ? `และอีก ${items.length - limit} รายการรอตรวจในหลังบ้าน` : '',
+  ] : [];
+}
+
 export function renderOwnerProjectSpend(
   project: OwnerProjectQueryCandidate,
   snapshot: InvestmentSnapshot,
 ): string {
   const linked = snapshot.items.filter(item => item.owner_project_id === project.id);
   const counted = linked.filter(item => item.counted_in_total);
-  const evidence = linked.filter(item => !item.counted_in_total);
+  const pending = linked.filter(item => item.pending_confirmation);
+  const evidence = linked.filter(item => !item.counted_in_total && !item.pending_confirmation);
   const spent = counted.reduce((sum, item) => sum + item.amount, 0);
-  const budget = number(project.budget_amount);
-  const lines = [
+  const budget = knownNumber(project.budget_amount);
+  return [
     `📈 โครงการ ${project.name}`,
-    `ยอดจ่ายแล้ว: ${money(spent)}`,
-    budget > 0 ? `งบโครงการ: ${money(budget)} · เหลือตามงบ: ${money(budget - spent)}` : '',
-    counted.length ? '' : 'ยังไม่มีรายการจ่ายที่ผูกกับโครงการนี้ครับ',
-    ...counted.slice(0, 8).map(item => `• ${item.title} · ${money(item.amount)}${item.status === 'needs_review' ? ' · รอตรวจหมวด/กิจการ' : ''}`),
+    counted.length ? `ยอดจ่ายที่ยืนยันแล้ว: ${money(spent)}` : 'ยอดจ่ายที่ยืนยันแล้ว: ยังไม่มีข้อมูล',
+    budget !== null ? `งบโครงการที่บันทึก: ${money(budget)}` : 'งบโครงการ: ยังไม่มีข้อมูล',
+    ...counted.slice(0, 8).map(item => `• ${item.title} · ${money(item.amount)} · ${provenance(item)}`),
+    ...renderPending(pending),
     evidence.length ? `หลักฐานประกอบ ${evidence.length} รายการ ไม่บวกซ้ำ` : '',
-  ];
-  return lines.filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n');
+}
+
+// Unknown is deliberately distinct from an explicitly stored zero.
+function knownNumber(value: unknown): number | null {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function confirmedSlip(row: Record<string, unknown>): boolean {
+  if (row.status !== 'categorized') return false;
+  if (row.review_state === 'confirmed') return true;
+  // Old categorized rows may have been classified by a rule, not a person.
+  return row.review_state == null && ['owner', 'backoffice'].includes(String(row.classification_source));
+}
+
+function expenseEvidenceKeys(row: Record<string, unknown>): string[] {
+  const group = typeof row.owner_group_hash === 'string' ? row.owner_group_hash.trim() : '';
+  if (!group) return [];
+  return ['reference_number', 'evidence_sha256'].flatMap(field => {
+    const value = typeof row[field] === 'string' ? (row[field] as string).replace(/\s/gu, '').toLowerCase() : '';
+    return value ? [group + ':' + field + ':' + value] : [];
+  });
+}
+
+function reconcileFinancialEvidence(entries: InvestmentItem[]): void {
+  const parent = entries.map((_, index) => index);
+  const root = (index: number): number => {
+    while (parent[index] !== index) index = parent[index]!;
+    return index;
+  };
+  const byKey = new Map<string, number>();
+  entries.forEach((item, index) => {
+    const messageKey = item.source_channel && item.source_message_id
+      ? ['source_message:' + item.source_channel + ':' + item.source_message_id] : [];
+    for (const key of [...item.evidence_keys, ...messageKey]) {
+      const previous = byKey.get(key);
+      if (previous !== undefined) parent[root(index)] = root(previous);
+      else byKey.set(key, index);
+    }
+  });
+  const groups = new Map<number, InvestmentItem[]>();
+  entries.forEach((item, index) => {
+    const key = root(index);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(item);
+  });
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const ordered = [...group].sort((a, b) => Number(b.counted_in_total) - Number(a.counted_in_total)
+      || Number(b.source_kind === 'manual') - Number(a.source_kind === 'manual'));
+    const canonical = ordered[0]!;
+    const conflict = group.some(item => !item.amount_known || !canonical.amount_known || item.amount !== canonical.amount
+      || !item.occurred_on || item.occurred_on !== canonical.occurred_on
+      || !item.currency || item.currency !== canonical.currency
+      || item.owner_project_id !== canonical.owner_project_id
+      || item.business_unit_code !== canonical.business_unit_code);
+    for (const item of conflict ? group : ordered.slice(1)) {
+      item.counted_in_total = false;
+      item.pending_confirmation = conflict;
+      item.reconciliation_note = conflict
+        ? 'หลักฐานอ้างอิงเดียวกันแต่ยอด/วันที่/สกุลเงิน/การผูกโครงการไม่ครบหรือต่างกัน ต้องตรวจสอบก่อนรวมยอด'
+        : 'หลักฐาน/ข้อความต้นทางเดียวกับ ' + canonical.title + ' · ไม่บวกซ้ำ';
+    }
+  }
+}
+
+function flagUnresolvedLegacyOverlap(entries: InvestmentItem[], legacy: InvestmentItem[]): void {
+  for (const item of entries) {
+    if (!item.counted_in_total) continue;
+    // This legacy view has no coverage dates or transaction-level links. Different
+    // titles/categories cannot prove a newer payment is outside its aggregate.
+    const possible = legacy.filter(canonical => canonical.counted_in_total
+      && canonical.business_unit_code === item.business_unit_code);
+    if (!possible.length) continue;
+    item.counted_in_total = false;
+    item.pending_confirmation = true;
+    item.possible_legacy_source_ids = possible.map(canonical => canonical.id);
+    item.reconciliation_note = 'อาจรวมอยู่ในยอดบัญชีลงทุนเดิมแล้ว ต้องกระทบยอดก่อนรวมเพิ่ม';
+  }
+}
+
+function uniqueRows(rows: Array<Record<string, unknown>>, key: string): Array<Record<string, unknown>> {
+  const seen = new Set<string>();
+  return rows.filter(row => {
+    const id = String(row[key] || '');
+    if (!id) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 function number(value: unknown): number {
@@ -280,47 +412,13 @@ function itemTopics(item: Pick<InvestmentItem, 'title' | 'category'>): string[] 
   return detectInvestmentTopics(item.title + ' ' + item.category);
 }
 
-function daysBetween(a: string, b: string): number {
-  return Math.abs(new Date(a + 'T12:00:00Z').getTime() - new Date(b + 'T12:00:00Z').getTime()) / 86_400_000;
-}
-
-function reconcileLegacyEvidence(
-  slips: InvestmentItem[],
-  legacy: InvestmentItem[],
-  adjustments: InvestmentAdjustment[],
-): void {
-  const claimed = new Set<string>();
-  const legacyById = new Map(legacy.map(item => [item.id, item]));
-  const ordered = [...adjustments].sort((a, b) => a.created_at.localeCompare(b.created_at));
-  for (const adjustment of ordered) {
-    if (adjustment.source !== 'owner_instruction') continue;
-    const canonical = legacyById.get(adjustment.legacy_investment_id);
-    const delta = number(adjustment.new_actual_amount) - number(adjustment.previous_actual_amount);
-    if (!canonical || delta <= 0) continue;
-    const canonicalTopics = new Set(itemTopics(canonical));
-    const candidates = slips.filter(slip =>
-      !claimed.has(slip.id)
-      && slip.business_unit_code === canonical.business_unit_code
-      && Math.abs(slip.amount - delta) < 0.01
-      && daysBetween(slip.occurred_on, canonical.occurred_on) <= 45
-      && itemTopics(slip).some(topic => canonicalTopics.has(topic))
-    );
-    if (candidates.length !== 1) continue;
-    const evidence = candidates[0]!;
-    claimed.add(evidence.id);
-    evidence.counted_in_total = false;
-    evidence.linked_legacy_source_id = canonical.id;
-    evidence.reconciliation_note = 'ยอดนี้รวมอยู่ใน ' + canonical.title + ' ' + money(adjustment.new_actual_amount) + ' แล้ว';
-  }
-}
-
 export function buildInvestmentSnapshot(input: {
   manual: Array<Record<string, unknown>>;
   slips: Array<Record<string, unknown>>;
   legacy: Array<Record<string, unknown>>;
   adjustments: InvestmentAdjustment[];
 }): InvestmentSnapshot {
-  const manual: InvestmentItem[] = input.manual
+  const manual: InvestmentItem[] = uniqueRows(input.manual, 'id')
     .filter(row => String(row.status || '') === 'recorded')
     .map(row => ({
       id: String(row.id || ''),
@@ -329,19 +427,26 @@ export function buildInvestmentSnapshot(input: {
       title: String(row.title || 'รายการลงทุน'),
       category: String(row.category || 'other'),
       amount: number(row.amount),
-      budget_amount: 0,
+      budget_amount: null,
       payment_method: String(row.payment_method || 'other'),
       vendor_name: typeof row.vendor_name === 'string' ? row.vendor_name : null,
       status: String(row.status || ''),
       created_at: String(row.created_at || ''),
       owner_project_id: typeof row.owner_project_id === 'string' ? row.owner_project_id : null,
       source_kind: 'manual',
-      counted_in_total: true,
-      linked_legacy_source_id: null,
+      counted_in_total: knownNumber(row.amount) !== null,
+      pending_confirmation: knownNumber(row.amount) === null,
+      amount_known: knownNumber(row.amount) !== null,
+      source_message_id: typeof row.source_message_id === 'string' ? row.source_message_id : null,
+      evidence_keys: [],
+      source_channel: typeof row.source_channel === 'string' ? row.source_channel : null,
+      currency: 'THB',
+      confirmation_basis: 'บัญชีลงทุน · สถานะ recorded',
+      possible_legacy_source_ids: [],
       reconciliation_note: null,
     }));
-  const slips: InvestmentItem[] = input.slips
-    .filter(row => row.amount !== null && row.amount !== undefined && String(row.status || '') !== 'cancelled')
+  const slips: InvestmentItem[] = uniqueRows(input.slips, 'id')
+    .filter(row => row.status !== 'cancelled' && row.review_state !== 'cancelled')
     .map(row => ({
       id: String(row.id || ''),
       occurred_on: String(row.occurred_on || ''),
@@ -349,44 +454,67 @@ export function buildInvestmentSnapshot(input: {
       title: String(row.purpose_raw || 'สลิปลงทุนรอระบุ'),
       category: String(row.expense_category || 'other'),
       amount: number(row.amount),
-      budget_amount: 0,
+      budget_amount: null,
       payment_method: 'transfer',
       vendor_name: typeof row.vendor_label === 'string' ? row.vendor_label : null,
       status: String(row.status || ''),
       created_at: String(row.created_at || ''),
       owner_project_id: typeof row.owner_project_id === 'string' ? row.owner_project_id : null,
       source_kind: 'slip',
-      counted_in_total: true,
-      linked_legacy_source_id: null,
+      counted_in_total: confirmedSlip(row) && knownNumber(row.amount) !== null,
+      pending_confirmation: !confirmedSlip(row) || knownNumber(row.amount) === null,
+      amount_known: knownNumber(row.amount) !== null,
+      source_message_id: typeof row.evidence_message_id === 'string' ? row.evidence_message_id : null,
+      evidence_keys: expenseEvidenceKeys(row),
+      source_channel: typeof row.source_channel === 'string' ? row.source_channel : null,
+      currency: typeof row.currency === 'string' ? row.currency : '',
+      confirmation_basis: row.review_state === 'confirmed' ? 'หลักฐานรายจ่าย · ยืนยันสรุปแล้ว'
+        : row.review_state == null && ['owner', 'backoffice'].includes(String(row.classification_source))
+          ? 'หลักฐานรายจ่ายเดิม · จัดหมวดโดย ' + String(row.classification_source) : 'หลักฐานรายจ่าย · ยังไม่พบการยืนยัน',
+      possible_legacy_source_ids: [],
       reconciliation_note: null,
     }));
-  const legacy: InvestmentItem[] = input.legacy.map(row => ({
+  const legacy: InvestmentItem[] = uniqueRows(input.legacy, 'source_id').filter(row => !['cancelled', 'ยกเลิก'].includes(String(row.status))).map(row => ({
     id: String(row.source_id || ''),
     occurred_on: String(row.occurred_on || ''),
     business_unit_code: String(row.business_unit_code || 'other'),
     title: String(row.title || 'ข้อมูลลงทุนเดิม'),
     category: String(row.category || 'other'),
     amount: number(row.amount),
-    budget_amount: number(row.budget_amount),
+    budget_amount: knownNumber(row.budget_amount),
     payment_method: String(row.payment_method || 'other'),
     vendor_name: typeof row.vendor_name === 'string' ? row.vendor_name : null,
     status: String(row.status || ''),
     created_at: String(row.created_at || ''),
     owner_project_id: typeof row.owner_project_id === 'string' ? row.owner_project_id : null,
     source_kind: 'legacy_restaurant',
-    counted_in_total: true,
-    linked_legacy_source_id: null,
+    counted_in_total: row.status === 'ชำระแล้ว' && knownNumber(row.amount) !== null,
+    pending_confirmation: row.status !== 'ชำระแล้ว' || knownNumber(row.amount) === null,
+    amount_known: knownNumber(row.amount) !== null,
+    source_message_id: null,
+    evidence_keys: [],
+    source_channel: null,
+    currency: 'THB',
+    confirmation_basis: 'บัญชีลงทุนเดิม · สถานะ ' + String(row.status || 'ยังไม่มี'),
+    possible_legacy_source_ids: [],
     reconciliation_note: null,
   }));
 
-  reconcileLegacyEvidence(slips, legacy, input.adjustments);
+  // Reconcile every identity alias in one graph. A bank-reference duplicate can
+  // be linked to the ledger by either slip's source message, including aliases
+  // that are not the first row. Conflicts quarantine the entire component.
+  reconcileFinancialEvidence([...manual, ...slips]);
+  // Legacy adjustment audits do not identify a slip. Amount/topic/date similarity
+  // cannot prove that evidence is already included in an aggregate.
+  flagUnresolvedLegacyOverlap([...manual, ...slips], legacy);
   const items = [...manual, ...slips, ...legacy]
     .sort((a, b) => (b.occurred_on + b.created_at).localeCompare(a.occurred_on + a.created_at));
   const counted = items.filter(item => item.counted_in_total);
-  const evidenceOnly = items.filter(item => !item.counted_in_total);
+  const evidenceOnly = items.filter(item => !item.counted_in_total && !item.pending_confirmation);
+  const pending = items.filter(item => item.pending_confirmation);
   const spent = counted.reduce((sum, item) => sum + item.amount, 0);
-  const budget = counted.reduce((sum, item) => sum + item.budget_amount, 0);
-  return { items, counted, evidenceOnly, spent, budget, remaining: budget - spent };
+  const budget = counted.reduce((sum, item) => sum + (item.budget_amount ?? 0), 0);
+  return { items, counted, evidenceOnly, pending, spent, budget, remaining: budget - spent };
 }
 
 function matchesInvestment(item: InvestmentItem, intent: OwnerBusinessQuestion): boolean {
@@ -402,65 +530,156 @@ function selectInvestmentSnapshot(snapshot: InvestmentSnapshot, intent: OwnerBus
   const canonicalIds = new Set(direct.filter(item => item.counted_in_total).map(item => item.id));
   const items = snapshot.items.filter(item =>
     direct.includes(item)
-    || (!item.counted_in_total && item.linked_legacy_source_id !== null && canonicalIds.has(item.linked_legacy_source_id))
+    || (item.pending_confirmation && item.possible_legacy_source_ids.some(id => canonicalIds.has(id)))
   );
   const counted = items.filter(item => item.counted_in_total);
-  const evidenceOnly = items.filter(item => !item.counted_in_total);
+  const evidenceOnly = items.filter(item => !item.counted_in_total && !item.pending_confirmation);
+  const pending = items.filter(item => item.pending_confirmation);
   const spent = counted.reduce((sum, item) => sum + item.amount, 0);
-  const budget = counted.reduce((sum, item) => sum + item.budget_amount, 0);
-  return { items, counted, evidenceOnly, spent, budget, remaining: budget - spent };
+  const budget = counted.reduce((sum, item) => sum + (item.budget_amount ?? 0), 0);
+  return { items, counted, evidenceOnly, pending, spent, budget, remaining: budget - spent };
 }
 
 export function renderInvestmentSnapshot(snapshot: InvestmentSnapshot, intent: OwnerBusinessQuestion): string {
   const selected = selectInvestmentSnapshot(snapshot, intent);
-  if (!selected.counted.length) {
-    return '📈 การลงทุน — ยังไม่พบรายการที่ตรงกับคำถามในข้อมูลหลังบ้านครับ';
+  const completeBudget = selected.counted.length > 0 && selected.counted.every(item => item.budget_amount !== null);
+  return [
+    '📈 สรุปการลงทุน · ตามข้อมูลที่บันทึก',
+    selected.counted.length ? 'ยอดจ่ายที่ยืนยันแล้ว: ' + money(selected.spent) : 'ยอดจ่ายที่ยืนยันแล้ว: ยังไม่มีข้อมูล',
+    completeBudget ? 'งบที่บันทึก: ' + money(selected.budget) + ' · เหลือตามงบ: ' + money(selected.remaining)
+      : 'งบรวม: ยังไม่มีข้อมูลครบ',
+    ...selected.counted.slice(0, 8).map(item => '• ' + item.title + ' · '
+      + (BUSINESS_LABELS[item.business_unit_code] || item.business_unit_code) + ' · ' + money(item.amount) + ' · ' + provenance(item)),
+    selected.counted.length > 8 ? 'และอีก ' + (selected.counted.length - 8) + ' รายการในหลังบ้าน' : '',
+    ...renderPending(selected.pending),
+    ...renderEvidence(selected.evidenceOnly),
+    'ยอดนี้เฉพาะรายการที่ยืนยันแล้วและข้อมูลเดิมที่ระบุชำระแล้ว ไม่ใช่ยอดลงทุนทั้งหมดหากข้อมูลยังไม่ครบ',
+  ].filter(Boolean).join('\n');
+}
+
+function renderEvidence(items: InvestmentItem[]): string[] {
+  return items.length ? [
+    `🔎 หลักฐานประกอบ ${items.length} รายการ — ไม่บวกยอดซ้ำ`,
+    ...items.slice(0, 3).map(item => `• ${item.title.slice(0, 180)} · ${itemAmount(item)} · ${item.reconciliation_note || 'รวมในยอดหลักแล้ว'}`),
+  ] : [];
+}
+
+export type OwnerInvestmentInstallment = {
+  id: string;
+  project_id: string;
+  title: string;
+  amount: number | string | null;
+  paid_amount: number | string | null;
+  due_on: string | null;
+  status: string;
+};
+
+function installmentBalance(item: OwnerInvestmentInstallment): number | null {
+  const amount = knownNumber(item.amount);
+  const paid = knownNumber(item.paid_amount);
+  return amount !== null && paid !== null && paid <= amount ? amount - paid : null;
+}
+
+export function renderInvestmentOverview(
+  snapshot: InvestmentSnapshot,
+  intent: OwnerBusinessQuestion,
+  projects: OwnerProjectQueryCandidate[],
+  installments: OwnerInvestmentInstallment[],
+): string {
+  const selected = selectInvestmentSnapshot(snapshot, intent);
+  const projectById = new Map(projects.map(project => [project.id, project]));
+  const groups = new Map<string, { title: string; project?: OwnerProjectQueryCandidate; items: InvestmentItem[] }>();
+  for (const item of selected.items) {
+    const project = item.owner_project_id ? projectById.get(item.owner_project_id) : undefined;
+    const key = item.owner_project_id ? 'project:' + item.owner_project_id : 'business:' + item.business_unit_code;
+    const title = project ? 'โครงการ ' + project.name : item.owner_project_id ? 'โครงการที่ยังไม่มีรายละเอียด'
+      : (BUSINESS_LABELS[item.business_unit_code] || item.business_unit_code) + ' · ยังไม่ผูกโครงการ';
+    if (!groups.has(key)) groups.set(key, { title, project, items: [] });
+    groups.get(key)!.items.push(item);
+  }
+  // Include confirmed plans even before a payment exists. Never infer spending = zero.
+  for (const project of projects) {
+    if (intent.businessUnit && project.business_unit_code !== intent.businessUnit) continue;
+    if (intent.investmentTopics.length || !project.confirmed_at) continue;
+    const key = 'project:' + project.id;
+    if (!groups.has(key)) groups.set(key, { title: 'โครงการ ' + project.name, project, items: [] });
   }
   const lines = [
-    '📈 สรุปการลงทุน · ข้อมูลที่บันทึกในหลังบ้าน',
-    'ใช้จริงรวม: ' + money(selected.spent),
-    selected.budget > 0 ? 'งบที่บันทึก: ' + money(selected.budget) + ' · คงเหลือตามงบ: ' + money(selected.remaining) : '',
-    '',
-    ...selected.counted.slice(0, 8).map(item => {
-      const budget = item.budget_amount > 0 ? ' / งบ ' + money(item.budget_amount) : '';
-      return '• ' + item.title + ' · ' + (BUSINESS_LABELS[item.business_unit_code] || item.business_unit_code) + ' · ใช้จริง ' + money(item.amount) + budget;
-    }),
-    selected.counted.length > 8 ? '• และอีก ' + (selected.counted.length - 8) + ' รายการในหลังบ้าน' : '',
-    selected.evidenceOnly.length
-      ? '🔎 หลักฐานประกอบ ' + selected.evidenceOnly.length + ' รายการ รวม ' + money(selected.evidenceOnly.reduce((sum, item) => sum + item.amount, 0)) + ' — ไม่บวกยอดซ้ำ'
-      : '',
-    ...selected.evidenceOnly.slice(0, 3).map(item => '• ' + item.title + ' ' + money(item.amount) + ' · ' + (item.reconciliation_note || 'รวมในยอดหลักแล้ว')),
-    '',
-    'ข้อมูลเดิมยังอยู่ครบ และยอดหลักไม่รวมหลักฐานซ้ำครับ',
+    '📈 ภาพรวมการลงทุน · แยกตามโครงการและกิจการ',
+    selected.counted.length ? `ยอดจ่ายที่ยืนยันแล้ว: ${money(selected.spent)}` : 'ยอดจ่ายที่ยืนยันแล้ว: ยังไม่มีข้อมูล',
+    'ยอดนี้เฉพาะข้อมูลที่ยืนยัน/ระบุชำระแล้ว ไม่รวมรายการรอตรวจ',
+    'งบรวมทุกโครงการ: ยังไม่มีข้อมูลครบและไม่รวมงบต่างแหล่งซ้ำ',
+    selected.pending.length ? `ยังยืนยันยอดลงทุนทั้งหมดไม่ได้ มีรายการรอตรวจ/กระทบยอดรวม ${selected.pending.length} รายการ` : '',
   ];
-  return lines.filter((line, index, all) => line !== '' || (index > 0 && all[index - 1] !== '')).join('\n').trim();
+  let shownGroups = 0;
+  let detailCharacters = 0;
+  for (const group of groups.values()) {
+    const counted = group.items.filter(item => item.counted_in_total);
+    const pending = group.items.filter(item => item.pending_confirmation);
+    const spent = counted.reduce((sum, item) => sum + item.amount, 0);
+    const projectBudget = group.project?.confirmed_at ? knownNumber(group.project.budget_amount) : null;
+    const legacyBudgets = group.items.filter(item => item.source_kind === 'legacy_restaurant' && item.budget_amount !== null);
+    const budgetLabel = projectBudget !== null ? `งบโครงการที่ยืนยัน: ${money(projectBudget)}`
+      : !group.project && legacyBudgets.length ? `งบที่บันทึกเฉพาะรายการเดิม: ${money(legacyBudgets.reduce((sum, item) => sum + item.budget_amount!, 0))} · ยังไม่ใช่งบรวม`
+        : 'งบที่ยืนยัน: ยังไม่มีข้อมูล';
+    const plan = group.project?.confirmed_at ? installments.filter(item => item.project_id === group.project!.id && item.status !== 'cancelled') : [];
+    const unpaid = plan.filter(item => item.status !== 'paid');
+    const balances = unpaid.map(installmentBalance);
+    const planConsistent = plan.every(item => {
+      const balance = installmentBalance(item);
+      return balance !== null && ['planned', 'due', 'paid'].includes(item.status)
+        && (item.status !== 'paid' || balance === 0);
+    });
+    const balanceKnown = plan.length > 0 && planConsistent;
+    const dated = unpaid.filter(item => item.due_on).sort((a, b) => a.due_on!.localeCompare(b.due_on!));
+    const next = dated[0];
+    const detail = [group.title,
+      budgetLabel,
+      counted.length ? `จ่ายที่ยืนยันแล้ว: ${money(spent)}` : 'จ่ายที่ยืนยันแล้ว: ยังไม่มีข้อมูล',
+      balanceKnown ? `ยอดคงค้างตามงวดที่บันทึก: ${money(balances.reduce<number>((sum, amount) => sum + amount!, 0))}`
+        : 'ยอดคงค้างตามงวด: ยังไม่มีข้อมูลครบ',
+      plan.length && !planConsistent ? 'ข้อมูลยอด/สถานะงวดยังไม่ครบหรือต่างกัน ต้องกระทบยอดก่อนสรุปค้างจ่าย' : '',
+      next ? `งวดที่ยังไม่ปิดและครบกำหนดก่อน: ${next.title} · ${next.due_on}` : 'กำหนดงวดถัดไป: ยังไม่มีข้อมูล',
+      unpaid.some(item => !item.due_on) ? 'มีงวดที่ยังไม่ระบุวันครบกำหนด จึงยืนยันลำดับงวดถัดไปไม่ได้' : '',
+      ...counted.slice(0, 5).map(item => `• ${item.title.slice(0, 180)} · ${money(item.amount)} · ${provenance(item)}`),
+      counted.length > 5 ? `และอีก ${counted.length - 5} รายการในกลุ่มนี้` : '',
+      ...renderPending(pending, 3)].filter(Boolean).join('\n');
+    if (shownGroups < 12 && detailCharacters + detail.length <= 12000) {
+      lines.push(detail);
+      detailCharacters += detail.length;
+      shownGroups += 1;
+    }
+  }
+  if (shownGroups < groups.size) lines.push(`ยังไม่ได้แสดงรายละเอียดอีก ${groups.size - shownGroups} กลุ่ม ถามชื่อโครงการหรือกิจการเพื่อดูรายละเอียดได้ ยอดด้านบนรวมทุกกลุ่มที่ผ่านการตรวจแล้ว`);
+  if (!groups.size) lines.push('ยังไม่มีข้อมูลโครงการหรือรายการลงทุนที่ตรงกับคำถาม');
+  lines.push(...renderEvidence(selected.evidenceOnly),
+    'งบคงเหลือไม่ใช่ยอดค้างจ่าย และยอดตามงวดอาจไม่ครอบคลุมหนี้ทั้งหมด',
+    'รายการที่ยังไม่ผูกโครงการแสดงตามกิจการเดิม ไม่เดาว่าเป็นส่วนกลาง');
+  return lines.filter(Boolean).join('\n');
 }
 
 async function loadInvestmentSnapshot(includeAllProjectLinkedExpenses = false): Promise<InvestmentSnapshot> {
   const expenseFilter = includeAllProjectLinkedExpenses
     ? 'status=neq.cancelled&'
-    : 'expense_class=eq.capital_investment&status=neq.cancelled&';
-  const [manual, slips, legacy, adjustments] = await Promise.all([
-    rows<Record<string, unknown>>(
-      'financial_investment_entries?status=eq.recorded&select=id,occurred_on,business_unit_code,title,category,amount,payment_method,vendor_name,notes,status,created_at,owner_project_id&order=occurred_on.desc&limit=1000'
+    : 'or=(expense_class.eq.capital_investment,review_state.eq.draft)&status=neq.cancelled&';
+  const [manual, slips, legacy] = await Promise.all([
+    completeInvestmentRows<Record<string, unknown>>(
+      'financial_investment_entries?status=eq.recorded&select=id,occurred_on,business_unit_code,title,category,amount,payment_method,vendor_name,notes,status,created_at,owner_project_id,source_channel,source_message_id&order=occurred_on.desc&limit=1000'
     ),
-    rows<Record<string, unknown>>(
+    completeInvestmentRows<Record<string, unknown>>(
       'financial_owner_expense_intakes?' + expenseFilter
-      + 'select=id,occurred_on,business_unit_code,purpose_raw,expense_category,amount,vendor_label,status,created_at,owner_project_id&order=occurred_on.desc&limit=1000'
+      + 'select=id,occurred_on,business_unit_code,purpose_raw,expense_category,amount,vendor_label,status,review_state,classification_source,created_at,owner_project_id,source_channel,evidence_message_id,owner_group_hash,reference_number,evidence_sha256,currency&order=occurred_on.desc&limit=1000'
     ),
-    rows<Record<string, unknown>>(
+    completeInvestmentRows<Record<string, unknown>>(
       'financial_investment_legacy_v1?select=source_id,occurred_on,business_unit_code,title,category,amount,budget_amount,payment_method,vendor_name,notes,status,created_at,source_kind&order=occurred_on.desc&limit=1000'
     ),
-    rows<InvestmentAdjustment>(
-      'financial_investment_legacy_adjustment_audit_events?select=legacy_investment_id,source,previous_actual_amount,new_actual_amount,created_at&order=created_at.asc&limit=1000'
-    ),
   ]);
-  return buildInvestmentSnapshot({ manual, slips, legacy, adjustments });
+  return buildInvestmentSnapshot({ manual, slips, legacy, adjustments: [] });
 }
 
 async function loadOwnerProjects(): Promise<OwnerProjectQueryCandidate[]> {
-  return rows<OwnerProjectQueryCandidate>(
-    'owner_projects?status=neq.cancelled&select=id,name,status,budget_amount&order=updated_at.desc&limit=500',
+  return completeInvestmentRows<OwnerProjectQueryCandidate>(
+    'owner_projects?status=neq.cancelled&select=id,name,status,budget_amount,confirmed_at,business_unit_code&order=updated_at.desc&limit=500',
   );
 }
 
@@ -662,6 +881,12 @@ export async function handleOwnerBusinessQuestion(input: {
         } else {
           replies.push(`ยังไม่พบโครงการชื่อ “${intent.projectNameQuery}” ในหลังบ้านครับ ช่วยบอกชื่อโครงการให้ตรงอีกครั้งครับ`);
         }
+      } else if (intent.groupByProject) {
+        const [projects, installments] = await Promise.all([
+          loadOwnerProjects(),
+          completeInvestmentRows<OwnerInvestmentInstallment>('owner_project_installments?status=neq.cancelled&select=id,project_id,title,amount,paid_amount,due_on,status&order=due_on.asc.nullslast&limit=1000'),
+        ]);
+        replies.push(renderInvestmentOverview(snapshot, intent, projects, installments));
       } else {
         replies.push(renderInvestmentSnapshot(snapshot, intent));
       }
