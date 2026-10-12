@@ -39,7 +39,7 @@ test('owner questions understand natural investment and sales wording without st
   );
 });
 
-test('Owner asks project spend by a unique short project name and only linked rows are included', () => {
+test('Owner asks project spend by a unique short project name and only linked confirmed rows contribute to paid totals', () => {
   const intent = classifyOwnerBusinessQuestion('โครงการไม้ยอดจ่ายเท่าไหร่');
   assert.equal(intent?.investment, true);
   assert.equal(intent?.projectNameQuery, 'ไม้');
@@ -63,11 +63,11 @@ test('Owner asks project spend by a unique short project name and only linked ro
   });
   const answer = renderOwnerProjectSpend(match.project, snapshot);
   assert.match(answer, /โครงการ เฉลียงไม้/u);
-  assert.match(answer, /ยอดจ่ายแล้ว: 1,000 บาท/u);
-  assert.match(answer, /งบโครงการ: 10,000 บาท · เหลือตามงบ: 9,000 บาท/u);
+  assert.match(answer, /ยอดจ่ายที่ยืนยันแล้ว: ยังไม่มีข้อมูล/u);
+  assert.match(answer, /งบโครงการที่บันทึก: 10,000 บาท/u);
   assert.doesNotMatch(answer, /ค่าปรับปรุง/u);
   assert.doesNotMatch(answer, /100,000/u);
-  assert.match(answer, /รอตรวจหมวด\/กิจการ/u);
+  assert.match(answer, /รอยืนยัน\/ตรวจข้อมูล 1 รายการ · ไม่รวมยอดจ่าย/u);
 });
 
 test('short project query asks for the full name when more than one active project matches', () => {
@@ -105,8 +105,9 @@ test('Owner LINE project spend question reads the linked Production-shaped expen
   try {
     const reply = await handleOwnerBusinessQuestion({ targetId: 'Cowner-project-spend-test', text: 'โครงการไม้ยอดจ่ายเท่าไหร่' });
     assert.match(reply ?? '', /โครงการ เฉลียงไม้/u);
-    assert.match(reply ?? '', /ยอดจ่ายแล้ว: 1,000 บาท/u);
-    assert.match(reply ?? '', /จ่ายค่าแปรรูปไม้ ของโครงการเฉลียงไม้ · 1,000 บาท · รอตรวจหมวด\/กิจการ/u);
+    assert.match(reply ?? '', /ยอดจ่ายที่ยืนยันแล้ว: ยังไม่มีข้อมูล/u);
+    assert.match(reply ?? '', /จ่ายค่าแปรรูปไม้ ของโครงการเฉลียงไม้ · 1,000 บาท · หลักฐานรายจ่าย/u);
+    assert.match(reply ?? '', /ไม่รวมยอดจ่าย/u);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.SUPABASE_URL;
@@ -116,7 +117,7 @@ test('Owner LINE project spend question reads the linked Production-shaped expen
   }
 });
 
-test('canonical investment answer keeps kitchen actual at 100,000 and treats the 50,000 slip as evidence', () => {
+test('legacy audit delta is not slip identity: kitchen keeps 100,000 and 50,000 awaits reconciliation', () => {
   const snapshot = buildInvestmentSnapshot({
     manual: [],
     legacy: [{
@@ -139,6 +140,7 @@ test('canonical investment answer keeps kitchen actual at 100,000 and treats the
       expense_category: 'construction',
       amount: '50000.00',
       status: 'categorized',
+      review_state: 'confirmed',
       created_at: '2026-10-05T07:59:11.783061Z',
     }],
     adjustments: [{
@@ -154,17 +156,19 @@ test('canonical investment answer keeps kitchen actual at 100,000 and treats the
   assert.equal(snapshot.budget, 300_000);
   assert.equal(snapshot.remaining, 200_000);
   assert.equal(snapshot.counted.length, 1);
-  assert.equal(snapshot.evidenceOnly.length, 1);
-  assert.equal(snapshot.evidenceOnly[0]?.amount, 50_000);
-  assert.equal(snapshot.evidenceOnly[0]?.counted_in_total, false);
+  assert.equal(snapshot.evidenceOnly.length, 0);
+  assert.equal(snapshot.pending.length, 1);
+  assert.equal(snapshot.pending[0]?.amount, 50_000);
+  assert.equal(snapshot.pending[0]?.counted_in_total, false);
 
   const intent = classifyOwnerBusinessQuestion('ก่อสร้างครัวลงทุนไปเท่าไหร่แล้ว');
   assert.ok(intent);
   const answer = renderInvestmentSnapshot(snapshot, intent);
-  assert.match(answer, /ใช้จริงรวม: 100,000 บาท/u);
-  assert.match(answer, /งบที่บันทึก: 300,000 บาท · คงเหลือตามงบ: 200,000 บาท/u);
-  assert.match(answer, /หลักฐานประกอบ 1 รายการ รวม 50,000 บาท — ไม่บวกยอดซ้ำ/u);
-  assert.doesNotMatch(answer, /ใช้จริงรวม: 150,000 บาท/u);
+  assert.match(answer, /ยอดจ่ายที่ยืนยันแล้ว: 100,000 บาท/u);
+  assert.match(answer, /งบที่บันทึก: 300,000 บาท · เหลือตามงบ: 200,000 บาท/u);
+  assert.match(answer, /ต้องกระทบยอดก่อนรวมเพิ่ม/u);
+  assert.doesNotMatch(answer, /ยอดนี้รวมอยู่ใน/u);
+  assert.doesNotMatch(answer, /ยอดจ่ายที่ยืนยันแล้ว: 150,000 บาท/u);
 });
 
 test('today sales answer covers all five businesses and labels draft or missing source records honestly', () => {
