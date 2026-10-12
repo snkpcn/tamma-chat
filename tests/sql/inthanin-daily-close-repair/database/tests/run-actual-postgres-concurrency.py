@@ -40,6 +40,8 @@ def main():
  sql=(HERE/'actual-schema-fixture.sql').read_text().replace('create role anon;create role authenticated;create role service_role bypassrls;','')
  setup=subprocess.run(command+['-v','ON_ERROR_STOP=1'],input=sql,capture_output=True,text=True,timeout=60)
  if setup.returncode:raise SystemExit('Fixture setup failed: '+setup.stderr)
+ if scalar("select count(*) from pg_class where relnamespace='public'::regnamespace and relname in ('financial_daily_close_effective_v1','financial_expense_claim_summary','financial_daily_expense_rollup') and reloptions @> array['security_invoker=true']")!='3':raise SystemExit('Fixture requires all three invoker views.')
+ if scalar("select bool_and(has_table_privilege('service_role',oid,'SELECT') and not has_table_privilege('anon',oid,'SELECT') and not has_table_privilege('authenticated',oid,'SELECT')) from pg_class where relnamespace='public'::regnamespace and relname in ('financial_expense_claim_summary','financial_daily_expense_rollup')")!='t':raise SystemExit('Fixture requires service-only summary view reads.')
  observer=Session(command);results=[];locks=[]
  def revision(id=A):return int(observer.scalar(f"select revision from financial_daily_closes where id='{id}'"))
  def reset():
@@ -62,6 +64,7 @@ def main():
   x=y=None;start=len(locks)
   try:
    reset();x=Session(command);y=Session(command)
+   x.ok('set role service_role');y.ok('set role service_role')
    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:fn(x,y,pool)
    results.append({'name':name,'passed':True,'observedLocks':locks[start:]});print('PASS '+name,flush=True)
   except Exception as e:results.append({'name':name,'passed':False,'error':str(e),'observedLocks':locks[start:]});print('FAIL '+name+': '+str(e),flush=True)
@@ -158,7 +161,7 @@ def main():
   x.ok('commit' if xr['sqlstate']=='00000' else 'rollback');y.ok('commit' if yr['sqlstate']=='00000' else 'rollback')
   assert observer.scalar("select count(*) from financial_daily_ledger_entries where source_message_id like 'synthetic-deadlock-%'")=='1';assert revision(A)+revision(B)==ar+br+1
  race('opposite externally held parent locks safely abort one entire deadlocked transaction',deadlock)
- observer.close();(HERE/'actual-postgres-concurrency-results.json').write_text(json.dumps({'sources':json.loads((HERE/'actual-schema-sources.json').read_text()),'results':results},indent=2)+'\n')
+ observer.close();(HERE/'actual-postgres-concurrency-results.json').write_text(json.dumps({'writerRole':'service_role','viewSecurity':'security_invoker with service-only summary reads','sources':json.loads((HERE/'actual-schema-sources.json').read_text()),'results':results},indent=2)+'\n')
  print(f"{sum(r['passed'] for r in results)}/{len(results)} passed")
  if not all(r['passed'] for r in results):raise SystemExit(1)
 if __name__=='__main__':main()

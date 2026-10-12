@@ -21,6 +21,7 @@ export function buildActualFixture(){
  for(const name of ['financial_reconcile_daily_close_v1','financial_confirm_inthanin_live_daily_close_v1','financial_ingest_inthanin_live_text_v1','financial_record_cash_sweep_live_v1','financial_dedupe_transfer_followup_expenses_v1'])add(path.join(root,'deployment-preflight',name+'.sql'));
  add(path.join(root,'deployment-preflight/remote-wrapper.sql'));
  for(const name of ['guard-repair','financial_attach_inthanin_live_evidence_v1','financial_rematch_inthanin_live_day_evidence_v1','save-draft'])add(path.join(root,'database',name+'.sql'));
+ add(path.join(here,'fixture-security.sql'));
  const sql=prefix+entries.map(e=>'\n-- SOURCE '+e.path+'\n'+e.sql+'\n;\n').join('');
  return {sql,entries:entries.map(({sql,...e})=>e)};
 }

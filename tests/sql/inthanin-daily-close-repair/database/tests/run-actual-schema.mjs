@@ -23,6 +23,24 @@ const save=async(d,patch,rev=d.revision,env=d.environment,date=d.local_date)=>rp
 const test=async(name,fn)=>{await db.exec('begin');try{await fn();results.push({name,passed:true});console.log('PASS '+name);}catch(e){results.push({name,passed:false,error:e.message});console.error('FAIL '+name+': '+e.message);}finally{await db.exec('rollback');}};
 try{
  await db.exec(fixture.sql);branch=(await one("select id from operations_business_branches where code='inthanin_tadtone'")).id;
+ await test('all three read views use invoker security and summary views remain service-only',async()=>{
+  const views=await q("select relname,reloptions,has_table_privilege('anon',oid,'SELECT') anon,has_table_privilege('authenticated',oid,'SELECT') authenticated,has_table_privilege('service_role',oid,'SELECT') service from pg_class where relnamespace='public'::regnamespace and relname=any($1) order by relname",[['financial_daily_close_effective_v1','financial_expense_claim_summary','financial_daily_expense_rollup']]);
+  assert.equal(views.length,3);
+  for(const v of views){assert.ok(v.reloptions.includes('security_invoker=true'));assert.equal(v.service,true);if(v.relname!=='financial_daily_close_effective_v1'){assert.equal(v.anon,false);assert.equal(v.authenticated,false);}}
+ });
+ for(const role of ['anon','authenticated'])await test(role+' cannot read service-only financial views',async()=>{
+  await day();await db.exec('savepoint view_access;set local role '+role);
+  await assert.rejects(db.query('select count(*) from financial_expense_claim_summary'),/permission denied/);
+  await db.exec('rollback to savepoint view_access;set local role '+role);
+  await assert.rejects(db.query('select count(*) from financial_daily_expense_rollup'),/permission denied/);
+ });
+ await test('service role reads invoker views and executes the actual confirmation wrapper',async()=>{
+  const d=await day();await db.exec('set local role service_role');
+  assert.equal((await one('select count(*)::int n from financial_daily_close_effective_v1')).n,1);
+  assert.equal((await one('select count(*)::int n from financial_daily_expense_rollup')).n,1);
+  assert.equal((await one('select count(*)::int n from financial_expense_claim_summary')).n,0);
+  assert.equal((await confirm(d)).confirmed,true);
+ });
  await test('actual generated-column parent no-op and timestamp-only edits preserve revision',async()=>{const d=await day();await db.query('update financial_daily_closes set gross_sales=gross_sales,updated_at=now() where id=$1',[d.id]);assert.equal(await revision(d.id),d.revision);});
  await test('actual parent financial edit advances revision and stale wrapper cannot confirm',async()=>{const d=await day();await db.query('update financial_daily_closes set notes=$2 where id=$1',[d.id,'Synthetic correction']);assert.equal(await revision(d.id),d.revision+1);assert.equal((await confirm(d)).reason,'stale_revision');});
  await test('actual reconciliation, confirmation and replay run without canonical stubs',async()=>{const d=await day();assert.equal((await confirm(d)).confirmed,true);assert.equal((await confirm(d)).reason,'stale_revision');const r=await rpc('financial_confirm_inthanin_live_daily_close_v1',[d.id,actor,'line']);assert.equal(r.already_confirmed,true);});
