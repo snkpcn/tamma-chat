@@ -5,12 +5,14 @@ export type AdvanceEmployee = {
   full_name: string; nickname?: string | null; business_unit_code: string | null;
   role_label?: string | null; month_paid_advance?: number | string;
 };
+export type AdvanceAliasInference = {employee_id:string; normalized_alias:string; approval_ref:string; profile_revision:number};
 export type AdvanceProposal = {
   kind: 'employee_advance'; event_type: 'unknown' | 'salary_advance';
   employee_query: string; employee_id: string | null; business_unit_code: string | null;
   funding_source: string; amount: number | null; occurred_on: string | null;
   purpose: string; questions: string[]; monthly_sum_before: number | null;
   employee?: AdvanceEmployee | null;
+  alias_inference?: AdvanceAliasInference | null;
 };
 export type AdvanceCardInput = {
   id: string; revision: number; proposal: AdvanceProposal;
@@ -21,7 +23,7 @@ export type AdvanceCardInput = {
 
 export const ADVANCE_PREFIX = 'owner-advance:';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const ACTIONS = ['employee', 'salary', 'funding', 'show_employee', 'show_funding', 'review', 'page', 'confirm', 'cancel', 'later'] as const;
+const ACTIONS = ['employee', 'salary', 'purchase', 'funding', 'show_employee', 'show_funding', 'review', 'page', 'confirm', 'cancel', 'later'] as const;
 type AdvanceAction = {id: string; revision: number; action: typeof ACTIONS[number]; value?: string};
 const SOURCES: Record<string, string> = {unknown:'ยังไม่ระบุ',business_account:'บัญชีกิจการ',owner_personal:'เงินส่วนตัวเจ้าของ',cash:'เงินสด',other:'แหล่งอื่น'};
 const BUSINESSES: Record<string, string> = {inthanin:'Inthanin',tamma_restaurant:'ตำมา-ชาติ',huenstay:'เฮือนสเตย์',adventure:'ผจญภัย',otop:'OTOP',shared_infrastructure:'ส่วนกลาง / โครงสร้างพื้นฐาน',shared:'ส่วนกลาง / ใช้ร่วม'};
@@ -84,16 +86,19 @@ export function buildOwnerEmployeeAdvanceCard(input: AdvanceCardInput): LineMess
       if (page > 0) button('ก่อนหน้า','page',String(page-1));
       if ((page+1)*5<candidates.length) button('พนักงานอื่น','page',String(page+1));
       if (!candidates.length) question = 'ยังไม่พบพนักงานที่ผูกไว้กับกลุ่มนี้ครับ กรุณาตรวจชื่อและข้อมูลพนักงานในหลังบ้าน';
+      if (!input.view) button('เลือกจากพนักงานทั้งหมด','show_employee');
       if (input.view) button('กลับไปสรุป','review');
     } else if (p.event_type === 'unknown') {
       question = 'รายการนี้เป็นเบิกเงินเดือนล่วงหน้าใช่ไหมครับ?';
       button('เบิกเงินเดือนล่วงหน้า','salary');
+      button('เปลี่ยนพนักงาน','show_employee');
     } else if (ready) {
       question = 'ตรวจชื่อ ส่วนงาน และยอด แล้วกดยืนยันบันทึกครับ';
       button('ยืนยันบันทึก','confirm',undefined,true);
       button('เปลี่ยนพนักงาน','show_employee');
       button('ระบุแหล่งเงิน','show_funding');
     }
+    button('ซื้อของ / สำรองจ่าย','purchase');
     button('ไว้ก่อน','later');
     button('ยกเลิกรายการ','cancel');
   }
@@ -118,7 +123,7 @@ export function buildOwnerEmployeeAdvanceCard(input: AdvanceCardInput): LineMess
     contents.push(row('ยอดสะสมที่บันทึกแล้ว · '+month,advanceMoney(p.monthly_sum_before)),row('เบิกครั้งนี้',advanceMoney(p.amount)),row('ยอดสะสมหลังยืนยัน (คาดการณ์)',advanceMoney(projected),true));
   }
   if (question && state === 'draft') contents.push(txt(question,{weight:'bold',color:input.error?'#9C472F':'#35654D'}));
-  if (state === 'draft' && p.event_type === 'unknown') contents.push(txt('หากเป็นเบิกไปซื้อของ ให้พิมพ์รายละเอียดก่อน ยังไม่รวมเป็นเงินเดือนล่วงหน้า',{size:'xs',color:'#69796F'}));
+  if (state === 'draft' && p.event_type === 'unknown') contents.push(txt('หากเป็นเบิกไปซื้อของหรือสำรองจ่าย เลือกปุ่มด้านล่างเพื่อกลับไปตรวจรายจ่าย',{size:'xs',color:'#69796F'}));
   contents.push(txt('ยอดสะสมนับเงินเบิกที่จ่ายแล้วในเดือนตามวันที่จ่าย ไม่ใช่เงินเดือนสุทธิ',{size:'xs',color:'#69796F'}));
   contents.push(txt('#'+input.id.replace(/-/g,'').slice(0,6).toUpperCase()+' · ฉบับ '+input.revision,{size:'xxs',color:'#69796F'}));
   const result: LineMessage = {type:'flex',altText:short(title+' · '+(employee?advanceEmployeeName(employee):p.employee_query||'พนักงาน')+' · '+advanceMoney(p.amount),400),

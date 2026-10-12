@@ -131,3 +131,35 @@ END$$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA employee_advance_test FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA employee_advance_test TO service_role;
 GRANT SELECT,INSERT,UPDATE ON employee_advance_test.import_requests TO service_role;
+
+-- Additional synthetic existing employees for alias-uniqueness races. No
+-- application path may create employees; the final count is the seeded baseline.
+INSERT INTO tamma_chart_os.employees(id,restaurant_id,full_name,nickname,wage_amount,employment_type,status,created_at,updated_at)
+VALUES('10000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000002','Synthetic Inactive','Idle',12000,'เงินเดือน','พ้นสภาพ','2026-09-01','2026-09-01'),
+('10000000-0000-4000-8000-000000000005','10000000-0000-4000-8000-000000000002','Synthetic Active','Second',12000,'เงินเดือน','ทำงานอยู่','2026-09-01','2026-09-01');
+CREATE FUNCTION employee_advance_test.add_alias_profile(p_case text,p_employee uuid) RETURNS void LANGUAGE sql AS $$
+ INSERT INTO public.financial_owner_employee_profiles(owner_group_hash,employee_id,employee_key,business_unit_code,role_label,approval_ref,salary_advance_aliases,salary_advance_alias_approval_ref)
+ SELECT c.group_hash,e.id,lower(e.nickname),'shared_infrastructure','Synthetic alias role','synthetic-profile-'||p_case,ARRAY['Workerเบิก'],'synthetic-alias-'||p_case
+ FROM employee_advance_test.cases c CROSS JOIN tamma_chart_os.employees e WHERE c.case_name=p_case AND e.id=p_employee;
+$$;
+CREATE FUNCTION employee_advance_test.prepare_alias(p_case text,p_inactive_match boolean DEFAULT false) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE g text; i public.financial_owner_expense_intakes%rowtype; c jsonb; r jsonb;
+BEGIN
+ PERFORM employee_advance_test.prepare(p_case,ARRAY[125]::numeric[],false,null,false);
+ SELECT group_hash INTO g FROM employee_advance_test.cases WHERE case_name=p_case;
+ PERFORM employee_advance_test.add_alias_profile(p_case,'10000000-0000-4000-8000-000000000001');
+ IF p_inactive_match THEN PERFORM employee_advance_test.add_alias_profile(p_case,'10000000-0000-4000-8000-000000000004'); END IF;
+ UPDATE public.financial_owner_expense_intakes SET review_data=jsonb_build_object('purpose','Workerเบิก'),
+  extraction_data=extraction_data||jsonb_build_object('visible_payment_note','Workerเบิก')
+ WHERE owner_group_hash=g;
+ SELECT * INTO i FROM public.financial_owner_expense_intakes WHERE owner_group_hash=g;
+ c:=public.owner_employee_advance_context_v1(g,'Workerเบิก',null,'2026-10-09');
+ PERFORM employee_advance_test.assert(c->'alias_resolution' IS NOT NULL AND c->'alias_resolution'<>'null'::jsonb,'synthetic alias initially unique');
+ r:=public.financial_stage_owner_employee_advance_v1(i.id,g,repeat('a',64),'synthetic-alias-stage-'||p_case,0,
+  jsonb_build_object('kind','employee_advance','event_type','salary_advance','employee_query','Workerเบิก',
+   'employee_id','10000000-0000-4000-8000-000000000001','business_unit_code','shared_infrastructure','funding_source','unknown',
+   'amount',125,'occurred_on','2026-10-09','purpose','Synthetic salary advance','alias_inference',c->'alias_resolution'));
+ PERFORM employee_advance_test.assert((r->>'ok')::boolean,'synthetic alias stage succeeds without money');
+END$$;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA employee_advance_test FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA employee_advance_test TO service_role;

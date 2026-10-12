@@ -73,6 +73,7 @@ type OwnerExpenseIntake = {
   document_type: string;
   extraction_data?: FinancialImageExtraction | null;
   review_state?: 'draft' | 'confirmed' | 'cancelled' | null;
+  review_revision?: number;
   purpose_raw: string | null;
   business_unit_code: BusinessUnit | null;
   expense_class: ExpenseClass | null;
@@ -275,7 +276,7 @@ async function existingIntakeByMessage(groupHash: string, messageId: string): Pr
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&source_channel=eq.line&evidence_message_id=eq.' + encodeURIComponent(messageId)
-    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,extraction_data,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,extraction_data,review_state,review_revision,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
   );
   return (await response.json() as OwnerExpenseIntake[])[0] ?? null;
 }
@@ -284,7 +285,7 @@ async function existingIntakeByImage(groupHash: string, sha256: string): Promise
   const response = await dbFetch(
     'financial_owner_expense_intakes?owner_group_hash=eq.' + encodeURIComponent(groupHash)
     + '&evidence_sha256=eq.' + encodeURIComponent(sha256)
-    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,extraction_data,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
+    + '&select=id,source_user_hash,status,amount,occurred_on,document_type,extraction_data,review_state,review_revision,purpose_raw,business_unit_code,expense_class,expense_category,expense_subcategory,created_at&limit=1',
   );
   return (await response.json() as OwnerExpenseIntake[])[0] ?? null;
 }
@@ -550,6 +551,8 @@ function storedExtractionFallback(): FinancialImageExtraction {
 
 function existingIntakeImageReply(row: OwnerExpenseIntake, prefix: string): string {
   const gate = ownerPaymentDocumentGate(row.extraction_data ?? storedExtractionFallback());
+  if(gate.kind==='payment_evidence'&&row.review_state==='draft'&&Number.isSafeInteger(row.review_revision))
+    return 'ตรวจสลิป #'+intakeCode(row.id)+' · ฉบับ '+row.review_revision+' (ยังไม่บันทึกรายจ่าย)\nเปิดรายการรอตรวจเดิม';
   return gate.kind === 'payment_evidence'
     ? detailReply(row, prefix)
     : ownerPaymentDocumentClarification(gate);

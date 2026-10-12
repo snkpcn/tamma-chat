@@ -270,7 +270,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string, rece
     if(advanceCard){await replyToLine(event.replyToken,advanceCard,accessToken);return;}
     const dailyCardReply=await handleDailyCloseCardAction({targetHash:sourceType==='group'?piiHash(targetId):null,userId:event.source?.userId,data:event.postback.data,receivedAt});
     if(dailyCardReply){await replyToLine(event.replyToken,dailyCardReply as LineMessage[],accessToken);return;}
-    const documentCard=await handleOwnerDocumentIntent({targetId,userId:event.source?.userId,data:event.postback.data,timestamp:event.timestamp});
+    const documentCard=await handleOwnerDocumentIntent({targetId,userId:event.source?.userId,data:event.postback.data,timestamp:event.timestamp,messageId:event.webhookEventId});
     if(documentCard){await replyToLine(event.replyToken,documentCard,accessToken);return;}
     const ownerSlipCard=await handleOwnerSlipPostback({targetId,userId:event.source?.userId,data:event.postback.data,messageId:event.webhookEventId,timestamp:event.timestamp});
     if(ownerSlipCard){await replyToLine(event.replyToken,ownerSlipCard,accessToken);return;}
@@ -342,7 +342,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string, rece
       timestamp: event.timestamp,
     });
     if (ownerExpenseReply) {
-      try {await replyToLine(event.replyToken, await ownerSlipReplyCard({targetId,userId:event.source?.userId,text:ownerExpenseReply}), accessToken);}
+      try {await replyToLine(event.replyToken, await ownerSlipReplyCard({targetId,userId:event.source?.userId,text:ownerExpenseReply,messageId:event.message.id,timestamp:event.timestamp}), accessToken);}
       catch(error){
         if(ownerExpenseReply===OWNER_SLIP_MAINTENANCE_REPLY)throw new OwnerSlipMaintenanceNoticeError('owner_slip_notice_failed');
         throw error;
@@ -411,7 +411,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string, rece
 
   if (isOwnerFamilyConversation(event.message.text) && await boundLineOpsTeam(targetId) === 'owner_general') return;
 
-  const documentReply=await handleOwnerDocumentIntent({targetId,userId:event.source?.userId,text:event.message.text,quotedMessageId:event.message.quotedMessageId,timestamp:event.timestamp});
+  const documentReply=await handleOwnerDocumentIntent({targetId,userId:event.source?.userId,text:event.message.text,quotedMessageId:event.message.quotedMessageId,timestamp:event.timestamp,messageId:event.message.id});
   if(documentReply){await replyToLine(event.replyToken,documentReply,accessToken);return;}
   const explicitReview=isExplicitOwnerReviewText(event.message.text);
   if(!explicitReview && (event.message.quotedMessageId || /ใบเสนอราคา|ตามสัญญา|เสนอราคา/u.test(event.message.text)) && await boundLineOpsTeam(targetId)==='owner_general')return;
@@ -422,7 +422,7 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string, rece
     text: event.message.text.replace(/^ทองไทย(?:ครับ|คะ|ค่ะ)?[\s,]*/u,''), messageId: event.message.id ?? null,
   }) : null;
   if (slipReviewReply) {
-    await replyToLine(event.replyToken, await ownerSlipReplyCard({targetId,userId:event.source?.userId,text:slipReviewReply}), accessToken);
+    await replyToLine(event.replyToken, await ownerSlipReplyCard({targetId,userId:event.source?.userId,text:slipReviewReply,messageId:event.message.id,timestamp:event.timestamp}), accessToken);
     return;
   }
 

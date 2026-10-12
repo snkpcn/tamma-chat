@@ -260,7 +260,11 @@ export function slipReviewLineMessage(text:string) {
 }
 
 export async function stageSlipReview(input:{id:string;groupHash:string;actorHash:string;messageId:string;revision:number;note:string;extraction:FinancialImageExtraction;choices?:SlipSelections;replyText?:string;previous?:SlipProposal|null}):Promise<string> {
-  const projects:OwnerExpenseProject[]=await request('owner_projects?owner_group_hash=eq.'+encodeURIComponent(input.groupHash)+'&status=neq.cancelled&select=id,name,business_unit_code,purpose,status&limit=500');
+  const staff=parseOwnerStaffTurn(input.note);
+  const employeeReview=!!staff&&['unknown','salary_advance'].includes(staff.kind)
+    ||await (await import('./_owner-employee-advance')).isApprovedOwnerEmployeeAdvanceNote({groupHash:input.groupHash,actorHash:input.actorHash,note:input.note,date:visibleSlipDate(input.extraction.document_date_local)});
+  // Employee review does not depend on choosing or loading a construction project.
+  const projects:OwnerExpenseProject[]=employeeReview?[]:await request('owner_projects?owner_group_hash=eq.'+encodeURIComponent(input.groupHash)+'&status=neq.cancelled&select=id,name,business_unit_code,purpose,status&limit=500');
   const projectIds=projects.map(p=>p.id);
   const installments:Installment[]=projectIds.length?await request('owner_project_installments?project_id=in.('+projectIds.join(',')+')&status=neq.cancelled&select=id,project_id,task_id,installment_no,title,status,task:owner_project_tasks(title)&limit=1000'):[];
   const choices=input.replyText===undefined?input.choices:reconcileSlipSelections({previous:input.previous,reply:input.replyText,projects,installments});
@@ -292,9 +296,9 @@ export async function handleOwnerSlipReviewText(input:{targetId:string;userId?:s
   if(rows.length!==1) return 'มีหลายสลิปครับ กรุณาระบุรหัสรายการเดียว: '+rows.map(r=>'#'+code(r.id)).join(' / ');
   const row=rows[0];
   if(row.source_user_hash!==actorHash) return 'กรุณาให้ผู้ส่งสลิปตรวจและยืนยันรายการนี้ครับ';
-  if((row.review_data as any)?.kind==='employee_advance')return 'รายการนี้เป็นการตรวจเงินเบิกพนักงานครับ กรุณาใช้การ์ดเงินเบิกล่าสุดเพื่อยืนยัน';
+  if((row.review_data as any)?.kind==='employee_advance')return 'ตรวจสลิป #'+code(row.id)+' · ฉบับ '+row.review_revision+' (ยังไม่บันทึกรายจ่าย)\nเปิดการ์ดเงินเบิกล่าสุด';
   const existingStaff=parseOwnerStaffTurn(row.review_data?.purpose??'');
-  if(existingStaff&&['unknown','salary_advance'].includes(existingStaff.kind))return 'รายการนี้เป็นเงินเบิกพนักงานครับ กรุณาพิมพ์ชื่อพนักงานและประเภทการเบิกเพื่อเปิดการ์ดเงินเบิก';
+  if(existingStaff&&['unknown','salary_advance'].includes(existingStaff.kind))return slipReviewReply(row);
   if(row.review_state!=='draft') return row.review_state==='confirmed'?'รายการ #'+code(row.id)+' บันทึกแล้วครับ ไม่เพิ่มยอดซ้ำ':'รายการ #'+code(row.id)+' ยกเลิกแล้วครับ';
   const text=input.text.replace(/#[a-f0-9]{6,32}\b/giu,'').trim();
   const documentGate=ownerPaymentDocumentGate(row.extraction_data);

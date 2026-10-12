@@ -68,7 +68,7 @@ python tests/sql/build-employee-advance-actual-schema.py --check
 ```
 
 The source builder asserts the frozen proposal SHA-256 remains
-`741fab4f5304a13d31f87fbef25106f7de734784fa9d1aa948836a619444f7e8`.
+`54daddec6e5cc0f9d4dcf15237671b8504448f2b469ab4075df745efbffc7026`.
 Running either builder only reads/writes local files; neither applies SQL or opens
 any database connection. Static provenance verification is not a runtime SQL pass.
 

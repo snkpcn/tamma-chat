@@ -9,6 +9,44 @@ alter table public.financial_employee_payroll_events
   add constraint financial_employee_payroll_events_funding_source_check
   check(funding_source in ('owner_personal','business_account','cash','other','unknown'));
 
+-- Approved aliases are private profile data, never public seeds or fuzzy rules.
+-- Whitespace/case normalization only; digits, punctuation and extra prose remain.
+create function public.financial_employee_advance_normalize_alias_v1(p_note text)
+returns text language sql immutable security invoker set search_path='' as $$
+ select lower(regexp_replace(coalesce(p_note,''),'[[:space:]]','','g'));
+$$;
+-- Even a misconfigured approved alias cannot imply salary when its text says
+-- purchase, reimbursement, another worker, negation, future intent or a question.
+create function public.financial_employee_advance_alias_note_ok_v1(p_note text)
+returns boolean language sql immutable security invoker set search_path='' as $$
+ select public.financial_employee_advance_normalize_alias_v1(p_note)<>''
+  and public.financial_employee_advance_normalize_alias_v1(p_note) !~
+   '(ซื้อ|สำรองจ่าย|คืนเงิน|เบิก.*จ่าย|ค่า|วัสดุ|อุปกรณ์|ใบเสนอราคา|ใบแจ้งหนี้|ให้.*(คนงาน|ช่าง|ผู้รับเหมา)|จ่าย.*(คนงาน|ช่าง|ผู้รับเหมา)|ไม่|ห้าม|ยังไม่ได้|พรุ่งนี้|มะรืน|จะเบิก|ขอเบิก|ไหม|มั้ย|หรือ|\?|purchase|reimburse|quotation|invoice|notpaid|notadvance|tomorrow)';
+$$;
+create function public.financial_employee_advance_aliases_valid_v1(p_aliases text[],p_approval_ref text)
+returns boolean language sql immutable security invoker set search_path='' as $$
+ select coalesce(cardinality(p_aliases) between 0 and 12
+  and (cardinality(p_aliases)=0 or (array_ndims(p_aliases)=1 and nullif(trim(p_approval_ref),'') is not null))
+  and not exists(select 1 from unnest(p_aliases) a where a is null or length(trim(a)) not between 3 and 160
+   or not public.financial_employee_advance_alias_note_ok_v1(a)
+   or public.financial_employee_advance_normalize_alias_v1(a) in
+    ('','เบิก','พนักงานเบิก','เบิกพนักงาน','เบิกเงิน','เงินเบิก','เบิกเงินเดือน','เงินเดือน','เงินเดือนล่วงหน้า',
+     'เบิกเงินเดือนล่วงหน้า','พนักงานเบิกเงิน','พนักงานเบิกเงินเดือน','พนักงานเบิกเงินเดือนล่วงหน้า',
+     'staffadvance','employeeadvance','salaryadvance','cashadvance','staffsalaryadvance','employeesalaryadvance',
+     'salary','payroll','advance','withdrawal'))
+  and (select count(distinct public.financial_employee_advance_normalize_alias_v1(a)) from unnest(p_aliases) a)=cardinality(p_aliases),false);
+$$;
+-- An already staged employee card retains its server-captured source note even
+-- when its display purpose is canonicalized. Client source-note fields are ignored.
+create function public.financial_employee_advance_saved_note_v1(p_purpose text,p_review jsonb,p_extraction jsonb)
+returns text language sql immutable security invoker set search_path='' as $$
+ select case when p_review->>'kind'='employee_advance' then
+  coalesce(nullif(trim(p_review->>'alias_source_note'),''),nullif(trim(p_purpose),''),
+   nullif(trim(p_extraction->>'visible_payment_note'),''),nullif(trim(p_extraction->>'note'),''),'')
+ else coalesce(nullif(trim(p_review->>'purpose'),''),nullif(trim(p_purpose),''),
+  nullif(trim(p_extraction->>'visible_payment_note'),''),nullif(trim(p_extraction->>'note'),''),'') end;
+$$;
+
 create table public.financial_owner_employee_profiles(
   owner_group_hash text not null check(length(trim(owner_group_hash))>=16),
   employee_id uuid not null references tamma_chart_os.employees(id) on delete restrict,
@@ -17,6 +55,10 @@ create table public.financial_owner_employee_profiles(
     ('inthanin','tamma_restaurant','huenstay','adventure','otop','shared_infrastructure','shared','other')),
   role_label text,
   salary_period text not null default 'unknown' check(salary_period in ('monthly','unknown')),
+  salary_advance_aliases text[] not null default '{}'::text[],
+  salary_advance_alias_approval_ref text,
+  constraint financial_owner_employee_alias_approval_check check(
+    public.financial_employee_advance_aliases_valid_v1(salary_advance_aliases,salary_advance_alias_approval_ref)),
   active boolean not null default true,
   revision integer not null default 1 check(revision>0),
   approval_ref text not null check(length(trim(approval_ref))>0),
@@ -28,6 +70,36 @@ create table public.financial_owner_employee_profiles(
 alter table public.financial_owner_employee_profiles enable row level security;
 revoke all on public.financial_owner_employee_profiles from public,anon,authenticated;
 grant select,insert,update on public.financial_owner_employee_profiles to service_role;
+
+-- Profile changes use the same group lock as confirmation. This includes new
+-- profiles, so a concurrent duplicate alias cannot appear after uniqueness review.
+create function public.financial_employee_advance_profile_guard_v1()
+returns trigger language plpgsql security invoker set search_path='' as $$
+begin
+ if tg_op='DELETE' then
+  if not pg_catalog.pg_try_advisory_xact_lock(pg_catalog.hashtextextended(old.owner_group_hash,117))
+   then raise exception 'employee_profile_busy'; end if;
+  return old;
+ end if;
+ if tg_op='UPDATE' and (old.owner_group_hash is distinct from new.owner_group_hash
+  or old.employee_id is distinct from new.employee_id) then raise exception 'employee_profile_identity_immutable'; end if;
+ -- A row UPDATE may already hold its row lock before this trigger. Never wait
+ -- for the group lock here: a confirmer may hold it and be waiting for this row.
+ if not pg_catalog.pg_try_advisory_xact_lock(pg_catalog.hashtextextended(new.owner_group_hash,117))
+  then raise exception 'employee_profile_busy'; end if;
+ if tg_op='UPDATE' then
+  if row(old.employee_key,old.business_unit_code,old.role_label,old.salary_period,old.active,
+    old.salary_advance_aliases,old.salary_advance_alias_approval_ref) is distinct from
+   row(new.employee_key,new.business_unit_code,new.role_label,new.salary_period,new.active,
+    new.salary_advance_aliases,new.salary_advance_alias_approval_ref) then
+   new.revision:=greatest(old.revision+1,new.revision); new.updated_at:=now();
+  elsif new.revision<old.revision then raise exception 'employee_profile_revision_regressed'; end if;
+ end if;
+ return new;
+end $$;
+create trigger financial_employee_advance_profile_guard_v1
+ before insert or update or delete on public.financial_owner_employee_profiles
+ for each row execute function public.financial_employee_advance_profile_guard_v1();
 
 alter table public.financial_employee_payroll_events
   add column employee_id uuid references tamma_chart_os.employees(id) on delete restrict,
@@ -119,6 +191,13 @@ begin
   or v_purpose ~ '(เบิกเงินเดือน|เงินเดือนล่วงหน้า)'
   or (v_purpose ~ 'เบิก' and v_purpose !~ '(ซื้อ|สำรองจ่าย|ค่า|งบ|คืน)')
   then raise exception 'salary_advance_requires_payroll_review'; end if;
+ if exists(select 1 from public.financial_owner_employee_profiles pr
+  join tamma_chart_os.employees emp on emp.id=pr.employee_id
+  where pr.owner_group_hash=new.owner_group_hash and pr.active and emp.status='ทำงานอยู่'
+   and nullif(trim(pr.salary_advance_alias_approval_ref),'') is not null
+   and exists(select 1 from unnest(pr.salary_advance_aliases) alias_note where
+    public.financial_employee_advance_normalize_alias_v1(alias_note)=public.financial_employee_advance_normalize_alias_v1(v_purpose)))
+  then raise exception 'salary_advance_requires_payroll_review'; end if;
  v_ref:=nullif(lower(regexp_replace(coalesce(new.reference_number,''),'[[:space:]]','','g')),'');
  if exists(select 1 from public.financial_employee_payroll_events p
   where p.owner_group_hash=new.owner_group_hash and p.status<>'cancelled' and
@@ -152,11 +231,23 @@ create function public.owner_employee_advance_context_v1(
  p_group_hash text,p_employee_query text default null,p_employee_id uuid default null,
  p_event_date date default null
 ) returns jsonb language plpgsql stable security invoker set search_path='' as $$
-declare v_start date; v_end date; v_candidates jsonb;
+declare v_start date; v_end date; v_candidates jsonb; v_aliases jsonb; v_alias jsonb;
 begin
  if length(trim(coalesce(p_group_hash,'')))<16 then raise exception 'owner_group_required'; end if;
  v_start:=date_trunc('month',coalesce(p_event_date,timezone('Asia/Bangkok',now())::date))::date;
  v_end:=(v_start+interval '1 month')::date;
+ select coalesce(jsonb_agg(jsonb_build_object('employee_id',pr.employee_id,
+   'normalized_alias',public.financial_employee_advance_normalize_alias_v1(p_employee_query),
+   'approval_ref',pr.salary_advance_alias_approval_ref,'profile_revision',pr.revision)),'[]'::jsonb)
+ into v_aliases from public.financial_owner_employee_profiles pr
+ join tamma_chart_os.employees emp on emp.id=pr.employee_id
+ where pr.owner_group_hash=p_group_hash and pr.active and emp.status='ทำงานอยู่'
+  and nullif(trim(pr.salary_advance_alias_approval_ref),'') is not null
+  and public.financial_employee_advance_alias_note_ok_v1(p_employee_query)
+  and exists(select 1 from unnest(pr.salary_advance_aliases) alias_note
+   where public.financial_employee_advance_normalize_alias_v1(alias_note)=public.financial_employee_advance_normalize_alias_v1(p_employee_query));
+ if jsonb_array_length(v_aliases)=1 and (p_employee_id is null or (v_aliases->0->>'employee_id')::uuid=p_employee_id)
+  then v_alias:=v_aliases->0; end if;
  select coalesce(jsonb_agg(x.item order by x.label,x.employee_id),'[]'::jsonb) into v_candidates
  from (
   select e.id as employee_id,coalesce(nullif(e.nickname,''),e.full_name) as label,
@@ -184,10 +275,12 @@ begin
    and e.status='ทำงานอยู่'
    and (p_employee_id is null or e.id=p_employee_id)
    and (p_employee_id is not null or nullif(trim(p_employee_query),'') is null
-    or position(lower(trim(p_employee_query)) in lower(coalesce(e.nickname,'')||' '||e.full_name||' '||pr.employee_key))>0)
+    or position(lower(trim(p_employee_query)) in lower(coalesce(e.nickname,'')||' '||e.full_name||' '||pr.employee_key))>0
+    or exists(select 1 from unnest(pr.salary_advance_aliases) alias_note where
+      public.financial_employee_advance_normalize_alias_v1(alias_note)=public.financial_employee_advance_normalize_alias_v1(p_employee_query)))
  ) x;
  return jsonb_build_object('ok',true,'candidates',v_candidates,'month_start',v_start,'month_end',v_end,
-  'month',to_char(v_start,'YYYY-MM'),'selected',case when jsonb_array_length(v_candidates)=1 then v_candidates->0 else null end);
+  'month',to_char(v_start,'YYYY-MM'),'alias_resolution',v_alias,'alias_match_count',jsonb_array_length(v_aliases),'selected',case when jsonb_array_length(v_candidates)=1 then v_candidates->0 else null end);
 end $$;
 
 create function public.financial_stage_owner_employee_advance_v1(
@@ -195,6 +288,7 @@ create function public.financial_stage_owner_employee_advance_v1(
 ) returns jsonb language plpgsql security invoker set search_path='' as $$
 declare r public.financial_owner_expense_intakes%rowtype; a record; c jsonb; e jsonb;
  d jsonb; q jsonb:='[]'::jsonb; v_date date; v_amount numeric; v_employee uuid; v_funding text;
+ v_note text; v_alias jsonb;
 begin
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_group_hash,117));
  select * into r from public.financial_owner_expense_intakes where id=p_intake_id for update;
@@ -223,6 +317,20 @@ begin
   then raise exception 'advance_amount_evidence_mismatch'; end if;
  if v_date is not null and nullif(r.extraction_data->>'document_date_local','') is not null
    and v_date is distinct from (r.extraction_data->>'document_date_local')::date then raise exception 'advance_date_evidence_mismatch'; end if;
+ v_note:=public.financial_employee_advance_saved_note_v1(r.purpose_raw,r.review_data,r.extraction_data);
+ if p_proposal->'alias_inference' is not null and p_proposal->'alias_inference'<>'null'::jsonb then
+  -- Lock all alias-bearing employees, even currently inactive ones: their
+  -- activation must not change uniqueness while this review decision commits.
+  perform 1 from public.financial_owner_employee_profiles pr
+   join tamma_chart_os.employees emp on emp.id=pr.employee_id
+   where pr.owner_group_hash=p_group_hash and exists(select 1 from unnest(pr.salary_advance_aliases) alias_note
+    where public.financial_employee_advance_normalize_alias_v1(alias_note)=public.financial_employee_advance_normalize_alias_v1(v_note))
+   order by pr.employee_id for share of pr,emp;
+  c:=public.owner_employee_advance_context_v1(p_group_hash,v_note,null,v_date); v_alias:=c->'alias_resolution';
+  if v_alias is null or v_alias='null'::jsonb or v_alias is distinct from p_proposal->'alias_inference'
+   or p_proposal->>'event_type'<>'salary_advance' or v_employee is distinct from (v_alias->>'employee_id')::uuid
+   then return jsonb_build_object('changed',true,'alias_invalid',true); end if;
+ end if;
  c:=public.owner_employee_advance_context_v1(p_group_hash,p_proposal->>'employee_query',v_employee,v_date);
  if v_employee is not null then
   e:=c->'selected';
@@ -242,6 +350,7 @@ begin
   'business_unit_code',e->>'business_unit_code','funding_source',v_funding,
   'amount',v_amount,'occurred_on',v_date,'purpose',coalesce(nullif(p_proposal->>'purpose',''),'พนักงานเบิก'),
   'questions',q,'employee',e,'monthly_sum_before',e->'monthly_sum',
+  'alias_inference',v_alias,'alias_source_note',v_note,
   'evidence_message_id',r.evidence_message_id,'evidence_sha256',r.evidence_sha256,
   'evidence_reference',r.reference_number,'evidence_amount',r.amount,'evidence_date',r.occurred_on);
  update public.financial_owner_expense_intakes set review_state='draft',review_data=d,
@@ -260,7 +369,7 @@ create function public.financial_commit_owner_employee_advance_v1(
  p_source text,p_approval_ref text,p_proposal jsonb,p_expected_updated_at timestamptz default null
 ) returns jsonb language plpgsql security invoker set search_path='' as $$
 declare r public.financial_owner_expense_intakes%rowtype; ev public.financial_employee_payroll_events%rowtype;
- c jsonb; e jsonb; d jsonb; v_id uuid; v_date date; v_amount numeric; v_ref text; v_before numeric; v_after jsonb;
+ c jsonb; e jsonb; d jsonb; v_id uuid; v_date date; v_amount numeric; v_ref text; v_before numeric; v_after jsonb; v_alias jsonb; v_note text;
 begin
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_group_hash,117));
  select * into r from public.financial_owner_expense_intakes where id=p_intake_id for update;
@@ -320,6 +429,20 @@ begin
   where pr.owner_group_hash=p_group_hash and pr.employee_id=(d->>'employee_id')::uuid for share of pr,emp;
  c:=public.owner_employee_advance_context_v1(p_group_hash,null,(d->>'employee_id')::uuid,v_date); e:=c->'selected';
  if e is null or e='null'::jsonb then return jsonb_build_object('changed',true,'employee',null,'employee_missing',true); end if;
+ if d->'alias_inference' is not null and d->'alias_inference'<>'null'::jsonb then
+  v_note:=public.financial_employee_advance_saved_note_v1(r.purpose_raw,r.review_data,r.extraction_data);
+  -- Lock all alias-bearing employees, even currently inactive ones: their
+  -- activation must not change uniqueness while this review decision commits.
+  perform 1 from public.financial_owner_employee_profiles pr
+   join tamma_chart_os.employees emp on emp.id=pr.employee_id
+   where pr.owner_group_hash=p_group_hash and exists(select 1 from unnest(pr.salary_advance_aliases) alias_note
+    where public.financial_employee_advance_normalize_alias_v1(alias_note)=public.financial_employee_advance_normalize_alias_v1(v_note))
+   order by pr.employee_id for share of pr,emp;
+  v_alias:=public.owner_employee_advance_context_v1(p_group_hash,v_note,null,v_date)->'alias_resolution';
+  if v_alias is null or v_alias='null'::jsonb or v_alias is distinct from d->'alias_inference'
+   or (v_alias->>'employee_id')::uuid is distinct from (d->>'employee_id')::uuid
+   then return jsonb_build_object('changed',true,'alias_invalid',true,'employee',e); end if;
+ end if;
  if d->>'business_unit_code' is distinct from e->>'business_unit_code' then return jsonb_build_object('changed',true,'employee',e); end if;
  if d->'employee'->>'profile_revision' is distinct from e->>'profile_revision'
   or d->'employee'->>'employee_updated_at' is distinct from e->>'employee_updated_at'
@@ -352,6 +475,7 @@ begin
   jsonb_build_object('approval_ref',p_approval_ref,'approval_source',p_source,'privacy_scope','owner_only',
    'not_shop_expense',true,'not_capital_investment',true,'role_label',e->>'role_label',
    'funding_classification',case when d->>'funding_source'='unknown' then 'unknown' else 'owner_or_operator_confirmed' end,'original_intake_id',r.id,
+   'alias_inference',d->'alias_inference',
    'classification_approval_refs',coalesce(d->'classification_approval_refs','[]'::jsonb),
    'funding_evidence_refs',coalesce(d->'funding_evidence_refs','[]'::jsonb)),r.id,e->>'business_unit_code')
  returning id into v_id;
@@ -389,7 +513,7 @@ create function public.financial_import_owner_employee_advances_v1(
 ) returns jsonb language plpgsql security invoker set search_path='' as $$
 declare j jsonb; r public.financial_owner_expense_intakes%rowtype; e tamma_chart_os.employees%rowtype;
  pr public.financial_owner_employee_profiles%rowtype; c jsonb; d jsonb; v_result jsonb; v_results jsonb:='[]'::jsonb;
- v_total numeric:=0; v_key text;
+ v_total numeric:=0; v_key text; v_aliases text[]; v_alias_approval text;
 begin
  if length(trim(coalesce(p_group_hash,'')))<16 or nullif(trim(p_approval_ref),'') is null
   or jsonb_typeof(p_rows) is distinct from 'array' or jsonb_array_length(p_rows) not between 1 and 25
@@ -410,15 +534,23 @@ begin
   if nullif(v_key,'') is null or not coalesce(v_key=lower(regexp_replace(trim(e.full_name),'[[:space:]]+',' ','g'))
     or v_key=lower(regexp_replace(trim(e.nickname),'[[:space:]]+',' ','g')),false)
    then raise exception 'employee_key_mismatch'; end if;
+  if j ? 'salary_advance_aliases' and jsonb_typeof(j->'salary_advance_aliases')<>'array' then raise exception 'invalid_alias_binding'; end if;
+  if exists(select 1 from jsonb_array_elements(coalesce(j->'salary_advance_aliases','[]'::jsonb)) a where jsonb_typeof(a)<>'string')
+   then raise exception 'invalid_alias_binding'; end if;
+  v_aliases:=array(select jsonb_array_elements_text(coalesce(j->'salary_advance_aliases','[]'::jsonb)));
+  v_alias_approval:=nullif(trim(j->>'salary_advance_alias_approval_ref'),'');
+  if not public.financial_employee_advance_aliases_valid_v1(v_aliases,v_alias_approval) then raise exception 'invalid_alias_binding'; end if;
   select * into pr from public.financial_owner_employee_profiles where owner_group_hash=p_group_hash and employee_id=e.id for update;
   if pr.employee_id is null then
-   insert into public.financial_owner_employee_profiles(owner_group_hash,employee_id,employee_key,business_unit_code,role_label,salary_period,approval_ref)
-   values(p_group_hash,e.id,v_key,j->>'business_unit_code',j->>'role_label',coalesce(j->>'salary_period','unknown'),p_approval_ref);
+   insert into public.financial_owner_employee_profiles(owner_group_hash,employee_id,employee_key,business_unit_code,role_label,salary_period,approval_ref,salary_advance_aliases,salary_advance_alias_approval_ref)
+   values(p_group_hash,e.id,v_key,j->>'business_unit_code',j->>'role_label',coalesce(j->>'salary_period','unknown'),p_approval_ref,v_aliases,v_alias_approval);
    insert into public.financial_employee_advance_audit_events(owner_group_hash,employee_id,action,source,actor_hash,approval_ref,after_data)
    values(p_group_hash,e.id,'profile_bound','backoffice',nullif(p_actor_hash,''),p_approval_ref,
-    jsonb_build_object('employee_key',v_key,'business_unit_code',j->>'business_unit_code','role_label',j->>'role_label','salary_period',coalesce(j->>'salary_period','unknown')));
+    jsonb_build_object('employee_key',v_key,'business_unit_code',j->>'business_unit_code','role_label',j->>'role_label','salary_period',coalesce(j->>'salary_period','unknown'),'salary_advance_aliases',to_jsonb(v_aliases),'salary_advance_alias_approval_ref',v_alias_approval));
   elsif not pr.active or pr.employee_key is distinct from v_key or pr.business_unit_code is distinct from j->>'business_unit_code'
    or pr.role_label is distinct from j->>'role_label' or pr.salary_period is distinct from coalesce(j->>'salary_period','unknown')
+   or ((j ? 'salary_advance_aliases' or j ? 'salary_advance_alias_approval_ref') and
+    (pr.salary_advance_aliases is distinct from v_aliases or pr.salary_advance_alias_approval_ref is distinct from v_alias_approval))
    then raise exception 'employee_profile_changed'; end if;
   select * into r from public.financial_owner_expense_intakes where id=(j->>'intake_id')::uuid for update;
   if r.id is null or r.owner_group_hash is distinct from p_group_hash then raise exception 'owner_group_mismatch'; end if;
@@ -524,3 +656,15 @@ grant execute on function public.financial_revert_owner_employee_advance_v1(uuid
 
 revoke all on function public.financial_employee_advance_investment_guard_v1() from public,anon,authenticated;
 grant execute on function public.financial_employee_advance_investment_guard_v1() to service_role;
+
+-- New helpers retain the same service-only, SECURITY INVOKER boundary.
+revoke all on function public.financial_employee_advance_normalize_alias_v1(text) from public,anon,authenticated;
+grant execute on function public.financial_employee_advance_normalize_alias_v1(text) to service_role;
+revoke all on function public.financial_employee_advance_aliases_valid_v1(text[],text) from public,anon,authenticated;
+grant execute on function public.financial_employee_advance_aliases_valid_v1(text[],text) to service_role;
+revoke all on function public.financial_employee_advance_saved_note_v1(text,jsonb,jsonb) from public,anon,authenticated;
+grant execute on function public.financial_employee_advance_saved_note_v1(text,jsonb,jsonb) to service_role;
+revoke all on function public.financial_employee_advance_profile_guard_v1() from public,anon,authenticated;
+grant execute on function public.financial_employee_advance_profile_guard_v1() to service_role;
+revoke all on function public.financial_employee_advance_alias_note_ok_v1(text) from public,anon,authenticated;
+grant execute on function public.financial_employee_advance_alias_note_ok_v1(text) to service_role;

@@ -1,16 +1,17 @@
 import { piiHash } from './_operations-db';
 import { boundLineOpsTeam } from './_ops-notifications';
-import { parseOwnerStaffTurn, isOwnerStaffAmbiguousText, isOwnerStaffCorrectionText, type OwnerStaffTurn } from './_owner-staff-intent';
+import { parseOwnerStaffTurn, isOwnerStaffAmbiguousText, isOwnerStaffCorrectionText, isOwnerStaffUnsafeText, type OwnerStaffTurn } from './_owner-staff-intent';
 import { isAuthorizedOwnerPaymentActor, ownerPaymentDocumentGate, ownerPaymentDocumentClarification } from './_owner-payment-document';
 import { ownerSlipMaintenancePaused, OWNER_SLIP_MAINTENANCE_REPLY } from './_owner-slip-maintenance';
 import type { FinancialImageExtraction } from './_inthanin-daily-close-image';
 import type { LineMessage } from './_ops-line-ui';
-import { ADVANCE_PREFIX, buildOwnerEmployeeAdvanceCard, decodeAdvanceAction, type AdvanceEmployee, type AdvanceProposal } from './_owner-employee-advance-card';
+import { buildOwnerSlipReviewCard } from './_owner-slip-review-ui';
+import { ADVANCE_PREFIX, buildOwnerEmployeeAdvanceCard, decodeAdvanceAction, type AdvanceEmployee, type AdvanceProposal, type AdvanceAliasInference } from './_owner-employee-advance-card';
 
 type Intake = {id:string;owner_group_hash:string;source_user_hash:string|null;status:string;amount:number|string|null;
   occurred_on:string;created_at:string;purpose_raw:string|null;review_state:'draft'|'confirmed'|'cancelled'|null;
   review_revision:number;review_data:AdvanceProposal|Record<string,any>|null;extraction_data:FinancialImageExtraction};
-type Context = {candidates:AdvanceEmployee[];selected?:AdvanceEmployee|null;month_start?:string;month_end?:string};
+type Context = {candidates:AdvanceEmployee[];selected?:AdvanceEmployee|null;month_start?:string;month_end?:string;alias_resolution?:AdvanceAliasInference|null;alias_match_count?:number};
 type Input = {targetId:string;userId?:string|null;messageId?:string|null;timestamp?:number};
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const code = (id:string) => id.replace(/-/g,'').slice(0,6).toUpperCase();
@@ -74,6 +75,68 @@ async function render(row:Intake,owner:{groupHash:string;actorHash:string},optio
     state:row.review_state==='confirmed'?'confirmed':row.review_state==='cancelled'?'cancelled':'draft',
     ...(row.review_state==='confirmed'?{monthlySum:finiteMoney(employee?.month_paid_advance),duplicate:true}:{}),...options});
 }
+/** Use the saved reviewed purpose before immutable OCR text; never infer from an unsaved replacement. */
+function savedNote(row:Intake):string {
+  return String(row.review_data?.purpose || row.purpose_raw || row.extraction_data?.visible_payment_note || row.extraction_data?.note || '').trim();
+}
+function reviewedEvidenceConflict(row:Intake):LineMessage|null {
+  const reviewed=row.review_data, evidenceAmount=finiteMoney(row.extraction_data.amount_total),evidenceDate=validDate(row.extraction_data.document_date_local);
+  if(reviewed&&((Object.hasOwn(reviewed,'amount')&&finiteMoney(reviewed.amount)!==evidenceAmount)
+    ||(Object.hasOwn(reviewed,'occurred_on')&&validDate(reviewed.occurred_on)!==evidenceDate))){
+    // Never silently discard an owner's reviewed correction to satisfy evidence guards.
+    return buildOwnerSlipReviewCard({id:row.id,revision:row.review_revision,amount:finiteMoney(reviewed.amount),date:validDate(reviewed.occurred_on),
+      memo:savedNote(row),business:null,project:null,category:null,destination:null,installment:null,installmentApplicable:false,step:'error',
+      question:'ข้อมูลที่แก้ไว้ต่างจากหลักฐานครับ: หลักฐานอ่านได้ '+(evidenceAmount??'ไม่ชัด')+' บาท / '+(evidenceDate??'วันที่ไม่ชัด')+
+        ' ยังไม่เปลี่ยนร่างหรือบันทึกยอด กรุณาตรวจแก้ข้อมูลเดิมให้ตรง หรือส่งหลักฐานที่ชัดเจนแล้วตอบกลับรูปว่า “ตรวจสลิป”'});
+  }
+  return null;
+}
+/** Purchase/negation exclusions win over even a misconfigured private alias. */
+export function employeeAdvanceAliasEligible(note:string):boolean {
+  return !!note.trim() && !isOwnerStaffUnsafeText(note) && !isOwnerStaffAmbiguousText(note)
+    && !/ซื้อ|สำรองจ่าย|คืนเงิน|เบิก(?:เงิน)?(?:ไป)?จ่าย|(?:ให้|จ่าย)(?:เงิน)?(?:คนงาน|ช่าง|ผู้รับเหมา)|ค่าน้ำ|ค่าไฟ|วัสดุ|อุปกรณ์|ใบเสนอราคา/u.test(note)
+    && parseOwnerStaffTurn(note)?.kind !== 'purchase';
+}
+
+/** Read-only hint for initial generic staging; only the configured owner may skip project lookup. */
+export async function isApprovedOwnerEmployeeAdvanceNote(input:{groupHash:string;actorHash:string;note:string;date:string|null}):Promise<boolean> {
+  const owners=(process.env.OWNER_FINANCE_LINE_USER_HASHES??'').split(',').map(s=>s.trim()).filter(Boolean);
+  if(owners.length!==1||owners[0]!==input.actorHash||!employeeAdvanceAliasEligible(input.note))return false;
+  const context=await employeeContext(input.groupHash,input.note,null,input.date);
+  return (Number.isSafeInteger(context.alias_match_count)&&Number(context.alias_match_count)>0)
+    ||!!context.alias_resolution&&context.candidates.some(e=>e.employee_id===context.alias_resolution!.employee_id);
+}
+
+/** Open the existing evidence as a draft card. A button or alias is never financial confirmation. */
+export async function openOwnerEmployeeAdvanceReview(input:Input&{intakeId:string;revision:number;entry:'saved_note'|'manual_button'}):Promise<LineMessage|null> {
+  if(!UUID.test(input.intakeId)||!Number.isSafeInteger(input.revision)||input.revision<0)return null;
+  const owner=await identity(input);if(!owner)return null;
+  if(blockedByMaintenance(input.timestamp))return {type:'text',text:OWNER_SLIP_MAINTENANCE_REPLY};
+  const row=await load(input.intakeId,owner);if(!row)return null;
+  if(proposalOf(row))return render(row,owner);
+  if(row.review_state!=='draft'||row.review_revision!==input.revision)return null;
+  if(!input.messageId)return null;
+  // This bridge follows a deliberate document/direction review, not image receipt.
+  const gate=ownerPaymentDocumentGate(row.extraction_data);
+  if(gate.kind!=='payment_evidence')return input.entry==='manual_button'?{type:'text',text:ownerPaymentDocumentClarification(gate)}:null;
+  if(input.entry==='manual_button')return stage(row,owner,input.messageId,{
+    employee_query:'',employee_id:null,event_type:'unknown',alias_inference:null,purpose:savedNote(row)||'พนักงานเบิก',
+  });
+  const note=savedNote(row), turn=parseOwnerStaffTurn(note);
+  if(!employeeAdvanceAliasEligible(note))return null;
+  const context=await employeeContext(owner.groupHash,note,null,validDate(row.extraction_data.document_date_local));
+  const alias=context.alias_resolution;
+  const inferred=alias&&UUID.test(alias.employee_id)&&typeof alias.normalized_alias==='string'&&typeof alias.approval_ref==='string'
+    &&Number.isSafeInteger(alias.profile_revision)&&context.candidates.some(e=>e.employee_id===alias.employee_id)?alias:null;
+  const ambiguousAlias=Number.isSafeInteger(context.alias_match_count)&&Number(context.alias_match_count)>1;
+  if(!inferred&&!ambiguousAlias&&(!turn||!['unknown','salary_advance'].includes(turn.kind)))return null;
+  return stage(row,owner,input.messageId,{
+    employee_query:context.candidates.length>1?note:turn?.employeeLabel??'',employee_id:inferred?.employee_id??null,
+    event_type:inferred||!ambiguousAlias&&turn?.kind==='salary_advance'?'salary_advance':'unknown',alias_inference:inferred,
+    purpose:note,
+  });
+}
+
 async function stage(row:Intake,owner:{groupHash:string;actorHash:string},messageId:string,changes:Partial<AdvanceProposal>,notice?:string):Promise<LineMessage> {
   const previous=proposalOf(row);
   const p:AdvanceProposal={kind:'employee_advance',event_type:'unknown',employee_query:'',employee_id:null,business_unit_code:null,funding_source:'unknown',
@@ -81,6 +144,7 @@ async function stage(row:Intake,owner:{groupHash:string;actorHash:string},messag
     purpose:'พนักงานเบิก',questions:[],monthly_sum_before:null,...previous,...changes};
   const gate=ownerPaymentDocumentGate(row.extraction_data,{fundsDirection:'outgoing'});
   if(gate.kind!=='payment_evidence')return {type:'text',text:ownerPaymentDocumentClarification(gate)};
+  if(!previous){const discrepancy=reviewedEvidenceConflict(row);if(discrepancy)return discrepancy;}
   const context=await employeeContext(owner.groupHash,p.employee_query,p.employee_id,p.occurred_on);
   const employee=selected(context,p.employee_id)??(!p.employee_id&&!!p.employee_query.trim()&&context.candidates.length===1?context.candidates[0]:null);
   p.employee_id=employee?.employee_id??null;
@@ -94,6 +158,10 @@ async function stage(row:Intake,owner:{groupHash:string;actorHash:string},messag
   if(!p.occurred_on)p.questions.push('วันที่จ่ายจากหลักฐานยังไม่ชัดครับ');
   if(employee&&p.monthly_sum_before===null)p.questions.push('ยังอ่านยอดสะสมจากฐานข้อมูลไม่ได้');
   const result=await request('rpc/financial_stage_owner_employee_advance_v1',{p_intake_id:row.id,p_group_hash:owner.groupHash,p_actor_hash:owner.actorHash,p_message_id:messageId,p_revision:row.review_revision,p_proposal:p});
+  if(result.changed&&result.alias_invalid){
+    const fresh=await load(row.id,owner);
+    return fresh&&fresh.review_state==='draft'?stage(fresh,owner,messageId+':alias-refresh',{...changes,event_type:'unknown',alias_inference:null},'ความหมายที่เคยยืนยันไว้เปลี่ยนแล้วครับ กรุณาเลือกประเภทการเบิกอีกครั้ง'):{type:'text',text:'ข้อมูลเปลี่ยนแล้วครับ กรุณาตรวจรายการล่าสุด'};
+  }
   if(result.conflict){const fresh=await load(row.id,owner);return fresh?render(fresh,owner,{error:'ข้อมูลเปลี่ยนแล้วครับ กรุณาตรวจการ์ดล่าสุด'}):{type:'text',text:'ยังไม่บันทึกครับ กรุณาตรวจรายการล่าสุด'};}
   if(!result.ok||!Number.isSafeInteger(result.revision)||result.proposal?.kind!=='employee_advance')throw new Error('employee_advance_stage_unverified');
   return buildOwnerEmployeeAdvanceCard({id:row.id,revision:result.revision,proposal:result.proposal,
@@ -111,7 +179,7 @@ async function confirm(row:Intake,owner:{groupHash:string;actorHash:string},revi
     const fresh=await load(row.id,owner);
     if(!fresh)return {type:'text',text:'ข้อมูลเปลี่ยนแล้วครับ ยังไม่บันทึกยอด'};
     // Re-stage only the review, so a changed monthly balance is visible before another approval.
-    if(result.changed&&fresh.review_state==='draft')return stage(fresh,owner,messageId+':refresh',{},'ยอดสะสมหรือข้อมูลพนักงานเปลี่ยนแล้วครับ ยังไม่บันทึก กรุณาตรวจยอดล่าสุดแล้วยืนยันอีกครั้ง');
+    if(result.changed&&fresh.review_state==='draft')return stage(fresh,owner,messageId+':refresh',result.alias_invalid?{event_type:'unknown',alias_inference:null}:{},'ยอดสะสมหรือข้อมูลพนักงานเปลี่ยนแล้วครับ ยังไม่บันทึก กรุณาตรวจยอดล่าสุดแล้วยืนยันอีกครั้ง');
     return render(fresh,owner,{error:'ข้อมูลเปลี่ยนแล้วครับ กรุณาตรวจและยืนยันการ์ดล่าสุด'});
   }
   if(result.duplicate_transaction && !result.event_id)return {type:'text',text:'พบหลักฐานธุรกรรมนี้ในรายการอื่นแล้วครับ ไม่เพิ่มยอดซ้ำ กรุณาตรวจรายการเดิม'};
@@ -173,6 +241,10 @@ export async function handleOwnerEmployeeAdvanceText(input:Input&{text:string}):
   const previous=proposalOf(row);
   const turn:OwnerStaffTurn|null=parseOwnerStaffTurn(text,previous?.purpose??row.review_data?.purpose??row.purpose_raw);
   if(!turn||turn.kind==='salary_payment')return null;
+  if(!previous&&turn.kind==='unknown'&&text.replace(/\s/gu,'').toLowerCase()===savedNote(row).replace(/\s/gu,'').toLowerCase()){
+    const inferred=await openOwnerEmployeeAdvanceReview({...input,intakeId:row.id,revision:row.review_revision,entry:'saved_note'});
+    if(inferred)return inferred;
+  }
   if(turn.kind==='purchase'){
     if(!previous)return null;
     // An explicit correction returns to the existing evidence-review flow;
@@ -181,12 +253,12 @@ export async function handleOwnerEmployeeAdvanceText(input:Input&{text:string}):
     const {ownerSlipReplyCard}=await import('./_owner-slip-cards');
     const reply=await stageSlipReview({id:row.id,groupHash:owner.groupHash,actorHash:owner.actorHash,messageId:input.messageId,
       revision:row.review_revision,note:employeeAdvancePurchaseCorrection(text,turn.employeeLabel??previous.employee_query),extraction:row.extraction_data});
-    return ownerSlipReplyCard({targetId:input.targetId,userId:input.userId,text:reply});
+    return ownerSlipReplyCard({...input,text:reply});
   }
   const renamed=!!turn.employeeLabel&&turn.employeeLabel!==previous?.employee_query;
   return stage(row,owner,input.messageId,{employee_query:turn.employeeLabel??previous?.employee_query??'',
     employee_id:renamed?null:previous?.employee_id??null,event_type:turn.kind==='salary_advance'?'salary_advance':'unknown',
-    purpose:(turn.employeeLabel??'พนักงาน')+'เบิก'+(turn.kind==='salary_advance'?'เงินเดือนล่วงหน้า':'')});
+    alias_inference:null,purpose:(turn.employeeLabel??'พนักงาน')+'เบิก'+(turn.kind==='salary_advance'?'เงินเดือนล่วงหน้า':'')});
 }
 
 export async function handleOwnerEmployeeAdvancePostback(input:Input&{data:string}):Promise<LineMessage|null> {
@@ -207,13 +279,22 @@ export async function handleOwnerEmployeeAdvancePostback(input:Input&{data:strin
   if(action.action==='review')return render(row,owner);
   if(action.action==='show_employee'||action.action==='page')return render(row,owner,{view:'employee',page:Number(action.value??0)});
   if(action.action==='show_funding')return render(row,owner,{view:'funding'});
-  if(action.action==='salary')return stage(row,owner,input.messageId,{event_type:'salary_advance',purpose:(proposalOf(row)!.employee_query||'พนักงาน')+'เบิกเงินเดือนล่วงหน้า'});
+  if(action.action==='salary')return stage(row,owner,input.messageId,{event_type:'salary_advance',alias_inference:null,purpose:(proposalOf(row)!.employee_query||'พนักงาน')+'เบิกเงินเดือนล่วงหน้า'});
+  if(action.action==='purchase'){
+    const {stageSlipReview}=await import('./_owner-slip-review');
+    const {ownerSlipReplyCard}=await import('./_owner-slip-cards');
+    const p=proposalOf(row)!;
+    const reply=await stageSlipReview({id:row.id,groupHash:owner.groupHash,actorHash:owner.actorHash,messageId:input.messageId,revision:row.review_revision,
+      note:employeeAdvancePurchaseCorrection(savedNote(row),p.employee_query||'พนักงาน'),extraction:row.extraction_data});
+    return ownerSlipReplyCard({...input,text:reply});
+  }
   if(action.action==='funding')return stage(row,owner,input.messageId,{funding_source:action.value});
   if(action.action==='employee'){
     const context=await employeeContext(owner.groupHash,'',action.value!,proposalOf(row)!.occurred_on);
     const employee=selected(context,action.value!);
     if(!employee)return render(row,owner,{error:'พนักงานนี้ไม่พร้อมใช้งานในกลุ่มนี้ครับ',view:'employee'});
-    return stage(row,owner,input.messageId,{employee_id:employee.employee_id,employee_query:employee.nickname||employee.full_name});
+    return stage(row,owner,input.messageId,{employee_id:employee.employee_id,employee_query:employee.nickname||employee.full_name,alias_inference:null,
+      ...(proposalOf(row)!.alias_inference?{event_type:'unknown' as const}:{})});
   }
   return render(row,owner);
 }
