@@ -1,0 +1,60 @@
+{
+  "checks": "Static only; no database execution performed.",
+  "privacy_scan": [
+    {
+      "path": "tests/sql/schema-metadata/target-schema-profile.json",
+      "sha256": "ff5b1a9b4b7bed9dc48044c88b714395b41b5b3d6ff851b30f6d5d8ab1b6370c",
+      "unexpected_matches": false,
+      "synthetic_uuid_matches": []
+    },
+    {
+      "path": "tests/sql/schema-metadata/target-schema-supplement.json",
+      "sha256": "386ecad35fc76a952791f7eaf5b7c532a0d9157323e15662a7576b675e43ac35",
+      "unexpected_matches": false,
+      "synthetic_uuid_matches": []
+    },
+    {
+      "path": "tests/sql/schema-metadata/target-schema-metadata.json",
+      "sha256": "a9bc95c696ca3a286ef600303aa298928384eb8cc7bccfedb45597f60c3840d7",
+      "unexpected_matches": false,
+      "synthetic_uuid_matches": []
+    },
+    {
+      "path": "tests/sql/schema-metadata/target-schema-extra.json",
+      "sha256": "ea2804988e3c9e791ca94fe587a680985f1e930285fabefa06e6916424dbf4e0",
+      "unexpected_matches": false,
+      "synthetic_uuid_matches": []
+    },
+    {
+      "path": "tests/sql/employee-advance-external-schema.sql",
+      "sha256": "2cb4ea3b17d72b28ffc839f98db9445fed2428d165bbbd24ee690baa50887ff5",
+      "unexpected_matches": false,
+      "synthetic_uuid_matches": [
+        "10000000-0000-4000-8000-000000000001",
+        "10000000-0000-4000-8000-000000000002",
+        "10000000-0000-4000-8000-000000000003"
+      ]
+    },
+    {
+      "path": "tests/sql/employee-advance-actual-schema.sql",
+      "sha256": "527547abfd16fb3a13e89e68c86dfb5294590d6b30c44960528abdfa4ada82b4",
+      "unexpected_matches": false,
+      "synthetic_uuid_matches": [
+        "10000000-0000-4000-8000-000000000001",
+        "10000000-0000-4000-8000-000000000002",
+        "10000000-0000-4000-8000-000000000003"
+      ]
+    }
+  ],
+  "metadata_contains_structural_records_only": true,
+  "seed_before_auth_signup_trigger": true,
+  "non_auth_application_triggers_installed_before_seed": true,
+  "no_trigger_bypass": true,
+  "frozen_proposal_sha256": "741fab4f5304a13d31f87fbef25106f7de734784fa9d1aa948836a619444f7e8",
+  "standalone_checkout_check_without_private_evidence_or_repo_tree": "passed",
+  "canonical_manifest_layout_checks": {
+    "partial_upstream_only": "passed",
+    "full_both_locations": "passed",
+    "full_root_only": "passed"
+  }
+}

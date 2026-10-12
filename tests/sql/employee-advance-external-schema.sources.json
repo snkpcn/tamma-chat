@@ -1,0 +1,2340 @@
+{
+  "source": "Approved PostgreSQL structural metadata capture, 2026-10-12; no source data rows included.",
+  "metadata_sources": [
+    {
+      "path": "tests/sql/schema-metadata/target-schema-metadata.json",
+      "sha256": "a9bc95c696ca3a286ef600303aa298928384eb8cc7bccfedb45597f60c3840d7"
+    },
+    {
+      "path": "tests/sql/schema-metadata/target-schema-extra.json",
+      "sha256": "ea2804988e3c9e791ca94fe587a680985f1e930285fabefa06e6916424dbf4e0"
+    },
+    {
+      "path": "tests/sql/schema-metadata/target-schema-supplement.json",
+      "sha256": "386ecad35fc76a952791f7eaf5b7c532a0d9157323e15662a7576b675e43ac35"
+    },
+    {
+      "path": "tests/sql/schema-metadata/target-schema-profile.json",
+      "sha256": "ff5b1a9b4b7bed9dc48044c88b714395b41b5b3d6ff851b30f6d5d8ab1b6370c"
+    }
+  ],
+  "fixture_sha256": "2cb4ea3b17d72b28ffc839f98db9445fed2428d165bbbd24ee690baa50887ff5",
+  "complete": true,
+  "tables": [
+    "auth.users",
+    "tamma_chart_os.employee_positions",
+    "tamma_chart_os.employees",
+    "tamma_chart_os.investment_categories",
+    "tamma_chart_os.investment_payments",
+    "tamma_chart_os.investment_receipt_intakes",
+    "tamma_chart_os.investments",
+    "tamma_chart_os.profiles",
+    "tamma_chart_os.projects",
+    "tamma_chart_os.restaurants"
+  ],
+  "counts": {
+    "columns": 155,
+    "constraints": 58,
+    "indexes": 22,
+    "functions": 8,
+    "triggers": 12,
+    "policies": 10,
+    "table_grants": 114
+  },
+  "seed": {
+    "auth_user_id": "10000000-0000-4000-8000-000000000003",
+    "restaurant_id": "10000000-0000-4000-8000-000000000002",
+    "employee_id": "10000000-0000-4000-8000-000000000001",
+    "employee_updated_at": "2026-09-01T00:00:00Z",
+    "seed_before_auth_signup_triggers": true
+  },
+  "excluded_execution_paths": [
+    "Auth signup and email-change customer subsystem; original trigger bodies remain present but no customer tables/functions are stubbed.",
+    "Supabase Auth API, JWT issuance, and Storage service behavior; no credential values are supplied."
+  ],
+  "provider_scaffolding": {
+    "schema_and_function_owner": "postgres in disposable CI database; provider administration ownership is not reproduced",
+    "omitted_provider_admin_acls": [
+      {
+        "target": "SCHEMA \"auth\"",
+        "acl": "supabase_admin=UC/supabase_admin"
+      },
+      {
+        "target": "SCHEMA \"auth\"",
+        "acl": "supabase_auth_admin=UC/supabase_admin"
+      },
+      {
+        "target": "SCHEMA \"auth\"",
+        "acl": "dashboard_user=UC/supabase_admin"
+      },
+      {
+        "target": "FUNCTION \"auth\".\"uid\"()",
+        "acl": "supabase_auth_admin=X/supabase_auth_admin"
+      },
+      {
+        "target": "FUNCTION \"auth\".\"uid\"()",
+        "acl": "dashboard_user=X/supabase_auth_admin"
+      }
+    ],
+    "tested_role_acls": "PUBLIC, postgres, anon, authenticated and service_role grants preserved"
+  },
+  "database_execution_performed_by_builder": false,
+  "definitions": [
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.employees",
+      "source": "columns",
+      "definition_sha256": "d4a075ab9b6d19385b5b12069dbf90a2f1f68b8646eb0ab536a9cb0f16f2bcf0",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 15,
+      "definition_line_count": 15
+    },
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.restaurants",
+      "source": "columns",
+      "definition_sha256": "d9bf02f00866496f3aa76602f4bd9767eeee1a83cecc5d77c3e39a9a986e5752",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 32,
+      "definition_line_count": 7
+    },
+    {
+      "label": "TABLE FROM CATALOG: auth.users",
+      "source": "columns",
+      "definition_sha256": "a1433f592dd4938ed7b051f62c0e26e9bc206bf49725d1c916b51257aed4102a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 41,
+      "definition_line_count": 37
+    },
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.employee_positions",
+      "source": "columns",
+      "definition_sha256": "3843e0b3b0c4e6a45744c25b410ea30f2c9aaaac54e2c3c20f7410144d3dedec",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 80,
+      "definition_line_count": 5
+    },
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.investment_categories",
+      "source": "columns",
+      "definition_sha256": "88b735743f5b8594f8da7ec8617f5482d7c1ef08844d0e6eee090021d816c557",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 87,
+      "definition_line_count": 10
+    },
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.investments",
+      "source": "columns",
+      "definition_sha256": "153e662a3674458aa2bfc27e8882dfed7216ebe8c99372b5edc8d22711b11982",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 99,
+      "definition_line_count": 23
+    },
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.investment_payments",
+      "source": "columns",
+      "definition_sha256": "71f88108bb496f54e7f07593a181e515fb21b4b81ef6a3381725de4d246bd57f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 124,
+      "definition_line_count": 15
+    },
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.projects",
+      "source": "columns",
+      "definition_sha256": "bd53b37f634ba64bf3cc717e21968a7d71411321c88a611530719f8d38d9fc9a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 141,
+      "definition_line_count": 16
+    },
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.investment_receipt_intakes",
+      "source": "columns",
+      "definition_sha256": "6a1a723443e5e7c27ba2eb76c75e0834b22b0193dc15fb33139c066d0a407155",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 159,
+      "definition_line_count": 39
+    },
+    {
+      "label": "TABLE FROM CATALOG: tamma_chart_os.profiles",
+      "source": "columns",
+      "definition_sha256": "1639455391c2a89de8e19383da43f04a99cbe18a52346358efd0447b05790952",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 200,
+      "definition_line_count": 8
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.employees.employees_employment_type_check",
+      "source": "constraints",
+      "definition_sha256": "87ddf5b413992b9603be87e73c55c0e534a468e86f93d9c8a0745e5f8ffc2e4e",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 210,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.employees.employees_pkey",
+      "source": "constraints",
+      "definition_sha256": "3aac8d6bb28c1eddaebb14966f54c4409580d07131eb46b9b7be611e4e95f548",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 213,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.employees.employees_status_check",
+      "source": "constraints",
+      "definition_sha256": "7014649213002d0e086f438609b2bff58073e2e88fd3ee646178f92d6a621617",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 216,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.restaurants.restaurants_pkey",
+      "source": "constraints",
+      "definition_sha256": "7b7379c8d199c61a643f50d6bf12aaaeb36c047f1afeb6efbb2acf0ae302ecf4",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 219,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: auth.users.users_email_change_confirm_status_check",
+      "source": "constraints",
+      "definition_sha256": "a9969a3bde174eb027e5ac5af0c731ceef441c00eba7771d3fdcf37b92da9f83",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 222,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: auth.users.users_phone_key",
+      "source": "constraints",
+      "definition_sha256": "90fe3d00d19645b71f3d17de14635e0d12e605dff77f9d6a3a31dec24d151228",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 225,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: auth.users.users_pkey",
+      "source": "constraints",
+      "definition_sha256": "dacb9006ed9465fd3cecfc2bceb059ac41e35884988de56aceda1e2d62a7b057",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 228,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.employee_positions.employee_positions_pkey",
+      "source": "constraints",
+      "definition_sha256": "283cd7a9aa87b9d0ab14846b98c174d59b382ad3a02de9454212291a76f626c5",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 231,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.employee_positions.employee_positions_restaurant_id_name_key",
+      "source": "constraints",
+      "definition_sha256": "af34909d22af4e3f17749f7ac535eee37dcbfec4a9a934d34470f571afaf2d95",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 234,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_categories.investment_categories_creation_source_check",
+      "source": "constraints",
+      "definition_sha256": "c788358ea4f3b51f3573a175ac3d539f7a3b326a5443b9ff0f5dee4455a5e05d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 237,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_categories.investment_categories_pkey",
+      "source": "constraints",
+      "definition_sha256": "af350b4e16f96fdd455334be9bb4ec24bf341004802bf9f4044f5fd70775d8e1",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 240,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_categories.investment_categories_restaurant_id_name_key",
+      "source": "constraints",
+      "definition_sha256": "249fcb5e49afd9354091273769aa0df70360dc51d48a095a485504c038d9abd0",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 243,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_actual_amount_check",
+      "source": "constraints",
+      "definition_sha256": "209c8928237606fb4a3834d0c22b2fe87f737c780090ddfb01a7a8e49021bfe5",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 246,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_budget_amount_check",
+      "source": "constraints",
+      "definition_sha256": "bbe37cca2f6ef53c060dc05377ca7a197a1116d89c38f9ab0b9ec21c89c9e904",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 249,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_creation_source_check",
+      "source": "constraints",
+      "definition_sha256": "ccfab5abb057de38e0c580e77b4fb9bc14a4a1431d4e301195e30c0ef5874852",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 252,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_manual_actual_amount_check",
+      "source": "constraints",
+      "definition_sha256": "2a5a53ee28c957d1c1ae09ff75cda21a4af00d1416c574102fd6ed61722b8b52",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 255,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_pkey",
+      "source": "constraints",
+      "definition_sha256": "09c7de5739781e8023eb00e8c9f356728c0fc3b8d9f9dbc4422a9cdace34c59b",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 258,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_quantity_check",
+      "source": "constraints",
+      "definition_sha256": "471004e55a8327c2cdbd5e9b0e828e381efb03b01f89933ed52b82de2cbc6e00",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 261,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_status_check",
+      "source": "constraints",
+      "definition_sha256": "52d5811d2943b7f84d8b5ebe11a0c1539800a6afbb03955ae79bc74c7f0b8785",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 264,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_payments.investment_payments_amount_check",
+      "source": "constraints",
+      "definition_sha256": "351ded4fda998f19f2b55bdcc1599a7bd44270d3b7fb7a3174220942734928a7",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 267,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_payments.investment_payments_pkey",
+      "source": "constraints",
+      "definition_sha256": "1df5a36d0b34cabdb7a4591d813b85e531040ad12686e7dfeb201b87bebed799",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 270,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_payments.investment_payments_receipt_intake_id_key",
+      "source": "constraints",
+      "definition_sha256": "12121491aca70f69054398aa555e4c97b5253b77a82fe03e10bde9e4aebe4106",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 273,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_payments.investment_payments_source_check",
+      "source": "constraints",
+      "definition_sha256": "8d9ec153453cfde1b03ded4a020f912e1cf8edba578af4dad48054cb293728a0",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 276,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.projects.projects_pkey",
+      "source": "constraints",
+      "definition_sha256": "bc592ff4099ac90c82322e5f8e7dbc0cb352510702ecc4a0b09baf91c06255a2",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 279,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.projects.projects_progress_percent_check",
+      "source": "constraints",
+      "definition_sha256": "d5d04bc963425cb1165e974746767b961bb564da05b9158545bb5992c9cfc84d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 282,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.projects.projects_status_check",
+      "source": "constraints",
+      "definition_sha256": "4f7b79446a32f39e6f008e1ccc5359152d530b8505624824b6c07ee70d79d950",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 285,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_amount_check",
+      "source": "constraints",
+      "definition_sha256": "2043d70585c5b52bbc19d2af575bfe1ebaf5358b88953762d93b787bf90b4144",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 288,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_classification_confidence_check",
+      "source": "constraints",
+      "definition_sha256": "47f6025ba2be9c0dba149d86fea86c8f4d1786eb11a79c208bb37b867ccf0d5f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 291,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_extraction_confidence_check",
+      "source": "constraints",
+      "definition_sha256": "1d7262aa78a862274ed94455d5b2f2ed49f4862b67d57f9f3c29beee71bacfcd",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 294,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_image_sha256_check",
+      "source": "constraints",
+      "definition_sha256": "5679264a1b18cf4bb6fafb1f6b62bafea241b815e1a653fc6861c477b76b3498",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 297,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_mime_type_check",
+      "source": "constraints",
+      "definition_sha256": "ef60c8fbc05c092887c4be198d71247bf0e9060efeea8b5d24aee649d35add6d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 300,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_pkey",
+      "source": "constraints",
+      "definition_sha256": "c87942597d5bb353561ba989306743a2cb02e68cf7fea7ead631bd7e5d1768af",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 303,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_restaurant_id_image_sha256_key",
+      "source": "constraints",
+      "definition_sha256": "c45c41feacb702a438c839584ff8d69ea8cbc530fc9cae4b3877b24fa009a995",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 306,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_restaurant_id_source_channel_sou_key",
+      "source": "constraints",
+      "definition_sha256": "7cf69950c19af58ff429b07bbb8ab9543bfddcf3e3ee9dcbd18a7cdf1ce15fde",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 309,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_source_channel_check",
+      "source": "constraints",
+      "definition_sha256": "4d24559c02932f34e06fe8fc1c450da6124801fe8d37dd9c572a3c107d0fdf42",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 312,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_status_check",
+      "source": "constraints",
+      "definition_sha256": "ad2ea1b776d038d2c8187fac41aa9d13a7e54ebad4d5ff9f0b773b73d724ac49",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 315,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_suggested_category_confidence_check",
+      "source": "constraints",
+      "definition_sha256": "2d12da0b02bb791d72f4c872b660f616a4f10616c0698cb9b60b003e8c51a77b",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 318,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.profiles.profiles_pkey",
+      "source": "constraints",
+      "definition_sha256": "c1d8d6dfd2865535525c292633d1959bd17d068a52b57bb3a200e80c1840927a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 321,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.employees.employees_position_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "27882b3adecc1b76251074e9bcb5827bd39d60bec9d7af1a41fd14192d7757af",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 324,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.employees.employees_restaurant_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "7cdd07e1d03c0354b2205cca0832958305e131da31fff7bf3be07930223221bc",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 327,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.restaurants.restaurants_owner_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "f2430a2eb8f5a5ad8d1b896258df5223e7828632d4684364fe724c0dbd5761ae",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 330,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.employee_positions.employee_positions_restaurant_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "f7d81a4196720c57e8b54467eb27c50fbfbdf825edf45426ad11c6aad8d2cacf",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 333,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_categories.investment_categories_restaurant_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "7fafd6b211efeaf6af62a5e8f723cca4eb393a62b2d3297a857284614401b4c8",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 336,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_category_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "e4ba1be1b99a0c63b1f43b9e86049dd3a9b49ac17b10406dfce9ce1a1701f254",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 339,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_project_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "c3408f52f7256ed9c4d70098b03c962720fa8a124bd9cea150fc5e862c6e78b9",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 342,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investments.investments_restaurant_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "a53f43af15fca4827a9adb6896717e8c8db4bbdbdffe64eced7b3eaa431b709f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 345,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_payments.investment_payments_investment_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "d1910ea21029562a4f871c440773412f7547713ac45af59da738ce356b89786e",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 348,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_payments.investment_payments_receipt_intake_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "4bf2570bfafb0c26307f7497d8d89c5abb3dc0360e5bfecaad9c4d8b3a2d631f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 351,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_payments.investment_payments_restaurant_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "bd4bf8cc434ec92645fe9001ca3ea9f0eac532fce943f1ffb5c54d423a9c2723",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 354,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.projects.projects_owner_employee_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "a3b0e5faa07fbe5508abb207decd29cc765efb08bc6238002e1a23c4bec6b883",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 357,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.projects.projects_restaurant_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "9a63ed707a151e794ba3c170e3bcea902d0f5d7c8ba3c710d858494cc8b357d9",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 360,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_category_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "a63ed61ae2a40dbbdadc5177bac7a7d969bed788aa898bedd5e5fbeb556e53bd",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 363,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_investment_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "6f35f022adfb1f98c80457bab57aee44b3292aeb170a6ae26814583f9a54a3e1",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 366,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_payment_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "de1ae382e97e2d03a413dc587be08b298a34093e80190331a8a190ba13d9c3d8",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 369,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_restaurant_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "ae495d11699ed17b129785419b3049f0ab47a0f4f056afce2eabd8118cbbc001",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 372,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.investment_receipt_intakes.investment_receipt_intakes_suggested_project_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "6c8def2806a572fbadba37a6f1b1c1e2e356c9525aaa97ebb5bb470971dbf4f3",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 375,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.profiles.profiles_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "26e39545530ec7be112f52d7ace59e610edd039159f62928f8a31a32a8fe03f2",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 378,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT CONSTRAINT: tamma_chart_os.profiles.profiles_restaurant_id_fkey",
+      "source": "constraints",
+      "definition_sha256": "cb75b104e3b2a9dfa53403c3a835c87577e169ba6c3bc34539f6e5aeddd5f176",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 381,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "997c2b6159d1e636f8d4733fba002f31e7b05491998f35f66ba223a8f2ce7be1",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 384,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "fa381873c4a24dc311a1b97dde64ca7e8827fe8821a2f5a671e7fa07da77d693",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 387,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "31cdc2301e3f33533d680c55241ea6202038a96bd40f0cda55d843108ec195fc",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 390,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "7cee01ede754c2dba83413395d9902c0b3ecc93b36a8ac923be06999e9cf3256",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 393,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "d5c7130f945e25a2767be8034a918cad4953a7c89cb7f005aac1f09a12855c18",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 396,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "90e75bf8767c7e21f67ad4511c2dab3a17d7753e82d1fc331fe68a9d3b55f913",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 399,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "f7a093c3184fc1d3da23dbfcb017dc6330181c90582e77569ac8253a44643d1c",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 402,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "2986ef01d0032200d994b9233d33961f646fd8e24f942b563ecb48179bd74aa0",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 405,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "cf404244c634c5b3fe2f062ddaa74c7079461570a2240c0614e6102b92a2af32",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 408,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "d0cc1e405d55b2f5438971efba427645322612771f741ae91e6b4af0240dcca3",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 411,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "a63cbab70b72afa7949ed9e8ebc9bb8629844da3d6d8cd08db06d962da548708",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 414,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "67c5dba835053e33609364eca25864b66b393d38f41972eb7dbc9d2dfb49609d",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 417,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: auth.users",
+      "source": "indexes",
+      "definition_sha256": "4dbc01feffae5acf04236e5aa3611151cc43e1467f84588e05b025dd9fbc7402",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 420,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_payments",
+      "source": "indexes",
+      "definition_sha256": "44b7dc4205a5d4b8c21a260018275d5e97f6f7187b7f8fae1cf1e0245e4e6d83",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 423,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_payments",
+      "source": "indexes",
+      "definition_sha256": "62fd5bbca9fa6d5d85e56080cdcfcbec77dbb3a14714473f5086bcfd39cb858d",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 426,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_receipt_intakes",
+      "source": "indexes",
+      "definition_sha256": "c94c8aaababcceeffba5c42f0572dd55077989445f8f62df0cbb0562e8e3d989",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 429,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_receipt_intakes",
+      "source": "indexes",
+      "definition_sha256": "c20be76e20b44e94fa80a70d2d14ba7f21c42bbe4286ea3044307836efb0cb8c",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 432,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_receipt_intakes",
+      "source": "indexes",
+      "definition_sha256": "6a849f378dd33626ffc130bfb93c7a730e6de53a18028148159f8407b05d08a6",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 435,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_receipt_intakes",
+      "source": "indexes",
+      "definition_sha256": "1edcfed0c9d72379d6aa5c51ef0156d88f0251881c093a0a5f830f9616712fbe",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 438,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_receipt_intakes",
+      "source": "indexes",
+      "definition_sha256": "3c504b6454e1166faafe7775d0915e4155f33353542c80b4764f86511a7aa964",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 441,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_receipt_intakes",
+      "source": "indexes",
+      "definition_sha256": "2fadc8bcee687369e9e35f6ef665d9bb544aeb563c966b6309a1da0b6bdfdcf5",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 444,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT INDEX: tamma_chart_os.investment_receipt_intakes",
+      "source": "indexes",
+      "definition_sha256": "8233dc24d407adbb5f0233809264142686d83363079c4616a1ac633ce5e63250",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 447,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT FUNCTION: CREATE OR REPLACE FUNCTION tamma_chart_os.set_updated_at()",
+      "source": "supplement.functions",
+      "definition_sha256": "5c97918a943d55514085a2b5109b25cdc9c64be624137a45b69323903e5482fa",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 450,
+      "definition_line_count": 10
+    },
+    {
+      "label": "EXACT FUNCTION: CREATE OR REPLACE FUNCTION public.handle_new_auth_user_customer_account()",
+      "source": "supplement.functions",
+      "definition_sha256": "896b7bfee934681d9931a5f3d2f3686498623e44dd726e1e365e3501b66dbe08",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 463,
+      "definition_line_count": 55
+    },
+    {
+      "label": "EXACT FUNCTION: CREATE OR REPLACE FUNCTION public.handle_auth_user_email_change_customer_account()",
+      "source": "supplement.functions",
+      "definition_sha256": "efaae65f5f48fcc29c21ca8fa6df2fbcae15a60865993c2df941d0b4bae87e47",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 521,
+      "definition_line_count": 13
+    },
+    {
+      "label": "EXACT FUNCTION: CREATE OR REPLACE FUNCTION tamma_chart_os.apply_manual_investment_actual_v1()",
+      "source": "supplement.functions",
+      "definition_sha256": "335194322556d8b499c80794037ca43cf85f758bf0e864036c629fbbb969888c",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 537,
+      "definition_line_count": 15
+    },
+    {
+      "label": "EXACT FUNCTION: CREATE OR REPLACE FUNCTION tamma_chart_os.refresh_investment_actual_from_payment_v1()",
+      "source": "supplement.functions",
+      "definition_sha256": "587b098f023105e818b292fcf62f004f3e6aeda7e2ea45f4143b793b135506d8",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 555,
+      "definition_line_count": 22
+    },
+    {
+      "label": "EXACT FUNCTION: CREATE OR REPLACE FUNCTION auth.uid()",
+      "source": "supplement.functions",
+      "definition_sha256": "7c1ff2ecbe653c9358b3115a2607db9573f88a2944ae4eca9e296a89cc5186a7",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 580,
+      "definition_line_count": 11
+    },
+    {
+      "label": "EXACT FUNCTION: CREATE OR REPLACE FUNCTION tamma_chart_os.auth_restaurant_id()",
+      "source": "supplement.functions",
+      "definition_sha256": "bb2f30cf833c1acd8495cfe97ba3bf2517321851e8b048560772522de0c5ccf4",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 594,
+      "definition_line_count": 8
+    },
+    {
+      "label": "EXACT FUNCTION: CREATE OR REPLACE FUNCTION tamma_chart_os.recalculate_investment_actual_v1(p_investment_id uuid)",
+      "source": "supplement.functions",
+      "definition_sha256": "cba68fcc994f83d3b2d50717648a78878033c11b19fd6a3838d95c26f637a100",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 605,
+      "definition_line_count": 14
+    },
+    {
+      "label": "ROW SECURITY: auth.users",
+      "source": "rls",
+      "definition_sha256": "d1dc2c160431a108072925938ace2152f4fe42dbc0907410aa3e3608f7802c05",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 622,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.restaurants",
+      "source": "rls",
+      "definition_sha256": "ff1e8856fe16c859c9efb771b41c192b03af56f1ed2363341a5a8caf6bab260d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 626,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.employee_positions",
+      "source": "rls",
+      "definition_sha256": "1c70d07bbd4e2631f21620ff655f154863f1e61a84150378a5b31287866f6d39",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 630,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.employees",
+      "source": "rls",
+      "definition_sha256": "a9bb7cd743073271cc600b103f1ac5ec5b1ad4f338b11b11d62fbd7fb69f95a3",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 634,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.projects",
+      "source": "rls",
+      "definition_sha256": "538dbe37069d8d0ec0f2d06f2eee0172af9a1987ef7e59d7f0c844790871449e",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 638,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.investment_categories",
+      "source": "rls",
+      "definition_sha256": "168643d6c5332bbd2cc33023e52ebaf07b2c42649426b07cbf14748d1cd10d30",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 642,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.investments",
+      "source": "rls",
+      "definition_sha256": "6bc55e1afa9052670cb6f420c5963d269d82f7dcac890bfc08b4f96ef43fc33f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 646,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.investment_payments",
+      "source": "rls",
+      "definition_sha256": "45b14018be4729b14c651402f3367cb7c35aeee3517a8ba7a2a8f2f74a023a42",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 650,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.investment_receipt_intakes",
+      "source": "rls",
+      "definition_sha256": "d5337edddf5121da6a4005b8fa88771caee686969fc62e02f689373f385b5e93",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 654,
+      "definition_line_count": 2
+    },
+    {
+      "label": "ROW SECURITY: tamma_chart_os.profiles",
+      "source": "rls",
+      "definition_sha256": "148085eb7a733f2a505df9c01b2e28ef26c68acab835f861c0092fec64d19368",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 658,
+      "definition_line_count": 2
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: owner can manage own restaurant",
+      "source": "policies",
+      "definition_sha256": "9fc38921585b0f8be49408e0b5fade173b79cb3028fe751d64041329f796401b",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 662,
+      "definition_line_count": 3
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: restaurant scoped access",
+      "source": "policies",
+      "definition_sha256": "0f589facafb4f3510fd360ffed317b3fbcd6469e7f0299676d9927c40cd617b3",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 667,
+      "definition_line_count": 3
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: restaurant scoped access",
+      "source": "policies",
+      "definition_sha256": "00d83ab4540a62cc89e2c2bf7bf00758af830299b5320a34af51bfdb97a2c65f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 672,
+      "definition_line_count": 3
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: restaurant scoped access",
+      "source": "policies",
+      "definition_sha256": "e47fe3f9b45afb7c25ef03227fe3159c412867edc531198872f1bc04145d7c4d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 677,
+      "definition_line_count": 3
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: restaurant scoped access",
+      "source": "policies",
+      "definition_sha256": "91bca7e122ca9613527cfafafd050625d123141ce3c4410260f9a06178ea3e37",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 682,
+      "definition_line_count": 3
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: restaurant scoped access",
+      "source": "policies",
+      "definition_sha256": "b629716a1ac209d093ddeab6b0352c6453660e65f6715de21a9fdf53283477cf",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 687,
+      "definition_line_count": 3
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: restaurant can view investment payments",
+      "source": "policies",
+      "definition_sha256": "cc8f1c8826fbc930fa9129c8033a61b52ebd3c7bb8fa73197c08078680769b40",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 692,
+      "definition_line_count": 2
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: restaurant can view owner receipt intakes",
+      "source": "policies",
+      "definition_sha256": "f88cbedcd930abd9094f020aa4ce2f0650b5777ed673ca675bb598c65e17e9c5",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 696,
+      "definition_line_count": 2
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: user can update own profile",
+      "source": "policies",
+      "definition_sha256": "aa419246109126a33118c9765f48f6a1b8a1fe77a7e55672c7d66afbcf336bcc",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 700,
+      "definition_line_count": 3
+    },
+    {
+      "label": "EXACT POLICY EXPRESSIONS: user can view own profile",
+      "source": "policies",
+      "definition_sha256": "eb121e7a44ee59eaf734c5bf21859f7017271de13a273eb29d548e70cb85306a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 705,
+      "definition_line_count": 2
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "18e0c24c56c350ae48b0697fdddeebe66c45d08bdb269a3137fb4f71968f9f81",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 709,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "45ee0998782e8980e4d125e6a46c553f946d44f5e47873ae0bbf775e76f029a6",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 712,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "6e03304006f5a031420347c326f510e18001c0c6a9d6df6464bb5813b357f8b8",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 715,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "d10516e9a5a33582358d5f2494cd4b14802d78da7f639cc19d20e24c2f14cd2f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 718,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "25bf071213eae936875aac966c805f5b5503f536f86d85b5744e10f9055d3710",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 721,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "970f827126362b6eb88e260734380102f765f47323b0497b45061c02a5a1e9e9",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 724,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "4955ca3479f26b99a0e80baa91a53c353bb63a8d249e6353b7275e7e105a7cc9",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 727,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "50f8e852519db66daaf8967ce757dd52f8d9047fe06989f1253eb9eac68b563f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 730,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "2fc2077a3e42c8c579e3d297f840594d34e59f18ade3c9e5c3e04683034c42cc",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 733,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "c55eb06fc79274f957f975e595d6cad8129e9310eccedc7cbc843d227c9ba78c",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 736,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "14fa457faee1f45539f4d4a28498968db0927fcf3dd8799cd821009b2fabf797",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 739,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "01cf50b4a9b16ea0d27ccc2f3df7caa5ffba2c4aa771d60ff9d86520ba89b0fd",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 742,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "a8ba41e509c119c10378ef82df589e788d275885d0333a038f4ccd10494295aa",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 745,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "189cfa9a412060d0d406eb414f99f5cc62311a4c3700385c00a40dec1f03186e",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 748,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "2e70667206118d1103aea3927dcfe1691fb0908080f5f853c72b1a8521871785",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 751,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "ee23b17ec75c4b20699d45df08c1a7b0270b94afdded800eb129e6e6304fcc6b",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 754,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e556370a940cbded992617dc548b648dd5a6226191fcfafd111f09948d01bfc0",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 757,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "cc340f263c0b4a6c7b1605ea88852c5d1ff6c44e664e6ae2002351cfe8cd6e39",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 760,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "9bc6b05c27b740eaad9d9d219f026efd73555325e2e379ea81b2a2ea54931e0b",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 763,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "b1f71f2de5b56211fd80fff8f0271e47a9e84d98da009e30f6d2880e17ade5b4",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 766,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "20690c51de690e8f43d4315787707af635056be2f55a99880a82854744c80bf3",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 769,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "cb14b97d4f3f5fcbeed383c3c2f0e8bc4c929c8fc0c5483e5c1ddcf21b48689f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 772,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "f7289a2280d5a02fdb98f1a4e151a1388251d3abc33ed30a561dd27dd4454608",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 775,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "eb5c790316323bbad00a7aac21dacf75536de383aae8fbc90808ff50ecec86e7",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 778,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e23b7f2ff71479974cb8cf06bfb37417917ca6e3b65d0a5c78266c7662f78c14",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 781,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "3f5197843007f6428127536f4f8425c0a917158a371d8f7d93a886fc1b8d5a34",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 784,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "8bf6ff34c6719ca216b0ceca637f30b753ddaabf18bd44ccd4210c80ff5b7905",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 787,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "90db6e742b63cf4f6480af756552e3c8d2226c5f869aef6a559e418c66d1db8e",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 790,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "5bc0022455f4b00cd6461b9cc1cc68504622ecdf93215e649cc1d3302d0f27d0",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 793,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "a940d36315fcac7fcb1b2c1fa7f1dbd4895462cc6320620bd13823adc04dda02",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 796,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "33d98a26892a55d3e8729e1de46d9bd4cfcdfb008ea138fd228d59aedb65fcea",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 799,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "27969b0cec1e5902dcbc376863c5543923f7d42d29a75e6319e0d9c4a2df7348",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 802,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e8642f157496072c15275ecb24238af37a0cf100c551dc83f197685f7dd70e6a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 805,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "3dc93d61aa474fcee275318b3fc97f226f0f48173cff2b18f88ddcbbd494a26a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 808,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "5c096ccb6c3e36129a64c4e30b9a0d1bd1647ac440b9bf67632ee58212f285cf",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 811,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "ee79599f5e34b5b61c1d12f6f4378cc038343c4f0778db160aaca8d190b519d9",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 814,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "01bc40ba580596ecbf5007a45c32d5f5f8e1bbaa25f4b43a9b90dfc147f44e54",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 817,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "ffde39dda53bf50435e63b5e1a373c6b3f5fbe51fec2f1a204d447f93970f001",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 820,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "f10192234ea288d17cad8b9756f9005cb95a42eb4f53000882219af6f1212281",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 823,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "97c6a7dc4706c3d6bc4cdbc619f948fe7014ebc151bd8f2c1971652a383af4c1",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 826,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "abde5a563a5dc57c4657afbdaca84df307ef3eccfbce57faeddd763ae567aa46",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 829,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e10ce222cb0b55ed2744ea3ad3380338244b4e1aea12d77d9ae0846e17bb2ee8",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 832,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "5d91cdf41b83ca3f553d3f7d5c2f7c460cc7b7d9cff0f62f5560769d5d3ea1fb",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 835,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "43dc12f8cf9c26904fdb56cf53d8307ea71427f1d4cdea8858804d0ca9ad79a2",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 838,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e339489cfb35b5ee0833628eb5a91bffcfb9f22b189c1e844f4c793a6e8d24a8",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 841,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "1c5897e85705fa5afa4b27ad5316dc2832d42dd90d50d0fbb2f3ee221abe730d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 844,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "3913319f24121982964cb7454a89b7095bff21564582cf2321a2607a26dafc25",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 847,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "d3073dae275b21e5ed64b3a1a781d487d7a951fb390b8704c46a5f89dceac629",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 850,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "dc36eefac83ecb4e07ab281a539ce6816fcac0f2cd13ce30423bdf313a5bdf0c",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 853,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "8324a10e093013379917dd5b0a8cc90ae49dae03d0ae22aee3ebc33c35b0fb6f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 856,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "9b3b138ddadf72714343d03878c4ac0cabb339116c636e4c1c29df7b4aa52864",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 859,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "9cf3f0ab971288b9fec1ca9f02985218131ad3d14d8d81e209a5f998d3541903",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 862,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "9f18adca59e0120270b36381b425cc280727b511d18625af79b8d8a3c4781498",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 865,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "afc3c5056c7a6f64550e92e57b9a8ba47770ad7996ba6adf5e5e6da737bace9d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 868,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "0fb1e9ac5cd7de4bce9c4ae5105511c7af12c540fa37ec5a4963e96f9e196107",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 871,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "faf642c1c2182732ea12dee676015ea63bca61f0ce31fa5baea9cacbd5212dc0",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 874,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "fc5da7a4ae8fcaf8b8401e3559366a803c3751bb0f31d5459638624cae6b1a18",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 877,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e9cc5374b733338d6eb577f042cecc1055747d480e2a6af5dccc4dc223681a42",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 880,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "0918b8061b9a9a5da15a060d2aba2c9c8b6b935d510a3a817279126f52f7edef",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 883,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "7a13234e59287192bbd0100894716646dcbc2325fe0e994d78c6e7d312397b3c",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 886,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "8540d7bc7f52243176de143478041d9ccdd2c711f6aab6d78ccde93b88f3e154",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 889,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "683292c436e6e57e6fce44d7fd21ba25e71016f9836ac90e01305684964396f7",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 892,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "5d78e2451cac481550c00161552181e62059bff016fef707875e37d9b462a850",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 895,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "d5566851439b23eb0d1ad1db3140f14c1cddefa04341066caae30690fbf31169",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 898,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "189e309d30ea0548858a45063f1fcc5c347b2d767c2c499986a672621da9b271",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 901,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "090da00b1c1a3366bf86cd223472faaa4c49e321a976b8e238baf2eb51243264",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 904,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "c2be29fe39ed4b41dd19183068c5b59f2ec3edc85a6002f1f3547e7c8e3e352f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 907,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e40a8be4c52006e9e686104e5b96f782669bf2fd839ab0c0f4e1c304cc43b147",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 910,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "bd8db9a48309a86901d8e8a9722edb178d0e663222b0af0b2ba779d43eae5efc",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 913,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e8068627001d9081778f209d3106a7b9e214700c4134685e4606d40618db92ad",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 916,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "dd37df8f9b6b7fb51c29955efe5cda681734cc592409925e120365a848e1bf16",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 919,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "39dac90439844c98ab4b98854bd4e6a6f650abb75fc4ef7e72560ca3e0c636ea",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 922,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "50715bf05169bdd9f6fa98abe3d4fd5253840a54df7501e86f02b0b7c61a3511",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 925,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "d002430d4b48d89304fa1ff11d7acec69c1aee9e69d410b713b6215c1031f736",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 928,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "1dca34a4eec5b89f6bf4e84bc7f060feebaf6fc96dc3ca2d7e9d5ca2dbf7b6fa",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 931,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "16b6fe8754ed7fdf4d5efd882484c8f7883c9be3bfde9c2b390fe0e33780e2cc",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 934,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "c6716434bcffd3aaf25ba1e50bc50e6ea64b579933f850b1c92333d94655caa4",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 937,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "d84cf64a84b4ea04a586420159f86d586b7fda97d6170d0c8237db99bb10b1ac",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 940,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "34e693ec4a644202f5fec0cb6ce75b663f6dcf0748624548c31b0d1ff81a2130",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 943,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "0054d4bc0b1e1d63e36ae8611e64ac4fbfad69799c749616da042378366ff7ff",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 946,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "be31d19b2b01cd5503b14bfcd3da2543fde405d85c39f1c3268918c346a82992",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 949,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "5d452118c8a90efe658999c77b63c7326f5b42de04b89f9582aa068a529ca21f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 952,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "31ec2388e4b1ad0f63578153514c3f3b2a6e68c921f91517d286f175ec0a8dde",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 955,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "1326e64ffecc054077ba183c68a419d088f88cfd0e81c8853ad42a4d8f200a7f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 958,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e69029515773ce167b285f91b249572646bec86bfe31f2305976e8fc9738d1aa",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 961,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "cdc2b3294a03c7a99299a24e8427900e2bdde43493553578a32cd0ce874345c8",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 964,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "8ead1cb0c35234ec28bd31ae1e1a9382be3995256a4be673b8b2b7eae03c7bdb",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 967,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "61e69a9751a2cf7c87e93b856b898f62c8ee28e87e97bc96053f715bb54e3ac1",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 970,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e8cc2a330bcd60f583dcfbad5b56a3718fbd611f89e836d691f051486942a106",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 973,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "468123f9ceee68a72161e178d12d029a19f5844cfa74b2fc8fa431ca247ae509",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 976,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "214caa5b9e443afa72bcf184eb2f35392452383724fd2637ba459ad236401967",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 979,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "266f529f8b05313eb7ac18abf1c0124eeeac4635c8d3b0411764f7f9560a928c",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 982,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "a8a2e67fc54fdbff8e824630c6d31d565a842c9115378f764566b14c38af6ffc",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 985,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "bceed253926643ab4733a9c4b5e1d1b0fd4a6109466380591d077978179c1e3a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 988,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "501528b7324d380eaf6769cefe4cefa5ef0117b98af1ae5fa523a9a20282b4cf",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 991,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "a955fc84ed84553c9cfd1ba7315caa2ef1d5909c5ae925571f3a82b2215ea47c",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 994,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "626b3bc6347b2aeb42103c5bf238e0aaa6f3152c65d1a74b816d2e2a4cc4ea91",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 997,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "73196326fcecf016838aaca887a6e088054f3dd8924bb848bc97ff37a5f862a7",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1000,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "692e61ca5d550d51378aeb49b31162f6629030cfb21a82fdda98f3e70f56a29d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1003,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "0289182372314ba66b18562158ffad6ea5666a3071985f2d94e6e65b6d7b8fde",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1006,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "61bc03cd7493bac7e6556ebcb6cb4d1d6a1481c7f6d51ef96223c8020fae521a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1009,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "505fd27a1688d98bcd26ed113b45cb02ebf4fa9000cea568458fb4b71156e25f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1012,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "dcad88fc3374e43f73f2ddc12d660659aadf2e622776c0dca87973993be4a662",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1015,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "4adb308de0e7640cd3093ecb0c5ca247043736bcc5253f76c80d9b16e41abc1b",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1018,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "0ab551a8d3e16bab18fcfcd075259a4c95a6709e474ed8940782bf1f4101bb33",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1021,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "23e4cee27df32d7ba4c06ec9c17d22c9403c98e7573a82c7c475ee5ae7592dba",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1024,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "49dacc2c80299058b355bb2a2bd0384e2116c3c7f211e779fe26a09aed154077",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1027,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "13535803fc914d4ce91d707b64bdb1ff6bec264ab031d375a5de4e802733a81a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1030,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "c934702f8037654fd49b9624335353ea26a0ccccce024ffadfb99e1dfadccc7a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1033,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "7c5ee0e4c1ee9311252fd838076baf42fec9c3f18758fc2876c8b0682d5bd9a3",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1036,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "a5cc38ae76c55e8c1d145bb26b7ec4df63da7d07878197f403a791b96db34145",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1039,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "217587e04910b5c11858988d93bf82d2f64c237591dfbcb00907c98bd203c366",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1042,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "aca87717524f149157f7a4e455b8d6fa218f39e3be46efdb8b1302bf18420902",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1045,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG TABLE GRANT",
+      "source": "grants",
+      "definition_sha256": "e68aa47bf71e8da1cd7d54e743231577c8e87687c9fab5ddbaab0e301836b9e9",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1048,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET SCHEMA ACL FOR TESTED ROLES",
+      "source": "schema_acls",
+      "definition_sha256": "36dda9516a8ee37b79526b5d4fe8c6c3afd59c6837acb15f5a2d828e9216f420",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1051,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG SCHEMA GRANT FOR TESTED ROLE",
+      "source": "schema_acls",
+      "definition_sha256": "399c92c64c9eb5fb92288ac7d2d4cc42cf0f1d0b2c6ec1025ffbc20e85838888",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1054,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG SCHEMA GRANT FOR TESTED ROLE",
+      "source": "schema_acls",
+      "definition_sha256": "9c4633b0ca15679c2cc64a15a6b3e15f424cc1bc6decd0431964b4e104360baf",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1057,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG SCHEMA GRANT FOR TESTED ROLE",
+      "source": "schema_acls",
+      "definition_sha256": "1a6ad8d1b9aaef2ff63f1c5381df318a2bc5e186693ce634be5c808a13d13d1a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1060,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG SCHEMA GRANT FOR TESTED ROLE",
+      "source": "schema_acls",
+      "definition_sha256": "96cb00b7b80f0c9af420766e28574a41a18ded64de74aa7352cd6832fb552e9a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1063,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET SCHEMA ACL FOR TESTED ROLES",
+      "source": "schema_acls",
+      "definition_sha256": "c29aa8ae251f8bcdf633e1d2d4c3315e5ce16763980b33bcd4bc29d169bf72e5",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1066,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG SCHEMA GRANT FOR TESTED ROLE",
+      "source": "schema_acls",
+      "definition_sha256": "d082cdbd9783d61189b3eb1269537f8a1499e7f61f92e2ee749ade0801289aa1",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1069,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG SCHEMA GRANT FOR TESTED ROLE",
+      "source": "schema_acls",
+      "definition_sha256": "847a4e2adac20c70ddabd4e88d09273df6b96a73ad83aa88e83aa5f68fc3eade",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1072,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG SCHEMA GRANT FOR TESTED ROLE",
+      "source": "schema_acls",
+      "definition_sha256": "77e81fd1de047f129779a1d448e7b5265ae0241ab4d51b9a797e60c4a4df7b32",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1075,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG SCHEMA GRANT FOR TESTED ROLE",
+      "source": "schema_acls",
+      "definition_sha256": "64512f99e5e28bffeb372431ad5b3819db5e962d02b56f2027c7d2e8d48eabe4",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1078,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET FUNCTION ACL FOR TESTED ROLES",
+      "source": "functions.acl",
+      "definition_sha256": "e2621088f0eb8b37611a1cbd9910943e16cacdd0db4d0e0ed1aa8f462a3eda8a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1081,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "9d0fdedb57cfd3f85b7d203bb11aaa7a7139bff3538caf95fc467c6882468a9f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1084,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "9d287649f2190ef59a371400ca6b3cede5f1ab8cd52e8beb5ecd9c6c96a0cd70",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1087,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "0dad0c78e0f43ca1edb1ef9d24d7ced4554d02778b07686f69d01640375953e9",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1090,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "8a587a200b2399c810fbcf254b311047bb32ff3c101d10840b7fc6dc7eb2ea9d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1093,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET FUNCTION ACL FOR TESTED ROLES",
+      "source": "functions.acl",
+      "definition_sha256": "5dc53ea5ae3d829a4848a28565f2e3d47009d3d2952abcb31260760d1c65f29e",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1096,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "51e2743af1dae2f37c80e698d8e78b5d9f7370b2c2285ae358bf026e7a28bc70",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1099,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "d36f22078ce1633b6e0e31b2f8dcc4ff12c516c26c45889502695e53e2bcec78",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1102,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET FUNCTION ACL FOR TESTED ROLES",
+      "source": "functions.acl",
+      "definition_sha256": "cd280b4f27f8d942ca77cf75909c4f5c008ab2ecb8422945660c34bb3406bb2b",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1105,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "81510dc6de1687716bfcbe32b0349b3a2ca5cda0cc238a54b454a45b6048ab3d",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1108,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "5c68162add0b7678037e105509b8b57dcc592cfd7263422b96527ab725d4b6b4",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1111,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET FUNCTION ACL FOR TESTED ROLES",
+      "source": "functions.acl",
+      "definition_sha256": "d5c81f9c5027df772c6449b037b23d5a6ad4ac11c1961b8c1095b71c3a1d6512",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1114,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "8770a066d8b9a411918c97837ec3b7f2c9f00903e4a27981ce32244e6061059a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1117,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "495803839899875da4c68a8272a07b447833b689d6b86f3cbf0115a60dea56e4",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1120,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET FUNCTION ACL FOR TESTED ROLES",
+      "source": "functions.acl",
+      "definition_sha256": "9c66a1d3a535ee8e6466b196808b2af0f0b665eea0b14cd8bb4a60299deae010",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1123,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "184212f181713172342d55594ec76adf4fa8085ee2f56ab0916b0d3eb390c9a8",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1126,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "9b7a718f5cff38748a3e48f1f8dd76e5a06d5a03e565f3d638717d6acf4c34f2",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1129,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET FUNCTION ACL FOR TESTED ROLES",
+      "source": "functions.acl",
+      "definition_sha256": "e85bce6d8430d18ef7263105bd2b7de1e2af47b1b13657dd6a163c6a21b894e1",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1132,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "94017c3d6effcefc93ebf5a2bcecd1f941b7885b94b62a9cbc8719f2a21c0f2a",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1135,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET FUNCTION ACL FOR TESTED ROLES",
+      "source": "functions.acl",
+      "definition_sha256": "32d00041e8a52050cadc1991138484a73972a46928cfb6f46ef4abcea7c16200",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1138,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "a8407bf637821af452ae5e68a9faa32d1f92ab803b6da8ce262113d3306a519f",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1141,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "d2b7b5befb957de9b7e3e2d657281bac59b1a9a8864305f2154d7199f656909e",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1144,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "f9778368201390cd3978b3f96f3ec6d0f2494f11074eaf041d95d13ab3563878",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1147,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "1884ab0c9f80b9e6a2b7c3488801549fa0c7cd861785fa5c2526551330a06914",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1150,
+      "definition_line_count": 1
+    },
+    {
+      "label": "RESET FUNCTION ACL FOR TESTED ROLES",
+      "source": "functions.acl",
+      "definition_sha256": "c6bf501b48f279d5791b4198997c5ceba02866b55b89e0cbb13880d0e9a88ce3",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1153,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "3730b0b8d2d1acf1b9526602f1d125f5f04c71a92b30b83e76b9de9016a6fe67",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1156,
+      "definition_line_count": 1
+    },
+    {
+      "label": "CATALOG FUNCTION GRANT FOR TESTED ROLE",
+      "source": "functions.acl",
+      "definition_sha256": "b8fa165aa7188af822e529c72e215bf370d442b046adbca0dded0b47562a8c96",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1159,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.employees.set_updated_at",
+      "source": "triggers",
+      "definition_sha256": "ada10f2a08b81523dcce35cf7292dc79310cd4555c284e979bacec773ee9634f",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1162,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.restaurants.set_updated_at",
+      "source": "triggers",
+      "definition_sha256": "4033e2fabb975d19ff51790f81a05e4a219dc744dcce91294caf9ca1193ffc0c",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1165,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.investment_categories.set_updated_at",
+      "source": "triggers",
+      "definition_sha256": "b070be572e03007333f073dbf118397a8fc0bbaaf857e438c189f40cb397f714",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1168,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.investments.investments_apply_manual_actual_v1",
+      "source": "triggers",
+      "definition_sha256": "530a536eea524830c3a08e82139e6090c76057e3953ef7c49e2b464339a077d8",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1171,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.investments.set_updated_at",
+      "source": "triggers",
+      "definition_sha256": "d1b6e694ffe4f747e60d320cbe97725803a5540e68cc835abea1321bf7df8c14",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1174,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.investment_payments.investment_payments_refresh_actual_v1",
+      "source": "triggers",
+      "definition_sha256": "6b78adab255964998d800fd46fdac516d579fa00a59f113a4f7b7c7439f3090c",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1177,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.investment_payments.set_updated_at",
+      "source": "triggers",
+      "definition_sha256": "98e78bb2b329c41d0b1c1008300ad1ae08b159b373882ef13a231d717fff03c7",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1180,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.projects.set_updated_at",
+      "source": "triggers",
+      "definition_sha256": "a60548b67e3e503712897848041ffaf9f8340fd35bea878daca8bbc4ad364fb8",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1183,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.investment_receipt_intakes.set_updated_at",
+      "source": "triggers",
+      "definition_sha256": "d3df10696b6ccdc50b40a1d9fae10f3484be48bc3d13a5740e89374d3ffbcb1b",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1186,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT TRIGGER: tamma_chart_os.profiles.set_updated_at",
+      "source": "triggers",
+      "definition_sha256": "4f88f27abe81b6ee6eaf480b98dd80dfd28776e95f81bc34426663eeaac75af7",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1189,
+      "definition_line_count": 1
+    },
+    {
+      "label": "SYNTHETIC EXISTING PRINCIPAL AND EMPLOYEE: no signup, password, token or real financial data",
+      "source": "synthetic-test-fixture",
+      "definition_sha256": "34f567738dd12d1502862ac331bbdab98545e9acab45e2b71257f75e1e4fe1b9",
+      "verbatim_catalog_definition": false,
+      "output_start_line": 1192,
+      "definition_line_count": 9
+    },
+    {
+      "label": "EXACT AUTH TRIGGER, ATTACHED AFTER PRE-EXISTING USER SEED: on_auth_user_created_customer_account",
+      "source": "triggers",
+      "definition_sha256": "ff83e47d9640acb08b7a0994321c580a032e777b384e0b0aea4119581b0b3d00",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1203,
+      "definition_line_count": 1
+    },
+    {
+      "label": "EXACT AUTH TRIGGER, ATTACHED AFTER PRE-EXISTING USER SEED: on_auth_user_email_changed_customer_account",
+      "source": "triggers",
+      "definition_sha256": "74527b4c209297376f77e01e24d8552f1769a22bd3521329f83cde45250b93f1",
+      "verbatim_catalog_definition": true,
+      "output_start_line": 1206,
+      "definition_line_count": 1
+    }
+  ]
+}

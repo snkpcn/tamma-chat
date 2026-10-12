@@ -1,0 +1,346 @@
+{
+  "rls": [
+    {
+      "table": "profiles",
+      "forced": false,
+      "schema": "tamma_chart_os",
+      "enabled": true
+    }
+  ],
+  "grants": [
+    {
+      "grantee": "authenticated",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "INSERT",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "authenticated",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "SELECT",
+      "with_hierarchy": "YES"
+    },
+    {
+      "grantee": "authenticated",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "UPDATE",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "authenticated",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "DELETE",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "authenticated",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "TRUNCATE",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "authenticated",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "REFERENCES",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "authenticated",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "TRIGGER",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "service_role",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "INSERT",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "service_role",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "SELECT",
+      "with_hierarchy": "YES"
+    },
+    {
+      "grantee": "service_role",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "UPDATE",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "service_role",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "DELETE",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "service_role",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "TRUNCATE",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "service_role",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "REFERENCES",
+      "with_hierarchy": "NO"
+    },
+    {
+      "grantee": "service_role",
+      "grantor": "postgres",
+      "table_name": "profiles",
+      "is_grantable": "NO",
+      "table_schema": "tamma_chart_os",
+      "table_catalog": "postgres",
+      "privilege_type": "TRIGGER",
+      "with_hierarchy": "NO"
+    }
+  ],
+  "columns": [
+    {
+      "type": "uuid",
+      "table": "profiles",
+      "column": "id",
+      "schema": "tamma_chart_os",
+      "default": null,
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "type": "uuid",
+      "table": "profiles",
+      "column": "restaurant_id",
+      "schema": "tamma_chart_os",
+      "default": null,
+      "identity": "",
+      "not_null": false,
+      "generated": ""
+    },
+    {
+      "type": "text",
+      "table": "profiles",
+      "column": "full_name",
+      "schema": "tamma_chart_os",
+      "default": null,
+      "identity": "",
+      "not_null": false,
+      "generated": ""
+    },
+    {
+      "type": "text",
+      "table": "profiles",
+      "column": "role",
+      "schema": "tamma_chart_os",
+      "default": "'เจ้าของร้าน'::text",
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "type": "timestamp with time zone",
+      "table": "profiles",
+      "column": "created_at",
+      "schema": "tamma_chart_os",
+      "default": "now()",
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    },
+    {
+      "type": "timestamp with time zone",
+      "table": "profiles",
+      "column": "updated_at",
+      "schema": "tamma_chart_os",
+      "default": "now()",
+      "identity": "",
+      "not_null": true,
+      "generated": ""
+    }
+  ],
+  "indexes": null,
+  "policies": [
+    {
+      "cmd": "UPDATE",
+      "qual": "(id = auth.uid())",
+      "roles": [
+        "public"
+      ],
+      "tablename": "profiles",
+      "permissive": "PERMISSIVE",
+      "policyname": "user can update own profile",
+      "schemaname": "tamma_chart_os",
+      "with_check": "(id = auth.uid())"
+    },
+    {
+      "cmd": "SELECT",
+      "qual": "(id = auth.uid())",
+      "roles": [
+        "public"
+      ],
+      "tablename": "profiles",
+      "permissive": "PERMISSIVE",
+      "policyname": "user can view own profile",
+      "schemaname": "tamma_chart_os",
+      "with_check": null
+    }
+  ],
+  "triggers": [
+    {
+      "name": "set_updated_at",
+      "table": "profiles",
+      "schema": "tamma_chart_os",
+      "definition": "CREATE TRIGGER set_updated_at BEFORE UPDATE ON tamma_chart_os.profiles FOR EACH ROW EXECUTE FUNCTION tamma_chart_os.set_updated_at()",
+      "function_definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_temp'\nAS $function$\nbegin\n  new.updated_at = now();\n  return new;\nend;\n$function$\n"
+    }
+  ],
+  "functions": [
+    {
+      "acl": [
+        "=X/postgres",
+        "postgres=X/postgres",
+        "authenticated=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "name": "set_updated_at",
+      "schema": "tamma_chart_os",
+      "signature": "",
+      "definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_temp'\nAS $function$\nbegin\n  new.updated_at = now();\n  return new;\nend;\n$function$\n"
+    },
+    {
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "name": "handle_auth_user_email_change_customer_account",
+      "schema": "public",
+      "signature": "",
+      "definition": "CREATE OR REPLACE FUNCTION public.handle_auth_user_email_change_customer_account()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'auth'\nAS $function$\ndeclare v_customer_id uuid;\nbegin\n  select id into v_customer_id from public.customer_accounts where auth_user_id = new.id;\n  if v_customer_id is not null then perform public.refresh_customer_profile_completion(v_customer_id); end if;\n  return new;\nend;\n$function$\n"
+    },
+    {
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "name": "handle_new_auth_user_customer_account",
+      "schema": "public",
+      "signature": "",
+      "definition": "CREATE OR REPLACE FUNCTION public.handle_new_auth_user_customer_account()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'auth'\nAS $function$\ndeclare\n  v_birth date;\n  v_gender text;\n  v_source text;\n  v_marketing boolean := false;\n  v_research boolean := false;\n  v_consent_version text := 'v1';\n  v_customer_id uuid;\n  v_birth_raw text;\n  v_gender_raw text;\n  v_line_raw text;\n  v_anonymous_raw text;\n  v_guest_id uuid;\nbegin\n  v_source := case when coalesce(new.raw_user_meta_data->>'acquisition_source','') in ('line','web','facebook','messenger','walk_in','staff','campaign') then new.raw_user_meta_data->>'acquisition_source' else 'web' end;\n  v_birth_raw := nullif(new.raw_user_meta_data->>'birth_date','');\n  if v_birth_raw ~ '^\\d{4}-\\d{2}-\\d{2}$' then begin v_birth:=v_birth_raw::date; if v_birth<date '1900-01-01' or v_birth>current_date then v_birth:=null; end if; exception when others then v_birth:=null; end; end if;\n  v_gender_raw := nullif(new.raw_user_meta_data->>'gender','');\n  if v_gender_raw in ('male','female','non_binary','self_described','prefer_not_to_say') then v_gender:=v_gender_raw; end if;\n  v_line_raw := nullif(trim(new.raw_user_meta_data->>'line_id'),'');\n  v_marketing := lower(coalesce(new.raw_user_meta_data->>'marketing_opt_in','false')) in ('true','1','yes','on');\n  v_research := lower(coalesce(new.raw_user_meta_data->>'research_opt_in','false')) in ('true','1','yes','on');\n  v_consent_version := left(coalesce(nullif(new.raw_user_meta_data->>'consent_version',''),'v1'),40);\n\n  insert into public.customer_accounts(auth_user_id,member_status,membership_started_at,acquisition_source,birth_date,gender,marketing_opt_in,research_opt_in,research_consent_at,consent_version,created_at,updated_at)\n  values(new.id,'member',now(),v_source,v_birth,v_gender,v_marketing,v_research,case when v_research then now() else null end,v_consent_version,now(),now())\n  on conflict (auth_user_id) do update set member_status='member',membership_started_at=coalesce(public.customer_accounts.membership_started_at,excluded.membership_started_at),acquisition_source=case when public.customer_accounts.acquisition_source='unknown' then excluded.acquisition_source else public.customer_accounts.acquisition_source end,birth_date=coalesce(public.customer_accounts.birth_date,excluded.birth_date),gender=coalesce(public.customer_accounts.gender,excluded.gender),updated_at=now()\n  returning id into v_customer_id;\n\n  if v_line_raw is not null then perform public.store_customer_line_id(v_customer_id,v_line_raw); end if;\n\n  insert into public.customer_membership_events(customer_id,event_type,source_channel,metadata)\n  values(v_customer_id,'signup_completed',case when v_source in ('line','web','facebook','messenger','walk_in') then v_source else 'web' end,jsonb_build_object('auth_user_id',new.id,'capture','auth_signup'));\n  if new.raw_user_meta_data ? 'marketing_opt_in' then insert into public.customer_consents(customer_id,consent_type,granted,consent_version,source_channel,metadata) values(v_customer_id,'marketing',v_marketing,v_consent_version,case when v_source in ('line','web','facebook','messenger','walk_in') then v_source else 'web' end,jsonb_build_object('capture','signup')); end if;\n  if new.raw_user_meta_data ? 'research_opt_in' then insert into public.customer_consents(customer_id,consent_type,granted,consent_version,source_channel,metadata) values(v_customer_id,'research',v_research,v_consent_version,case when v_source in ('line','web','facebook','messenger','walk_in') then v_source else 'web' end,jsonb_build_object('capture','signup')); end if;\n\n  -- Optional immediate web guest merge. Treat the browser anonymous UUID as a bearer identifier, matching the existing guest-memory model.\n  v_anonymous_raw := nullif(new.raw_user_meta_data->>'anonymous_id','');\n  if v_anonymous_raw ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' then\n    select id into v_guest_id from public.guests where anonymous_id=v_anonymous_raw::uuid limit 1;\n    if v_guest_id is not null then\n      v_customer_id := public.merge_member_identity(new.id,v_guest_id,case when v_source in ('line','web','facebook','messenger') then v_source else 'web' end);\n    end if;\n  end if;\n\n  perform public.refresh_customer_profile_completion(v_customer_id);\n  return new;\nend;\n$function$\n"
+    },
+    {
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "name": "apply_manual_investment_actual_v1",
+      "schema": "tamma_chart_os",
+      "signature": "",
+      "definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.apply_manual_investment_actual_v1()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'tamma_chart_os', 'pg_temp'\nAS $function$\nbegin\n  new.actual_amount := new.manual_actual_amount + coalesce((\n    select sum(p.amount)\n    from tamma_chart_os.investment_payments p\n    where p.investment_id = new.id\n  ), 0);\n  return new;\nend;\n$function$\n"
+    },
+    {
+      "acl": [
+        "postgres=X/postgres",
+        "service_role=X/postgres"
+      ],
+      "name": "refresh_investment_actual_from_payment_v1",
+      "schema": "tamma_chart_os",
+      "signature": "",
+      "definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.refresh_investment_actual_from_payment_v1()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'tamma_chart_os', 'pg_temp'\nAS $function$\nbegin\n  if tg_op = 'DELETE' then\n    perform tamma_chart_os.recalculate_investment_actual_v1(old.investment_id);\n    return old;\n  elsif tg_op = 'UPDATE' then\n    perform tamma_chart_os.recalculate_investment_actual_v1(old.investment_id);\n    if new.investment_id <> old.investment_id then\n      perform tamma_chart_os.recalculate_investment_actual_v1(new.investment_id);\n    end if;\n    return new;\n  else\n    perform tamma_chart_os.recalculate_investment_actual_v1(new.investment_id);\n    return new;\n  end if;\nend;\n$function$\n"
+    }
+  ],
+  "constraints": [
+    {
+      "name": "profiles_id_fkey",
+      "table": "profiles",
+      "schema": "tamma_chart_os",
+      "definition": "FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "profiles_pkey",
+      "table": "profiles",
+      "schema": "tamma_chart_os",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "profiles_restaurant_id_fkey",
+      "table": "profiles",
+      "schema": "tamma_chart_os",
+      "definition": "FOREIGN KEY (restaurant_id) REFERENCES tamma_chart_os.restaurants(id) ON DELETE SET NULL"
+    }
+  ],
+  "schema_acls": [
+    {
+      "acl": [
+        "supabase_admin=UC/supabase_admin",
+        "anon=U/supabase_admin",
+        "authenticated=U/supabase_admin",
+        "service_role=U/supabase_admin",
+        "supabase_auth_admin=UC/supabase_admin",
+        "dashboard_user=UC/supabase_admin",
+        "postgres=U/supabase_admin"
+      ],
+      "schema": "auth"
+    },
+    {
+      "acl": [
+        "postgres=UC/postgres",
+        "authenticated=U/postgres",
+        "service_role=U/postgres"
+      ],
+      "schema": "tamma_chart_os"
+    }
+  ]
+}
