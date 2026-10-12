@@ -1,4 +1,6 @@
+import { openOwnerEmployeeAdvanceReview } from './_owner-employee-advance';
 import { piiHash } from './_operations-db';
+import { parseOwnerStaffTurn } from './_owner-staff-intent';
 import { boundLineOpsTeam } from './_ops-notifications';
 import type { OwnerExpenseProject } from './_owner-expense-intake';
 import { OWNER_SLIP_MAINTENANCE_REPLY, ownerSlipMaintenancePaused } from './_owner-slip-maintenance';
@@ -7,7 +9,7 @@ import { buildOwnerSlipReviewCard, decodeOwnerSlipAction, encodeOwnerSlipAction 
 import type { LineMessage } from './_ops-line-ui';
 import { isAuthorizedOwnerPaymentActor, ownerPaymentDocumentGate, ownerPaymentDocumentClarification, OWNER_NON_PAYMENT_REPLY } from './_owner-payment-document';
 
-type Catalogue={projects:OwnerExpenseProject[];installments:Installment[]};
+type Catalogue={projects:OwnerExpenseProject[];installments:Installment[];loaded?:boolean};
 type Context={row:Review;groupHash:string;actorHash:string;catalogue:Catalogue};
 const own=(obj:object,key:string)=>Object.prototype.hasOwnProperty.call(obj,key);
 const businessChoices=Object.entries(units).filter(([id])=>id!=='other').map(([value,label])=>({label,value,action:'business'}));
@@ -37,7 +39,7 @@ async function catalogue(groupHash:string):Promise<Catalogue>{
  const projects:OwnerExpenseProject[]=await request('owner_projects?owner_group_hash=eq.'+encodeURIComponent(groupHash)+'&status=neq.cancelled&select=id,name,business_unit_code,purpose,status&limit=500');
  const ids=projects.map(p=>p.id);
  const installments:Installment[]=ids.length?await request('owner_project_installments?project_id=in.('+ids.join(',')+')&status=neq.cancelled&select=id,project_id,task_id,installment_no,title,status,task:owner_project_tasks(title)&limit=1000'):[];
- return {projects,installments};
+ return {projects,installments,loaded:true};
 }
 async function loadContext(targetId:string,userId:string|null|undefined,id:string):Promise<Context|null>{
  if(!isAuthorizedOwnerPaymentActor(userId) || await boundLineOpsTeam(targetId)!=='owner_general')return null;
@@ -46,7 +48,7 @@ async function loadContext(targetId:string,userId:string|null|undefined,id:strin
  const rows:Review[]=await request('financial_owner_expense_intakes?owner_group_hash=eq.'+encodeURIComponent(groupHash)+'&id=eq.'+encodeURIComponent(id)+'&review_state=not.is.null&select=id,source_user_hash,review_state,review_revision,review_data,extraction_data&limit=2');
  const row=rows.find(r=>r.id===id);
  if(!row||row.source_user_hash!==actorHash)return null;
- return {row,groupHash,actorHash,catalogue:await catalogue(groupHash)};
+ return {row,groupHash,actorHash,catalogue:{projects:[],installments:[]}};
 }
 function requiredStep(p:SlipProposal,cat:Catalogue):'business'|'project'|'category'|'destination'|'installment'|'confirm'|'error'{
  if(p.expense_class==='owner_private')return 'error';
@@ -61,11 +63,16 @@ function requiredStep(p:SlipProposal,cat:Catalogue):'business'|'project'|'catego
 function documentReviewCard(ctx:Context,question:string,options:Array<{label:string;action:string;value?:string}>):LineMessage {
  return {type:'flex',altText:'เอกสารรอตรวจ • '+question,contents:{type:'bubble',body:{type:'box',layout:'vertical',spacing:'md',contents:[{type:'text',text:'เอกสารรอตรวจ',weight:'bold',size:'lg'},{type:'text',text:question,wrap:true},{type:'text',text:'ยังไม่บันทึกรายจ่าย',size:'sm',color:'#69796F'}]},footer:{type:'box',layout:'vertical',spacing:'sm',contents:options.map(option=>({type:'button',action:{type:'postback',label:option.label,data:encodeOwnerSlipAction({id:ctx.row.id,revision:ctx.row.review_revision,action:option.action,...(option.value?{value:option.value}:{})})}}))}}} as LineMessage;
 }
-function render(ctx:Context,view?:string,page=0,error?:string):LineMessage{
- const {row,catalogue:cat}=ctx,p=row.review_data;
+async function render(ctx:Context,view?:string,page=0,error?:string):Promise<LineMessage>{
+ const {row}=ctx,p=row.review_data;
  if(!p)return {type:'text',text:'อ่านข้อมูลสลิปไม่ได้ครับ กรุณาส่งรายละเอียดอีกครั้ง'};
  const documentGate=ownerPaymentDocumentGate(row.extraction_data);
  if(row.review_state==='draft' && documentGate.kind!=='payment_evidence')return documentReviewCard(ctx,ownerPaymentDocumentClarification(documentGate),documentGate.kind==='needs_document_kind'?[{label:'ใบเสนอราคา',action:'document_kind',value:'quotation'},{label:'หลักฐานโอน',action:'document_kind',value:'payment_evidence'},{label:'เอกสารอื่น',action:'document_kind',value:'other'}]:[{label:'เอาออกจากคิวตรวจ',action:'cancel'},{label:'ไว้ก่อน',action:'later'}]);
+ const staff=parseOwnerStaffTurn(p.purpose);
+ if(row.review_state==='draft'&&((p as any)?.kind==='employee_advance'||staff&&['unknown','salary_advance'].includes(staff.kind)))
+   return documentReviewCard(ctx,error||'เลือกเงินเบิกพนักงานเพื่อตรวจชื่อ ส่วนงาน และยอดสะสมครับ',[{label:'เงินเบิกพนักงาน',action:'employee_advance'},{label:'ไว้ก่อน',action:'later'},{label:'ยกเลิกรายการ',action:'cancel'}]);
+ if(!ctx.catalogue.loaded)ctx.catalogue=await catalogue(ctx.groupHash);
+ const cat=ctx.catalogue;
  const step=row.review_state!=='draft'?'closed':view??requiredStep(p,cat);
  const common={id:row.id,revision:row.review_revision,amount:safeAmount(p.amount),date:p.occurred_on,memo:displayMemo(row,p),
   project:p.project_name??(own(p.review_choices??{},'project')?'ไม่ผูกโครงการ':null),business:units[p.business_unit_code??'']??null,
@@ -116,12 +123,12 @@ function render(ctx:Context,view?:string,page=0,error?:string):LineMessage{
   choices=documentGate.kind==='needs_document_kind'?[{label:'ใบเสนอราคา',action:'document_kind',value:'quotation'},{label:'หลักฐานโอน',action:'document_kind',value:'payment_evidence'},{label:'เอกสารอื่น',action:'document_kind',value:'other'}]:[{label:'ยกเลิกรายการรอตรวจ',action:'cancel'}];
  }
  if(view && step!=='closed' && step!=='confirm')choices.push({label:'กลับไปสรุป',action:'show_review'});
- return buildOwnerSlipReviewCard({...common,step:step as any,question,choices,
+ return buildOwnerSlipReviewCard({...common,step:step as any,question,choices,employeeAdvanceAvailable:row.review_state==='draft'&&documentGate.kind==='payment_evidence',
   ...(step==='closed'?{closedText:row.review_state==='confirmed'?'บันทึกแล้วครับ ไม่เพิ่มยอดซ้ำ':'ยกเลิกรายการแล้วครับ'}:{})});
 }
 
 /** Convert only a verified review response, never an arbitrary memo, to an owner card. */
-export async function ownerSlipReplyCard(input:{targetId:string;userId?:string|null;text:string}):Promise<LineMessage>{
+export async function ownerSlipReplyCard(input:{targetId:string;userId?:string|null;text:string;messageId?:string|null;timestamp?:number}):Promise<LineMessage>{
  const multiple=input.text.startsWith('มีหลายสลิปครับ กรุณาระบุรหัสรายการเดียว: ');
  const header=input.text.match(/^(?:ฉบับนี้ไม่ใช่สรุปล่าสุดครับ\n)?ตรวจสลิป #([a-f0-9]{6}) · ฉบับ (\d+) \(ยังไม่บันทึกรายจ่าย\)\n/iu);
  if(!header&&!multiple)return {type:'text',text:input.text};
@@ -141,7 +148,10 @@ export async function ownerSlipReplyCard(input:{targetId:string;userId?:string|n
  const rows:Review[]=await request('financial_owner_expense_intakes?owner_group_hash=eq.'+encodeURIComponent(groupHash)+'&id=gte.'+uuid(ref.padEnd(32,'0'))+'&id=lte.'+uuid(ref.padEnd(32,'f'))+'&review_state=not.is.null&select=id,source_user_hash,review_state,review_revision,review_data,extraction_data&limit=2');
  const matching=rows.filter(r=>r.id.replace(/-/g,'').startsWith(ref)&&r.source_user_hash===actorHash);
  if(matching.length!==1)return {type:'text',text:'มีหลายรายการที่ใกล้เคียงกันครับ กรุณาเปิดสรุปของสลิปที่ต้องการอีกครั้ง'};
- return render({row:matching[0],groupHash,actorHash,catalogue:await catalogue(groupHash)});
+ const row=matching[0];
+ const employeeCard=await openOwnerEmployeeAdvanceReview({...input,intakeId:row.id,revision:row.review_revision,entry:'saved_note'});
+ if(employeeCard)return employeeCard;
+ return render({row,groupHash,actorHash,catalogue:{projects:[],installments:[]}});
 }
 
 export async function handleOwnerSlipPostback(input:{targetId:string;userId?:string|null;data:string;messageId?:string|null;timestamp?:number}):Promise<LineMessage|null>{
@@ -153,8 +163,15 @@ export async function handleOwnerSlipPostback(input:{targetId:string;userId?:str
  const ctx=await loadContext(input.targetId,input.userId,action.id);
  if(!ctx)return {type:'text',text:'กรุณาให้ผู้ส่งสลิปเลือกจากการ์ดในกลุ่มเดิมครับ'};
  const {row}=ctx;
+ if((row.review_data as any)?.kind==='employee_advance')return await openOwnerEmployeeAdvanceReview({...input,intakeId:row.id,revision:action.revision,entry:'saved_note'})??render(ctx);
  if(row.review_state!=='draft')return render(ctx);
  if(row.review_revision!==action.revision)return render(ctx,undefined,0,'รายการนี้มีการแก้ไขแล้ว กรุณาใช้การ์ดล่าสุด');
+ if(action.action==='employee_advance')return await openOwnerEmployeeAdvanceReview({...input,intakeId:row.id,revision:action.revision,entry:'manual_button'})??render(ctx);
+ if(!['later','cancel','document_kind'].includes(action.action)){
+   const employeeCard=await openOwnerEmployeeAdvanceReview({...input,intakeId:row.id,revision:action.revision,entry:'saved_note'});
+   if(employeeCard)return employeeCard;
+ }
+ if(!ctx.catalogue.loaded)ctx.catalogue=await catalogue(ctx.groupHash);
  if(action.action==='document_kind'){
   if(action.value==='quotation'||action.value==='other')return documentReviewCard(ctx,action.value==='quotation'?'รับว่าเป็นใบเสนอราคาครับ ไม่ใช่หลักฐานจ่าย ต้องการเอารายการนี้ออกจากคิวตรวจไหมครับ?':'รับว่าเป็นเอกสารอื่นครับ ยังไม่ใช้บันทึกรายจ่าย ต้องการเอาออกจากคิวตรวจไหมครับ?',[{label:'เอาออกจากคิวตรวจ',action:'cancel'},{label:'ไว้ก่อน',action:'later'}]);
   return {type:'text',text:'กรุณาตอบกลับรูปหลักฐานการชำระที่ชัดเจนด้วย “ตรวจสลิป” ครับ เอกสารเดิมยังไม่ใช้บันทึกยอด'};

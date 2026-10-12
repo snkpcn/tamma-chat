@@ -8,7 +8,7 @@ import type { LineMessage } from './_ops-line-ui';
  */
 export const OWNER_SLIP_ACTION_PREFIX = 'owner-slip:';
 export const OWNER_SLIP_ACTIONS = [
-  'business', 'project', 'category', 'destination', 'installment',
+  'employee_advance', 'business', 'project', 'category', 'destination', 'installment',
   'document_kind', 'no_project', 'no_installment', 'show_business', 'show_project', 'show_category',
   'show_destination', 'show_installment', 'show_review', 'page', 'confirm', 'cancel', 'later',
 ] as const;
@@ -34,6 +34,8 @@ export type OwnerSlipReviewCardInput = {
   installment: string | null;
   /** Omit for legacy callers; false hides installment controls unless a selection exists. */
   installmentApplicable?: boolean;
+  /** A draft-only route; this control never confirms payroll. */
+  employeeAdvanceAvailable?: boolean;
   step: OwnerSlipReviewStep;
   question?: string;
   choices?: Array<{ label: string; action: string; value?: string }>;
@@ -175,6 +177,7 @@ export function buildOwnerSlipReviewCard(input: OwnerSlipReviewCardInput): LineM
         footer.push(text('ยังไม่มีตัวเลือกที่ใช้ได้ กรุณาตรวจสอบข้อมูลรายการนี้', { size: 'xs', color: palette.muted }));
       }
     }
+    if (input.employeeAdvanceAvailable) footer.push(actionButton(input, 'เงินเบิกพนักงาน', 'employee_advance'));
     footer.push(actionButton(input, 'ไว้ก่อน', 'later', undefined, 'link'));
   }
 

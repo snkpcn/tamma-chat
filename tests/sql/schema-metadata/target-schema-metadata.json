@@ -1,0 +1,883 @@
+{
+  "source": "Targeted structural metadata only, no production rows, read 2026-10-12.",
+  "employee_restaurant": {
+    "columns": [
+      {
+        "type": "uuid",
+        "table": "employees",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "employees",
+        "column": "restaurant_id",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "employees",
+        "column": "full_name",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "employees",
+        "column": "nickname",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "uuid",
+        "table": "employees",
+        "column": "position_id",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "employees",
+        "column": "phone",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "date",
+        "table": "employees",
+        "column": "start_date",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "employees",
+        "column": "employment_type",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "numeric(14,2)",
+        "table": "employees",
+        "column": "wage_amount",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "employees",
+        "column": "status",
+        "default": "'ทำงานอยู่'::text",
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "employees",
+        "column": "notes",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "employees",
+        "column": "created_at",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "employees",
+        "column": "updated_at",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "restaurants",
+        "column": "id",
+        "default": "gen_random_uuid()",
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "restaurants",
+        "column": "owner_id",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "restaurants",
+        "column": "name",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "restaurants",
+        "column": "created_at",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "restaurants",
+        "column": "updated_at",
+        "default": "now()",
+        "not_null": true
+      }
+    ],
+    "triggers": [
+      {
+        "name": "set_updated_at",
+        "table": "employees",
+        "definition": "CREATE TRIGGER set_updated_at BEFORE UPDATE ON tamma_chart_os.employees FOR EACH ROW EXECUTE FUNCTION tamma_chart_os.set_updated_at()",
+        "function_definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_temp'\nAS $function$\nbegin\n  new.updated_at = now();\n  return new;\nend;\n$function$\n"
+      },
+      {
+        "name": "set_updated_at",
+        "table": "restaurants",
+        "definition": "CREATE TRIGGER set_updated_at BEFORE UPDATE ON tamma_chart_os.restaurants FOR EACH ROW EXECUTE FUNCTION tamma_chart_os.set_updated_at()",
+        "function_definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_temp'\nAS $function$\nbegin\n  new.updated_at = now();\n  return new;\nend;\n$function$\n"
+      }
+    ],
+    "constraints": [
+      {
+        "name": "employees_employment_type_check",
+        "table": "employees",
+        "definition": "CHECK (employment_type IS NULL OR (employment_type = ANY (ARRAY['เงินเดือน'::text, 'รายวัน'::text, 'รายชั่วโมง'::text])))"
+      },
+      {
+        "name": "employees_pkey",
+        "table": "employees",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "employees_position_id_fkey",
+        "table": "employees",
+        "definition": "FOREIGN KEY (position_id) REFERENCES tamma_chart_os.employee_positions(id) ON DELETE SET NULL"
+      },
+      {
+        "name": "employees_restaurant_id_fkey",
+        "table": "employees",
+        "definition": "FOREIGN KEY (restaurant_id) REFERENCES tamma_chart_os.restaurants(id) ON DELETE CASCADE"
+      },
+      {
+        "name": "employees_status_check",
+        "table": "employees",
+        "definition": "CHECK (status = ANY (ARRAY['ทำงานอยู่'::text, 'พ้นสภาพ'::text]))"
+      },
+      {
+        "name": "restaurants_owner_id_fkey",
+        "table": "restaurants",
+        "definition": "FOREIGN KEY (owner_id) REFERENCES auth.users(id) ON DELETE CASCADE"
+      },
+      {
+        "name": "restaurants_pkey",
+        "table": "restaurants",
+        "definition": "PRIMARY KEY (id)"
+      }
+    ]
+  },
+  "dependencies": {
+    "columns": [
+      {
+        "type": "uuid",
+        "table": "users",
+        "column": "instance_id",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "uuid",
+        "table": "users",
+        "column": "id",
+        "schema": "auth",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "aud",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "role",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "email",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "encrypted_password",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "email_confirmed_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "invited_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "confirmation_token",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "confirmation_sent_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "recovery_token",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "recovery_sent_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "email_change_token_new",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "email_change",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "email_change_sent_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "last_sign_in_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "jsonb",
+        "table": "users",
+        "column": "raw_app_meta_data",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "jsonb",
+        "table": "users",
+        "column": "raw_user_meta_data",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "boolean",
+        "table": "users",
+        "column": "is_super_admin",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "created_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "updated_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "users",
+        "column": "phone",
+        "schema": "auth",
+        "default": "NULL::character varying",
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "phone_confirmed_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "users",
+        "column": "phone_change",
+        "schema": "auth",
+        "default": "''::character varying",
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "phone_change_token",
+        "schema": "auth",
+        "default": "''::character varying",
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "phone_change_sent_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "confirmed_at",
+        "schema": "auth",
+        "default": "LEAST(email_confirmed_at, phone_confirmed_at)",
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "email_change_token_current",
+        "schema": "auth",
+        "default": "''::character varying",
+        "not_null": false
+      },
+      {
+        "type": "smallint",
+        "table": "users",
+        "column": "email_change_confirm_status",
+        "schema": "auth",
+        "default": "0",
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "banned_until",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "character varying(255)",
+        "table": "users",
+        "column": "reauthentication_token",
+        "schema": "auth",
+        "default": "''::character varying",
+        "not_null": false
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "reauthentication_sent_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "boolean",
+        "table": "users",
+        "column": "is_sso_user",
+        "schema": "auth",
+        "default": "false",
+        "not_null": true
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "users",
+        "column": "deleted_at",
+        "schema": "auth",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "boolean",
+        "table": "users",
+        "column": "is_anonymous",
+        "schema": "auth",
+        "default": "false",
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "employee_positions",
+        "column": "id",
+        "schema": "tamma_chart_os",
+        "default": "gen_random_uuid()",
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "employee_positions",
+        "column": "restaurant_id",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "employee_positions",
+        "column": "name",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "investment_categories",
+        "column": "id",
+        "schema": "tamma_chart_os",
+        "default": "gen_random_uuid()",
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "investment_categories",
+        "column": "restaurant_id",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "investment_categories",
+        "column": "name",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "integer",
+        "table": "investment_categories",
+        "column": "sort_order",
+        "schema": "tamma_chart_os",
+        "default": "0",
+        "not_null": true
+      },
+      {
+        "type": "boolean",
+        "table": "investment_categories",
+        "column": "is_archived",
+        "schema": "tamma_chart_os",
+        "default": "false",
+        "not_null": true
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "investment_categories",
+        "column": "created_at",
+        "schema": "tamma_chart_os",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "investment_categories",
+        "column": "updated_at",
+        "schema": "tamma_chart_os",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "investment_categories",
+        "column": "creation_source",
+        "schema": "tamma_chart_os",
+        "default": "'manual'::text",
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "investments",
+        "column": "id",
+        "schema": "tamma_chart_os",
+        "default": "gen_random_uuid()",
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "investments",
+        "column": "restaurant_id",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "uuid",
+        "table": "investments",
+        "column": "category_id",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "uuid",
+        "table": "investments",
+        "column": "project_id",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "investments",
+        "column": "name",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "investments",
+        "column": "description",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "investments",
+        "column": "vendor_name",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "numeric(14,2)",
+        "table": "investments",
+        "column": "budget_amount",
+        "schema": "tamma_chart_os",
+        "default": "0",
+        "not_null": true
+      },
+      {
+        "type": "numeric(14,2)",
+        "table": "investments",
+        "column": "actual_amount",
+        "schema": "tamma_chart_os",
+        "default": "0",
+        "not_null": true
+      },
+      {
+        "type": "numeric(14,3)",
+        "table": "investments",
+        "column": "quantity",
+        "schema": "tamma_chart_os",
+        "default": "1",
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "investments",
+        "column": "unit",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "date",
+        "table": "investments",
+        "column": "order_date",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "date",
+        "table": "investments",
+        "column": "paid_date",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "investments",
+        "column": "status",
+        "schema": "tamma_chart_os",
+        "default": "'วางแผน'::text",
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "investments",
+        "column": "payment_method",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "text",
+        "table": "investments",
+        "column": "notes",
+        "schema": "tamma_chart_os",
+        "default": null,
+        "not_null": false
+      },
+      {
+        "type": "boolean",
+        "table": "investments",
+        "column": "is_archived",
+        "schema": "tamma_chart_os",
+        "default": "false",
+        "not_null": true
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "investments",
+        "column": "created_at",
+        "schema": "tamma_chart_os",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "type": "timestamp with time zone",
+        "table": "investments",
+        "column": "updated_at",
+        "schema": "tamma_chart_os",
+        "default": "now()",
+        "not_null": true
+      },
+      {
+        "type": "numeric(14,2)",
+        "table": "investments",
+        "column": "manual_actual_amount",
+        "schema": "tamma_chart_os",
+        "default": "0",
+        "not_null": true
+      },
+      {
+        "type": "text",
+        "table": "investments",
+        "column": "creation_source",
+        "schema": "tamma_chart_os",
+        "default": "'manual'::text",
+        "not_null": true
+      }
+    ],
+    "triggers": [
+      {
+        "name": "on_auth_user_created_customer_account",
+        "table": "users",
+        "schema": "auth",
+        "definition": "CREATE TRIGGER on_auth_user_created_customer_account AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION handle_new_auth_user_customer_account()",
+        "function_definition": "CREATE OR REPLACE FUNCTION public.handle_new_auth_user_customer_account()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'auth'\nAS $function$\ndeclare\n  v_birth date;\n  v_gender text;\n  v_source text;\n  v_marketing boolean := false;\n  v_research boolean := false;\n  v_consent_version text := 'v1';\n  v_customer_id uuid;\n  v_birth_raw text;\n  v_gender_raw text;\n  v_line_raw text;\n  v_anonymous_raw text;\n  v_guest_id uuid;\nbegin\n  v_source := case when coalesce(new.raw_user_meta_data->>'acquisition_source','') in ('line','web','facebook','messenger','walk_in','staff','campaign') then new.raw_user_meta_data->>'acquisition_source' else 'web' end;\n  v_birth_raw := nullif(new.raw_user_meta_data->>'birth_date','');\n  if v_birth_raw ~ '^\\d{4}-\\d{2}-\\d{2}$' then begin v_birth:=v_birth_raw::date; if v_birth<date '1900-01-01' or v_birth>current_date then v_birth:=null; end if; exception when others then v_birth:=null; end; end if;\n  v_gender_raw := nullif(new.raw_user_meta_data->>'gender','');\n  if v_gender_raw in ('male','female','non_binary','self_described','prefer_not_to_say') then v_gender:=v_gender_raw; end if;\n  v_line_raw := nullif(trim(new.raw_user_meta_data->>'line_id'),'');\n  v_marketing := lower(coalesce(new.raw_user_meta_data->>'marketing_opt_in','false')) in ('true','1','yes','on');\n  v_research := lower(coalesce(new.raw_user_meta_data->>'research_opt_in','false')) in ('true','1','yes','on');\n  v_consent_version := left(coalesce(nullif(new.raw_user_meta_data->>'consent_version',''),'v1'),40);\n\n  insert into public.customer_accounts(auth_user_id,member_status,membership_started_at,acquisition_source,birth_date,gender,marketing_opt_in,research_opt_in,research_consent_at,consent_version,created_at,updated_at)\n  values(new.id,'member',now(),v_source,v_birth,v_gender,v_marketing,v_research,case when v_research then now() else null end,v_consent_version,now(),now())\n  on conflict (auth_user_id) do update set member_status='member',membership_started_at=coalesce(public.customer_accounts.membership_started_at,excluded.membership_started_at),acquisition_source=case when public.customer_accounts.acquisition_source='unknown' then excluded.acquisition_source else public.customer_accounts.acquisition_source end,birth_date=coalesce(public.customer_accounts.birth_date,excluded.birth_date),gender=coalesce(public.customer_accounts.gender,excluded.gender),updated_at=now()\n  returning id into v_customer_id;\n\n  if v_line_raw is not null then perform public.store_customer_line_id(v_customer_id,v_line_raw); end if;\n\n  insert into public.customer_membership_events(customer_id,event_type,source_channel,metadata)\n  values(v_customer_id,'signup_completed',case when v_source in ('line','web','facebook','messenger','walk_in') then v_source else 'web' end,jsonb_build_object('auth_user_id',new.id,'capture','auth_signup'));\n  if new.raw_user_meta_data ? 'marketing_opt_in' then insert into public.customer_consents(customer_id,consent_type,granted,consent_version,source_channel,metadata) values(v_customer_id,'marketing',v_marketing,v_consent_version,case when v_source in ('line','web','facebook','messenger','walk_in') then v_source else 'web' end,jsonb_build_object('capture','signup')); end if;\n  if new.raw_user_meta_data ? 'research_opt_in' then insert into public.customer_consents(customer_id,consent_type,granted,consent_version,source_channel,metadata) values(v_customer_id,'research',v_research,v_consent_version,case when v_source in ('line','web','facebook','messenger','walk_in') then v_source else 'web' end,jsonb_build_object('capture','signup')); end if;\n\n  -- Optional immediate web guest merge. Treat the browser anonymous UUID as a bearer identifier, matching the existing guest-memory model.\n  v_anonymous_raw := nullif(new.raw_user_meta_data->>'anonymous_id','');\n  if v_anonymous_raw ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' then\n    select id into v_guest_id from public.guests where anonymous_id=v_anonymous_raw::uuid limit 1;\n    if v_guest_id is not null then\n      v_customer_id := public.merge_member_identity(new.id,v_guest_id,case when v_source in ('line','web','facebook','messenger') then v_source else 'web' end);\n    end if;\n  end if;\n\n  perform public.refresh_customer_profile_completion(v_customer_id);\n  return new;\nend;\n$function$\n"
+      },
+      {
+        "name": "on_auth_user_email_changed_customer_account",
+        "table": "users",
+        "schema": "auth",
+        "definition": "CREATE TRIGGER on_auth_user_email_changed_customer_account AFTER UPDATE OF email ON auth.users FOR EACH ROW EXECUTE FUNCTION handle_auth_user_email_change_customer_account()",
+        "function_definition": "CREATE OR REPLACE FUNCTION public.handle_auth_user_email_change_customer_account()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'public', 'auth'\nAS $function$\ndeclare v_customer_id uuid;\nbegin\n  select id into v_customer_id from public.customer_accounts where auth_user_id = new.id;\n  if v_customer_id is not null then perform public.refresh_customer_profile_completion(v_customer_id); end if;\n  return new;\nend;\n$function$\n"
+      },
+      {
+        "name": "set_updated_at",
+        "table": "investment_categories",
+        "schema": "tamma_chart_os",
+        "definition": "CREATE TRIGGER set_updated_at BEFORE UPDATE ON tamma_chart_os.investment_categories FOR EACH ROW EXECUTE FUNCTION tamma_chart_os.set_updated_at()",
+        "function_definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_temp'\nAS $function$\nbegin\n  new.updated_at = now();\n  return new;\nend;\n$function$\n"
+      },
+      {
+        "name": "investments_apply_manual_actual_v1",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "CREATE TRIGGER investments_apply_manual_actual_v1 BEFORE INSERT OR UPDATE OF manual_actual_amount ON tamma_chart_os.investments FOR EACH ROW EXECUTE FUNCTION tamma_chart_os.apply_manual_investment_actual_v1()",
+        "function_definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.apply_manual_investment_actual_v1()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'tamma_chart_os', 'pg_temp'\nAS $function$\nbegin\n  new.actual_amount := new.manual_actual_amount + coalesce((\n    select sum(p.amount)\n    from tamma_chart_os.investment_payments p\n    where p.investment_id = new.id\n  ), 0);\n  return new;\nend;\n$function$\n"
+      },
+      {
+        "name": "set_updated_at",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "CREATE TRIGGER set_updated_at BEFORE UPDATE ON tamma_chart_os.investments FOR EACH ROW EXECUTE FUNCTION tamma_chart_os.set_updated_at()",
+        "function_definition": "CREATE OR REPLACE FUNCTION tamma_chart_os.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_temp'\nAS $function$\nbegin\n  new.updated_at = now();\n  return new;\nend;\n$function$\n"
+      }
+    ],
+    "constraints": [
+      {
+        "name": "users_email_change_confirm_status_check",
+        "table": "users",
+        "schema": "auth",
+        "definition": "CHECK (email_change_confirm_status >= 0 AND email_change_confirm_status <= 2)"
+      },
+      {
+        "name": "users_phone_key",
+        "table": "users",
+        "schema": "auth",
+        "definition": "UNIQUE (phone)"
+      },
+      {
+        "name": "users_pkey",
+        "table": "users",
+        "schema": "auth",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "employee_positions_pkey",
+        "table": "employee_positions",
+        "schema": "tamma_chart_os",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "employee_positions_restaurant_id_fkey",
+        "table": "employee_positions",
+        "schema": "tamma_chart_os",
+        "definition": "FOREIGN KEY (restaurant_id) REFERENCES tamma_chart_os.restaurants(id) ON DELETE CASCADE"
+      },
+      {
+        "name": "employee_positions_restaurant_id_name_key",
+        "table": "employee_positions",
+        "schema": "tamma_chart_os",
+        "definition": "UNIQUE (restaurant_id, name)"
+      },
+      {
+        "name": "investment_categories_creation_source_check",
+        "table": "investment_categories",
+        "schema": "tamma_chart_os",
+        "definition": "CHECK (creation_source = ANY (ARRAY['manual'::text, 'thongthai_line'::text]))"
+      },
+      {
+        "name": "investment_categories_pkey",
+        "table": "investment_categories",
+        "schema": "tamma_chart_os",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "investment_categories_restaurant_id_fkey",
+        "table": "investment_categories",
+        "schema": "tamma_chart_os",
+        "definition": "FOREIGN KEY (restaurant_id) REFERENCES tamma_chart_os.restaurants(id) ON DELETE CASCADE"
+      },
+      {
+        "name": "investment_categories_restaurant_id_name_key",
+        "table": "investment_categories",
+        "schema": "tamma_chart_os",
+        "definition": "UNIQUE (restaurant_id, name)"
+      },
+      {
+        "name": "investments_actual_amount_check",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "CHECK (actual_amount >= 0::numeric)"
+      },
+      {
+        "name": "investments_budget_amount_check",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "CHECK (budget_amount >= 0::numeric)"
+      },
+      {
+        "name": "investments_category_id_fkey",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "FOREIGN KEY (category_id) REFERENCES tamma_chart_os.investment_categories(id) ON DELETE SET NULL"
+      },
+      {
+        "name": "investments_creation_source_check",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "CHECK (creation_source = ANY (ARRAY['manual'::text, 'thongthai_line'::text]))"
+      },
+      {
+        "name": "investments_manual_actual_amount_check",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "CHECK (manual_actual_amount >= 0::numeric)"
+      },
+      {
+        "name": "investments_pkey",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "PRIMARY KEY (id)"
+      },
+      {
+        "name": "investments_project_id_fkey",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "FOREIGN KEY (project_id) REFERENCES tamma_chart_os.projects(id) ON DELETE SET NULL"
+      },
+      {
+        "name": "investments_quantity_check",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "CHECK (quantity >= 0::numeric)"
+      },
+      {
+        "name": "investments_restaurant_id_fkey",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "FOREIGN KEY (restaurant_id) REFERENCES tamma_chart_os.restaurants(id) ON DELETE CASCADE"
+      },
+      {
+        "name": "investments_status_check",
+        "table": "investments",
+        "schema": "tamma_chart_os",
+        "definition": "CHECK (status = ANY (ARRAY['วางแผน'::text, 'ขอราคา'::text, 'อนุมัติแล้ว'::text, 'สั่งซื้อแล้ว'::text, 'ชำระบางส่วน'::text, 'ชำระแล้ว'::text, 'ได้รับของแล้ว'::text, 'ยกเลิก'::text]))"
+      }
+    ]
+  }
+}

@@ -1,0 +1,80 @@
+name: Employee advance PostgreSQL concurrency
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/proposals/owner_employee_advance_v1.sql'
+      - 'tests/sql/employee-advance-**'
+      - 'tests/sql/build-employee-advance-*.py'
+      - 'tests/sql/schema-metadata/**'
+      - 'tests/sql/upstream/**'
+      - 'supabase/migrations/**'
+      - 'scripts/test-employee-advance-concurrency.sh'
+      - '.github/workflows/employee-advance-concurrency-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  schema-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify source and structural metadata hashes
+        run: |
+          python3 tests/sql/build-employee-advance-external-schema.py --check
+          python3 tests/sql/build-employee-advance-actual-schema.py --check
+  postgres17-concurrency:
+    needs: schema-integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: postgres:17
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: employee_advance_test
+          # Trust is limited to this disposable job's private Docker network.
+          # No host ports, production URLs, secrets, or persistent credentials.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        options: >-
+          --health-cmd "pg_isready -U postgres -d employee_advance_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: postgres
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGDATABASE: employee_advance_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify exact source schema and real PostgreSQL races
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/concurrency
+          bash scripts/test-employee-advance-concurrency.sh | tee evidence/employee-advance-concurrency.tap
+      - name: Show failing synthetic test diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          for f in evidence/concurrency/*.log; do
+            [ -f "$f" ] || continue
+            printf '\n== %s ==\n' "$f"
+            tail -n 60 "$f"
+          done
+      - name: Retain synthetic test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: employee-advance-postgres17-evidence
+          path: |
+            evidence/concurrency/
+            evidence/employee-advance-concurrency.tap
+          retention-days: 7

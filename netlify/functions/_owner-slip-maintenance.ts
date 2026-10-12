@@ -1,6 +1,6 @@
 import { boundLineOpsTeam } from './_ops-notifications';
 import { piiHash } from './_operations-db';
-import { isOwnerFamilyConversation } from './_owner-staff-intent';
+import { isOwnerFamilyConversation, parseOwnerStaffTurn } from './_owner-staff-intent';
 
 type SlipEvent = {
   type?:string; replyToken?:string; timestamp?:number;
@@ -68,13 +68,15 @@ export async function partitionOwnerSlipMaintenance<T extends SlipEvent>(
     if(!paused&&!stale){allowed.push(event);continue;}
     const source=event.source;
     const target=source?.type==='group'?source.groupId:source?.type==='room'?source.roomId:null;
-    if(target&&event.type==='postback'&&(event.postback?.data?.startsWith('owner-slip:')||event.postback?.data?.startsWith('owner-doc:'))&&await deps.team(target)==='owner_general'){blocked.push(event);continue;}
+    if(target&&event.type==='postback'&&['owner-slip:','owner-doc:','owner-advance:'].some(prefix=>event.postback?.data?.startsWith(prefix))&&await deps.team(target)==='owner_general'){blocked.push(event);continue;}
     if(!target||event.type!=='message'||!['image','text'].includes(event.message?.type||'')
       ||await deps.team(target)!=='owner_general'){allowed.push(event);continue;}
     let affected=false;
     if(event.message?.type==='image')affected=false; // Unaddressed images are quiet; targeted payroll retains its own route.
     else {
       const text=(event.message?.text?.trim()||'').replace(/^ทองไทย(?:ครับ|คะ|ค่ะ)?[\s,]*/u,'');
+      const staff=parseOwnerStaffTurn(text);
+      if(staff&&['unknown','salary_advance'].includes(staff.kind)){blocked.push(event);continue;}
       if(text&&/^(?:ตรวจสลิป|บันทึกสลิป|ดูสลิป|ดู(?:รูป|เอกสาร)นี้|ช่วยดู(?:รูป|เอกสาร)นี้|#|สรุป|แก้|ยอด\s*\d|วันที่\s*20\d\d-|ยืนยัน|ยกเลิก)/u.test(text)&&!/^ผูกทีม\s+/iu.test(text)&&!isOwnerFamilyConversation(text)){
         const refs=[...text.matchAll(/#([a-f0-9]{6,32})\b/giu)].map(m=>m[1].toLowerCase());
         // Canonical review actions must never fall through even after a schema/code rollback.

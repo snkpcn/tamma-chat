@@ -9,7 +9,7 @@ export function isExplicitOwnerReviewText(text:string):boolean {
  const value=text.trim().replace(/^ทองไทย(?:ครับ|คะ|ค่ะ)?[\s,]*/u,'');
  return /^(?:#[a-f0-9]{6,32}\b|ตรวจสลิป|สรุป(?:สลิป)?\s*$|แก้(?:เป็น|ไข)|ยอด\s*\d|วันที่\s*20\d\d-|ยืนยัน(?:\s|$)|ยกเลิก(?:\s|$))/iu.test(value);
 }
-export async function handleOwnerDocumentIntent(input:{targetId:string;userId?:string|null;text?:string;quotedMessageId?:string;data?:string;timestamp?:number}):Promise<LineMessage|null>{
+export async function handleOwnerDocumentIntent(input:{targetId:string;userId?:string|null;text?:string;quotedMessageId?:string;data?:string;timestamp?:number;messageId?:string|null}):Promise<LineMessage|null>{
  const command=input.text?.trim().replace(/^ทองไทย(?:ครับ|คะ|ค่ะ)?[\s,]*/u,'');
  const isCommand=!!command && /^(?:ตรวจสลิป|บันทึกสลิป|ดูสลิป|ดู(?:รูป|เอกสาร)นี้|ช่วยดู(?:รูป|เอกสาร)นี้)(?:ครับ|ค่ะ|คะ)?$/u.test(command);
  const isAction=input.data?.startsWith('owner-doc:');
@@ -33,5 +33,5 @@ export async function handleOwnerDocumentIntent(input:{targetId:string;userId?:s
   return buildOwnerDocumentChoiceCard({targetId:input.targetId,userId,imageMessageId,step:'kind'});
  }
  if(result===OWNER_FUNDS_DIRECTION_QUESTION)return buildOwnerDocumentChoiceCard({targetId:input.targetId,userId,imageMessageId,step:'direction'});
- return ownerSlipReplyCard({targetId:input.targetId,userId,text:result});
+ return ownerSlipReplyCard({targetId:input.targetId,userId,text:result,messageId:input.messageId,timestamp:input.timestamp});
 }

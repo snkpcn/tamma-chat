@@ -117,6 +117,8 @@ test('text handler stages reconciled choices and preserves unrelated fields for 
   if(url.pathname.endsWith('/financial_owner_expense_intakes'))return Response.json([{id:projectId,source_user_hash:piiHash(sourceUser),review_state:'draft',review_revision:7,review_data:previous,extraction_data:extraction}]);
   if(url.pathname.endsWith('/owner_projects'))return Response.json(projects);
   if(url.pathname.endsWith('/owner_project_installments'))return Response.json(installments);
+  // Read-only private-alias lookup has no mappings in this generic-expense fixture.
+  if(url.pathname.endsWith('/rpc/owner_employee_advance_context_v1'))return Response.json({ok:true,candidates:[],alias_resolution:null});
   assert.ok(url.pathname.endsWith('/rpc/financial_stage_owner_slip_review_v1'),'Only staging, never confirmation or financial allocation');
   const body=JSON.parse(init.body);assert.equal(body.p_revision,7);staged.push(body.p_proposal);
   return Response.json({revision:8,proposal:body.p_proposal});
