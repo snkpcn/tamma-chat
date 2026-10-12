@@ -1,0 +1,56 @@
+name: Inthanin daily-close concurrency
+on:
+  pull_request:
+    paths:
+      - 'supabase/proposals/inthanin_daily_close_revision_repair_v1.sql'
+      - 'tests/sql/inthanin-daily-close-repair/**'
+      - 'netlify/functions/_inthanin-daily-close-card*.ts'
+      - '.github/workflows/inthanin-daily-close-concurrency.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: guard_revision_test_inthanin
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-disposable-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d guard_revision_test_inthanin"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGPASSWORD: synthetic-disposable-ci-only
+      KIT: tests/sql/inthanin-daily-close-repair/database/tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Deterministic guard and actual writer tests
+        run: |
+          node "$KIT/run-pglite.mjs"
+          node "$KIT/run-actual-schema.mjs"
+          node --import tsx "$KIT/run-card-writer-integration.ts"
+      - name: Initialize isolated fixture roles
+        run: |
+          psql -X -w -h 127.0.0.1 -U postgres -d guard_revision_test_inthanin -v ON_ERROR_STOP=1 -c 'create role anon; create role authenticated; create role service_role bypassrls;'
+      - name: Prove real writer lock waits and rollback
+        run: |
+          node "$KIT/build-actual-fixture.mjs"
+          python3 "$KIT/run-actual-postgres-concurrency.py" --host 127.0.0.1 --database guard_revision_test_inthanin --user postgres --allow-local-fixture-writes
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inthanin-daily-close-synthetic-proof
+          path: |
+            tests/sql/inthanin-daily-close-repair/database/tests/*results.json
+            tests/sql/inthanin-daily-close-repair/database/tests/*sources.json

@@ -119,3 +119,32 @@ for(const mode of ['unbound','ambiguous-channel','foreign-channel','missing-bran
   assert.equal(confirmCalls(f.calls).length,0);
  }finally{f.restore();}
 });
+
+// Daily-close repair regression coverage uses invented fixtures only.
+test('edit link names the exact close, day, live branch and displayed revision without auth secrets',async()=>{
+ const f=fixture();try{const result=await handleDailyCloseCardAction({targetHash:INTHANIN_TARGET_HASH,userId:actor,data:command('edit')});
+  const msg=result?.find(m=>m.type==='template') as any;const url=new URL(msg.template.actions[0].uri);
+  assert.equal(url.origin,'https://tamma-backoffice.netlify.app');
+  assert.deepEqual(Object.fromEntries(url.searchParams),{view:'daily-close',close:id,date:'2037-10-11',branch:'inthanin_tadtone',environment:'live',revision:'2'});
+  assert.ok(!url.href.includes(hash));assert.equal(confirmCalls(f.calls).length,0);
+ }finally{f.restore();}
+});
+test('flag-off copy never directs owner to nonexistent LIVE Backoffice confirmation',async()=>{
+ const f=fixture();try{delete process.env.INTHANIN_DAILY_CLOSE_CARD_CONFIRM_ENABLED;
+  const result=await handleDailyCloseCardAction({targetHash:INTHANIN_TARGET_HASH,userId:actor,data:command()});
+  assert.doesNotMatch(JSON.stringify(result),/ยืนยันผ่านหลังบ้าน/);assert.match(JSON.stringify(result),/รอเปิดใช้งาน/);
+  assert.equal(confirmCalls(f.calls).length,0);
+ }finally{f.restore();}
+});
+test('real database pending_confirmation status remains reviewable after readiness checks',async()=>{
+ const f=fixture();try{f.current.status='pending_confirmation';
+  await handleDailyCloseCardAction({targetHash:INTHANIN_TARGET_HASH,userId:actor,data:command()});
+  assert.equal(confirmCalls(f.calls).length,1);
+ }finally{f.restore();}
+});
+for(const [field,value] of [['cash_counted_closing',null],['sales_payment_variance',-100],['status','void']] as const)test('cannot confirm with invalid persisted '+field,async()=>{
+ const f=fixture();try{(f.current as any)[field]=value;
+  await handleDailyCloseCardAction({targetHash:INTHANIN_TARGET_HASH,userId:actor,data:command()});
+  assert.equal(confirmCalls(f.calls).length,0);
+ }finally{f.restore();}
+});

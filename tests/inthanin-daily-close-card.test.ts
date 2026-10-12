@@ -174,8 +174,8 @@ test('void closes clearly show cancellation and hide edit and confirm despite re
   assert.doesNotMatch(visibleText(card), /DRAFT|พร้อมให้นุ๊ก|ปุ่มแก้ไข/);
 });
 
-test('only draft and submitted statuses permit review and confirmation; unknown statuses fail closed', () => {
-  for (const status of ['draft', 'submitted']) {
+test('only known draft and submitted statuses permit review and confirmation; unknown statuses fail closed', () => {
+  for (const status of ['draft', 'submitted', 'pending_confirmation']) {
     const card = buildInthaninDailyCloseCard({ ...input(), status });
     assert.deepEqual(renderedActions(card).map(item => item.action), ['check', 'edit', 'confirm']);
     assert.match(visibleText(card), /ยังไม่ยืนยันปิดวัน/);
