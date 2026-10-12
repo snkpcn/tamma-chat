@@ -80,14 +80,14 @@ test('recorded ledger and explicitly paid legacy rows count; unknown/unpaid/canc
 
 test('exact ledger/slip source-message identity counts one financial event and preserves provenance', () => {
   const snapshot = buildInvestmentSnapshot({ ...empty,
-    manual: [{ id: 'ledger1', source_channel: 'line', source_message_id: 'message1', status: 'recorded', amount: 1000, owner_project_id: 'p1', business_unit_code: 'tamma_restaurant', title: 'ค่าไม้จากบัญชี' }],
+    manual: [{ id: 'ledger1', source_channel: 'line', source_message_id: 'message1', occurred_on: '2026-10-10', status: 'recorded', amount: 1000, owner_project_id: 'p1', business_unit_code: 'tamma_restaurant', title: 'ค่าไม้จากบัญชี' }],
     slips: [{ ...confirmed, evidence_message_id: 'message1' }, { ...confirmed, evidence_message_id: 'message1' }],
   });
   assert.equal(snapshot.spent, 1000);
   assert.equal(snapshot.items.length, 2, 'same intake id is not repeated');
   assert.equal(snapshot.evidenceOnly.length, 1);
   assert.equal(snapshot.pending.length, 0);
-  assert.match(snapshot.evidenceOnly[0]!.reconciliation_note!, /ข้อความเดียว/u);
+  assert.match(snapshot.evidenceOnly[0]!.reconciliation_note!, /ข้อความต้นทางเดียว/u);
   assert.equal(snapshot.counted[0]!.source_kind, 'manual');
   assert.equal(snapshot.evidenceOnly[0]!.source_kind, 'slip');
 });
@@ -261,7 +261,7 @@ test('paid status alone cannot turn inconsistent or unknown installment balances
 test('same source message with conflicting ledger/slip allocation or amounts stays pending', () => {
   for (const changed of [{ amount: 2000 }, { owner_project_id: 'p2' }]) {
     const snapshot = buildInvestmentSnapshot({ ...empty,
-      manual: [{ id: 'm1', source_channel: 'line', source_message_id: 'message1', status: 'recorded', amount: 1000, owner_project_id: 'p1', business_unit_code: 'tamma_restaurant' }],
+      manual: [{ id: 'm1', source_channel: 'line', source_message_id: 'message1', occurred_on: '2026-10-10', status: 'recorded', amount: 1000, owner_project_id: 'p1', business_unit_code: 'tamma_restaurant' }],
       slips: [{ ...confirmed, evidence_message_id: 'message1', ...changed }],
     });
     assert.equal(snapshot.counted.length, 0);
@@ -286,4 +286,52 @@ test('many projects produce a bounded LINE report with explicit omitted-group co
   assert.match(answer, /ยังไม่ได้แสดงรายละเอียดอีก 168 กลุ่ม/u);
   assert.match(answer, /ยอดด้านบนรวมทุกกลุ่มที่ผ่านการตรวจแล้ว/u);
   assert.match(answer, /ยอดจ่ายที่ยืนยันแล้ว: ยังไม่มีข้อมูล/u);
+});
+
+test('ledger source-message aliases reconcile the entire transitive slip component in either order', () => {
+  for (const reverse of [false, true]) {
+    const slips = [
+      { ...confirmed, id: 'slip-a', owner_group_hash: 'group1', reference_number: 'ref1', evidence_message_id: 'message-a' },
+      { ...confirmed, id: 'slip-b', owner_group_hash: 'group1', reference_number: 'ref1', evidence_message_id: 'message-b' },
+    ];
+    if (reverse) slips.reverse();
+    const snapshot = buildInvestmentSnapshot({ ...empty,
+      manual: [{ id: 'ledger', occurred_on: '2026-10-10', source_channel: 'line', source_message_id: 'message-b', status: 'recorded', amount: 1000, owner_project_id: 'p1', business_unit_code: 'tamma_restaurant' }],
+      slips,
+    });
+    assert.equal(snapshot.spent, 1000);
+    assert.equal(snapshot.counted.length, 1);
+    assert.equal(snapshot.counted[0]!.source_kind, 'manual');
+    assert.equal(snapshot.evidenceOnly.length, 2);
+    assert.equal(snapshot.pending.length, 0);
+  }
+});
+
+test('any conflicting alias quarantines the entire ledger and slip identity component', () => {
+  for (const reverse of [false, true]) {
+    const slips = [
+      { ...confirmed, id: 'slip-a', owner_group_hash: 'group1', reference_number: 'ref1', evidence_message_id: 'message-a' },
+      { ...confirmed, id: 'slip-b', owner_group_hash: 'group1', reference_number: 'ref1', evidence_message_id: 'message-b' },
+    ];
+    if (reverse) slips.reverse();
+    const snapshot = buildInvestmentSnapshot({ ...empty,
+      manual: [{ id: 'ledger', occurred_on: '2026-10-10', source_channel: 'line', source_message_id: 'message-b', status: 'recorded', amount: 2000, owner_project_id: 'p1', business_unit_code: 'tamma_restaurant' }],
+      slips,
+    });
+    assert.equal(snapshot.counted.length, 0);
+    assert.equal(snapshot.spent, 0);
+    assert.equal(snapshot.pending.length, 3);
+    assert.equal(snapshot.evidenceOnly.length, 0);
+  }
+});
+
+test('cross-source date or currency conflicts stay pending just like duplicate slip conflicts', () => {
+  for (const changed of [{ occurred_on: '2026-10-11' }, { currency: 'USD' }, { currency: '' }]) {
+    const snapshot = buildInvestmentSnapshot({ ...empty,
+      manual: [{ id: 'ledger', occurred_on: '2026-10-10', source_channel: 'line', source_message_id: 'message1', status: 'recorded', amount: 1000, owner_project_id: 'p1', business_unit_code: 'tamma_restaurant' }],
+      slips: [{ ...confirmed, evidence_message_id: 'message1', ...changed }],
+    });
+    assert.equal(snapshot.counted.length, 0);
+    assert.equal(snapshot.pending.length, 2);
+  }
 });

@@ -331,29 +331,32 @@ function expenseEvidenceKeys(row: Record<string, unknown>): string[] {
   });
 }
 
-function reconcileDuplicateSlips(slips: InvestmentItem[]): void {
-  const parent = slips.map((_, index) => index);
+function reconcileFinancialEvidence(entries: InvestmentItem[]): void {
+  const parent = entries.map((_, index) => index);
   const root = (index: number): number => {
     while (parent[index] !== index) index = parent[index]!;
     return index;
   };
   const byKey = new Map<string, number>();
-  slips.forEach((item, index) => {
-    for (const key of item.evidence_keys) {
+  entries.forEach((item, index) => {
+    const messageKey = item.source_channel && item.source_message_id
+      ? ['source_message:' + item.source_channel + ':' + item.source_message_id] : [];
+    for (const key of [...item.evidence_keys, ...messageKey]) {
       const previous = byKey.get(key);
       if (previous !== undefined) parent[root(index)] = root(previous);
       else byKey.set(key, index);
     }
   });
   const groups = new Map<number, InvestmentItem[]>();
-  slips.forEach((item, index) => {
+  entries.forEach((item, index) => {
     const key = root(index);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(item);
   });
   for (const group of groups.values()) {
     if (group.length < 2) continue;
-    const ordered = [...group].sort((a, b) => Number(b.counted_in_total) - Number(a.counted_in_total));
+    const ordered = [...group].sort((a, b) => Number(b.counted_in_total) - Number(a.counted_in_total)
+      || Number(b.source_kind === 'manual') - Number(a.source_kind === 'manual'));
     const canonical = ordered[0]!;
     const conflict = group.some(item => !item.amount_known || !canonical.amount_known || item.amount !== canonical.amount
       || !item.occurred_on || item.occurred_on !== canonical.occurred_on
@@ -365,7 +368,7 @@ function reconcileDuplicateSlips(slips: InvestmentItem[]): void {
       item.pending_confirmation = conflict;
       item.reconciliation_note = conflict
         ? 'หลักฐานอ้างอิงเดียวกันแต่ยอด/วันที่/สกุลเงิน/การผูกโครงการไม่ครบหรือต่างกัน ต้องตรวจสอบก่อนรวมยอด'
-        : 'หลักฐานอ้างอิงเดียวกับ ' + canonical.title + ' · ไม่บวกซ้ำ';
+        : 'หลักฐาน/ข้อความต้นทางเดียวกับ ' + canonical.title + ' · ไม่บวกซ้ำ';
     }
   }
 }
@@ -497,33 +500,10 @@ export function buildInvestmentSnapshot(input: {
     reconciliation_note: null,
   }));
 
-  reconcileDuplicateSlips(slips);
-  // Explicit source identity takes precedence over amount/topic matching.
-  const ledgerByMessage = new Map(manual.filter(item => item.counted_in_total && item.source_message_id && item.source_channel)
-    .map(item => [item.source_channel + ':' + item.source_message_id, item]));
-  for (const slip of slips) {
-    const canonical = slip.source_message_id && slip.source_channel ? ledgerByMessage.get(slip.source_channel + ':' + slip.source_message_id) : undefined;
-    if (!canonical) continue;
-    if (!slip.amount_known || slip.amount !== canonical.amount
-      || slip.owner_project_id !== canonical.owner_project_id
-      || slip.business_unit_code !== canonical.business_unit_code) {
-      for (const conflict of [slip, canonical]) {
-        conflict.counted_in_total = false;
-        conflict.pending_confirmation = true;
-        conflict.reconciliation_note = 'ข้อความต้นทางเดียวกันแต่ยอด/การผูกโครงการต่างกัน ต้องตรวจสอบก่อนรวมยอด';
-      }
-      continue;
-    }
-    if (slip.reconciliation_note?.includes('ต้องตรวจสอบ')) {
-      canonical.counted_in_total = false;
-      canonical.pending_confirmation = true;
-      canonical.reconciliation_note = slip.reconciliation_note;
-      continue;
-    }
-    slip.counted_in_total = false;
-    slip.pending_confirmation = false;
-    slip.reconciliation_note = `อ้างอิงข้อความเดียวกับ ${canonical.title} ในบัญชีลงทุน · ไม่บวกซ้ำ`;
-  }
+  // Reconcile every identity alias in one graph. A bank-reference duplicate can
+  // be linked to the ledger by either slip's source message, including aliases
+  // that are not the first row. Conflicts quarantine the entire component.
+  reconcileFinancialEvidence([...manual, ...slips]);
   // Legacy adjustment audits do not identify a slip. Amount/topic/date similarity
   // cannot prove that evidence is already included in an aggregate.
   flagUnresolvedLegacyOverlap([...manual, ...slips], legacy);
