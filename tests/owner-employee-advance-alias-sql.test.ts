@@ -12,7 +12,11 @@ const R='10000000-0000-4000-8000-000000000002', ALIAS='ตัวอย่าง�
 async function database(){
  const db=new PGlite();
  await db.exec('create role anon;create role authenticated;create role service_role bypassrls;');
- await db.exec(BASE);await db.exec(SQL);
+ await db.exec(BASE);
+ // The production creator grants ALL table privileges by default. Reproduce
+ // those defaults only in this disposable database before creating new objects.
+ await db.exec('alter default privileges in schema public grant all on tables to anon,authenticated,service_role; alter default privileges in schema public grant execute on functions to anon,authenticated,service_role;');
+ await db.exec(SQL);
  await db.query(`insert into tamma_chart_os.employees(id,restaurant_id,full_name,nickname,wage_amount,employment_type,status,created_at,updated_at)
  values($1,$2,'Synthetic Second','Another',12000,'เงินเดือน','ทำงานอยู่','2026-09-01','2026-09-01')`,[E2,R]);
  return db;
@@ -42,6 +46,28 @@ test('alias SQL proposal and unapplied migration stay byte-identical and service
  const db=await database();try{
  const q=await db.query<any>(`select proname,prosecdef,has_function_privilege('anon',oid,'execute') anon,has_function_privilege('authenticated',oid,'execute') auth from pg_proc where proname like 'financial_employee_advance_%v1'`);
  for(const r of q.rows){assert.equal(r.prosecdef,false);assert.equal(r.anon,false);assert.equal(r.auth,false);}
+ }finally{await db.close();}
+});
+
+test('new tables reset inherited service-role ALL defaults to precise least privilege',async()=>{
+ const db=await database();try{
+ const privileges=['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN'];
+ for(const table of ['financial_owner_employee_profiles','financial_employee_advance_audit_events']){
+  const allowed=table==='financial_owner_employee_profiles'?['SELECT','INSERT','UPDATE']:['SELECT','INSERT'];
+  for(const role of ['anon','authenticated','service_role'])for(const privilege of privileges){
+   const q=await db.query<any>('select has_table_privilege($1,$2,$3) ok',[role,'public.'+table,privilege]);
+   assert.equal(q.rows[0].ok,role==='service_role'&&allowed.includes(privilege),role+':'+table+':'+privilege);
+  }
+ }
+ await db.exec('set role service_role');
+ await assert.rejects(()=>db.exec('update public.financial_employee_advance_audit_events set before_data=before_data'),/permission denied/);
+ await assert.rejects(()=>db.exec('delete from public.financial_employee_advance_audit_events'),/permission denied/);
+ await assert.rejects(()=>db.exec('truncate public.financial_employee_advance_audit_events'),/permission denied/);
+ await assert.rejects(()=>db.exec('delete from public.financial_owner_employee_profiles'),/permission denied/);
+ // Creator defaults themselves remain unchanged for unrelated future objects.
+ await db.exec('reset role');
+ const acl=await db.query<any>(`select defaclacl::text acl from pg_default_acl where defaclnamespace='public'::regnamespace and defaclobjtype='r'`);
+ assert.ok(acl.rows[0].acl.includes('service_role=arwdDxtm'));
  }finally{await db.close();}
 });
 

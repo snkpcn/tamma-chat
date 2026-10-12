@@ -9,7 +9,7 @@ import re
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 COMMIT = '910762af1bb548afb326e0ddbcf60a9a3857e049'
-PROPOSAL_SHA256 = '54daddec6e5cc0f9d4dcf15237671b8504448f2b469ab4075df745efbffc7026'
+PROPOSAL_SHA256 = 'e712948af96f9137c7da4809defeb726588f13d2783df236537ba6e8c3447c9b'
 OUTPUT = HERE / 'employee-advance-actual-schema.sql'
 MANIFEST = HERE / 'employee-advance-actual-schema.sources.json'
 EXTERNAL = HERE / 'employee-advance-external-schema.sql'

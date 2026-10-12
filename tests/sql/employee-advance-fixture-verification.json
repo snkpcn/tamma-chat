@@ -50,7 +50,7 @@
   "seed_before_auth_signup_trigger": true,
   "non_auth_application_triggers_installed_before_seed": true,
   "no_trigger_bypass": true,
-  "frozen_proposal_sha256": "54daddec6e5cc0f9d4dcf15237671b8504448f2b469ab4075df745efbffc7026",
+  "frozen_proposal_sha256": "e712948af96f9137c7da4809defeb726588f13d2783df236537ba6e8c3447c9b",
   "standalone_checkout_check_without_private_evidence_or_repo_tree": "passed",
   "canonical_manifest_layout_checks": {
     "partial_upstream_only": "passed",

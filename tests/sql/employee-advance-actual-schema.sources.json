@@ -3,7 +3,7 @@
   "commit": "910762af1bb548afb326e0ddbcf60a9a3857e049",
   "status": "external_schema_supplied_static_verification_only",
   "proposal_path": "supabase/proposals/owner_employee_advance_v1.sql",
-  "proposal_sha256": "54daddec6e5cc0f9d4dcf15237671b8504448f2b469ab4075df745efbffc7026",
+  "proposal_sha256": "e712948af96f9137c7da4809defeb726588f13d2783df236537ba6e8c3447c9b",
   "proposal_applied_by_fixture": false,
   "database_execution_performed_by_builder": false,
   "fixture_path": "tests/sql/employee-advance-actual-schema.sql",

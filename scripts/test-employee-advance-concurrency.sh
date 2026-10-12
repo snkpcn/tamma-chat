@@ -17,10 +17,15 @@ db(){ "${DB[@]}" "$@"; }
 db -c 'CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;' > evidence/concurrency/provider-role-bootstrap.log 2>&1
 # Bootstrap is exact source DDL plus separately documented schema-only prerequisites.
 db -f tests/sql/employee-advance-actual-schema.sql > evidence/concurrency/bootstrap.log 2>&1
-printf '%s  %s\n' '54daddec6e5cc0f9d4dcf15237671b8504448f2b469ab4075df745efbffc7026' 'supabase/proposals/owner_employee_advance_v1.sql' | sha256sum --check
+# Reproduce the production creator's public-schema defaults in this disposable
+# database only. The proposal must reset its two new tables to least privilege.
+db -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon,authenticated,service_role; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon,authenticated,service_role;' > evidence/concurrency/provider-default-acl-bootstrap.log 2>&1
+printf '%s  %s\n' 'e712948af96f9137c7da4809defeb726588f13d2783df236537ba6e8c3447c9b' 'supabase/proposals/owner_employee_advance_v1.sql' | sha256sum --check
 # No Supabase migration history or production target exists in this job.
 db -f supabase/proposals/owner_employee_advance_v1.sql >> evidence/concurrency/bootstrap.log 2>&1
 db -f tests/sql/employee-advance-concurrency-cases.sql >> evidence/concurrency/bootstrap.log 2>&1
+# Fail before any test payment if creator defaults widened the new tables.
+db -c "select employee_advance_test.assert(not exists(select 1 from (values ('public.financial_owner_employee_profiles'),('public.financial_employee_advance_audit_events')) t(name),unnest(ARRAY['anon','authenticated','service_role']) r(role_name),unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER','MAINTAIN']) p(privilege) where has_table_privilege(r.role_name,t.name,p.privilege) is distinct from (r.role_name='service_role' and (p.privilege in ('SELECT','INSERT') or (t.name='public.financial_owner_employee_profiles' and p.privilege='UPDATE')))),'new table grants are precise despite inherited creator defaults');" > evidence/concurrency/new-table-privileges.log
 PASS=0
 assert_sql(){ db -c "select employee_advance_test.assert(($1),'$2');" >/dev/null; }
 act(){ db -c "BEGIN; SET LOCAL ROLE service_role; $1 COMMIT;"; }

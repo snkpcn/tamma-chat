@@ -67,8 +67,10 @@ create table public.financial_owner_employee_profiles(
   primary key(owner_group_hash,employee_id),
   unique(owner_group_hash,employee_key)
 );
+-- Reset table-specific inherited creator defaults, including service_role ALL.
+-- Do not alter any global defaults or privileges on pre-existing source tables.
 alter table public.financial_owner_employee_profiles enable row level security;
-revoke all on public.financial_owner_employee_profiles from public,anon,authenticated;
+revoke all on public.financial_owner_employee_profiles from public,anon,authenticated,service_role;
 grant select,insert,update on public.financial_owner_employee_profiles to service_role;
 
 -- Profile changes use the same group lock as confirmation. This includes new
@@ -142,7 +144,7 @@ create table public.financial_employee_advance_audit_events(
   created_at timestamptz not null default now()
 );
 alter table public.financial_employee_advance_audit_events enable row level security;
-revoke all on public.financial_employee_advance_audit_events from public,anon,authenticated;
+revoke all on public.financial_employee_advance_audit_events from public,anon,authenticated,service_role;
 grant select,insert on public.financial_employee_advance_audit_events to service_role;
 create unique index financial_advance_stage_message_unique_v1
  on public.financial_employee_advance_audit_events(owner_group_hash,intake_id,source_message_id)
