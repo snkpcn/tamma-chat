@@ -186,7 +186,7 @@ export function buildInthaninDailyCloseCard(input: InthaninDailyCloseCardInput):
 
   const confirmed = input.status === 'confirmed';
   const voided = input.status === 'void';
-  const reviewable = input.status === 'draft' || input.status === 'submitted';
+  const reviewable = ['draft', 'pending_confirmation', 'submitted'].includes(input.status);
   const missing = amountKeys.filter(key => input[key] === null);
   const mismatch = input.salesVariance !== null && input.salesVariance !== 0;
   const unavailableReason = input.confirmationUnavailableReason === undefined ? null : shorten(input.confirmationUnavailableReason, 1000);
@@ -195,7 +195,7 @@ export function buildInthaninDailyCloseCard(input: InthaninDailyCloseCardInput):
   const canConfirm = reviewable && input.readyToConfirm && !unavailableReason && input.blockers.length === 0 && missing.length === 0 && !mismatch;
   const status = confirmed ? 'ยืนยันปิดวันแล้ว' : voided ? 'VOID · ยกเลิกรายการแล้ว'
     : input.status === 'draft' ? 'DRAFT · ยังไม่ยืนยันปิดวัน'
-      : input.status === 'submitted' ? 'ส่งรายงานแล้ว · ยังไม่ยืนยันปิดวัน' : 'สถานะไม่รองรับ · ต้องตรวจสอบ';
+      : ['pending_confirmation', 'submitted'].includes(input.status) ? 'ส่งรายงานแล้ว · ยังไม่ยืนยันปิดวัน' : 'สถานะไม่รองรับ · ต้องตรวจสอบ';
   const readiness = confirmed ? 'ข้อมูลปิดวันถูกล็อกแล้ว'
     : voided ? 'รายการที่ยกเลิกแล้วไม่สามารถยืนยันปิดวันได้'
       : !reviewable ? 'ยังยืนยันไม่ได้ · กรุณาตรวจสถานะใน Backoffice' : unavailableReason ?? (canConfirm

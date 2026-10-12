@@ -33,11 +33,11 @@ async function loadCard(id:string,localDate:string,branchId:string){
     openingFloat:amount(row.cash_opening_float),countedClosing:amount(row.cash_counted_closing),
     // Deployment alone cannot enable financial confirmation before the atomic wrapper is installed and approved.
     readyToConfirm:reconcile.ready_to_confirm===true&&process.env.INTHANIN_DAILY_CLOSE_CARD_CONFIRM_ENABLED==='true'
-      &&['draft','submitted'].includes(row.status)&&amount(row.sales_payment_variance)===0
+      &&['draft','pending_confirmation','submitted'].includes(row.status)&&amount(row.sales_payment_variance)===0
       &&[row.net_sales,row.payment_cash,row.payment_qr,row.payments_total,row.cash_drawer_outflow_amount,row.cash_opening_float,row.cash_counted_closing].every(v=>amount(v)!==null),
     blockers:reconcile.blockers??[],warnings:reconcile.warnings??[],
     ...(reconcile.ready_to_confirm===true&&process.env.INTHANIN_DAILY_CLOSE_CARD_CONFIRM_ENABLED!=='true'
-      ?{confirmationUnavailableReason:'ข้อมูลผ่านการตรวจแล้ว แต่ปุ่มยืนยันใน LINE ยังไม่เปิดใช้งาน กรุณายืนยันผ่านหลังบ้าน'}:{})};
+      ?{confirmationUnavailableReason:'ข้อมูลผ่านการตรวจแล้ว แต่การยืนยันปิดวัน LIVE ยังรอเปิดใช้งาน หลังแก้ไขให้กลับมากดตรวจล่าสุดใน LINE'}:{})};
   return {row,input,message:buildInthaninDailyCloseCard(input)};
 }
 export async function dailyCloseCardForReceipt(input:{targetHash:string|null;close:RecordedDailyClose|null;missingText?:string}):Promise<Record<string,unknown>|null>{
@@ -66,9 +66,9 @@ export async function handleDailyCloseCardAction(input:{targetHash:string|null;u
   if(current.row.revision!==action.revision)return [...text('ข้อมูลเปลี่ยนหลังสร้างการ์ด กรุณาตรวจการ์ดล่าสุดก่อนครับ'),current.message];
   if(action.action==='edit')return [...text('ยอดวันที่ '+action.localDate+' · เปิดหลังบ้านเพื่อเติมหรือแก้เฉพาะช่องที่ขาด แล้วกดตรวจอีกครั้งครับ'),
     {type:'template',altText:'เปิดหลังบ้านตรวจยอด '+action.localDate,template:{type:'buttons',text:'Daily Close '+action.localDate,
-      actions:[{type:'uri',label:'เปิดหลังบ้าน',uri:'https://tamma-backoffice.netlify.app/'}]}}];
+      actions:[{type:'uri',label:'เปิดหลังบ้าน',uri:'https://tamma-backoffice.netlify.app/?'+new URLSearchParams({view:'daily-close',close:action.id,date:action.localDate,branch:'inthanin_tadtone',environment:'live',revision:String(current.row.revision)}).toString()}]}}];
   if(current.row.status==='confirmed')return [current.message];
-  if(process.env.INTHANIN_DAILY_CLOSE_CARD_CONFIRM_ENABLED!=='true')return [...text('ปุ่มยืนยันใน LINE ยังไม่เปิดใช้งาน กรุณายืนยันผ่านหลังบ้านก่อนครับ'),current.message];
+  if(process.env.INTHANIN_DAILY_CLOSE_CARD_CONFIRM_ENABLED!=='true')return [...text('การยืนยันปิดวัน LIVE ยังรอเปิดใช้งานครับ ตรวจและแก้ไขข้อมูลได้ แล้วกลับมากดตรวจล่าสุดใน LINE'),current.message];
   if(!current.input.readyToConfirm||current.input.blockers.length)return [...text('ยังยืนยันไม่ได้ ต้องแก้รายการที่ขาดหรือยอดไม่ตรงก่อนครับ'),current.message];
   if(Date.now()-receivedAt>30000)return [...text('ยังไม่ได้ยืนยัน กรุณากดตรวจอีกครั้งก่อนยืนยัน เพื่อให้ตอบกลับด้วยโทเคนที่ยังใช้งานได้ครับ'),current.message];
   const result=await(await db('rpc/financial_confirm_inthanin_daily_close_card_v1',{method:'POST',body:JSON.stringify({
