@@ -1,4 +1,5 @@
 import { piiHash } from './_operations-db';
+import { parseOwnerStaffTurn } from './_owner-staff-intent';
 import { boundLineOpsTeam } from './_ops-notifications';
 import type { OwnerExpenseProject } from './_owner-expense-intake';
 import { OWNER_SLIP_MAINTENANCE_REPLY, ownerSlipMaintenancePaused } from './_owner-slip-maintenance';
@@ -63,6 +64,9 @@ function documentReviewCard(ctx:Context,question:string,options:Array<{label:str
 }
 function render(ctx:Context,view?:string,page=0,error?:string):LineMessage{
  const {row,catalogue:cat}=ctx,p=row.review_data;
+ if((p as any)?.kind==='employee_advance')return {type:'text',text:'รายการนี้เป็นเงินเบิกพนักงานครับ กรุณาใช้การ์ดเงินเบิกล่าสุด'};
+ const staff=p?parseOwnerStaffTurn(p.purpose):null;
+ if(staff&&['unknown','salary_advance'].includes(staff.kind))return {type:'text',text:'รายการนี้เป็นเงินเบิกพนักงานครับ พิมพ์ชื่อพนักงานและประเภทการเบิกเพื่อเปิดการ์ดเงินเบิกก่อนยืนยัน'};
  if(!p)return {type:'text',text:'อ่านข้อมูลสลิปไม่ได้ครับ กรุณาส่งรายละเอียดอีกครั้ง'};
  const documentGate=ownerPaymentDocumentGate(row.extraction_data);
  if(row.review_state==='draft' && documentGate.kind!=='payment_evidence')return documentReviewCard(ctx,ownerPaymentDocumentClarification(documentGate),documentGate.kind==='needs_document_kind'?[{label:'ใบเสนอราคา',action:'document_kind',value:'quotation'},{label:'หลักฐานโอน',action:'document_kind',value:'payment_evidence'},{label:'เอกสารอื่น',action:'document_kind',value:'other'}]:[{label:'เอาออกจากคิวตรวจ',action:'cancel'},{label:'ไว้ก่อน',action:'later'}]);
@@ -153,6 +157,9 @@ export async function handleOwnerSlipPostback(input:{targetId:string;userId?:str
  const ctx=await loadContext(input.targetId,input.userId,action.id);
  if(!ctx)return {type:'text',text:'กรุณาให้ผู้ส่งสลิปเลือกจากการ์ดในกลุ่มเดิมครับ'};
  const {row}=ctx;
+ if((row.review_data as any)?.kind==='employee_advance')return render(ctx);
+ const staff=row.review_data?parseOwnerStaffTurn(row.review_data.purpose):null;
+ if(staff&&['unknown','salary_advance'].includes(staff.kind))return render(ctx);
  if(row.review_state!=='draft')return render(ctx);
  if(row.review_revision!==action.revision)return render(ctx,undefined,0,'รายการนี้มีการแก้ไขแล้ว กรุณาใช้การ์ดล่าสุด');
  if(action.action==='document_kind'){

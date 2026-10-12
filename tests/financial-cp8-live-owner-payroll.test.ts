@@ -22,39 +22,24 @@ test('owner payroll commands parse salary advance payment and deduction',()=>{
   assert.equal(parseOwnerPayrollCommand('แม่บอกว่าเจิดเบิกเงินเดือน 200'),null);
 });
 
-test('Owner payroll accepts a joined Thai command and does not record its repeated wording twice',async()=>{
-  const oldFetch=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const oldOwners=process.env.OWNER_FINANCE_LINE_USER_HASHES;
-  process.env.OWNER_FINANCE_LINE_USER_HASHES=piiHash('owner')!;
-  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='service-key';
-  let attempts=0;
-  globalThis.fetch=(async(input:string|URL|Request)=>{
-    const path=new URL(String(input)).pathname;
-    if(path.endsWith('/ops_notification_channels'))return new Response(JSON.stringify([{team_code:'owner_general'}]),{status:200});
-    if(path.endsWith('/rpc/financial_create_owner_payroll_event_v1')){
-      attempts++;
-      return attempts===1
-        ?new Response(JSON.stringify({ok:true,event_id:'event-1',status:'awaiting_slip',amount:200}),{status:200})
-        :new Response('payroll_slip_pending',{status:409});
-    }
-    if(path.endsWith('/financial_employee_payroll_events'))return new Response(JSON.stringify([{
-      id:'event-1',event_type:'salary_advance',employee_label:'เจิด',employee_key:'เจิด',amount:200,
-      status:'awaiting_slip',owner_group_hash:'group-hash',created_at:'2026-10-07T11:34:00Z',
-    }]),{status:200});
-    return new Response('[]',{status:200});
-  }) as typeof fetch;
-  try{
-    const first=await handleOwnerPayrollText({targetId:'owner-group',userId:'owner',text:'เบิกเงินเดือนเจิด 200',messageId:'line-msg-1'});
-    const repeat=await handleOwnerPayrollText({targetId:'owner-group',userId:'owner',text:'เจิดเบิกเงินเดือน 200',messageId:'line-msg-2'});
-    assert.match(first??'',/เจิด[\s\S]*200 บาท[\s\S]*ส่งรูปสลิป/u);
-    assert.match(repeat??'',/รอสลิปอยู่แล้วครับ ไม่เพิ่มยอดซ้ำ/u);
-    assert.equal(attempts,2);
-  }finally{
-    globalThis.fetch=oldFetch;
-    if(oldUrl===undefined)delete process.env.SUPABASE_URL;else process.env.SUPABASE_URL=oldUrl;
-    if(oldKey===undefined)delete process.env.SUPABASE_SERVICE_ROLE_KEY;else process.env.SUPABASE_SERVICE_ROLE_KEY=oldKey;
-    if(oldOwners===undefined)delete process.env.OWNER_FINANCE_LINE_USER_HASHES;else process.env.OWNER_FINANCE_LINE_USER_HASHES=oldOwners;
+test('legacy joined salary-advance commands never create payroll even when repeated',async t=>{
+  const oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY,oldOwners=process.env.OWNER_FINANCE_LINE_USER_HASHES;
+  process.env.OWNER_FINANCE_LINE_USER_HASHES=piiHash('synthetic-owner')!;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='synthetic-key';
+  t.after(()=>{for(const [key,value] of [['SUPABASE_URL',oldUrl],['SUPABASE_SERVICE_ROLE_KEY',oldKey],['OWNER_FINANCE_LINE_USER_HASHES',oldOwners]]){
+    if(value===undefined)delete process.env[key!];else process.env[key!]=value;
+  }});
+  const calls:Array<{path:string;method:string}>=[];
+  t.mock.method(globalThis,'fetch',async(raw:any,init:any={})=>{
+    const path=new URL(String(raw)).pathname;calls.push({path,method:init.method??'GET'});
+    assert.ok(path.endsWith('/ops_notification_channels'),'legacy advance must not read or write payroll');
+    return Response.json([{team_code:'owner_general'}]);
+  });
+  for(const [index,text] of ['เบิกเงินเดือนทดสอบ 125','ทดสอบเบิกเงินเดือน 125'].entries()){
+    const reply=await handleOwnerPayrollText({targetId:'synthetic-owner-group',userId:'synthetic-owner',text,messageId:'synthetic-message-'+index});
+    assert.match(reply??'',/ทดสอบ[\s\S]*125 บาท/u);assert.match(reply??'',/การ์ดเงินเบิก/);assert.match(reply??'',/ยังไม่บันทึกยอด/);
   }
+  assert.equal(calls.length,2);assert.ok(calls.every(call=>call.method==='GET'));
 });
 
 test('payroll privacy is hard-routed to owner_general and separate storage',()=>{
@@ -102,4 +87,31 @@ test('salary advance is not silently turned into shop expense',()=>{
   assert.match(guard,/advance_deduction_exceeds_outstanding/);
   assert.match(guard,/status in \(''awaiting_slip'',''needs_review''\)/);
   assert.doesNotMatch(payroll,/financial_daily_ledger_entries/);
+});
+
+test('salary-payment text retains pending-slip duplicate protection',async t=>{
+  const oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY,oldOwners=process.env.OWNER_FINANCE_LINE_USER_HASHES;
+  process.env.OWNER_FINANCE_LINE_USER_HASHES=piiHash('synthetic-owner')!;
+  process.env.SUPABASE_URL='https://unit.test';process.env.SUPABASE_SERVICE_ROLE_KEY='synthetic-key';
+  t.after(()=>{for(const [key,value] of [['SUPABASE_URL',oldUrl],['SUPABASE_SERVICE_ROLE_KEY',oldKey],['OWNER_FINANCE_LINE_USER_HASHES',oldOwners]]){
+    if(value===undefined)delete process.env[key!];else process.env[key!]=value;
+  }});
+  const writes:any[]=[];
+  t.mock.method(globalThis,'fetch',async(raw:any,init:any={})=>{
+    const url=new URL(String(raw)),path=url.pathname,body=init.body?JSON.parse(init.body):undefined;
+    if(path.endsWith('/ops_notification_channels'))return Response.json([{team_code:'owner_general'}]);
+    if(path.endsWith('/financial_create_owner_payroll_event_v1')){
+      writes.push(body);assert.equal(body.p_event_type,'salary_payment');assert.equal(body.p_employee_label,'ทดสอบ');assert.equal(body.p_amount,7500);
+      return writes.length===1?Response.json({ok:true,event_id:'synthetic-salary-event',status:'awaiting_slip',amount:7500}):new Response('payroll_slip_pending',{status:409});
+    }
+    if(path.endsWith('/financial_employee_payroll_events'))return Response.json([{
+      id:'synthetic-salary-event',event_type:'salary_payment',employee_label:'ทดสอบ',employee_key:'ทดสอบ',amount:7500,
+      status:'awaiting_slip',owner_group_hash:piiHash('synthetic-owner-group'),created_at:'2026-10-11T03:00:00Z',
+    }]);
+    throw new Error('Unexpected salary-payment request '+path);
+  });
+  const request={targetId:'synthetic-owner-group',userId:'synthetic-owner',text:'จ่ายเงินเดือน ทดสอบ 7500',timestamp:Date.parse('2026-10-11T03:01:00Z')};
+  assert.match(await handleOwnerPayrollText({...request,messageId:'synthetic-payment-first'})??'',/ทดสอบ[\s\S]*7,500 บาท[\s\S]*ส่งรูปสลิป/u);
+  assert.match(await handleOwnerPayrollText({...request,messageId:'synthetic-payment-repeat'})??'',/รอสลิปอยู่แล้วครับ ไม่เพิ่มยอดซ้ำ/u);
+  assert.equal(writes.length,2);assert.notEqual(writes[0].p_message_id,writes[1].p_message_id);
 });

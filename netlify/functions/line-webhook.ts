@@ -14,6 +14,7 @@ import {dailyCloseCardForReceipt,handleDailyCloseCardAction} from './_inthanin-d
 import { handleCafeTestDailyCloseConfirmText } from './_inthanin-daily-close-confirm';
 import { handleCafeTestDailyCloseImage } from './_inthanin-daily-close-image';
 import { handleOwnerPayrollImage, handleOwnerPayrollText } from './_owner-payroll';
+import { handleOwnerEmployeeAdvanceText, handleOwnerEmployeeAdvancePostback } from './_owner-employee-advance';
 import { handleOwnerExpenseImage, handleOwnerStaffSlipText, handleOwnerExpenseText, handleOwnerPaidExpenseMethodFollowup, handleOwnerRecentSlipProjectPurpose, isOwnerExpenseClassificationReply } from './_owner-expense-intake';
 import { handleOwnerSlipReviewText } from './_owner-slip-review';
 import { handleOwnerSlipPostback, ownerSlipReplyCard } from './_owner-slip-cards';
@@ -265,6 +266,8 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string, rece
   if (!targetId) return;
 
   if (event.type === 'postback' && typeof event.postback?.data === 'string') {
+    const advanceCard=await handleOwnerEmployeeAdvancePostback({targetId,userId:event.source?.userId,data:event.postback.data,messageId:event.webhookEventId,timestamp:event.timestamp});
+    if(advanceCard){await replyToLine(event.replyToken,advanceCard,accessToken);return;}
     const dailyCardReply=await handleDailyCloseCardAction({targetHash:sourceType==='group'?piiHash(targetId):null,userId:event.source?.userId,data:event.postback.data,receivedAt});
     if(dailyCardReply){await replyToLine(event.replyToken,dailyCardReply as LineMessage[],accessToken);return;}
     const documentCard=await handleOwnerDocumentIntent({targetId,userId:event.source?.userId,data:event.postback.data,timestamp:event.timestamp});
@@ -412,6 +415,8 @@ async function handleOpsEvent(event: LineWebhookEvent, accessToken: string, rece
   if(documentReply){await replyToLine(event.replyToken,documentReply,accessToken);return;}
   const explicitReview=isExplicitOwnerReviewText(event.message.text);
   if(!explicitReview && (event.message.quotedMessageId || /ใบเสนอราคา|ตามสัญญา|เสนอราคา/u.test(event.message.text)) && await boundLineOpsTeam(targetId)==='owner_general')return;
+  const advanceReply=await handleOwnerEmployeeAdvanceText({targetId,userId:event.source?.userId,text:event.message.text,messageId:event.message.id,timestamp:event.timestamp});
+  if(advanceReply){await replyToLine(event.replyToken,advanceReply,accessToken);return;}
   const slipReviewReply = explicitReview ? await handleOwnerSlipReviewText({
     targetId, userId: event.source?.userId ?? null,
     text: event.message.text.replace(/^ทองไทย(?:ครับ|คะ|ค่ะ)?[\s,]*/u,''), messageId: event.message.id ?? null,

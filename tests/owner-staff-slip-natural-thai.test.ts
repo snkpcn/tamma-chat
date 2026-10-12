@@ -5,6 +5,7 @@ import { handler as lineWebhookHandler } from '../netlify/functions/line-webhook
 import { applyOwnerProjectText, handleOwnerProjectText } from '../netlify/functions/_owner-project-os';
 import { handleOwnerExpenseText, handleOwnerStaffSlipText } from '../netlify/functions/_owner-expense-intake';
 import { piiHash } from '../netlify/functions/_operations-db';
+import { decodeAdvanceAction, type AdvanceEmployee } from '../netlify/functions/_owner-employee-advance-card';
 
 // Existing successful cases use explicitly authorized synthetic finance owners.
 let previousFinanceOwners:string|undefined;
@@ -53,14 +54,14 @@ test('a schedule accepts dates and timing, not arbitrary names or financial text
   assert.equal(data.schedule_text,undefined);
 });
 
-type Slip = {id:string; source_user_hash:string|null; status:string; amount:number|null; created_at:string; purpose_raw:string|null; occurred_on:string; document_type:string;business_unit_code?:string|null;expense_class?:string|null;expense_category?:string|null;expense_subcategory?:string|null};
+type Slip = {id:string; source_user_hash:string|null; status:string; amount:number|null; created_at:string; purpose_raw:string|null; occurred_on:string; document_type:string;business_unit_code?:string|null;expense_class?:string|null;expense_category?:string|null;expense_subcategory?:string|null;owner_group_hash?:string|null;review_state?:string|null;review_revision?:number;review_data?:any;extraction_data?:any};
 const at = Date.parse('2026-10-11T03:00:00Z');
 const slip = (overrides:Partial<Slip>={}):Slip => ({
   id:'87044d4b-b8a8-41ab-a393-e8ab8a7b5597', source_user_hash:'mother-hash',
   status:'awaiting_purpose',amount:200,created_at:'2026-10-11T01:13:41Z',
   purpose_raw:null,occurred_on:'2026-10-11',document_type:'transfer_slip',...overrides,
 });
-function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicate?:boolean;createEventType?:string;tampered?:boolean;uploadStatus?:number;pendingError?:boolean;attachError?:boolean;team?:string}={}) {
+function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicate?:boolean;createEventType?:string;tampered?:boolean;uploadStatus?:number;pendingError?:boolean;attachError?:boolean;team?:string;employees?:AdvanceEmployee[]}={}) {
   const oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
   const oldSecret=process.env.LINE_CHANNEL_SECRET,oldToken=process.env.LINE_CHANNEL_ACCESS_TOKEN;
   process.env.SUPABASE_URL='https://staff-slip.test';process.env.SUPABASE_SERVICE_ROLE_KEY='mock-key';
@@ -85,6 +86,30 @@ function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicat
         extraction_confidence:0.95,extraction_data:{document_type:row.document_type,document_kind:row.document_type==='transfer_slip'?'transfer_evidence':'unknown',funds_direction:row.document_type==='transfer_slip'?'outgoing':'unknown',amount_total:row.amount,confidence:0.95},
       })));
       return Response.json(rows.filter(row=>['awaiting_purpose','awaiting_business'].includes(row.status)));
+    }
+    if(path.endsWith('/owner_employee_advance_context_v1')){
+      const catalog=config.employees??syntheticEmployees;
+      const candidates=catalog.filter(employee=>body.p_employee_id?employee.employee_id===body.p_employee_id:
+        !body.p_employee_query||employee.nickname===body.p_employee_query);
+      return Response.json({ok:true,candidates,month_start:'2026-10-01',month_end:'2026-11-01'});
+    }
+    if(path.endsWith('/financial_stage_owner_employee_advance_v1')){
+      const row=rows.find(row=>row.id===body.p_intake_id);
+      assert.ok(row);assert.equal(body.p_group_hash,row.owner_group_hash);assert.equal(body.p_actor_hash,row.source_user_hash);
+      assert.equal(body.p_revision,row.review_revision);
+      row.review_data=structuredClone(body.p_proposal);row.review_revision!++;row.review_state='draft';
+      return Response.json({ok:true,revision:row.review_revision,proposal:row.review_data});
+    }
+    if(path.endsWith('/financial_confirm_owner_employee_advance_v1')){
+      const row=rows.find(row=>row.id===body.p_intake_id);
+      assert.ok(row);assert.equal(body.p_group_hash,row.owner_group_hash);assert.equal(body.p_actor_hash,row.source_user_hash);
+      assert.equal(body.p_revision,row.review_revision);
+      const employee=(config.employees??syntheticEmployees).find(employee=>employee.employee_id===row.review_data.employee_id);
+      assert.ok(employee);assert.equal(row.review_data.event_type,'salary_advance');
+      const duplicate=row.review_state==='confirmed';row.review_state='confirmed';
+      return Response.json({ok:true,event_id:'44444444-4444-4444-8444-444444444444',duplicate,employee,
+        amount:row.review_data.amount,occurred_on:row.review_data.occurred_on,
+        funding_source:row.review_data.funding_source,monthly_sum:Number(employee.month_paid_advance)+row.review_data.amount});
     }
     if(path.endsWith('/financial_create_owner_payroll_event_v1')){
       if(config.pendingError)return new Response('payroll_slip_pending',{status:400});
@@ -118,6 +143,25 @@ function harness(t:any, rows:Slip[], config:{attachStatus?:string;createDuplicat
   return {calls};
 }
 const input = {targetId:'owner-test-group',userId:'son-test-user',messageId:'message-staff',timestamp:at};
+// Replacement advance cases use a separate, wholly synthetic employee/evidence fixture.
+const syntheticEmployees:AdvanceEmployee[]=[
+  {employee_id:'22222222-2222-4222-8222-222222222222',employee_key:'synthetic-a',full_name:'ทดสอบ ตัวอย่าง',nickname:'ทดสอบ',business_unit_code:'shared',role_label:'ฝ่ายทดสอบ',month_paid_advance:450},
+  {employee_id:'33333333-3333-4333-8333-333333333333',employee_key:'synthetic-b',full_name:'จำลอง ตัวอย่าง',nickname:'จำลอง',business_unit_code:'shared',role_label:'ฝ่ายทดสอบ',month_paid_advance:60},
+];
+const syntheticSlip=(overrides:Partial<Slip>={}):Slip=>({
+  id:'11111111-1111-4111-8111-111111111111',source_user_hash:piiHash(input.userId),owner_group_hash:piiHash(input.targetId),
+  status:'awaiting_purpose',amount:125,created_at:new Date(at-60000).toISOString(),purpose_raw:null,
+  occurred_on:'2026-10-11',document_type:'transfer_slip',review_state:null,review_revision:1,review_data:null,
+  extraction_data:{document_type:'transfer_slip',document_kind:'transfer_evidence',funds_direction:'outgoing',amount_total:125,document_date_local:'2026-10-11',confidence:0.95,payment_document_count:1},
+  ...overrides,
+});
+const noAdvanceMoneyWrite=(calls:Array<{path:string}>)=>assert.ok(!calls.some(call=>/financial_create_owner_payroll_event|financial_attach_owner_payroll_slip|financial_mark_owner_expense_not_expense|financial_confirm_owner_employee_advance/.test(call.path)));
+const cardActions=(value:any)=>{
+  const result:Array<{data:string;action:NonNullable<ReturnType<typeof decodeAdvanceAction>>}>=[];
+  const visit=(item:any)=>{if(!item||typeof item!=='object')return;const action=item.type==='postback'?decodeAdvanceAction(item.data):null;if(action)result.push({data:item.data,action});Object.values(item).forEach(visit);};
+  visit(value);return result;
+};
+
 
 test('son can clarify mother slip 106 minutes later, asks type, creates no payroll or project',async t=>{
   const h=harness(t,[slip()]);
@@ -170,26 +214,19 @@ test('a side question or negation makes no financial write',async t=>{
   }
   assert.equal(h.calls.filter(x=>x.method==='POST').length,0);
 });
-test('salary follow-up converts original slip once without asking for reupload',async t=>{
-  const h=harness(t,[slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+test('legacy salary follow-up preserves the original slip and requires a staged card',async t=>{
+  const row=syntheticSlip({status:'awaiting_business',purpose_raw:'ทดสอบเบิก'}),before=structuredClone(row);
+  const h=harness(t,[row]);
   const reply=await handleOwnerStaffSlipText({...input,text:'เงินเดือน'});
-  assert.match(reply??'',/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
-  assert.match(reply??'',/ไม่เพิ่มเป็นค่าใช้จ่ายร้านหรือเงินลงทุน/);
-  const create=h.calls.find(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'))!;
-  assert.equal(create.body.p_employee_label,'เจิด');assert.equal(create.body.p_amount,200);
-  assert.equal(create.body.p_message_id,'owner-slip-payroll:'+slip().id);
-  const attach=h.calls.find(x=>x.path.endsWith('/financial_attach_owner_payroll_slip_v1'))!;
-  assert.equal(attach.body.p_slip_message_id,'original-line-image');
-  assert.equal(attach.body.p_storage_bucket,'owner-payroll-evidence');
-  const close=h.calls.findIndex(x=>x.path.endsWith('/financial_mark_owner_expense_not_expense_v1'));
-  assert.ok(close>h.calls.indexOf(attach));
-  assert.ok(!h.calls.some(x=>/financial_resolve|record_line_investment|owner_project/.test(x.path)));
+  assert.match(reply??'',/ยืนยันจากการ์ดเงินเบิกพนักงาน/);assert.match(reply??'',/ยังไม่บันทึกยอด/);
+  assert.deepEqual(row,before);assert.equal(h.calls.filter(call=>call.method==='POST').length,0);
+  assert.ok(!h.calls.some(call=>/storage|owner_project/.test(call.path)));
 });
-test('full natural salary description uses existing slip before legacy text-first payroll',async t=>{
-  const h=harness(t,[slip()]);
-  const reply=await handleOwnerStaffSlipText({...input,text:'เจิดเบิกเงินเดือน 200'});
-  assert.match(reply??'',/พร้อมสลิปเดิม/);
-  assert.equal(h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1')).length,1);
+test('full natural salary description cannot bypass the card through legacy stored-slip payroll',async t=>{
+  const row=syntheticSlip(),before=structuredClone(row),h=harness(t,[row]);
+  const reply=await handleOwnerStaffSlipText({...input,text:'ทดสอบเบิกเงินเดือน 125'});
+  assert.match(reply??'',/ยังไม่บันทึกยอดจากสลิปอัตโนมัติ/);
+  assert.deepEqual(row,before);assert.equal(h.calls.filter(call=>call.method==='POST').length,0);
 });
 test('purchase advance waits for receipts and is excluded from shop costs',async t=>{
   const h=harness(t,[slip({status:'awaiting_business',purpose_raw:'เจิดเบิกไปซื้อของ'})]);
@@ -208,38 +245,43 @@ test('a bare business answer releases an unknown advance without repeating its t
   assert.equal(row.purpose_raw,'เจิดเบิก');
   assert.ok(!h.calls.some(x=>x.method==='POST'));
 });
-test('low-confidence evidence remains under review and does not enter confirmed totals',async t=>{
-  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})],{attachStatus:'needs_review'});
-  assert.match(await handleOwnerStaffSlipText({...input,text:'เงินเดือน'})??'',/ยังไม่ยืนยันยอด/);
-  assert.ok(h.calls.some(x=>x.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
-  assert.ok(!h.calls.some(x=>x.path.endsWith('/financial_employee_advance_owner_v1')));
+test('salary-payment evidence under review retains the legacy review outcome',async t=>{
+  const h=harness(t,[syntheticSlip({purpose_raw:'จ่ายเงินเดือน ทดสอบ'})],{attachStatus:'needs_review'});
+  assert.match(await handleOwnerStaffSlipText({...input,text:'จ่ายเงินเดือน ทดสอบ'})??'',/ยังไม่ยืนยันยอด/);
+  const create=h.calls.find(call=>call.path.endsWith('/financial_create_owner_payroll_event_v1'))!;
+  assert.equal(create.body.p_event_type,'salary_payment');assert.equal(create.body.p_amount,125);
+  assert.ok(h.calls.some(call=>call.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
+  assert.ok(!h.calls.some(call=>call.path.endsWith('/financial_employee_advance_owner_v1')));
 });
-test('retry of an attached event reuses the stable source, closes original and skips storage upload',async t=>{
-  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})],{createDuplicate:true});
-  assert.match(await handleOwnerStaffSlipText({...input,messageId:'retry-message',text:'เงินเดือน'})??'',/พร้อมสลิปเดิม/);
-  assert.ok(!h.calls.some(x=>x.path.includes('/storage/')));
-  assert.ok(h.calls.some(x=>x.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
+test('salary-payment retry reuses the stable source and skips storage upload',async t=>{
+  const row=syntheticSlip(),h=harness(t,[row],{createDuplicate:true});
+  assert.match(await recordOwnerPayrollFromStoredSlip({...input,intakeId:row.id,employeeLabel:'ทดสอบ',eventType:'salary_payment'}),/พร้อมสลิปเดิม/);
+  const create=h.calls.find(call=>call.path.endsWith('/financial_create_owner_payroll_event_v1'))!;
+  assert.equal(create.body.p_message_id,'owner-slip-payroll:'+row.id);assert.equal(create.body.p_event_type,'salary_payment');
+  assert.ok(!h.calls.some(call=>call.path.includes('/storage/')));
+  assert.ok(h.calls.some(call=>call.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
 });
-test('conflicting payroll retries never change employee or payroll type',async t=>{
-  const h=harness(t,[slip()],{createDuplicate:true,createEventType:'salary_payment'});
-  const reply=await recordOwnerPayrollFromStoredSlip({...input,intakeId:slip().id,employeeLabel:'เจิด',eventType:'salary_advance'});
+test('conflicting salary-payment retry never changes an existing payroll type',async t=>{
+  const row=syntheticSlip(),h=harness(t,[row],{createDuplicate:true,createEventType:'salary_advance'});
+  const reply=await recordOwnerPayrollFromStoredSlip({...input,intakeId:row.id,employeeLabel:'ทดสอบ',eventType:'salary_payment'});
   assert.match(reply,/ข้อมูลไม่ตรงกัน/);
-  assert.ok(!h.calls.some(x=>x.path.includes('/storage/')||x.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
+  assert.ok(!h.calls.some(call=>call.path.includes('/storage/')||call.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
 });
-test('tampered stored evidence cannot attach or close the original slip',async t=>{
-  const h=harness(t,[slip()],{tampered:true});
-  await assert.rejects(recordOwnerPayrollFromStoredSlip({...input,intakeId:slip().id,employeeLabel:'เจิด',eventType:'salary_advance'}),/hash_mismatch/);
-  assert.ok(!h.calls.some(x=>x.path.endsWith('/financial_attach_owner_payroll_slip_v1')||x.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
+test('tampered salary-payment evidence cannot attach or close the original slip',async t=>{
+  const row=syntheticSlip(),h=harness(t,[row],{tampered:true});
+  await assert.rejects(recordOwnerPayrollFromStoredSlip({...input,intakeId:row.id,employeeLabel:'ทดสอบ',eventType:'salary_payment'}),/hash_mismatch/);
+  assert.ok(!h.calls.some(call=>call.path.endsWith('/financial_attach_owner_payroll_slip_v1')||call.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
 });
-test('attachment error retains original intake for safe retry',async t=>{
-  const h=harness(t,[slip()],{attachError:true});
-  await assert.rejects(recordOwnerPayrollFromStoredSlip({...input,intakeId:slip().id,employeeLabel:'เจิด',eventType:'salary_advance'}),/already_used/);
-  assert.ok(!h.calls.some(x=>x.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
+test('salary-payment attachment error retains the original intake for safe retry',async t=>{
+  const row=syntheticSlip(),before=structuredClone(row),h=harness(t,[row],{attachError:true});
+  await assert.rejects(recordOwnerPayrollFromStoredSlip({...input,intakeId:row.id,employeeLabel:'ทดสอบ',eventType:'salary_payment'}),/already_used/);
+  assert.deepEqual(row,before);assert.ok(!h.calls.some(call=>call.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
 });
-test('another pending payroll event does not capture this slip or alter project',async t=>{
-  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})],{pendingError:true});
-  assert.match(await handleOwnerStaffSlipText({...input,text:'เงินเดือน'})??'',/ก่อนหน้ารอสลิป/);
-  assert.ok(!h.calls.some(x=>x.path.includes('/storage/')||x.path.endsWith('/financial_mark_owner_expense_not_expense_v1')));
+test('pending legacy payroll cannot capture a salary advance or alter its slip',async t=>{
+  const row=syntheticSlip({purpose_raw:'ทดสอบเบิก'}),before=structuredClone(row),h=harness(t,[row],{pendingError:true});
+  assert.match(await handleOwnerStaffSlipText({...input,text:'เงินเดือน'})??'',/ยืนยันจากการ์ดเงินเบิกพนักงาน/);
+  assert.deepEqual(row,before);assert.equal(h.calls.filter(call=>call.method==='POST').length,0);
+  assert.ok(!h.calls.some(call=>/storage|owner_project/.test(call.path)));
 });
 test('other teams cannot enter the private owner staff flow',async t=>{
   const h=harness(t,[slip()],{team:'cafe_test'});
@@ -252,9 +294,10 @@ test('project handler releases a financial topic before it reads or patches the 
   assert.ok(!h.calls.some(x=>x.path.includes('owner_project')));
 });
 
-test('known salary type is preserved when employee name is supplied later',async t=>{
-  harness(t,[slip({purpose_raw:'พนักงานเบิกเงินเดือนล่วงหน้า'})]);
-  assert.match(await handleOwnerStaffSlipText({...input,text:'เจิด'})??'',/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
+test('a name-only legacy salary-advance answer cannot auto-record the saved slip',async t=>{
+  const row=syntheticSlip({purpose_raw:'พนักงานเบิกเงินเดือนล่วงหน้า'}),before=structuredClone(row),h=harness(t,[row]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'ทดสอบ'})??'',/ยืนยันจากการ์ดเงินเบิกพนักงาน/);
+  assert.deepEqual(row,before);assert.equal(h.calls.filter(call=>call.method==='POST').length,0);
 });
 test('unreadable amount asks one missing question and preserves salary context',async t=>{
   const h=harness(t,[slip({amount:null,purpose_raw:'เจิดเบิก'})]);
@@ -262,11 +305,10 @@ test('unreadable amount asks one missing question and preserves salary context',
   assert.equal(h.calls.find(x=>x.path.endsWith('/financial_stage_owner_expense_purpose_v1'))?.body.p_purpose,'เจิดเบิกเงินเดือนล่วงหน้า');
   assert.ok(!h.calls.some(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1')));
 });
-test('owner amount clarification still needs evidence review when original slip was unreadable',async t=>{
-  const h=harness(t,[slip({amount:null,purpose_raw:'เจิดเบิกเงินเดือนล่วงหน้า'})],{attachStatus:'needs_review'});
-  assert.match(await handleOwnerStaffSlipText({...input,text:'200'})??'',/ยังไม่ยืนยันยอด/);
-  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'))?.body.p_amount,200);
-  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_attach_owner_payroll_slip_v1'))?.body.p_slip_amount,null);
+test('owner amount clarification cannot auto-create or attach an unreadable salary advance',async t=>{
+  const row=syntheticSlip({amount:null,purpose_raw:'ทดสอบเบิกเงินเดือนล่วงหน้า'}),before=structuredClone(row),h=harness(t,[row]);
+  assert.match(await handleOwnerStaffSlipText({...input,text:'125'})??'',/ยังไม่บันทึกยอดจากสลิปอัตโนมัติ/);
+  assert.deepEqual(row,before);assert.equal(h.calls.filter(call=>call.method==='POST').length,0);
 });
 
 test('payroll summaries and deductions leave pending staff slips untouched',async t=>{
@@ -311,27 +353,40 @@ async function deliverStaffWebhook(text:string,messageId:string,validSignature=t
   const signature=createHmac('sha256','mock-line-secret').update(body).digest('base64');
   return lineWebhookHandler({httpMethod:'POST',body,headers:{'x-line-signature':validSignature?signature:'invalid'}} as never,{} as never);
 }
-test('signed LINE receiver routes a family staff slip through clarification to payroll without project or private transport',async t=>{
-  const h=harness(t,[slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
-  t.mock.method(console,'log',()=>{});
-  assert.equal((await deliverStaffWebhook('เจิดเบิก','staff-first') as any).statusCode,200);
-  assert.equal((await deliverStaffWebhook('เงินเดือน','staff-salary') as any).statusCode,200);
-  const replies=h.calls.filter(x=>x.path==='/v2/bot/message/reply');
-  assert.equal(replies.length,2);
-  assert.match(replies[0].body.messages[0].text,/เจิดเบิก 200 บาท.*เงินเดือนล่วงหน้าหรือเบิกไปซื้อของ/);
-  assert.match(replies[1].body.messages[0].text,/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
-  assert.equal(h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1')).length,1);
-  assert.ok(!h.calls.some(x=>/owner_project|snk-money|investment/.test(x.path)));
-  assert.equal(replies[1].body.replyToken,'mock-reply-staff-salary');
+async function deliverAdvancePostback(data:string,messageId:string,userId=input.userId,validSignature=true) {
+  const body=JSON.stringify({events:[{type:'postback',webhookEventId:messageId,replyToken:'mock-reply-'+messageId,timestamp:at,
+    source:{type:'group',groupId:input.targetId,userId},postback:{data}}]});
+  const signature=createHmac('sha256','mock-line-secret').update(body).digest('base64');
+  return lineWebhookHandler({httpMethod:'POST',body,headers:{'x-line-signature':validSignature?signature:'invalid'}} as never,{} as never);
+}
+test('signed LINE stages an employee card and only explicit owner confirmation records the advance',async t=>{
+  const row=syntheticSlip(),h=harness(t,[row]);t.mock.method(console,'log',()=>{});
+  assert.equal((await deliverStaffWebhook('ทดสอบเบิก','synthetic-first') as any).statusCode,200);
+  assert.equal((await deliverStaffWebhook('เงินเดือน','synthetic-salary') as any).statusCode,200);
+  const replies=h.calls.filter(call=>call.path==='/v2/bot/message/reply');assert.equal(replies.length,2);
+  assert.equal(replies[0].body.messages[0].type,'flex');assert.equal(replies[1].body.messages[0].type,'flex');
+  assert.equal(cardActions(replies[0].body).some(item=>item.action.action==='confirm'),false);
+  const confirmation=cardActions(replies[1].body).find(item=>item.action.action==='confirm')!;assert.ok(confirmation);
+  for(const value of ['ทดสอบ ตัวอย่าง','450 บาท','125 บาท','575 บาท','ยังไม่บันทึกยอด'])assert.ok(JSON.stringify(replies[1].body).includes(value));
+  assert.equal(row.review_data.employee_id,syntheticEmployees[0].employee_id);assert.equal(row.review_data.event_type,'salary_advance');
+  assert.equal(row.review_state,'draft');noAdvanceMoneyWrite(h.calls);
+  assert.equal((await deliverAdvancePostback(confirmation.data,'synthetic-confirm') as any).statusCode,200);
+  assert.equal(row.review_state,'confirmed');
+  const commits=h.calls.filter(call=>call.path.endsWith('/financial_confirm_owner_employee_advance_v1'));assert.equal(commits.length,1);
+  assert.equal(commits[0].body.p_intake_id,row.id);assert.equal(commits[0].body.p_revision,confirmation.action.revision);
+  const saved=h.calls.filter(call=>call.path==='/v2/bot/message/reply').at(-1)!.body;
+  assert.match(JSON.stringify(saved),/บันทึกเงินเบิกแล้ว/);assert.match(JSON.stringify(saved),/575 บาท/);
+  assert.equal(cardActions(saved).length,0);
+  assert.ok(!h.calls.some(call=>/create_owner_payroll|attach_owner_payroll|owner_project|snk-money|investment|storage/.test(call.path)));
 });
-test('signed LINE receiver asks which ambiguous slip and does not create payroll',async t=>{
-  const h=harness(t,[slip(),slip({id:'another-slip',amount:500})]);
+test('signed LINE asks which synthetic slip and performs no draft or money write when ambiguous',async t=>{
+  const rows=[syntheticSlip(),syntheticSlip({id:'55555555-5555-4555-8555-555555555555'})],before=structuredClone(rows),h=harness(t,rows);
   t.mock.method(console,'log',()=>{});
-  assert.equal((await deliverStaffWebhook('เจิดเบิก','ambiguous') as any).statusCode,200);
-  const replies=h.calls.filter(x=>x.path==='/v2/bot/message/reply');
-  assert.equal(replies.length,1);
-  assert.match(replies[0].body.messages[0].text,/2 รายการ/);
-  assert.ok(!h.calls.some(x=>x.method==='POST'&&x.path!=='/v2/bot/message/reply'));
+  assert.equal((await deliverStaffWebhook('ทดสอบเบิก','synthetic-ambiguous') as any).statusCode,200);
+  const replies=h.calls.filter(call=>call.path==='/v2/bot/message/reply');assert.equal(replies.length,1);
+  assert.match(replies[0].body.messages[0].text,/หลายสลิป/);
+  assert.match(replies[0].body.messages[0].text,/#111111/);assert.match(replies[0].body.messages[0].text,/#555555/);
+  assert.deepEqual(rows,before);assert.ok(!h.calls.some(call=>call.method==='POST'&&call.path!=='/v2/bot/message/reply'));
 });
 test('invalid LINE signature cannot read a staff slip, write a ledger, or send a reply',async t=>{
   const h=harness(t,[slip()]);
@@ -421,25 +476,28 @@ test('signed LINE family chat is ignored without changing staff slips or project
   assert.ok(!h.calls.some(x=>x.method==='POST'));
   assert.ok(!h.calls.some(x=>/financial_owner|owner_project/.test(x.path)));
 });
-test('signed LINE can clarify completed advances without calling them purchases',async t=>{
-  const h=harness(t,[slip()]);
-  t.mock.method(console,'log',()=>{});
-  await deliverStaffWebhook('เจิดเบิกไปแล้วเมื่อวาน','completed-advance');
-  const reply=h.calls.find(x=>x.path==='/v2/bot/message/reply')!;
-  assert.match(reply.body.messages[0].text,/เงินเดือนล่วงหน้าหรือเบิกไปซื้อของ/);
-  assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
+test('signed LINE completed advance wording stages an unknown type and never implies a purchase',async t=>{
+  const row=syntheticSlip(),h=harness(t,[row]);t.mock.method(console,'log',()=>{});
+  await deliverStaffWebhook('ทดสอบเบิกไปแล้วเมื่อวาน','synthetic-completed');
+  const reply=h.calls.find(call=>call.path==='/v2/bot/message/reply')!.body;
+  assert.equal(row.review_data.event_type,'unknown');assert.equal(row.review_data.employee_id,syntheticEmployees[0].employee_id);
+  assert.match(JSON.stringify(reply),/เบิกเงินเดือนล่วงหน้าใช่ไหม/);
+  assert.equal(cardActions(reply).some(item=>item.action.action==='confirm'),false);noAdvanceMoneyWrite(h.calls);
+  assert.ok(!h.calls.some(call=>call.path.endsWith('/financial_resolve_owner_expense_intake_v1')));
 });
-test('signed LINE person correction keeps the original evidence and records only the corrected employee after clarification',async t=>{
-  const h=harness(t,[slip({purpose_raw:'เจิดเบิก'})]);
-  t.mock.method(console,'log',()=>{});
-  await deliverStaffWebhook('ไม่ใช่เจิด เป็นปอ','correct-person');
-  await deliverStaffWebhook('เงินเดือน','correct-type');
-  const creates=h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'));
-  assert.equal(creates.length,1);
-  assert.equal(creates[0].body.p_employee_label,'ปอ');
-  assert.equal(creates[0].body.p_amount,200);
-  assert.equal(h.calls.find(x=>x.path.endsWith('/financial_attach_owner_payroll_slip_v1'))?.body.p_slip_message_id,'original-line-image');
-  assert.equal(h.calls.filter(x=>x.path==='/v2/bot/message/reply').length,2);
+test('signed LINE person correction rebinds the same draft to the corrected stable employee without payment',async t=>{
+  const row=syntheticSlip(),h=harness(t,[row]);t.mock.method(console,'log',()=>{});
+  await deliverStaffWebhook('ทดสอบเบิกเงินเดือน 125','synthetic-initial-person');
+  await deliverStaffWebhook('ไม่ใช่ทดสอบ เป็นจำลอง','synthetic-correct-person');
+  assert.equal(row.review_data.employee_id,syntheticEmployees[1].employee_id);assert.equal(row.review_data.event_type,'unknown');
+  const corrected=h.calls.filter(call=>call.path==='/v2/bot/message/reply').at(-1)!.body;
+  assert.equal(cardActions(corrected).some(item=>item.action.action==='confirm'),false);
+  await deliverStaffWebhook('เงินเดือน','synthetic-correct-type');
+  assert.equal(row.review_data.employee_id,syntheticEmployees[1].employee_id);assert.equal(row.review_data.amount,125);
+  assert.equal(row.review_data.monthly_sum_before,60);assert.equal(row.review_state,'draft');
+  const stages=h.calls.filter(call=>call.path.endsWith('/financial_stage_owner_employee_advance_v1'));assert.equal(stages.length,3);
+  assert.ok(stages.every(call=>call.body.p_intake_id===row.id));noAdvanceMoneyWrite(h.calls);
+  assert.ok(!h.calls.some(call=>call.path.includes('/storage/')));
 });
 
 for (const text of ['เจิดเบิกเงินเดือน0บาท','เจิดเบิกเงินเดือนศูนย์บาท','เจิดเบิกเงินเดือน200.567บาท','เจิดเบิกเงินเดือน20,0บาท']) {
@@ -475,15 +533,12 @@ test('business-only answer is not a payroll type answer for an old staff slip',(
   assert.equal(parseOwnerStaffTurn('Inthanin','เจิดเบิกไปซื้อของ')?.kind,'purchase');
 });
 for(const text of ['เบิกล่วงหน้า','เบิกเงินเดือนล่วงหน้า','เงินเดือนล่วงหน้า','เงินเดือน']){
-  test('short payroll type continues only the staff slip beside an equipment receipt: '+text,async t=>{
-    const h=harness(t,[equipmentSlip({status:'awaiting_business',purpose_raw:'ค่าอุปกรณ์ไฟฟ้า'}),
-      slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
+  test('legacy short salary type cannot pay either the staff slip or equipment receipt: '+text,async t=>{
+    const rows=[syntheticSlip({id:'66666666-6666-4666-8666-666666666666',amount:850,status:'awaiting_business',purpose_raw:'ค่าอุปกรณ์ไฟฟ้า'}),
+      syntheticSlip({status:'awaiting_business',purpose_raw:'ทดสอบเบิก'})],before=structuredClone(rows),h=harness(t,rows);
     const reply=await handleOwnerStaffSlipText({...input,text});
-    assert.match(reply??'',/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
-    const creates=h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'));
-    assert.equal(creates.length,1);assert.equal(creates[0].body.p_employee_label,'เจิด');
-    assert.equal(creates[0].body.p_amount,200);
-    assert.ok(!h.calls.some(x=>/financial_resolve|financial_stage/.test(x.path)));
+    assert.match(reply??'',/ยืนยันจากการ์ดเงินเบิกพนักงาน/);
+    assert.deepEqual(rows,before);assert.equal(h.calls.filter(call=>call.method==='POST').length,0);
   });
 }
 test('a type-only answer cannot overwrite a known non-staff expense as payroll',async t=>{
@@ -523,25 +578,22 @@ test('business reply to a known equipment expense wins over a pending staff purc
   assert.equal(await handleOwnerStaffSlipText({...input,text:'ตำมา-ชาติ'}),null);
   assert.ok(!h.calls.some(x=>x.method==='POST'));
 });
-test('explicit signed LINE equipment references finish the same slip before the staff salary answer',async t=>{
+test('signed LINE equipment selection remains independent of a staged employee advance',async t=>{
   t.mock.method(Date,'now',()=>at);t.mock.method(console,'log',()=>{});
-  const row=equipmentSlip();
-  const h=harness(t,[row,slip({status:'awaiting_business',purpose_raw:'เจิดเบิก'})]);
-  await deliverStaffWebhook('#a6c43e ค่าอุปกรณ์ไฟฟ้า','equipment-purpose');
-  await deliverStaffWebhook('#a6c43e ตำมา-ชาติ','equipment-business');
-  await deliverStaffWebhook('เบิกเงินเดือนล่วงหน้า','staff-final');
-  const replies=h.calls.filter(x=>x.path==='/v2/bot/message/reply');
-  assert.equal(replies.length,3);
-  assert.match(replies[0].body.messages[0].text,/กิจการ/);
-  assert.match(replies[1].body.messages[0].text,/6,474 บาท/);
-  assert.doesNotMatch(replies[1].body.messages[0].text,/เจิด|เบิกเงินเดือน/);
-  assert.match(replies[2].body.messages[0].text,/บันทึกเบิกเงินเดือนล่วงหน้าของ เจิด 200 บาท/);
-  assert.doesNotMatch(replies[2].body.messages[0].text,/หลักฐานรอระบุ|2 รายการ/);
-  const resolves=h.calls.filter(x=>x.path.endsWith('/financial_resolve_owner_expense_intake_v1'));
-  assert.equal(resolves.length,1);assert.equal(resolves[0].body.p_intake_id,row.id);
-  const payroll=h.calls.filter(x=>x.path.endsWith('/financial_create_owner_payroll_event_v1'));
-  assert.equal(payroll.length,1);assert.equal(payroll[0].body.p_amount,200);
-  assert.equal(payroll[0].body.p_employee_label,'เจิด');
+  const equipment=syntheticSlip({id:'66666666-6666-4666-8666-666666666666',amount:850,extraction_data:{document_type:'transfer_slip',document_kind:'transfer_evidence',funds_direction:'outgoing',amount_total:850,document_date_local:'2026-10-11',confidence:0.95}});
+  const staff=syntheticSlip({status:'awaiting_business',purpose_raw:'ทดสอบเบิก'}),h=harness(t,[equipment,staff]);
+  await deliverStaffWebhook('#666666 ค่าอุปกรณ์ไฟฟ้า','synthetic-equipment-purpose');
+  await deliverStaffWebhook('#666666 ตำมา-ชาติ','synthetic-equipment-business');
+  await deliverStaffWebhook('เบิกเงินเดือนล่วงหน้า','synthetic-staff-final');
+  const replies=h.calls.filter(call=>call.path==='/v2/bot/message/reply');assert.equal(replies.length,3);
+  assert.match(replies[0].body.messages[0].text,/กิจการ/);assert.match(replies[1].body.messages[0].text,/850 บาท/);
+  assert.doesNotMatch(replies[1].body.messages[0].text,/ทดสอบ|เบิกเงินเดือน/);
+  assert.equal(replies[2].body.messages[0].type,'flex');assert.match(JSON.stringify(replies[2].body),/125 บาท/);
+  const resolves=h.calls.filter(call=>call.path.endsWith('/financial_resolve_owner_expense_intake_v1'));
+  assert.equal(resolves.length,1);assert.equal(resolves[0].body.p_intake_id,equipment.id);
+  const stages=h.calls.filter(call=>call.path.endsWith('/financial_stage_owner_employee_advance_v1'));
+  assert.equal(stages.length,1);assert.equal(stages[0].body.p_intake_id,staff.id);
+  assert.equal(staff.review_data.employee_id,syntheticEmployees[0].employee_id);assert.equal(staff.review_state,'draft');noAdvanceMoneyWrite(h.calls);
 });
 test('signed LINE scopes a legacy expense with an explicit six-character slip reference',async t=>{
   t.mock.method(Date,'now',()=>at);t.mock.method(console,'log',()=>{});
@@ -589,3 +641,43 @@ test('signed LINE completes a saved equipment purpose after a pause without aski
   assert.ok(!h.calls.some(x=>x.path.includes('payroll')));
 });
 
+
+test('signed LINE employee-name ambiguity requires selecting an existing stable employee ID',async t=>{
+  const employees=[syntheticEmployees[0],{...syntheticEmployees[1],nickname:'ทดสอบ'}];
+  const row=syntheticSlip(),h=harness(t,[row],{employees});t.mock.method(console,'log',()=>{});
+  await deliverStaffWebhook('ทดสอบเบิกเงินเดือน 125','synthetic-ambiguous-employee');
+  const first=h.calls.filter(call=>call.path==='/v2/bot/message/reply').at(-1)!.body;
+  assert.equal(row.review_data.employee_id,null);assert.equal(cardActions(first).some(item=>item.action.action==='confirm'),false);
+  const choices=cardActions(first).filter(item=>item.action.action==='employee');assert.equal(choices.length,2);
+  assert.deepEqual(new Set(choices.map(item=>item.action.value)),new Set(employees.map(employee=>employee.employee_id)));
+  const choice=choices.find(item=>item.action.value===syntheticEmployees[1].employee_id)!;
+  await deliverAdvancePostback(choice.data,'synthetic-select-employee');
+  assert.equal(row.review_data.employee_id,syntheticEmployees[1].employee_id);assert.equal(row.review_data.monthly_sum_before,60);
+  const selected=h.calls.filter(call=>call.path==='/v2/bot/message/reply').at(-1)!.body;
+  assert.equal(cardActions(selected).filter(item=>item.action.action==='confirm').length,1);noAdvanceMoneyWrite(h.calls);
+});
+
+test('signed LINE confirmation denies another participant and non-single-owner configuration',async t=>{
+  const row=syntheticSlip(),h=harness(t,[row]);t.mock.method(console,'log',()=>{});
+  await deliverStaffWebhook('ทดสอบเบิกเงินเดือน 125','synthetic-owner-draft');
+  const first=h.calls.filter(call=>call.path==='/v2/bot/message/reply').at(-1)!.body;
+  const confirmation=cardActions(first).find(item=>item.action.action==='confirm')!;assert.ok(confirmation);
+  const before=structuredClone(row),callCount=h.calls.length;
+  await deliverAdvancePostback(confirmation.data,'synthetic-other-actor','synthetic-other-participant');
+  assert.deepEqual(row,before);assert.ok(h.calls.slice(callCount).every(call=>call.path==='/v2/bot/message/reply'||call.path.endsWith('/ops_notification_channels')));
+  process.env.OWNER_FINANCE_LINE_USER_HASHES+=','+piiHash('synthetic-second-owner');
+  const secondCallCount=h.calls.length;
+  await deliverAdvancePostback(confirmation.data,'synthetic-multiple-owners');
+  assert.deepEqual(row,before);assert.ok(h.calls.slice(secondCallCount).every(call=>call.path==='/v2/bot/message/reply'||call.path.endsWith('/ops_notification_channels')));
+  noAdvanceMoneyWrite(h.calls);
+});
+
+test('invalid signed LINE postback cannot read or confirm a real staged draft',async t=>{
+  const row=syntheticSlip(),h=harness(t,[row]);t.mock.method(console,'log',()=>{});t.mock.method(console,'error',()=>{});
+  await deliverStaffWebhook('ทดสอบเบิกเงินเดือน 125','synthetic-before-invalid-postback');
+  const first=h.calls.filter(call=>call.path==='/v2/bot/message/reply').at(-1)!.body;
+  const confirmation=cardActions(first).find(item=>item.action.action==='confirm')!;assert.ok(confirmation);
+  const before=structuredClone(row),callCount=h.calls.length;
+  assert.equal((await deliverAdvancePostback(confirmation.data,'synthetic-invalid-postback',input.userId,false) as any).statusCode,401);
+  assert.deepEqual(row,before);assert.equal(h.calls.length,callCount);noAdvanceMoneyWrite(h.calls);
+});

@@ -162,7 +162,12 @@ export function prepareSlipProposal(input:{note:string; extraction:FinancialImag
   }
   purpose=purpose.replace(/(?:ตำมา[\s-]*ชาติ|อินทนิล|inthanin|เฮือนสเตย์|huenstay|ผจญภัย|adventure|otop|โอทอป|โครงการ|โปรเจกต์)/giu,' ')
     .replace(/งวด(?:ที่)?\s*[0-9๐-๙]+|ไม่ผูกงวด|ไม่แบ่งงวด/gu,' ').trim();
-  const classification=classifyOwnerExpensePurpose(purpose);
+  const staffAdvance=parseOwnerStaffTurn(note);
+  // A person's name and a negated salary label are not the purchased category.
+  const classificationPurpose=staffAdvance?.kind==='purchase'
+    ?purpose.match(/(?:ไป)?ซื้อ[\s\S]*$/u)?.[0]??purpose:purpose;
+  const classification=classifyOwnerExpensePurpose(classificationPurpose);
+  const employeeAdvance=!!staffAdvance && ['unknown','salary_advance'].includes(staffAdvance.kind);
   if(choices.category && choices.category!=='other' && categories[choices.category]) {
     const sameCategory=classification.expenseCategory===choices.category;
     classification.expenseCategory=choices.category as typeof classification.expenseCategory;
@@ -213,6 +218,12 @@ export function prepareSlipProposal(input:{note:string; extraction:FinancialImag
   if(amount===null || !Number.isFinite(amount) || amount<=0) questions.push('ยอดเงินเท่าไรครับ ระบุ “ยอด 1234.56”');
   const date=visibleSlipDate(extraction.document_date_local);
   if(!date) questions.push('วันที่ในสลิปอ่านไม่ชัด ระบุวันที่ YYYY-MM-DD ครับ');
+  // OCR or a later category tap must never route an employee advance into the
+  // expense/investment ledger. Only the employee review can confirm this evidence.
+  if(employeeAdvance){
+    classification.expenseClass='uncategorized';classification.expenseCategory='staff';
+    questions.push('รายการนี้เป็นเงินเบิกพนักงานครับ กรุณาระบุชื่อพนักงานและตรวจการ์ดเงินเบิกก่อนยืนยัน');
+  }
   return {purpose:note || (choices.category?categories[choices.category]??'':''),amount,occurred_on:date,project_id:project?.id??null,project_name:project?.name??null,
     task_id:installment?.task_id??null,installment_id:installment?.id??null,
     installment_label:installment?`งวด ${installment.installment_no} · ${installment.task?.title??installment.title}`:null,
@@ -281,6 +292,9 @@ export async function handleOwnerSlipReviewText(input:{targetId:string;userId?:s
   if(rows.length!==1) return 'มีหลายสลิปครับ กรุณาระบุรหัสรายการเดียว: '+rows.map(r=>'#'+code(r.id)).join(' / ');
   const row=rows[0];
   if(row.source_user_hash!==actorHash) return 'กรุณาให้ผู้ส่งสลิปตรวจและยืนยันรายการนี้ครับ';
+  if((row.review_data as any)?.kind==='employee_advance')return 'รายการนี้เป็นการตรวจเงินเบิกพนักงานครับ กรุณาใช้การ์ดเงินเบิกล่าสุดเพื่อยืนยัน';
+  const existingStaff=parseOwnerStaffTurn(row.review_data?.purpose??'');
+  if(existingStaff&&['unknown','salary_advance'].includes(existingStaff.kind))return 'รายการนี้เป็นเงินเบิกพนักงานครับ กรุณาพิมพ์ชื่อพนักงานและประเภทการเบิกเพื่อเปิดการ์ดเงินเบิก';
   if(row.review_state!=='draft') return row.review_state==='confirmed'?'รายการ #'+code(row.id)+' บันทึกแล้วครับ ไม่เพิ่มยอดซ้ำ':'รายการ #'+code(row.id)+' ยกเลิกแล้วครับ';
   const text=input.text.replace(/#[a-f0-9]{6,32}\b/giu,'').trim();
   const documentGate=ownerPaymentDocumentGate(row.extraction_data);

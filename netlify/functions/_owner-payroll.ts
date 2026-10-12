@@ -221,6 +221,11 @@ export async function handleOwnerPayrollText(input:{
     return '🔒 Owner Payroll — LINE message id หาย จึงยังไม่บันทึกเพื่อกันรายการซ้ำครับ';
   }
 
+  // Advances are reviewed against a stable employee and monthly balance before
+  // any money event is written. Do not recreate the legacy auto-paid route.
+  if(command!.eventType==='salary_advance')return 'รับรายการเบิกของ '+command!.employeeLabel+' '+money(command!.amount)
+    +' ครับ ส่งรูปสลิปแล้วตอบกลับรูปว่า “ตรวจสลิป” จากนั้นระบุชื่อพนักงาน ผมจะแสดงการ์ดเงินเบิกและยอดสะสมให้ตรวจก่อนยืนยัน ยังไม่บันทึกยอดและไม่ลงเป็นค่าใช้จ่ายร้านครับ';
+
   const groupHash=piiHash(input.targetId);
   if(!groupHash)throw new Error('owner_group_hash_unavailable');
 
@@ -268,9 +273,7 @@ export async function handleOwnerPayrollText(input:{
     command!.payPeriod?'รอบเงินเดือน: '+command!.payPeriod:'',
     '',
     'ส่งรูปสลิปโอนในกลุ่ม Owner นี้ต่อได้เลยครับ',
-    command!.eventType==='salary_advance'
-      ?'รายการนี้เป็นเงินเดือนล่วงหน้า ไม่ลงเป็นค่าใช้จ่ายร้าน ณ วันที่โอนครับ'
-      :'รายการเงินเดือนถูกเก็บใน Payroll ส่วนตัวของ Owner ไม่แสดงในกลุ่มพนักงานครับ',
+    'รายการเงินเดือนถูกเก็บใน Payroll ส่วนตัวของ Owner ไม่แสดงในกลุ่มพนักงานครับ',
   ].filter(Boolean).join('\n');
 }
 
@@ -287,6 +290,9 @@ export async function handleOwnerPayrollImage(input:{
   const groupHash=piiHash(input.targetId);
   if(!groupHash)return null;
   const pending=await pendingPayrollEvent(groupHash);
+  // Existing advance sessions cannot turn a newly received image into payment.
+  // Let the evidence inbox capture it for the explicit employee-advance review.
+  if(pending?.event_type==='salary_advance')return null;
   // Only the authenticated initiator's targeted salary/advance session owns an image.
   // Another owner or a newly added group member cannot consume a pending session.
   if(!pending || pending.created_by_hash!==piiHash(input.userId)
@@ -353,17 +359,11 @@ export async function handleOwnerPayrollImage(input:{
   }
 
   if(result.status==='paid'){
-    const outstanding=pending.event_type==='salary_advance'
-      ?await advanceOutstanding(pending.employee_label)
-      :null;
     return [
       '🔒 Owner Payroll — ✅ จับคู่สลิปสำเร็จครับ',
       eventLabel(pending.event_type)+' · '+pending.employee_label,
       'ยอด: '+money(pending.amount),
-      outstanding!==null?'ยอดเบิกล่วงหน้าค้างหักของ '+pending.employee_label+': '+money(outstanding):'',
-      pending.event_type==='salary_advance'
-        ?'ไม่ลงเป็นค่าใช้จ่ายร้าน และรอหักจากเงินเดือนภายหลังครับ'
-        :'เก็บเป็นรายการ Payroll ฝั่ง Owner เท่านั้นครับ',
+      'เก็บเป็นรายการ Payroll ฝั่ง Owner เท่านั้นครับ',
     ].filter(Boolean).join('\n');
   }
 
@@ -387,6 +387,7 @@ export async function recordOwnerPayrollFromStoredSlip(input: {
   employeeLabel: string; eventType: 'salary_advance' | 'salary_payment';
   payPeriod?: string | null; declaredAmount?: number | null;
 }): Promise<string> {
+  if(input.eventType==='salary_advance')return 'กรุณาตรวจและยืนยันจากการ์ดเงินเบิกพนักงานก่อนครับ ยังไม่บันทึกยอดจากสลิปอัตโนมัติ';
   if (!isAuthorizedOwnerPaymentActor(input.userId)) return 'ยังไม่ได้เปิดสิทธิ์บันทึกการเงินพนักงานให้บัญชี LINE นี้ครับ';
   if (await boundLineOpsTeam(input.targetId) !== 'owner_general') {
     return 'รายการเงินพนักงานใช้เฉพาะกลุ่ม Owner ครับ';
@@ -483,13 +484,9 @@ export async function recordOwnerPayrollFromStoredSlip(input: {
     return 'เก็บรายการ ' + eventLabel(input.eventType) + 'ของ ' + input.employeeLabel + ' ' + money(amount)
       + ' พร้อมสลิปเดิมแล้วครับ แต่หลักฐานยังต้องตรวจ จึงยังไม่ยืนยันยอดหรือเพิ่มเป็นค่าใช้จ่ายร้านครับ';
   }
-  const outstanding = input.eventType === 'salary_advance' ? await advanceOutstanding(input.employeeLabel) : null;
   return [
     '✅ บันทึก' + eventLabel(input.eventType) + 'ของ ' + input.employeeLabel + ' ' + money(amount) + ' พร้อมสลิปเดิมแล้วครับ',
-    outstanding !== null ? 'ยอดเบิกล่วงหน้าค้างหัก: ' + money(outstanding) : '',
-    input.eventType === 'salary_advance'
-      ? 'รอหักจากเงินเดือนภายหลัง ไม่เพิ่มเป็นค่าใช้จ่ายร้านหรือเงินลงทุนครับ'
-      : 'เก็บในรายการเงินเดือนฝั่ง Owner ไม่เพิ่มยอดลงทุนซ้ำครับ',
+    'เก็บในรายการเงินเดือนฝั่ง Owner ไม่เพิ่มยอดลงทุนซ้ำครับ',
   ].filter(Boolean).join('\n');
 }
 
