@@ -1,3 +1,9 @@
+import { regularArrivalInformation } from './_visitor-arrival';
+import { understandVisitorQuestion } from './_visitor-question-understanding';
+import { answerVisitorInformation } from './_visitor-information';
+import { searchMissingVisitorInformation } from './_visitor-web-search';
+import { normalizeCustomerText } from './_customer-text';
+import { touchAiConversation } from './_ai-cost-ledger';
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
   LLMAvailabilityError,
@@ -47,16 +53,18 @@ import {
   type CafeMasterMenuItem,
   type CafeBranchModifier,
 } from './_cafe-sot';
-import { parsePreferences as parseRestaurantConstraintSignals } from './_restaurant-intelligence';
+import { parsePreferences as parseRestaurantConstraintSignals, parseRestaurantParty } from './_restaurant-intelligence';
 import {
   applyConversationContextUpdate,
   emptyConversationContextState,
+  CONVERSATION_RESET_RE,
+  boundedTransportHistory,
   loadConversationContext,
   persistConversationContext,
   type ConversationContextState,
 } from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
-import { persistAiResponseTurn, persistAiResponseTurnIfAbsent } from './_ai-cost-store';
+import { persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
 import { resolveRequestedCustomerMedia } from './_thongthai-media';
@@ -410,7 +418,6 @@ export function deterministicGreetingResponse(request: BrainRequest): BrainRespo
 // An explicit request to drop the prior conversation and start fresh. A
 // small, closed marker set (not a growing phrase table), matching this
 // codebase's convention for other structural intent markers.
-const CONVERSATION_RESET_RE = /ลืมที่คุยกันไปก่อน|ลืมที่คุยไปก่อน|เริ่มใหม่|ล้างก่อน|ไม่เอาที่คุยเมื่อกี้/u;
 
 /**
  * A real reset, not merely a friendly acknowledgment: clears the
@@ -757,6 +764,8 @@ function mergeAfterTools(first: BrainResponse, second: BrainResponse, toolResult
 function currentRestaurantAdvisorContext(runtime: { agentState: Record<string, unknown> }): AgentStateUpdate['restaurantAdvisorContext'] | null {
   const raw = runtime.agentState.restaurantAdvisorContext;
   if (!isObject(raw) || !Array.isArray(raw.recentMessages)) return null;
+  const updatedAt = typeof raw.updatedAt === 'string' ? Date.parse(raw.updatedAt) : NaN;
+  if (!Number.isFinite(updatedAt) || Date.now() - updatedAt >= 2 * 60 * 60 * 1000) return null;
   const recentMessages = raw.recentMessages
     .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
     .map(item => item.trim().replace(/\s+/g, ' ').slice(0, 180))
@@ -781,8 +790,12 @@ function restaurantAdvisorRecentMessages(
   runtime: { agentState: Record<string, unknown> },
 ): string[] {
   const stored = currentRestaurantAdvisorContext(runtime)?.recentMessages ?? [];
-  const transported = request.chatHistory.slice(-6).map(turn => turn.content);
-  return [...stored, ...transported].slice(-8);
+  const transported = boundedTransportHistory(request.chatHistory).filter(turn => turn.role === 'user').slice(-8).map(turn => turn.content);
+  // The browser repeats the same history on every turn. Prefer its current
+  // chronological user window over concatenating duplicate server history;
+  // LINE uses the bounded server window instead. Assistant prices must never
+  // be parsed as a guest's budget or party size.
+  return transported.length ? transported : stored;
 }
 
 function isRestaurantAlternativeRequest(message: string): boolean {
@@ -1057,7 +1070,7 @@ function wantsFullRestaurantList(message: string): boolean {
 // equally common "แพ้กุ้ง กินอะไรได้บ้าง" (no "มี") matched nothing here at
 // all and silently fell back to the short constraint-only acknowledgment
 // instead of a real recommendation.
-const RESTAURANT_RECOMMEND_REQUEST_MARKER = /มีอะไร|แนะนำอะไร|อยากกิน|กินอะไรดี|กินอะไรได้|ขอเมนู|มีเมนู|จัดชุด|จัดโต๊ะ|อะไรอร่อย|มีไรกิน|ไรกิน/u;
+const RESTAURANT_RECOMMEND_REQUEST_MARKER = /มีอาหาร|มีอะไร|แนะนำอะไร|อยากกิน|กินอะไรดี|กินอะไรได้|ขอเมนู|มีเมนู|จัดชุด|จัดโต๊ะ|อะไรอร่อย|มีไรกิน|ไรกิน/u;
 // The SAME constraint vocabulary _restaurant-intelligence.ts's own
 // parsePreferences checks -- but tested against ONLY the current
 // message (never chat history), to tell "the customer just stated this"
@@ -2401,6 +2414,52 @@ async function deterministicRestaurantResponse(
   };
 }
 
+/** A read-only restaurant recommendation already has a grounded executor.
+ * Do not spend two model calls before reaching it. Ambiguous/domain-changing
+ * language and transactions retain the canonical semantic/executor path. */
+async function groundedRestaurantBeforePrimary(
+  request: BrainRequest,
+  guestDbId: string | null,
+  channel: BrainChannel,
+): Promise<BrainResponse | null> {
+  if (request.language !== 'th' || hasExplicitTransactionIntent(request.message)) return null;
+  const text = request.message;
+  if (classifyLocalConciergeQuestion(text)?.category === 'food_culture'
+      && !LOCAL_CONCIERGE_ALLERGY_DEFER_RE.test(text)) return null;
+  if (/(?:จองโต๊ะ|โต๊ะว่าง|สถานะ|ชำระ|โอนเงิน|โปรโมชั่น|โปรโมชัน|ขี่ม้า|ที่พัก|ห้องพัก|คาเฟ่|กาแฟ|OTOP|เส้นทาง|เดินทาง|อยู่ที่ไหน)/iu.test(text)) return null;
+  const recommendation = /(?:เมนู|อาหาร|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย|จัดชุด|จัดโต๊ะ|สั่งอะไรกิน)/u.test(text)
+    && /(?:แนะนำ|กินอะไร|อะไรกิน|ไรกิน|อะไรอร่อย|จัดชุด|จัดโต๊ะ|สั่งอะไรกิน|ขอเมนู|มีเมนู|มีอะไร)/u.test(text);
+  const recap = /(?:สรุป|ทวน|จำได้)/u.test(text) && /(?:กี่คน|จำนวน|งบ|รส|เผ็ด)/u.test(text);
+  const partyUpdate = /(?:เด็ก|ผู้ใหญ่|เพิ่ม|เปลี่ยน|แก้)/u.test(text) && extractPartySize(text) !== null;
+  if (!recommendation && !recap && !partyUpdate) return null;
+  const snapshot = guestDbId ? await loadGuestAgentStateSnapshot(guestDbId) : null;
+  const runtime = { agentState: snapshot?.state ?? {} };
+  if (!isRestaurantAdvisorTurn(request, runtime)) return null;
+  if (!recommendation && !currentRestaurantAdvisorContext(runtime)
+      && !request.chatHistory.some(turn => turn.role === 'user' && /(?:เมนู|อาหาร|กินอะไร)/u.test(turn.content))) return null;
+
+  if (recap || (partyUpdate && !recommendation)) {
+    const recentMessages = restaurantAdvisorRecentMessages(request, runtime);
+    const party = parseRestaurantParty([...recentMessages, text]);
+    const preferences = parseRestaurantConstraintSignals({ query:text, recentMessages, constraints:request.guestContext.constraints,
+      budget:typeof request.guestContext.budget === 'number' ? request.guestContext.budget : null }, []);
+    const parts = [
+      party.total !== null ? `รวม ${party.total} คน` : 'ยังไม่ทราบจำนวนคนรวม',
+      party.adults !== null ? `ผู้ใหญ่ ${party.adults} คน` : '',
+      party.children !== null ? `เด็ก ${party.children} คน` : '',
+      preferences.budget !== null ? `งบรวม ${preferences.budget} บาท` : 'ยังไม่ทราบงบ',
+      preferences.spice === 'none' ? 'ทานไม่เผ็ด' : preferences.spice === 'mild' ? 'ทานเผ็ดน้อย' : '',
+    ].filter(Boolean);
+    return {
+      message:`ตอนนี้คุยเรื่องอาหารไว้ว่า ${parts.join(' · ')} ครับ`,
+      intent:'information',contextUpdates:{},journeyAction:{type:'none',journey:null},suggestedActions:[],
+      responseStyle:'direct',semanticMemoryUpdates:[],toolCalls:[],
+      agentStateUpdate:restaurantAdvisorContextUpdate(request,runtime),
+    };
+  }
+  return deterministicRestaurantResponse(request,runtime,guestDbId,channel);
+}
+
 async function deterministicActivityResponse(
   request: BrainRequest,
   guestDbId: string | null,
@@ -2432,6 +2491,8 @@ async function deterministicActivityResponse(
     canonicalAnonymousId: request.guestId,
     guestDbId,
     durableMemory: durableMemoryFromRequest(request),
+    chatHistory:request.chatHistory,
+    environment:request.environment,
     persistState: true,
   }, cachedSemantic ? {
     interpretSemanticTurn: async () => cachedSemantic,
@@ -5586,6 +5647,7 @@ function hasDurableRestaurantConstraint(request: BrainRequest): boolean {
  * available to deterministicRestaurantResponse.
  */
 function isSafetyCriticalRestaurantRecommendation(message: string): boolean {
+  if (/เด็ก/u.test(message) && /ไม่เผ็ด|ไม่กินเผ็ด|ไม่ทานเผ็ด/u.test(message) && /มีอาหาร|มีเมนู|กินอะไร|แนะนำ/u.test(message)) return true;
   if (!/แพ้(?:กุ้ง|ถั่ว|ปลา|ไข่|อาหารทะเล|ทะเล)/u.test(message)) return false;
   const intent = classifyRestaurantDietaryIntent(message);
   return intent === 'CONSTRAINT_AND_RECOMMENDATION';
@@ -6080,7 +6142,54 @@ async function verifiedBookingStatusReadbackBeforePrimary(
 // x-nf-request-id/x-request-id header), or null if transport gave us nothing
 // stable for this turn.
 export async function processThongthaiChatCore(request: BrainRequest, eventId: string | null): Promise<ThongthaiChatCoreResult> {
+  const channel = getBrainChannel(request.pageContext.section);
+  const turnId = eventId ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2,12)}`;
+  const startedAt = Date.now();
+  try {
+    request = { ...request, message:normalizeCustomerText(request.message) };
+    const result = await processThongthaiChatCoreInternal(request, turnId);
+    console.log('THONGTHAI_CUSTOMER_TURN', JSON.stringify({
+      event_id:turnId, channel, status_code:result.statusCode,
+      duration_ms:Date.now()-startedAt, outcome:'completed',
+    }));
+    await persistCustomerTurnOutcome({
+      conversationId:request.guestId ?? null,eventId:turnId,channel,
+      outcome:'completed',errorType:null,durationMs:Date.now()-startedAt,environment:request.environment,
+    });
+    return result;
+  } catch (error) {
+    // Never start a second paid attempt or repeat a transaction after an
+    // uncertain backend failure. Both transports receive a usable response.
+    console.error('THONGTHAI_CUSTOMER_TURN', JSON.stringify({
+      event_id:turnId, channel, status_code:503,
+      duration_ms:Date.now()-startedAt, outcome:'failed',
+      error_type:error instanceof Error ? error.name : 'UnknownError',
+    }));
+    await persistCustomerTurnOutcome({
+      conversationId:request.guestId ?? null,eventId:turnId,channel,
+      outcome:'failed',errorType:error instanceof Error ? error.name : 'UnknownError',
+      durationMs:Date.now()-startedAt,environment:request.environment,
+    });
+    const messages:Record<string,string> = {
+      th:'ตอนนี้ทองไทยตรวจสอบข้อมูลไม่สำเร็จครับ หากเพิ่งส่งคำขอจองหรือสั่งซื้อ ทองไทยยังยืนยันผลไม่ได้ กรุณาให้พนักงานตรวจสอบก่อนส่งคำขอซ้ำครับ',
+      en:'I could not verify the information. If you just submitted a booking or order, please ask staff to check its status before submitting again.',
+      zh:'暂时无法核实信息。如果您刚提交预订或订单，请先联系工作人员确认状态，再决定是否重新提交。',
+      ja:'情報を確認できませんでした。予約や注文を送信した直後の場合は、再送信する前にスタッフへ状況をご確認ください。',
+      ko:'정보를 확인하지 못했습니다. 방금 예약이나 주문을 제출했다면 다시 제출하기 전에 직원에게 상태를 확인해 주세요.',
+      lo:'ຕອນນີ້ຍັງກວດສອບຂໍ້ມູນບໍ່ໄດ້. ຖ້າຫາກສົ່ງຄຳຂໍຈອງ ຫຼື ສັ່ງຊື້ແລ້ວ ກະລຸນາໃຫ້ພະນັກງານກວດສອບສະຖານະກ່ອນສົ່ງຊ້ຳ.',
+      vi:'Hiện tôi chưa xác minh được thông tin. Nếu bạn vừa gửi yêu cầu đặt chỗ hoặc đặt hàng, vui lòng nhờ nhân viên kiểm tra trạng thái trước khi gửi lại.',
+    };
+    return { statusCode:200, payload:{
+      message:messages[request.language] ?? messages.en,
+      intent:'information', contextUpdates:{},
+      journeyAction:{type:'none',journey:null}, suggestedActions:[],
+    }};
+  }
+}
+
+async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: string | null): Promise<ThongthaiChatCoreResult> {
   let explicitAiResponseTurnPersisted = false;
+  let visitorUnderstandingModelAttempted=false;
 
   async function coreResult(statusCode: number, payload: unknown): Promise<ThongthaiChatCoreResult> {
     const typed = payload as Record<string, unknown>;
@@ -6167,6 +6276,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         });
       }
     }
+    if(visitorUnderstandingModelAttempted && statusCode===200)await markAiResponseTurnInterpreted({
+      conversationId:request.guestId ?? guestDbId ?? 'unknown',eventId:transportEventId,channel,environment:request.environment,
+    });
     return { statusCode, payload: typed };
   }
 
@@ -6198,8 +6310,6 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     };
   }
 
-  await registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId);
-
   // One stable identity per transport turn. LINE supplies message.id; web
   // supplies eventId/request-id when available. Generate the fallback ONCE
   // per core invocation so every side effect in this turn shares it.
@@ -6227,12 +6337,21 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   // and steal cold-start local-food/service-mind routing.
   const hadDurableRestaurantConstraintBeforeTurn = hasDurableRestaurantConstraint(request);
   const sameTurnPreferenceSignal = extractGuestPreferenceSignal(request.message);
-  await capturePreferenceSignals(guestDbId, request.message, {
-    channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
-    eventId: transportEventId,
-  }).catch(error => {
-    console.error('THONGTHAI_PREFERENCE_CAPTURE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
-  });
+  // Independent identity, budget heartbeat and preference records need not
+  // add three consecutive database round trips to every customer reply.
+  await Promise.all([
+    registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId),
+    touchAiConversation({
+      conversationId:request.guestId ?? guestDbId ?? 'unknown',
+      guestDbId, channel, eventId:transportEventId, callerLabel:'customer_activity',
+    }),
+    capturePreferenceSignals(guestDbId, request.message, {
+      channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
+      eventId: transportEventId,
+    }).catch(error => {
+      console.error('THONGTHAI_PREFERENCE_CAPTURE_ERROR', error instanceof Error ? error.message.slice(0, 220) : 'unknown');
+    }),
+  ]);
 
   // The write above is durable, but request.guestContext was loaded BEFORE
   // that write. LINE does not send conversation history back, so without this
@@ -6266,6 +6385,26 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         travelerType: sameTurnPreferenceSignal.travelerType ?? request.guestContext.travelerType,
       },
     };
+  }
+
+  let visitorUnderstoodTopic:string|null=null;
+  let visitorArrivalInformation:ReturnType<typeof regularArrivalInformation>=null;
+  if(process.env.THONGTHAI_VISITOR_UNDERSTANDING==='1' && request.language==='th') {
+    const history=request.chatHistory.length?request.chatHistory
+      :(await loadConversationContext(guestDbId).catch(()=>null))?.recentTurns ?? [];
+    const understanding=await understandVisitorQuestion({message:request.message,history,
+      costContext:{conversationId:request.guestId ?? guestDbId ?? 'unknown',guestDbId,channel,eventId:transportEventId,callerLabel:'visitor-question-interpretation'}});
+    visitorUnderstandingModelAttempted=understanding.modelAttempted;
+    visitorUnderstoodTopic=understanding.topic;
+    if(understanding.topic==='hours')visitorArrivalInformation=regularArrivalInformation(request.message);
+    if(understanding.method!=='original')console.log('THONGTHAI_VISITOR_UNDERSTANDING',JSON.stringify({event_id:transportEventId,topic:understanding.topic,method:understanding.method,model_attempted:understanding.modelAttempted}));
+    if(understanding.method==='unavailable' || understanding.method==='abstain') {
+      const message=understanding.method==='unavailable' && process.env.THONGTHAI_LOCAL_PREVIEW==='1'
+        ? 'ตัวทดลองยังเชื่อมต่อระบบตีความภาษาไม่ได้ครับ หากใช้ KKU ให้ตรวจสอบ key ในไฟล์ .env.local แล้วเริ่มตัวทดลองใหม่ คำถามข้อมูลพื้นฐานที่ระบบรองรับยังใช้ได้ครับ'
+        : 'อยากทราบเรื่องเวลาเปิด–ปิด ที่ตั้ง เมนู กิจกรรม ที่พัก หรือของฝากครับ ช่วยระบุหัวข้อที่ต้องการอีกนิดได้เลยครับ';
+      return coreResult(200,{message,intent:'information',contextUpdates:{},journeyAction:{type:'none',journey:null},suggestedActions:[]});
+    }
+    request={...request,message:understanding.message};
   }
 
   const topLevelSemanticIntent = classifyTopLevelSemanticIntent(request.message);
@@ -6359,6 +6498,53 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     });
   }
 
+  // Informational visitor questions must not become cafe menu lookups,
+  // generic model failures, or unsolicited escalation/booking operations.
+  let visitorInformation = request.language==='th'
+    ? visitorArrivalInformation ?? await answerVisitorInformation({message:request.message,channel,environment:request.environment})
+    : null;
+  const visitorWebSearch=request.language==='th'
+    ? await searchMissingVisitorInformation({message:request.message,answer:visitorInformation,context:{
+        conversationId:request.guestId ?? guestDbId ?? 'unknown',guestDbId,channel,eventId:transportEventId,
+        callerLabel:'visitor-web-search',
+      }}) : null;
+  if(visitorWebSearch)visitorInformation=visitorWebSearch.answer;
+  if(visitorInformation) {
+    try {
+      const currentContext=await loadConversationContext(guestDbId);
+      await persistConversationContext(guestDbId,applyConversationContextUpdate(currentContext,{
+        eventId:transportEventId,channel,userMessage:request.message,
+        assistantMessage:visitorInformation.message,activeDomain:visitorInformation.domain,
+        activeTopic:visitorInformation.topic,
+      }));
+    } catch(error) { console.error('THONGTHAI_VISITOR_CONTEXT_ERROR',error instanceof Error?error.name:'unknown'); }
+    console.log('THONGTHAI_VISITOR_INFORMATION',JSON.stringify({event_id:transportEventId,
+      topic:visitorInformation.topic,source_ids:visitorInformation.sourceIds,
+      used_fact_keys:visitorInformation.usedFactKeys,missing_fields:visitorInformation.missingFields,
+      web_search_status:visitorWebSearch?.status,web_search_cached:visitorWebSearch?.cached ?? false,
+      web_search_checked_at:visitorWebSearch?.checkedAt,
+      web_search_charged_this_turn:visitorWebSearch?.chargedThisTurn ?? false,
+      paid_call_used:visitorUnderstandingModelAttempted || visitorWebSearch?.attempted===true,transaction_executed:false}));
+    await persistAiResponseTurn({conversationId:request.guestId ?? guestDbId ?? 'unknown',eventId:transportEventId,channel,
+      finalResponseSource:visitorWebSearch?.status==='found'?'visitor_web_search':'visitor_information',modelReplyUsed:false,
+      groundedKnowledgeSupplied:visitorInformation.sourceIds.length>0,zeroCostTurn:!visitorUnderstandingModelAttempted && !visitorWebSearch?.chargedThisTurn,
+      environment:request.environment,occurredAt:new Date().toISOString()})
+      .catch(error=>console.error('THONGTHAI_VISITOR_TELEMETRY_ERROR',error instanceof Error?error.name:'unknown'));
+    return coreResult(200,{message:visitorInformation.message,intent:'information',contextUpdates:{},
+      journeyAction:{type:'none',journey:null},suggestedActions:[]});
+  }
+
+  if(['child_food','allergy','menu'].includes(visitorUnderstoodTopic ?? '')) {
+    const snapshot=guestDbId?await loadGuestAgentStateSnapshot(guestDbId).catch(()=>null):null;
+    const answer=await deterministicRestaurantResponse(request,{agentState:snapshot?.state ?? {}},guestDbId,channel);
+    if(answer) {
+      const polished=polishedResponse(answer,channel);
+      await persistBrainRuntime(guestDbId,channel,polished);
+      return coreResult(200,{message:polished.message,intent:polished.intent,contextUpdates:polished.contextUpdates,
+        journeyAction:polished.journeyAction,suggestedActions:polished.suggestedActions});
+    }
+  }
+
   // Phase 5 Business + Incident Router: one pre-model classification pass
   // owns the deterministic authority/feedback precedence. The individual
   // responders below receive the already-classified object so they cannot
@@ -6438,6 +6624,36 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     topLevelSemanticIntent,
   );
   const explicitTransactionIntent = commercialBoundary.currentTurnCommit;
+
+  const groundedRestaurant = await groundedRestaurantBeforePrimary(request,guestDbId,channel).catch(error => {
+    console.error('THONGTHAI_GROUNDED_RESTAURANT_ERROR',error instanceof Error ? error.name : 'UnknownError');
+    // The request was read-only. A source failure must not start another
+    // paid attempt or replace missing live menu facts with guesses.
+    return {
+      message:'ตอนนี้ตรวจสอบข้อมูลเมนูและราคาล่าสุดไม่สำเร็จครับ ยังจัดชุดอาหารให้ตรงเงื่อนไขไม่ได้',
+      intent:'information' as const,contextUpdates:{},journeyAction:{type:'none' as const,journey:null},suggestedActions:[],
+      responseStyle:'direct' as const,semanticMemoryUpdates:[],toolCalls:[],
+    };
+  });
+  if (groundedRestaurant) {
+    const polished = polishedResponse(groundedRestaurant,channel);
+    await Promise.all([
+      persistBrainRuntime(guestDbId,channel,polished),
+      persistAiResponseTurn({
+        conversationId:request.guestId ?? guestDbId ?? 'unknown',eventId:transportEventId,channel,
+        finalResponseSource:'restaurant_grounded_read_only',modelReplyUsed:false,
+        groundedKnowledgeSupplied:polished.intent === 'recommendation',zeroCostTurn:true,
+        environment:request.environment,occurredAt:new Date().toISOString(),
+      }).catch(error => {
+        console.error('AI_RESPONSE_TURN_PERSIST_ERROR',error instanceof Error ? error.name : 'UnknownError');
+      }),
+    ]);
+    explicitAiResponseTurnPersisted = true;
+    return coreResult(200,{
+      message:polished.message,intent:polished.intent,contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction,suggestedActions:polished.suggestedActions,
+    });
+  }
   const transactionPrepareIntent = commercialBoundary.prepareEligible;
 
   const worldwideReadFastPath = await boundedWorldwideReadBeforePrimary(request).catch(error => {
@@ -7007,7 +7223,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       // These two failures happen before a new paid Agent turn is sent. Do not
       // punish the customer with the old "คิดช้า ลองใหม่" loop: safely fall
       // through to One-Mind/deterministic responders, whose own cost ledger
-      // still enforces the same <=5 THB conversation cap.
+      // still enforces the same <=2 THB conversation cap.
       if (isAgentPreflightBudgetGuard(error)) {
         console.log('THONGTHAI_AGENT_PRIMARY_BUDGET_FALLTHROUGH', JSON.stringify({ channel }));
       } else {
@@ -7052,6 +7268,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         canonicalAnonymousId:request.guestId,
         guestDbId,
         durableMemory:durableMemoryFromRequest(request),
+        chatHistory:request.chatHistory,
+        environment:request.environment,
         persistState:true,
       }, {}, {}, undefined, { requireSemanticSupervisor:true });
       // Production cost invariant: at most one paid semantic call per
@@ -8039,6 +8257,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         canonicalAnonymousId:request.guestId,
         guestDbId,
         durableMemory:durableMemoryFromRequest(request),
+        chatHistory:request.chatHistory,
+        environment:request.environment,
         // Reuse the already-understood meaning, then let the existing
         // Dialog Manager persist its bounded conversational task state.
         persistState:true,
@@ -8100,6 +8320,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         canonicalAnonymousId: request.guestId,
         guestDbId,
         durableMemory: durableMemoryFromRequest(request),
+        chatHistory:request.chatHistory,
+        environment:request.environment,
         // Persist only when explicitly enabled AND the transport gave us a
         // stable event id. A generated shadow id must never mutate continuity.
         persistState: process.env.THONGTHAI_ONE_MIND_SHADOW_PERSIST === '1' && Boolean(eventId),
@@ -8408,6 +8630,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         canonicalAnonymousId: request.guestId,
         guestDbId,
         durableMemory: durableMemoryFromRequest(request),
+        chatHistory:request.chatHistory,
+        environment:request.environment,
         persistState: true,
       }, {
         interpretSemanticTurn: async () => { throw error; },

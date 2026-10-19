@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 // Shared optimistic-concurrency store for guest_agent_state.
 //
 // Why this exists: conversationContext, taskState and legacy brain working
@@ -33,7 +34,7 @@ function configuration(): { url: string; key: string } | null {
 async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const c = configuration();
   if (!c) throw new Error('Supabase configuration missing');
-  const response = await fetch(`${c.url}/rest/v1/${path}`, {
+  const response = await backendFetch(`${c.url}/rest/v1/${path}`, {
     ...init,
     headers: {
       apikey: c.key,

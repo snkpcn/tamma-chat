@@ -815,8 +815,20 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
   // tell the customer what they themselves have already selected.
   if (turn.intent === 'summarize_active_task') return [];
 
+  // Venue permission questions can be understood as local/general rather
+  // than ecosystem. Their required knowledge is still the venue policy;
+  // the semantic domain label must not turn a known policy question into
+  // generic small talk with no source request.
+  if(turn.informationNeed==='policy' && ['local','general'].includes(turn.domain)) {
+    return [{...base,domain:'ecosystem',needs:['stable_policy']}];
+  }
+  if(turn.informationNeed==='schedule' && ['local','general'].includes(turn.domain)) {
+    return [{...base,domain:'ecosystem',needs:['schedule']}];
+  }
+
   switch (turn.domain) {
     case 'restaurant':
+      if (turn.informationNeed === 'policy') return [{...base,domain:'restaurant',needs:['stable_policy']}];
       // Human Brain Phase 1.3: route from the CLOSED semantic information
       // facet, never from an arbitrary free-form intent label.
       if (turn.informationNeed === 'availability') {
@@ -927,6 +939,9 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.action === 'status') return [{ ...base, domain: 'membership', needs: ['membership_status'] }];
       return [];
     case 'cafe':
+      if (turn.informationNeed==='schedule') return [{...base,domain:'cafe',needs:['schedule']}];
+      if (turn.informationNeed==='policy') return [{...base,domain:'cafe',needs:['stable_policy']}];
+      if (turn.informationNeed==='amenities' || /location|directions|branch_profile|atmosphere/u.test(turn.intent)) return [{...base,domain:'cafe',needs:['entity_details']}];
       if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'cafe', needs: ['catalog'] }];
       return [];
     case 'payment':
@@ -940,6 +955,19 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       }
       return [];
     case 'ecosystem':
+      if(turn.informationNeed==='equipment' && turn.entities.facilityTopic) return [{...base,domain:'ecosystem',needs:['entity_details']}];
+      // Opening/closing times and closed days are mutable operational
+      // knowledge. Never answer a schedule question from the identity graph.
+      if (turn.informationNeed === 'schedule') return [{ ...base, domain:'ecosystem', needs:['schedule'] }];
+      // Route the requested facet, not every ecosystem question to a list
+      // of businesses. Knowing what the brand contains cannot establish
+      // permission, prices, availability, or any other operational fact.
+      if (turn.informationNeed === 'policy') return [{ ...base, domain:'ecosystem', needs:['stable_policy'] }];
+      if (turn.informationNeed === 'price') return [{ ...base, domain:'ecosystem', needs:['price'] }];
+      if (turn.informationNeed === 'availability') return [{ ...base, domain:'ecosystem', needs:['availability'] }];
+      if (turn.informationNeed === 'inventory') return [{ ...base, domain:'ecosystem', needs:['inventory'] }];
+      if (turn.informationNeed === 'ingredients') return [{ ...base, domain:'ecosystem', needs:['ingredients'] }];
+      if (!['none','catalog','recommendation'].includes(turn.informationNeed ?? 'none')) return [];
       if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'ecosystem', needs: ['catalog'] }];
       return [];
     case 'journey':

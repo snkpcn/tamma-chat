@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 import { createHash } from 'node:crypto';
 import { redactDirectIdentifiers } from './_direct-identifier-redaction';
 
@@ -25,7 +26,7 @@ function dbConfig(): { url: string; key: string } | null {
 async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const config = dbConfig();
   if (!config) throw new Error('Customer intelligence events database is not configured');
-  const response = await fetch(`${config.url}/rest/v1/${path}`, {
+  const response = await backendFetch(`${config.url}/rest/v1/${path}`, {
     ...init,
     headers: {
       apikey: config.key,

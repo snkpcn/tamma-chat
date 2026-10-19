@@ -34,7 +34,8 @@ test('Thongthai runtime loads cafe live facts and One-Mind has a cafe_live adapt
 
   assert.equal(runtime.includes("import { loadCafeWorldFacts } from './_cafe-sot';"),true);
   assert.equal(runtime.includes("loadCafeWorldFacts('inthanin_tadtone')"),true);
-  assert.equal(adapters.includes("cafe: { facts: request => cafeFactsAdapter() }"),true);
+  assert.match(adapters,/cafe:\s*\{\s*facts:\s*request => cafeFactsAdapter\(\),/);
+  assert.match(adapters,/profile:request=>Promise\.resolve\(cafeBranchProfileAdapter\(request\)\)/);
   assert.equal(adapters.includes("sourceType:'cafe_live'"),true);
   assert.equal(resolver.includes("need === 'price'"),true);
   assert.equal(resolver.includes("'cafe_live'"),true);

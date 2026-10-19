@@ -1,3 +1,6 @@
+import { extractPartySize } from './_slot-parsers';
+import { normalizeCustomerText } from './_customer-text';
+
 export type RestaurantMenuProfile = {
   summary?: string;
   mealRoles: string[];
@@ -163,7 +166,7 @@ const FOOD_CONSTRAINT_ALIASES: Record<string, Partial<Pick<ParsedPreferences,'sp
 };
 
 function thaiAmount(text: string): number | null {
-  const digit = readNumber(text, /(?:งบ(?:ประมาณ)?|ไม่เกิน|budget)\s*(?:สัก|ประมาณ|ราวๆ|ราว|ไม่เกิน)?\s*([0-9,]{2,7})/i)
+  const digit = readNumber(text, /(?:งบ(?:ประมาณ|รวม|ทั้งหมด)?|ไม่เกิน|budget)\s*(?:สัก|ประมาณ|ราวๆ|ราว|ไม่เกิน)?\s*([0-9,]{2,7})/i)
     ?? readNumber(text, /([0-9,]{2,7})\s*บาท\s*(?:พอ|ทั้งหมด|รวม|ไม่เกิน|ได้ไหม|จัดให้)/i);
   if (digit) return digit;
   const units: Record<string, number> = {
@@ -199,14 +202,44 @@ function hasAffirmative(current: string, word: string): boolean {
 // thongthai-chat.ts's formatRestaurantConstraintAck). `items` only affects
 // `selectedNames` (matching a menu item's name against the text), so an
 // empty items array is always safe for constraint-only parsing.
+/** Only customer statements belong here. Menu prices and portion counts in
+ * assistant replies are evidence about dishes, never the customer's budget
+ * or group. Apply labelled counts/corrections in chronological order. */
+export function parseRestaurantParty(messages: string[]): { adults: number | null; children: number | null; total: number | null } {
+  let adults: number | null = null;
+  let children: number | null = null;
+  let total: number | null = null;
+  const number = '(หนึ่ง|สอง|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า|สิบ|\\d{1,2})';
+  for (const raw of messages.slice(-16)) {
+    const text = normalizeCustomerText(raw);
+    const adultMatch = text.match(new RegExp('ผู้ใหญ่\\s*(?:เปลี่ยนเป็น|แก้เป็น|เป็น)?\\s*' + number + '\\s*(?:คน|ท่าน)', 'u'));
+    const childMatch = text.match(new RegExp('เด็ก(?:เล็ก)?(?:มาด้วย)?\\s*(?:เพิ่ม|มา|อีก|ด้วย|เพิ่มมา|เพิ่มอีก|มาอีก|เพิ่มมาอีก)*\\s*' + number + '\\s*(?:คน|ท่าน)', 'u'));
+    if (adultMatch || childMatch) {
+      if (adultMatch) adults = extractPartySize(adultMatch[1] + ' คน');
+      if (childMatch) {
+        const count = extractPartySize(childMatch[1] + ' คน');
+        const added = /(?:เพิ่ม|อีก)/u.test(childMatch[0]);
+        if (count !== null) {
+          if (added && total !== null) total += count;
+          children = added ? (children ?? 0) + count : count;
+        }
+      }
+      if (adults !== null) total = adults + (children ?? 0);
+    } else {
+      const count = extractPartySize(text);
+      if (count !== null) { total = count; adults = null; children = null; }
+    }
+  }
+  return { adults, children, total };
+}
+
 export function parsePreferences(input: RestaurantAdvisorInput, items: RestaurantAdvisorItem[]): ParsedPreferences {
   const history = [...(input.recentMessages ?? []).slice(-6), input.query].join(' ');
   const text = norm(history);
   const current = norm(input.query);
-  const partyFromText = readNumber(current, /(\d{1,2})\s*(?:คน|ท่าน|persons?|people)/i);
-  const partyFromHistory = readNumber(text, /(\d{1,2})\s*(?:คน|ท่าน|persons?|people)/i);
+  const party = parseRestaurantParty([...(input.recentMessages ?? []), input.query]);
   const budgetFromText = thaiAmount(current);
-  const budgetFromHistory = thaiAmount(text);
+  const budgetFromHistory = [...(input.recentMessages ?? [])].reverse().map(message => thaiAmount(norm(message))).find(value => value !== null) ?? null;
 
   let spice: ParsedPreferences['spice'] = null;
   if (includesAny(text, [/ไม่เผ็ด/u,/เผ็ดไม่ได้/u,/ไม่กินเผ็ด/u,/no spicy/i])) spice = 'none';
@@ -302,8 +335,8 @@ export function parsePreferences(input: RestaurantAdvisorInput, items: Restauran
   }).map(item => item.name);
 
   return {
-    partySize: input.partySize ?? partyFromText ?? partyFromHistory ?? null,
-    budget: input.budget ?? budgetFromText ?? budgetFromHistory ?? null,
+    partySize: party.total ?? input.partySize ?? null,
+    budget: budgetFromText ?? input.budget ?? budgetFromHistory ?? null,
     spice, vegetarian, avoidProteins: uniq(avoidProteins), preferProteins: uniq(preferProteins),
     avoidIngredients: uniq(avoidIngredients), allergenFlags: uniq(allergenFlags), goals: uniq(goals), selectedNames: uniq(selectedNames),
   };
@@ -378,6 +411,8 @@ function recommendationScope(input: RestaurantAdvisorInput): RecommendationScope
   if (ALL_MENU_REQUEST_RE.test(current)) return 'all';
   if (DRINK_REQUEST_RE.test(current)) return 'drink';
   if (DESSERT_REQUEST_RE.test(current)) return 'dessert';
+  // An explicit current food question overrides an earlier drink topic.
+  if (FOOD_CONTEXT_RE.test(current)) return 'food';
 
   // A vague "อีก/มีอะไรแนะนำอีก" should continue the most recent explicit
   // category instead of resetting. Walk newest-to-oldest and stop at the first

@@ -31,6 +31,6 @@ test('_task-state.ts does not import the runtime/brain/model-provider layer -- i
 
 test('_task-state.ts only imports from the expected leaf modules', async () => {
   const imports = await importsOf('_task-state.ts');
-  const allowed = new Set(['./_semantic-interpreter', './_promotion-dialog', './_restaurant-preorder-dialog', './_guest-agent-state-store']);
+  const allowed = new Set(['./_semantic-interpreter', './_promotion-dialog', './_restaurant-preorder-dialog', './_guest-agent-state-store', './_backend-fetch']);
   for (const specifier of imports) assert.ok(allowed.has(specifier), `unexpected import in _task-state.ts: ${specifier}`);
 });

@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 export type CafeMenuPriceSlot={
   id:string;
   menu_code:string;
@@ -49,7 +50,7 @@ function config():{url:string;key:string}{
 
 async function dbFetch(path:string):Promise<Response>{
   const c=config();
-  const res=await fetch(c.url+'/rest/v1/'+path,{
+  const res=await backendFetch(c.url+'/rest/v1/'+path,{
     headers:{
       apikey:c.key,
       Authorization:'Bearer '+c.key,

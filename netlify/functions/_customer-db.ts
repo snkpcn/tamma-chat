@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 import { extractGuestPreferenceSignal, extractIntelligenceSignals } from './_customer-phrase-intelligence';
 import { recordIntelligenceEvent } from './_customer-intelligence-events';
 
@@ -132,7 +133,7 @@ async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> 
   const config = configuration();
   if (!config) throw new Error('Customer database is not configured');
 
-  const res = await fetch(config.url + '/rest/v1/' + path, {
+  const res = await backendFetch(config.url + '/rest/v1/' + path, {
     ...init,
     headers: {
       apikey: config.key,

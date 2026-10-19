@@ -1,4 +1,29 @@
+import { backendFetch } from './_backend-fetch';
+
+export async function persistCustomerTurnOutcome(row:{
+  conversationId:string|null;eventId:string;channel:string;
+  outcome:'completed'|'failed';errorType:string|null;durationMs:number;
+  environment?:'live'|'test';
+}):Promise<void> {
+  const c=config();
+  if (!c) return;
+  try {
+    const response = await backendFetch(c.url+'/rest/v1/customer_turn_outcomes?on_conflict=channel,event_id,environment',{
+      method:'POST',headers:{apikey:c.key,Authorization:'Bearer '+c.key,
+        'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'},
+      body:JSON.stringify({conversation_id:row.conversationId?.slice(0,180) ?? null,
+        event_id:row.eventId.slice(0,180),channel:row.channel,
+        outcome:row.outcome,error_type:row.errorType?.slice(0,80) ?? null,
+        duration_ms:Math.max(0,Math.floor(row.durationMs)),environment:row.environment ?? 'live'}),
+    },1000);
+    if(!response.ok) console.error('CUSTOMER_TURN_OUTCOME_PERSIST_ERROR',response.status);
+  } catch {
+    console.error('CUSTOMER_TURN_OUTCOME_PERSIST_ERROR','unavailable');
+  }
+}
+
 export type PersistedAiCallCost = {
+  provider?:'openai'|'tavily';
   conversationId:string;
   eventId:string;
   channel:string;
@@ -53,9 +78,12 @@ async function postWithPreference(
   if(!c)return;
 
   let lastError:unknown=null;
+  // Response diagnostics must not add a five-second retry loop after a
+  // successful answer. Paid-call accounting keeps its existing retries.
+  const timeoutMs=table==='ai_response_turns'?1000:POST_TIMEOUT_MS;
   for(let attempt=0;attempt<POST_ATTEMPTS;attempt+=1){
     const controller=new AbortController();
-    const timer=setTimeout(()=>controller.abort(),POST_TIMEOUT_MS);
+    const timer=setTimeout(()=>controller.abort(),timeoutMs);
     try{
       const r=await fetch(
         `${c.url}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,
@@ -117,7 +145,7 @@ export async function persistAiCallCost(row:PersistedAiCallCost):Promise<void>{
     conversation_id:row.conversationId.slice(0,180),
     event_id:row.eventId.slice(0,180),
     channel:row.channel.slice(0,40)||'unknown',
-    provider:'openai',
+    provider:row.provider ?? 'openai',
     model:row.model.slice(0,120),
     call_purpose:row.callPurpose.slice(0,120),
     input_tokens:Math.max(0,Math.floor(row.inputTokens||0)),
@@ -135,6 +163,13 @@ export async function persistAiCallCost(row:PersistedAiCallCost):Promise<void>{
 }
 
 export async function persistAiResponseTurn(row:PersistedAiResponseTurn):Promise<void>{
+  // Emit provenance even if the telemetry database is unavailable.
+  console.log('THONGTHAI_RESPONSE_SOURCE', JSON.stringify({
+    event_id:row.eventId, channel:row.channel,
+    source:row.finalResponseSource, model_reply_used:row.modelReplyUsed,
+    grounded_knowledge_supplied:row.groundedKnowledgeSupplied,
+    zero_cost_turn:row.zeroCostTurn,
+  }));
   await post('ai_response_turns','conversation_id,event_id',{
     conversation_id:row.conversationId.slice(0,180),
     event_id:row.eventId.slice(0,180),
@@ -171,4 +206,19 @@ export async function persistAiResponseTurnIfAbsent(row:PersistedAiResponseTurn)
     environment:row.environment==='test'?'test':'live',
     occurred_at:row.occurredAt,
   });
+}
+
+/** Interpretation can precede a zero-model fact renderer. Mark the final
+ * turn as paid without replacing its actual response source/fact provenance. */
+export async function markAiResponseTurnInterpreted(row:{conversationId:string;eventId:string;channel:string;environment?:'live'|'test'}):Promise<void> {
+  console.log('THONGTHAI_RESPONSE_SOURCE_ADJUSTMENT',JSON.stringify({event_id:row.eventId,channel:row.channel,zero_cost_turn:false,reason:'visitor_semantic_interpretation'}));
+  const c=config();if(!c)return;
+  const query=new URLSearchParams({conversation_id:'eq.'+row.conversationId,event_id:'eq.'+row.eventId,channel:'eq.'+row.channel});
+  try {
+    const response=await backendFetch(c.url+'/rest/v1/ai_response_turns?'+query.toString(),{
+      method:'PATCH',headers:{apikey:c.key,Authorization:'Bearer '+c.key,'Content-Type':'application/json',Prefer:'return=minimal'},
+      body:JSON.stringify({zero_cost_turn:false}),
+    },1000);
+    if(!response.ok)console.error('AI_RESPONSE_TURN_INTERPRETATION_MARK_ERROR',response.status);
+  } catch {console.error('AI_RESPONSE_TURN_INTERPRETATION_MARK_ERROR','unavailable');}
 }

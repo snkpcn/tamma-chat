@@ -14,6 +14,8 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { listRestaurantMenu } from './_restaurant-sot';
 import { loadActivityWorldFacts } from './_activity-sot';
 import { listCafeMasterMenu, listCafeBranchModifiers } from './_cafe-sot';
+import { ECOSYSTEM_ENTITY_GRAPH } from './_ecosystem-entity-graph';
+import { ORGANIZATION_CONFIG, INTHANIN_TADTONE_CONFIG, INTHANIN_TADTONE_DOG_POLICY } from './_organization-config';
 import { ACTIVITY_ASSET_ATTRIBUTE_KEYS } from './_activity-catalog-policy';
 import { loadActivePromotionsWorldFact } from './_promotions-runtime';
 import {
@@ -476,6 +478,78 @@ export type RealKnowledgeAdapterOptions = {
   environment?: 'live' | 'test';
 };
 
+/** Stable identity and business relationships already authored in the
+ * canonical ecosystem graph. This does not assert today's hours, prices,
+ * inventory, or whether an activity is available right now. */
+function ecosystemIdentityAdapter(now:Date=new Date()):SourceResult {
+  const sourceId='canonical_ecosystem_graph';
+  const base={domain:'ecosystem' as const,sourceId,sourceType:'bible' as const,authoritative:true,fetchedAt:now.toISOString()};
+  const label=(text:string)=>text.replace(/\s*\([^)]*\)/gu,'').trim();
+  const units=ECOSYSTEM_ENTITY_GRAPH.children ?? [];
+  return ok(sourceId,'bible',[
+    {...base,key:'ecosystem:name',value:ECOSYSTEM_ENTITY_GRAPH.label},
+    {...base,key:'ecosystem:tagline',value:ORGANIZATION_CONFIG.taglineTh},
+    {...base,key:'ecosystem:description',value:ORGANIZATION_CONFIG.descriptionTh},
+    {...base,key:'ecosystem:location',value:ORGANIZATION_CONFIG.locationTh},
+    ...units.map(unit=>({...base,key:`ecosystem:business:${unit.id}:name`,value:label(unit.label)})),
+    ...units.flatMap(unit=>(unit.children ?? []).filter(node=>node.type==='activity').map(activity=>({
+      ...base,key:`ecosystem:activity:${activity.id}:name`,value:label(activity.label),
+    }))),
+  ],now);
+}
+
+function cafeBranchProfileAdapter(request:KnowledgeRequest,now:Date=new Date()):SourceResult {
+  const config=INTHANIN_TADTONE_CONFIG;
+  const aliases=new Set(['inthanin_tadtone','inthanin','cafe','อินทนิล','อินทนิล สาขาตาดโตน','อินทนิลตาดโตน']);
+  const unsupportedScope=['branchCode','branchName','businessUnit','businessScope','unitCode','resourceCode','cafeName']
+    .some(key=>typeof request.entities[key]==='string' && String(request.entities[key]).trim() && !aliases.has(String(request.entities[key]).trim().toLowerCase()));
+  if(unsupportedScope)return unavailable(config.sourceId,'organization_config',new Error('cafe_branch_profile_scope_mismatch'),now);
+  const base={domain:'cafe' as const,sourceId:config.sourceId,sourceType:'organization_config' as const,authoritative:true,
+    fetchedAt:now.toISOString(),updatedAt:config.confirmedAt+'T00:00:00+07:00'};
+  return ok(config.sourceId,'organization_config',[
+    {...base,key:'organization:name',value:config.nameTh},
+    {...base,key:'organization:regularOpeningHours',value:config.regularOpeningHours},
+    {...base,key:'organization:timezone',value:config.timezone},
+    {...base,key:'cafe_branch:address',value:config.addressTh},
+    {...base,key:'cafe_branch:directions',value:config.directionsTh},
+    {...base,key:'cafe_branch:atmosphere',value:config.atmosphereTh},
+  ],now);
+}
+
+function cafeDogPolicyAdapter(request:KnowledgeRequest,now:Date=new Date()):SourceResult {
+  const config=INTHANIN_TADTONE_DOG_POLICY;
+  const topic=[request.intent,request.entities.policyTopic,request.entities.species,request.entities.animalType].filter(value=>typeof value==='string').join(' ');
+  const scopeKeys=['branchCode','branchName','businessUnit','businessScope','unitCode','resourceCode','cafeName','restaurantName','accommodationName'];
+  const aliases=new Set(['inthanin_tadtone','inthanin','cafe','ecosystem','อินทนิล','อินทนิล สาขาตาดโตน','ทำมา-ชาติ']);
+  const unsupportedScope=scopeKeys.some(key=>typeof request.entities[key]==='string'
+    && String(request.entities[key]).trim() && !aliases.has(String(request.entities[key]).trim().toLowerCase()));
+  const unsupportedSpecies=['species','animalType'].some(key=>typeof request.entities[key]==='string' && !['dog','dogs','หมา','สุนัข','น้องหมา','pet','pets','animal','animals','สัตว์เลี้ยง'].includes(String(request.entities[key]).trim().toLowerCase()));
+  if(unsupportedScope || unsupportedSpecies || !/(?:^|[^a-z])(?:pets?|dogs?|animals?)(?=$|[^a-z])|สัตว์เลี้ยง|สุนัข|น้องหมา/iu.test(topic)
+      || /(?:^|[^a-z])(?:cats?|birds?|rabbits?)(?=$|[^a-z])|แมว|กระต่าย|นก/u.test(topic)) {
+    return unavailable(config.sourceId,'organization_config',new Error('dog_policy_scope_not_supported'),now);
+  }
+  return ok(config.sourceId,'organization_config',[{
+    key:'cafe_branch:dog_policy',value:config,domain:request.domain,
+    sourceId:config.sourceId,sourceType:'organization_config',authoritative:true,
+    fetchedAt:now.toISOString(),updatedAt:config.confirmedAt+'T00:00:00+07:00',
+  }],now);
+}
+
+function organizationScheduleAdapter(request:KnowledgeRequest,now:Date=new Date()):SourceResult {
+  const config=ORGANIZATION_CONFIG;
+  const rootNames=new Set(['ecosystem','all','ทำมา-ชาติ','thamma-chat-ecosystem']);
+  const namedUnit=['businessUnit','businessScope','unitCode','resourceCode','restaurantName','cafeName','accommodationName']
+    .some(key=>typeof request.entities[key]==='string' && String(request.entities[key]).trim() && !rootNames.has(String(request.entities[key]).trim()));
+  if(namedUnit)return unavailable(config.sourceId,'organization_config',new Error('specific_business_hours_not_provided'),now);
+  const base={domain:'ecosystem' as const,sourceId:config.sourceId,sourceType:'organization_config' as const,authoritative:true,
+    fetchedAt:now.toISOString(),updatedAt:config.confirmedAt+'T00:00:00+07:00'};
+  return ok(config.sourceId,'organization_config',[
+    {...base,key:'organization:name',value:config.nameTh},
+    {...base,key:'organization:regularOpeningHours',value:config.regularOpeningHours},
+    {...base,key:'organization:timezone',value:config.timezone},
+  ],now);
+}
+
 /** Builds the read-only source set used by the One-Mind shadow
  * orchestrator. Every adapter wraps an existing canonical data-access
  * function; none performs a transactional write. */
@@ -485,6 +559,8 @@ export function buildRealKnowledgeSourceAdapters(
 ): KnowledgeSourceAdapters {
   const environment = options.environment ?? 'live';
   return {
+    bible:{identity:()=>Promise.resolve(ecosystemIdentityAdapter())},
+    organization:{schedule:request=>Promise.resolve(organizationScheduleAdapter(request)),policy:request=>Promise.resolve(cafeDogPolicyAdapter(request))},
     restaurant: { menu: request => restaurantMenuAdapter() },
     activity: {
       catalog: request => activityCatalogAdapter(request),
@@ -500,6 +576,6 @@ export function buildRealKnowledgeSourceAdapters(
     paymentStatus: { lookup: request => paymentStatusAdapter(options.guestDbId)(request) },
     membership: { status: request => membershipStatusAdapter(options.guestDbId)(request) },
     otop: { catalog: request => otopCatalogAdapter(environment) },
-    cafe: { facts: request => cafeFactsAdapter() },
+    cafe: { facts: request => cafeFactsAdapter(), profile:request=>Promise.resolve(cafeBranchProfileAdapter(request)) },
   };
 }

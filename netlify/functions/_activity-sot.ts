@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 // Activity source-of-truth reads. Mirrors _restaurant-sot.ts's role: a
 // neutral domain module for the ACTIVITY business unit's live catalog data
 // (activity_offerings + activity_assets), so it can be imported both by the
@@ -25,7 +26,7 @@ function configuration(): { url: string; key: string } | null {
 }
 async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const c = configuration(); if (!c) throw new Error('Supabase configuration missing');
-  const res = await fetch(`${c.url}/rest/v1/${path}`, {
+  const res = await backendFetch(`${c.url}/rest/v1/${path}`, {
     ...init,
     headers: { apikey: c.key, Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });

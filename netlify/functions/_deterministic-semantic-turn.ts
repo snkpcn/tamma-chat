@@ -1,3 +1,5 @@
+import { namesInthaninTadtone } from './_organization-config';
+import { normalizeCustomerText } from './_customer-text';
 // Zero-cost architecture (Phase P): deterministic semantic-turn derivation
 // for when the model provider is unavailable (circuit open / 429 / provider
 // down). Reuses the EXISTING generic slot parsers, task state, and entity-
@@ -908,7 +910,7 @@ export function deriveDeterministicSemanticTurn(
   taskState: TaskStateContainer,
   now: Date = new Date(),
 ): SemanticTurn | null {
-  const trimmed = message.trim();
+  const trimmed = normalizeCustomerText(message);
   if (!trimmed) return null;
 
   const activeTask = taskState.activeTask && !isTerminalTaskStatus(taskState.activeTask.status)
@@ -921,6 +923,65 @@ export function deriveDeterministicSemanticTurn(
   // supplying another slot to it.
   const paymentStatus=paymentStatusTurn(trimmed);
   if(paymentStatus)return paymentStatus;
+
+  // A regular, overall-venue schedule is an owner-confirmed read-only fact.
+  // Keep named units, dated exceptions, multi-topic questions and transactions
+  // on the semantic path; their meaning cannot be inferred from venue hours.
+  const asksRegularVenueHours = /(?:เปิด(?:กี่โมง|ถึงกี่โมง|วันไหน|วันอะไร)|ปิด(?:กี่โมง|วันไหน|วันอะไร)|เวลา(?:เปิด|ปิด|ทำการ)|หยุด(?:วันไหน|วันอะไร)|opening\s*hours|business\s*hours)/iu.test(trimmed);
+  const namesVenue = /ทำมา[-\s]?ชาติ/u.test(trimmed);
+  const namesUnit = /(?:ตำมา|ร้าน|อาหาร|คาเฟ่|กาแฟ|อินทนิล|inthanin|ที่พัก|เฮือน|สเตย์|ขี่ม้า|ATV|เอทีวี|ยิงธนู|เป็ดน้ำ|กิจกรรม)/iu.test(trimmed);
+  const otherOrExceptionalQuestion = /(?:วันนี้|พรุ่งนี้|มะรืน|เมื่อวาน|วันหยุดนักขัต|เทศกาล|สงกรานต์|ปีใหม่|วันหยุดพิเศษ|ราคา|เท่าไหร่|เท่าไร|พาหมา|สัตว์เลี้ยง|จอดรถ|อยู่ที่ไหน|อยู่ไหน|พิกัด|หรือ|และ|[0-9])/u.test(trimmed);
+  if (asksRegularVenueHours && !activeTask && !namesUnit
+      && !otherOrExceptionalQuestion && !extractDate(trimmed, now)
+      && !hasStandaloneTransactionRequest(trimmed)
+      && (namesVenue || !effectiveDomain || ['ecosystem','local','general'].includes(effectiveDomain))) {
+    return {
+      domain:'ecosystem', intent:'organization_regular_hours_lookup', action:'ask',
+      informationNeed:'schedule', entities:{}, references:[], constraints:[],
+      confidence:0.95, needsClarification:false,
+    };
+  }
+
+  // Exact branch-profile questions use supplied static facts, never menu
+  // prices, other branches, special-date hours or operational availability.
+  const namesTadtoneCafe=namesInthaninTadtone(trimmed);
+  const asksCafeLocation=/(?:อยู่(?:ที่)?ไหน|พิกัด|เดินทาง|ไปยังไง|ที่ตั้ง)/u.test(trimmed);
+  const asksCafeAtmosphere=/(?:บรรยากาศ|มุมถ่ายรูป|ตกแต่ง)/u.test(trimmed);
+  if(namesTadtoneCafe && !activeTask && !hasStandaloneTransactionRequest(trimmed)
+      && !/(?:วันนี้|พรุ่งนี้|มะรืน|เทศกาล|สงกรานต์|ปีใหม่|วันหยุดพิเศษ|ราคา|เท่าไหร่|เท่าไร|พาหมา|สัตว์เลี้ยง|หรือ|และ|[0-9])/u.test(trimmed) && !extractDate(trimmed,now)
+      && [asksRegularVenueHours,asksCafeLocation,asksCafeAtmosphere].filter(Boolean).length===1) {
+    return {
+      domain:'cafe',intent:asksRegularVenueHours?'cafe_regular_hours_lookup':asksCafeLocation?'cafe_branch_location_lookup':'cafe_branch_profile_lookup',
+      action:'ask',informationNeed:asksRegularVenueHours?'schedule':'amenities',
+      entities:{branchCode:'inthanin_tadtone'},references:[],constraints:[],confidence:0.95,needsClarification:false,
+    };
+  }
+
+  // A single dog-access question can read the supplied outdoor cafe policy.
+  // Named accommodation/restaurant/other-branch or mixed-species requests
+  // still require semantic scope resolution and cannot inherit this policy.
+  if(!activeTask && !hasStandaloneTransactionRequest(trimmed)
+      && /(?:หมา|สุนัข)/u.test(trimmed) && /(?:ได้ไหม|ได้มั้ย|ได้มั๊ย|อนุญาต|พา.*ได้|pet.?friendly)/iu.test(trimmed)
+      && !/(?:แมว|กระต่าย|นก|ที่พัก|ห้องพัก|เฮือน|ร้านอาหาร|ตำมา|ราคา|กี่โมง|จอง|หรือ|และ)/u.test(trimmed)
+      && (!/(?:อินทนิล|inthanin)/iu.test(trimmed) || namesTadtoneCafe)
+      && (!effectiveDomain || ['ecosystem','local','general','cafe'].includes(effectiveDomain) || namesTadtoneCafe)) {
+    return {domain:'cafe',intent:'cafe_dog_access_policy_lookup',action:'ask',informationNeed:'policy',
+      entities:{policyTopic:'dogs',species:'dog',branchCode:'inthanin_tadtone'},references:[],constraints:[],
+      confidence:0.95,needsClarification:false};
+  }
+
+  // A short facility-loan question is read-only. Unknown facility data must
+  // yield an honest missing-information answer, not a model-outage retry.
+  if(!activeTask && !hasStandaloneTransactionRequest(trimmed)
+      && /รถเข็น|วีลแชร์|wheelchair|stroller/iu.test(trimmed)
+      && /(?:มี|ให้ยืม|ให้เช่า|บริการ|ขอใช้|ใช้ได้ไหม)/u.test(trimmed)
+      && trimmed.length<=100
+      && !/(?:ราคา|เท่าไหร่|เท่าไร|กี่โมง|เปิดวัน|ปิดวัน|ตั้งอยู่|ที่ไหน|จอง|และ|หรือ|ส่งเรื่อง|ติดต่อทีม|ช่วยเตรียม)/u.test(trimmed)) {
+    const facilityTopic=/รถเข็นเด็ก|stroller/iu.test(trimmed)?'stroller_loan'
+      :/วีลแชร์|wheelchair|ผู้สูงอายุ|ผู้พิการ/iu.test(trimmed)?'wheelchair_loan':'mobility_cart_loan';
+    return {domain:'ecosystem',intent:'facility_loan_information_lookup',action:'ask',informationNeed:'equipment',
+      entities:{facilityTopic},references:[],constraints:[],confidence:0.95,needsClarification:false};
+  }
 
   // Explicit transaction commitment outranks every read-only topic shortcut.
   // The resource comes from the closed ecosystem activity graph; missing

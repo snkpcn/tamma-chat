@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 import { createRestaurantPreorderWithPromotion, listRestaurantMenu } from './_restaurant-sot';
 import type { BrainChannel } from './_thongthai-brain-v3';
 
@@ -22,7 +23,7 @@ function config(): { url: string; key: string } {
 
 async function publicDbFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const c = config();
-  const response = await fetch(`${c.url}/rest/v1/${path}`, {
+  const response = await backendFetch(`${c.url}/rest/v1/${path}`, {
     ...init,
     headers: { apikey: c.key, Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });

@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { interpretStayBookingTurn } from './_thongthai-brain-v3';
 import { CONTEXT_TTL_MS } from './_conversation-context';
@@ -34,7 +35,7 @@ function config(): { url: string; key: string } | null {
 async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const c = config();
   if (!c) throw new Error('Operations database is not configured');
-  const res = await fetch(`${c.url}/rest/v1/${path}`, {
+  const res = await backendFetch(`${c.url}/rest/v1/${path}`, {
     ...init,
     headers: {
       apikey: c.key,

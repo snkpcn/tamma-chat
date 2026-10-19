@@ -71,14 +71,14 @@ export type KnowledgeRequest = {
 export type KnowledgeSourceType =
   | 'bible' | 'restaurant_live' | 'activity_live' | 'stay_live' | 'promotion_runtime'
   | 'booking_operational' | 'order_operational' | 'payment_operational' | 'membership_operational'
-  | 'otop_live' | 'cafe_live' | 'conversation_memory';
+  | 'otop_live' | 'cafe_live' | 'conversation_memory' | 'organization_config';
 
 export const SOURCE_REGISTRY: Record<KnowledgeNeed, readonly KnowledgeSourceType[]> = {
   catalog: ['activity_live', 'restaurant_live', 'stay_live', 'otop_live', 'bible'],
-  entity_details: ['activity_live', 'restaurant_live', 'stay_live', 'bible'],
+  entity_details: ['activity_live', 'restaurant_live', 'stay_live', 'bible', 'organization_config'],
   price: ['activity_live', 'restaurant_live', 'stay_live', 'otop_live', 'cafe_live'],
   availability: ['restaurant_live', 'activity_live', 'stay_live'],
-  schedule: ['activity_live', 'stay_live'],
+  schedule: ['activity_live', 'stay_live', 'organization_config'],
   inventory: ['activity_live', 'otop_live'],
   ingredients: ['restaurant_live'],
   recommendations_input: ['restaurant_live', 'activity_live', 'bible'],
@@ -87,7 +87,7 @@ export const SOURCE_REGISTRY: Record<KnowledgeNeed, readonly KnowledgeSourceType
   order_status: ['order_operational'],
   payment_status: ['payment_operational'],
   membership_status: ['membership_operational'],
-  stable_policy: ['bible'],
+  stable_policy: ['bible', 'organization_config'],
 };
 
 /** Mutable-fact needs that must NEVER route to Bible, even though Bible
@@ -113,6 +113,7 @@ export const SOURCE_PRECEDENCE: Record<KnowledgeSourceType, number> = {
   stay_live: 80,
   otop_live: 80,
   cafe_live: 80,
+  organization_config:75,
   bible: 50,
   conversation_memory: 10,
 };
@@ -205,8 +206,9 @@ export type KnowledgeSourceAdapters = {
   paymentStatus?: { lookup?: KnowledgeSourceFetch };
   membership?: { status?: KnowledgeSourceFetch };
   otop?: { catalog?: KnowledgeSourceFetch };
-  cafe?: { facts?: KnowledgeSourceFetch };
-  bible?: { stablePolicy?: KnowledgeSourceFetch };
+  cafe?: { facts?: KnowledgeSourceFetch; profile?:KnowledgeSourceFetch };
+  bible?: { identity?:KnowledgeSourceFetch; stablePolicy?: KnowledgeSourceFetch };
+  organization?:{schedule?:KnowledgeSourceFetch;policy?:KnowledgeSourceFetch;facilities?:KnowledgeSourceFetch};
 };
 
 type Route = { sourceType: KnowledgeSourceType; fetch: KnowledgeSourceFetch } | null;
@@ -216,7 +218,8 @@ type Route = { sourceType: KnowledgeSourceType; fetch: KnowledgeSourceFetch } | 
  *  request for one need in one domain can only ever trigger the single
  *  adapter function this function selects, never any other domain's
  *  adapters (proven by a spy-based test). */
-function routeNeed(domain: SemanticDomain, need: KnowledgeNeed, adapters: KnowledgeSourceAdapters): Route {
+function routeNeed(domain: SemanticDomain, need: KnowledgeNeed, adapters: KnowledgeSourceAdapters, facilityLookup=false): Route {
+  if(need==='stable_policy' && (domain==='ecosystem' || domain==='cafe') && adapters.organization?.policy) return {sourceType:'organization_config',fetch:adapters.organization.policy};
   if (NEVER_BIBLE_FOR.has(need) && domain !== 'ecosystem') {
     // fall through to the domain-specific live routes below; Bible is
     // simply never a candidate for these needs outside 'ecosystem'.
@@ -257,14 +260,24 @@ function routeNeed(domain: SemanticDomain, need: KnowledgeNeed, adapters: Knowle
       if (need === 'order_status' && adapters.orderStatus?.lookup) return { sourceType: 'order_operational', fetch: adapters.orderStatus.lookup };
       return null;
     case 'cafe':
+      if ((need==='schedule' || need==='entity_details') && adapters.cafe?.profile) return {sourceType:'organization_config',fetch:adapters.cafe.profile};
       if ((need === 'catalog' || need === 'entity_details' || need === 'recommendations_input' || need === 'price') && adapters.cafe?.facts) return { sourceType: 'cafe_live', fetch: adapters.cafe.facts };
       return null;
     case 'payment':
       if (adapters.paymentStatus?.lookup) return { sourceType: 'payment_operational', fetch: adapters.paymentStatus.lookup };
       return null;
     case 'ecosystem':
-      if ((need === 'catalog' || need === 'entity_details' || need === 'stable_policy' || need === 'recommendations_input') && adapters.bible?.stablePolicy) {
-        return { sourceType: 'bible', fetch: adapters.bible.stablePolicy };
+      // Identity/catalog facts cannot establish a loan service. Until a
+      // facility source is registered this request is explicitly unknown.
+      if(need==='entity_details' && facilityLookup) return adapters.organization?.facilities
+        ? {sourceType:'organization_config',fetch:adapters.organization.facilities}:null;
+      if(need==='schedule' && adapters.organization?.schedule)return {sourceType:'organization_config',fetch:adapters.organization.schedule};
+      if (need === 'stable_policy' && adapters.bible?.stablePolicy) {
+        return { sourceType:'bible',fetch:adapters.bible.stablePolicy };
+      }
+      if (need === 'catalog' || need === 'entity_details' || need === 'recommendations_input') {
+        const identity=adapters.bible?.identity ?? adapters.bible?.stablePolicy;
+        if(identity)return {sourceType:'bible',fetch:identity};
       }
       return null;
     default:
@@ -273,8 +286,8 @@ function routeNeed(domain: SemanticDomain, need: KnowledgeNeed, adapters: Knowle
 }
 
 function computeFreshness(sources: readonly KnowledgeSourceTrace[]): KnowledgeBundle['freshness'] {
-  const liveTypes = sources.filter(s => s.status !== 'unavailable' && s.sourceType !== 'bible' && s.sourceType !== 'conversation_memory');
-  const stableTypes = sources.filter(s => s.status !== 'unavailable' && s.sourceType === 'bible');
+  const liveTypes = sources.filter(s => s.status !== 'unavailable' && s.sourceType !== 'bible' && s.sourceType !== 'conversation_memory' && s.sourceType !== 'organization_config');
+  const stableTypes = sources.filter(s => s.status !== 'unavailable' && (s.sourceType === 'bible' || s.sourceType === 'organization_config'));
   if (liveTypes.length && stableTypes.length) return 'mixed';
   if (stableTypes.length && !liveTypes.length) return 'stable';
   return 'live';
@@ -311,7 +324,7 @@ export async function resolveKnowledge(request: KnowledgeRequest, adapters: Know
   const warnings: string[] = [];
 
   for (const need of request.needs) {
-    const route = routeNeed(request.domain, need, adapters);
+    const route = routeNeed(request.domain, need, adapters, Boolean(request.entities.facilityTopic));
     if (!route) {
       missing.push(need);
       sources.push({ need, sourceId: 'none', sourceType: guessSourceType(request.domain, need), status: 'unavailable', reason: 'no_source_registered' });

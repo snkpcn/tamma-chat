@@ -38,10 +38,10 @@ test('cost calculator handles cached and uncached input from one canonical modul
   assert.equal(reserveWorstCaseCostUsd('gpt-5.6-terra',1_000,100),0.0032);
 });
 
-test('production defaults enforce the owner hard cap of <= 5 THB per customer conversation and compact semantic output',()=>{
+test('production defaults enforce the owner hard cap of <= 2 THB per customer conversation and compact semantic output',()=>{
   const policy=aiCostPolicy();
   const capThb=policy.maxConversationCostUsd*usdToThbRate();
-  assert.ok(capThb<=5+1e-9,`effective production cap must be <= 5 THB, got ${capThb}`);
+  assert.ok(capThb<=2+1e-9,`effective production cap must be <= 2 THB, got ${capThb}`);
   assert.ok(policy.maxCallsPerTurn>=1&&policy.maxCallsPerTurn<=3);
   assert.ok(policy.maxCallsPerConversation>6);
   assert.ok(policy.semanticMaxOutputTokens>=300&&policy.semanticMaxOutputTokens<=900);
@@ -49,22 +49,22 @@ test('production defaults enforce the owner hard cap of <= 5 THB per customer co
 });
 
 
-test('THB cap may be tightened by environment but can never be raised above 5 THB',()=>{
+test('THB cap may be tightened by environment but can never be raised above 2 THB',()=>{
   const keys=['THONGTHAI_MAX_CONVERSATION_AI_COST_THB','THONGTHAI_MAX_CONVERSATION_AI_COST_USD','THONGTHAI_USD_TO_THB_RATE'] as const;
   const before=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
   try{
     delete process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_USD;
     process.env.THONGTHAI_USD_TO_THB_RATE='36';
 
-    process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_THB='4';
-    assert.ok(Math.abs(aiCostPolicy().maxConversationCostUsd*usdToThbRate()-4)<1e-6);
+    process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_THB='1';
+    assert.ok(Math.abs(aiCostPolicy().maxConversationCostUsd*usdToThbRate()-1)<1e-6);
 
     process.env.THONGTHAI_MAX_CONVERSATION_AI_COST_THB='500';
-    assert.ok(aiCostPolicy().maxConversationCostUsd*usdToThbRate()<=5+1e-9);
+    assert.ok(aiCostPolicy().maxConversationCostUsd*usdToThbRate()<=2+1e-9);
 
     process.env.THONGTHAI_USD_TO_THB_RATE='0';
     assert.equal(usdToThbRate(),36,'zero/invalid conversion rate must fail closed to the reviewed positive rate');
-    assert.ok(aiCostPolicy().maxConversationCostUsd*usdToThbRate()<=5+1e-9);
+    assert.ok(aiCostPolicy().maxConversationCostUsd*usdToThbRate()<=2+1e-9);
   }finally{
     for(const key of keys){
       const value=before[key];
@@ -107,9 +107,9 @@ test('reviewed OpenAI rates and owner caps fail closed against unsafe configurat
     process.env.THONGTHAI_MAX_AI_CALLS_PER_CONVERSATION='99';
     process.env.THONGTHAI_SEMANTIC_MAX_OUTPUT_TOKENS='800';
     const policy=aiCostPolicy();
-    // THB config may never loosen the reviewed 5 THB ceiling. The legacy
+    // THB config may never loosen the reviewed 2 THB ceiling. The legacy
     // USD override is also STRICTER-only, so 0.50 USD cannot raise the cap.
-    assert.ok(policy.maxConversationCostUsd*usdToThbRate()<=5+1e-9);
+    assert.ok(policy.maxConversationCostUsd*usdToThbRate()<=2+1e-9);
     assert.equal(policy.maxCallsPerTurn,3);
     assert.equal(policy.maxCallsPerConversation,99);
     assert.ok(policy.semanticMaxOutputTokens<=900);
@@ -297,7 +297,7 @@ test('100-conversation synthetic traffic has zero cap violations and reports sta
   };
   assert.equal(report.conversationsExceedingCap,0);
   assert.ok(report.maxCostPerConversation<=policy.maxConversationCostUsd+Number.EPSILON);
-  assert.ok(report.maxCostPerConversation*usdToThbRate()<=5+1e-9);
+  assert.ok(report.maxCostPerConversation*usdToThbRate()<=2+1e-9);
   assert.ok(report.callsPerTurn<=1);
   assert.ok(report.zeroCallTurnPct>50);
   console.log('THONGTHAI_AI_COST_STRESS',JSON.stringify(report));

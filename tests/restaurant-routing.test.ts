@@ -57,7 +57,7 @@ test('restaurant follow-up can use persisted server-side context when transporte
       restaurantAdvisorContext:{
         source:'restaurant_menu_advisor_v1',
         recentMessages:['ร้านมีไรกิน'],
-        updatedAt:'2026-09-18T01:20:00.000Z',
+        updatedAt:new Date().toISOString(),
       },
     },
   };

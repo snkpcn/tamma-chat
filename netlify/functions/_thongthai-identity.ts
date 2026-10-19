@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 import type { BrainChannel } from './_thongthai-brain';
 
 function configuration(): { url: string; key: string } | null {
@@ -9,7 +10,7 @@ function configuration(): { url: string; key: string } | null {
 async function dbFetch(path: string): Promise<Response> {
   const config = configuration();
   if (!config) throw new Error('Supabase configuration missing');
-  const response = await fetch(`${config.url}/rest/v1/${path}`, {
+  const response = await backendFetch(`${config.url}/rest/v1/${path}`, {
     headers: {
       apikey: config.key,
       Authorization: `Bearer ${config.key}`,

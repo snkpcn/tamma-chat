@@ -26,13 +26,15 @@ test('Phase 4: bare recommendation is a deterministic 3-path host opener, not an
   });
 });
 
-test('Phase 4: cafe stays helpful but never invents menu, price or hours without a verified production source', async () => {
+test('Phase 4: cafe labels supplied reference prices without claiming confirmed branch prices or hours', async () => {
   await withHarness(async harness => {
     const result = await ask('cafe-price', 'ลาเต้ราคาเท่าไหร่');
     assert.equal(result.statusCode, 200);
     const text = messageOf(result);
-    assert.match(text, /ไม่มีข้อมูล.*ยืนยัน|ไม่ขอเดา/u);
-    assert.match(text, /คาเฟ่|ร้านอาหาร|ที่พัก/u, 'must still offer a useful next step inside the ecosystem');
+    assert.match(text, /ราคาอ้างอิง/u);
+    assert.match(text, /ยังรอการยืนยันราคาของสาขาตาดโตน/u);
+    assert.match(text, /ลาเต้/u);
+    assert.match(text, /70\s*บาท/u, 'iced latte must use the supplied reference, not an invented price');
     assert.doesNotMatch(text, /65\s*บาท|07:00|18:00/u);
     assert.equal(harness.modelCallCount(), 0, 'known Cafe information boundary must stay pre-Agent and zero-cost so it cannot leak another domain');
   });

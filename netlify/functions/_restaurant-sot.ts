@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 import { decryptPii, piiHash } from './_operations-db';
 import { createHash } from 'node:crypto';
 import {
@@ -71,7 +72,7 @@ function config(): { url: string; key: string } {
 
 async function publicDbFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const c = config();
-  const response = await fetch(`${c.url}/rest/v1/${path}`, {
+  const response = await backendFetch(`${c.url}/rest/v1/${path}`, {
     ...init,
     headers: { apikey: c.key, Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });
@@ -88,7 +89,7 @@ async function chartDbFetch(path: string, init: RequestInit = {}): Promise<Respo
   const profileHeaders = method === 'GET' || method === 'HEAD'
     ? { 'Accept-Profile': RESTAURANT_SCHEMA }
     : { 'Content-Profile': RESTAURANT_SCHEMA, 'Accept-Profile': RESTAURANT_SCHEMA };
-  const response = await fetch(`${c.url}/rest/v1/${path}`, {
+  const response = await backendFetch(`${c.url}/rest/v1/${path}`, {
     ...init,
     headers: {
       apikey: c.key, Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json',
@@ -118,12 +119,11 @@ function cleanList(value: unknown): string[] {
 
 export async function listRestaurantMenu(): Promise<RestaurantMenuItem[]> {
   const rid = await restaurantId();
-  const profiles = await restaurantMenuProfiles(rid);
-  const response = await chartDbFetch(
+  const [profiles, response] = await Promise.all([restaurantMenuProfiles(rid), chartDbFetch(
     `restaurant_menu_live?restaurant_id=eq.${rid}`
     + '&select=menu_item_id,category_name,category_sort_order,sort_order,name,selling_price,description,is_signature,ingredient_names,unavailable_ingredients,available_servings,is_orderable,source_updated_at'
     + '&order=category_sort_order.asc,sort_order.asc',
-  );
+  )]);
   const rows = await response.json() as Array<Record<string, unknown>>;
   return rows.map(row => {
     const profile = profiles.map.get(String(row.menu_item_id))?.profile;

@@ -207,7 +207,8 @@ async function callOpenAIModel(
   }
 
   const policy = aiCostPolicy();
-  const maxOutputTokens = responseSchema.name === RESPONSE_COMPOSER_RESPONSE_SCHEMA.name
+  const maxOutputTokens = responseSchema.name === 'thongthai_visitor_question' ? 160
+    : responseSchema.name === RESPONSE_COMPOSER_RESPONSE_SCHEMA.name
     ? RESPONSE_COMPOSER_MAX_OUTPUT_TOKENS
     : policy.semanticMaxOutputTokens;
   let reservation:AiCallReservation | null = null;
@@ -338,6 +339,13 @@ async function callOpenAIModel(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Bounded visitor-topic interpretation; no business facts or actions. */
+export function callVisitorQuestionInterpreter(systemPrompt:string,messages:ChatTurn[],costContext:AiCallContext):Promise<string> {
+  return callOpenAIModel(OPENAI_SEMANTIC_PRIMARY_MODEL,systemPrompt,messages,'semantic-visitor-question-interpretation',costContext,{
+    name:'thongthai_visitor_question',schema:{type:'object',properties:{topic:{type:'string'},scope:{type:'string'},confidence:{type:'number'}},required:['topic','scope','confidence'],additionalProperties:false},
+  });
 }
 
 /** Primary language-supervisor call. Never executes a business action. */

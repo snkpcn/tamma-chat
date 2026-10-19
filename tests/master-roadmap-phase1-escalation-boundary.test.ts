@@ -295,14 +295,14 @@ test('14. bad-review threat routes to owner_general with calming wording', async
   });
 });
 
-test('15. unverified availability question routes to the stay team, never guesses a real answer', async () => {
+test('15. an availability question collects the missing checkout date without unsolicited staff escalation', async () => {
   await withHarnessAndLine(async (harness, replies) => {
     harness.programOpsChannel('stay');
     await callLineWebhook([privateEvent('ห้องว่างคืนนี้ไหม', 'phase1-15')]);
     const t = text(replies, 0);
-    assert.match(t, /ห้องว่างช่วงนี้ทองไทยขอเช็กกับทีมให้ชัวร์อีกทีนะครับ/u);
+    assert.match(t, /ขอวันเช็กเอาต์หรือจำนวนคืน/u);
+    assert.match(t, /ยังไม่ได้ยืนยันห้องว่าง/u);
     assert.doesNotMatch(t, /มีห้องว่าง|ห้องเต็มแล้ว/u, 'must never assert a real availability fact it has not verified');
-    const events = harness.postsTo('ops_feedback_events');
-    assert.equal(events[0].business_unit, 'stay');
+    assert.equal(harness.postsTo('ops_feedback_events').length,0,'an information question does not authorize staff notification');
   });
 });

@@ -1,3 +1,4 @@
+import { backendFetch } from './_backend-fetch';
 // Phase C of the Thongthai one-mind architecture program (see THONGTHAI_HANDOFF.md).
 //
 // Server-side, canonical-guest-keyed conversation continuity. thongthai-chat no
@@ -43,6 +44,18 @@ export const MAX_SUSPENDED_TOPICS = 4;
 export const MAX_RECENT_EVENT_IDS = 5;
 export const MAX_SUMMARY_CHARS = 600;
 export const CONTEXT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours of inactivity -- a stale context is treated as absent, never as a permanent transcript
+export const CONVERSATION_RESET_RE = /ลืมที่คุยกันไปก่อน|ลืมที่คุยไปก่อน|เริ่มใหม่|ล้างก่อน|ไม่เอาที่คุยเมื่อกี้/u;
+
+/** Browser history is supplemental conversational evidence, never trusted
+ * task state or business facts. Drop everything through the latest reset. */
+export function boundedTransportHistory(history: Array<{ role: 'user' | 'assistant'; content: string }> = []): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const bounded = history.slice(-MAX_RECENT_TURNS);
+  let start = 0;
+  for (let index = 0; index < bounded.length; index += 1) {
+    if (bounded[index].role === 'user' && CONVERSATION_RESET_RE.test(bounded[index].content)) start = index + 1;
+  }
+  return bounded.slice(start).map(turn => ({role:turn.role,content:boundTurnContent(turn.content)}));
+}
 
 export type ConversationTurnRole = 'user' | 'assistant';
 
@@ -401,7 +414,7 @@ export function applyConversationContextUpdate(
  * interpretSemanticTurn() expects. The Semantic Interpreter never sees
  * ConversationContextState directly, only this.
  */
-export function buildSemanticContext(state: ConversationContextState, now: Date = new Date()): SemanticContext {
+export function buildSemanticContext(state: ConversationContextState, now: Date = new Date(), transportedHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []): SemanticContext {
   const live = pruneExpired(state, now);
   const memory = live.workingMemory ?? emptyConversationWorkingMemory();
   const memorySummaryParts = [
@@ -428,7 +441,9 @@ export function buildSemanticContext(state: ConversationContextState, now: Date 
     // recentTurns are already redacted and bounded at write time by this
     // module. Passing that same bounded evidence to the semantic layer gives
     // natural short follow-ups real context without creating a second chat log.
-    recentTurns: live.recentTurns.map(turn => ({ role:turn.role, content:turn.content })),
+    recentTurns: live.recentTurns.length
+      ? live.recentTurns.map(turn => ({ role:turn.role, content:turn.content }))
+      : boundedTransportHistory(transportedHistory),
   };
 }
 
@@ -438,13 +453,40 @@ export function buildSemanticContext(state: ConversationContextState, now: Date 
 // mirrors. The reducer/builder above carry all the tested logic; these are
 // thin persistence wrappers around it.
 
+/** Grounded restaurant replies persist bounded user-only working memory in
+ * the legacy sibling field. Expose it to the same semantic pipeline used by
+ * LINE, which carries no browser history. Canonical discourse takes priority;
+ * neither this bridge nor client history can create task/transaction state. */
+export function conversationContextFromAgentState(state: Record<string, unknown>, now: Date = new Date()): ConversationContextState {
+  const context = parseConversationContextState(state.conversationContext,now);
+  // A concrete proposed order belongs to its established preorder dialog;
+  // do not introduce a parallel read-only topic that can intercept consent
+  // or its missing-field prompts before that executor sees the turn.
+  if (state.restaurantProposedSet) return context;
+  const legacy = state.restaurantAdvisorContext;
+  if (state.active_topic !== 'restaurant' || !legacy || typeof legacy !== 'object') return context;
+  const raw = legacy as Record<string,unknown>;
+  const updatedAt = typeof raw.updatedAt === 'string' ? Date.parse(raw.updatedAt) : NaN;
+  if (!Number.isFinite(updatedAt) || now.getTime()-updatedAt >= CONTEXT_TTL_MS || !Array.isArray(raw.recentMessages)) return context;
+  if ((context.recentTurns.length || context.activeDomain) && Date.parse(context.updatedAt) >= updatedAt) return context;
+  const recentTurns = boundedTransportHistory(raw.recentMessages
+    .filter((value): value is string => typeof value === 'string')
+    .map(content => ({role:'user' as const,content})))
+    .map(turn => ({...turn,channel:'shared',at:new Date(updatedAt).toISOString()}));
+  // Supply evidence without manufacturing a semantic domain/intent. The
+  // language layer must still interpret a new turn; otherwise an unknown
+  // follow-up can become a fabricated restaurant clarification loop.
+  return {...context,activeDomain:null,activeTopic:null,recentTurns,
+    updatedAt:new Date(updatedAt).toISOString(),expiresAt:new Date(updatedAt+CONTEXT_TTL_MS).toISOString()};
+}
+
 function configuration(): { url: string; key: string } | null {
   const url = process.env.SUPABASE_URL; const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   return url && key ? { url: url.replace(/\/$/, ''), key } : null;
 }
 async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const c = configuration(); if (!c) throw new Error('Supabase configuration missing');
-  const res = await fetch(`${c.url}/rest/v1/${path}`, {
+  const res = await backendFetch(`${c.url}/rest/v1/${path}`, {
     ...init,
     headers: { apikey: c.key, Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });
@@ -471,8 +513,7 @@ export async function loadConversationContext(guestDbId: string | null, now: Dat
   try {
     const res = await dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`);
     const rows = await res.json() as Array<{ state?: Record<string, unknown> }>;
-    const raw = rows[0]?.state?.conversationContext;
-    return parseConversationContextState(raw, now);
+    return conversationContextFromAgentState(rows[0]?.state ?? {}, now);
   } catch (error) {
     console.error('CONVERSATION_CONTEXT_LOAD_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
     return emptyConversationContextState(now);

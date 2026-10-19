@@ -196,7 +196,10 @@ test('reset really resets: persisted routing/discourse memory is actually cleare
     const after = afterState?.conversationContext as { activeDomain?: string | null; recentEntities?: unknown[] } | undefined;
     assert.equal(after?.activeDomain ?? null, null, 'reset must actually clear the persisted active domain, not just say it will');
     assert.equal((after?.recentEntities ?? []).length, 0, 'reset must actually clear persisted recent entities');
-    assert.deepEqual(afterState?.aiCostLedger, seededLedger,
+    const afterLedger = afterState?.aiCostLedger as typeof seededLedger;
+    assert.ok(Date.parse(afterLedger.lastActivityAt) >= Date.parse(seededLedger.lastActivityAt),
+      'even a free reset turn counts as activity in the existing accounting session');
+    assert.deepEqual({ ...afterLedger, lastActivityAt:seededLedger.lastActivityAt }, seededLedger,
       'conversation reset must not mint a fresh accounting budget session');
     assert.equal((afterState?.aiCostLedger as { cumulativeCostUsd?: number } | undefined)?.cumulativeCostUsd,0.12,
       'historical spend in the active accounting session remains auditable and enforceable');

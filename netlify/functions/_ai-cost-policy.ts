@@ -2,16 +2,22 @@
 // No other module may contain model-rate or conversation-cap arithmetic.
 //
 // Owner hard production requirement: OpenAI spend for one customer
-// conversation may never exceed 5 THB. The ledger still reasons in USD for
+// conversation may never exceed 2 THB. The ledger still reasons in USD for
 // provider pricing, but the canonical ceiling is THB and is converted using
 // the same reporting rate used by cost telemetry. Environment configuration
 // may make the cap stricter, never looser.
 export const DEFAULT_USD_TO_THB_RATE = 36;
-export const DEFAULT_MAX_CONVERSATION_AI_COST_THB = 5;
+export const DEFAULT_MAX_CONVERSATION_AI_COST_THB = 2;
 export const DEFAULT_MAX_CONVERSATION_AI_COST_USD =
   DEFAULT_MAX_CONVERSATION_AI_COST_THB / DEFAULT_USD_TO_THB_RATE;
 export const DEFAULT_MAX_AI_CALLS_PER_TURN = 3;
 export const DEFAULT_MAX_AI_CALLS_PER_CONVERSATION = 2_000;
+// Tavily basic search: one credit, conservatively priced at pay-as-you-go.
+// https://docs.tavily.com/documentation/api-credits (checked 2026-10-18).
+export const WEB_SEARCH_MODEL = 'tavily-basic';
+export function webSearchCostUsd(): number {
+  return Math.max(0.008, finiteNumber(process.env.THONGTHAI_WEB_SEARCH_COST_USD, 0.008));
+}
 // Phase 3 live calibration (20 probes / 21 real calls) measured semantic
 // output p95=323 and max=499 tokens, including one Sol review. 700 keeps
 // ~40% headroom above the observed max while reducing the theoretical

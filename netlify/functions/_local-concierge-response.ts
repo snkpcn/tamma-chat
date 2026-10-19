@@ -1,3 +1,4 @@
+import { ORGANIZATION_CONFIG, INTHANIN_TADTONE_CONFIG, namesInthaninTadtone } from './_organization-config';
 // Composes the actual customer-facing message for a classified Local
 // Concierge question (see _local-concierge-intent.ts). Same discipline as
 // _experience-discovery.ts's formatExperienceDiscoveryMessage. Every fact
@@ -200,15 +201,26 @@ export function composeSafetyUncertaintyResponse(): string {
   ].join('\n');
 }
 
-/** Category A (static): the owner-provided Maps link is the one canonical
- *  source of "where are we" -- see _local-concierge-location.ts. Never
- *  invents an address; includes one only once resolutionStatus is
- *  'resolved'. */
-export function composeLocationResponse(): string {
+/** Static arrival information combines the canonical owner-provided Maps
+ *  link with supplied landmark directions independently of coordinate
+ *  resolution; it never invents latitude/longitude or a new map link. */
+export function composeLocationResponse(message=''): string {
+  if(namesInthaninTadtone(message)) {
+    const config=INTHANIN_TADTONE_CONFIG;
+    return `${config.nameTh}อยู่ที่${config.addressTh}ครับ\n${config.directionsTh}`;
+  }
+  if(/อินทนิล|inthanin/iu.test(message))return 'ตอนนี้มีข้อมูลที่ตั้งของอินทนิลสาขาตาดโตนเท่านั้นครับ ยังยืนยันที่ตั้งสาขาที่ถามไม่ได้';
   const location = TAMMA_CHART_LOCATION;
   const lines: string[] = [];
   if (location.resolutionStatus === 'resolved' && location.address) {
     lines.push(`ทำมา-ชาติอยู่ที่: ${location.address}`);
+  } else {
+    // The map coordinates remain unresolved, but we now have user-supplied
+    // place text and a named arrival landmark. Do not hide those facts just
+    // because an unrelated coordinate-resolution flag is still unresolved.
+    lines.push(`ทำมา-ชาติอยู่แถว${ORGANIZATION_CONFIG.locationTh.replace(' • ',' จังหวัด')}ครับ`);
+    lines.push(`จุดอ้างอิงคือ${INTHANIN_TADTONE_CONFIG.nameTh} ที่${INTHANIN_TADTONE_CONFIG.addressTh}`);
+    lines.push(INTHANIN_TADTONE_CONFIG.directionsTh);
   }
   lines.push(`ปักหมุดตามลิงก์นี้ได้เลยครับ: ${location.mapsLink}`);
   lines.push('กดลิงก์แล้วกดนำทางได้เลยครับ ถ้าใกล้ถึงแล้วหาจุดจอดไม่เจอ ทักมาได้เลยครับ');
@@ -231,7 +243,7 @@ export function composeHorseComparisonResponse(): string {
 
 export async function composeLocalConciergeResponse(match: LocalConciergeMatch, message: string): Promise<string> {
   switch (match.category) {
-    case 'location': return composeLocationResponse();
+    case 'location': return composeLocationResponse(message);
     case 'horse_comparison': return composeHorseComparisonResponse();
     case 'weather_condition': return composeWeatherConditionResponse(message);
     case 'region_place': return composeRegionPlaceResponse();

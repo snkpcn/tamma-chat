@@ -4868,7 +4868,28 @@ async function tryAIChatEndpoint(text){
   }
 }
 
+// Keep one customer turn in flight. Two overlapping calls otherwise build
+// history before either answer is recorded and can overwrite each other's
+// context when a guest taps send again while waiting.
+let chatRequestPending = false;
 async function handleUserMessage(text){
+  if(chatRequestPending) return;
+  chatRequestPending = true;
+  const send = qs('#chatSend');
+  send.disabled = true;
+  input.readOnly = true;
+  quickWrap.inert = true;
+  try {
+    await performUserMessage(text);
+  } finally {
+    chatRequestPending = false;
+    send.disabled = false;
+    input.readOnly = false;
+    quickWrap.inert = false;
+  }
+}
+
+async function performUserMessage(text){
   const t = window.I18N ? window.I18N.t : (k)=>k;
   addMessage('user', escapeHtml(text));
   statusEl.textContent = t('chat_status_thinking');
@@ -4923,7 +4944,8 @@ async function handleUserMessage(text){
     vi:'Thongthai tạm thời chưa kết nối được. Vui lòng thử lại sau ít phút.',
   }[lang] || 'Thongthai is temporarily unavailable. Please try again in a moment.';
   addMessage('bot', unavailableCopy);
-  window.JourneyProvider.pushChat('assistant', unavailableCopy);
+  // A transport failure is UI status, not an assistant's business answer.
+  // Keep it out of the conversational evidence sent on the next request.
   statusEl.textContent = t('chat_status_ready');
   renderQuickActions();
 }

@@ -1,3 +1,4 @@
+import { normalizeCustomerText } from './_customer-text';
 // Phase G.1 — canonical One-Mind orchestration entrypoint.
 //
 // This module is intentionally NOT wired to customer-visible routing yet.
@@ -24,6 +25,7 @@ import {
   buildSemanticContext,
   loadConversationContext,
   parseConversationContextState,
+  conversationContextFromAgentState,
   persistConversationContext,
   CONTEXT_TTL_MS,
   type ConversationContextState,
@@ -92,6 +94,9 @@ export type OneMindTurnInput = {
   channel: BrainChannel;
   message: string;
   eventId: string;
+  /** Web history supplements an absent server discourse window only. It
+   * never replaces canonical task state, identity or verified knowledge. */
+  chatHistory?: Array<{ role:'user'|'assistant'; content:string }>;
   /** Channel-local, already privacy-safe provider key. Raw LINE user ids must
    * still be hashed by the LINE adapter before this layer sees them. */
   providerUserKey?: string;
@@ -201,7 +206,7 @@ const REAL_DEPENDENCIES: OneMindDependencies = {
 };
 
 function normalizeMessage(message: string): string {
-  return message.trim().slice(0, 4000);
+  return normalizeCustomerText(message).slice(0, 4000);
 }
 
 function normalizedEntityToken(value:string):string {
@@ -612,6 +617,20 @@ const COARSE_READ_ONLY_INTENTS: ReadonlySet<string> = new Set([
 // re-phrase what canonical data already answers, never invents a fact the
 // deterministic composer couldn't already produce on its own.
 export function isTrustedZeroCostFactLookup(turn: SemanticTurn, message: string): boolean {
+  if(turn.intent==='facility_loan_information_lookup' && turn.domain==='ecosystem'
+      && turn.action==='ask' && turn.informationNeed==='equipment'
+      && ['wheelchair_loan','stroller_loan','mobility_cart_loan'].includes(String(turn.entities.facilityTopic)))return true;
+  if(turn.intent==='cafe_dog_access_policy_lookup' && turn.domain==='cafe'
+      && turn.action==='ask' && turn.informationNeed==='policy'
+      && turn.entities.species==='dog' && turn.entities.branchCode==='inthanin_tadtone')return true;
+  if (['cafe_regular_hours_lookup','cafe_branch_location_lookup','cafe_branch_profile_lookup'].includes(turn.intent)
+      && turn.domain==='cafe' && turn.action==='ask' && turn.entities.branchCode==='inthanin_tadtone'
+      && ['schedule','amenities'].includes(turn.informationNeed ?? ''))return true;
+  if (turn.intent === 'organization_regular_hours_lookup'
+      && turn.domain === 'ecosystem' && turn.action === 'ask'
+      && turn.informationNeed === 'schedule') {
+    return true;
+  }
   // Payment status is a guest-scoped, read-only lookup against the canonical
   // payment_requests row.  The deterministic turn carries an optional
   // canonical reference code and the adapter still enforces guest ownership,
@@ -723,6 +742,12 @@ const EXACT_READ_ONLY_DETERMINISTIC_INTENTS: ReadonlySet<string> = new Set([
   // (deliberately left in COARSE_READ_ONLY_INTENTS above, since those CAN
   // depend on which item/date/context is meant).
   'stay_checkin_checkout_time_lookup',
+  'organization_regular_hours_lookup',
+  'facility_loan_information_lookup',
+  'cafe_regular_hours_lookup',
+  'cafe_dog_access_policy_lookup',
+  'cafe_branch_location_lookup',
+  'cafe_branch_profile_lookup',
 ]);
 
 // Exact context/state operations whose meaning is already canonical. These are
@@ -1546,7 +1571,7 @@ async function computeOneMindTurnFromState(
   const computeStartedAt = Date.now();
   const message = normalizeMessage(input.message);
   const semanticContext: SemanticContext = {
-    ...buildSemanticContext(conversationContextBefore, now),
+    ...buildSemanticContext(conversationContextBefore, now, input.chatHistory),
     activeTask:semanticTaskContext(taskStateBefore.activeTask),
     suspendedTask:semanticTaskContext(taskStateBefore.suspendedTask),
   };
@@ -1769,7 +1794,7 @@ export async function processThongthaiOneMindTurnAuthoritative(
     const stateReadStartedAt = Date.now();
     const snapshot: GuestAgentStateSnapshot = await stateDeps.loadSnapshot(identity.guestDbId);
     stateReadMs += Date.now() - stateReadStartedAt;
-    const conversationContextBefore = parseConversationContextState(snapshot.state.conversationContext, now);
+    const conversationContextBefore = conversationContextFromAgentState(snapshot.state, now);
     const loadedTaskState = parseTaskState(snapshot.state.taskState);
     const { taskState:taskStateBefore, staleTaskSuspended } = normalizeTaskStateForConversation(loadedTaskState, now);
     const result = await computeOneMindTurnFromState(

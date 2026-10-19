@@ -454,7 +454,8 @@ export async function composeGroundedModelResponse(
     return null;
   }
   const facts = allFacts(input.knowledgeBundles);
-  const hasAuthoritativeSourceState = input.knowledgeBundles.some(bundle => bundle.sources.length > 0);
+  const hasAuthoritativeSourceState = input.knowledgeBundles.some(bundle => bundle.sources.some(source=>
+    source.sourceId !== 'none' && source.reason !== 'no_source_registered'));
   // A successful/failed live source state is itself authoritative truth:
   // "empty" means a verified empty result and "unavailable" means we cannot
   // verify right now. Let the human composer phrase those states naturally
@@ -1145,7 +1146,104 @@ function renderPaymentStatusResponse(input: ResponseComposerInput): { message:st
   return{message,usedFactKeys:used};
 }
 
+function unverifiedFacilityResponse(input:ResponseComposerInput):ComposedResponse|null {
+  const turn=input.semanticTurn;
+  if(input.language!=='th' || turn?.intent!=='facility_loan_information_lookup'
+      || turn.action!=='ask' || input.dialogDecision.actionProposal || input.operationalOutcome)return null;
+  const topic=String(turn.entities.facilityTopic);
+  const names:Record<string,string>={wheelchair_loan:'รถเข็นสำหรับผู้ใช้วีลแชร์',stroller_loan:'รถเข็นเด็ก',mobility_cart_loan:'รถเข็น'};
+  if(!names[topic])return null;
+  const request=input.dialogDecision.knowledgeRequests.find(request=>request.entities.facilityTopic===topic);
+  const bundle=input.knowledgeBundles.find(bundle=>bundle.domain===request?.domain && bundle.sources.some(source=>source.need==='entity_details'));
+  if(!request || !bundle || bundle.facts.some(fact=>fact.authoritative && !fact.stale))return null;
+  return {message:`ตอนนี้ยังไม่มีข้อมูลยืนยันว่าที่ทำมา-ชาติมี${names[topic]}ให้ยืมหรือเช่าครับ หากจำเป็นต้องใช้ แนะนำสอบถามทีมงานก่อนเดินทางครับ`,
+    mode:'deterministic',usedFactKeys:[],composerVersion:RESPONSE_COMPOSER_VERSION,
+    bibleVersion:THONGTHAI_BIBLE_VERSION,channel:input.channel,language:input.language};
+}
+
+function configuredDogPolicyResponse(input:ResponseComposerInput):ComposedResponse|null {
+  const turn=input.semanticTurn;
+  if(input.language!=='th' || turn?.informationNeed!=='policy' || !isPetPolicyTopic(turn.entities,turn.intent)
+      || input.dialogDecision.actionProposal || input.operationalOutcome)return null;
+  const fact=allFacts(input.knowledgeBundles).find(fact=>fact.key==='cafe_branch:dog_policy'
+    && fact.sourceType==='organization_config' && fact.authoritative && !fact.stale
+    && input.knowledgeBundles.some(bundle=>bundle.facts.includes(fact) && bundle.sources.some(source=>source.need==='stable_policy' && source.status==='ok')));
+  if(!fact || !fact.value || typeof fact.value!=='object')return null;
+  const policy=fact.value as Record<string,unknown>;
+  if(policy.species!=='dog' || policy.branchCode!=='inthanin_tadtone'
+      || !Array.isArray(policy.allowedZones) || !Array.isArray(policy.excludedZones) || policy.leashRequired!==true
+      || typeof policy.subjectTh!=='string' || typeof policy.precautionsTh!=='string' || typeof policy.cleanupTh!=='string')return null;
+  return {message:`พาน้องหมาไป${policy.subjectTh}ได้ครับ ให้อยู่บริเวณ ${policy.allowedZones.join(' หรือ ')}\n`
+    +`ไม่นำเข้าบริเวณ${policy.excludedZones.join(' หรือ ')}\n${policy.precautionsTh}\n${policy.cleanupTh}`,
+    mode:'deterministic',usedFactKeys:[fact.key],composerVersion:RESPONSE_COMPOSER_VERSION,
+    bibleVersion:THONGTHAI_BIBLE_VERSION,channel:input.channel,language:input.language};
+}
+
+function configuredCafeProfileResponse(input:ResponseComposerInput):ComposedResponse|null {
+  if(input.language!=='th' || input.semanticTurn?.domain!=='cafe' || input.dialogDecision.actionProposal
+      || !(input.semanticTurn.informationNeed==='amenities' || /location|directions|branch_profile|atmosphere/u.test(input.semanticTurn.intent)))return null;
+  const facts=allFacts(input.knowledgeBundles).filter(fact=>fact.domain==='cafe' && fact.sourceType==='organization_config' && fact.authoritative && !fact.stale);
+  const name=facts.find(fact=>fact.key==='organization:name');
+  const address=facts.find(fact=>fact.key==='cafe_branch:address');
+  const directions=facts.find(fact=>fact.key==='cafe_branch:directions');
+  const atmosphere=facts.find(fact=>fact.key==='cafe_branch:atmosphere');
+  if(!name || !address || !directions || !atmosphere || !Array.isArray(atmosphere.value))return null;
+  const locationOnly=/location|directions/u.test(input.semanticTurn.intent);
+  const used=locationOnly?[name,address,directions]:[name,address,directions,atmosphere];
+  return {message:`${String(name.value)}อยู่ที่${String(address.value)}ครับ\n${String(directions.value)}`
+      +(locationOnly?'':`\n${atmosphere.value.map(String).join(' · ')}`),
+    mode:'deterministic',usedFactKeys:used.map(fact=>fact.key),
+    composerVersion:RESPONSE_COMPOSER_VERSION,bibleVersion:THONGTHAI_BIBLE_VERSION,channel:input.channel,language:input.language};
+}
+
+function configuredOrganizationScheduleResponse(input:ResponseComposerInput):ComposedResponse|null {
+  if(input.language!=='th' || input.semanticTurn?.informationNeed!=='schedule' || input.dialogDecision.actionProposal)return null;
+  const facts=allFacts(input.knowledgeBundles).filter(fact=>(fact.domain==='ecosystem' || fact.domain==='cafe') && fact.sourceType==='organization_config' && fact.authoritative && !fact.stale);
+  const name=facts.find(fact=>fact.key==='organization:name');
+  const hours=facts.find(fact=>fact.key==='organization:regularOpeningHours');
+  const timezone=facts.find(fact=>fact.key==='organization:timezone');
+  if(!name || !hours || !timezone || !Array.isArray(hours.value) || timezone.value!=='Asia/Bangkok')return null;
+  const rows=hours.value as Array<{dayOfWeek:number;opens:string;closes:string}>;
+  if(rows.length!==7 || new Set(rows.map(row=>row.dayOfWeek)).size!==7
+      || !rows.every(row=>Number.isInteger(row.dayOfWeek) && row.dayOfWeek>=0 && row.dayOfWeek<=6
+        && row.opens===rows[0].opens && row.closes===rows[0].closes
+        && /^\d{2}:\d{2}$/u.test(row.opens) && /^\d{2}:\d{2}$/u.test(row.closes)))return null;
+  return {
+    message:`เวลาทำการปกติของ${String(name.value)}คือทุกวัน ${rows[0].opens}–${rows[0].closes} น. ไม่มีวันหยุดประจำสัปดาห์ครับ`,
+    mode:'deterministic',usedFactKeys:[name.key,hours.key,timezone.key],
+    composerVersion:RESPONSE_COMPOSER_VERSION,bibleVersion:THONGTHAI_BIBLE_VERSION,channel:input.channel,language:input.language,
+  };
+}
+
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
+  const facility=unverifiedFacilityResponse(input);
+  if(facility)return facility;
+  const dogPolicy=configuredDogPolicyResponse(input);
+  if(dogPolicy)return dogPolicy;
+  const cafeProfile=configuredCafeProfileResponse(input);
+  if(cafeProfile)return cafeProfile;
+  const organizationSchedule=configuredOrganizationScheduleResponse(input);
+  if(organizationSchedule)return organizationSchedule;
+  if(input.language==='th' && input.semanticTurn?.domain==='ecosystem'
+      && ['ask','discover','recommend'].includes(input.semanticTurn.action)
+      && ['none','catalog'].includes(input.semanticTurn.informationNeed ?? 'none')
+      && !input.dialogDecision.actionProposal) {
+    const facts=allFacts(input.knowledgeBundles).filter(fact=>fact.sourceId==='canonical_ecosystem_graph' && fact.authoritative);
+    const name=facts.find(fact=>fact.key==='ecosystem:name');
+    const units=facts.filter(fact=>/^ecosystem:business:.+:name$/u.test(fact.key));
+    const activities=facts.filter(fact=>/^ecosystem:activity:.+:name$/u.test(fact.key));
+    if(name && units.length) {
+      const tagline=facts.find(fact=>fact.key==='ecosystem:tagline');
+      const description=facts.find(fact=>fact.key==='ecosystem:description');
+      const location=facts.find(fact=>fact.key==='ecosystem:location');
+      const introduction=[tagline?.value,description?.value,location?`📍 ${String(location.value)}`:''].filter(Boolean).join('\n');
+      const message=(introduction?introduction+'\n\n':'')+`${String(name.value)}เป็นพื้นที่รวม${units.map(fact=>String(fact.value)).join(' · ')}ครับ`
+        +(activities.length?`\nกิจกรรมในภาพรวมมี ${activities.map(fact=>String(fact.value)).join(' · ')}`:'');
+      return {message:polishCustomerMessage(message,input.channel),mode:'deterministic',
+        usedFactKeys:[name,...[tagline,description,location].filter((fact):fact is GroundedFact=>Boolean(fact)),...units,...activities].map(fact=>fact.key),
+        composerVersion:RESPONSE_COMPOSER_VERSION,bibleVersion:THONGTHAI_BIBLE_VERSION,channel:input.channel,language:input.language};
+    }
+  }
   const humanGrounded = renderPaymentStatusResponse(input)
     ?? renderJourneyPlan(input)
     ?? renderStayResponse(input)
@@ -1277,6 +1375,41 @@ function unknownSubject(domain: string, named: string | null): string {
   return fallback[domain] ?? 'เรื่องนี้';
 }
 
+function isPetPolicyTopic(entities:Record<string,unknown>,intent:string|undefined):boolean {
+  const topic=[entities.policyTopic,intent].filter(value=>typeof value==='string').join(' ');
+  return /(?:^|[^a-z])(?:pets?|animals?|dogs?|cats?)(?=$|[^a-z])|สัตว์เลี้ยง|สุนัข|น้องหมา/iu.test(topic);
+}
+
+function unknownPolicyMessage(entities:Record<string,unknown>,intent:string|undefined,subject:string):string {
+  if(isPetPolicyTopic(entities,intent)) {
+    return 'ตอนนี้ยังไม่มีข้อมูลยืนยันเรื่องการนำสัตว์เลี้ยงเข้าพื้นที่ครับ ต้องเช็กเงื่อนไขกับทีมงานก่อน ต้องการพาน้องไปร้านอาหาร คาเฟ่ หรือพักที่เฮือนสเตย์ครับ';
+  }
+  return `เรื่องเงื่อนไขของ${subject}ตอนนี้ทองไทยยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากตอบเดา ๆ`;
+}
+
+/** Missing permission facts are not a prose-generation problem. Even a
+ * fluent clarification from the semantic model must not start with an
+ * unverified affirmative that sounds like permission has been granted. */
+function unverifiedEcosystemPolicyResponse(input:ResponseComposerInput):ComposedResponse|null {
+  const turn=input.semanticTurn;
+  if(input.language!=='th' || !turn || turn.informationNeed!=='policy'
+      || input.dialogDecision.actionProposal || input.operationalOutcome) return null;
+  const petPolicy=isPetPolicyTopic(turn.entities,turn.intent);
+  // Existing read-only ordering/booking instructions describe the known
+  // application workflow; they do not require an external venue permission.
+  if(!petPolicy && commercialSupportProcessMessage(input))return null;
+  if(!petPolicy && !['ecosystem','local','general','restaurant','stay'].includes(turn.domain))return null;
+  const verifiedPolicy=input.knowledgeBundles.some(bundle=>
+    (!petPolicy || bundle.sources.some(source=>source.need==='stable_policy' && source.status==='ok'))
+    && bundle.facts.some(fact=>fact.authoritative && !fact.stale));
+  if(verifiedPolicy)return null;
+  return {
+    message:unknownPolicyMessage(turn.entities,turn.intent,unknownSubject('ecosystem',firstCustomerFacingEntity(turn.entities))),
+    mode:'deterministic',usedFactKeys:[],composerVersion:RESPONSE_COMPOSER_VERSION,
+    bibleVersion:THONGTHAI_BIBLE_VERSION,channel:input.channel,language:input.language,
+  };
+}
+
 /**
  * Human fallback for a meaning that is already known but whose mutable fact
  * cannot be verified. This is RENDERING ONLY: it never interprets user text.
@@ -1322,6 +1455,7 @@ function humanKnowledgeUnknownCopy(
   }
 
   if (need === 'schedule') {
+    if(request.domain==='ecosystem')return 'เวลาเปิด–ปิดและวันหยุดของแต่ละส่วนอาจต่างกันครับ ตอนนี้ยังไม่มีตารางเวลาที่ตรวจสอบได้ ต้องการสอบถามร้านอาหาร คาเฟ่ ที่พัก หรือกิจกรรมส่วนไหนครับ';
     const target = request.domain === 'activity' ? 'รอบกิจกรรม' : `ตารางเวลาของ${subject}`;
     return `${lead}ตอนนี้ทองไทยยังเช็ก${target}ที่อัปเดตไม่ได้ครับ เลยไม่อยากเดาเวลาให้ผิด`;
   }
@@ -1345,8 +1479,8 @@ function humanKnowledgeUnknownCopy(
     return `ส่วนผสมของ${subject}ตอนนี้ยังไม่มีข้อมูลที่ยืนยันได้ครบครับ เลยไม่อยากเดา โดยเฉพาะถ้าเกี่ยวกับของที่แพ้หรือของที่งด`;
   }
 
-  if (need === 'policy') {
-    return `เรื่องเงื่อนไขของ${subject}ตอนนี้ทองไทยยังไม่มีข้อมูลที่ยืนยันได้ครับ เลยไม่อยากตอบเดา ๆ`;
+  if (need === 'stable_policy') {
+    return unknownPolicyMessage(request.entities,input.semanticTurn?.intent,subject);
   }
 
   if (need === 'transaction_status') {
@@ -1905,6 +2039,12 @@ function specificClarificationMessage(input: ResponseComposerInput): string | nu
 }
 
 export function composeDeterministicResponse(input: ResponseComposerInput): ComposedResponse {
+  const facility=unverifiedFacilityResponse(input);
+  if(facility)return facility;
+  const dogPolicy=configuredDogPolicyResponse(input);
+  if(dogPolicy)return dogPolicy;
+  const policy=unverifiedEcosystemPolicyResponse(input);
+  if(policy)return policy;
   const copy = deterministicMessages(input.language);
   const outcome = input.operationalOutcome;
   let message: string;
@@ -2084,6 +2224,16 @@ function boundedCrossDomainReadback(input: ResponseComposerInput): ComposedRespo
 }
 
 export async function composeThongthaiResponse(input: ResponseComposerInput): Promise<ComposedResponse> {
+  const cafeProfile=configuredCafeProfileResponse(input);
+  if(cafeProfile)return cafeProfile;
+  const organizationSchedule=configuredOrganizationScheduleResponse(input);
+  if(organizationSchedule)return organizationSchedule;
+  const facility=unverifiedFacilityResponse(input);
+  if(facility)return facility;
+  const dogPolicy=configuredDogPolicyResponse(input);
+  if(dogPolicy)return dogPolicy;
+  const policy=unverifiedEcosystemPolicyResponse(input);
+  if(policy)return policy;
   const boundedReadback = boundedCrossDomainReadback(input);
   if (boundedReadback) return boundedReadback;
   // Rejected duration is an authoritative policy outcome. It must outrank a

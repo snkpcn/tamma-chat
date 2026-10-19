@@ -6,6 +6,8 @@ import {
   roundUsd,
   usdToThb,
   type AiUsage,
+  WEB_SEARCH_MODEL,
+  webSearchCostUsd,
 } from './_ai-cost-policy';
 import {
   compareAndSwapGuestAgentState,
@@ -33,7 +35,7 @@ export type AiCostEvent = {
   eventId: string;
   callerLabel: string;
   channel: string;
-  provider: 'openai';
+  provider: 'openai' | 'tavily';
   model: string;
   status: 'reserved' | 'completed' | 'failed';
   inputTokens: number;
@@ -153,6 +155,22 @@ function emitCostMetric(fields: Record<string, unknown>): void {
   console.log('THONGTHAI_AI_COST', JSON.stringify(fields));
 }
 
+/** Free replies are conversation activity too. Without this heartbeat a
+ * customer talking for 30 minutes through free paths could reset paid spend. */
+export async function touchAiConversation(
+  context:AiCallContext,
+  now:Date = new Date(),
+):Promise<void> {
+  if (!context.guestDbId) return;
+  for (let attempt=0; attempt<MAX_CAS_ATTEMPTS; attempt++) {
+    const snapshot = await loadGuestAgentStateSnapshot(context.guestDbId);
+    const ledger = parseLedger(snapshot.state[STATE_KEY],context,now);
+    ledger.lastActivityAt = now.toISOString();
+    if (await casLedger(context.guestDbId,snapshot,ledger,now)) return;
+  }
+  throw new AiBudgetBlockedError('ledger_unavailable');
+}
+
 function effectiveBudgetCapUsd(context: AiCallContext, customerCapUsd: number): number {
   return context.certificationMode === true
     || (Boolean(process.env.NODE_TEST_CONTEXT) && process.env.THONGTHAI_TEST_BYPASS_COST_CAP === '1')
@@ -194,12 +212,12 @@ export async function reserveAiCall(
   // Certification is explicit code/config, never customer-controlled. It still
   // records usage, but may use isolated synthetic conversation ids.
   const policy = aiCostPolicy();
-  // Real customer traffic is governed by the owner hard cap (<= 5 THB).
+  // Real customer traffic is governed by the owner hard cap (<= 2 THB).
   // Explicit certification runs and the repository's network-free harness
   // are not customer conversations, so they may use the old generous
   // runaway ceiling while still exercising/recording the same call path.
   const budgetCapUsd = effectiveBudgetCapUsd(context, policy.maxConversationCostUsd);
-  const estimatedInputTokens = estimateInputTokens(promptParts);
+  const estimatedInputTokens = model === WEB_SEARCH_MODEL ? 0 : estimateInputTokens(promptParts);
   if (estimatedInputTokens > policy.absoluteInputTokens) {
     emitCostMetric({
       conversation_id:context.conversationId, event_id:context.eventId, model,
@@ -225,7 +243,7 @@ export async function reserveAiCall(
     policy.absoluteInputTokens,
   );
   const reservedCostUsd = roundUsd(
-    reserveWorstCaseCostUsd(model, reservationInputTokens, maxOutputTokens),
+    model === WEB_SEARCH_MODEL ? webSearchCostUsd() : reserveWorstCaseCostUsd(model, reservationInputTokens, maxOutputTokens),
   );
 
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
@@ -280,7 +298,7 @@ export async function reserveAiCall(
       eventId:context.eventId,
       callerLabel:context.callerLabel,
       channel:context.channel,
-      provider:'openai',
+      provider:model === WEB_SEARCH_MODEL ? 'tavily' : 'openai',
       model,
       status:'reserved',
       inputTokens:estimatedInputTokens,
@@ -319,7 +337,8 @@ export async function finalizeAiCall(
   const { context } = reservation;
   if (!context.guestDbId) return;
   const chargedCostUsd = roundUsd(
-    usage ? calculateAiCostUsd(reservation.model, usage) : reservation.reservedCostUsd,
+    reservation.model === WEB_SEARCH_MODEL ? reservation.reservedCostUsd
+      : usage ? calculateAiCostUsd(reservation.model, usage) : reservation.reservedCostUsd,
   );
 
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
@@ -354,6 +373,7 @@ export async function finalizeAiCall(
       const budgetCapUsd = effectiveBudgetCapUsd(context, policy.maxConversationCostUsd);
       const latencyMs = Math.max(0, now.getTime() - Date.parse(previous.at || now.toISOString()));
       await persistAiCallCost({
+        provider:previous.provider,
         conversationId:context.conversationId,
         eventId:context.eventId,
         channel:context.channel,
@@ -377,7 +397,7 @@ export async function finalizeAiCall(
         conversation_id:context.conversationId,
         event_id:context.eventId,
         channel:context.channel,
-        provider:'openai',
+        provider:previous.provider,
         model:reservation.model,
         input_tokens:updated.inputTokens,
         cached_input_tokens:updated.cachedInputTokens,
@@ -428,10 +448,16 @@ function activePrimaryAgentSpendUsdFromSnapshot(
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 0;
   const value = raw as {
     cumulativeCostThb?: unknown;
+    costAccountingIncomplete?: unknown;
     lastConversationId?: unknown;
     lastUsedAt?: unknown;
   };
   if (String(value.lastConversationId ?? '') !== context.conversationId.slice(0,180)) return 0;
+  // An unfinished Agent turn may already have been billed. Do not treat its
+  // missing usage as zero and spend through the fallback provider as well.
+  if (value.costAccountingIncomplete === true) {
+    throw new AiBudgetBlockedError('ledger_unavailable');
+  }
   const lastUsed = Date.parse(String(value.lastUsedAt ?? ''));
   if (!Number.isFinite(lastUsed) || now.getTime() - lastUsed >= aiCostPolicy().conversationIdleMs) return 0;
   const thb = Math.max(0, Number(value.cumulativeCostThb) || 0);

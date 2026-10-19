@@ -54,7 +54,7 @@ test('activity: an unknown how-it-works detail is honestly declined, only the re
 test('stay: an unrecorded policy question (parking) is honestly declined, never a guessed yes/no', async () => {
   await withHarness(async harness => {
     const gid = guestId('gate5-stay-unknown-policy');
-    const r = await processThongthaiChatCore(brainRequest('มีที่จอดรถไหม', gid, 'web'), 'evt-1');
+    const r = await processThongthaiChatCore(brainRequest('ที่พักมีที่จอดรถไหม', gid, 'web'), 'evt-1');
     assert.equal(r.statusCode, 200);
     const message = msg(r.payload);
     assert.doesNotMatch(message, NO_INVENTED_SPECIFICS);

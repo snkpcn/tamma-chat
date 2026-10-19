@@ -351,3 +351,18 @@ test('unverified comparison is always deterministic and cannot hallucinate trait
   assert.match(response.message,/ยังไม่มีข้อมูลยืนยัน|ไม่ขอเดา/u);
   assert.doesNotMatch(response.message,/ใจดี|น่ารัก|คุ้นเคยกับคน|นิสัยดีกว่า/u);
 });
+
+test('unverified ecosystem permission remains explicit unknown even during a scope clarification',async()=>{
+  const request=input({
+    userMessage:'พาหมาไปได้ไหม',knowledgeBundles:[],
+    semanticTurn:{domain:'ecosystem',intent:'pet_policy',action:'ask',informationNeed:'policy',entities:{policyTopic:'pets'},references:[],constraints:[],confidence:0.9,needsClarification:true},
+    dialogDecision:decision({mode:'clarify',responseIntent:'clarify_ambiguous_entity'}),
+  });
+  for(const result of [composeDeterministicResponse(request),await composeThongthaiResponse(request)]) {
+    assert.equal(result.mode,'deterministic');
+    assert.match(result.message,/สัตว์เลี้ยง/);
+    assert.match(result.message,/ยังไม่มีข้อมูลยืนยัน/);
+    assert.doesNotMatch(result.message,/^ได้ครับ|ตัวเลือกที่มีตอนนี้|อนุญาต|ห้ามนำ/);
+    assert.deepEqual(result.usedFactKeys,[]);
+  }
+});
