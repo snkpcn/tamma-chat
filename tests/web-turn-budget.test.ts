@@ -113,5 +113,5 @@ test('LINE still races both attempts against its remaining budget', () => {
   const raced = fn.match(/withinTurnBudget\(askThongthai\(/gu) ?? [];
   assert.equal(raced.length, 2, 'the first attempt and the retry must both stay bounded');
   assert.match(fn, /if \(remainingMs\(\) >= LINE_MIN_RETRY_BUDGET_MS\)/u);
-  assert.match(fn, /ทองไทยรับข้อความแล้วครับ/u);
+  assert.match(fn, /turnUnfinishedMessage\(/u);
 });

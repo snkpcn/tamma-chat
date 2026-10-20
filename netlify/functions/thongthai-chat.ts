@@ -70,7 +70,10 @@ import { CUSTOMER_TURN_BUDGET_MS, withinTurnBudget } from './_customer-turn-budg
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
 import { resolveRequestedCustomerMedia } from './_thongthai-media';
-import { formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
+import { experienceCatalogLines, formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
+import {
+  budgetExhaustedMessage, fallbackCauseOf, isTransactionMessage, logFallback, providerUnavailableMessage, turnUnfinishedMessage,
+} from './_customer-fallback';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
 import { redactWeatherUrl } from './_weather-provider';
@@ -601,17 +604,28 @@ function isAgentPreflightBudgetGuard(error: unknown): boolean {
     || message.includes('remaining combined budget is below the safe per-turn reserve');
 }
 
-export function degradedFallbackResponse(category: DegradedFallbackCategory): BrainResponse {
-  const message = category === 'weather'
-    ? 'ตอนนี้ทองไทยเช็กสภาพอากาศไม่ทันครับ ลองถามอีกครั้งในอีกสักครู่ หรือเช็กแอปพยากรณ์อากาศคู่กันไปก่อนนะครับ'
-    : category === 'booking'
-      ? 'ตอนนี้ระบบจองของทองไทยตอบช้ากว่าปกติครับ ข้อมูลที่พิมพ์มายังไม่หายไปไหน ลองส่งอีกครั้งในอีกสักครู่นะครับ'
-      : category === 'feedback'
-        ? 'ขอบคุณสำหรับข้อความนี้ครับ ตอนนี้ระบบตอบช้ากว่าปกติเล็กน้อย รบกวนส่งอีกครั้งในอีกสักครู่ เพื่อให้ทองไทยรับเรื่องไว้อย่างถูกต้องครับ'
-        : 'ทองไทยอยู่นี่ครับ แต่ตอนนี้คิดช้ากว่าปกตินิดหนึ่ง ลองพิมพ์อีกครั้งในอีกสักครู่นะครับ 😊';
+/** The provider is genuinely unavailable, so retrying can help. A budget
+ *  block must NOT use this: see budgetExhaustedResponse. */
+export function degradedFallbackResponse(category: DegradedFallbackCategory, language: BrainRequest['language'] = 'th'): BrainResponse {
   return {
-    message,
+    message: providerUnavailableMessage(category, language),
     intent: 'conversation',
+    contextUpdates: {},
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [],
+    responseStyle: 'direct',
+    semanticMemoryUpdates: [],
+    toolCalls: [],
+  };
+}
+
+/** The conversation's AI budget is spent. Retrying cannot help, so the reply
+ *  says so plainly, points to the questions that are answered from live data
+ *  without the model, and shows the verified catalog for this turn. */
+export function budgetExhaustedResponse(language: BrainRequest['language'], worldFacts: Parameters<typeof experienceCatalogLines>[0]): BrainResponse {
+  return {
+    message: budgetExhaustedMessage(language, experienceCatalogLines(worldFacts, language)),
+    intent: 'information',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
     suggestedActions: [],
@@ -2292,7 +2306,7 @@ function deterministicExperienceDiscoveryResponse(
 ): BrainResponse | null {
   if (!isExperienceDiscoveryIntent(request.message)) return null;
   return {
-    message: formatExperienceDiscoveryMessage(runtime.worldFacts),
+    message: formatExperienceDiscoveryMessage(runtime.worldFacts, request.language),
     intent:'recommendation',
     contextUpdates:{},
     journeyAction:{type:'none',journey:null},
@@ -6187,17 +6201,12 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       outcome:'failed',errorType:error instanceof Error ? error.name : 'UnknownError',
       durationMs:Date.now()-startedAt,environment:request.environment,
     });
-    const messages:Record<string,string> = {
-      th:'ตอนนี้ทองไทยตรวจสอบข้อมูลไม่สำเร็จครับ หากเพิ่งส่งคำขอจองหรือสั่งซื้อ ทองไทยยังยืนยันผลไม่ได้ กรุณาให้พนักงานตรวจสอบก่อนส่งคำขอซ้ำครับ',
-      en:'I could not verify the information. If you just submitted a booking or order, please ask staff to check its status before submitting again.',
-      zh:'暂时无法核实信息。如果您刚提交预订或订单，请先联系工作人员确认状态，再决定是否重新提交。',
-      ja:'情報を確認できませんでした。予約や注文を送信した直後の場合は、再送信する前にスタッフへ状況をご確認ください。',
-      ko:'정보를 확인하지 못했습니다. 방금 예약이나 주문을 제출했다면 다시 제출하기 전에 직원에게 상태를 확인해 주세요.',
-      lo:'ຕອນນີ້ຍັງກວດສອບຂໍ້ມູນບໍ່ໄດ້. ຖ້າຫາກສົ່ງຄຳຂໍຈອງ ຫຼື ສັ່ງຊື້ແລ້ວ ກະລຸນາໃຫ້ພະນັກງານກວດສອບສະຖານະກ່ອນສົ່ງຊ້ຳ.',
-      vi:'Hiện tôi chưa xác minh được thông tin. Nếu bạn vừa gửi yêu cầu đặt chỗ hoặc đặt hàng, vui lòng nhờ nhân viên kiểm tra trạng thái trước khi gửi lại.',
-    };
+    // Orders are mentioned only when this message was a transaction; a menu
+    // or price question must not be told about an order it never placed.
+    logFallback({ cause:'turn_unfinished', reason:error instanceof Error ? error.name : 'UnknownError',
+      channel, language:request.language, eventId:turnId });
     return { statusCode:200, payload:{
-      message:messages[request.language] ?? messages.en,
+      message:turnUnfinishedMessage(request.language, isTransactionMessage(request.message), channel === 'line' ? 'line' : 'web'),
       intent:'information', contextUpdates:{},
       journeyAction:{type:'none',journey:null}, suggestedActions:[],
     }};
@@ -6332,6 +6341,23 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // per core invocation so every side effect in this turn shares it.
   const transportEventId = eventId
     ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2, 12)}`;
+
+  /** A fallback reply records its real cause twice: one THONGTHAI_FALLBACK
+   *  log line, and the turn row's final_response_source
+   *  ('fallback_budget_exhausted' / 'fallback_provider_unavailable'), which
+   *  the monitor view already exposes. */
+  async function recordFallbackTurn(cause: 'budget_exhausted' | 'provider_unavailable', reason: string | null): Promise<void> {
+    logFallback({ cause, reason, channel, language: request.language, eventId: transportEventId });
+    explicitAiResponseTurnPersisted = true;
+    await persistAiResponseTurn({
+      conversationId:request.guestId ?? guestDbId ?? 'unknown',eventId:transportEventId,channel,
+      finalResponseSource:`fallback_${cause}`,modelReplyUsed:false,
+      groundedKnowledgeSupplied:cause === 'budget_exhausted',zeroCostTurn:false,
+      environment:request.environment,occurredAt:new Date().toISOString(),
+    }).catch(error => {
+      console.error('AI_RESPONSE_TURN_PERSIST_ERROR',error instanceof Error ? error.name : 'UnknownError');
+    });
+  }
 
   // Recovery architecture: attempt the canonical language-understanding
   // pipeline once, early. If it cannot safely own the turn, legacy execution
@@ -7299,9 +7325,10 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
         // For provider/tool failures after an Agent attempt, keep the
         // no-double-spend rule: do not launch another paid model path.
         const fallback = polishedResponse(
-          degradedFallbackResponse(categorizeDegradedFallback(request.message)),
+          degradedFallbackResponse(categorizeDegradedFallback(request.message), request.language),
           channel,
         );
+        await recordFallbackTurn('provider_unavailable', detail.slice(0, 80));
         await persistBrainRuntime(guestDbId, channel, fallback);
         return coreResult(200, {
           message: fallback.message,
@@ -8740,7 +8767,13 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
           suggestedActions: polished.suggestedActions,
         });
       }
-      const fallback = polishedResponse(degradedFallbackResponse(categorizeDegradedFallback(request.message)), channel);
+      // A budget block cannot be retried away; only a genuinely unavailable
+      // provider gets the "try again in a moment" reply.
+      const failure = fallbackCauseOf(error) ?? { cause:'provider_unavailable' as const, reason:null };
+      const fallback = polishedResponse(failure.cause === 'budget_exhausted'
+        ? budgetExhaustedResponse(request.language, runtime.worldFacts)
+        : degradedFallbackResponse(categorizeDegradedFallback(request.message), request.language), channel);
+      await recordFallbackTurn(failure.cause, failure.reason);
       return coreResult(200, fallback);
     }
     return coreResult(502, { error: 'Thongthai brain request failed. Please try again.' });

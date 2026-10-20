@@ -5,6 +5,8 @@ import { processThongthaiChatCore } from './thongthai-chat';
 import { isSimpleGreetingMessage, isCasualAttentionMessage, isShortUnclearTextMessage, categorizeDegradedFallback } from './thongthai-chat';
 import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
 import { claimCustomerTurn, type TurnClaimOutcome } from './_ai-cost-store';
+import { resolveCustomerLanguage } from './_customer-language';
+import { isTransactionMessage, logFallback, retryLabel, turnUnfinishedMessage } from './_customer-fallback';
 import {
   CUSTOMER_MIN_RETRY_BUDGET_MS,
   CUSTOMER_TURN_BUDGET_MS,
@@ -265,16 +267,16 @@ export async function askThongthaiReliably(
     onAttemptError?.('TurnBudgetExhaustedError');
   }
 
+  // In the customer's language, and orders are mentioned only when this
+  // message was a transaction: a menu question used to be told that "no
+  // duplicate order will be created" for an order it never placed.
+  const language = resolveCustomerLanguage(message, detectLanguage(message));
+  logFallback({ cause: 'turn_unfinished', reason: 'line_turn_not_answered', channel: 'line', language, eventId: eventId ?? null });
   return {
-    message: [
-      'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
-      '',
-      'ถ้าเพิ่งส่งคำสั่งเดิมซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
-      'ลองส่งข้อความเดิมอีกครั้ง หรือพิมพ์ “ดูออเดอร์ล่าสุด” ได้เลย',
-    ].join('\n'),
+    message: turnUnfinishedMessage(language, isTransactionMessage(message), 'line'),
     intent: 'support',
     journeyAction: { type: 'none', journey: null },
-    suggestedActions: [{ label: 'ลองอีกครั้ง', action: message.slice(0, 180) }],
+    suggestedActions: [{ label: retryLabel(language), action: message.slice(0, 180) }],
   };
 }
 

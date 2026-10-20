@@ -88,7 +88,9 @@ test('the retry only starts when it has enough budget left to land', () => {
   assert.match(source, /LINE_THONGTHAI_RETRY_SKIPPED_NO_BUDGET/u);
   // The honest fallback is still reachable from BOTH the retried and the
   // skipped-retry path, so a bounded turn never ends in silence.
-  assert.match(source, /ทองไทยรับข้อความแล้วครับ/u);
+  // The text itself now comes from _customer-fallback.ts (language- and
+  // transaction-aware); tests/customer-fallback.test.ts asserts the reply.
+  assert.match(source, /turnUnfinishedMessage\(/u);
 });
 
 test('both attempts are raced against the turn budget, not just the retry', () => {

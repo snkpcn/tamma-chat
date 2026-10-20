@@ -171,8 +171,14 @@ function liveActivityState(worldFacts: WorldFactLike[]): LiveActivityState {
   return unique.length ? { status:'ok', names:unique } : { status:'empty' };
 }
 
-export function formatExperienceDiscoveryMessage(worldFacts: WorldFactLike[]): string {
+/** The business-unit list with the live activity line, without an opener or
+ *  closing, so other answers (for example the budget-exhausted reply) can
+ *  reuse the same verified content. Thai is the default; every other
+ *  language gets English labels. Names stay exactly as the catalog has them
+ *  (most exist only in Thai); only the labels and sentences are translated. */
+export function experienceCatalogLines(worldFacts: WorldFactLike[], language: string = 'th'): string[] {
   const activity = liveActivityState(worldFacts);
+  const th = language === 'th';
 
   // The activity line is the only INVENTORY-dependent line here; the other
   // lines name business units that exist regardless of today's bookable
@@ -181,23 +187,35 @@ export function formatExperienceDiscoveryMessage(worldFacts: WorldFactLike[]): s
   // confident claim that activities are on offer. An unverified source must
   // say so and hand off instead.
   const activityLine = activity.status === 'ok'
-    ? `🌿 กิจกรรม — ${activity.names.join(' / ')}`
+    ? `🌿 ${th ? 'กิจกรรม' : 'Activities'} — ${activity.names.join(' / ')}`
     : activity.status === 'empty'
-      ? '🌿 กิจกรรม — ตอนนี้ยังไม่มีรอบกิจกรรมเปิดให้จองครับ'
-      : '🌿 กิจกรรม — ตอนนี้ทองไทยยังเช็กรายการกิจกรรมล่าสุดไม่ได้ครับ เดี๋ยวให้แอดมินยืนยันให้';
-
-  const closing = activity.status === 'ok'
-    ? 'บอกจำนวนคน + เวลาที่มีได้เลย ทองไทยจัดเป็นแพลนสั้น ๆ ให้ได้ครับ'
-    : 'บอกจำนวนคน + เวลาที่มีได้เลยครับ ส่วนกิจกรรมเดี๋ยวแอดมินยืนยันรายการที่เปิดให้อีกรอบครับ';
+      ? (th ? '🌿 กิจกรรม — ตอนนี้ยังไม่มีรอบกิจกรรมเปิดให้จองครับ' : '🌿 Activities — no activity rounds are open for booking right now')
+      : (th
+        ? '🌿 กิจกรรม — ตอนนี้ทองไทยยังเช็กรายการกิจกรรมล่าสุดไม่ได้ครับ เดี๋ยวให้แอดมินยืนยันให้'
+        : '🌿 Activities — I can’t check the latest activity list right now; our staff will confirm it');
 
   return [
-    'มีครับ 😊 ที่ทำมา-ชาติมีหลายแบบ',
-    '',
-    `🍽️ กิน — ${catalogName('dining', 'ตำมา-ชาติ')}`,
+    `🍽️ ${th ? 'กิน' : 'Dining'} — ${catalogName('dining', 'ตำมา-ชาติ')}`,
     activityLine,
-    `🏡 พัก — ${catalogName('stay', 'ทำมา-ชาติ เฮือนสเตย์')}`,
-    `🌅 ชิล — ${catalogName('landscape', 'เดินชมพื้นที่กลาง')} / ${catalogName('sunset', 'ชมพระอาทิตย์ตก')}`,
-    `☕ แวะพัก — ${catalogName('inthanin', 'Inthanin')}`,
+    `🏡 ${th ? 'พัก' : 'Stay'} — ${catalogName('stay', 'ทำมา-ชาติ เฮือนสเตย์')}`,
+    `🌅 ${th ? 'ชิล' : 'Relax'} — ${catalogName('landscape', 'เดินชมพื้นที่กลาง')} / ${catalogName('sunset', 'ชมพระอาทิตย์ตก')}`,
+    `☕ ${th ? 'แวะพัก' : 'Café'} — ${catalogName('inthanin', 'Inthanin')}`,
+  ];
+}
+
+export function formatExperienceDiscoveryMessage(worldFacts: WorldFactLike[], language: string = 'th'): string {
+  const activity = liveActivityState(worldFacts);
+  const th = language === 'th';
+  const closing = activity.status === 'ok'
+    ? (th ? 'บอกจำนวนคน + เวลาที่มีได้เลย ทองไทยจัดเป็นแพลนสั้น ๆ ให้ได้ครับ'
+      : 'Tell me how many people and when you’re free, and I’ll put together a short plan.')
+    : (th ? 'บอกจำนวนคน + เวลาที่มีได้เลยครับ ส่วนกิจกรรมเดี๋ยวแอดมินยืนยันรายการที่เปิดให้อีกรอบครับ'
+      : 'Tell me how many people and when you’re free. Our staff will confirm which activities are open.');
+
+  return [
+    th ? 'มีครับ 😊 ที่ทำมา-ชาติมีหลายแบบ' : 'Here’s what Thammachat offers 😊',
+    '',
+    ...experienceCatalogLines(worldFacts, language),
     '',
     closing,
   ].join('\n');

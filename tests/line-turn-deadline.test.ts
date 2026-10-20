@@ -10,7 +10,9 @@ import { TURN_CLAIM_STALE_MS } from '../netlify/functions/_ai-cost-store';
 /** The lowest synchronous Netlify request limit. */
 const NETLIFY_SYNC_LIMIT_MS = 10_000;
 const LINE_REPLY = 'https://api.line.me/v2/bot/message/reply';
-const FALLBACK = 'ทองไทยรับข้อความแล้วครับ';
+// Both the plain and the transaction wording of the LINE turn-unfinished
+// reply contain this; these turns ask a price, so the plain one is sent.
+const FALLBACK = 'ไม่ทันในรอบนี้';
 
 const ENV = {
   SUPABASE_URL: 'https://example.supabase.co',
