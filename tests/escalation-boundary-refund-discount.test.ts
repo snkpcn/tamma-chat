@@ -56,7 +56,10 @@ test('a night of accommodation is never mistaken for a refund', () => {
   // "คืน" is also the word for a night, so these all contain "เงินคืน".
   for (const message of [
     'จ่ายเงินคืนนี้ได้ไหม',
+    'จ่ายเงินคืนนี้',
     'โอนเงินคืนวันศุกร์ได้ไหม',
+    'คืนวันศุกร์',
+    'เงินคืนวันศุกร์',
     'จ่ายเงินคืนแรกก่อนได้ไหม',
     'ค่าที่พักเป็นเงินคืนละเท่าไหร่',
     'จ่ายเงินคืนสุดท้ายตอนเช็กเอาต์',
