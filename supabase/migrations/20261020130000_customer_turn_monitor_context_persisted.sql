@@ -11,6 +11,25 @@
 -- does not distinguish the two. The view is otherwise identical to
 -- 20261020120000_customer_turn_claim_v1.sql; the new column is appended
 -- last so create or replace view keeps every existing column in place.
+--
+-- ORDER: requires 20261020120000_customer_turn_claim_v1.sql first. Applied
+-- before it, this would succeed on the older view and then make the claim
+-- migration fail ("cannot drop columns from view"), so it refuses to run.
+-- customer_turn_outcomes.claimed_at is the marker that the claim migration
+-- has been applied.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'customer_turn_outcomes'
+      and column_name = 'claimed_at'
+  ) then
+    raise exception 'Apply supabase/migrations/20261020120000_customer_turn_claim_v1.sql before 20261020130000_customer_turn_monitor_context_persisted.sql (customer_turn_outcomes.claimed_at is missing)';
+  end if;
+end
+$$;
+
 create or replace view public.thongthai_customer_turn_monitor
 with (security_invoker = true) as
 with costs as (

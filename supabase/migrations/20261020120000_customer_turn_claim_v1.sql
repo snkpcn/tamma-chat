@@ -1,5 +1,12 @@
 -- Turn-level idempotency for the shared LINE/web customer path.
 --
+-- DO NOT RE-RUN this file after
+-- 20261020130000_customer_turn_monitor_context_persisted.sql has been
+-- applied. That migration appends context_persisted to
+-- thongthai_customer_turn_monitor; the view below does not have it, so
+-- re-running this create or replace view fails with "cannot drop columns
+-- from view".
+--
 -- LINE redelivers a webhook when the previous delivery timed out or returned
 -- a non-2xx. Before this, a redelivery re-ran the whole turn: tools, state
 -- writes and a second reply. The AI cost ledger deduplicated only the paid
