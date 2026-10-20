@@ -181,7 +181,9 @@ test('Phase 5 semantic-only OTOP complaint is durably routed before the model re
 
     assert.equal(result.statusCode, 200);
     assert.doesNotMatch(message(result.payload), /MODEL_DRAFT_MUST_NOT_REACH_CUSTOMER/u);
-    assert.match(message(result.payload), /รับเรื่อง/u);
+    // The customer wrote in English, so the acknowledgement is in English
+    // (the turn language follows the message, not the request's fallback).
+    assert.match(message(result.payload), /logged this for follow-up/u);
     assert.equal(harness.modelCallCount(), 1);
 
     const events = harness.postsTo('ops_feedback_events');

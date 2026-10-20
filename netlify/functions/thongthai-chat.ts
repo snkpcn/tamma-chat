@@ -3,6 +3,7 @@ import { understandVisitorQuestion } from './_visitor-question-understanding';
 import { answerVisitorInformation } from './_visitor-information';
 import { searchMissingVisitorInformation } from './_visitor-web-search';
 import { normalizeCustomerText } from './_customer-text';
+import { resolveCustomerLanguage } from './_customer-language';
 import { touchAiConversation } from './_ai-cost-ledger';
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
@@ -6148,6 +6149,11 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const startedAt = Date.now();
   try {
     request = { ...request, message:normalizeCustomerText(request.message) };
+    // Answer in the language of THIS message. The incoming language is only a
+    // fallback for when the message does not say: the web sends its UI
+    // language, LINE sends its own script check. Every path below, fallbacks
+    // included, reads request.language.
+    request = { ...request, language:resolveCustomerLanguage(request.message, request.language) };
     // Bound the shared core inside the synchronous function limit. The web
     // handler has no transport-level retry and no other deadline of its
     // own, so without this a stalled turn runs past the request limit and
