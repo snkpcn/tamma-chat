@@ -66,14 +66,17 @@ const ISAN_NEGATION: ReadonlyArray<readonly [RegExp, string]> = [
  *    prompt. The model understands หม่ำ as food without help.
  *  - "เว้า" -> "พูด". "เว้า" is also standard Thai for concave, and it is a
  *    substring of "เว้าวอน" (to plead), which became "พูดวอน".
+ *  - "แซ่บ"/"แซบ" -> "อร่อย". แซ่บ is part of real menu names here
+ *    ("ต้มแซ่บไก่บ้าน" became "ต้มอร่อยไก่บ้าน"), and in an order it means
+ *    hot-and-bold, not just tasty: "ส้มตำเอาแซ่บ" lost its spice request
+ *    because the restaurant parser's /เอาแซ่บ/ and /แซ่บๆ/ rules never saw
+ *    the word. "บ่แซบ" in ISAN_NEGATION is unaffected.
  *
- *  Both broke this file's own rule above: never rewrite a word that also
- *  exists in standard Thai with a different meaning. */
+ *  All three broke this file's own rule above: never rewrite a word that
+ *  also exists in standard Thai with a different meaning. */
 const ISAN_VOCABULARY: ReadonlyArray<readonly [RegExp, string]> = [
   [/เบิ่ง/gu, 'ดู'],
   [/เฮ็ด/gu, 'ทำ'],
-  [/แซ่บ/gu, 'อร่อย'],
-  [/แซบ/gu, 'อร่อย'],
   [/ม่วน/gu, 'สนุก'],
   [/อีหลี/gu, 'จริง'],
   [/จั่งใด|จังได๋|จั่งได๋/gu, 'อย่างไร'],
