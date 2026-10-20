@@ -25,6 +25,19 @@ test('elongation collapses to the real word', () => {
   assert.equal(normalizeCustomerText('ไปป่าววววว'), 'ไปป่าว');
 });
 
+test('only Thai letters are collapsed: sizes, URLs and numbers stay as typed', () => {
+  // Review finding: Latin letters were collapsed too, so a size or a link
+  // silently changed before anything read it.
+  for (const text of [
+    'XXXL', 'เสื้อไซส์ XXXL มีไหม', 'www.facebook.com', 'ดูที่ www.facebook.com/tammachat',
+    'ถ่าน AAA', '555', 'ฮ่าๆ 5555', 'ห้อง 1000 บาท', 'โทร 0888 999 000',
+  ]) {
+    assert.equal(normalizeCustomerText(text), text, `${text} must be left alone`);
+  }
+  // Thai emphasis still collapses, next to Latin that does not.
+  assert.equal(normalizeCustomerText('ขอไซส์ XXXL ด่วนนนน'), 'ขอไซส์ XXXL ด่วน');
+});
+
 test('elongation collapse never corrupts a real doubled consonant', () => {
   // Standard Thai genuinely places two identical consonants side by side.
   // Only three or more is emphasis, which is why the threshold is 3.
@@ -57,6 +70,19 @@ test('"บ่เป็น" becomes the idiom only when it IS the idiom', () => {
     assert.equal(normalizeCustomerText(text), text, `${text} must be left alone`);
     assert.ok(!normalizeCustomerText(text).includes('ไม่เป็นไร'));
   }
+});
+
+test('bare "บ่เป็น" expands only at the real end of the message', () => {
+  // Review finding: a space or a digit after "บ่เป็น" counted as the end.
+  for (const text of ['บ่เป็น ไผ', 'บ่เป็น หนี้', 'บ่เป็น 2 คน', 'บ่เป็น ห่วงครับ']) {
+    assert.equal(normalizeCustomerText(text), text, `${text} must be left alone`);
+  }
+  assert.equal(normalizeCustomerText('บ่เป็น'), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็น!'), 'ไม่เป็นไร!');
+  assert.equal(normalizeCustomerText('บ่เป็น  '), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็นหยัง'), 'ไม่เป็นไร');
+  // The complete idiom still expands with a space before what follows.
+  assert.equal(normalizeCustomerText('บ่เป็นหยัง เด้อ'), 'ไม่เป็นไร เด้อ');
 });
 
 test('ordinary Thai words that merely start with "บ่" are never rewritten', () => {
@@ -102,6 +128,21 @@ test('an Isan menu item is never rewritten into a verb', () => {
   }
 });
 
+test('"แซ่บ" survives: it names real dishes and asks for spice', async () => {
+  // Review finding: แซ่บ -> อร่อย rewrote menu names and erased the spice
+  // request before the restaurant parser could read it.
+  for (const text of ['ขอต้มแซ่บไก่บ้าน 1 ที่', 'มีต้มแซ่บไหม', 'ต้มแซบกระดูกอ่อน', 'ส้มตำเอาแซ่บ', 'เอาแซ่บๆ']) {
+    assert.equal(normalizeCustomerText(text), text, `${text} must survive normalization verbatim`);
+  }
+  const { parsePreferences } = await import('../netlify/functions/_restaurant-intelligence');
+  for (const text of ['ส้มตำเอาแซ่บ', 'เอาแซ่บๆ']) {
+    // processThongthaiChatCore normalizes the message before any parser runs.
+    assert.equal(parsePreferences({ query: normalizeCustomerText(text) }, []).spice, 'hot', `${text} asks for hot`);
+  }
+  // The negated form still normalizes.
+  assert.equal(normalizeCustomerText('ส้มตำบ่แซบ'), 'ส้มตำไม่อร่อย');
+});
+
 test('a standard-Thai word is not rewritten by an Isan lookalike', () => {
   // "เว้า" is standard Thai for concave and a substring of "เว้าวอน".
   assert.equal(normalizeCustomerText('เว้าวอน'), 'เว้าวอน');
@@ -110,8 +151,6 @@ test('a standard-Thai word is not rewritten by an Isan lookalike', () => {
 
 test('everyday Isan vocabulary reaches the parsers as standard Thai', () => {
   assert.equal(normalizeCustomerText('อยากเบิ่งเมนู'), 'อยากดูเมนู');
-  assert.equal(normalizeCustomerText('ส้มตำแซ่บ'), 'ส้มตำอร่อย');
-  assert.equal(normalizeCustomerText('ส้มตำแซบหลาย'), 'ส้มตำอร่อยหลาย');
   assert.equal(normalizeCustomerText('ขี่ม้าม่วนบ้อ'), 'ขี่ม้าสนุกบ้อ');
   assert.equal(normalizeCustomerText('อีหลีบ้อ'), 'จริงบ้อ');
   assert.equal(normalizeCustomerText('เฮ็ดจั่งใด'), 'ทำอย่างไร');
@@ -154,7 +193,7 @@ test('"คับ" is never treated as a politeness particle, even at the end', (
 test('a real Isan sentence survives end to end', () => {
   assert.equal(
     normalizeCustomerText('อยากเบิ่งเมนูครับ ส้มตำแซ่บบ่ บ่เอาเผ็ดหลายเด้อ'),
-    'อยากดูเมนูครับ ส้มตำอร่อยบ่ ไม่เอาเผ็ดหลายเด้อ',
+    'อยากดูเมนูครับ ส้มตำแซ่บบ่ ไม่เอาเผ็ดหลายเด้อ',
   );
   assert.equal(
     normalizeCustomerText('๒ คนไปตอนบ่ายได้บ่มีที่ว่างคร้าบ'),

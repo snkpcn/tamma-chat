@@ -33,9 +33,11 @@ const ISAN_NEGATION: ReadonlyArray<readonly [RegExp, string]> = [
   // With the tail present the idiom is complete, so anything may follow
   // ("บ่เป็นหยังเด้อ").
   [/บ่เป็น(?:หยัง|อิหยัง|ไร)/gu, 'ไม่เป็นไร'],
-  // Bare "บ่เป็น" only at the end of a clause. Anything else is "บ่" + a
-  // different verb and must keep its own word.
-  [/บ่เป็น(?![ก-๛])/gu, 'ไม่เป็นไร'],
+  // Bare "บ่เป็น" only at the real end of the message (trailing spaces or
+  // punctuation allowed). Anything else is "บ่" + a different verb and must
+  // keep its own word. "Not followed by a Thai letter" was not enough: Thai
+  // is typed with spaces between words, so "บ่เป็น ไผ" became "ไม่เป็นไร ไผ".
+  [/บ่เป็น(?=[\s!?.…]*$)/gu, 'ไม่เป็นไร'],
   [/บ่ฮู้/gu, 'ไม่รู้'],
   [/บ่รู้/gu, 'ไม่รู้'],
   [/บ่ไหว/gu, 'ไม่ไหว'],
@@ -64,14 +66,17 @@ const ISAN_NEGATION: ReadonlyArray<readonly [RegExp, string]> = [
  *    prompt. The model understands หม่ำ as food without help.
  *  - "เว้า" -> "พูด". "เว้า" is also standard Thai for concave, and it is a
  *    substring of "เว้าวอน" (to plead), which became "พูดวอน".
+ *  - "แซ่บ"/"แซบ" -> "อร่อย". แซ่บ is part of real menu names here
+ *    ("ต้มแซ่บไก่บ้าน" became "ต้มอร่อยไก่บ้าน"), and in an order it means
+ *    hot-and-bold, not just tasty: "ส้มตำเอาแซ่บ" lost its spice request
+ *    because the restaurant parser's /เอาแซ่บ/ and /แซ่บๆ/ rules never saw
+ *    the word. "บ่แซบ" in ISAN_NEGATION is unaffected.
  *
- *  Both broke this file's own rule above: never rewrite a word that also
- *  exists in standard Thai with a different meaning. */
+ *  All three broke this file's own rule above: never rewrite a word that
+ *  also exists in standard Thai with a different meaning. */
 const ISAN_VOCABULARY: ReadonlyArray<readonly [RegExp, string]> = [
   [/เบิ่ง/gu, 'ดู'],
   [/เฮ็ด/gu, 'ทำ'],
-  [/แซ่บ/gu, 'อร่อย'],
-  [/แซบ/gu, 'อร่อย'],
   [/ม่วน/gu, 'สนุก'],
   [/อีหลี/gu, 'จริง'],
   [/จั่งใด|จังได๋|จั่งได๋/gu, 'อย่างไร'],
@@ -106,9 +111,14 @@ const TRAILING_POLITENESS: ReadonlyArray<readonly [RegExp, string]> = [
  *  Threshold is 3, not 2: standard Thai really does place two identical
  *  consonants side by side across a syllable boundary ("บ้านนอก", "จันทร์",
  *  "ธรรมะ" patterns), and collapsing those would corrupt real words. Three
- *  or more of the same character is emphasis, not spelling. */
+ *  or more of the same character is emphasis, not spelling.
+ *
+ *  Thai letters only. A repeated Latin letter or digit is usually data, not
+ *  emphasis: "XXXL" is a size, "www." is a URL, "AAA" is a battery, and
+ *  collapsing them changed what the customer asked for ("XXXL" -> "XL").
+ *  Digits were already excluded; "555" stays as typed. */
 function collapseElongation(message: string): string {
-  return message.replace(/([ก-๛A-Za-z])\1{2,}/gu, '$1');
+  return message.replace(/([ก-๛])\1{2,}/gu, '$1');
 }
 
 function applyMap(

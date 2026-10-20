@@ -148,8 +148,10 @@ const SPECIAL_DISCOUNT_RE = new RegExp(
     'ต่อราคา',
     // "ถูกกว่านี้ได้ไหม" asks for a cheaper PRICE and escalates.
     // "มีที่ถูกกว่านี้ไหม" asks whether a cheaper OPTION exists, which the
-    // catalog responder owns -- so a preceding "มี ..." disqualifies it.
-    '(?<!มี[\\u0E00-\\u0E7F]{0,10})ถูกกว่านี้',
+    // catalog responder owns -- so a preceding "มี ..." disqualifies it,
+    // and so does a following "มี" ("ถูกกว่านี้มีไหม": same question, the
+    // other word order).
+    '(?<!มี[\\u0E00-\\u0E7F]{0,10})ถูกกว่านี้(?!\\s*มี)',
     'ลดราคา',
   ].join('|'),
   'u',
