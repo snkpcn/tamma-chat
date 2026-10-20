@@ -90,8 +90,45 @@ function detectDomainHint(text: string): BusinessUnit | null {
   return DOMAIN_HINT.find(([pattern]) => pattern.test(text))?.[1] ?? null;
 }
 
-const REFUND_RE = /คืนเงิน|ขอเงินคืน|refund/iu;
-const SPECIAL_DISCOUNT_RE = /ส่วนลดพิเศษ|ลดพิเศษ|ราคาพิเศษ|ขอลดราคา|ขอส่วนลด/u;
+// "เงินคืน" alone is NOT safe: "คืน" is also the word for a night, so
+// "จ่ายเงินคืนนี้" (pay tonight) and "โอนเงินคืนวันศุกร์" (transfer Friday
+// night) both contain it. The night readings are excluded explicitly; the
+// unambiguous "คืนเงิน" word order needs no guard.
+const REFUND_NIGHT_CONTEXT = 'นี้|นั้น|วาน|วัน|ละ|แรก|สุดท้าย|ก่อน|ถัดไป|ที่\\s*\\d';
+const REFUND_RE = new RegExp(
+  [
+    'คืนเงิน',
+    'คืนตัง(?:ค์)?',
+    `เงินคืน(?!${REFUND_NIGHT_CONTEXT})`,
+    'refund',
+    'รีฟันด์',
+  ].join('|'),
+  'iu',
+);
+
+// A REQUEST for a better price, not a question about existing promotions:
+// "มีส่วนลดไหม" must keep reaching the promotion responder rather than
+// escalating to the owner.
+//
+// The token immediately after "ลด" is what separates the two readings. A
+// bare /ลด/ would catch "ลดหวานหน่อย", "ลดเผ็ดได้ไหม" and "ลดน้ำแข็ง" --
+// ordinary café and restaurant modifiers, not haggling. Requiring a
+// price-side function word right after "ลด" excludes all of them by
+// construction, because those sentences continue with a food noun instead.
+const SPECIAL_DISCOUNT_RE = new RegExp(
+  [
+    'ส่วนลดพิเศษ',
+    'ลดพิเศษ',
+    'ราคาพิเศษ',
+    'ขอลดราคา',
+    'ขอส่วนลด',
+    'ลด(?:ให้|ราคา|หน่อย|ได้|อีก|กว่านี้)',
+    'ต่อราคา',
+    'ถูกกว่านี้',
+    'ลดราคา',
+  ].join('|'),
+  'u',
+);
 const CLAIM_RE = /ขอเคลม|เคลมประกัน|(?:^|[\s,])เคลม(?:[\s,]|$)/u;
 // A LIABILITY QUESTION ("...รับผิดชอบไหม"), not a report that an
 // accident already happened -- deliberately requires the question
