@@ -65,9 +65,7 @@ test('asking for a better price now escalates', () => {
   }
 });
 
-test('reducing an ingredient is not a discount request', () => {
-  // The exact false positive a bare /ลด/ rule would create. These belong to
-  // the café and restaurant responders.
+test('reducing an ingredient is not a discount request (noun AFTER ลด)', () => {
   for (const message of [
     'ลดหวานหน่อยครับ',
     'ลดน้ำตาลครึ่งนึง',
@@ -82,6 +80,56 @@ test('reducing an ingredient is not a discount request', () => {
       `${message} is a food modifier, not haggling`,
     );
   }
+});
+
+test('reducing an ingredient is not a discount request (noun BEFORE ลด)', () => {
+  // Review finding: Thai puts the thing being reduced on either side of
+  // "ลด", and only the AFTER order was handled. These are among the most
+  // common café orders there is and were all escalating to the owner as
+  // haggling while answering about price instead of the drink.
+  for (const message of [
+    'น้ำตาลลดได้ไหม',
+    'ความเผ็ดลดได้ไหม',
+    'เผ็ดลดได้ป่าว',
+    'น้ำแข็งลดได้ไหม',
+    'หวานลดหน่อยได้ไหม',
+    'ความหวานลดให้หน่อย',
+    'เค็มลดได้ไหม',
+    'นมลดหน่อยครับ',
+    'ปริมาณลดได้ไหม',
+  ]) {
+    assert.notEqual(
+      category(message), 'special_discount',
+      `${message} is a food modifier with the noun first, not haggling`,
+    );
+  }
+});
+
+test('a genuine price reduction still escalates in either word order', () => {
+  // The leading-noun guard must not swallow real haggling. "ราคา" is
+  // deliberately absent from the consumable list for exactly this reason.
+  for (const message of [
+    'ราคาลดได้ไหม',
+    'ค่าห้องลดได้ไหม',
+    'ลดราคาได้ไหม',
+    'ลดให้หน่อยได้ป่าว',
+  ]) {
+    assert.equal(
+      category(message), 'special_discount',
+      `${message} is a real price request`,
+    );
+  }
+});
+
+test('asking whether a cheaper option exists is a catalog question', () => {
+  // Review finding: "ถูกกว่านี้" unanchored escalated an ordinary
+  // option-comparison question to the owner.
+  assert.notEqual(category('มีที่ถูกกว่านี้ไหม'), 'special_discount');
+  assert.notEqual(category('มีห้องถูกกว่านี้ไหม'), 'special_discount');
+  assert.notEqual(category('มีแพ็กเกจถูกกว่านี้ไหม'), 'special_discount');
+  // ...but asking for a cheaper PRICE still escalates, with or without ขอ.
+  assert.equal(category('ถูกกว่านี้ได้ไหม'), 'special_discount');
+  assert.equal(category('ขอถูกกว่านี้ได้ไหม'), 'special_discount');
 });
 
 test('asking about existing promotions is not an owner escalation', () => {

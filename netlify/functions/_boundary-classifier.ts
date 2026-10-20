@@ -110,11 +110,26 @@ const REFUND_RE = new RegExp(
 // "มีส่วนลดไหม" must keep reaching the promotion responder rather than
 // escalating to the owner.
 //
-// The token immediately after "ลด" is what separates the two readings. A
-// bare /ลด/ would catch "ลดหวานหน่อย", "ลดเผ็ดได้ไหม" and "ลดน้ำแข็ง" --
-// ordinary café and restaurant modifiers, not haggling. Requiring a
-// price-side function word right after "ลด" excludes all of them by
-// construction, because those sentences continue with a food noun instead.
+// Thai puts the thing being reduced on EITHER side of "ลด", so one rule is
+// not enough:
+//
+//   "ลดหวานหน่อย"      -- noun AFTER  -> food modifier
+//   "น้ำตาลลดได้ไหม"   -- noun BEFORE -> food modifier, same meaning
+//
+// Requiring a price-side function word after "ลด" only handles the first
+// order. Review found the second order misrouted every "น้ำตาลลดได้ไหม" /
+// "ความเผ็ดลดได้ไหม" to the owner as haggling, which is one of the most
+// common café orders there is. So the trailing function word is still
+// required AND a leading consumable noun now disqualifies the match.
+//
+// "ราคา" is deliberately NOT in this list: "ราคาลดได้ไหม" really is a
+// discount request.
+const DISCOUNT_CONSUMABLE_BEFORE = [
+  'น้ำตาล','หวาน','เผ็ด','เค็ม','เปรี้ยว','มัน','น้ำแข็ง','นม','ครีม','ชีส',
+  'โซเดียม','เกลือ','พริก','กะทิ','ซอส','แป้ง','ข้าว','ผัก','ปริมาณ','ขนาด',
+  'น้ำหนัก','ความหวาน','ความเผ็ด','ความเค็ม',
+].join('|');
+
 const SPECIAL_DISCOUNT_RE = new RegExp(
   [
     'ส่วนลดพิเศษ',
@@ -122,9 +137,12 @@ const SPECIAL_DISCOUNT_RE = new RegExp(
     'ราคาพิเศษ',
     'ขอลดราคา',
     'ขอส่วนลด',
-    'ลด(?:ให้|ราคา|หน่อย|ได้|อีก|กว่านี้)',
+    `(?<!(?:${DISCOUNT_CONSUMABLE_BEFORE}))ลด(?:ให้|ราคา|หน่อย|ได้|อีก|กว่านี้)`,
     'ต่อราคา',
-    'ถูกกว่านี้',
+    // "ถูกกว่านี้ได้ไหม" asks for a cheaper PRICE and escalates.
+    // "มีที่ถูกกว่านี้ไหม" asks whether a cheaper OPTION exists, which the
+    // catalog responder owns -- so a preceding "มี ..." disqualifies it.
+    '(?<!มี[\\u0E00-\\u0E7F]{0,10})ถูกกว่านี้',
     'ลดราคา',
   ].join('|'),
   'u',
