@@ -113,6 +113,10 @@ export interface AgentStateUpdate {
    *  JSON output (not part of the documented OUTPUT schema below). */
   pendingPromotionRedemption?: PendingPromotionRedemption;
   clearPendingPromotionRedemption?: boolean;
+  /** The topic menu this reply offered (see _offer-reply.ts). Set only by
+   *  deterministic responders, never by the LLM's JSON output. */
+  pendingOffer?: { kind: 'topic_menu' | 'catalog_list'; offeredAt: string; language?: string };
+  clearPendingOffer?: boolean;
 }
 export interface SemanticMemoryUpdate { key: string; value: string | string[]; confidence: number }
 export interface BrainRuntimeContext {

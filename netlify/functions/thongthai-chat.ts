@@ -4,6 +4,7 @@ import { answerVisitorInformation } from './_visitor-information';
 import { searchMissingVisitorInformation } from './_visitor-web-search';
 import { normalizeCustomerText } from './_customer-text';
 import { resolveCustomerLanguage } from './_customer-language';
+import { canonicalQueryForOfferReply, isLiveOffer, offerAcceptsReply, parseOfferReply, withTopicMenuOffer } from './_offer-reply';
 import { touchAiConversation } from './_ai-cost-ledger';
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
@@ -6461,6 +6462,35 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     };
   }
 
+  // A reply to the topic menu Thongthai just offered ("ทั้งหมดเลยครับ",
+  // "all of them", "2", "กิจกรรม") is understood here, before any paid path:
+  // it becomes the explicit question it stands for. The state read happens
+  // only for a message shaped like such a reply. See _offer-reply.ts.
+  const offerReply = guestDbId ? parseOfferReply(request.message) : null;
+  if (offerReply) {
+    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(() => null);
+    const recentTurns = (snapshot?.state?.conversationContext as { recentTurns?: Array<{ at?: string }> } | undefined)?.recentTurns ?? [];
+    const lastTurnAt = recentTurns.length ? recentTurns[recentTurns.length - 1]?.at ?? null : null;
+    const offer = snapshot?.state?.pending_offer;
+    if (snapshot && isLiveOffer(offer, lastTurnAt) && offerAcceptsReply(offer, offerReply, request.message)) {
+      // A reply with no letters at all ("2") answers in the offer's language.
+      if (!/\p{L}/u.test(request.message) && typeof offer.language === 'string'
+          && ['th','en','zh','lo','vi','ja','ko'].includes(offer.language)) {
+        request = { ...request, language:offer.language as BrainRequest['language'] };
+      }
+      const canonical = canonicalQueryForOfferReply(offerReply, request.language);
+      console.log('THONGTHAI_OFFER_REPLY_RESOLVED', JSON.stringify({
+        event_id:transportEventId, channel, language:request.language,
+        reply:offerReply.kind === 'all' ? 'all' : offerReply.option,
+      }));
+      // Used once: the next "ทั้งหมด" must not resolve against this offer.
+      await patchGuestAgentState(guestDbId, { set:{}, removeKeys:['pending_offer'] }).catch(error => {
+        console.error('THONGTHAI_OFFER_CLEAR_ERROR', error instanceof Error ? error.message.slice(0, 160) : 'unknown');
+      });
+      request = { ...request, message:canonical };
+    }
+  }
+
   // Broad-discovery turns ("มีกิจกรรมอะไรบ้าง") are answered entirely from
   // the verified activity/experience catalog by
   // deterministicExperienceDiscoveryResponse further down -- no model output
@@ -6500,7 +6530,8 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
 
   const earlyGreeting = deterministicGreetingResponse(request);
   if (earlyGreeting) {
-    const polished = polishedResponse(earlyGreeting, channel);
+    // The greeting offers the topic menu; remember it for the next turn.
+    const polished = polishedResponse(withTopicMenuOffer(earlyGreeting, request.language), channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
@@ -7899,7 +7930,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   const botAddress = deterministicBotAddressResponse(request);
   if (botAddress) {
     console.log('SEMANTIC_RESPONDER_SELECTED', JSON.stringify({ responder: 'deterministicBotAddressResponse' }));
-    const polished = polishedResponse(botAddress, channel);
+    const polished = polishedResponse(withTopicMenuOffer(botAddress, request.language), channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,
@@ -8596,7 +8627,9 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // activity inventory before the broader activity interpreter runs.
   const experienceDiscovery = deterministicExperienceDiscoveryResponse(request, runtime);
   if (experienceDiscovery) {
-    const polished = polishedResponse(experienceDiscovery, channel);
+    // The catalog list is itself a menu: "ทั้งหมดเลย" right after it is an
+    // answer to it, not a new open question for the model.
+    const polished = polishedResponse(withTopicMenuOffer(experienceDiscovery, request.language), channel);
     await persistBrainRuntime(guestDbId, channel, polished);
     return coreResult(200, {
       message: polished.message,

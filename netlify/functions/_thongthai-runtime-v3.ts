@@ -359,6 +359,10 @@ export async function persistBrainRuntime(guestDbId: string | null, channel: Bra
     if (update.restaurantAdvisorContext) set.restaurantAdvisorContext = update.restaurantAdvisorContext;
     if (update.pendingPromotionRedemption) set.pendingPromotionRedemption = update.pendingPromotionRedemption;
     if (update.clearPendingPromotionRedemption === true) removeKeys.push('pendingPromotionRedemption');
+    // An offer frames only the very next customer turn: any reply that does
+    // not make a new one retires the previous one.
+    if (update.pendingOffer) set.pending_offer = update.pendingOffer;
+    else removeKeys.push('pending_offer');
     const patched = await patchGuestAgentState(guestDbId,{set,removeKeys});
     if (!patched) throw new Error('guest_agent_state_cas_exhausted');
 
