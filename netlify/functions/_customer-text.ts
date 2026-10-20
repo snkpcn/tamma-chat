@@ -45,11 +45,23 @@ const ISAN_NEGATION: ReadonlyArray<readonly [RegExp, string]> = [
 
 /** Everyday Isan vocabulary. Kept small on purpose: a word is only listed
  *  when the standard-Thai reading is absent or vanishingly unlikely in a
- *  restaurant / café / stay / activity conversation. */
+ *  restaurant / café / stay / activity conversation.
+ *
+ *  Two entries were REMOVED after review, and must not come back:
+ *
+ *  - "หม่ำ" -> "กิน". หม่ำ is an Isan fermented pork sausage, i.e. a real
+ *    MENU ITEM here (and a nationally known performer's name). Rewriting it
+ *    destroyed orders: "มีหม่ำไหม" became "มีกินไหม" and "สั่งหม่ำ 2 ไม้"
+ *    became "สั่งกิน 2 ไม้", so the dish never reached the parser or the
+ *    prompt. The model understands หม่ำ as food without help.
+ *  - "เว้า" -> "พูด". "เว้า" is also standard Thai for concave, and it is a
+ *    substring of "เว้าวอน" (to plead), which became "พูดวอน".
+ *
+ *  Both broke this file's own rule above: never rewrite a word that also
+ *  exists in standard Thai with a different meaning. */
 const ISAN_VOCABULARY: ReadonlyArray<readonly [RegExp, string]> = [
   [/เบิ่ง/gu, 'ดู'],
   [/เฮ็ด/gu, 'ทำ'],
-  [/เว้า/gu, 'พูด'],
   [/แซ่บ/gu, 'อร่อย'],
   [/แซบ/gu, 'อร่อย'],
   [/ม่วน/gu, 'สนุก'],
@@ -59,7 +71,6 @@ const ISAN_VOCABULARY: ReadonlyArray<readonly [RegExp, string]> = [
   [/ยังใด๋/gu, 'อย่างไร'],
   [/สิไป/gu, 'จะไป'],
   [/กินข้าวแลง/gu, 'กินข้าวเย็น'],
-  [/หม่ำ/gu, 'กิน'],
   [/อิหยัง|หยัง/gu, 'อะไร'],
 ];
 

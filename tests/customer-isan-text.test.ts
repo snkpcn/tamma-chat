@@ -71,6 +71,27 @@ test('negation is never stripped off the verb it negates', () => {
   }
 });
 
+test('an Isan menu item is never rewritten into a verb', () => {
+  // Review finding: "หม่ำ" (Isan fermented pork sausage) was mapped to
+  // "กิน", which destroyed real orders before they reached any parser.
+  assert.equal(normalizeCustomerText('มีหม่ำไหม'), 'มีหม่ำไหม');
+  assert.equal(normalizeCustomerText('สั่งหม่ำ 2 ไม้'), 'สั่งหม่ำ 2 ไม้');
+  assert.equal(normalizeCustomerText('ไส้กรอกหม่ำ'), 'ไส้กรอกหม่ำ');
+  assert.equal(normalizeCustomerText('หม่ำกับส้มตำ'), 'หม่ำกับส้มตำ');
+  for (const dish of ['หม่ำ', 'ส้มตำ', 'ลาบ', 'ก้อย', 'ซุปหน่อไม้', 'แจ่ว', 'ปลาร้า', 'ไก่ย่าง']) {
+    assert.equal(
+      normalizeCustomerText(`มี${dish}ไหม`), `มี${dish}ไหม`,
+      `${dish} is a menu item and must survive normalization verbatim`,
+    );
+  }
+});
+
+test('a standard-Thai word is not rewritten by an Isan lookalike', () => {
+  // "เว้า" is standard Thai for concave and a substring of "เว้าวอน".
+  assert.equal(normalizeCustomerText('เว้าวอน'), 'เว้าวอน');
+  assert.equal(normalizeCustomerText('ขอบเว้า'), 'ขอบเว้า');
+});
+
 test('everyday Isan vocabulary reaches the parsers as standard Thai', () => {
   assert.equal(normalizeCustomerText('อยากเบิ่งเมนู'), 'อยากดูเมนู');
   assert.equal(normalizeCustomerText('ส้มตำแซ่บ'), 'ส้มตำอร่อย');
