@@ -285,9 +285,20 @@ test('the claim metric never carries customer text', async () => {
   );
 });
 
-test('the in-flight window is wider than any synchronous invocation', () => {
-  // A takeover must mean the previous attempt is really gone, not slow.
-  assert.ok(TURN_CLAIM_STALE_MS > 26_000);
+test('the in-flight window brackets a real bounded turn', async () => {
+  const { LINE_TURN_BUDGET_MS } = await import('../netlify/functions/_line-webhook-core');
+  // Above the longest a live turn can hold its claim, so a slow-but-alive
+  // attempt is never stolen...
+  assert.ok(
+    TURN_CLAIM_STALE_MS > LINE_TURN_BUDGET_MS,
+    'a live turn must never have its own claim taken over',
+  );
+  // ...and below the point where a killed turn could never be retried, which
+  // would turn a timeout into permanent silence.
+  assert.ok(
+    TURN_CLAIM_STALE_MS < 30_000,
+    'a killed turn must become reclaimable soon enough for LINE to redeliver',
+  );
   assert.ok(TURN_CLAIM_TIMEOUT_MS <= 1_000, 'dedupe may add at most ~1s to a reply');
 });
 

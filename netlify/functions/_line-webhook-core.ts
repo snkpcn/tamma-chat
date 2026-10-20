@@ -203,14 +203,64 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** Wall-clock budget for one LINE customer turn, measured from the moment
+ *  the message handler starts (so the turn claim is inside it).
+ *
+ *  A synchronous Netlify function is killed at its request limit, the lowest
+ *  of which is 10s. Nothing in this path used to be bounded by that: each
+ *  provider call owns its own 7s budget, a turn makes two of them
+ *  (interpretation then grounded composition), and the retry below doubled
+ *  the whole thing -- a worst case near 29s. The function died first, so the
+ *  customer got silence instead of the honest fallback this module already
+ *  has, and _thongthai-one-mind-response.ts's own 18s composer cutoff could
+ *  never fire because 18s is past the kill.
+ *
+ *  8s leaves room for the LINE reply call and webhook-level work inside 10s.
+ *  This bounds when the customer gets AN ANSWER; it does not cancel
+ *  already-issued database writes, which stay idempotent exactly as the
+ *  retry comment below describes. */
+export const LINE_TURN_BUDGET_MS = 8_000;
+
+/** Below this there is not enough time left for a retry to plausibly finish,
+ *  so spend the remaining time on the fallback reply instead of starting an
+ *  attempt that cannot land. */
+export const LINE_MIN_RETRY_BUDGET_MS = 2_500;
+
+class TurnBudgetExhaustedError extends Error {
+  constructor(remainingMs: number) {
+    super(`LINE turn budget exhausted with ${remainingMs}ms left`);
+    this.name = 'TurnBudgetExhaustedError';
+  }
+}
+
+/** Resolve with the attempt, or reject once the turn budget runs out --
+ *  whichever happens first. The abandoned attempt's own per-call timeouts
+ *  still fire; we simply stop waiting for it. */
+function withinTurnBudget(
+  attempt: Promise<ThongthaiResponse>,
+  budgetMs: number,
+): Promise<ThongthaiResponse> {
+  if (budgetMs <= 0) return Promise.reject(new TurnBudgetExhaustedError(budgetMs));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new TurnBudgetExhaustedError(0)), budgetMs);
+  });
+  return Promise.race([attempt, deadline]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 async function askThongthaiReliably(
   message: string,
   userId: string,
   eventId?: string,
   onAttemptError?: (errorType: string) => void,
+  turnStartedAt: number = Date.now(),
 ): Promise<ThongthaiResponse> {
+  const remainingMs = () => LINE_TURN_BUDGET_MS - (Date.now() - turnStartedAt);
+
   try {
-    return await askThongthai(message, userId, eventId);
+    return await withinTurnBudget(askThongthai(message, userId, eventId), remainingMs());
   } catch (firstError) {
     console.error(
       'LINE_THONGTHAI_FIRST_ATTEMPT_ERROR',
@@ -222,27 +272,39 @@ async function askThongthaiReliably(
   // A retry is safe for write actions because operational creates (including restaurant preorders)
   // are idempotent at the database layer. This closes the failure window where a write succeeds
   // but the model/final response times out and the customer otherwise sees silence.
-  await delay(250);
-  try {
-    return await askThongthai(message, userId, eventId);
-  } catch (secondError) {
-    console.error(
-      'LINE_THONGTHAI_SECOND_ATTEMPT_ERROR',
-      secondError instanceof Error ? secondError.message.slice(0, 240) : 'unknown',
-    );
-    onAttemptError?.(secondError instanceof Error ? secondError.constructor.name : 'unknown');
-    return {
-      message: [
-        'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
-        '',
-        'ถ้าเพิ่งส่งคำสั่งเดิมซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
-        'ลองส่งข้อความเดิมอีกครั้ง หรือพิมพ์ “ดูออเดอร์ล่าสุด” ได้เลย',
-      ].join('\n'),
-      intent: 'support',
-      journeyAction: { type: 'none', journey: null },
-      suggestedActions: [{ label: 'ลองอีกครั้ง', action: message.slice(0, 180) }],
-    };
+  // It is now also gated on there being enough budget left to finish: a retry
+  // that cannot land before the function is killed produces silence, which is
+  // the exact symptom the retry exists to prevent.
+  if (remainingMs() >= LINE_MIN_RETRY_BUDGET_MS) {
+    await delay(250);
+    try {
+      return await withinTurnBudget(askThongthai(message, userId, eventId), remainingMs());
+    } catch (secondError) {
+      console.error(
+        'LINE_THONGTHAI_SECOND_ATTEMPT_ERROR',
+        secondError instanceof Error ? secondError.message.slice(0, 240) : 'unknown',
+      );
+      onAttemptError?.(secondError instanceof Error ? secondError.constructor.name : 'unknown');
+    }
+  } else {
+    console.log('LINE_THONGTHAI_RETRY_SKIPPED_NO_BUDGET', JSON.stringify({
+      remaining_ms: Math.max(0, remainingMs()),
+      turn_budget_ms: LINE_TURN_BUDGET_MS,
+    }));
+    onAttemptError?.('TurnBudgetExhaustedError');
   }
+
+  return {
+    message: [
+      'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
+      '',
+      'ถ้าเพิ่งส่งคำสั่งเดิมซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
+      'ลองส่งข้อความเดิมอีกครั้ง หรือพิมพ์ “ดูออเดอร์ล่าสุด” ได้เลย',
+    ].join('\n'),
+    intent: 'support',
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [{ label: 'ลองอีกครั้ง', action: message.slice(0, 180) }],
+  };
 }
 
 function splitText(value: string): string[] {
@@ -463,6 +525,9 @@ async function handleEvent(
     return;
   }
 
+  // Start the turn clock before the claim, so the whole turn -- dedupe
+  // included -- is bounded by LINE_TURN_BUDGET_MS.
+  const turnStartedAt = Date.now();
   const message = event.message.text;
   const language = detectLanguage(message);
 
@@ -529,7 +594,7 @@ async function handleEvent(
   }
   const result = await askThongthaiReliably(message, userId, turnId, errorType => {
     llmErrorType = errorType;
-  });
+  }, turnStartedAt);
   if (!deterministicResponder) finalResponseKind = llmErrorType ? 'degraded_fallback' : 'thongthai_core';
   console.log('FINAL_RESPONSE_SOURCE', JSON.stringify({ source: deterministicResponder ?? finalResponseKind }));
   logPrivateChatAttempt();

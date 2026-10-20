@@ -15,10 +15,16 @@ export type TurnClaimOutcome =
 export const TURN_CLAIM_TIMEOUT_MS = 1_000;
 
 /** Longest a claim may stay 'in_progress' before another delivery may take
- *  it over. Above the hard ceiling of a synchronous function invocation, so a
- *  takeover means the previous attempt really is gone (crash / hard timeout),
- *  never that it is merely slow. */
-export const TURN_CLAIM_STALE_MS = 30_000;
+ *  it over.
+ *
+ *  Must sit ABOVE the longest a live turn can hold its claim (the LINE turn
+ *  budget plus the reply call, i.e. the 10s synchronous function ceiling) so
+ *  a slow-but-alive attempt is never stolen, and BELOW the point where a
+ *  redelivery would be refused forever. If a turn is killed mid-flight its
+ *  claim is left 'in_progress', and LINE's redelivery must be able to take
+ *  over and actually answer -- otherwise dedupe converts a timeout into
+ *  permanent silence, which is worse than the duplicate it prevents. */
+export const TURN_CLAIM_STALE_MS = 12_000;
 
 async function runCustomerTurnClaim(
   row:{ conversationId:string|null; eventId:string; channel:string; environment:'live'|'test' },
