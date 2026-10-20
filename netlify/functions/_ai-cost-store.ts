@@ -1,5 +1,122 @@
 import { backendFetch } from './_backend-fetch';
 
+/** Result of trying to claim a turn before doing any work.
+ *  'claimed'            -- first delivery, proceed.
+ *  'stale_reclaimed'    -- a previous attempt claimed it and never finished
+ *                          within the in-flight window, so take it over.
+ *  'duplicate_skipped'  -- a live attempt owns this turn, do nothing.
+ *  'claim_failed_open'  -- the claim could not be decided; proceed anyway. */
+export type TurnClaimOutcome =
+  | 'claimed' | 'stale_reclaimed' | 'duplicate_skipped' | 'claim_failed_open';
+
+/** Deliberately shorter than BACKEND_TIMEOUT_MS. Dedupe sits on the customer
+ *  reply path, so it may add at most ~1s to a turn that is already racing the
+ *  function timeout. A slow claim fails OPEN rather than delaying the reply. */
+export const TURN_CLAIM_TIMEOUT_MS = 1_000;
+
+/** Longest a claim may stay 'in_progress' before another delivery may take
+ *  it over. Above the hard ceiling of a synchronous function invocation, so a
+ *  takeover means the previous attempt really is gone (crash / hard timeout),
+ *  never that it is merely slow. */
+export const TURN_CLAIM_STALE_MS = 30_000;
+
+async function runCustomerTurnClaim(
+  row:{ conversationId:string|null; eventId:string; channel:string; environment:'live'|'test' },
+  now:Date,
+):Promise<TurnClaimOutcome> {
+  const c=config();
+  // Unconfigured storage cannot decide ownership. Never silently drop a
+  // customer message because observability is not wired up.
+  if (!c) return 'claim_failed_open';
+
+  const headers={
+    apikey:c.key,Authorization:'Bearer '+c.key,
+    'Content-Type':'application/json',
+  };
+  const eventId=row.eventId.slice(0,180);
+
+  // ignore-duplicates + return=representation: an inserted row comes back,
+  // a conflicting one yields an empty array. One round trip in the common
+  // (first-delivery) case.
+  const inserted=await backendFetch(
+    c.url+'/rest/v1/customer_turn_outcomes?on_conflict=channel,event_id,environment',
+    {
+      method:'POST',
+      headers:{...headers,Prefer:'resolution=ignore-duplicates,return=representation'},
+      body:JSON.stringify({
+        conversation_id:row.conversationId?.slice(0,180) ?? null,
+        event_id:eventId,channel:row.channel,
+        outcome:'in_progress',error_type:null,duration_ms:0,
+        environment:row.environment,claimed_at:now.toISOString(),
+      }),
+    },
+    TURN_CLAIM_TIMEOUT_MS,
+  );
+  if(!inserted.ok) throw new Error('turn claim insert '+inserted.status);
+  const insertedRows=await inserted.json() as unknown[];
+  if(Array.isArray(insertedRows) && insertedRows.length>0) return 'claimed';
+
+  // The row exists. Only take it over if it is an abandoned claim; a
+  // terminal row or a live in-flight claim is a duplicate delivery.
+  const staleBefore=new Date(now.getTime()-TURN_CLAIM_STALE_MS).toISOString();
+  const query=new URLSearchParams({
+    channel:'eq.'+row.channel,
+    event_id:'eq.'+eventId,
+    environment:'eq.'+row.environment,
+    outcome:'eq.in_progress',
+    claimed_at:'lt.'+staleBefore,
+  });
+  const reclaimed=await backendFetch(
+    c.url+'/rest/v1/customer_turn_outcomes?'+query.toString(),
+    {
+      method:'PATCH',
+      headers:{...headers,Prefer:'return=representation'},
+      body:JSON.stringify({claimed_at:now.toISOString()}),
+    },
+    TURN_CLAIM_TIMEOUT_MS,
+  );
+  if(!reclaimed.ok) throw new Error('turn claim takeover '+reclaimed.status);
+  const reclaimedRows=await reclaimed.json() as unknown[];
+  return Array.isArray(reclaimedRows) && reclaimedRows.length>0
+    ? 'stale_reclaimed'
+    : 'duplicate_skipped';
+}
+
+/**
+ * Claim one customer turn before any work happens, so a redelivered webhook
+ * cannot answer, charge or write twice.
+ *
+ * FAILS OPEN by contract: any error, timeout or unconfigured store resolves
+ * to 'claim_failed_open' and the caller proceeds. A duplicate reply is a
+ * worse-but-recoverable outcome; silently dropping a real customer message
+ * is not. The paid path keeps its own independent guards (the cost ledger
+ * replays a completed call for the same event and blocks a duplicate
+ * in-flight one), so failing open here does not double-charge.
+ *
+ * Logs one metric per attempt. No customer text is recorded -- only the
+ * opaque transport event id needed to correlate the turn.
+ */
+export async function claimCustomerTurn(row:{
+  conversationId:string|null;eventId:string;channel:string;environment?:'live'|'test';
+},now:Date = new Date()):Promise<TurnClaimOutcome> {
+  const startedAt=Date.now();
+  const environment=row.environment ?? 'live';
+  let outcome:TurnClaimOutcome;
+  try {
+    outcome=await runCustomerTurnClaim({...row,environment},now);
+  } catch {
+    outcome='claim_failed_open';
+  }
+  console.log('THONGTHAI_TURN_CLAIM',JSON.stringify({
+    outcome,
+    channel:row.channel,
+    event_id:row.eventId.slice(0,180),
+    environment,
+    latency_ms:Date.now()-startedAt,
+  }));
+  return outcome;
+}
+
 export async function persistCustomerTurnOutcome(row:{
   conversationId:string|null;eventId:string;channel:string;
   outcome:'completed'|'failed';errorType:string|null;durationMs:number;

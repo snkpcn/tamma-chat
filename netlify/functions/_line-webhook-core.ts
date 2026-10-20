@@ -4,6 +4,7 @@ import { splitCustomerMessageForLine } from './_chat-copy-style';
 import { processThongthaiChatCore } from './thongthai-chat';
 import { isSimpleGreetingMessage, isCasualAttentionMessage, isShortUnclearTextMessage, categorizeDegradedFallback } from './thongthai-chat';
 import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
+import { claimCustomerTurn } from './_ai-cost-store';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -22,6 +23,9 @@ type LinePostback = {
 
 type LineWebhookEvent = {
   type?: string;
+  // Stable across LINE redeliveries of the same event, and present for every
+  // event type (not just messages). This is the turn-dedupe key.
+  webhookEventId?: string;
   replyToken?: string;
   source?: LineSource;
   message?: LineMessage;
@@ -506,7 +510,24 @@ async function handleEvent(
   // deterministic or not), but only overwrite llmAttempted here for every
   // OTHER category, where it genuinely is about to reach the LLM.
   if (!deterministicResponder) llmAttempted = true;
-  const result = await askThongthaiReliably(message, userId, event.message.id, errorType => {
+  // One id for dedupe, the cost ledger and the turn-outcome row, so a
+  // redelivery lands on the SAME customer_turn_outcomes row the claim
+  // created instead of leaving a phantom one behind. webhookEventId is
+  // LINE's own stable per-event id; message.id stays as the fallback for
+  // older/odd payloads that omit it.
+  const turnId = event.webhookEventId ?? event.message.id;
+  // Claim the turn BEFORE any tool, state write or reply. Fails open, so a
+  // slow or unavailable claim never costs the customer their answer.
+  const claim = await claimCustomerTurn({
+    conversationId: lineGuestId(userId),
+    eventId: turnId ?? `line:${Date.now()}`,
+    channel: 'line',
+  });
+  if (claim === 'duplicate_skipped') {
+    console.log('LINE_DUPLICATE_DELIVERY_SKIPPED', JSON.stringify({ textCategory }));
+    return;
+  }
+  const result = await askThongthaiReliably(message, userId, turnId, errorType => {
     llmErrorType = errorType;
   });
   if (!deterministicResponder) finalResponseKind = llmErrorType ? 'degraded_fallback' : 'thongthai_core';
