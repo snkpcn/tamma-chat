@@ -149,6 +149,10 @@ test('asking whether a cheaper option exists is a catalog question', () => {
   assert.notEqual(category('มีที่ถูกกว่านี้ไหม'), 'special_discount');
   assert.notEqual(category('มีห้องถูกกว่านี้ไหม'), 'special_discount');
   assert.notEqual(category('มีแพ็กเกจถูกกว่านี้ไหม'), 'special_discount');
+  // The same question with "มี" after it.
+  assert.notEqual(category('ถูกกว่านี้มีไหม'), 'special_discount');
+  assert.notEqual(category('ถูกกว่านี้ มีไหมครับ'), 'special_discount');
+  assert.notEqual(categoryAsTyped('ห้องถูกกว่านี้มีมั้ย'), 'special_discount');
   // ...but asking for a cheaper PRICE still escalates, with or without ขอ.
   assert.equal(category('ถูกกว่านี้ได้ไหม'), 'special_discount');
   assert.equal(category('ขอถูกกว่านี้ได้ไหม'), 'special_discount');
