@@ -130,7 +130,14 @@ test('Human Conversation Recovery: production chat routing attempts One Mind bef
   const pending = source.indexOf('pendingQuestionContinuationResponse(request');
   const homestay = source.indexOf('const homestayFacts = homestayFactsResponse(request)');
   const activityFallback = source.indexOf('const earlyActivityFallback = await activityBookingFallbackResponse(request');
-  const oldCutover = source.indexOf('const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message)');
+  // Anchor on the legacy-position cutover GATE itself. This used to point at
+  // the preserveExperienceDiscoveryFastPath declaration as a proxy, but that
+  // declaration is now hoisted above the first gate so the broad-discovery
+  // class can skip the first gate's paid semantic call too (see
+  // tests/experience-discovery-zero-call.test.ts). The declaration's position
+  // never said anything about where the legacy cutover runs; this condition,
+  // which appears only on the second gate, does.
+  const oldCutover = source.indexOf('&& !preserveRestaurantFastPath && !preserveLocalConciergeFastPath');
 
   assert.ok(first > 0);
   assert.ok(pending > first, 'language understanding must run before pending-question phrase matching');

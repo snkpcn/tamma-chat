@@ -7284,7 +7284,21 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // regex responders, or other legacy domain routers. If One-Mind says the
   // turn needs a real transaction executor, it returns legacy_required and
   // the unchanged executor path below still owns the write.
+  // Broad-discovery turns are answered entirely from the verified
+  // activity/experience catalog by deterministicExperienceDiscoveryResponse
+  // below -- no model output reaches the customer. The same guard already
+  // existed on the SECOND One-Mind gate, but it was computed after this
+  // first gate had already run and spent the turn's paid semantic call, so
+  // "มีกิจกรรมอะไรบ้าง" paid for an interpretation whose result was then
+  // discarded. Evaluating it here makes the whole class a zero-call turn.
+  //
+  // Deliberately the same shared isExperienceDiscoveryIntent matcher, so
+  // this only moves WHEN an existing guard is evaluated. The four guards
+  // below keep their exact meaning and scope.
+  const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
+
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
+      && !preserveExperienceDiscoveryFastPath
       && !preserveVerifiedLocationBeforeSupervision
       && !completeVisitorJourneyBeforeSupervision
       && !restaurantTopicSwitchBeforePrimary
@@ -8173,7 +8187,10 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // colloquial Thai such as "มีไรทำมั่ง"). This is a domain-level routing
   // guard, not a phrase-by-phrase answer patch: the shared
   // isExperienceDiscoveryIntent matcher owns the entire broad-discovery class.
-  const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
+  //
+  // Computed once before the FIRST One-Mind gate (see its comment there) so
+  // the guard also prevents that gate's paid semantic call, not just this
+  // one. Reused here unchanged.
 
   // Production LINE sends chatHistory: [], so a bare restaurant follow-up
   // ("มีอะไรแนะนำอีก") cannot prove its topic from transport history alone.
