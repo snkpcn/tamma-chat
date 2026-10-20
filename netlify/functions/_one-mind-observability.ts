@@ -81,7 +81,13 @@ export type OneMindTraceEnvelope = {
     retryable: boolean;
   };
   state: {
+    /** The canonical TASK state was written. */
     persisted: boolean;
+    /** The bounded conversation transcript was written. Can be true when
+     *  persisted is false (a legacy_required turn keeps its transcript
+     *  without touching task state). null on paths that do not distinguish
+     *  the two -- never guessed from persisted. */
+    contextPersisted: boolean | null;
     conflictRetries: number;
   };
   composer: {
@@ -185,6 +191,7 @@ export function buildOneMindTraceEnvelope(args:{
     },
     state:{
       persisted:turn.trace.statePersisted === true,
+      contextPersisted:typeof turn.trace.contextPersisted === 'boolean' ? turn.trace.contextPersisted : null,
       conflictRetries:Math.max(0,turn.trace.stateConflictRetries ?? 0),
     },
     composer:{mode:response ? (safeToken(response.mode,40) ?? 'unknown') : null},
