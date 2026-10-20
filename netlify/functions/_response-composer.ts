@@ -1693,7 +1693,16 @@ function commercialSupportProcessMessage(input: ResponseComposerInput): string |
 }
 
 function conversationalStateUpdateMessage(input: ResponseComposerInput): string | null {
-  if (input.language !== 'th' || !input.semanticTurn) return null;
+  if (!input.semanticTurn) return null;
+  const rawCommercialBoundary=classifyCommercialBoundaryText(input.userMessage ?? '','OTHER');
+  if (
+    input.language === 'en'
+    && rawCommercialBoundary.mode === 'WITHHOLD'
+    && !input.dialogDecision.actionProposal
+  ) {
+    return 'Understood. Nothing will be booked, ordered, or submitted yet.';
+  }
+  if (input.language !== 'th') return null;
   const turn = input.semanticTurn;
   const task = input.dialogDecision.taskStateContainer.activeTask;
   const noCommitment = !task?.commitmentIntent;

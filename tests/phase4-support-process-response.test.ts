@@ -160,3 +160,22 @@ test('Phase 4 non-commercial restaurant policy question is not hijacked by comme
     /ถามขั้นตอนได้ครับ การถามหรือเลือกยังไม่ทำรายการจริง/u,
   );
 });
+
+
+test('Phase 4 English explicit withholding uses deterministic English copy',()=>{
+  const response=composeDeterministicResponse(
+    inputFor("Keep this one for now, but don't book yet.",'en',{
+      domain:'unknown',
+      intent:'hold_option_without_booking',
+      action:'provide_information',
+      speechAct:'preference_update',
+      informationNeed:'none',
+      constraints:['no_transaction'],
+      needsClarification:false,
+    })
+  );
+  assert.equal(response.mode,'deterministic');
+  assert.match(response.message,/nothing will be booked|not.*booked/i);
+  assert.doesNotMatch(response.message,/ทองไทย|ยังไม่|ครับ/u);
+  assert.doesNotMatch(response.message,/booking confirmed|order created|จองสำเร็จ/u);
+});
