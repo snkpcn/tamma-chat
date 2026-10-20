@@ -63,6 +63,23 @@ export class LLMAvailabilityError extends LLMRequestError {
   }
 }
 
+/** A call the cost guard refused BEFORE any request left the process.
+ *
+ *  Deliberately still an LLMAvailabilityError so every existing
+ *  `instanceof LLMAvailabilityError` handler keeps behaving exactly as
+ *  before. It only adds the structured reason, so a caller can tell
+ *  "we ran out of budget" apart from "OpenAI timed out" without parsing an
+ *  error message -- the two have completely different operator responses and
+ *  must not share one log line. */
+export class LLMBudgetBlockedError extends LLMAvailabilityError {
+  budgetReason: string;
+  constructor(budgetReason: string, attempts: ProviderAttemptDiagnostic[] = []) {
+    super(`OpenAI blocked by cost guard: ${budgetReason}`, attempts);
+    this.name = 'LLMBudgetBlockedError';
+    this.budgetReason = budgetReason;
+  }
+}
+
 export const OPENAI_SEMANTIC_PRIMARY_MODEL =
   process.env.THONGTHAI_SEMANTIC_MODEL?.trim() || 'gpt-5.6-terra';
 export const OPENAI_SEMANTIC_REVIEW_MODEL =
@@ -240,7 +257,7 @@ async function callOpenAIModel(
       reservation = guarded;
     } catch (error) {
       if (error instanceof AiBudgetBlockedError) {
-        throw new LLMAvailabilityError(`OpenAI blocked by cost guard: ${error.reason}`, [
+        throw new LLMBudgetBlockedError(error.reason, [
           { provider:'openai', model, outcome:'request_error', elapsedMs:0 },
         ]);
       }

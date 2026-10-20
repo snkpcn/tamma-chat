@@ -16,7 +16,7 @@ import {
   planModelDegradation,
   type DegradationPlan,
 } from './_graceful-degradation';
-import { stripCodeFences, callResponseComposer } from './_thongthai-model-provider';
+import { stripCodeFences, callResponseComposer, LLMBudgetBlockedError } from './_thongthai-model-provider';
 import type { AiCallContext } from './_ai-cost-ledger';
 import type { ConversationContextState } from './_conversation-context';
 import { THONGTHAI_BIBLE_SECTIONS, THONGTHAI_BIBLE_VERSION } from './_thongthai-bible-generated';
@@ -482,6 +482,24 @@ export async function composeGroundedModelResponse(
       language:input.language,
     };
   } catch (error) {
+    // "We ran out of conversation budget" and "OpenAI failed" both end in a
+    // templated reply, but they are different operational problems: the
+    // first is a cost-policy outcome an operator tunes, the second is an
+    // incident. Sharing one ERROR line made a permanent, every-turn budget
+    // block indistinguishable from transient provider noise -- which is how
+    // the composer stayed blocked unnoticed. Keep them separate.
+    if (error instanceof LLMBudgetBlockedError) {
+      console.log('THONGTHAI_GROUNDED_COMPOSER_BUDGET_BLOCKED', JSON.stringify({
+        composer_budget_blocked:1,
+        reason:error.budgetReason,
+        caller_label:'grounded-response-composition',
+        channel:input.channel,
+        language:input.language,
+        fact_count:facts.length,
+        composer_version:RESPONSE_COMPOSER_VERSION,
+      }));
+      return null;
+    }
     console.error(
       'THONGTHAI_GROUNDED_MODEL_COMPOSER_ERROR',
       error instanceof Error ? error.message.slice(0, 220) : 'unknown',
