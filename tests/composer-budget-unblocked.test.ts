@@ -199,6 +199,65 @@ test('the composer model is primary by default and reverts to review by env alon
   }
 });
 
+/** Reserve the composer for one prompt, either on a fresh conversation or
+ *  after that same turn's interpretation has settled at the calibrated
+ *  ratio. Returns 'reserved' or the block reason. */
+async function composerOutcome(model: string, prompt: string, afterInterpretation: boolean): Promise<string> {
+  const policy = aiCostPolicy();
+  const context = { conversationId:`rollback-${model}-${prompt.length}-${afterInterpretation}`, guestDbId:'g', channel:'line' as const, eventId:'turn-1' };
+  if (afterInterpretation) {
+    const interpret = await reserveAiCall(
+      { ...context, callerLabel:'semantic-interpreter' },
+      OPENAI_SEMANTIC_PRIMARY_MODEL, [prompt], policy.semanticMaxOutputTokens,
+    );
+    assert.equal(interpret.kind, 'reserved');
+    if (interpret.kind !== 'reserved') return 'interpretation-blocked';
+    await finalizeAiCall(interpret, {
+      inputTokens:Math.round(estimateInputTokens([prompt]) * 0.64), cachedInputTokens:0, outputTokens:323,
+    }, '{"intent":"ask"}', true);
+  }
+  try {
+    const compose = await reserveAiCall(
+      { ...context, callerLabel:'grounded-response-composition' },
+      model, [prompt], RESPONSE_COMPOSER_MAX_OUTPUT_TOKENS,
+    );
+    return compose.kind;
+  } catch (error) {
+    assert.ok(error instanceof AiBudgetBlockedError);
+    return `blocked:${(error as AiBudgetBlockedError).reason}`;
+  }
+}
+
+test('rolling the composer back to sol is budget-blocked on long prompts (documented in .env.example)', async () => {
+  // Review finding: .env.example presented gpt-5.6-sol as a clean rollback.
+  // It is not: under the same 2 THB ceiling sol's worst-case reservation
+  // blocks long prompts that terra composes. This pins the behaviour the
+  // .env.example comment now states, so the two cannot drift apart.
+  await withFakeLedger(async ({ reset }) => {
+    const LONG_PROMPT = 'ก'.repeat(7000);
+    const cases: Array<[string, string, boolean, string]> = [
+      // [model, prompt, after interpretation, expected]
+      [OPENAI_SEMANTIC_REVIEW_MODEL, NORMAL_PROMPT, true, 'reserved'],
+      [OPENAI_SEMANTIC_REVIEW_MODEL, 'ก'.repeat(4500), true, 'blocked:budget'],
+      [OPENAI_SEMANTIC_REVIEW_MODEL, COMPLEX_PROMPT, true, 'blocked:budget'],
+      [OPENAI_SEMANTIC_REVIEW_MODEL, COMPLEX_PROMPT, false, 'reserved'],
+      [OPENAI_SEMANTIC_REVIEW_MODEL, LONG_PROMPT, false, 'blocked:budget'],
+      // The default composes every one of these.
+      [OPENAI_SEMANTIC_PRIMARY_MODEL, COMPLEX_PROMPT, true, 'reserved'],
+      [OPENAI_SEMANTIC_PRIMARY_MODEL, LONG_PROMPT, true, 'reserved'],
+    ];
+    for (const [model, prompt, afterInterpretation, expected] of cases) {
+      reset();
+      process.env.THONGTHAI_RESPONSE_COMPOSER_MODEL = model;
+      assert.equal(responseComposerModel(), model);
+      assert.equal(
+        await composerOutcome(responseComposerModel(), prompt, afterInterpretation), expected,
+        `${model}, ${prompt.length} chars, ${afterInterpretation ? 'after interpretation' : 'fresh conversation'}`,
+      );
+    }
+  });
+});
+
 test('the flat web-search credit is unaffected by caller sizing', async () => {
   await withFakeLedger(async () => {
     const reservation = await reserveAiCall(
