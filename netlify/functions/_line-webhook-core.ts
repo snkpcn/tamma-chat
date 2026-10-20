@@ -4,6 +4,15 @@ import { splitCustomerMessageForLine } from './_chat-copy-style';
 import { processThongthaiChatCore } from './thongthai-chat';
 import { isSimpleGreetingMessage, isCasualAttentionMessage, isShortUnclearTextMessage, categorizeDegradedFallback } from './thongthai-chat';
 import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
+import { claimCustomerTurn, type TurnClaimOutcome } from './_ai-cost-store';
+import {
+  CUSTOMER_MIN_RETRY_BUDGET_MS,
+  CUSTOMER_TURN_BUDGET_MS,
+  CUSTOMER_TURN_HARD_DEADLINE_MS,
+  TurnBudgetExhaustedError,
+  remainingTurnBudgetMs,
+  withinTurnBudget,
+} from './_customer-turn-budget';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -22,6 +31,9 @@ type LinePostback = {
 
 type LineWebhookEvent = {
   type?: string;
+  // Stable across LINE redeliveries of the same event, and present for every
+  // event type (not just messages). This is the turn-dedupe key.
+  webhookEventId?: string;
   replyToken?: string;
   source?: LineSource;
   message?: LineMessage;
@@ -199,14 +211,27 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function askThongthaiReliably(
+/** The LINE turn budget is the shared customer turn budget. Re-exported
+ *  under the original names so existing callers and tests keep working;
+ *  the web path consumes the same constants from
+ *  _customer-turn-budget.ts directly. */
+export const LINE_TURN_BUDGET_MS = CUSTOMER_TURN_BUDGET_MS;
+export const LINE_MIN_RETRY_BUDGET_MS = CUSTOMER_MIN_RETRY_BUDGET_MS;
+
+export async function askThongthaiReliably(
   message: string,
   userId: string,
   eventId?: string,
   onAttemptError?: (errorType: string) => void,
+  turnStartedAt: number = Date.now(),
 ): Promise<ThongthaiResponse> {
+  const remainingMs = () => remainingTurnBudgetMs(turnStartedAt, LINE_TURN_BUDGET_MS);
+
   try {
-    return await askThongthai(message, userId, eventId);
+    // The clock starts at function entry, so webhook-level work may already
+    // have spent the budget. Do not start a core turn nobody will wait for.
+    if (remainingMs() <= 0) throw new TurnBudgetExhaustedError(remainingMs());
+    return await withinTurnBudget(askThongthai(message, userId, eventId), remainingMs());
   } catch (firstError) {
     console.error(
       'LINE_THONGTHAI_FIRST_ATTEMPT_ERROR',
@@ -218,27 +243,39 @@ async function askThongthaiReliably(
   // A retry is safe for write actions because operational creates (including restaurant preorders)
   // are idempotent at the database layer. This closes the failure window where a write succeeds
   // but the model/final response times out and the customer otherwise sees silence.
-  await delay(250);
-  try {
-    return await askThongthai(message, userId, eventId);
-  } catch (secondError) {
-    console.error(
-      'LINE_THONGTHAI_SECOND_ATTEMPT_ERROR',
-      secondError instanceof Error ? secondError.message.slice(0, 240) : 'unknown',
-    );
-    onAttemptError?.(secondError instanceof Error ? secondError.constructor.name : 'unknown');
-    return {
-      message: [
-        'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
-        '',
-        'ถ้าเพิ่งส่งคำสั่งเดิมซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
-        'ลองส่งข้อความเดิมอีกครั้ง หรือพิมพ์ “ดูออเดอร์ล่าสุด” ได้เลย',
-      ].join('\n'),
-      intent: 'support',
-      journeyAction: { type: 'none', journey: null },
-      suggestedActions: [{ label: 'ลองอีกครั้ง', action: message.slice(0, 180) }],
-    };
+  // It is now also gated on there being enough budget left to finish: a retry
+  // that cannot land before the function is killed produces silence, which is
+  // the exact symptom the retry exists to prevent.
+  if (remainingMs() >= LINE_MIN_RETRY_BUDGET_MS) {
+    await delay(250);
+    try {
+      return await withinTurnBudget(askThongthai(message, userId, eventId), remainingMs());
+    } catch (secondError) {
+      console.error(
+        'LINE_THONGTHAI_SECOND_ATTEMPT_ERROR',
+        secondError instanceof Error ? secondError.message.slice(0, 240) : 'unknown',
+      );
+      onAttemptError?.(secondError instanceof Error ? secondError.constructor.name : 'unknown');
+    }
+  } else {
+    console.log('LINE_THONGTHAI_RETRY_SKIPPED_NO_BUDGET', JSON.stringify({
+      remaining_ms: Math.max(0, remainingMs()),
+      turn_budget_ms: LINE_TURN_BUDGET_MS,
+    }));
+    onAttemptError?.('TurnBudgetExhaustedError');
   }
+
+  return {
+    message: [
+      'ทองไทยรับข้อความแล้วครับ แต่ระบบตอบกลับไม่ทันในรอบนี้',
+      '',
+      'ถ้าเพิ่งส่งคำสั่งเดิมซ้ำ ระบบจะไม่สร้างออเดอร์ซ้ำครับ',
+      'ลองส่งข้อความเดิมอีกครั้ง หรือพิมพ์ “ดูออเดอร์ล่าสุด” ได้เลย',
+    ].join('\n'),
+    intent: 'support',
+    journeyAction: { type: 'none', journey: null },
+    suggestedActions: [{ label: 'ลองอีกครั้ง', action: message.slice(0, 180) }],
+  };
 }
 
 function splitText(value: string): string[] {
@@ -409,8 +446,17 @@ async function saveLatestJourney(userId: string): Promise<'saved' | 'already_sav
   return 'saved';
 }
 
-async function replyToLine(replyToken: string, messages: LineReplyMessage[], accessToken: string): Promise<void> {
+/** Bounded by the turn's absolute deadline: an unbounded reply could hold
+ *  the function past its kill even after the answer itself was bounded. */
+async function replyToLine(
+  replyToken: string,
+  messages: LineReplyMessage[],
+  accessToken: string,
+  turnStartedAt: number,
+): Promise<void> {
   if (!messages.length) return;
+  const timeoutMs = remainingTurnBudgetMs(turnStartedAt, CUSTOMER_TURN_HARD_DEADLINE_MS);
+  if (timeoutMs <= 0) throw new Error(`LINE reply skipped: turn deadline passed ${-timeoutMs}ms ago`);
   const response = await fetch(LINE_REPLY_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -418,6 +464,7 @@ async function replyToLine(replyToken: string, messages: LineReplyMessage[], acc
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({ replyToken, messages: messages.slice(0, MAX_LINE_MESSAGES) }),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!response.ok) {
@@ -430,6 +477,7 @@ async function handleEvent(
   event: LineWebhookEvent,
   accessToken: string,
   channelSecret: string,
+  turnStartedAt: number,
 ): Promise<void> {
   const replyToken = event.replyToken;
   if (!replyToken) return;
@@ -444,7 +492,7 @@ async function handleEvent(
       : status === 'already_saved'
         ? 'Journey นี้ถูกบันทึกไว้แล้วครับ ✅'
         : 'ยังไม่พบ Journey ล่าสุดให้บันทึกครับ\nลองให้ทองไทยวางแผนก่อนนะครับ';
-    await replyToLine(replyToken, splitText(text).map(value => ({ type: 'text', text:value })), accessToken);
+    await replyToLine(replyToken, splitText(text).map(value => ({ type: 'text', text:value })), accessToken, turnStartedAt);
     return;
   }
 
@@ -455,10 +503,14 @@ async function handleEvent(
       replyToken,
       [{ type: 'text', text: 'ตอนนี้ทองไทยคุยผ่านข้อความตัวอักษรก่อนนะครับ\nพิมพ์สิ่งที่อยากรู้ หรือให้ทองไทยช่วยวาง Journey ได้เลยครับ' }],
       accessToken,
+      turnStartedAt,
     );
     return;
   }
 
+  // turnStartedAt is taken at function entry (line-webhook.ts) and handed
+  // down, so webhook-level work, the dedupe claim and the answer all share
+  // one LINE_TURN_BUDGET_MS, and the reply one CUSTOMER_TURN_HARD_DEADLINE_MS.
   const message = event.message.text;
   const language = detectLanguage(message);
 
@@ -506,24 +558,57 @@ async function handleEvent(
   // deterministic or not), but only overwrite llmAttempted here for every
   // OTHER category, where it genuinely is about to reach the LLM.
   if (!deterministicResponder) llmAttempted = true;
-  const result = await askThongthaiReliably(message, userId, event.message.id, errorType => {
+  // One id for dedupe, the cost ledger and the turn-outcome row, so a
+  // redelivery lands on the SAME customer_turn_outcomes row the claim
+  // created instead of leaving a phantom one behind. webhookEventId is
+  // LINE's own stable per-event id; message.id stays as the fallback for
+  // older/odd payloads that omit it.
+  const turnId = event.webhookEventId ?? event.message.id;
+  // Claim the turn BEFORE any tool, state write or reply. Fails open, so a
+  // slow or unavailable claim never costs the customer their answer -- and
+  // it is raced against what is left of the answer budget, so it can never
+  // eat the slice reserved for the reply. With no budget left there is no
+  // answer to protect, only the fallback, so it is not attempted.
+  const claimBudgetMs = remainingTurnBudgetMs(turnStartedAt, LINE_TURN_BUDGET_MS);
+  const claim: TurnClaimOutcome = claimBudgetMs > 0
+    ? await withinTurnBudget(claimCustomerTurn({
+      conversationId: lineGuestId(userId),
+      eventId: turnId ?? `line:${Date.now()}`,
+      channel: 'line',
+    }), claimBudgetMs).catch((): TurnClaimOutcome => 'claim_failed_open')
+    : 'claim_failed_open';
+  if (claim === 'duplicate_skipped') {
+    console.log('LINE_DUPLICATE_DELIVERY_SKIPPED', JSON.stringify({ textCategory }));
+    return;
+  }
+  const result = await askThongthaiReliably(message, userId, turnId, errorType => {
     llmErrorType = errorType;
-  });
+  }, turnStartedAt);
   if (!deterministicResponder) finalResponseKind = llmErrorType ? 'degraded_fallback' : 'thongthai_core';
   console.log('FINAL_RESPONSE_SOURCE', JSON.stringify({ source: deterministicResponder ?? finalResponseKind }));
   logPrivateChatAttempt();
 
+  // Bounded by what is left of the answer budget, so it can never eat the
+  // slice reserved for the reply.
   try {
-    await reinforceStructuredMemory(message, userId, language);
+    const memoryBudgetMs = remainingTurnBudgetMs(turnStartedAt, LINE_TURN_BUDGET_MS);
+    if (memoryBudgetMs <= 0) throw new TurnBudgetExhaustedError(memoryBudgetMs);
+    await withinTurnBudget(reinforceStructuredMemory(message, userId, language), memoryBudgetMs);
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'Unknown structured-memory error';
     console.error('LINE_STRUCTURED_MEMORY_ERROR', detail.slice(0, 240));
   }
 
-  await replyToLine(replyToken, buildReplyMessages(result, userId, channelSecret), accessToken);
+  await replyToLine(replyToken, buildReplyMessages(result, userId, channelSecret), accessToken, turnStartedAt);
 }
 
-export const handler: Handler = async (event: HandlerEvent) => {
+/** `turnStartedAt` is the moment the outer webhook function was entered.
+ *  line-webhook.ts passes its own entry time; the standalone handler below
+ *  starts the clock itself. */
+export async function handleLineCustomerWebhook(
+  event: HandlerEvent,
+  turnStartedAt: number = Date.now(),
+): Promise<{ statusCode: number; body: string }> {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
 
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
@@ -551,7 +636,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (!events.length) return { statusCode: 200, body: 'OK' };
 
   const results = await Promise.allSettled(
-    events.map(item => handleEvent(item, accessToken, channelSecret)),
+    events.map(item => handleEvent(item, accessToken, channelSecret, turnStartedAt)),
   );
   const failures = results.filter(result => result.status === 'rejected');
   if (failures.length) {
@@ -564,4 +649,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
   }
 
   return { statusCode: 200, body: 'OK' };
-};
+}
+
+export const handler: Handler = async (event: HandlerEvent) => handleLineCustomerWebhook(event);

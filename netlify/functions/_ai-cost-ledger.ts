@@ -180,20 +180,67 @@ function effectiveBudgetCapUsd(context: AiCallContext, customerCapUsd: number): 
 
 export const PHASE3_SEMANTIC_INPUT_RESERVE_MULTIPLIER = 1.5;
 
+/** How a caller's worst-case input reservation is sized.
+ *  'estimate' -- 1.5x the canonical byte-based estimate of THIS prompt.
+ *  'absolute' -- the flat absolute input ceiling, regardless of prompt size. */
+export type ReservationSizing = 'estimate' | 'absolute';
+
+// EXPLICIT per-caller reservation policy. Previously this was a
+// `/^semantic/` prefix test, which silently sized every non-semantic caller
+// at the flat absolute ceiling. Under the 2 THB cap that made the grounded
+// response composer reserve ~2.95 THB on EVERY turn (16,000 input tokens on
+// the review model + 900 output) and therefore be budget-blocked from turn
+// one, on every channel -- the customer-visible symptom being a permanently
+// templated reply instead of a composed one, with only a console.error.
+//
+// A name-shaped rule cannot express that, so the policy is now a closed
+// table keyed by the REAL callerLabel each provider entry point passes (see
+// _thongthai-model-provider.ts). Adding a new paid caller means adding a row
+// here with a reviewed sizing decision.
+//
+// Live Phase 3 calibration measured actual/estimate max=0.6359 on every real
+// call, so 1.5x the already-conservative estimate is ~2.35x the largest
+// observed actual input. This changes only how much is RESERVED up front;
+// the charged amount has always come from the provider's reported usage, and
+// the <=2 THB conversation ceiling itself is untouched.
+const CALLER_RESERVATION_SIZING: Readonly<Record<string, ReservationSizing>> = {
+  // Customer production, paid.
+  'semantic-interpreter':'estimate',
+  'semantic-reviewer':'estimate',
+  'grounded-response-composition':'estimate',
+  'grounded-response-composer':'estimate',
+  'thongthai-brain-v3':'estimate',
+  // Flat per-search credit; input tokens are forced to 0 and the reservation
+  // never consults this sizing. Listed so the real caller set is complete.
+  'visitor-web-search':'estimate',
+  // Explicit certification runs only, never customer traffic.
+  'semantic-certification-primary':'estimate',
+  'semantic-certification-reviewer':'estimate',
+  // Batches many cases into one prompt: per-prompt size is not a safe proxy
+  // for the worst case, so keep the flat ceiling.
+  'semantic-certification-group':'absolute',
+};
+
+/** Unknown/unreviewed callers fail CLOSED at the flat absolute ceiling,
+ *  mirroring UNKNOWN_MODEL_PRICING: a new paid path must be reviewed into
+ *  CALLER_RESERVATION_SIZING rather than inherit a cheap reservation. */
+export function reservationSizingForCallerLabel(callerLabel: string): ReservationSizing {
+  return CALLER_RESERVATION_SIZING[callerLabel] ?? 'absolute';
+}
+
+/** Caller labels with a reviewed sizing decision. Tests assert every label
+ *  the provider can really emit is covered here. */
+export function reservationSizedCallerLabels(): string[] {
+  return Object.keys(CALLER_RESERVATION_SIZING);
+}
+
 export function reservationInputTokensForAiCall(
   context: Pick<AiCallContext,'callerLabel'>,
   estimatedInputTokens: number,
   absoluteInputTokens = aiCostPolicy().absoluteInputTokens,
 ): number {
   const estimate=Math.max(1,Math.ceil(estimatedInputTokens));
-  // Live Phase 3 calibration proved the canonical byte-based estimator was
-  // conservative on every real call: actual/estimate max=0.6359. Reserve
-  // 1.5x the already-conservative estimate for semantic interpretation /
-  // review (~2.35x the largest observed actual input) while retaining the
-  // old absolute worst-case reservation for grounded response composition
-  // and every other caller. If a future semantic prompt itself grows, the
-  // reservation grows with it up to the unchanged absolute ceiling.
-  if (/^semantic(?:-|$)/u.test(context.callerLabel)) {
+  if (reservationSizingForCallerLabel(context.callerLabel) === 'estimate') {
     return Math.min(
       absoluteInputTokens,
       Math.max(estimate,Math.ceil(estimate*PHASE3_SEMANTIC_INPUT_RESERVE_MULTIPLIER)),

@@ -69,8 +69,15 @@ test('inactive activity inventory is not advertised as currently playable', () =
     },
   }]);
 
-  assert.match(message, /ทำมา-ชาติ ผจญภัย/);
+  // Intent is unchanged: a sold-out activity must not be offered. The
+  // MECHANISM changed -- substituting the static "ทำมา-ชาติ ผจญภัย" catalog
+  // name read as a confident claim that activities were on offer. A verified
+  // empty catalog now says so plainly instead.
   assert.doesNotMatch(message, /ขี่ม้า \/ ATV/);
+  assert.doesNotMatch(message, /ขี่ม้า/);
+  assert.doesNotMatch(message, /ATV/);
+  assert.doesNotMatch(message, /ทำมา-ชาติ ผจญภัย/);
+  assert.match(message, /ยังไม่มีรอบกิจกรรมเปิด/u);
 });
 
 

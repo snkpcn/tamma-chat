@@ -142,12 +142,21 @@ function catalogName(id: string, fallback: string): string {
   return EXPERIENCES.find(item => item.id === id)?.name || fallback;
 }
 
-function liveActivityNames(worldFacts: WorldFactLike[]): string[] {
+/** Three genuinely different states, which the old string[] return could not
+ *  express: a verified list, a verified EMPTY list, and "the live source did
+ *  not answer". The last one must never be phrased like the first two. */
+type LiveActivityState =
+  | { status: 'ok'; names: string[] }
+  | { status: 'empty' }
+  | { status: 'unavailable' };
+
+function liveActivityState(worldFacts: WorldFactLike[]): LiveActivityState {
   const fact = worldFacts.find(item => item?.fact_key === 'activity_catalog_live');
   const value = fact?.fact_value;
-  if (!value || typeof value !== 'object') return [];
+  if (!value || typeof value !== 'object') return { status:'unavailable' };
   const raw = value as Record<string, unknown>;
-  const activities = Array.isArray(raw.activities) ? raw.activities : [];
+  if (!Array.isArray(raw.activities)) return { status:'unavailable' };
+  const activities = raw.activities;
 
   const names = activities
     .map(item => item && typeof item === 'object' ? item as Record<string, unknown> : {})
@@ -158,14 +167,28 @@ function liveActivityNames(worldFacts: WorldFactLike[]): string[] {
     .map(item => typeof item.name === 'string' ? item.name.trim() : '')
     .filter(Boolean);
 
-  return [...new Set(names)].slice(0, 6);
+  const unique = [...new Set(names)].slice(0, 6);
+  return unique.length ? { status:'ok', names:unique } : { status:'empty' };
 }
 
 export function formatExperienceDiscoveryMessage(worldFacts: WorldFactLike[]): string {
-  const activities = liveActivityNames(worldFacts);
-  const activityLine = activities.length
-    ? `🌿 กิจกรรม — ${activities.join(' / ')}`
-    : `🌿 กิจกรรม — ${catalogName('adventure', 'ทำมา-ชาติ ผจญภัย')}`;
+  const activity = liveActivityState(worldFacts);
+
+  // The activity line is the only INVENTORY-dependent line here; the other
+  // lines name business units that exist regardless of today's bookable
+  // rounds. Previously an unavailable or empty live catalog silently
+  // substituted the static "ผจญภัย" catalog name, which reads as a
+  // confident claim that activities are on offer. An unverified source must
+  // say so and hand off instead.
+  const activityLine = activity.status === 'ok'
+    ? `🌿 กิจกรรม — ${activity.names.join(' / ')}`
+    : activity.status === 'empty'
+      ? '🌿 กิจกรรม — ตอนนี้ยังไม่มีรอบกิจกรรมเปิดให้จองครับ'
+      : '🌿 กิจกรรม — ตอนนี้ทองไทยยังเช็กรายการกิจกรรมล่าสุดไม่ได้ครับ เดี๋ยวให้แอดมินยืนยันให้';
+
+  const closing = activity.status === 'ok'
+    ? 'บอกจำนวนคน + เวลาที่มีได้เลย ทองไทยจัดเป็นแพลนสั้น ๆ ให้ได้ครับ'
+    : 'บอกจำนวนคน + เวลาที่มีได้เลยครับ ส่วนกิจกรรมเดี๋ยวแอดมินยืนยันรายการที่เปิดให้อีกรอบครับ';
 
   return [
     'มีครับ 😊 ที่ทำมา-ชาติมีหลายแบบ',
@@ -176,6 +199,6 @@ export function formatExperienceDiscoveryMessage(worldFacts: WorldFactLike[]): s
     `🌅 ชิล — ${catalogName('landscape', 'เดินชมพื้นที่กลาง')} / ${catalogName('sunset', 'ชมพระอาทิตย์ตก')}`,
     `☕ แวะพัก — ${catalogName('inthanin', 'Inthanin')}`,
     '',
-    'บอกจำนวนคน + เวลาที่มีได้เลย ทองไทยจัดเป็นแพลนสั้น ๆ ให้ได้ครับ',
+    closing,
   ].join('\n');
 }

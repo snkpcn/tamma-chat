@@ -65,6 +65,7 @@ import {
 } from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
 import { persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
+import { CUSTOMER_TURN_BUDGET_MS, withinTurnBudget } from './_customer-turn-budget';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
 import { resolveRequestedCustomerMedia } from './_thongthai-media';
@@ -6147,7 +6148,17 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const startedAt = Date.now();
   try {
     request = { ...request, message:normalizeCustomerText(request.message) };
-    const result = await processThongthaiChatCoreInternal(request, turnId);
+    // Bound the shared core inside the synchronous function limit. The web
+    // handler has no transport-level retry and no other deadline of its
+    // own, so without this a stalled turn runs past the request limit and
+    // the browser gets a dead connection instead of the honest fallback
+    // below. LINE additionally races this against its own remaining turn
+    // budget (see _line-webhook-core.ts); whichever deadline is tighter
+    // wins, so LINE's retry accounting is unchanged.
+    const result = await withinTurnBudget(
+      processThongthaiChatCoreInternal(request, turnId),
+      CUSTOMER_TURN_BUDGET_MS,
+    );
     console.log('THONGTHAI_CUSTOMER_TURN', JSON.stringify({
       event_id:turnId, channel, status_code:result.statusCode,
       duration_ms:Date.now()-startedAt, outcome:'completed',
@@ -6340,10 +6351,41 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // Independent identity, budget heartbeat and preference records need not
   // add three consecutive database round trips to every customer reply.
   await Promise.all([
-    registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId),
+    // Identity registration is a last-seen upsert, never a precondition for
+    // this turn: guestDbId is already resolved, and the memory/ledger/state
+    // reads below key off it directly rather than off guest_identities.
+    //
+    // _thongthai-runtime-v3.ts swallows its own write errors today, so this
+    // guard is a second layer rather than a fix for a live failure. It is
+    // here because the call site must not DEPEND on that: if the inner
+    // try/catch is ever narrowed, a customer reply must still not be lost to
+    // a bookkeeping write.
+    registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId)
+      .catch(error => {
+        console.error(
+          'THONGTHAI_GUEST_IDENTITY_REGISTER_ERROR',
+          error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+        );
+      }),
+    // Heartbeat only: it bumps the ledger's lastActivityAt so a long
+    // free-path conversation cannot reset paid spend. It is NOT the budget
+    // gate. A failed heartbeat must never cost the customer their reply --
+    // especially on a turn that was going to be free anyway.
+    //
+    // The paid path still fails CLOSED without this: reserveAiCall does its
+    // own snapshot load + compare-and-swap, and throws
+    // AiBudgetBlockedError('ledger_unavailable') when the ledger cannot be
+    // read or written. Swallowing the heartbeat therefore cannot let an
+    // unaccounted paid call through; it only risks losing one activity bump
+    // (every paid reservation bumps lastActivityAt too).
     touchAiConversation({
       conversationId:request.guestId ?? guestDbId ?? 'unknown',
       guestDbId, channel, eventId:transportEventId, callerLabel:'customer_activity',
+    }).catch(error => {
+      console.error(
+        'THONGTHAI_AI_CONVERSATION_HEARTBEAT_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
     }),
     capturePreferenceSignals(guestDbId, request.message, {
       channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
@@ -6387,9 +6429,23 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     };
   }
 
+  // Broad-discovery turns ("มีกิจกรรมอะไรบ้าง") are answered entirely from
+  // the verified activity/experience catalog by
+  // deterministicExperienceDiscoveryResponse further down -- no model output
+  // reaches the customer. Declared HERE, above the first paid path of the
+  // turn, so every later gate can honour it.
+  //
+  // Review finding: this guard previously sat below the visitor paths, so
+  // once THONGTHAI_VISITOR_UNDERSTANDING / the web search were enabled a
+  // discovery question paid for an interpretation (and possibly a search
+  // credit) whose result was then discarded. The same shared
+  // isExperienceDiscoveryIntent matcher owns the whole class; this only
+  // changes WHEN it is evaluated.
+  const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
+
   let visitorUnderstoodTopic:string|null=null;
   let visitorArrivalInformation:ReturnType<typeof regularArrivalInformation>=null;
-  if(process.env.THONGTHAI_VISITOR_UNDERSTANDING==='1' && request.language==='th') {
+  if(!preserveExperienceDiscoveryFastPath && process.env.THONGTHAI_VISITOR_UNDERSTANDING==='1' && request.language==='th') {
     const history=request.chatHistory.length?request.chatHistory
       :(await loadConversationContext(guestDbId).catch(()=>null))?.recentTurns ?? [];
     const understanding=await understandVisitorQuestion({message:request.message,history,
@@ -6500,10 +6556,17 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
 
   // Informational visitor questions must not become cafe menu lookups,
   // generic model failures, or unsolicited escalation/booking operations.
+  // NOT guarded by the discovery fast path: answerVisitorInformation is
+  // deterministic and free (see tests/visitor-basic-questions.test.ts, which
+  // asserts modelCallCount()===0), and it answers several questions that
+  // merely CONTAIN the word "กิจกรรม" better than the broad-discovery
+  // catalog does. Only the paid paths are skipped.
   let visitorInformation = request.language==='th'
     ? visitorArrivalInformation ?? await answerVisitorInformation({message:request.message,channel,environment:request.environment})
     : null;
-  const visitorWebSearch=request.language==='th'
+  // Paid search credit. Skipped for broad discovery for the same reason as
+  // the paid interpretation above: the answer is already deterministic.
+  const visitorWebSearch=request.language==='th' && !preserveExperienceDiscoveryFastPath
     ? await searchMissingVisitorInformation({message:request.message,answer:visitorInformation,context:{
         conversationId:request.guestId ?? guestDbId ?? 'unknown',guestDbId,channel,eventId:transportEventId,
         callerLabel:'visitor-web-search',
@@ -7253,7 +7316,12 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // regex responders, or other legacy domain routers. If One-Mind says the
   // turn needs a real transaction executor, it returns legacy_required and
   // the unchanged executor path below still owns the write.
+  // preserveExperienceDiscoveryFastPath is declared once near the top of
+  // this function, above the turn's first paid path, and reused by every
+  // gate from here down. The four guards below keep their exact meaning and
+  // scope.
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
+      && !preserveExperienceDiscoveryFastPath
       && !preserveVerifiedLocationBeforeSupervision
       && !completeVisitorJourneyBeforeSupervision
       && !restaurantTopicSwitchBeforePrimary
@@ -8142,7 +8210,10 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // colloquial Thai such as "มีไรทำมั่ง"). This is a domain-level routing
   // guard, not a phrase-by-phrase answer patch: the shared
   // isExperienceDiscoveryIntent matcher owns the entire broad-discovery class.
-  const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
+  //
+  // Computed once before the FIRST One-Mind gate (see its comment there) so
+  // the guard also prevents that gate's paid semantic call, not just this
+  // one. Reused here unchanged.
 
   // Production LINE sends chatHistory: [], so a bare restaurant follow-up
   // ("มีอะไรแนะนำอีก") cannot prove its topic from transport history alone.

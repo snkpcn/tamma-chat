@@ -90,8 +90,72 @@ function detectDomainHint(text: string): BusinessUnit | null {
   return DOMAIN_HINT.find(([pattern]) => pattern.test(text))?.[1] ?? null;
 }
 
-const REFUND_RE = /คืนเงิน|ขอเงินคืน|refund/iu;
-const SPECIAL_DISCOUNT_RE = /ส่วนลดพิเศษ|ลดพิเศษ|ราคาพิเศษ|ขอลดราคา|ขอส่วนลด/u;
+// "เงินคืน" alone is NOT safe: "คืน" is also the word for a night, so
+// "จ่ายเงินคืนนี้" (pay tonight) and "โอนเงินคืนวันศุกร์" (transfer Friday
+// night) both contain it. The night readings are excluded explicitly; the
+// unambiguous "คืนเงิน" word order needs no guard.
+// The night readings are all "เงินคืน" + a word that continues the DATE,
+// never a question about the refund itself. Review found the bare "วัน"
+// exclusion was too broad and swallowed the most natural way to ask when a
+// refund arrives ("ได้เงินคืนวันไหน"), so the refund-question forms are
+// listed first and win.
+const REFUND_QUESTION_AFTER = 'วันไหน|วันใด|เมื่อไหร่|เมื่อไร|กี่วัน|ตอนไหน|ยังไง|อย่างไร';
+const REFUND_NIGHT_CONTEXT = 'นี้|นั้น|วาน|ละ|แรก|สุดท้าย|ก่อน|ถัดไป|ที่\\s*\\d|วัน(?!ไหน|ใด)';
+const REFUND_RE = new RegExp(
+  [
+    'คืนเงิน',
+    'คืนตัง(?:ค์)?',
+    `เงินคืน(?=${REFUND_QUESTION_AFTER})`,
+    `เงินคืน(?!${REFUND_NIGHT_CONTEXT})`,
+    'refund',
+    'รีฟันด์',
+  ].join('|'),
+  'iu',
+);
+
+// A REQUEST for a better price, not a question about existing promotions:
+// "มีส่วนลดไหม" must keep reaching the promotion responder rather than
+// escalating to the owner.
+//
+// Thai puts the thing being reduced on EITHER side of "ลด", so one rule is
+// not enough:
+//
+//   "ลดหวานหน่อย"      -- noun AFTER  -> food modifier
+//   "น้ำตาลลดได้ไหม"   -- noun BEFORE -> food modifier, same meaning
+//
+// Requiring a price-side function word after "ลด" only handles the first
+// order. Review found the second order misrouted every "น้ำตาลลดได้ไหม" /
+// "ความเผ็ดลดได้ไหม" to the owner as haggling, which is one of the most
+// common café orders there is. So the trailing function word is still
+// required AND a leading consumable noun now disqualifies the match.
+//
+// "ราคา" is deliberately NOT in this list: "ราคาลดได้ไหม" really is a
+// discount request.
+const DISCOUNT_CONSUMABLE_BEFORE = [
+  'น้ำตาล','หวาน','เผ็ด','เค็ม','เปรี้ยว','มัน','น้ำแข็ง','นม','ครีม','ชีส',
+  'โซเดียม','เกลือ','พริก','กะทิ','ซอส','แป้ง','ข้าว','ผัก','ปริมาณ','ขนาด',
+  'น้ำหนัก','ความหวาน','ความเผ็ด','ความเค็ม',
+].join('|');
+
+const SPECIAL_DISCOUNT_RE = new RegExp(
+  [
+    'ส่วนลดพิเศษ',
+    'ลดพิเศษ',
+    'ราคาพิเศษ',
+    'ขอลดราคา',
+    'ขอส่วนลด',
+    `(?<!(?:${DISCOUNT_CONSUMABLE_BEFORE}))ลด(?:ให้|ราคา|หน่อย|ได้|อีก|กว่านี้)`,
+    'ต่อราคา',
+    // "ถูกกว่านี้ได้ไหม" asks for a cheaper PRICE and escalates.
+    // "มีที่ถูกกว่านี้ไหม" asks whether a cheaper OPTION exists, which the
+    // catalog responder owns -- so a preceding "มี ..." disqualifies it,
+    // and so does a following "มี" ("ถูกกว่านี้มีไหม": same question, the
+    // other word order).
+    '(?<!มี[\\u0E00-\\u0E7F]{0,10})ถูกกว่านี้(?!\\s*มี)',
+    'ลดราคา',
+  ].join('|'),
+  'u',
+);
 const CLAIM_RE = /ขอเคลม|เคลมประกัน|(?:^|[\s,])เคลม(?:[\s,]|$)/u;
 // A LIABILITY QUESTION ("...รับผิดชอบไหม"), not a report that an
 // accident already happened -- deliberately requires the question
