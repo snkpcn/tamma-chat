@@ -140,6 +140,15 @@ export type OneMindTrace = {
     relevantConstraintCount: number;
   };
   statePersisted: boolean;
+  /** Whether the bounded CONVERSATION TRANSCRIPT (recent turns, summary,
+   *  active domain/topic) was written. Separate from statePersisted, which
+   *  means the canonical TASK state was written.
+   *
+   *  A turn that One-Mind does not own (legacy_required) must not mutate
+   *  task state, but losing the transcript too is what made LINE forget the
+   *  conversation across such turns. Undefined on paths that do not
+   *  distinguish the two (the compatibility orchestrator below). */
+  contextPersisted?: boolean;
   stateConflictRetries?: number;
   timingsMs?: {
     semantic: number;
@@ -1772,6 +1781,14 @@ export async function processThongthaiOneMindTurnAuthoritative(
   now: Date = new Date(),
   maxAttempts = 4,
   persistPredicate: (result: OneMindTurnResult) => boolean = () => true,
+  /** Whether the bounded conversation transcript may be written even when
+   *  persistPredicate refuses the canonical task write.
+   *
+   *  Default false preserves the original all-or-nothing behavior for every
+   *  existing caller. _thongthai-one-mind-response.ts opts in, so a turn
+   *  that falls through to legacy still remembers what was said without
+   *  being allowed to mutate task state. */
+  contextOnlyPredicate: (result: OneMindTurnResult) => boolean = () => false,
 ): Promise<OneMindTurnResult> {
   const deps: OneMindDependencies = { ...REAL_DEPENDENCIES, ...dependencies };
   const stateDeps: AuthoritativeStateDependencies = {
@@ -1806,15 +1823,32 @@ export async function processThongthaiOneMindTurnAuthoritative(
     // Staleness normalization is a state-safety operation, not a response
     // cutover decision. Persist it even when this turn itself falls through
     // to legacy (e.g. a greeting/support turn outside initial cutover).
+    const semanticTrusted = semanticTurnTrustedForState(result.semanticTurn);
     const shouldPersist = input.persistState === true
-      && (staleTaskSuspended
-        || (semanticTurnTrustedForState(result.semanticTurn) && persistPredicate(result)));
-    if (!shouldPersist || !identity.guestDbId) {
+      && (staleTaskSuspended || (semanticTrusted && persistPredicate(result)));
+
+    // The bounded conversation TRANSCRIPT is a different thing from the
+    // canonical TASK state, and conflating them in one write is what made a
+    // legacy_required turn forget the conversation entirely.
+    //
+    // A transcript-only write is allowed when the turn's meaning is trusted
+    // but One-Mind is not going to own the response. It still requires
+    // trusted semantics -- a provider_unavailable or low-confidence reading
+    // must not be recorded as what the guest said -- and it never touches
+    // taskState, so every state-ownership guarantee in
+    // _thongthai-one-mind-response.ts holds unchanged.
+    const shouldPersistContextOnly = !shouldPersist
+      && input.persistState === true
+      && semanticTrusted
+      && contextOnlyPredicate(result);
+
+    if ((!shouldPersist && !shouldPersistContextOnly) || !identity.guestDbId) {
       return {
         ...result,
         trace:{
           ...result.trace,
           statePersisted:false,
+          contextPersisted:false,
           stateConflictRetries:attempt,
           timingsMs:{
             semantic:semanticMs,
@@ -1829,20 +1863,29 @@ export async function processThongthaiOneMindTurnAuthoritative(
 
     const stateWriteStartedAt = Date.now();
     const write = await stateDeps.compareAndSwap(identity.guestDbId, snapshot, {
-      set:{
-        conversationContext:result.conversationContextAfter,
-        taskState:result.taskStateAfter,
-      },
+      set: shouldPersist
+        ? {
+          conversationContext:result.conversationContextAfter,
+          taskState:result.taskStateAfter,
+        }
+        // Transcript only. taskState is deliberately absent from the patch,
+        // so the existing row keeps whatever the authoritative task owner
+        // last wrote.
+        : { conversationContext:result.conversationContextAfter },
     }, now);
     stateWriteMs += Date.now() - stateWriteStartedAt;
 
     if (write.status === 'applied') {
-      await mirrorActivityTaskIfLineSourced(input.channel, identity.guestDbId, result.taskStateAfter, input.environment, deps);
+      // Only a real task write may mirror the activity task outward.
+      if (shouldPersist) {
+        await mirrorActivityTaskIfLineSourced(input.channel, identity.guestDbId, result.taskStateAfter, input.environment, deps);
+      }
       return {
         ...result,
         trace:{
           ...result.trace,
-          statePersisted:true,
+          statePersisted:shouldPersist,
+          contextPersisted:true,
           stateConflictRetries:attempt,
           timingsMs:{
             semantic:semanticMs,
@@ -1860,6 +1903,7 @@ export async function processThongthaiOneMindTurnAuthoritative(
         trace:{
           ...result.trace,
           statePersisted:false,
+          contextPersisted:false,
           stateConflictRetries:attempt,
           timingsMs:{
             semantic:semanticMs,

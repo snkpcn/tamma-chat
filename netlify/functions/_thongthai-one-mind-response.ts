@@ -611,6 +611,42 @@ export async function processOneMindCustomerTurn(
       }
       return true;
     },
+    // Transcript-only fallback. When the predicate above refuses the
+    // canonical TASK write, the bounded conversation transcript may still be
+    // recorded so the next turn remembers what was said -- the gap that made
+    // LINE lose continuity across every legacy_required turn.
+    //
+    // It must NOT be allowed for the three cases this module deliberately
+    // routes to legacy, because each of them means the turn's own outcome is
+    // still unsettled and recording a transcript would describe a
+    // conversation state that never happened:
+    //
+    //  1. taskStateChanged -- a cancel/suspend/resume/correction whose task
+    //     write did not land. The customer has not actually been told the
+    //     working state changed (see the legacy_required branch below).
+    //  2. A grounded promotion provider-fallback, which is response-only by
+    //     design so an outage cannot steal ownership from the promotion
+    //     state machine.
+    //  3. A trusted INCIDENT, where the chat core owns durable persistence
+    //     and notification; One-Mind must not get ahead of it.
+    candidate => {
+      if (taskStateChanged(candidate)) return false;
+      if (
+        eligibilityOptionsWithMessage.requireSemanticSupervisor
+        && isTrustedGroundedPromotionProviderFallback(candidate, eligibilityOptionsWithMessage.message ?? input.message)
+      ) {
+        return false;
+      }
+      const meaning = deriveSemanticMeaning(candidate.dialogSemanticTurn);
+      if (
+        meaning.conversationalMode === 'INCIDENT'
+        && (candidate.dialogSemanticTurn.semanticSource === 'openai_supervisor'
+          || candidate.dialogSemanticTurn.semanticSource === 'semantic_concept_memory')
+      ) {
+        return false;
+      }
+      return true;
+    },
   );
   const eligibility = readOnlyCutoverEligibility(turn, eligibilityOptionsWithMessage);
 
