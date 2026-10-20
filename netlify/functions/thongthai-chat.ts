@@ -6429,9 +6429,23 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     };
   }
 
+  // Broad-discovery turns ("มีกิจกรรมอะไรบ้าง") are answered entirely from
+  // the verified activity/experience catalog by
+  // deterministicExperienceDiscoveryResponse further down -- no model output
+  // reaches the customer. Declared HERE, above the first paid path of the
+  // turn, so every later gate can honour it.
+  //
+  // Review finding: this guard previously sat below the visitor paths, so
+  // once THONGTHAI_VISITOR_UNDERSTANDING / the web search were enabled a
+  // discovery question paid for an interpretation (and possibly a search
+  // credit) whose result was then discarded. The same shared
+  // isExperienceDiscoveryIntent matcher owns the whole class; this only
+  // changes WHEN it is evaluated.
+  const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
+
   let visitorUnderstoodTopic:string|null=null;
   let visitorArrivalInformation:ReturnType<typeof regularArrivalInformation>=null;
-  if(process.env.THONGTHAI_VISITOR_UNDERSTANDING==='1' && request.language==='th') {
+  if(!preserveExperienceDiscoveryFastPath && process.env.THONGTHAI_VISITOR_UNDERSTANDING==='1' && request.language==='th') {
     const history=request.chatHistory.length?request.chatHistory
       :(await loadConversationContext(guestDbId).catch(()=>null))?.recentTurns ?? [];
     const understanding=await understandVisitorQuestion({message:request.message,history,
@@ -6542,10 +6556,17 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
 
   // Informational visitor questions must not become cafe menu lookups,
   // generic model failures, or unsolicited escalation/booking operations.
+  // NOT guarded by the discovery fast path: answerVisitorInformation is
+  // deterministic and free (see tests/visitor-basic-questions.test.ts, which
+  // asserts modelCallCount()===0), and it answers several questions that
+  // merely CONTAIN the word "กิจกรรม" better than the broad-discovery
+  // catalog does. Only the paid paths are skipped.
   let visitorInformation = request.language==='th'
     ? visitorArrivalInformation ?? await answerVisitorInformation({message:request.message,channel,environment:request.environment})
     : null;
-  const visitorWebSearch=request.language==='th'
+  // Paid search credit. Skipped for broad discovery for the same reason as
+  // the paid interpretation above: the answer is already deterministic.
+  const visitorWebSearch=request.language==='th' && !preserveExperienceDiscoveryFastPath
     ? await searchMissingVisitorInformation({message:request.message,answer:visitorInformation,context:{
         conversationId:request.guestId ?? guestDbId ?? 'unknown',guestDbId,channel,eventId:transportEventId,
         callerLabel:'visitor-web-search',
@@ -7295,19 +7316,10 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // regex responders, or other legacy domain routers. If One-Mind says the
   // turn needs a real transaction executor, it returns legacy_required and
   // the unchanged executor path below still owns the write.
-  // Broad-discovery turns are answered entirely from the verified
-  // activity/experience catalog by deterministicExperienceDiscoveryResponse
-  // below -- no model output reaches the customer. The same guard already
-  // existed on the SECOND One-Mind gate, but it was computed after this
-  // first gate had already run and spent the turn's paid semantic call, so
-  // "มีกิจกรรมอะไรบ้าง" paid for an interpretation whose result was then
-  // discarded. Evaluating it here makes the whole class a zero-call turn.
-  //
-  // Deliberately the same shared isExperienceDiscoveryIntent matcher, so
-  // this only moves WHEN an existing guard is evaluated. The four guards
-  // below keep their exact meaning and scope.
-  const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
-
+  // preserveExperienceDiscoveryFastPath is declared once near the top of
+  // this function, above the turn's first paid path, and reused by every
+  // gate from here down. The four guards below keep their exact meaning and
+  // scope.
   if (process.env.THONGTHAI_ONE_MIND_CUTOVER === '1'
       && !preserveExperienceDiscoveryFastPath
       && !preserveVerifiedLocationBeforeSupervision

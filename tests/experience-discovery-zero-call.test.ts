@@ -68,7 +68,110 @@ test('the other four first-gate guards keep their exact scope', () => {
   assert.equal((condition.match(/&&/gu) ?? []).length, 5);
 });
 
-test('a discovery turn never reaches a paid provider call', async () => {
+test('a real discovery turn completes and makes no paid call, flag off AND flag on', async () => {
+  // Runs the real shared core end to end and fails on ANY request to a paid
+  // provider, with the visitor flags both off and on.
+  //
+  // HONEST LIMITATION: this is a smoke test, not proof that the guard works.
+  // A unit test cannot drive the visitor paths all the way to a provider
+  // call -- they resolve these questions without a model -- so a control
+  // message does NOT pay here either, and this assertion would still pass
+  // with the guard removed. The load-bearing check for THIS fix is the
+  // ordering/reference test below. Kept because it does prove the reordered
+  // guard did not break the turn or introduce a new paid path.
+  const { processThongthaiChatCore } = await import('../netlify/functions/thongthai-chat');
+  const keys = [
+    'THONGTHAI_VISITOR_UNDERSTANDING','THONGTHAI_VISITOR_WEB_SEARCH','THONGTHAI_ONE_MIND_CUTOVER',
+    'OPENAI_API_KEY','TAVILY_API_KEY','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY',
+  ] as const;
+  const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  const originalFetch = global.fetch;
+
+  const paidHosts = ['api.openai.com', 'api.tavily.com'];
+  for (const understanding of ['0', '1']) {
+    const paidCalls: string[] = [];
+    process.env.THONGTHAI_ONE_MIND_CUTOVER = '1';
+    process.env.THONGTHAI_VISITOR_UNDERSTANDING = understanding;
+    process.env.THONGTHAI_VISITOR_WEB_SEARCH = understanding;
+    process.env.OPENAI_API_KEY = 'test-key';
+    process.env.TAVILY_API_KEY = 'test-key';
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    global.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
+      if (paidHosts.some(host => url.includes(host))) paidCalls.push(url);
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    try {
+      for (const message of DISCOVERY_MESSAGES) {
+        await processThongthaiChatCore({
+          message,
+          language: 'th',
+          guestId: '11111111-1111-5111-8111-111111111111',
+          chatHistory: [],
+          guestContext: {
+            tripDuration: null, travelerType: null,
+            group: { adults: null, children: null, elderly: null },
+            interests: [], pace: null, budget: null, constraints: [],
+          },
+          pageContext: { section: 'line' },
+        } as never, `zero-call-${understanding}-${message}`);
+      }
+      assert.deepEqual(
+        paidCalls, [],
+        `THONGTHAI_VISITOR_UNDERSTANDING=${understanding}: discovery must cost nothing, saw ${paidCalls.join(', ')}`,
+      );
+    } finally {
+      global.fetch = originalFetch;
+      for (const key of keys) {
+        if (before[key] === undefined) delete process.env[key];
+        else process.env[key] = before[key];
+      }
+    }
+  }
+});
+
+test('the broad-discovery guard is declared above the turn first paid path', () => {
+  const declaration = CHAT_SOURCE.indexOf('const preserveExperienceDiscoveryFastPath =');
+  const visitorUnderstanding = CHAT_SOURCE.indexOf("process.env.THONGTHAI_VISITOR_UNDERSTANDING==='1'");
+  const visitorSearch = CHAT_SOURCE.indexOf("callerLabel:'visitor-web-search'");
+  assert.ok(declaration > 0 && visitorUnderstanding > 0 && visitorSearch > 0);
+  assert.ok(
+    declaration < visitorUnderstanding,
+    'the guard must be evaluated before the paid visitor interpretation',
+  );
+  assert.ok(declaration < visitorSearch, 'and before the paid search credit');
+  // Both PAID visitor paths must actually consult it.
+  assert.match(
+    CHAT_SOURCE.slice(visitorUnderstanding - 200, visitorUnderstanding + 40),
+    /!preserveExperienceDiscoveryFastPath/u,
+    'the paid visitor interpretation must honour the fast path',
+  );
+  assert.match(
+    CHAT_SOURCE.slice(visitorSearch - 400, visitorSearch),
+    /!preserveExperienceDiscoveryFastPath/u,
+    'the paid web search must honour the fast path',
+  );
+});
+
+test('the FREE visitor answer is deliberately not gated by the fast path', () => {
+  // isExperienceDiscoveryIntent claims any message containing "กิจกรรม"
+  // (see hasDiscoveryShape in _experience-discovery.ts), which is far wider
+  // than broad discovery. Gating the deterministic answerVisitorInformation
+  // on it regressed 8 cases in tests/visitor-basic-questions.test.ts --
+  // questions like "มีแพ็กเกจที่พักรวมอาหารและกิจกรรมไหม" lost their real
+  // answer and got the generic catalog blurb instead. Only paid paths may
+  // be skipped.
+  const call = CHAT_SOURCE.indexOf('await answerVisitorInformation({');
+  assert.ok(call > 0, 'the free visitor answer must still be reachable');
+  const assignment = CHAT_SOURCE.slice(CHAT_SOURCE.lastIndexOf('let visitorInformation', call), call);
+  assert.ok(
+    !assignment.includes('preserveExperienceDiscoveryFastPath'),
+    'the free deterministic visitor answer must not be gated on broad discovery',
+  );
+});
+
+test('the discovery answer itself reaches no provider', async () => {
   // Any outbound request at all would be either OpenAI or a backend read on
   // the paid path. The deterministic answer needs neither: it is rendered
   // from world facts already loaded for the turn.
