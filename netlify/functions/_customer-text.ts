@@ -106,9 +106,14 @@ const TRAILING_POLITENESS: ReadonlyArray<readonly [RegExp, string]> = [
  *  Threshold is 3, not 2: standard Thai really does place two identical
  *  consonants side by side across a syllable boundary ("บ้านนอก", "จันทร์",
  *  "ธรรมะ" patterns), and collapsing those would corrupt real words. Three
- *  or more of the same character is emphasis, not spelling. */
+ *  or more of the same character is emphasis, not spelling.
+ *
+ *  Thai letters only. A repeated Latin letter or digit is usually data, not
+ *  emphasis: "XXXL" is a size, "www." is a URL, "AAA" is a battery, and
+ *  collapsing them changed what the customer asked for ("XXXL" -> "XL").
+ *  Digits were already excluded; "555" stays as typed. */
 function collapseElongation(message: string): string {
-  return message.replace(/([ก-๛A-Za-z])\1{2,}/gu, '$1');
+  return message.replace(/([ก-๛])\1{2,}/gu, '$1');
 }
 
 function applyMap(

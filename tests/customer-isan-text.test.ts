@@ -25,6 +25,19 @@ test('elongation collapses to the real word', () => {
   assert.equal(normalizeCustomerText('ไปป่าววววว'), 'ไปป่าว');
 });
 
+test('only Thai letters are collapsed: sizes, URLs and numbers stay as typed', () => {
+  // Review finding: Latin letters were collapsed too, so a size or a link
+  // silently changed before anything read it.
+  for (const text of [
+    'XXXL', 'เสื้อไซส์ XXXL มีไหม', 'www.facebook.com', 'ดูที่ www.facebook.com/tammachat',
+    'ถ่าน AAA', '555', 'ฮ่าๆ 5555', 'ห้อง 1000 บาท', 'โทร 0888 999 000',
+  ]) {
+    assert.equal(normalizeCustomerText(text), text, `${text} must be left alone`);
+  }
+  // Thai emphasis still collapses, next to Latin that does not.
+  assert.equal(normalizeCustomerText('ขอไซส์ XXXL ด่วนนนน'), 'ขอไซส์ XXXL ด่วน');
+});
+
 test('elongation collapse never corrupts a real doubled consonant', () => {
   // Standard Thai genuinely places two identical consonants side by side.
   // Only three or more is emphasis, which is why the threshold is 3.
