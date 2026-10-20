@@ -74,12 +74,22 @@ const ISAN_VOCABULARY: ReadonlyArray<readonly [RegExp, string]> = [
   [/อิหยัง|หยัง/gu, 'อะไร'],
 ];
 
-/** Politeness particles, anchored to the END of the message only.
- *  "คับ" unanchored would rewrite "เสื้อคับ" (the shirt is tight) and
- *  "ค่า" would rewrite "ค่าอาหาร" (the food charge). A trailing particle is
- *  unambiguous; the same letters mid-sentence are not. */
+/** Politeness particles, anchored to the END of the message only, because
+ *  "ค่า" mid-sentence is "ค่าอาหาร" (the food charge), not a particle.
+ *
+ *  "คับ" was REMOVED after review and must not come back. Anchoring is not
+ *  enough for it: "คับ" is itself an ordinary word meaning tight, and it
+ *  ends a sentence perfectly naturally --
+ *
+ *    "หมวกคับ" -> "หมวกครับ"
+ *    "เสื้อคับ" -> "เสื้อครับ"
+ *
+ *  which silently deleted the customer's actual report. This ecosystem
+ *  hands out riding helmets for the horse and ATV activities, so "หมวกคับ"
+ *  is a safety message, not a greeting. Every remaining spelling here
+ *  contains ร or a tone mark that no ordinary word shares. */
 const TRAILING_POLITENESS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/(?:คร้าบ|คร๊าบ|ค้าบ|คร่าบ|ครัช|ครัฟ|คับ|ขรับ)(?=[\s!?.…]*$)/u, 'ครับ'],
+  [/(?:คร้าบ|คร๊าบ|ค้าบ|คร่าบ|ครัช|ครัฟ|ขรับ)(?=[\s!?.…]*$)/u, 'ครับ'],
   [/(?:ค่าา|คร่า|ค๊ะ|ค้ะ|คะ่)(?=[\s!?.…]*$)/u, 'ค่ะ'],
 ];
 

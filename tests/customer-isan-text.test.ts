@@ -105,9 +105,9 @@ test('everyday Isan vocabulary reaches the parsers as standard Thai', () => {
 
 test('politeness spellings normalize only at the end of the message', () => {
   assert.equal(normalizeCustomerText('ขอบคุณคร้าบ'), 'ขอบคุณครับ');
-  assert.equal(normalizeCustomerText('ขอบคุณคับ'), 'ขอบคุณครับ');
   assert.equal(normalizeCustomerText('ขอบคุณคร้าบบบบ'), 'ขอบคุณครับ');
   assert.equal(normalizeCustomerText('สวัสดีค้าบ!'), 'สวัสดีครับ!');
+  assert.equal(normalizeCustomerText('ขอบคุณคร่าบ'), 'ขอบคุณครับ');
 });
 
 test('a politeness lookalike in the middle of a sentence is left alone', () => {
@@ -115,6 +115,24 @@ test('a politeness lookalike in the middle of a sentence is left alone', () => {
   assert.equal(normalizeCustomerText('เสื้อคับไปหน่อย'), 'เสื้อคับไปหน่อย');
   assert.equal(normalizeCustomerText('ค่าอาหารเท่าไหร่'), 'ค่าอาหารเท่าไหร่');
   assert.equal(normalizeCustomerText('ขอคะน้าผัดน้ำมันหอย'), 'ขอคะน้าผัดน้ำมันหอย');
+});
+
+test('"คับ" is never treated as a politeness particle, even at the end', () => {
+  // Review finding: anchoring to end-of-message was not enough, because
+  // "คับ" (tight) ends a sentence naturally. This ecosystem issues riding
+  // helmets, so "หมวกคับ" is a safety report that must survive intact.
+  assert.equal(normalizeCustomerText('หมวกคับ'), 'หมวกคับ');
+  assert.equal(normalizeCustomerText('เสื้อคับ'), 'เสื้อคับ');
+  assert.equal(normalizeCustomerText('กางเกงคับ'), 'กางเกงคับ');
+  assert.equal(normalizeCustomerText('หมวกคับไปหน่อย'), 'หมวกคับไปหน่อย');
+  // Elongation is still collapsed first, and must not then become ครับ.
+  assert.equal(normalizeCustomerText('หมวกคับบบบ'), 'หมวกคับ');
+  for (const text of ['หมวกคับ', 'เสื้อคับ', 'กางเกงคับ']) {
+    assert.ok(
+      !normalizeCustomerText(text).includes('ครับ'),
+      `${text} must not gain a politeness particle`,
+    );
+  }
 });
 
 test('a real Isan sentence survives end to end', () => {
