@@ -6341,9 +6341,25 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // add three consecutive database round trips to every customer reply.
   await Promise.all([
     registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId),
+    // Heartbeat only: it bumps the ledger's lastActivityAt so a long
+    // free-path conversation cannot reset paid spend. It is NOT the budget
+    // gate. A failed heartbeat must never cost the customer their reply --
+    // especially on a turn that was going to be free anyway.
+    //
+    // The paid path still fails CLOSED without this: reserveAiCall does its
+    // own snapshot load + compare-and-swap, and throws
+    // AiBudgetBlockedError('ledger_unavailable') when the ledger cannot be
+    // read or written. Swallowing the heartbeat therefore cannot let an
+    // unaccounted paid call through; it only risks losing one activity bump
+    // (every paid reservation bumps lastActivityAt too).
     touchAiConversation({
       conversationId:request.guestId ?? guestDbId ?? 'unknown',
       guestDbId, channel, eventId:transportEventId, callerLabel:'customer_activity',
+    }).catch(error => {
+      console.error(
+        'THONGTHAI_AI_CONVERSATION_HEARTBEAT_ERROR',
+        error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+      );
     }),
     capturePreferenceSignals(guestDbId, request.message, {
       channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
