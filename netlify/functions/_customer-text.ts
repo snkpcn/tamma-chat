@@ -33,9 +33,11 @@ const ISAN_NEGATION: ReadonlyArray<readonly [RegExp, string]> = [
   // With the tail present the idiom is complete, so anything may follow
   // ("บ่เป็นหยังเด้อ").
   [/บ่เป็น(?:หยัง|อิหยัง|ไร)/gu, 'ไม่เป็นไร'],
-  // Bare "บ่เป็น" only at the end of a clause. Anything else is "บ่" + a
-  // different verb and must keep its own word.
-  [/บ่เป็น(?![ก-๛])/gu, 'ไม่เป็นไร'],
+  // Bare "บ่เป็น" only at the real end of the message (trailing spaces or
+  // punctuation allowed). Anything else is "บ่" + a different verb and must
+  // keep its own word. "Not followed by a Thai letter" was not enough: Thai
+  // is typed with spaces between words, so "บ่เป็น ไผ" became "ไม่เป็นไร ไผ".
+  [/บ่เป็น(?=[\s!?.…]*$)/gu, 'ไม่เป็นไร'],
   [/บ่ฮู้/gu, 'ไม่รู้'],
   [/บ่รู้/gu, 'ไม่รู้'],
   [/บ่ไหว/gu, 'ไม่ไหว'],

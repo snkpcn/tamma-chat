@@ -72,6 +72,19 @@ test('"บ่เป็น" becomes the idiom only when it IS the idiom', () => {
   }
 });
 
+test('bare "บ่เป็น" expands only at the real end of the message', () => {
+  // Review finding: a space or a digit after "บ่เป็น" counted as the end.
+  for (const text of ['บ่เป็น ไผ', 'บ่เป็น หนี้', 'บ่เป็น 2 คน', 'บ่เป็น ห่วงครับ']) {
+    assert.equal(normalizeCustomerText(text), text, `${text} must be left alone`);
+  }
+  assert.equal(normalizeCustomerText('บ่เป็น'), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็น!'), 'ไม่เป็นไร!');
+  assert.equal(normalizeCustomerText('บ่เป็น  '), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็นหยัง'), 'ไม่เป็นไร');
+  // The complete idiom still expands with a space before what follows.
+  assert.equal(normalizeCustomerText('บ่เป็นหยัง เด้อ'), 'ไม่เป็นไร เด้อ');
+});
+
 test('ordinary Thai words that merely start with "บ่" are never rewritten', () => {
   // This is the whole reason the negation map is a closed list rather than
   // a /บ่/ prefix rule: each of these would become nonsense.
