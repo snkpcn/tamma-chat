@@ -27,7 +27,15 @@ const ISAN_NEGATION: ReadonlyArray<readonly [RegExp, string]> = [
   [/บ่ต้อง/gu, 'ไม่ต้อง'],
   [/บ่เอา/gu, 'ไม่เอา'],
   [/บ่ใช่/gu, 'ไม่ใช่'],
-  [/บ่เป็น(?:หยัง|อิหยัง)?/gu, 'ไม่เป็นไร'],
+  // Only the complete idiom. Review found the optional tail let a bare
+  // "บ่เป็น" absorb whatever followed and gain a "ไร" that was never there:
+  // "บ่เป็นไผ" -> "ไม่เป็นไรไผ", "บ่เป็นหนี้" -> "ไม่เป็นไรหนี้".
+  // With the tail present the idiom is complete, so anything may follow
+  // ("บ่เป็นหยังเด้อ").
+  [/บ่เป็น(?:หยัง|อิหยัง|ไร)/gu, 'ไม่เป็นไร'],
+  // Bare "บ่เป็น" only at the end of a clause. Anything else is "บ่" + a
+  // different verb and must keep its own word.
+  [/บ่เป็น(?![ก-๛])/gu, 'ไม่เป็นไร'],
   [/บ่ฮู้/gu, 'ไม่รู้'],
   [/บ่รู้/gu, 'ไม่รู้'],
   [/บ่ไหว/gu, 'ไม่ไหว'],
@@ -45,11 +53,23 @@ const ISAN_NEGATION: ReadonlyArray<readonly [RegExp, string]> = [
 
 /** Everyday Isan vocabulary. Kept small on purpose: a word is only listed
  *  when the standard-Thai reading is absent or vanishingly unlikely in a
- *  restaurant / café / stay / activity conversation. */
+ *  restaurant / café / stay / activity conversation.
+ *
+ *  Two entries were REMOVED after review, and must not come back:
+ *
+ *  - "หม่ำ" -> "กิน". หม่ำ is an Isan fermented pork sausage, i.e. a real
+ *    MENU ITEM here (and a nationally known performer's name). Rewriting it
+ *    destroyed orders: "มีหม่ำไหม" became "มีกินไหม" and "สั่งหม่ำ 2 ไม้"
+ *    became "สั่งกิน 2 ไม้", so the dish never reached the parser or the
+ *    prompt. The model understands หม่ำ as food without help.
+ *  - "เว้า" -> "พูด". "เว้า" is also standard Thai for concave, and it is a
+ *    substring of "เว้าวอน" (to plead), which became "พูดวอน".
+ *
+ *  Both broke this file's own rule above: never rewrite a word that also
+ *  exists in standard Thai with a different meaning. */
 const ISAN_VOCABULARY: ReadonlyArray<readonly [RegExp, string]> = [
   [/เบิ่ง/gu, 'ดู'],
   [/เฮ็ด/gu, 'ทำ'],
-  [/เว้า/gu, 'พูด'],
   [/แซ่บ/gu, 'อร่อย'],
   [/แซบ/gu, 'อร่อย'],
   [/ม่วน/gu, 'สนุก'],
@@ -59,16 +79,25 @@ const ISAN_VOCABULARY: ReadonlyArray<readonly [RegExp, string]> = [
   [/ยังใด๋/gu, 'อย่างไร'],
   [/สิไป/gu, 'จะไป'],
   [/กินข้าวแลง/gu, 'กินข้าวเย็น'],
-  [/หม่ำ/gu, 'กิน'],
   [/อิหยัง|หยัง/gu, 'อะไร'],
 ];
 
-/** Politeness particles, anchored to the END of the message only.
- *  "คับ" unanchored would rewrite "เสื้อคับ" (the shirt is tight) and
- *  "ค่า" would rewrite "ค่าอาหาร" (the food charge). A trailing particle is
- *  unambiguous; the same letters mid-sentence are not. */
+/** Politeness particles, anchored to the END of the message only, because
+ *  "ค่า" mid-sentence is "ค่าอาหาร" (the food charge), not a particle.
+ *
+ *  "คับ" was REMOVED after review and must not come back. Anchoring is not
+ *  enough for it: "คับ" is itself an ordinary word meaning tight, and it
+ *  ends a sentence perfectly naturally --
+ *
+ *    "หมวกคับ" -> "หมวกครับ"
+ *    "เสื้อคับ" -> "เสื้อครับ"
+ *
+ *  which silently deleted the customer's actual report. This ecosystem
+ *  hands out riding helmets for the horse and ATV activities, so "หมวกคับ"
+ *  is a safety message, not a greeting. Every remaining spelling here
+ *  contains ร or a tone mark that no ordinary word shares. */
 const TRAILING_POLITENESS: ReadonlyArray<readonly [RegExp, string]> = [
-  [/(?:คร้าบ|คร๊าบ|ค้าบ|คร่าบ|ครัช|ครัฟ|คับ|ขรับ)(?=[\s!?.…]*$)/u, 'ครับ'],
+  [/(?:คร้าบ|คร๊าบ|ค้าบ|คร่าบ|ครัช|ครัฟ|ขรับ)(?=[\s!?.…]*$)/u, 'ครับ'],
   [/(?:ค่าา|คร่า|ค๊ะ|ค้ะ|คะ่)(?=[\s!?.…]*$)/u, 'ค่ะ'],
 ];
 

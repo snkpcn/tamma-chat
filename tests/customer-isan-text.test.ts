@@ -43,6 +43,22 @@ test('"บ่" is read as negation only in unambiguous Isan collocations', () =>
   assert.equal(normalizeCustomerText('ที่พักบ่แพง'), 'ที่พักไม่แพง');
 });
 
+test('"บ่เป็น" becomes the idiom only when it IS the idiom', () => {
+  // Review finding: the optional tail let a bare "บ่เป็น" absorb whatever
+  // followed and gain a "ไร" that was never there.
+  assert.equal(normalizeCustomerText('บ่เป็นหยัง'), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็นอิหยัง'), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็นไร'), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็น'), 'ไม่เป็นไร');
+  // The complete idiom may still be followed by a particle.
+  assert.equal(normalizeCustomerText('บ่เป็นหยังเด้อ'), 'ไม่เป็นไรเด้อ');
+  // "บ่" + a different verb keeps its own word, and must not gain "ไร".
+  for (const text of ['บ่เป็นไผ', 'บ่เป็นหนี้', 'บ่เป็นห่วง']) {
+    assert.equal(normalizeCustomerText(text), text, `${text} must be left alone`);
+    assert.ok(!normalizeCustomerText(text).includes('ไม่เป็นไร'));
+  }
+});
+
 test('ordinary Thai words that merely start with "บ่" are never rewritten', () => {
   // This is the whole reason the negation map is a closed list rather than
   // a /บ่/ prefix rule: each of these would become nonsense.
@@ -71,6 +87,27 @@ test('negation is never stripped off the verb it negates', () => {
   }
 });
 
+test('an Isan menu item is never rewritten into a verb', () => {
+  // Review finding: "หม่ำ" (Isan fermented pork sausage) was mapped to
+  // "กิน", which destroyed real orders before they reached any parser.
+  assert.equal(normalizeCustomerText('มีหม่ำไหม'), 'มีหม่ำไหม');
+  assert.equal(normalizeCustomerText('สั่งหม่ำ 2 ไม้'), 'สั่งหม่ำ 2 ไม้');
+  assert.equal(normalizeCustomerText('ไส้กรอกหม่ำ'), 'ไส้กรอกหม่ำ');
+  assert.equal(normalizeCustomerText('หม่ำกับส้มตำ'), 'หม่ำกับส้มตำ');
+  for (const dish of ['หม่ำ', 'ส้มตำ', 'ลาบ', 'ก้อย', 'ซุปหน่อไม้', 'แจ่ว', 'ปลาร้า', 'ไก่ย่าง']) {
+    assert.equal(
+      normalizeCustomerText(`มี${dish}ไหม`), `มี${dish}ไหม`,
+      `${dish} is a menu item and must survive normalization verbatim`,
+    );
+  }
+});
+
+test('a standard-Thai word is not rewritten by an Isan lookalike', () => {
+  // "เว้า" is standard Thai for concave and a substring of "เว้าวอน".
+  assert.equal(normalizeCustomerText('เว้าวอน'), 'เว้าวอน');
+  assert.equal(normalizeCustomerText('ขอบเว้า'), 'ขอบเว้า');
+});
+
 test('everyday Isan vocabulary reaches the parsers as standard Thai', () => {
   assert.equal(normalizeCustomerText('อยากเบิ่งเมนู'), 'อยากดูเมนู');
   assert.equal(normalizeCustomerText('ส้มตำแซ่บ'), 'ส้มตำอร่อย');
@@ -84,9 +121,9 @@ test('everyday Isan vocabulary reaches the parsers as standard Thai', () => {
 
 test('politeness spellings normalize only at the end of the message', () => {
   assert.equal(normalizeCustomerText('ขอบคุณคร้าบ'), 'ขอบคุณครับ');
-  assert.equal(normalizeCustomerText('ขอบคุณคับ'), 'ขอบคุณครับ');
   assert.equal(normalizeCustomerText('ขอบคุณคร้าบบบบ'), 'ขอบคุณครับ');
   assert.equal(normalizeCustomerText('สวัสดีค้าบ!'), 'สวัสดีครับ!');
+  assert.equal(normalizeCustomerText('ขอบคุณคร่าบ'), 'ขอบคุณครับ');
 });
 
 test('a politeness lookalike in the middle of a sentence is left alone', () => {
@@ -94,6 +131,24 @@ test('a politeness lookalike in the middle of a sentence is left alone', () => {
   assert.equal(normalizeCustomerText('เสื้อคับไปหน่อย'), 'เสื้อคับไปหน่อย');
   assert.equal(normalizeCustomerText('ค่าอาหารเท่าไหร่'), 'ค่าอาหารเท่าไหร่');
   assert.equal(normalizeCustomerText('ขอคะน้าผัดน้ำมันหอย'), 'ขอคะน้าผัดน้ำมันหอย');
+});
+
+test('"คับ" is never treated as a politeness particle, even at the end', () => {
+  // Review finding: anchoring to end-of-message was not enough, because
+  // "คับ" (tight) ends a sentence naturally. This ecosystem issues riding
+  // helmets, so "หมวกคับ" is a safety report that must survive intact.
+  assert.equal(normalizeCustomerText('หมวกคับ'), 'หมวกคับ');
+  assert.equal(normalizeCustomerText('เสื้อคับ'), 'เสื้อคับ');
+  assert.equal(normalizeCustomerText('กางเกงคับ'), 'กางเกงคับ');
+  assert.equal(normalizeCustomerText('หมวกคับไปหน่อย'), 'หมวกคับไปหน่อย');
+  // Elongation is still collapsed first, and must not then become ครับ.
+  assert.equal(normalizeCustomerText('หมวกคับบบบ'), 'หมวกคับ');
+  for (const text of ['หมวกคับ', 'เสื้อคับ', 'กางเกงคับ']) {
+    assert.ok(
+      !normalizeCustomerText(text).includes('ครับ'),
+      `${text} must not gain a politeness particle`,
+    );
+  }
 });
 
 test('a real Isan sentence survives end to end', () => {

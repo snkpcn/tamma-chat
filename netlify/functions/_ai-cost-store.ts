@@ -1,4 +1,5 @@
 import { backendFetch } from './_backend-fetch';
+import { CUSTOMER_TURN_BUDGET_MS } from './_customer-turn-budget';
 
 /** Result of trying to claim a turn before doing any work.
  *  'claimed'            -- first delivery, proceed.
@@ -15,16 +16,23 @@ export type TurnClaimOutcome =
 export const TURN_CLAIM_TIMEOUT_MS = 1_000;
 
 /** Longest a claim may stay 'in_progress' before another delivery may take
- *  it over.
+ *  it over. DERIVED from the turn budget rather than hand-picked.
  *
- *  Must sit ABOVE the longest a live turn can hold its claim (the LINE turn
- *  budget plus the reply call, i.e. the 10s synchronous function ceiling) so
- *  a slow-but-alive attempt is never stolen, and BELOW the point where a
- *  redelivery would be refused forever. If a turn is killed mid-flight its
- *  claim is left 'in_progress', and LINE's redelivery must be able to take
- *  over and actually answer -- otherwise dedupe converts a timeout into
- *  permanent silence, which is worse than the duplicate it prevents. */
-export const TURN_CLAIM_STALE_MS = 12_000;
+ *  Two bounds have to hold at once:
+ *
+ *   - ABOVE the longest a LIVE turn can hold its claim, or a slow-but-alive
+ *     attempt gets stolen and answers twice. The claim is taken inside the
+ *     turn budget (the clock starts before it), so that maximum is
+ *     CUSTOMER_TURN_BUDGET_MS.
+ *   - AT OR BELOW the point where a killed turn's redelivery arrives, or
+ *     dedupe refuses the retry and converts a timeout into permanent
+ *     silence -- worse than the duplicate it prevents.
+ *
+ *  A hand-picked 12s violated the second bound: review found a dead zone
+ *  between the ~10s function kill and 12s, where a redelivery was refused
+ *  and the customer got nothing at all. Deriving it keeps the two bounds
+ *  consistent if the budget ever moves. */
+export const TURN_CLAIM_STALE_MS = CUSTOMER_TURN_BUDGET_MS + 1_000;
 
 async function runCustomerTurnClaim(
   row:{ conversationId:string|null; eventId:string; channel:string; environment:'live'|'test' },

@@ -285,21 +285,31 @@ test('the claim metric never carries customer text', async () => {
   );
 });
 
-test('the in-flight window brackets a real bounded turn', async () => {
-  const { LINE_TURN_BUDGET_MS } = await import('../netlify/functions/_line-webhook-core');
-  // Above the longest a live turn can hold its claim, so a slow-but-alive
-  // attempt is never stolen...
+test('the in-flight window leaves no dead zone around the function kill', async () => {
+  const { CUSTOMER_TURN_BUDGET_MS } = await import('../netlify/functions/_customer-turn-budget');
+  const NETLIFY_SYNC_LIMIT_MS = 10_000;
+
+  // Above the longest a LIVE turn can hold its claim (the claim is taken
+  // inside the budget), so a slow-but-alive attempt is never stolen.
   assert.ok(
-    TURN_CLAIM_STALE_MS > LINE_TURN_BUDGET_MS,
+    TURN_CLAIM_STALE_MS > CUSTOMER_TURN_BUDGET_MS,
     'a live turn must never have its own claim taken over',
   );
-  // ...and below the point where a killed turn could never be retried, which
-  // would turn a timeout into permanent silence.
+  // At or below the function kill, so a redelivery after a kill can ALWAYS
+  // take the claim over. Review found a dead zone here: with a hand-picked
+  // 12s, a retry arriving between the ~10s kill and 12s was refused and the
+  // customer got nothing at all.
   assert.ok(
-    TURN_CLAIM_STALE_MS < 30_000,
-    'a killed turn must become reclaimable soon enough for LINE to redeliver',
+    TURN_CLAIM_STALE_MS <= NETLIFY_SYNC_LIMIT_MS,
+    `a killed turn must be reclaimable immediately; ${TURN_CLAIM_STALE_MS}ms leaves a dead zone`,
   );
   assert.ok(TURN_CLAIM_TIMEOUT_MS <= 1_000, 'dedupe may add at most ~1s to a reply');
+});
+
+test('the in-flight window is derived from the turn budget, not hand-picked', async () => {
+  const { CUSTOMER_TURN_BUDGET_MS } = await import('../netlify/functions/_customer-turn-budget');
+  // Keeps both bounds above consistent if the budget ever moves.
+  assert.equal(TURN_CLAIM_STALE_MS, CUSTOMER_TURN_BUDGET_MS + 1_000);
 });
 
 test('the terminal write still reports a real outcome after a claim', async () => {

@@ -4,10 +4,13 @@ import { splitCustomerMessageForLine } from './_chat-copy-style';
 import { processThongthaiChatCore } from './thongthai-chat';
 import { isSimpleGreetingMessage, isCasualAttentionMessage, isShortUnclearTextMessage, categorizeDegradedFallback } from './thongthai-chat';
 import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
-import { claimCustomerTurn } from './_ai-cost-store';
+import { claimCustomerTurn, type TurnClaimOutcome } from './_ai-cost-store';
 import {
   CUSTOMER_MIN_RETRY_BUDGET_MS,
   CUSTOMER_TURN_BUDGET_MS,
+  CUSTOMER_TURN_HARD_DEADLINE_MS,
+  TurnBudgetExhaustedError,
+  remainingTurnBudgetMs,
   withinTurnBudget,
 } from './_customer-turn-budget';
 
@@ -215,16 +218,19 @@ function delay(ms: number): Promise<void> {
 export const LINE_TURN_BUDGET_MS = CUSTOMER_TURN_BUDGET_MS;
 export const LINE_MIN_RETRY_BUDGET_MS = CUSTOMER_MIN_RETRY_BUDGET_MS;
 
-async function askThongthaiReliably(
+export async function askThongthaiReliably(
   message: string,
   userId: string,
   eventId?: string,
   onAttemptError?: (errorType: string) => void,
   turnStartedAt: number = Date.now(),
 ): Promise<ThongthaiResponse> {
-  const remainingMs = () => LINE_TURN_BUDGET_MS - (Date.now() - turnStartedAt);
+  const remainingMs = () => remainingTurnBudgetMs(turnStartedAt, LINE_TURN_BUDGET_MS);
 
   try {
+    // The clock starts at function entry, so webhook-level work may already
+    // have spent the budget. Do not start a core turn nobody will wait for.
+    if (remainingMs() <= 0) throw new TurnBudgetExhaustedError(remainingMs());
     return await withinTurnBudget(askThongthai(message, userId, eventId), remainingMs());
   } catch (firstError) {
     console.error(
@@ -440,8 +446,17 @@ async function saveLatestJourney(userId: string): Promise<'saved' | 'already_sav
   return 'saved';
 }
 
-async function replyToLine(replyToken: string, messages: LineReplyMessage[], accessToken: string): Promise<void> {
+/** Bounded by the turn's absolute deadline: an unbounded reply could hold
+ *  the function past its kill even after the answer itself was bounded. */
+async function replyToLine(
+  replyToken: string,
+  messages: LineReplyMessage[],
+  accessToken: string,
+  turnStartedAt: number,
+): Promise<void> {
   if (!messages.length) return;
+  const timeoutMs = remainingTurnBudgetMs(turnStartedAt, CUSTOMER_TURN_HARD_DEADLINE_MS);
+  if (timeoutMs <= 0) throw new Error(`LINE reply skipped: turn deadline passed ${-timeoutMs}ms ago`);
   const response = await fetch(LINE_REPLY_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -449,6 +464,7 @@ async function replyToLine(replyToken: string, messages: LineReplyMessage[], acc
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({ replyToken, messages: messages.slice(0, MAX_LINE_MESSAGES) }),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!response.ok) {
@@ -461,6 +477,7 @@ async function handleEvent(
   event: LineWebhookEvent,
   accessToken: string,
   channelSecret: string,
+  turnStartedAt: number,
 ): Promise<void> {
   const replyToken = event.replyToken;
   if (!replyToken) return;
@@ -475,7 +492,7 @@ async function handleEvent(
       : status === 'already_saved'
         ? 'Journey นี้ถูกบันทึกไว้แล้วครับ ✅'
         : 'ยังไม่พบ Journey ล่าสุดให้บันทึกครับ\nลองให้ทองไทยวางแผนก่อนนะครับ';
-    await replyToLine(replyToken, splitText(text).map(value => ({ type: 'text', text:value })), accessToken);
+    await replyToLine(replyToken, splitText(text).map(value => ({ type: 'text', text:value })), accessToken, turnStartedAt);
     return;
   }
 
@@ -486,13 +503,14 @@ async function handleEvent(
       replyToken,
       [{ type: 'text', text: 'ตอนนี้ทองไทยคุยผ่านข้อความตัวอักษรก่อนนะครับ\nพิมพ์สิ่งที่อยากรู้ หรือให้ทองไทยช่วยวาง Journey ได้เลยครับ' }],
       accessToken,
+      turnStartedAt,
     );
     return;
   }
 
-  // Start the turn clock before the claim, so the whole turn -- dedupe
-  // included -- is bounded by LINE_TURN_BUDGET_MS.
-  const turnStartedAt = Date.now();
+  // turnStartedAt is taken at function entry (line-webhook.ts) and handed
+  // down, so webhook-level work, the dedupe claim and the answer all share
+  // one LINE_TURN_BUDGET_MS, and the reply one CUSTOMER_TURN_HARD_DEADLINE_MS.
   const message = event.message.text;
   const language = detectLanguage(message);
 
@@ -547,12 +565,18 @@ async function handleEvent(
   // older/odd payloads that omit it.
   const turnId = event.webhookEventId ?? event.message.id;
   // Claim the turn BEFORE any tool, state write or reply. Fails open, so a
-  // slow or unavailable claim never costs the customer their answer.
-  const claim = await claimCustomerTurn({
-    conversationId: lineGuestId(userId),
-    eventId: turnId ?? `line:${Date.now()}`,
-    channel: 'line',
-  });
+  // slow or unavailable claim never costs the customer their answer -- and
+  // it is raced against what is left of the answer budget, so it can never
+  // eat the slice reserved for the reply. With no budget left there is no
+  // answer to protect, only the fallback, so it is not attempted.
+  const claimBudgetMs = remainingTurnBudgetMs(turnStartedAt, LINE_TURN_BUDGET_MS);
+  const claim: TurnClaimOutcome = claimBudgetMs > 0
+    ? await withinTurnBudget(claimCustomerTurn({
+      conversationId: lineGuestId(userId),
+      eventId: turnId ?? `line:${Date.now()}`,
+      channel: 'line',
+    }), claimBudgetMs).catch((): TurnClaimOutcome => 'claim_failed_open')
+    : 'claim_failed_open';
   if (claim === 'duplicate_skipped') {
     console.log('LINE_DUPLICATE_DELIVERY_SKIPPED', JSON.stringify({ textCategory }));
     return;
@@ -564,17 +588,27 @@ async function handleEvent(
   console.log('FINAL_RESPONSE_SOURCE', JSON.stringify({ source: deterministicResponder ?? finalResponseKind }));
   logPrivateChatAttempt();
 
+  // Bounded by what is left of the answer budget, so it can never eat the
+  // slice reserved for the reply.
   try {
-    await reinforceStructuredMemory(message, userId, language);
+    const memoryBudgetMs = remainingTurnBudgetMs(turnStartedAt, LINE_TURN_BUDGET_MS);
+    if (memoryBudgetMs <= 0) throw new TurnBudgetExhaustedError(memoryBudgetMs);
+    await withinTurnBudget(reinforceStructuredMemory(message, userId, language), memoryBudgetMs);
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'Unknown structured-memory error';
     console.error('LINE_STRUCTURED_MEMORY_ERROR', detail.slice(0, 240));
   }
 
-  await replyToLine(replyToken, buildReplyMessages(result, userId, channelSecret), accessToken);
+  await replyToLine(replyToken, buildReplyMessages(result, userId, channelSecret), accessToken, turnStartedAt);
 }
 
-export const handler: Handler = async (event: HandlerEvent) => {
+/** `turnStartedAt` is the moment the outer webhook function was entered.
+ *  line-webhook.ts passes its own entry time; the standalone handler below
+ *  starts the clock itself. */
+export async function handleLineCustomerWebhook(
+  event: HandlerEvent,
+  turnStartedAt: number = Date.now(),
+): Promise<{ statusCode: number; body: string }> {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method not allowed' };
 
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
@@ -602,7 +636,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   if (!events.length) return { statusCode: 200, body: 'OK' };
 
   const results = await Promise.allSettled(
-    events.map(item => handleEvent(item, accessToken, channelSecret)),
+    events.map(item => handleEvent(item, accessToken, channelSecret, turnStartedAt)),
   );
   const failures = results.filter(result => result.status === 'rejected');
   if (failures.length) {
@@ -615,4 +649,6 @@ export const handler: Handler = async (event: HandlerEvent) => {
   }
 
   return { statusCode: 200, body: 'OK' };
-};
+}
+
+export const handler: Handler = async (event: HandlerEvent) => handleLineCustomerWebhook(event);

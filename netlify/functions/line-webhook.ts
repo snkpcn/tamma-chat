@@ -1,7 +1,7 @@
 import { isOwnerFamilyConversation } from './_owner-staff-intent';
 import type { Handler, HandlerEvent, HandlerResponse } from '@netlify/functions';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
-import { handler as coreHandler } from './_line-webhook-core';
+import { handler as coreHandler, handleLineCustomerWebhook } from './_line-webhook-core';
 import { registerLineContact, piiHash } from './_operations-db';
 import { handleLineOpsGroupMessage, boundLineOpsTeam } from './_ops-notifications';
 import { handleLineFuelImage, handleLineFuelText } from './_ops-fuel-receipts';
@@ -37,6 +37,7 @@ import {
 } from './_settlement-line-proof';
 import { splitCustomerMessageForLine } from './_chat-copy-style';
 import { routePrivateOpsEvents, type PrivateProbe, type PrivateDispatch } from './_snk-private-bridge';
+import { TurnBudgetExhaustedError, remainingTurnBudgetMs, withinTurnBudget } from './_customer-turn-budget';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -65,6 +66,9 @@ type LineWebhookBody = {
 
 const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
 const MAX_LINE_MESSAGES = 5;
+/** An unanswered LINE reply call must not hold the function until it is
+ *  killed. Generous next to the API's normal sub-second latency. */
+const LINE_REPLY_TIMEOUT_MS = 5_000;
 
 function getHeader(event: HandlerEvent, name: string): string | undefined {
   const target = name.toLowerCase();
@@ -163,6 +167,7 @@ async function replyToLine(
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({ replyToken, messages: normalizeReplyMessages(reply) }),
+    signal: AbortSignal.timeout(LINE_REPLY_TIMEOUT_MS),
   });
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -681,6 +686,9 @@ async function handleCustomerPaymentEvent(
 }
 
 export const handler: Handler = async (event, context) => {
+  // The customer turn's clock. Everything below -- maintenance partition,
+  // private routing, contact registration, ops events in a mixed batch --
+  // spends the same budget the customer answer and reply are bounded by.
   const receivedAt=Date.now();
   if (event.httpMethod !== 'POST') {
     const coreResponse = await coreHandler(event, context);
@@ -734,8 +742,13 @@ export const handler: Handler = async (event, context) => {
   const opsEvents = allEvents.filter(item => item.source?.type === 'group' || item.source?.type === 'room');
   const customerCandidates = allEvents.filter(item => item.source?.type !== 'group' && item.source?.type !== 'room');
 
-  try {
-    await registerDirectUsers(customerCandidates);
+  // Best effort (failures were already only logged), so it may use what is
+  // left of the answer budget but never the slice reserved for the reply.
+  // Group/room-only batches have nothing to register and keep their path.
+  if (customerCandidates.length) try {
+    const registrationBudgetMs = remainingTurnBudgetMs(receivedAt);
+    if (registrationBudgetMs <= 0) throw new TurnBudgetExhaustedError(registrationBudgetMs);
+    await withinTurnBudget(registerDirectUsers(customerCandidates), registrationBudgetMs);
   } catch (error) {
     console.error(
       'LINE_OPERATIONAL_CONTACT_LINK_ERROR',
@@ -775,7 +788,7 @@ export const handler: Handler = async (event, context) => {
     );
     headers['x-line-signature'] = signInternalBody(customerBody, channelSecret);
     const customerEvent: HandlerEvent = { ...event, headers, body: customerBody };
-    const coreResponse = await coreHandler(customerEvent, context);
+    const coreResponse = await handleLineCustomerWebhook(customerEvent, receivedAt);
     if (!coreResponse) {
       console.error('LINE_WEBHOOK_EMPTY_RESPONSE');
       return { statusCode: 500, body: 'LINE webhook failed' };

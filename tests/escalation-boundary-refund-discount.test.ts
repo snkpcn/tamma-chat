@@ -35,14 +35,36 @@ test('refund wordings that used to slip through now escalate', () => {
   }
 });
 
+test('asking WHEN a refund arrives still escalates', () => {
+  // Review finding: the night-context guard excluded a bare "วัน", which
+  // swallowed the most natural way to ask about refund timing. These fell
+  // through to the LLM with no policy guardrail -- the exact gap this
+  // classifier exists to close.
+  for (const message of [
+    'ได้เงินคืนวันไหน',
+    'เงินคืนวันไหน',
+    'เงินคืนเมื่อไหร่',
+    'ได้เงินคืนเมื่อไร',
+    'ได้เงินคืนตอนไหน',
+    'เงินคืนกี่วัน',
+  ]) {
+    assert.equal(category(message), 'refund_request', `${message} must escalate`);
+  }
+});
+
 test('a night of accommodation is never mistaken for a refund', () => {
   // "คืน" is also the word for a night, so these all contain "เงินคืน".
   for (const message of [
     'จ่ายเงินคืนนี้ได้ไหม',
+    'จ่ายเงินคืนนี้',
     'โอนเงินคืนวันศุกร์ได้ไหม',
+    'คืนวันศุกร์',
+    'เงินคืนวันศุกร์',
     'จ่ายเงินคืนแรกก่อนได้ไหม',
     'ค่าที่พักเป็นเงินคืนละเท่าไหร่',
     'จ่ายเงินคืนสุดท้ายตอนเช็กเอาต์',
+    'ที่พักคืนละเท่าไหร่',
+    'พักกี่คืน',
   ]) {
     assert.notEqual(
       category(message), 'refund_request',
@@ -65,9 +87,7 @@ test('asking for a better price now escalates', () => {
   }
 });
 
-test('reducing an ingredient is not a discount request', () => {
-  // The exact false positive a bare /ลด/ rule would create. These belong to
-  // the café and restaurant responders.
+test('reducing an ingredient is not a discount request (noun AFTER ลด)', () => {
   for (const message of [
     'ลดหวานหน่อยครับ',
     'ลดน้ำตาลครึ่งนึง',
@@ -82,6 +102,56 @@ test('reducing an ingredient is not a discount request', () => {
       `${message} is a food modifier, not haggling`,
     );
   }
+});
+
+test('reducing an ingredient is not a discount request (noun BEFORE ลด)', () => {
+  // Review finding: Thai puts the thing being reduced on either side of
+  // "ลด", and only the AFTER order was handled. These are among the most
+  // common café orders there is and were all escalating to the owner as
+  // haggling while answering about price instead of the drink.
+  for (const message of [
+    'น้ำตาลลดได้ไหม',
+    'ความเผ็ดลดได้ไหม',
+    'เผ็ดลดได้ป่าว',
+    'น้ำแข็งลดได้ไหม',
+    'หวานลดหน่อยได้ไหม',
+    'ความหวานลดให้หน่อย',
+    'เค็มลดได้ไหม',
+    'นมลดหน่อยครับ',
+    'ปริมาณลดได้ไหม',
+  ]) {
+    assert.notEqual(
+      category(message), 'special_discount',
+      `${message} is a food modifier with the noun first, not haggling`,
+    );
+  }
+});
+
+test('a genuine price reduction still escalates in either word order', () => {
+  // The leading-noun guard must not swallow real haggling. "ราคา" is
+  // deliberately absent from the consumable list for exactly this reason.
+  for (const message of [
+    'ราคาลดได้ไหม',
+    'ค่าห้องลดได้ไหม',
+    'ลดราคาได้ไหม',
+    'ลดให้หน่อยได้ป่าว',
+  ]) {
+    assert.equal(
+      category(message), 'special_discount',
+      `${message} is a real price request`,
+    );
+  }
+});
+
+test('asking whether a cheaper option exists is a catalog question', () => {
+  // Review finding: "ถูกกว่านี้" unanchored escalated an ordinary
+  // option-comparison question to the owner.
+  assert.notEqual(category('มีที่ถูกกว่านี้ไหม'), 'special_discount');
+  assert.notEqual(category('มีห้องถูกกว่านี้ไหม'), 'special_discount');
+  assert.notEqual(category('มีแพ็กเกจถูกกว่านี้ไหม'), 'special_discount');
+  // ...but asking for a cheaper PRICE still escalates, with or without ขอ.
+  assert.equal(category('ถูกกว่านี้ได้ไหม'), 'special_discount');
+  assert.equal(category('ขอถูกกว่านี้ได้ไหม'), 'special_discount');
 });
 
 test('asking about existing promotions is not an owner escalation', () => {
