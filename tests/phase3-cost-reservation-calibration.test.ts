@@ -30,15 +30,37 @@ test('Phase 3 semantic reservation keeps calibrated headroom without falling bac
   assert.ok(reserved/(estimate*calibratedObservedMaxRatio)>2);
 });
 
-test('Phase 3 does not loosen non-semantic reservations',()=>{
+// Phase 3 originally sized EVERY non-semantic caller at the flat absolute
+// ceiling, which was affordable under the 5 THB cap this test was written
+// for. At the owner's 2 THB ceiling that flat reservation is ~2.95 THB on a
+// single call, so the grounded composer became permanently budget-blocked
+// from turn one (see tests/composer-budget-unblocked.test.ts). The reviewed
+// callers are now sized from their real prompt; the safety property that
+// actually matters -- an UNREVIEWED caller never inherits a cheap
+// reservation -- is asserted below and is unchanged.
+test('reservation sizing is per reviewed caller, and unreviewed callers stay at the absolute ceiling',()=>{
   const policy=aiCostPolicy();
+  assert.equal(
+    reservationInputTokensForAiCall(
+      {callerLabel:'some-unreviewed-future-caller'},
+      4_200,
+      policy.absoluteInputTokens,
+    ),
+    policy.absoluteInputTokens,
+  );
+  // callPreferredModel's own default label is deliberately unregistered.
+  assert.equal(
+    reservationInputTokensForAiCall({callerLabel:'unknown'},4_200,policy.absoluteInputTokens),
+    policy.absoluteInputTokens,
+  );
+  // A reviewed caller is sized from this prompt, never the flat ceiling.
   assert.equal(
     reservationInputTokensForAiCall(
       {callerLabel:'grounded-response-composer'},
       4_200,
       policy.absoluteInputTokens,
     ),
-    policy.absoluteInputTokens,
+    6_300,
   );
   assert.equal(RESPONSE_COMPOSER_MAX_OUTPUT_TOKENS,900);
 });

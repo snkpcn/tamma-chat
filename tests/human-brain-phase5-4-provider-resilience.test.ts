@@ -59,10 +59,17 @@ test('Human Conversation Recovery: bounded reviewer uses Sol only when explicitl
   }
 });
 
-test('Quality-first final response composer uses Sol for customer-facing grounded replies', async () => {
+// This test previously asserted the composer was pinned to Sol. Sol's
+// worst-case reservation does not fit a second composed turn inside the
+// owner's 2 THB conversation ceiling, so the default moved to the primary
+// model and the Sol behavior became an env-only rollback. Both directions
+// are asserted here so neither can regress silently.
+test('Quality-first final response composer defaults to Terra and reverts to Sol by env alone', async () => {
   const originalFetch = global.fetch;
   const originalKey = process.env.OPENAI_API_KEY;
+  const originalComposerModel = process.env.THONGTHAI_RESPONSE_COMPOSER_MODEL;
   process.env.OPENAI_API_KEY = 'test-openai-key';
+  delete process.env.THONGTHAI_RESPONSE_COMPOSER_MODEL;
 
   const models:string[] = [];
   global.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -72,11 +79,18 @@ test('Quality-first final response composer uses Sol for customer-facing grounde
 
   try {
     await callResponseComposer('system', [{role:'user',content:'compose'}], 'grounded-response-composition');
-    assert.deepEqual(models, [OPENAI_SEMANTIC_REVIEW_MODEL]);
+    assert.deepEqual(models, [OPENAI_SEMANTIC_PRIMARY_MODEL]);
+    assert.equal(OPENAI_SEMANTIC_PRIMARY_MODEL, 'gpt-5.6-terra');
+
+    process.env.THONGTHAI_RESPONSE_COMPOSER_MODEL = 'gpt-5.6-sol';
+    await callResponseComposer('system', [{role:'user',content:'compose'}], 'grounded-response-composition');
+    assert.deepEqual(models, [OPENAI_SEMANTIC_PRIMARY_MODEL, 'gpt-5.6-sol']);
     assert.equal(OPENAI_SEMANTIC_REVIEW_MODEL, 'gpt-5.6-sol');
   } finally {
     global.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = originalKey;
+    if (originalComposerModel === undefined) delete process.env.THONGTHAI_RESPONSE_COMPOSER_MODEL;
+    else process.env.THONGTHAI_RESPONSE_COMPOSER_MODEL = originalComposerModel;
   }
 });
 

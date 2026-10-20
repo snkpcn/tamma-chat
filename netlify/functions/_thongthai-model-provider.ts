@@ -68,6 +68,21 @@ export const OPENAI_SEMANTIC_PRIMARY_MODEL =
 export const OPENAI_SEMANTIC_REVIEW_MODEL =
   process.env.THONGTHAI_SEMANTIC_REVIEW_MODEL?.trim() || 'gpt-5.6-sol';
 
+/** Model used to phrase ALREADY-VERIFIED facts in Thongthai's voice.
+ *
+ *  Defaults to the primary model rather than the review model. The composer
+ *  reserves its worst case up front, and on the review model that worst case
+ *  leaves no room for a second composed turn inside the 2 THB conversation
+ *  ceiling. The primary model fits roughly twice as many composed turns per
+ *  conversation at the same ceiling.
+ *
+ *  Read per call (not a module constant) so the rollback is a pure
+ *  environment change: set THONGTHAI_RESPONSE_COMPOSER_MODEL=gpt-5.6-sol to
+ *  restore the previous behavior without a deploy. */
+export function responseComposerModel(): string {
+  return process.env.THONGTHAI_RESPONSE_COMPOSER_MODEL?.trim() || OPENAI_SEMANTIC_PRIMARY_MODEL;
+}
+
 const TOTAL_PROVIDER_BUDGET_MS = 7_000;
 const PER_ATTEMPT_CAP_MS = 6_000;
 const SEMANTIC_CERT_TOTAL_PROVIDER_BUDGET_MS = 30_000;
@@ -390,7 +405,7 @@ export function callResponseComposer(
   costContext?:AiCallContext,
 ):Promise<string> {
   return callOpenAIModel(
-    OPENAI_SEMANTIC_REVIEW_MODEL,
+    responseComposerModel(),
     systemPrompt,
     messages,
     callerLabel,
