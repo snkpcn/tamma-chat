@@ -65,6 +65,7 @@ import {
 } from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
 import { persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
+import { CUSTOMER_TURN_BUDGET_MS, withinTurnBudget } from './_customer-turn-budget';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
 import { resolveRequestedCustomerMedia } from './_thongthai-media';
@@ -6147,7 +6148,17 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const startedAt = Date.now();
   try {
     request = { ...request, message:normalizeCustomerText(request.message) };
-    const result = await processThongthaiChatCoreInternal(request, turnId);
+    // Bound the shared core inside the synchronous function limit. The web
+    // handler has no transport-level retry and no other deadline of its
+    // own, so without this a stalled turn runs past the request limit and
+    // the browser gets a dead connection instead of the honest fallback
+    // below. LINE additionally races this against its own remaining turn
+    // budget (see _line-webhook-core.ts); whichever deadline is tighter
+    // wins, so LINE's retry accounting is unchanged.
+    const result = await withinTurnBudget(
+      processThongthaiChatCoreInternal(request, turnId),
+      CUSTOMER_TURN_BUDGET_MS,
+    );
     console.log('THONGTHAI_CUSTOMER_TURN', JSON.stringify({
       event_id:turnId, channel, status_code:result.statusCode,
       duration_ms:Date.now()-startedAt, outcome:'completed',

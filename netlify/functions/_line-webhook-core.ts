@@ -5,6 +5,11 @@ import { processThongthaiChatCore } from './thongthai-chat';
 import { isSimpleGreetingMessage, isCasualAttentionMessage, isShortUnclearTextMessage, categorizeDegradedFallback } from './thongthai-chat';
 import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
 import { claimCustomerTurn } from './_ai-cost-store';
+import {
+  CUSTOMER_MIN_RETRY_BUDGET_MS,
+  CUSTOMER_TURN_BUDGET_MS,
+  withinTurnBudget,
+} from './_customer-turn-budget';
 
 type LineSource = {
   type?: 'user' | 'group' | 'room';
@@ -203,52 +208,12 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Wall-clock budget for one LINE customer turn, measured from the moment
- *  the message handler starts (so the turn claim is inside it).
- *
- *  A synchronous Netlify function is killed at its request limit, the lowest
- *  of which is 10s. Nothing in this path used to be bounded by that: each
- *  provider call owns its own 7s budget, a turn makes two of them
- *  (interpretation then grounded composition), and the retry below doubled
- *  the whole thing -- a worst case near 29s. The function died first, so the
- *  customer got silence instead of the honest fallback this module already
- *  has, and _thongthai-one-mind-response.ts's own 18s composer cutoff could
- *  never fire because 18s is past the kill.
- *
- *  8s leaves room for the LINE reply call and webhook-level work inside 10s.
- *  This bounds when the customer gets AN ANSWER; it does not cancel
- *  already-issued database writes, which stay idempotent exactly as the
- *  retry comment below describes. */
-export const LINE_TURN_BUDGET_MS = 8_000;
-
-/** Below this there is not enough time left for a retry to plausibly finish,
- *  so spend the remaining time on the fallback reply instead of starting an
- *  attempt that cannot land. */
-export const LINE_MIN_RETRY_BUDGET_MS = 2_500;
-
-class TurnBudgetExhaustedError extends Error {
-  constructor(remainingMs: number) {
-    super(`LINE turn budget exhausted with ${remainingMs}ms left`);
-    this.name = 'TurnBudgetExhaustedError';
-  }
-}
-
-/** Resolve with the attempt, or reject once the turn budget runs out --
- *  whichever happens first. The abandoned attempt's own per-call timeouts
- *  still fire; we simply stop waiting for it. */
-function withinTurnBudget(
-  attempt: Promise<ThongthaiResponse>,
-  budgetMs: number,
-): Promise<ThongthaiResponse> {
-  if (budgetMs <= 0) return Promise.reject(new TurnBudgetExhaustedError(budgetMs));
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new TurnBudgetExhaustedError(0)), budgetMs);
-  });
-  return Promise.race([attempt, deadline]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
-}
+/** The LINE turn budget is the shared customer turn budget. Re-exported
+ *  under the original names so existing callers and tests keep working;
+ *  the web path consumes the same constants from
+ *  _customer-turn-budget.ts directly. */
+export const LINE_TURN_BUDGET_MS = CUSTOMER_TURN_BUDGET_MS;
+export const LINE_MIN_RETRY_BUDGET_MS = CUSTOMER_MIN_RETRY_BUDGET_MS;
 
 async function askThongthaiReliably(
   message: string,
