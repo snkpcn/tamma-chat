@@ -14,6 +14,16 @@
  */
 export const CUSTOMER_TURN_BUDGET_MS = 8_000;
 
+/** Reserved after the answer budget for the channel to deliver the reply.
+ *  The answer may use all of CUSTOMER_TURN_BUDGET_MS; the reply must then
+ *  land inside this slice, so the whole turn ends at
+ *  CUSTOMER_TURN_HARD_DEADLINE_MS from function entry. */
+export const CUSTOMER_REPLY_BUDGET_MS = 1_000;
+
+/** Absolute end of one turn, reply included, measured from function entry.
+ *  Kept under the 10s synchronous limit with margin for the response. */
+export const CUSTOMER_TURN_HARD_DEADLINE_MS = CUSTOMER_TURN_BUDGET_MS + CUSTOMER_REPLY_BUDGET_MS;
+
 /** Below this there is not enough time left for a retry to plausibly
  *  finish, so spend the remaining time on the fallback reply instead of
  *  starting an attempt that cannot land. Only channels that retry (LINE)

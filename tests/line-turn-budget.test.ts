@@ -31,7 +31,8 @@ function constantFrom(source: string, name: string): number {
 }
 
 test('one turn plus its reply fits inside the synchronous function limit', () => {
-  // The reply call and webhook-level work both happen outside the budget.
+  // The reply has its own slice after the answer budget (see
+  // CUSTOMER_TURN_HARD_DEADLINE_MS and tests/line-turn-deadline.test.ts).
   const replyAndOverheadHeadroomMs = NETLIFY_SYNC_LIMIT_MS - LINE_TURN_BUDGET_MS;
   assert.ok(
     LINE_TURN_BUDGET_MS < NETLIFY_SYNC_LIMIT_MS,
@@ -96,19 +97,10 @@ test('both attempts are raced against the turn budget, not just the retry', () =
   assert.equal(raced.length, 2, 'the first attempt must be bounded too, not only the retry');
 });
 
-test('the turn clock starts before the dedupe claim', () => {
-  const clockAt = CORE_SOURCE.indexOf('const turnStartedAt = Date.now()');
-  const claimAt = CORE_SOURCE.indexOf('claimCustomerTurn({');
-  const askAt = CORE_SOURCE.indexOf('askThongthaiReliably(message');
-  assert.ok(clockAt > 0, 'the turn clock must exist');
-  assert.ok(clockAt < claimAt, 'the claim must be inside the measured budget');
-  assert.ok(claimAt < askAt);
-  assert.match(
-    CORE_SOURCE.slice(askAt, askAt + 200),
-    /turnStartedAt/u,
-    'the same clock must be handed to the reliability wrapper',
-  );
-});
+// 'the turn clock starts before the dedupe claim' used to pin the clock's
+// position in this file's source. The clock now starts at function entry in
+// line-webhook.ts and is passed down; tests/line-turn-deadline.test.ts proves
+// that by running the webhook, including the claim being bounded by it.
 
 test('the one-mind composer cutoff can now actually fire before the kill', () => {
   const cutoff = constantFrom(ONE_MIND_SOURCE, 'COMPOSER_MODEL_BUDGET_CUTOFF_MS');
