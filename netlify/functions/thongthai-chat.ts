@@ -6340,7 +6340,22 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // Independent identity, budget heartbeat and preference records need not
   // add three consecutive database round trips to every customer reply.
   await Promise.all([
-    registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId),
+    // Identity registration is a last-seen upsert, never a precondition for
+    // this turn: guestDbId is already resolved, and the memory/ledger/state
+    // reads below key off it directly rather than off guest_identities.
+    //
+    // _thongthai-runtime-v3.ts swallows its own write errors today, so this
+    // guard is a second layer rather than a fix for a live failure. It is
+    // here because the call site must not DEPEND on that: if the inner
+    // try/catch is ever narrowed, a customer reply must still not be lost to
+    // a bookkeeping write.
+    registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId)
+      .catch(error => {
+        console.error(
+          'THONGTHAI_GUEST_IDENTITY_REGISTER_ERROR',
+          error instanceof Error ? error.message.slice(0, 220) : 'unknown',
+        );
+      }),
     // Heartbeat only: it bumps the ledger's lastActivityAt so a long
     // free-path conversation cannot reset paid spend. It is NOT the budget
     // gate. A failed heartbeat must never cost the customer their reply --
