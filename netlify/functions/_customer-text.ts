@@ -27,7 +27,15 @@ const ISAN_NEGATION: ReadonlyArray<readonly [RegExp, string]> = [
   [/บ่ต้อง/gu, 'ไม่ต้อง'],
   [/บ่เอา/gu, 'ไม่เอา'],
   [/บ่ใช่/gu, 'ไม่ใช่'],
-  [/บ่เป็น(?:หยัง|อิหยัง)?/gu, 'ไม่เป็นไร'],
+  // Only the complete idiom. Review found the optional tail let a bare
+  // "บ่เป็น" absorb whatever followed and gain a "ไร" that was never there:
+  // "บ่เป็นไผ" -> "ไม่เป็นไรไผ", "บ่เป็นหนี้" -> "ไม่เป็นไรหนี้".
+  // With the tail present the idiom is complete, so anything may follow
+  // ("บ่เป็นหยังเด้อ").
+  [/บ่เป็น(?:หยัง|อิหยัง|ไร)/gu, 'ไม่เป็นไร'],
+  // Bare "บ่เป็น" only at the end of a clause. Anything else is "บ่" + a
+  // different verb and must keep its own word.
+  [/บ่เป็น(?![ก-๛])/gu, 'ไม่เป็นไร'],
   [/บ่ฮู้/gu, 'ไม่รู้'],
   [/บ่รู้/gu, 'ไม่รู้'],
   [/บ่ไหว/gu, 'ไม่ไหว'],

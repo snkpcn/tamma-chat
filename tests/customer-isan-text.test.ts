@@ -43,6 +43,22 @@ test('"บ่" is read as negation only in unambiguous Isan collocations', () =>
   assert.equal(normalizeCustomerText('ที่พักบ่แพง'), 'ที่พักไม่แพง');
 });
 
+test('"บ่เป็น" becomes the idiom only when it IS the idiom', () => {
+  // Review finding: the optional tail let a bare "บ่เป็น" absorb whatever
+  // followed and gain a "ไร" that was never there.
+  assert.equal(normalizeCustomerText('บ่เป็นหยัง'), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็นอิหยัง'), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็นไร'), 'ไม่เป็นไร');
+  assert.equal(normalizeCustomerText('บ่เป็น'), 'ไม่เป็นไร');
+  // The complete idiom may still be followed by a particle.
+  assert.equal(normalizeCustomerText('บ่เป็นหยังเด้อ'), 'ไม่เป็นไรเด้อ');
+  // "บ่" + a different verb keeps its own word, and must not gain "ไร".
+  for (const text of ['บ่เป็นไผ', 'บ่เป็นหนี้', 'บ่เป็นห่วง']) {
+    assert.equal(normalizeCustomerText(text), text, `${text} must be left alone`);
+    assert.ok(!normalizeCustomerText(text).includes('ไม่เป็นไร'));
+  }
+});
+
 test('ordinary Thai words that merely start with "บ่" are never rewritten', () => {
   // This is the whole reason the negation map is a closed list rather than
   // a /บ่/ prefix rule: each of these would become nonsense.
