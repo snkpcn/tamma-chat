@@ -68,66 +68,81 @@ test('the other four first-gate guards keep their exact scope', () => {
   assert.equal((condition.match(/&&/gu) ?? []).length, 5);
 });
 
-test('a real discovery turn completes and makes no paid call, flag off AND flag on', async () => {
-  // Runs the real shared core end to end and fails on ANY request to a paid
-  // provider, with the visitor flags both off and on.
-  //
-  // HONEST LIMITATION: this is a smoke test, not proof that the guard works.
-  // A unit test cannot drive the visitor paths all the way to a provider
-  // call -- they resolve these questions without a model -- so a control
-  // message does NOT pay here either, and this assertion would still pass
-  // with the guard removed. The load-bearing check for THIS fix is the
-  // ordering/reference test below. Kept because it does prove the reordered
-  // guard did not break the turn or introduce a new paid path.
-  const { processThongthaiChatCore } = await import('../netlify/functions/thongthai-chat');
-  const keys = [
-    'THONGTHAI_VISITOR_UNDERSTANDING','THONGTHAI_VISITOR_WEB_SEARCH','THONGTHAI_ONE_MIND_CUTOVER',
-    'OPENAI_API_KEY','TAVILY_API_KEY','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY',
-  ] as const;
-  const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
-  const originalFetch = global.fetch;
+/** Broad-discovery phrasings that, WITHOUT the fast-path guard, reach a
+ *  paid visitor path under THONGTHAI_VISITOR_UNDERSTANDING /
+ *  THONGTHAI_VISITOR_WEB_SEARCH: the first five reach the visitor
+ *  interpreter (OpenAI), the last reaches the activity_opening web search
+ *  (Tavily). DISCOVERY_MESSAGES above resolve through knownTopic and never
+ *  reach either path, so they cannot detect a missing guard. */
+const PAID_PATH_DISCOVERY_MESSAGES = [
+  'ที่นี่มีอะไรให้เล่นบ้างไหม',
+  'แถวนี้มีอะไรเที่ยวดีไหม',
+  'ประสบการณ์ที่นี่มีอะไรบ้างไหม',
+  'มีกิจกรรมอะไรให้เด็กเล่นไหม',
+  'ที่ทำมา-ชาติมีอะไรทำบ้างไหม',
+  'กิจกรรมเปิดยัง',
+];
 
-  const paidHosts = ['api.openai.com', 'api.tavily.com'];
-  for (const understanding of ['0', '1']) {
-    const paidCalls: string[] = [];
-    process.env.THONGTHAI_ONE_MIND_CUTOVER = '1';
-    process.env.THONGTHAI_VISITOR_UNDERSTANDING = understanding;
-    process.env.THONGTHAI_VISITOR_WEB_SEARCH = understanding;
-    process.env.OPENAI_API_KEY = 'test-key';
-    process.env.TAVILY_API_KEY = 'test-key';
-    delete process.env.SUPABASE_URL;
-    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    global.fetch = (async (input: RequestInfo | URL) => {
-      const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
-      if (paidHosts.some(host => url.includes(host))) paidCalls.push(url);
-      return new Response('{}', { status: 200 });
-    }) as typeof fetch;
-    try {
-      for (const message of DISCOVERY_MESSAGES) {
-        await processThongthaiChatCore({
-          message,
-          language: 'th',
-          guestId: '11111111-1111-5111-8111-111111111111',
-          chatHistory: [],
-          guestContext: {
-            tripDuration: null, travelerType: null,
-            group: { adults: null, children: null, elderly: null },
-            interests: [], pace: null, budget: null, constraints: [],
-          },
-          pageContext: { section: 'line' },
-        } as never, `zero-call-${understanding}-${message}`);
-      }
-      assert.deepEqual(
-        paidCalls, [],
-        `THONGTHAI_VISITOR_UNDERSTANDING=${understanding}: discovery must cost nothing, saw ${paidCalls.join(', ')}`,
+/** Non-discovery visitor questions that DO pay with the flags on: proof
+ *  that the counter below sees a paid call when one happens. */
+const PAID_CONTROL_MESSAGES = ['ที่นี่เหมาะกับคนแก่ไหม', 'มี wifi ไหม'];
+
+async function paidCallsForTurn(message: string, understanding: '0' | '1'): Promise<string[]> {
+  const { withHarness, brainRequest, guestId } = await import('./helpers/canonical-core-harness');
+  const { processThongthaiChatCore } = await import('../netlify/functions/thongthai-chat');
+  const { clearVisitorSearchCacheForTests } = await import('../netlify/functions/_visitor-web-search');
+  const keys = ['THONGTHAI_VISITOR_UNDERSTANDING', 'THONGTHAI_VISITOR_WEB_SEARCH', 'TAVILY_API_KEY'] as const;
+  const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  process.env.THONGTHAI_VISITOR_UNDERSTANDING = understanding;
+  process.env.THONGTHAI_VISITOR_WEB_SEARCH = understanding;
+  process.env.TAVILY_API_KEY = 'test-key';
+  clearVisitorSearchCacheForTests();
+  try {
+    return await withHarness(async harness => {
+      const paid: string[] = [];
+      global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
+        if (/api\.openai\.com|api\.tavily\.com/u.test(url)) paid.push(url);
+        return harness.fetchMock(input, init);
+      }) as typeof fetch;
+      await processThongthaiChatCore(
+        brainRequest(message, guestId(`zero-call-${understanding}-${message}`), 'line') as never,
+        `zero-call-${understanding}-${message}`,
       );
-    } finally {
-      global.fetch = originalFetch;
-      for (const key of keys) {
-        if (before[key] === undefined) delete process.env[key];
-        else process.env[key] = before[key];
-      }
+      return paid;
+    });
+  } finally {
+    clearVisitorSearchCacheForTests();
+    for (const key of keys) {
+      if (before[key] === undefined) delete process.env[key];
+      else process.env[key] = before[key];
     }
+  }
+}
+
+test('a whole discovery turn makes no paid call, THONGTHAI_VISITOR_UNDERSTANDING off AND on', async () => {
+  // Drives the real core end to end with Supabase and both providers
+  // mocked, counting every request to OpenAI or Tavily for the WHOLE turn
+  // (visitor interpretation, web search, One-Mind semantic, composer).
+  // Verified to fail when the guard is removed from either paid visitor
+  // path: each message below then pays exactly one call.
+  for (const understanding of ['0', '1'] as const) {
+    for (const message of [...DISCOVERY_MESSAGES, ...PAID_PATH_DISCOVERY_MESSAGES]) {
+      assert.equal(isExperienceDiscoveryIntent(message), true, `${message} must be broad discovery`);
+      assert.deepEqual(
+        await paidCallsForTurn(message, understanding), [],
+        `THONGTHAI_VISITOR_UNDERSTANDING=${understanding}: "${message}" must cost nothing`,
+      );
+    }
+  }
+});
+
+test('the paid-call counter does see a paid visitor call when one happens', async () => {
+  // Without this, the zero-call assertion above could pass vacuously.
+  for (const message of PAID_CONTROL_MESSAGES) {
+    assert.equal(isExperienceDiscoveryIntent(message), false);
+    const paid = await paidCallsForTurn(message, '1');
+    assert.ok(paid.length > 0, `"${message}" is not discovery and must reach a paid path with the flags on`);
   }
 });
 
