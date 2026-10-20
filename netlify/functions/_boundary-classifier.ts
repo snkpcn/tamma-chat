@@ -94,11 +94,18 @@ function detectDomainHint(text: string): BusinessUnit | null {
 // "จ่ายเงินคืนนี้" (pay tonight) and "โอนเงินคืนวันศุกร์" (transfer Friday
 // night) both contain it. The night readings are excluded explicitly; the
 // unambiguous "คืนเงิน" word order needs no guard.
-const REFUND_NIGHT_CONTEXT = 'นี้|นั้น|วาน|วัน|ละ|แรก|สุดท้าย|ก่อน|ถัดไป|ที่\\s*\\d';
+// The night readings are all "เงินคืน" + a word that continues the DATE,
+// never a question about the refund itself. Review found the bare "วัน"
+// exclusion was too broad and swallowed the most natural way to ask when a
+// refund arrives ("ได้เงินคืนวันไหน"), so the refund-question forms are
+// listed first and win.
+const REFUND_QUESTION_AFTER = 'วันไหน|วันใด|เมื่อไหร่|เมื่อไร|กี่วัน|ตอนไหน|ยังไง|อย่างไร';
+const REFUND_NIGHT_CONTEXT = 'นี้|นั้น|วาน|ละ|แรก|สุดท้าย|ก่อน|ถัดไป|ที่\\s*\\d|วัน(?!ไหน|ใด)';
 const REFUND_RE = new RegExp(
   [
     'คืนเงิน',
     'คืนตัง(?:ค์)?',
+    `เงินคืน(?=${REFUND_QUESTION_AFTER})`,
     `เงินคืน(?!${REFUND_NIGHT_CONTEXT})`,
     'refund',
     'รีฟันด์',

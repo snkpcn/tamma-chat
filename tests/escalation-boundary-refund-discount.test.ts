@@ -35,6 +35,23 @@ test('refund wordings that used to slip through now escalate', () => {
   }
 });
 
+test('asking WHEN a refund arrives still escalates', () => {
+  // Review finding: the night-context guard excluded a bare "วัน", which
+  // swallowed the most natural way to ask about refund timing. These fell
+  // through to the LLM with no policy guardrail -- the exact gap this
+  // classifier exists to close.
+  for (const message of [
+    'ได้เงินคืนวันไหน',
+    'เงินคืนวันไหน',
+    'เงินคืนเมื่อไหร่',
+    'ได้เงินคืนเมื่อไร',
+    'ได้เงินคืนตอนไหน',
+    'เงินคืนกี่วัน',
+  ]) {
+    assert.equal(category(message), 'refund_request', `${message} must escalate`);
+  }
+});
+
 test('a night of accommodation is never mistaken for a refund', () => {
   // "คืน" is also the word for a night, so these all contain "เงินคืน".
   for (const message of [
@@ -43,6 +60,8 @@ test('a night of accommodation is never mistaken for a refund', () => {
     'จ่ายเงินคืนแรกก่อนได้ไหม',
     'ค่าที่พักเป็นเงินคืนละเท่าไหร่',
     'จ่ายเงินคืนสุดท้ายตอนเช็กเอาต์',
+    'ที่พักคืนละเท่าไหร่',
+    'พักกี่คืน',
   ]) {
     assert.notEqual(
       category(message), 'refund_request',
