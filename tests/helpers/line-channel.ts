@@ -34,6 +34,9 @@ export async function deliverLineTexts(
     opsStatus?: number;
     /** Send this exact batch again instead of building one. */
     rawBody?: string;
+    /** Status / extra latency of the loading-animation endpoint. */
+    loadingStatus?: number;
+    loadingDelayMs?: number;
   },
 ): Promise<LineDeliveryResult> {
   const now = Date.now();
@@ -72,9 +75,16 @@ export async function deliverLineTexts(
     const u = String(url);
     if (/api\.line\.me\/v2\/bot\/(message\/(reply|push)|chat\/loading)/u.test(u)) {
       const parsed = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
-      const status = u.endsWith('/reply') ? input.replyStatus ?? 200 : 200;
+      const loading = u.includes('/chat/loading');
+      if (loading && input.loadingDelayMs) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, input.loadingDelayMs);
+          init.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(init.signal?.reason); }, { once: true });
+        });
+      }
+      const status = u.endsWith('/reply') ? input.replyStatus ?? 200 : loading ? input.loadingStatus ?? 202 : 200;
       calls.push({ endpoint: u.replace(/^.*\/v2\/bot\//u, ''), status, body: parsed });
-      return new Response(status === 200 ? '{}' : '{"message":"Invalid reply token"}', { status });
+      return new Response(status < 300 ? '{}' : '{"message":"Invalid reply token"}', { status });
     }
     if (u.includes('/api/line/snk-money')) {
       if (input.opsDelayMs) await new Promise(resolve => setTimeout(resolve, input.opsDelayMs));

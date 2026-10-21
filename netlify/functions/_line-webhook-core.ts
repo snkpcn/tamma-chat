@@ -583,6 +583,13 @@ async function handleEvent(
     console.log('LINE_DUPLICATE_DELIVERY_SKIPPED', JSON.stringify({ textCategory }));
     return;
   }
+  // Show "typing" while the answer is worked out; it runs alongside the turn
+  // and is settled before the reply (see startLineLoadingAnimation).
+  // Only with enough answer budget left that the request is settled before
+  // that budget ends: it may never eat the slice reserved for the reply.
+  const loading = remainingTurnBudgetMs(turnStartedAt, LINE_TURN_BUDGET_MS) > LINE_LOADING_TIMEOUT_MS
+    ? startLineLoadingAnimation(userId, accessToken)
+    : Promise.resolve();
   const result = await askThongthaiReliably(message, userId, turnId, errorType => {
     llmErrorType = errorType;
   }, turnStartedAt);
@@ -601,7 +608,36 @@ async function handleEvent(
     console.error('LINE_STRUCTURED_MEMORY_ERROR', detail.slice(0, 240));
   }
 
+  await loading;
   await replyToLine(replyToken, buildReplyMessages(result, userId, channelSecret), accessToken, turnStartedAt);
+}
+
+const LINE_LOADING_ENDPOINT = 'https://api.line.me/v2/bot/chat/loading/start';
+/** LINE accepts 5–60 in steps of 5. A turn ends within its 9 s hard
+ *  deadline, and the animation stops by itself when the reply arrives. */
+const LINE_LOADING_SECONDS = 10;
+/** Short: the animation is a courtesy, and it must have landed before the
+ *  reply is sent -- a late request would show "typing" after the answer. */
+const LINE_LOADING_TIMEOUT_MS = 1_500;
+
+/** The Messaging API loading animation (POST /v2/bot/chat/loading/start).
+ *  Per the LINE reference: one-on-one chats only (a group or room id is a
+ *  400), shown only while the user is viewing the chat (202 either way),
+ *  ends after loadingSeconds or when the account sends a message, LINE
+ *  13.16.0+. Called only for a user's own text turn. Never throws: a failed
+ *  or slow request is logged and the turn goes on. */
+async function startLineLoadingAnimation(userId: string, accessToken: string): Promise<void> {
+  try {
+    const response = await fetch(LINE_LOADING_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ chatId: userId, loadingSeconds: LINE_LOADING_SECONDS }),
+      signal: AbortSignal.timeout(LINE_LOADING_TIMEOUT_MS),
+    });
+    if (!response.ok) console.error('LINE_LOADING_ANIMATION_ERROR', JSON.stringify({ status: response.status }));
+  } catch (error) {
+    console.error('LINE_LOADING_ANIMATION_ERROR', JSON.stringify({ error: error instanceof Error ? error.name : 'unknown' }));
+  }
 }
 
 /** `turnStartedAt` is the moment the outer webhook function was entered.
