@@ -929,7 +929,9 @@ export function deriveDeterministicSemanticTurn(
   // on the semantic path; their meaning cannot be inferred from venue hours.
   const asksRegularVenueHours = /(?:เปิด(?:กี่โมง|ถึงกี่โมง|วันไหน|วันอะไร)|ปิด(?:กี่โมง|วันไหน|วันอะไร)|เวลา(?:เปิด|ปิด|ทำการ)|หยุด(?:วันไหน|วันอะไร)|opening\s*hours|business\s*hours)/iu.test(trimmed);
   const namesVenue = /ทำมา[-\s]?ชาติ/u.test(trimmed);
-  const namesUnit = /(?:ตำมา|ร้าน|อาหาร|คาเฟ่|กาแฟ|อินทนิล|inthanin|ที่พัก|เฮือน|สเตย์|ขี่ม้า|ATV|เอทีวี|ยิงธนู|เป็ดน้ำ|กิจกรรม)/iu.test(trimmed);
+  // A bare "ร้าน" ("ร้านเปิดกี่โมง") is how customers name the whole place;
+  // a named kind of shop (ร้านอาหาร, ร้านกาแฟ, ร้านของฝาก) is a unit.
+  const namesUnit = /(?:ตำมา|ร้าน(?:อาหาร|กาแฟ|ค้า|ขาย|ของ)|อาหาร|คาเฟ่|กาแฟ|อินทนิล|inthanin|ที่พัก|เฮือน|สเตย์|ขี่ม้า|ATV|เอทีวี|ยิงธนู|เป็ดน้ำ|กิจกรรม)/iu.test(trimmed);
   const otherOrExceptionalQuestion = /(?:วันนี้|พรุ่งนี้|มะรืน|เมื่อวาน|วันหยุดนักขัต|เทศกาล|สงกรานต์|ปีใหม่|วันหยุดพิเศษ|ราคา|เท่าไหร่|เท่าไร|พาหมา|สัตว์เลี้ยง|จอดรถ|อยู่ที่ไหน|อยู่ไหน|พิกัด|หรือ|และ|[0-9])/u.test(trimmed);
   if (asksRegularVenueHours && !activeTask && !namesUnit
       && !otherOrExceptionalQuestion && !extractDate(trimmed, now)

@@ -584,7 +584,7 @@ export function deterministicBotAddressResponse(request: BrainRequest): BrainRes
 // this at least tells a weather/booking/feedback question something
 // relevant to what it actually asked, and never claims an action (a
 // booking, a saved feedback note) that did not actually happen.
-type DegradedFallbackCategory = 'weather' | 'booking' | 'feedback' | 'casual';
+type DegradedFallbackCategory = 'weather' | 'booking' | 'information' | 'feedback' | 'casual';
 
 export function isAgentTransactionPrepareIntent(
   message: string,
@@ -596,7 +596,8 @@ export function isAgentTransactionPrepareIntent(
 export function categorizeDegradedFallback(message: string): DegradedFallbackCategory {
   if (classifyServiceFeedback(message)) return 'feedback';
   if (classifyLocalConciergeQuestion(message)?.category === 'weather_condition') return 'weather';
-  if (hasExplicitTransactionIntent(message) || OPERATIONAL_TOPIC_RE.test(message)) return 'booking';
+  if (isTransactionMessage(message)) return 'booking';
+  if (OPERATIONAL_TOPIC_RE.test(message)) return 'information';
   return 'casual';
 }
 

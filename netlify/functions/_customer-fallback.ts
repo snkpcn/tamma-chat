@@ -29,7 +29,7 @@ export function isTransactionMessage(message: string): boolean {
 }
 
 export type FallbackCause = 'budget_exhausted' | 'provider_unavailable' | 'turn_unfinished';
-export type DegradedCategory = 'weather' | 'booking' | 'feedback' | 'casual';
+export type DegradedCategory = 'weather' | 'booking' | 'information' | 'feedback' | 'casual';
 
 type Texts = Partial<Record<CustomerLanguage, string>> & { th: string; en: string };
 const pick = (texts: Texts, language: CustomerLanguage): string => texts[language] ?? texts.en;
@@ -50,6 +50,12 @@ const PROVIDER_UNAVAILABLE: Record<DegradedCategory, Texts> = {
   booking: {
     th: 'ตอนนี้ระบบจองของทองไทยตอบช้ากว่าปกติครับ ข้อมูลที่พิมพ์มายังไม่หายไปไหน ลองส่งอีกครั้งในอีกสักครู่นะครับ',
     en: 'The booking system is responding slowly right now. What you typed hasn’t been lost — please send it again in a moment.',
+  },
+  // A question about the shop (hours, menu, prices) that is not a booking:
+  // "ระบบจอง" would describe a system the customer never used.
+  information: {
+    th: 'ตอนนี้ทองไทยดึงข้อมูลมาตอบคำถามนี้ไม่ทันครับ ลองถามอีกครั้งในอีกสักครู่นะครับ',
+    en: 'I couldn’t get the information to answer this just now. Please ask again in a moment.',
   },
   feedback: {
     th: 'ขอบคุณสำหรับข้อความนี้ครับ ตอนนี้ระบบตอบช้ากว่าปกติเล็กน้อย รบกวนส่งอีกครั้งในอีกสักครู่ เพื่อให้ทองไทยรับเรื่องไว้อย่างถูกต้องครับ',
