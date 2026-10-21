@@ -6414,10 +6414,23 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // customer's previous message in this conversation. Read only for such a
   // message.
   if (channel === 'line' && guestDbId && detectMessageLanguage(request.customerMessage ?? request.message) === null) {
-    const previous = await loadConversationContext(guestDbId)
-      .then(context => [...context.recentTurns].reverse().find(turn => turn.role === 'user')?.content ?? null)
-      .catch(() => null);
-    const previousLanguage = previous ? detectMessageLanguage(previous) : null;
+    // A greeting or menu reply records no conversation turn, but it leaves
+    // its offer -- in the language it was made in -- and any later reply
+    // retires that offer. So a standing offer is the latest language.
+    const [previous, offerLanguage] = await Promise.all([
+      loadConversationContext(guestDbId)
+        .then(context => [...context.recentTurns].reverse().find(turn => turn.role === 'user')?.content ?? null)
+        .catch(() => null),
+      peekGuestAgentState(guestDbId)
+        .then(snapshot => {
+          const offer = snapshot.state?.pending_offer;
+          return isObject(offer) && typeof offer.language === 'string' ? offer.language : null;
+        })
+        .catch(() => null),
+    ]);
+    const previousLanguage = (offerLanguage && ['th','en','zh','lo','vi','ja','ko'].includes(offerLanguage)
+      ? offerLanguage as BrainRequest['language'] : null)
+      ?? (previous ? detectMessageLanguage(previous) : null);
     if (previousLanguage) request = { ...request, language:previousLanguage };
   }
 

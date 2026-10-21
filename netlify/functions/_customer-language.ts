@@ -17,6 +17,9 @@ const segmenter = new Intl.Segmenter('th', { granularity: 'word' });
 const THAI_RE = /[ก-๎]/u;
 const LATIN_WORD_RE = /^[A-Za-z][A-Za-z'’-]*$/u;
 const ACRONYM_RE = /^[A-Z0-9]{2,}$/u;
+/** "ok" is typed the same way in every language here, so it says nothing
+ *  about which one: a Thai customer's "ok" keeps the page's language. */
+const NEUTRAL_WORDS = new Set(['ok', 'okay', 'oke', 'okie', 'okey']);
 
 /** Vietnamese words that carry no Vietnamese-only letter ("Xin chào" has
  *  only "à", which French or Spanish also use). One of these together with
@@ -43,7 +46,7 @@ export function detectMessageLanguage(message: string): CustomerLanguage | null 
   for (const part of segmenter.segment(text)) {
     if (!part.isWordLike) continue;
     if (THAI_RE.test(part.segment)) thai += 1;
-    else if (LATIN_WORD_RE.test(part.segment) && !ACRONYM_RE.test(part.segment)) latin += 1;
+    else if (LATIN_WORD_RE.test(part.segment) && !ACRONYM_RE.test(part.segment) && !NEUTRAL_WORDS.has(part.segment.toLowerCase())) latin += 1;
   }
   if (thai > latin) return 'th';
   if (latin > thai) return 'en';

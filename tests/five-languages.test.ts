@@ -81,7 +81,10 @@ test('the message shows its language, or says nothing (then the web keeps its UI
   for (const [text, language] of [['Xin chào', 'vi'], ['Cảm ơn', 'vi'], ['你好', 'zh'], ['ສະບາຍດີ', 'lo'], ['สวัสดี', 'th'], ['Hi', 'en'], ['Café latte please', 'en']] as const) {
     assert.equal(detectMessageLanguage(text), language, text);
   }
-  for (const text of ['2', '555', '👍', 'ATV']) assert.equal(detectMessageLanguage(text), null, text);
+  for (const text of ['2', '555', '👍', 'ATV', 'ok', 'Okay']) assert.equal(detectMessageLanguage(text), null, text);
+  // "ok" next to real words does not change their language.
+  assert.equal(detectMessageLanguage('ok thank you'), 'en');
+  assert.equal(detectMessageLanguage('ok ครับ'), 'th');
 });
 
 test('LINE: a message that does not show its language keeps the language of the customer\'s previous message', async () => {
@@ -115,5 +118,18 @@ test('every topic number from the greeting menu is answered in the customer\'s l
         }
       }
     }
+  });
+});
+
+// A Thai customer's "ok" on a Thai page is answered in Thai (the web keeps its
+// UI language), and on LINE in the language of their previous message.
+test('"ok" keeps the page language on the web and the previous language on LINE', async () => {
+  await withHarness(async harness => {
+    const thai = /[฀-๿]/u;
+    const web = String(((await processThongthaiChatCore({ ...brainRequest('ok', guestId('five-ok'), 'web'), language: 'th' }, 'five-ok')).payload as { message?: unknown }).message ?? '');
+    assert.match(web, thai, `web: ${web}`);
+    await deliverLineTexts(harness, { userId: 'U-five-ok', texts: ['สวัสดีครับ'] });
+    const line = (await deliverLineTexts(harness, { userId: 'U-five-ok', texts: ['ok'] })).replies[0]?.texts.join(' ') ?? '';
+    assert.match(line, thai, `line: ${line}`);
   });
 });
