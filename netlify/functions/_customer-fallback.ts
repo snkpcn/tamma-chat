@@ -13,8 +13,8 @@
  *  - turn_unfinished: the turn ran out of time. Orders are mentioned only
  *    when the message itself was a transaction.
  *
- *  Thai and English are written out; the other supported languages use
- *  their own text where it already existed and English otherwise. */
+ *  Every language the site offers (th, en, zh, lo, vi) is written out; any
+ *  other falls back to English, never to Thai. */
 import type { CustomerLanguage } from './_customer-language';
 import { LLMAvailabilityError, LLMBudgetBlockedError } from './_thongthai-model-provider';
 import { hasExplicitTransactionIntent } from './_local-concierge-intent';

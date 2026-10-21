@@ -169,7 +169,7 @@ const SPECIAL_DISCOUNT_EN_RE = /\b(?:can|could|would|will)\s+(?:you|i|we)\s+(?:p
 // a discount or promotion exists ("有优惠吗", "ມີສ່ວນຫຼຸດບໍ່", "có khuyến mãi
 // không"), a cheaper option, or less sugar is not one.
 const REFUND_OTHER_RE = /退款|退钱|退费|ຄືນເງິນ|ເງິນຄືນ|hoàn tiền|trả lại tiền|lấy lại tiền/iu;
-const SPECIAL_DISCOUNT_OTHER_RE = /(?:能|可以|可不可以|能不能)(?:给我|给我们|帮我)?(?:打个?折|打折|便宜一?点|算便宜一?点|优惠一?点)|打个折吧|便宜点吧|讲价|砍价|ຫຼຸດລາຄາໃຫ້|ລົດລາຄາໃຫ້|ຂໍສ່ວນຫຼຸດ|ຂໍຫຼຸດລາຄາ|ຕໍ່ລາຄາ|(?:giảm|bớt) giá (?:cho|được)|giảm giá cho (?:tôi|mình|em|chúng tôi)|bớt (?:cho|chút|một chút)|có thể giảm giá|mặc cả/iu;
+const SPECIAL_DISCOUNT_OTHER_RE = /(?:能|可以|可不可以|能不能)(?:给我|给我们|帮我)?(?:打个?折|打折|便宜一?点|算便宜一?点|优惠一?点)|打个折吧|便宜点吧|讲价|砍价|ຫຼຸດລາຄາໃຫ້|ລົດລາຄາໃຫ້|ຂໍສ່ວນຫຼຸດ|ຂໍຫຼຸດລາຄາ|ຕໍ່ລາຄາ|(?:giảm|bớt) giá (?:cho (?:tôi|mình|em|chúng tôi|anh|chị)|được (?:không|ko|chứ))|bớt (?:cho|chút|một chút)|có thể giảm giá|mặc cả/iu;
 
 const CLAIM_RE = /ขอเคลม|เคลมประกัน|(?:^|[\s,])เคลม(?:[\s,]|$)/u;
 // A LIABILITY QUESTION ("...รับผิดชอบไหม"), not a report that an

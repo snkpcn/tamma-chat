@@ -20,9 +20,11 @@ const REQUESTS: Array<[string, 'special_discount' | 'refund_request', RegExp]> =
 
 test('discount and refund requests in zh/lo/vi are classified; near misses in each language are not', () => {
   for (const [text, category] of REQUESTS) assert.equal(classifyEscalationBoundary(text)?.category, category, text);
-  for (const text of ['能便宜一点吗', 'Bớt cho tôi chút được không']) assert.equal(classifyEscalationBoundary(text)?.category, 'special_discount', text);
+  for (const text of ['能便宜一点吗', 'Bớt cho tôi chút được không', 'Giảm giá được không?', 'Bớt giá được không?']) assert.equal(classifyEscalationBoundary(text)?.category, 'special_discount', text);
   for (const text of ['有优惠吗？', '有什么折扣活动吗', '少糖', '有便宜一点的吗', 'ມີສ່ວນຫຼຸດບໍ່', 'ມີໂປຣບໍ່', 'ຫວານໜ້ອຍ',
-    'Có khuyến mãi không?', 'Có giảm giá không?', 'Ít đường nhé', 'Có món nào rẻ hơn không']) {
+    'Có khuyến mãi không?', 'Có giảm giá không?', 'Ít đường nhé', 'Có món nào rẻ hơn không',
+    // Whether a discount exists for someone is a question, not a request.
+    'Có giảm giá cho trẻ em không?', 'Có giảm giá cho nhóm không?', 'Bớt cay được không?']) {
     assert.equal(classifyEscalationBoundary(text), null, text);
   }
 });
@@ -38,6 +40,19 @@ test('each request is answered as an owner matter in the customer\'s language, z
       const line = await deliverLineTexts(harness, { userId: `U-money5-${index}`, texts: [text] });
       assert.match(line.replies[0]?.texts.join('\n') ?? '', expected, `line: ${text}`);
       assert.equal(harness.modelCallCount() - before, 0, `line: ${text}`);
+    }
+  });
+});
+
+// "Is there a discount for children?" asks whether one exists: it is not
+// escalated as a request for a special price, on either channel.
+test('vi: asking whether a discount for children exists is not escalated, web and LINE', async () => {
+  await withHarness(async harness => {
+    const text = 'Có giảm giá cho trẻ em không?';
+    const web = await processThongthaiChatCore(brainRequest(text, guestId('money5-kids'), 'web'), 'money5-kids');
+    const line = await deliverLineTexts(harness, { userId: 'U-money5-kids', texts: [text] });
+    for (const reply of [String((web.payload as { message?: unknown }).message), line.replies[0]?.texts.join(' ') ?? '']) {
+      assert.doesNotMatch(reply, /Giảm giá đặc biệt cần chủ sở hữu/u, reply);
     }
   });
 });
