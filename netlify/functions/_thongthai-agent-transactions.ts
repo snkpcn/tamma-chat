@@ -1002,7 +1002,7 @@ async function prepareRestaurantPreorder(
       return { ok: false, error: candidates.length ? 'menu_item_ambiguous' : 'menu_item_not_found', requested_name: requestedName };
     }
     const item = candidates[0]!;
-    if (!item.is_orderable || item.available_servings < quantity) {
+    if (!item.is_orderable || (item.available_servings ?? 0) < quantity) {
       return {
         ok: false,
         error: 'menu_item_unavailable',

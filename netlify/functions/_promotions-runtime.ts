@@ -68,10 +68,10 @@ export function checkCampaignEligibility(
 
 /** A restaurant promotion item is only available if the live menu still has it orderable with enough stock for the promo's stored quantity. */
 export function isRestaurantItemAvailable(
-  menuItem: { is_orderable: boolean; available_servings: number } | undefined,
+  menuItem: { is_orderable: boolean; available_servings: number | null } | undefined,
   quantity: number,
 ): boolean {
-  return Boolean(menuItem) && menuItem!.is_orderable && menuItem!.available_servings >= quantity;
+  return Boolean(menuItem) && menuItem!.is_orderable && (menuItem!.available_servings ?? 0) >= quantity;
 }
 
 /** Item/qty fidelity: the preorder must use exactly the promo's stored items, never a re-derived or re-typed list. */

@@ -53,7 +53,8 @@ export type RestaurantAdvisorItem = {
   price: number;
   signature: boolean;
   orderable: boolean;
-  availableServings: number;
+  /** null = no stock figure (unknown, not sold out). */
+  availableServings: number | null;
   ingredients: string[];
   unavailableIngredients: string[];
   profile: RestaurantMenuProfile;
@@ -439,8 +440,17 @@ function itemMatchesRecommendationScope(item: RestaurantAdvisorItem, scope: Reco
   return !isDrink && !isDessert;
 }
 
+/** Ready to sell now. An item without a stock figure is not claimed ready. */
+function inStock(item: RestaurantAdvisorItem): boolean {
+  return item.orderable && item.availableServings !== null && item.availableServings > 0 && !item.unavailableIngredients.length;
+}
+
 function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): boolean {
-  if (!item.orderable || item.availableServings <= 0 || item.unavailableIngredients.length) return true;
+  if (!inStock(item)) return true;
+  return excludedByPreferences(item, pref);
+}
+
+function excludedByPreferences(item: RestaurantAdvisorItem, pref: ParsedPreferences): boolean {
   if (pref.vegetarian && item.profile.proteinTags.some(tag => ['pork','beef','chicken','fish','shrimp'].includes(tag))) return true;
   if (item.profile.proteinTags.some(tag => pref.avoidProteins.includes(tag))) return true;
   if (item.profile.allergenFlags.some(tag => pref.allergenFlags.includes(tag))) return true;
@@ -457,6 +467,32 @@ function isHardExcluded(item: RestaurantAdvisorItem, pref: ParsedPreferences): b
   if (pref.spice === 'none' && ingredients.some(ingredient => SPICY_RISK_INGREDIENT_RE.test(ingredient))) return true;
   return false;
 }
+
+export type MenuUnavailableReason = 'sold_out' | 'no_stock_data' | 'constraints' | 'no_items';
+
+/** Why nothing in scope can be recommended. "no_stock_data" wins over
+ *  "sold_out": an item with no stock figure might well be available. */
+function menuUnavailableReason(items: RestaurantAdvisorItem[], pref: ParsedPreferences): MenuUnavailableReason {
+  if (!items.length) return 'no_items';
+  const fits = items.filter(item => !excludedByPreferences(item, pref));
+  if (fits.some(item => item.orderable && item.availableServings === null && !item.unavailableIngredients.length)) return 'no_stock_data';
+  if (!fits.length || items.some(inStock)) return 'constraints';
+  return 'sold_out';
+}
+
+export const MENU_UNAVAILABLE_TH: Record<MenuUnavailableReason, string> = {
+  sold_out: 'ตอนนี้เมนูที่ถามหมดทุกรายการครับ',
+  no_stock_data: 'ตอนนี้ระบบยังไม่มีข้อมูลสต๊อกล่าสุดของเมนู ทองไทยจึงยืนยันไม่ได้ว่าเมนูไหนพร้อมขายครับ',
+  constraints: 'ไม่มีเมนูที่ผ่านข้อจำกัดและขายได้ในสต๊อกปัจจุบัน',
+  no_items: 'ตอนนี้ยังไม่มีรายการเมนูในระบบให้ยืนยันครับ',
+};
+
+export const MENU_UNAVAILABLE_EN: Record<MenuUnavailableReason, string> = {
+  sold_out: 'Everything you asked about is sold out right now.',
+  no_stock_data: 'I don’t have current stock data for the menu, so I can’t confirm which dishes are available right now.',
+  constraints: 'No dish that fits those requirements is in stock right now.',
+  no_items: 'There are no menu items in our system to confirm right now.',
+};
 
 function scoreItem(item: RestaurantAdvisorItem, pref: ParsedPreferences, selectedRoles: string[]): Scored {
   let score = item.signature ? 1 : 0;
@@ -491,7 +527,7 @@ function scoreItem(item: RestaurantAdvisorItem, pref: ParsedPreferences, selecte
   }
   if (selectedRoles.length && p.pairingTags.some(role => selectedRoles.includes(role))) { score += 3; reasons.push('ช่วยเติมบทบาทที่เข้าคู่กับของที่เลือกแล้ว'); }
   if (pref.selectedNames.includes(item.name)) score -= 8;
-  score += Math.min(1.2, item.availableServings / 100);
+  score += Math.min(1.2, (item.availableServings ?? 0) / 100);
   if (!reasons.length && p.summary) reasons.push(p.summary);
   return { item, score, reasons: uniq(reasons).slice(0, 3) };
 }
@@ -528,7 +564,7 @@ function composeSet(candidates: Scored[], pref: ParsedPreferences) {
   let total = 0;
   const add = (row: Scored | null, role: string, quantity = 1) => {
     if (!row || used.has(row.item.name)) return false;
-    quantity = Math.max(1, Math.min(quantity, row.item.availableServings));
+    quantity = Math.max(1, Math.min(quantity, row.item.availableServings ?? 1));
     const cost = row.item.price * quantity;
     if (budget != null && total + cost > budget) return false;
     used.add(row.item.name); total += cost;
@@ -600,19 +636,23 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   // notify staff, matching Customer Service Doctrine's food-safety wording.
   const notices: string[] = [];
   if (pref.allergenFlags.length) notices.push('ตรวจจากวัตถุดิบที่บันทึกไว้และตัดเมนูที่มีสารก่อภูมิแพ้ตรงตัวออกแล้ว แต่ร้านยังไม่มีข้อมูลยืนยันเรื่องการปนเปื้อนข้ามอุปกรณ์/ครัว ขอให้แจ้งพนักงานอีกครั้งหน้างานเพื่อความปลอดภัยครับ');
-  if (!available.length) notices.push('ไม่มีเมนูที่ผ่านข้อจำกัดและขายได้ในสต๊อกปัจจุบัน');
+  // Nothing to recommend has three different causes, and the customer must
+  // hear the right one: sold out, no stock figure at all (unknown -- never
+  // "sold out"), or nothing in stock that fits what they asked for.
+  const unavailableReason = available.length ? null : menuUnavailableReason(items.filter(item => itemMatchesRecommendationScope(item, scope)), pref);
+  if (unavailableReason) notices.push(MENU_UNAVAILABLE_TH[unavailableReason]);
 
   if (singleItemSafetyQuestion) {
     const item = named[0]!;
     return {
-      mode:'item_safety_check', parsed:pref, notices,
+      mode:'item_safety_check', parsed:pref, notices, unavailableReason,
       itemSafety:{ item:compactItem(item), safe:!isHardExcluded(item, pref) },
       recommendations:[], comparison:null, set:null,
     };
   }
   if (compareMode) {
     return {
-      mode:'compare', parsed:pref, notices,
+      mode:'compare', parsed:pref, notices, unavailableReason,
       comparison:named.slice(0,4).map(compactItem),
       recommendations:[], set:null,
     };
@@ -620,13 +660,13 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   if (composeMode) {
     const set = composeSet(scored,pref);
     return {
-      mode:'compose_set', parsed:pref, notices, set,
+      mode:'compose_set', parsed:pref, notices, unavailableReason, set,
       recommendations:scored.slice(0,5).map(row=>({ ...compactItem(row.item), score:Number(row.score.toFixed(2)), reasons:row.reasons })),
       comparison:null,
     };
   }
   return {
-    mode:pairingMode?'pairing':'recommend', parsed:pref, notices, set:null, comparison:null,
+    mode:pairingMode?'pairing':'recommend', parsed:pref, notices, unavailableReason, set:null, comparison:null,
     recommendations:scored.slice(0,5).map(row=>({ ...compactItem(row.item), score:Number(row.score.toFixed(2)), reasons:row.reasons })),
   };
 }

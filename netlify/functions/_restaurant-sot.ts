@@ -27,7 +27,9 @@ export type RestaurantMenuItem = {
   is_signature: boolean;
   ingredient_names: string[];
   unavailable_ingredients: string[];
-  available_servings: number;
+  /** null = the live view has no stock figure for this item -- unknown,
+   *  which is not the same as sold out. */
+  available_servings: number | null;
   is_orderable: boolean;
   profile: unknown;
   safety: RestaurantMenuSafetyProfile;
@@ -133,7 +135,7 @@ export async function listRestaurantMenu(): Promise<RestaurantMenuItem[]> {
       category_sort_order: Number(row.category_sort_order), sort_order: Number(row.sort_order), name: String(row.name),
       selling_price: Number(row.selling_price), description: typeof row.description === 'string' ? row.description : null,
       is_signature: row.is_signature === true, ingredient_names: cleanList(row.ingredient_names),
-      unavailable_ingredients: cleanList(row.unavailable_ingredients), available_servings: Number(row.available_servings ?? 0),
+      unavailable_ingredients: cleanList(row.unavailable_ingredients), available_servings: row.available_servings == null ? null : Number(row.available_servings),
       is_orderable: row.is_orderable === true,
       profile,
       safety: normalizeRestaurantMenuSafetyProfile(p.safety),
@@ -350,7 +352,7 @@ export async function createRestaurantPreorder(input: {
   const resolved = input.items.map(item => ({ menu: resolveMenuName(item.name, menu), quantity: Math.max(1, Math.min(50, Math.floor(item.quantity || 1))) }));
   if (resolved.some(item => !item.menu)) throw new Error('menu_item_not_found');
   for (const item of resolved) {
-    if (!item.menu!.is_orderable || item.menu!.available_servings < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);
+    if (!item.menu!.is_orderable || (item.menu!.available_servings ?? 0) < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);
   }
   const environment = input.environment ?? await guestEnvironment(input.guestDbId);
   const canonicalItems = resolved
@@ -427,7 +429,7 @@ export async function createRestaurantPreorderWithPromotion(input: {
   const resolved = input.items.map(item => ({ menu: resolveMenuName(item.name, menu), quantity: Math.max(1, Math.min(50, Math.floor(item.quantity || 1))) }));
   if (resolved.some(item => !item.menu)) throw new Error('menu_item_not_found');
   for (const item of resolved) {
-    if (!item.menu!.is_orderable || item.menu!.available_servings < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);
+    if (!item.menu!.is_orderable || (item.menu!.available_servings ?? 0) < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);
   }
   const environment = await guestEnvironment(input.guestDbId);
   const canonicalItems = resolved

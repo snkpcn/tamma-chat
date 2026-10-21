@@ -56,7 +56,7 @@ import {
   type CafeMasterMenuItem,
   type CafeBranchModifier,
 } from './_cafe-sot';
-import { parsePreferences as parseRestaurantConstraintSignals, parseRestaurantParty } from './_restaurant-intelligence';
+import { MENU_UNAVAILABLE_EN, parsePreferences as parseRestaurantConstraintSignals, parseRestaurantParty } from './_restaurant-intelligence';
 import {
   applyConversationContextUpdate,
   emptyConversationContextState,
@@ -1404,6 +1404,10 @@ function formatAdvisorMessage(
       }),
       closing,
     ]);
+  }
+  if (language === 'en') {
+    const reason = advisor?.unavailableReason as keyof typeof MENU_UNAVAILABLE_EN | null | undefined;
+    return reason ? MENU_UNAVAILABLE_EN[reason] : MENU_UNAVAILABLE_EN.constraints;
   }
   return notices[0] ?? 'ตอนนี้ยังไม่มีเมนูที่ตรงเงื่อนไขและพร้อมขายในสต๊อกครับ';
 }
@@ -6780,7 +6784,9 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     // The request was read-only. A source failure must not start another
     // paid attempt or replace missing live menu facts with guesses.
     return {
-      message:'ตอนนี้ตรวจสอบข้อมูลเมนูและราคาล่าสุดไม่สำเร็จครับ ยังจัดชุดอาหารให้ตรงเงื่อนไขไม่ได้',
+      message:request.language === 'en'
+        ? 'I couldn’t read the latest menu and prices just now, so I can’t recommend dishes yet. Please try again in a moment.'
+        : 'ตอนนี้ตรวจสอบข้อมูลเมนูและราคาล่าสุดไม่สำเร็จครับ ยังจัดชุดอาหารให้ตรงเงื่อนไขไม่ได้',
       intent:'information' as const,contextUpdates:{},journeyAction:{type:'none' as const,journey:null},suggestedActions:[],
       responseStyle:'direct' as const,semanticMemoryUpdates:[],toolCalls:[],
     };
