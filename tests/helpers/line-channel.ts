@@ -12,7 +12,7 @@ export type LineDeliveryResult = {
   replies: Array<LineReply | null>;
   /** Every api.line.me call made while handling the batch, and every call
    *  to the private ops router (endpoint 'snk-money'). */
-  calls: Array<{ endpoint: string; status: number; body: Record<string, unknown> }>;
+  calls: Array<{ endpoint: string; status: number; body: Record<string, unknown>; headers?: Headers }>;
   /** The signed batch as sent, to deliver it again (LINE redelivery). */
   rawBody: string;
 };
@@ -28,6 +28,8 @@ export async function deliverLineTexts(
     withGroup?: boolean;
     /** Status LINE answers a reply with (400 = expired/used reply token). */
     replyStatus?: number;
+    /** Status LINE answers a push with (409 = retry key already accepted). */
+    pushStatus?: number;
     /** Extra latency for the private ops router, to model a slow group path. */
     opsDelayMs?: number;
     /** Status the private ops router answers with (500 = router down). */
@@ -82,8 +84,8 @@ export async function deliverLineTexts(
           init.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(init.signal?.reason); }, { once: true });
         });
       }
-      const status = u.endsWith('/reply') ? input.replyStatus ?? 200 : loading ? input.loadingStatus ?? 202 : 200;
-      calls.push({ endpoint: u.replace(/^.*\/v2\/bot\//u, ''), status, body: parsed });
+      const status = u.endsWith('/reply') ? input.replyStatus ?? 200 : loading ? input.loadingStatus ?? 202 : input.pushStatus ?? 200;
+      calls.push({ endpoint: u.replace(/^.*\/v2\/bot\//u, ''), status, body: parsed, headers: new Headers(init.headers) });
       return new Response(status < 300 ? '{}' : '{"message":"Invalid reply token"}', { status });
     }
     if (u.includes('/api/line/snk-money')) {

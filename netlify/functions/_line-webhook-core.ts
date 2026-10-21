@@ -471,7 +471,66 @@ async function replyToLine(
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
-    throw new Error(`LINE reply failed ${response.status}: ${body.slice(0, 240)}`);
+    throw new LineReplyRejectedError(response.status, body);
+  }
+}
+
+class LineReplyRejectedError extends Error {
+  constructor(readonly status: number, body: string) {
+    super(`LINE reply failed ${status}: ${body.slice(0, 240)}`);
+  }
+}
+
+const LINE_PUSH_ENDPOINT = 'https://api.line.me/v2/bot/message/push';
+
+/** A UUID that is the same for every attempt at one turn, so LINE accepts
+ *  at most one push per turn (X-Line-Retry-Key; a second gets 409). */
+function lineRetryKey(turnId: string): string {
+  const hex = createHash('sha256').update(`thongthai-line-push:${turnId}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** Reply, and if LINE rejects the reply token (400: expired or already
+ *  used, e.g. a slow turn or a redelivery whose token was spent), push the
+ *  same answer to the user once. Only a definite 400 pushes: a timeout or
+ *  network error may have delivered the reply, and a push then would be a
+ *  second answer. Private one-on-one chats only (handleEvent is never
+ *  reached for groups or rooms). Bounded by the same hard deadline. */
+async function replyOrPushOnce(
+  replyToken: string,
+  userId: string,
+  turnId: string | undefined,
+  messages: LineReplyMessage[],
+  accessToken: string,
+  turnStartedAt: number,
+): Promise<void> {
+  try {
+    await replyToLine(replyToken, messages, accessToken, turnStartedAt);
+    return;
+  } catch (error) {
+    if (!(error instanceof LineReplyRejectedError) || error.status !== 400 || !turnId) throw error;
+  }
+  const timeoutMs = remainingTurnBudgetMs(turnStartedAt, CUSTOMER_TURN_HARD_DEADLINE_MS);
+  if (timeoutMs <= 0) {
+    console.error('LINE_PUSH_FALLBACK', JSON.stringify({ outcome: 'skipped_deadline' }));
+    return;
+  }
+  try {
+    const response = await fetch(LINE_PUSH_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        'X-Line-Retry-Key': lineRetryKey(turnId),
+      },
+      body: JSON.stringify({ to: userId, messages: messages.slice(0, MAX_LINE_MESSAGES) }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    // 409: this turn's push was already accepted -- the customer has it.
+    const outcome = response.ok ? 'pushed' : response.status === 409 ? 'already_pushed' : 'failed';
+    (outcome === 'failed' ? console.error : console.log)('LINE_PUSH_FALLBACK', JSON.stringify({ outcome, status: response.status }));
+  } catch (error) {
+    console.error('LINE_PUSH_FALLBACK', JSON.stringify({ outcome: 'failed', error: error instanceof Error ? error.name : 'unknown' }));
   }
 }
 
@@ -609,7 +668,7 @@ async function handleEvent(
   }
 
   await loading;
-  await replyToLine(replyToken, buildReplyMessages(result, userId, channelSecret), accessToken, turnStartedAt);
+  await replyOrPushOnce(replyToken, userId, turnId, buildReplyMessages(result, userId, channelSecret), accessToken, turnStartedAt);
 }
 
 const LINE_LOADING_ENDPOINT = 'https://api.line.me/v2/bot/chat/loading/start';
