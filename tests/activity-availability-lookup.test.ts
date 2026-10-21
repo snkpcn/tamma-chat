@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { withHarness } from './helpers/canonical-core-harness';
+import { brainRequest, guestId, withHarness } from './helpers/canonical-core-harness';
+import { deliverLineTexts } from './helpers/line-channel';
+import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
 import { askBothChannels, failReads } from './helpers/both-channels';
 
 // "พรุ่งนี้ขี่ม้าว่างไหม" used to be read as a catalog question and answered
@@ -51,4 +53,33 @@ test('a missing day or length is asked for, with the lengths sold -- not answere
   const catalog = { serviceResources: [horse], serviceSchedules: [round(1)] };
   await expectBoth('avail-no-length', 'พรุ่งนี้ขี่ม้าว่างไหม', /อยากเช็กแบบกี่นาที \(มี 30 นาที \/ 45 นาที\)ครับ$/u, catalog);
   await expectBoth('avail-no-day', 'ขี่ม้าว่างไหม', /อยากเช็กวันไหน และแบบกี่นาที/u, catalog);
+});
+
+// The demo server found what one-question-per-customer tests missed: once
+// the conversation was about an activity, the next round question took a
+// different path, paid two model calls and ran out of time.
+test('a follow-up round question, and a bare "30 นาที" answer, stay on the live rounds -- same customer, web and LINE', async () => {
+  await withHarness(async harness => {
+    const texts = ['พรุ่งนี้ขี่ม้าว่างไหม', WITH_LENGTH, '30 นาที'];
+    const web: Array<{ reply: string; calls: number }> = [];
+    const gid = guestId('avail-follow-web');
+    for (const [index, text] of texts.entries()) {
+      const before = harness.modelCallCount();
+      const result = await processThongthaiChatCore(brainRequest(text, gid, 'web'), `avail-follow-web-${index}`);
+      web.push({ reply: String((result.payload as { message?: unknown }).message ?? ''), calls: harness.modelCallCount() - before });
+    }
+    const line: Array<{ reply: string; calls: number }> = [];
+    for (const text of texts) {
+      const before = harness.modelCallCount();
+      const result = await deliverLineTexts(harness, { userId: 'U-avail-follow', texts: [text] });
+      line.push({ reply: result.replies[0]?.texts.join('\n') ?? '', calls: harness.modelCallCount() - before });
+    }
+    for (const [channel, turns] of [['web', web], ['line', line]] as const) {
+      assert.match(turns[0]!.reply, /อยากเช็กแบบกี่นาที/u, channel);
+      for (const answered of [turns[1]!, turns[2]!]) {
+        assert.match(answered.reply, /ขี่ม้า 30 นาที วันที่ \d{4}-\d{2}-\d{2} ยังว่างรอบ 10:00 น\./u, `${channel}: ${answered.reply}`);
+      }
+      for (const turn of turns) assert.equal(turn.calls, 0, channel);
+    }
+  }, { serviceResources: [horse], serviceSchedules: [round(1)] });
 });

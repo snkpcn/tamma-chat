@@ -904,6 +904,38 @@ function deriveForActiveTask(
  * (the caller decides what to do then -- call the model if available, or ask
  * one honest clarifying question if not).
  */
+/** "พรุ่งนี้ขี่ม้าว่างไหม" asks about live rounds, not what the activity is:
+ *  answering it with the catalog ("มีขี่ม้าครับ") reads as "yes". It is read
+ *  here, before any domain follow-up, so an activity conversation already
+ *  under way reads it the same way. A short reply with only a length or a
+ *  day ("30 นาที") right after such a lookup completes that lookup, with the
+ *  activity and any day taken from the customer's previous message. */
+function activityRoundLookupTurn(message: string, context: SemanticContext, now: Date): SemanticTurn | null {
+  if (hasStandaloneTransactionRequest(message)) return null;
+  const slots = (text: string) => {
+    const date = extractDate(text, now);
+    const time = extractTime(text);
+    const durationMinutes = extractDurationMinutes(text);
+    return { ...(date ? { date } : {}), ...(time ? { time } : {}), ...(durationMinutes ? { durationMinutes } : {}) };
+  };
+  const turn = (topic: { nodeId: string; activityCode: string }, entities: Record<string, unknown>): SemanticTurn => ({
+    domain: 'activity', intent: 'activity_availability_lookup', action: 'ask', informationNeed: 'availability',
+    entities: { activityCode: topic.activityCode, resourceCode: topic.nodeId, ...entities },
+    references: [], constraints: [], confidence: 0.88, needsClarification: false,
+  });
+
+  const topic = findActivityTopic(message);
+  if (topic && AVAILABILITY_STATUS_MARKER.test(message)) return turn(topic, slots(message));
+
+  if (context.activeTopic !== 'activity_availability_lookup' || message.length > 30) return null;
+  const answered = slots(message);
+  if (!answered.date && !answered.durationMinutes) return null;
+  const previous = [...(context.recentTurns ?? [])].reverse().find(item => item.role === 'user')?.content ?? '';
+  const previousTopic = findActivityTopic(previous);
+  if (!previousTopic || (topic && topic.activityCode !== previousTopic.activityCode)) return null;
+  return turn(previousTopic, { ...slots(previous), ...answered });
+}
+
 export function deriveDeterministicSemanticTurn(
   message: string,
   context: SemanticContext,
@@ -923,6 +955,9 @@ export function deriveDeterministicSemanticTurn(
   // supplying another slot to it.
   const paymentStatus=paymentStatusTurn(trimmed);
   if(paymentStatus)return paymentStatus;
+
+  const roundLookup = activeTask ? null : activityRoundLookupTurn(trimmed, context, now);
+  if (roundLookup) return roundLookup;
 
   // A regular, overall-venue schedule is an owner-confirmed read-only fact.
   // Keep named units, dated exceptions, multi-topic questions and transactions
@@ -1419,22 +1454,6 @@ export function deriveDeterministicSemanticTurn(
         ],
         confidence:0.86,
         needsClarification:false,
-      };
-    }
-
-    // "พรุ่งนี้ขี่ม้าว่างไหม" asks about live rounds, not what the activity
-    // is: answering it with the catalog ("มีขี่ม้าครับ") reads as "yes".
-    if (!committing && AVAILABILITY_STATUS_MARKER.test(trimmed)) {
-      const date = extractDate(trimmed, now);
-      const time = extractTime(trimmed);
-      const durationMinutes = extractDurationMinutes(trimmed);
-      return {
-        domain: 'activity', intent: 'activity_availability_lookup', action: 'ask', informationNeed: 'availability',
-        entities: {
-          activityCode: activityTopic.activityCode, resourceCode: activityTopic.nodeId,
-          ...(date ? { date } : {}), ...(time ? { time } : {}), ...(durationMinutes ? { durationMinutes } : {}),
-        },
-        references: [], constraints: [], confidence: 0.88, needsClarification: false,
       };
     }
 
