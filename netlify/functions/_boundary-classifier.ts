@@ -164,6 +164,13 @@ const SPECIAL_DISCOUNT_RE = new RegExp(
 // not. "discounted" is not "discount": "Can I get the discounted price?"
 // asks for an existing promotion.
 const SPECIAL_DISCOUNT_EN_RE = /\b(?:can|could|would|will)\s+(?:you|i|we)\s+(?:please\s+)?(?:give|get|have|offer|do|make)\s+(?:me\s+|us\s+)?(?:a\s+|an?\s+extra\s+|some\s+|any\s+|a\s+little\s+|a\s+special\s+)?(?:discount|deal|lower\s+price|better\s+price|cheaper\s+price|special\s+price)\b|\b(?:give|offer)\s+(?:me|us)\s+(?:a\s+)?(?:discount|deal|better\s+price|special\s+price)\b|\b(?:lower|reduce|drop|cut)\s+(?:the\s+|your\s+)?price\b|\b(?:make\s+it|go)\s+cheaper\b|\bknock\s+(?:\w+\s+){0,3}off\b|\b(?:negotiate|haggle)\b/iu;
+// The same two rules in Chinese, Lao and Vietnamese. A refund is any ask
+// for money back. A discount REQUEST asks for a better price; asking whether
+// a discount or promotion exists ("有优惠吗", "ມີສ່ວນຫຼຸດບໍ່", "có khuyến mãi
+// không"), a cheaper option, or less sugar is not one.
+const REFUND_OTHER_RE = /退款|退钱|退费|ຄືນເງິນ|ເງິນຄືນ|hoàn tiền|trả lại tiền|lấy lại tiền/iu;
+const SPECIAL_DISCOUNT_OTHER_RE = /(?:能|可以|可不可以|能不能)(?:给我|给我们|帮我)?(?:打个?折|打折|便宜一?点|算便宜一?点|优惠一?点)|打个折吧|便宜点吧|讲价|砍价|ຫຼຸດລາຄາໃຫ້|ລົດລາຄາໃຫ້|ຂໍສ່ວນຫຼຸດ|ຂໍຫຼຸດລາຄາ|ຕໍ່ລາຄາ|(?:giảm|bớt) giá (?:cho|được)|giảm giá cho (?:tôi|mình|em|chúng tôi)|bớt (?:cho|chút|một chút)|có thể giảm giá|mặc cả/iu;
+
 const CLAIM_RE = /ขอเคลม|เคลมประกัน|(?:^|[\s,])เคลม(?:[\s,]|$)/u;
 // A LIABILITY QUESTION ("...รับผิดชอบไหม"), not a report that an
 // accident already happened -- deliberately requires the question
@@ -190,10 +197,10 @@ export function classifyEscalationBoundary(message: string): EscalationMatch | n
   const text = message.trim();
   if (!text) return null;
 
-  if (REFUND_RE.test(text)) {
+  if (REFUND_RE.test(text) || REFUND_OTHER_RE.test(text)) {
     return { category: 'refund_request', domainUnit: null, pureEscalation: true, escalates: true };
   }
-  if (SPECIAL_DISCOUNT_RE.test(text) || SPECIAL_DISCOUNT_EN_RE.test(text)) {
+  if (SPECIAL_DISCOUNT_RE.test(text) || SPECIAL_DISCOUNT_EN_RE.test(text) || SPECIAL_DISCOUNT_OTHER_RE.test(text)) {
     return { category: 'special_discount', domainUnit: null, pureEscalation: false, escalates: true };
   }
   if (CLAIM_RE.test(text)) {
