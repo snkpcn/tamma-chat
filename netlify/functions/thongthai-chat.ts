@@ -7,6 +7,7 @@ import { resolveCustomerLanguage } from './_customer-language';
 import { canonicalQueryForOfferReply, isLiveOffer, offerAcceptsReply, parseOfferReply, withTopicMenuOffer } from './_offer-reply';
 import { ENGLISH_MENU_CANONICAL, readEnglishBasicQuestion } from './_english-basic-question';
 import { ungroundedNumericClaims } from './_grounded-numbers';
+import { formatCustomerDate } from './_customer-date';
 import { INTHANIN_TADTONE_CONFIG } from './_organization-config';
 import { touchAiConversation } from './_ai-cost-ledger';
 import type { Handler, HandlerEvent } from '@netlify/functions';
@@ -4840,7 +4841,7 @@ export function composeActivityPrepareOnlyResponse(
   const details = [
     `เตรียมรายการจองไว้แล้วครับ (ยังไม่ได้ส่งจองจริง)`,
     `• ขี่ม้า: ${displayHorseName(summary.asset)}`,
-    summary.date ? `• วันที่ ${summary.date}${summary.time ? ` เวลา ${summary.time}` : ''}` : '',
+    summary.date ? `• วันที่ ${formatCustomerDate(String(summary.date))}${summary.time ? ` เวลา ${summary.time}` : ''}` : '',
     summary.duration_minutes ? `• ${summary.duration_minutes} นาที · ${summary.party_size ?? 1} ท่าน` : '',
     summary.expected_price != null ? `• ราคา ${summary.expected_price} บาท` : '',
     summary.customer_name ? `• ชื่อ ${summary.customer_name}${summary.phone ? ` · โทร ${summary.phone}` : ''}` : '',
@@ -4901,7 +4902,7 @@ function activityBookingFallbackPrompt(request: BrainRequest): BrainResponse | n
   const horseName = String(draft.horseName);
   const summary = [
     `เลือกม้า: ${horseName}`,
-    draft.date ? `วันที่: ${draft.date}` : '',
+    draft.date ? `วันที่: ${formatCustomerDate(String(draft.date))}` : '',
     draft.time ? `เวลา: ${draft.time}` : '',
     draft.durationMinutes ? `ระยะเวลา: ${draft.durationMinutes} นาที` : '',
     draft.partySize ? `จำนวนผู้ขี่: ${draft.partySize} คน` : '',
@@ -5090,7 +5091,7 @@ async function executeDeterministicRestaurantTableBooking(
     message:[
       'รับคำขอจองโต๊ะเข้าระบบแล้วครับ ✅',
       bookingCode ? `เลขที่คำขอ ${bookingCode}` : '',
-      `${date} เวลา ${time} · ${partySize} ท่าน`,
+      `${formatCustomerDate(String(date))} เวลา ${time} · ${partySize} ท่าน`,
       status === 'confirmed' ? 'สถานะ: ยืนยันแล้ว' : 'สถานะ: รอทีมงานยืนยัน',
       transactionNotificationMessage(detail),
     ].filter(Boolean).join('\n'),
@@ -5168,7 +5169,7 @@ async function executeDeterministicRestaurantPreorder(
       preorderCode ? `เลขออเดอร์ ${preorderCode}` : '',
       ...itemLines,
       totalAmount !== null ? `รวม ${Math.round(totalAmount)} บาท` : '',
-      `รับอาหาร ${date} เวลา ${time}`,
+      `รับอาหาร ${formatCustomerDate(String(date))} เวลา ${time}`,
       'สถานะ: รอร้านรับออเดอร์',
       transactionNotificationMessage(detail),
     ].filter(Boolean).join('\n'),
@@ -5323,7 +5324,7 @@ async function executeDeterministicPromotionRedemption(
       `💡 ${title}`,
       campaignCode?`รหัสโปร ${campaignCode}`:'',
       preorderCode?`🍽️ ออเดอร์ ${preorderCode}`:'',
-      date&&time?`🕑 วันที่ ${date} เวลา ${time}`:'',
+      date&&time?`🕑 วันที่ ${formatCustomerDate(String(date))} เวลา ${time}`:'',
       promoTotal!==null?`💰 ราคาพิเศษ ${Math.round(promoTotal)} บาท`:'',
       status==='redeemed'?'สถานะ: ใช้สิทธิ์แล้ว':'สถานะ: รอดำเนินการ/ยืนยัน',
     ].filter(Boolean).join('\n'),

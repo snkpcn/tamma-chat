@@ -26,6 +26,7 @@ import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } fro
 import { extractTime } from './_slot-parsers';
 import { ACTIVITY_ENGLISH_LABELS } from './_english-basic-question';
 import { ungroundedNumericClaims } from './_grounded-numbers';
+import { formatCustomerDate } from './_customer-date';
 import { ORGANIZATION_CONFIG } from './_organization-config';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
 
@@ -1425,7 +1426,7 @@ function firstCustomerFacingEntity(entities: Record<string, unknown>): string | 
 }
 
 function thaiWhen(entities: Record<string, unknown>): string {
-  const date = typeof entities.date === 'string' ? entities.date.trim() : '';
+  const date = typeof entities.date === 'string' ? formatCustomerDate(entities.date.trim(), 'th') : '';
   const time = typeof entities.time === 'string' ? entities.time.trim() : '';
   if (date && time) return `${date} เวลา ${time}`;
   if (date) return date;
