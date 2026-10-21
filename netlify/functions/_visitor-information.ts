@@ -148,7 +148,12 @@ export async function answerVisitorInformation(input:{
         return `• ${String(name.value)}${price?` — ${String(price.value)} บาท`:''}`;
       });
       result.message=lines.length?`รายการของฝากในหลังบ้านที่อ่านได้ตอนนี้ครับ\n${lines.join('\n')}\nหากสนใจชิ้นไหน บอกชื่อสินค้าได้ครับ ส่วนผู้ผลิตและชุมชนที่มาต้องมีข้อมูลยืนยันรายชิ้น`
-        :'ตอนนี้ยังอ่านรายการของฝากปัจจุบันไม่ได้ครับ จึงยังไม่ขอเดาชื่อสินค้า ราคา หรือชุมชนผู้ผลิต';
+        // Read fine but empty is not a failed read: the live query only returns
+        // rows with stock_qty > 0, so sold-out and no-stock-figure items are both
+        // absent. Say exactly that -- neither "sold out" nor "could not read".
+        :bundle.sources.some(source=>source.status==='empty')
+          ?'ตอนนี้ยังไม่มีของฝากที่ระบบยืนยันว่ามีสต๊อกพร้อมขายครับ ทองไทยจึงยังไม่ขอเสนอชิ้นไหน'
+          :'ตอนนี้ยังอ่านรายการของฝากปัจจุบันไม่ได้ครับ จึงยังไม่ขอเดาชื่อสินค้า ราคา หรือชุมชนผู้ผลิต';
       if(!lines.length)result.missingFields=['otop.current_catalog'];return result;
     }
     case 'product_origin':

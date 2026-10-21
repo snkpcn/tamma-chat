@@ -820,7 +820,12 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     }
 
     // --- otop ---
-    if (path.startsWith('otop_products') && method === 'GET') return jsonResponse(catalog.otopProducts);
+    if (path.startsWith('otop_products') && method === 'GET') {
+      // Models the live query's stock_qty=gt.0: a null or zero stock row is
+      // not returned.
+      const inStockOnly = query.get('stock_qty') === 'gt.0';
+      return jsonResponse(inStockOnly ? catalog.otopProducts.filter(row => typeof row.stock_qty === 'number' && row.stock_qty > 0) : catalog.otopProducts);
+    }
     if (path.startsWith('otop_orders') && method === 'POST') {
       const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
       genericSeq += 1;
