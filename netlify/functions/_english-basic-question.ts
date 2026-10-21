@@ -12,7 +12,7 @@
  *  Anything outside these shapes -- a booking, a second question, "today",
  *  a named unit -- returns null and keeps the normal path. */
 
-export type EnglishBasicTopic = 'activities' | 'activity_price' | 'menu' | 'hours';
+export type EnglishBasicTopic = 'activities' | 'activity_price' | 'menu' | 'hours' | 'unit_hours';
 export type EnglishBasicQuestion = { topic: EnglishBasicTopic; canonical: string };
 
 const ACTIVITIES_CANONICAL = 'มีกิจกรรมอะไรบ้าง';
@@ -36,6 +36,9 @@ const PRICE_RE = /^(?:how\s+much\s+(?:is|does|for|are|do)\b|what(?:'s|\s+is|\s+a
 const MENU_RE = /^(?:what(?:'s|\s+is)\s+on\s+(?:the|your)\s+menu|(?:can\s+i\s+)?(?:see|show\s+me|view|have)\s+(?:the|your)\s+menu|what\s+(?:food|dishes)\s+do\s+you\s+(?:have|serve|recommend)|what\s+do\s+you\s+recommend\s+(?:to\s+eat|for\s+food)|what\s+(?:food|dishes)\s+(?:is|are)\s+(?:good|recommended)|(?:the\s+)?menu)$/u;
 const HOURS_RE = /^(?:what\s+time\s+do\s+you\s+(?:open|close)|when\s+do\s+you\s+(?:open|close)|what\s+(?:are|is)\s+your\s+(?:opening\s+|business\s+)?hours|what\s+are\s+the\s+(?:opening|business)\s+hours|(?:your\s+)?(?:opening|business)\s+hours|hours\s+of\s+operation|what\s+time\s+are\s+you\s+open(?:\s+until)?|how\s+late\s+are\s+you\s+open)$/u;
 
+/** One unit's hours: the café or the restaurant. */
+const UNIT_HOURS_RE = /^(?:(?:what\s+time|when)\s+(?:does|do|is)\s+(?:the|your)\s+(?:cafe|café|coffee\s+shop|restaurant)\s+(?:open|close)|(?:what\s+are\s+)?(?:the|your)\s+(?:cafe|café|coffee\s+shop|restaurant)(?:'s)?\s+(?:opening\s+)?hours)$/u;
+
 function normalize(message: string): string {
   return message
     .normalize('NFC')
@@ -54,6 +57,8 @@ export function readEnglishBasicQuestion(message: string): EnglishBasicQuestion 
   if (ACTIVITIES_RE.test(text)) return { topic: 'activities', canonical: ACTIVITIES_CANONICAL };
   if (MENU_RE.test(text)) return { topic: 'menu', canonical: ENGLISH_MENU_CANONICAL };
   if (HOURS_RE.test(text)) return { topic: 'hours', canonical: HOURS_CANONICAL };
+  const unit = UNIT_HOURS_RE.exec(text);
+  if (unit) return { topic: 'unit_hours', canonical: /restaurant/u.test(unit[0]) ? 'ร้านอาหารเปิดกี่โมง' : 'คาเฟ่เปิดกี่โมง' };
   if (PRICE_RE.test(text)) {
     const named = ACTIVITY_NAMES.filter(([pattern]) => pattern.test(text));
     // One activity only: "how much is it" has no referent here, and two

@@ -26,6 +26,11 @@ import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } fro
 import { extractTime } from './_slot-parsers';
 import { ACTIVITY_ENGLISH_LABELS } from './_english-basic-question';
 import { ungroundedNumericClaims } from './_grounded-numbers';
+import { ORGANIZATION_CONFIG } from './_organization-config';
+import { findEcosystemNode } from './_ecosystem-entity-graph';
+
+/** The restaurant's name as the canonical ecosystem graph labels it. */
+const RESTAURANT_NAME_TH = (findEcosystemNode('thamma-chat-restaurant')?.label ?? 'ร้านอาหาร').replace(/\s*\(restaurant\)$/u, '');
 import {
   classifyCommercialBoundarySemantic,
   classifyCommercialBoundaryText,
@@ -1264,7 +1269,26 @@ function configuredOrganizationScheduleResponse(input:ResponseComposerInput):Com
   };
 }
 
+/** "ร้านอาหารเปิดกี่โมง": the restaurant has no hours of its own on record.
+ *  Say so; the venue's regular hours are given as the venue's, never as the
+ *  restaurant's. */
+function restaurantHoursNotOnRecordResponse(input:ResponseComposerInput):ComposedResponse|null {
+  if(input.semanticTurn?.intent!=='restaurant_regular_hours_lookup' || (input.language!=='th' && input.language!=='en'))return null;
+  const rows=ORGANIZATION_CONFIG.regularOpeningHours;
+  const first=rows[0];
+  const sameEveryDay=Boolean(first) && rows.length===7 && rows.every(row=>row.opens===first!.opens && row.closes===first!.closes);
+  const message=input.language==='en'
+    ? `I don’t have separate opening hours for the restaurant (${RESTAURANT_NAME_TH}) on record, so I won’t guess.`
+      +(sameEveryDay?` Thammachat as a whole is open ${first!.opens}–${first!.closes} every day; please check with the team before coming for an early or late meal.`:'')
+    : `ตอนนี้ระบบยังไม่มีเวลาเปิด–ปิดแยกของร้านอาหาร${RESTAURANT_NAME_TH}ครับ ทองไทยไม่ขอเดา`
+      +(sameEveryDay?` ส่วนเวลาทำการปกติของพื้นที่${ORGANIZATION_CONFIG.nameTh}คือทุกวัน ${first!.opens}–${first!.closes} น. ถ้าจะมาทานช่วงเช้าหรือเย็น แนะนำสอบถามทีมงานก่อนครับ`:'');
+  return {message:polishCustomerMessage(message,input.channel),mode:'deterministic',usedFactKeys:[],
+    composerVersion:RESPONSE_COMPOSER_VERSION,bibleVersion:THONGTHAI_BIBLE_VERSION,channel:input.channel,language:input.language};
+}
+
 export function composeGroundedDeterministicResponse(input: ResponseComposerInput): ComposedResponse | null {
+  const restaurantHours=restaurantHoursNotOnRecordResponse(input);
+  if(restaurantHours)return restaurantHours;
   const facility=unverifiedFacilityResponse(input);
   if(facility)return facility;
   const dogPolicy=configuredDogPolicyResponse(input);

@@ -103,7 +103,8 @@ test('Messenger/Inthanin: natural preference chain stays grounded, remembers cor
       assert.match(replies[8]!,/ไม่ใช่อาการแพ้นม|ไม่ใช่.*แพ้/u);
       assert.doesNotMatch(replies[9]!,/ไม่เอากาแฟ/u);
       assert.match(replies[10]!,/ไม่ใส่น้ำตาล/u);
-      assert.match(replies[12]!,/ยังไม่มีข้อมูล.*เวลา|ไม่มีข้อมูล.*เวลา|ไม่ขอเดา/u);
+      // The branch's regular hours are configured; nothing beyond them.
+      assert.match(replies[12]!,/อินทนิล สาขาตาดโตน.*06:00–18:00/u);
       assert.match(replies[13]!,/ที่จอดรถ/u);
       assert.match(replies[15]!,/ยังไม่มีคำสั่งให้ส่ง|ยังไม่ได้.*ส่ง/u);
 

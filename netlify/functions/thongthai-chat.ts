@@ -7,6 +7,7 @@ import { resolveCustomerLanguage } from './_customer-language';
 import { canonicalQueryForOfferReply, isLiveOffer, offerAcceptsReply, parseOfferReply, withTopicMenuOffer } from './_offer-reply';
 import { ENGLISH_MENU_CANONICAL, readEnglishBasicQuestion } from './_english-basic-question';
 import { ungroundedNumericClaims } from './_grounded-numbers';
+import { INTHANIN_TADTONE_CONFIG } from './_organization-config';
 import { touchAiConversation } from './_ai-cost-ledger';
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
@@ -2140,6 +2141,17 @@ export function cafeGroundedAnswer(
   return {answer:`${item.name_th} มีเมนูนี้ครับ แต่ตอนนี้ยังไม่มีราคาให้ยืนยัน`,grounded:true};
 }
 
+/** Inthanin Tadtone's configured regular hours, when every day is the same;
+ *  null otherwise (then the reply says it cannot confirm). */
+function cafeRegularHoursAnswer(language: BrainRequest['language']): string | null {
+  const rows = INTHANIN_TADTONE_CONFIG.regularOpeningHours;
+  const first = rows[0];
+  if (!first || rows.length !== 7 || !rows.every(row => row.opens === first.opens && row.closes === first.closes)) return null;
+  return language === 'en'
+    ? `The café (${INTHANIN_TADTONE_CONFIG.nameTh}) is open ${first.opens}–${first.closes} every day.`
+    : `เวลาทำการปกติของ${INTHANIN_TADTONE_CONFIG.nameTh}คือทุกวัน ${first.opens}–${first.closes} น. ไม่มีวันหยุดประจำสัปดาห์ครับ`;
+}
+
 async function deterministicCafeResponse(
   request: BrainRequest,
   runtime: Pick<BrainRuntimeContext,'agentState'>,
@@ -2279,6 +2291,10 @@ async function deterministicCafeResponse(
     answer = `รับทราบครับ ตอนนี้เก็บไว้แค่ความชอบ: ${preferences} ยังไม่ได้สั่งและยังไม่ได้ส่งรายการไปที่ Inthanin Café ตาดโตนครับ`;
   } else if (/(?:รายการ.*ส่ง.*ร้าน|ส่งไปที่ร้าน.*หรือยัง)/u.test(message)) {
     answer = 'จากข้อความที่คุยกันรอบนี้ ยังไม่มีคำสั่งให้ส่งรายการไปที่ Inthanin Café ตาดโตนครับ ตอนนี้ยังเป็นการเลือกและถามข้อมูลเท่านั้นครับ';
+  } else if (/(?:เปิด|ปิด|กี่โมง)/u.test(message) && !/ที่จอดรถ/u.test(message) && cafeRegularHoursAnswer(request.language)) {
+    // The branch's regular hours are configured (same source as
+    // "อินทนิลเปิดกี่โมง"); saying they cannot be confirmed contradicted it.
+    answer = cafeRegularHoursAnswer(request.language)!;
   } else if (/(?:เปิด|ปิด|กี่โมง|อีกประมาณ.*ชั่วโมง|ที่จอดรถ)/u.test(message)) {
     answer = 'ตอนนี้ทองไทยยังยืนยันเวลาเปิด-ปิดกับข้อมูลที่จอดรถของ Inthanin Café ตาดโตนให้ไม่ได้ครับ เลยไม่ขอเดาให้ผิด';
   } else if (/ถามเผื่อแฟน/u.test(message) && /คนเดียว/u.test(message)) {

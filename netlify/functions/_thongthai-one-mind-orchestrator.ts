@@ -643,6 +643,11 @@ export function isTrustedZeroCostFactLookup(turn: SemanticTurn, message: string)
       && turn.informationNeed === 'schedule') {
     return true;
   }
+  // The restaurant has no hours of its own on record: the reply says so.
+  if (turn.intent === 'restaurant_regular_hours_lookup' && turn.domain === 'restaurant'
+      && turn.action === 'ask' && turn.informationNeed === 'schedule') {
+    return true;
+  }
   // "พรุ่งนี้ขี่ม้า 30 นาทีว่างไหม": one named activity, read-only, and the
   // day/length come from slot parsers; a missing slot is asked for, never
   // guessed. Nothing here can book.

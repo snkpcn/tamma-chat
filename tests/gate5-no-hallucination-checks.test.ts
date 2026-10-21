@@ -87,13 +87,18 @@ test('otop: an unlisted product (t-shirts) never gets a fabricated yes/price, on
   });
 });
 
-test('cafe: EVERY cafe fact (menu, price, hours) is honestly declined -- see documented missing-adapter gap in THONGTHAI_HANDOFF.md', async () => {
+// The café's regular hours are now configured (INTHANIN_TADTONE_CONFIG), so
+// "เปิดกี่โมง" in a café conversation answers them; menu and price facts
+// without a source are still declined.
+test('cafe: menu and price facts without a source are honestly declined; hours come from the configured branch hours', async () => {
   await withHarness(async harness => {
     const gid = guestId('gate5-cafe-all-unknown');
-    for (const message of ['มีลาเต้ไหม', 'ราคาเท่าไร', 'เปิดกี่โมง']) {
+    for (const message of ['มีลาเต้ไหม', 'ราคาเท่าไร']) {
       const r = await processThongthaiChatCore(brainRequest(message, gid, 'web'), `evt-${message}`);
       assert.equal(r.statusCode, 200);
       assert.match(msg(r.payload), /ไม่มีข้อมูลยืนยัน|ไม่ขอเดา/, `"${message}" must be honestly declined, never guessed`);
     }
+    const hours = await processThongthaiChatCore(brainRequest('เปิดกี่โมง', gid, 'web'), 'evt-เปิดกี่โมง');
+    assert.match(msg(hours.payload), /อินทนิล สาขาตาดโตน.*06:00–18:00/u, 'the configured branch hours, nothing else');
   });
 });

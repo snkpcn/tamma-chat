@@ -994,6 +994,26 @@ export function deriveDeterministicSemanticTurn(
     };
   }
 
+  // "คาเฟ่เปิดกี่โมง" / "ร้านอาหารเปิดกี่โมง" ask one unit's hours. The
+  // ecosystem's only café is Inthanin Tadtone, whose regular hours are
+  // configured; the restaurant has no hours of its own on record, which the
+  // reply says rather than lending it the venue's. Exactly one unit, regular
+  // hours only -- dates, other branches and mixed questions keep their path.
+  if(asksRegularVenueHours && !activeTask && !hasStandaloneTransactionRequest(trimmed)
+      && !otherOrExceptionalQuestion && !extractDate(trimmed,now)
+      && !/(?:สาขา(?!\s*ตาดโตน)|สาขาอื่น|ทุกสาขา)/u.test(trimmed)) {
+    const cafe=/(?:คาเฟ่|ร้านกาแฟ|กาแฟ|cafe|café)/iu.test(trimmed);
+    const restaurant=/(?:ร้านอาหาร|ตำมา|อาหาร|restaurant)/iu.test(trimmed);
+    const otherUnit=/(?:ที่พัก|เฮือน|สเตย์|ขี่ม้า|ATV|เอทีวี|ยิงธนู|เป็ดน้ำ|กิจกรรม|ของฝาก)/iu.test(trimmed);
+    if(cafe!==restaurant && !otherUnit){
+      return cafe
+        ? {domain:'cafe',intent:'cafe_regular_hours_lookup',action:'ask',informationNeed:'schedule',
+          entities:{branchCode:'inthanin_tadtone'},references:[],constraints:[],confidence:0.95,needsClarification:false}
+        : {domain:'restaurant',intent:'restaurant_regular_hours_lookup',action:'ask',informationNeed:'schedule',
+          entities:{},references:[],constraints:[],confidence:0.95,needsClarification:false};
+    }
+  }
+
   // A single dog-access question can read the supplied outdoor cafe policy.
   // Named accommodation/restaurant/other-branch or mixed-species requests
   // still require semantic scope resolution and cannot inherit this policy.
