@@ -79,11 +79,19 @@ const CANONICAL: Record<'all' | TopicMenuOption, { th: string; en: string }> = {
   trip: { th: 'ช่วยจัดทริปให้หน่อย', en: 'Can you plan a trip for me?' },
 };
 
+/** Topics whose answer has a Chinese, Lao and Vietnamese template. */
+const TEMPLATED_TOPICS = new Set<'all' | TopicMenuOption>(['all', 'dining', 'activities']);
+
 export function canonicalQueryForOfferReply(reply: OfferReply, language: string): string {
-  const entry = CANONICAL[reply.kind === 'all' ? 'all' : reply.option];
-  // Chinese, Lao and Vietnamese replies go straight to the Thai question;
-  // the turn keeps its language and its responder renders that language.
-  return language === 'en' ? entry.en : entry.th;
+  const key = reply.kind === 'all' ? 'all' : reply.option;
+  const entry = CANONICAL[key];
+  if (language === 'th') return entry.th;
+  if (language === 'en') return entry.en;
+  // Chinese, Lao and Vietnamese: the Thai question only for templated
+  // topics. Rooms, location, weather and trips are answered in Thai only,
+  // so those keep the English question and reach the model, which answers
+  // in the customer's language.
+  return TEMPLATED_TOPICS.has(key) ? entry.th : entry.en;
 }
 
 /** Is this offer still the one the customer is answering? */

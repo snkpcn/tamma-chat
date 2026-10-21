@@ -95,3 +95,25 @@ test('LINE: a message that does not show its language keeps the language of the 
     assert.match(reply, /[㐀-鿿]/u, `Chinese, as the previous message: ${reply}`);
   }, { serviceResources: [horse], serviceSchedules: [round] });
 });
+
+// A number picked from the greeting's topic menu: topics without a zh/lo/vi
+// template (rooms, location, weather, trips) must not be answered in Thai.
+test('every topic number from the greeting menu is answered in the customer\'s language, web and LINE', async () => {
+  await withHarness(async harness => {
+    const thai = /[฀-๿]/u;
+    for (const [language, greeting] of [['zh', '你好'], ['lo', 'ສະບາຍດີ'], ['vi', 'Xin chào']] as const) {
+      for (const option of ['1', '2', '3', '4', '5', '6']) {
+        const gid = guestId(`menu-${language}-${option}`);
+        await processThongthaiChatCore({ ...brainRequest(greeting, gid, 'web'), language }, `menu-${language}-${option}-0`);
+        const web = String(((await processThongthaiChatCore({ ...brainRequest(option, gid, 'web'), language }, `menu-${language}-${option}-1`)).payload as { message?: unknown }).message ?? '');
+        await deliverLineTexts(harness, { userId: `U-menu-${language}-${option}`, texts: [greeting] });
+        const line = (await deliverLineTexts(harness, { userId: `U-menu-${language}-${option}`, texts: [option] })).replies[0]?.texts.join('\n') ?? '';
+        for (const [channel, reply] of [['web', web], ['line', line]] as const) {
+          // Stored names (dishes, units) may stay Thai; the sentence may not.
+          const sentence = reply.replace(/—[^\n]*/gu, '').replace(/•[^\n]*/gu, '');
+          assert.doesNotMatch(sentence, thai, `${language} ${option} ${channel}: ${reply}`);
+        }
+      }
+    }
+  });
+});

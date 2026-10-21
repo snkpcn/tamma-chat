@@ -1153,7 +1153,7 @@ function compactGroundedLines(input: ResponseComposerInput): { lines: string[]; 
 }
 
 function groundedIntro(input: ResponseComposerInput): string {
-  if (input.language !== 'th') return 'Here is what I can verify right now:';
+  if (input.language !== 'th') return T.groundedIntro[replyLanguage(input.language)];
   if (input.knowledgeBundles.some(bundle => bundle.domain === 'restaurant')) return '🍽️ เมนูที่มีตอนนี้ครับ';
   if (input.knowledgeBundles.some(bundle => bundle.domain === 'stay')) return '🏡 ที่พักที่มีตอนนี้ครับ';
   if (input.knowledgeBundles.some(bundle => bundle.domain === 'otop')) return '🛍️ ของฝากที่มีตอนนี้ครับ';

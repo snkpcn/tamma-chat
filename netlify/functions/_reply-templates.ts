@@ -34,6 +34,12 @@ export const T = {
   money: (l: ReplyLanguage, value: number) => money[l](value),
   duration: (l: ReplyLanguage, minutes: number) => duration[l](minutes),
 
+  /** Lead line of the generic grounded list (facts listed as stored). */
+  groundedIntro: {
+    en: 'Here is what I can verify right now:', zh: '这是目前可以确认的信息：',
+    lo: 'ນີ້ແມ່ນຂໍ້ມູນທີ່ຢືນຢັນໄດ້ຕອນນີ້:', vi: 'Đây là thông tin tôi xác nhận được lúc này:',
+  } as Table<string>,
+
   greeting: {
     en: "Hi, I'm Thongthai 😊 I can help with dining, stays, activities, location, weather, or planning your trip.",
     zh: '您好，我是 Thongthai 😊 可以帮您了解餐饮、住宿、活动、位置、天气，或安排行程。',
