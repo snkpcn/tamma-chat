@@ -2518,7 +2518,7 @@ async function deterministicActivityResponse(
   const oneMind = await processOneMindCustomerTurn({
     channel,
     language: request.language,
-    message: request.message,
+    message: request.message, customerMessage: request.customerMessage,
     eventId: transportEventId,
     providerUserKey: providerUserKey ?? request.guestId,
     canonicalAnonymousId: request.guestId,
@@ -6252,13 +6252,13 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       typed.message = normalizeFinalCustomerMessage(typed.message,request.language,channel);
       typed.message = applyThongthaiCharacterKernel({
         message: typed.message,
-        customerMessage: request.message,
+        customerMessage: request.customerMessage ?? request.message,
         language: request.language,
         channel,
       });
 
       const requestedMedia = await resolveRequestedCustomerMedia({
-        customerMessage: request.message,
+        customerMessage: request.customerMessage ?? request.message,
         assistantMessage: typed.message,
         language: request.language,
         chatHistory: request.chatHistory,
@@ -6272,7 +6272,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
           : mediaAck;
         typed.message = applyThongthaiCharacterKernel({
           message: combined,
-          customerMessage: request.message,
+          customerMessage: request.customerMessage ?? request.message,
           language: request.language,
           channel,
         });
@@ -6281,7 +6281,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
 
     if (statusCode === 200 && typeof typed?.message === 'string') {
       const signals = evaluateBotQualitySignals({
-        customerMessage: request.message,
+        customerMessage: request.customerMessage ?? request.message,
         assistantMessage: typed.message,
         chatHistory: request.chatHistory,
       });
@@ -6503,7 +6503,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       await patchGuestAgentState(guestDbId, { set:{}, removeKeys:['pending_offer'] }).catch(error => {
         console.error('THONGTHAI_OFFER_CLEAR_ERROR', error instanceof Error ? error.message.slice(0, 160) : 'unknown');
       });
-      request = { ...request, message:canonical };
+      request = { ...request, customerMessage:request.customerMessage ?? request.message, message:canonical };
     }
   }
 
@@ -6512,7 +6512,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   const englishBasic = request.language === 'en' ? readEnglishBasicQuestion(request.message) : null;
   if (englishBasic) {
     console.log('THONGTHAI_ENGLISH_BASIC_QUESTION', JSON.stringify({ event_id:transportEventId, channel, topic:englishBasic.topic }));
-    request = { ...request, message:englishBasic.canonical };
+    request = { ...request, customerMessage:request.customerMessage ?? request.message, message:englishBasic.canonical };
   }
 
   // Broad-discovery turns ("มีกิจกรรมอะไรบ้าง") are answered entirely from
@@ -6663,7 +6663,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     try {
       const currentContext=await loadConversationContext(guestDbId);
       await persistConversationContext(guestDbId,applyConversationContextUpdate(currentContext,{
-        eventId:transportEventId,channel,userMessage:request.message,
+        eventId:transportEventId,channel,userMessage:request.customerMessage ?? request.message,
         assistantMessage:visitorInformation.message,activeDomain:visitorInformation.domain,
         activeTopic:visitorInformation.topic,
       }));
@@ -7255,7 +7255,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
         const nextContext = applyConversationContextUpdate(currentContext, {
           eventId: transportEventId,
           channel,
-          userMessage: request.message,
+          userMessage: request.customerMessage ?? request.message,
           assistantMessage: polished.message,
           activeDomain: 'cafe',
           activeTopic: 'cafe',
@@ -7348,7 +7348,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
         const nextContext = applyConversationContextUpdate(currentContext, {
           eventId: transportEventId,
           channel,
-          userMessage: request.message,
+          userMessage: request.customerMessage ?? request.message,
           assistantMessage: primaryResponse.message,
         });
         await persistConversationContext(guestDbId, nextContext);
@@ -7418,7 +7418,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       const oneMind = await processOneMindCustomerTurn({
         channel,
         language:request.language,
-        message:request.message,
+        message:request.message, customerMessage:request.customerMessage,
         eventId:transportEventId,
         providerUserKey:providerUserKey ?? request.guestId,
         canonicalAnonymousId:request.guestId,
@@ -7659,7 +7659,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       const nextContext = applyConversationContextUpdate(currentContext, {
         eventId:transportEventId,
         channel,
-        userMessage:request.message,
+        userMessage:request.customerMessage ?? request.message,
         assistantMessage:polished.message,
         activeDomain:'activity',
         lastAction:semantic.action,
@@ -8410,7 +8410,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       const oneMind = await processOneMindCustomerTurn({
         channel,
         language:request.language,
-        message:request.message,
+        message:request.message, customerMessage:request.customerMessage,
         eventId:transportEventId,
         providerUserKey:providerUserKey ?? request.guestId,
         canonicalAnonymousId:request.guestId,
@@ -8785,7 +8785,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       // immediately rather than spend a second real provider attempt --
       // "at most one LLM call per customer turn" still holds.
       const oneMindFallback = await processOneMindCustomerTurn({
-        channel, language: request.language, message: request.message,
+        channel, language: request.language, message: request.message, customerMessage: request.customerMessage,
         eventId: transportEventId,
         providerUserKey: providerUserKey ?? request.guestId,
         canonicalAnonymousId: request.guestId,

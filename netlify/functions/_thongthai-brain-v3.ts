@@ -62,6 +62,11 @@ export interface BrainRequest {
    *  Normal Web/LINE/Facebook traffic omits this and remains LIVE. */
   environment?: 'live' | 'test';
   message: string;
+  /** What the customer actually typed, set only when `message` has been
+   *  rewritten into the question it stands for (a menu reply, a basic
+   *  English question). History and quality signals record this, never the
+   *  rewrite. */
+  customerMessage?: string;
   language: 'th' | 'en' | 'zh' | 'lo' | 'vi' | 'ja' | 'ko';
   chatHistory: ChatTurn[];
   guestContext: GuestContext;

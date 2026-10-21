@@ -93,6 +93,9 @@ export const ONE_MIND_ORCHESTRATOR_VERSION = 'one-mind-g1-v1';
 export type OneMindTurnInput = {
   channel: BrainChannel;
   message: string;
+  /** What the customer typed when `message` is a rewrite of it; the
+   *  conversation history records this instead. */
+  customerMessage?: string;
   eventId: string;
   /** Web history supplements an absent server discourse window only. It
    * never replaces canonical task state, identity or verified knowledge. */
@@ -437,7 +440,7 @@ function nextConversationContext(
   return applyConversationContextUpdate(before, {
     eventId: input.eventId,
     channel: input.channel,
-    userMessage: normalizeMessage(input.message),
+    userMessage: normalizeMessage(input.customerMessage ?? input.message),
     activeDomain: semanticTurn.domain === 'unknown' ? undefined : semanticTurn.domain,
     activeTopic: semanticTurn.intent || undefined,
     semanticTurn,
