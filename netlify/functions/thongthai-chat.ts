@@ -73,14 +73,14 @@ import {
   type ConversationContextState,
 } from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
-import { persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
+import { claimCustomerTurn, persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
 import { CUSTOMER_TURN_BUDGET_MS, CUSTOMER_TURN_HARD_DEADLINE_MS, remainingTurnBudgetMs, withinTurnBudget } from './_customer-turn-budget';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
 import { resolveRequestedCustomerMedia } from './_thongthai-media';
 import { experienceCatalogLines, formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import {
-  budgetExhaustedMessage, fallbackCauseOf, isTransactionMessage, logFallback, providerUnavailableMessage, turnUnfinishedMessage, ungroundedNumberMessage,
+  budgetExhaustedMessage, duplicateDeliveryMessage, fallbackCauseOf, isTransactionMessage, logFallback, providerUnavailableMessage, turnUnfinishedMessage, ungroundedNumberMessage,
 } from './_customer-fallback';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
@@ -8999,6 +8999,28 @@ export const handler: Handler = async (event: HandlerEvent) => {
     : (isNonEmptyString(event.headers?.['x-request-id'])
       ? event.headers['x-request-id'].trim().slice(0, 180)
       : null);
+
+  // The page sends one eventId per message it sends. Claim it exactly as
+  // LINE claims a webhook event, so a request delivered twice -- an edge or
+  // proxy retry, a second tab -- is not answered, charged or written twice.
+  // A per-request header id is not a message identity, so only the page's
+  // own id is claimed. Fails open: an unavailable claim never costs the
+  // answer.
+  if (rawEventId) {
+    const claim = await claimCustomerTurn({
+      conversationId: request.guestId ?? null,
+      eventId: rawEventId,
+      channel: getBrainChannel(request.pageContext.section),
+      environment: request.environment,
+    });
+    if (claim === 'duplicate_skipped') {
+      const language = resolveCustomerLanguage(normalizeCustomerText(request.message), request.language);
+      return json(200, {
+        message: duplicateDeliveryMessage(language), intent: 'conversation', contextUpdates: {},
+        journeyAction: { type: 'none', journey: null }, suggestedActions: [], duplicate: true,
+      });
+    }
+  }
 
   const result = await processThongthaiChatCore(request, rawEventId ?? headerEventId);
   return json(result.statusCode, result.payload);

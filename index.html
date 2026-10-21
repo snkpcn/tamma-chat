@@ -4821,10 +4821,18 @@ function getAnonymousGuestId(){
 // script block and needs to reach the same guest id.
 window.getAnonymousGuestId = getAnonymousGuestId;
 
+function newChatEventId(){
+  try { if (window.crypto && typeof window.crypto.randomUUID === 'function') return 'web:' + window.crypto.randomUUID(); } catch(e) {}
+  return 'web:' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2, 12);
+}
+
 function buildChatRequestPayload(text){
   const js = window.JourneyProvider ? window.JourneyProvider.get() : {};
   return {
     message: text,
+    // One id per message sent: the server claims it the way LINE claims a
+    // webhook event, so a request delivered twice is answered once.
+    eventId: newChatEventId(),
     language: window.I18N ? window.I18N.lang() : 'th',
     guestId: getAnonymousGuestId(),
     chatHistory: (js.chatHistory || []).slice(-12).map(m => ({ role: m.role, content: m.text })),

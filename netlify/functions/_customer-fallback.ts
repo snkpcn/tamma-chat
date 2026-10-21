@@ -67,6 +67,16 @@ const PROVIDER_UNAVAILABLE: Record<DegradedCategory, Texts> = {
   },
 };
 
+/** The same message arrived twice (its eventId was already claimed). */
+const DUPLICATE_DELIVERY: Texts = {
+  th: 'ข้อความนี้ส่งเข้ามาซ้ำครับ ทองไทยรับไว้แล้วรอบหนึ่ง ถ้ายังไม่เห็นคำตอบ พิมพ์ถามใหม่ได้เลยครับ',
+  en: 'This message arrived twice; I already received it once. If you don’t see my answer, just ask again.',
+};
+
+export function duplicateDeliveryMessage(language: CustomerLanguage): string {
+  return pick(DUPLICATE_DELIVERY, language);
+}
+
 /** The model's reply named a figure that is not in our data. */
 const UNGROUNDED_NUMBER: Texts = {
   th: 'ตัวเลขที่จะตอบเรื่องนี้ ทองไทยยืนยันจากข้อมูลในระบบไม่ได้ครับ ถามแบบเจาะจงได้เลย เช่น ราคากิจกรรม เมนู หรือเวลาเปิด ทองไทยตอบจากข้อมูลจริงได้ทันทีครับ',
