@@ -686,9 +686,9 @@ async function handleCustomerPaymentEvent(
 }
 
 export const handler: Handler = async (event, context) => {
-  // The customer turn's clock. Everything below -- maintenance partition,
-  // private routing, contact registration, ops events in a mixed batch --
-  // spends the same budget the customer answer and reply are bounded by.
+  // The customer turn's clock. Contact registration and the answer spend
+  // the same budget the reply is bounded by; a mixed batch's group work runs
+  // alongside, not before (see below).
   const receivedAt=Date.now();
   if (event.httpMethod !== 'POST') {
     const coreResponse = await coreHandler(event, context);
@@ -716,44 +716,65 @@ export const handler: Handler = async (event, context) => {
     return { statusCode: 400, body: 'Invalid JSON' };
   }
 
-  let incomingEvents = Array.isArray(payload.events) ? payload.events : [];
-  try {
-    const maintenance=await partitionOwnerSlipMaintenance(incomingEvents);
+  const incomingEvents = Array.isArray(payload.events) ? payload.events : [];
+  const isGroupEvent = (item: LineWebhookEvent) => item.source?.type === 'group' || item.source?.type === 'room';
+  let groupEvents = incomingEvents.filter(isGroupEvent);
+  const customerCandidates = incomingEvents.filter(item => !isGroupEvent(item));
+
+  // Slip maintenance stays first: a failed rejection notice must return 503
+  // before anything else in the batch is dispatched (owner-slip-maintenance
+  // tests). It reads only group/room events and is a no-op without them.
+  if (groupEvents.length) try {
+    const maintenance=await partitionOwnerSlipMaintenance(groupEvents);
     await notifyOwnerSlipMaintenance(maintenance.blocked,
       async(token,text)=>{await replyToLine(token,text,accessToken);});
-    incomingEvents=maintenance.allowed;
+    groupEvents=maintenance.allowed;
   } catch {
     // No other route has run. Never turn a failed rejection notice into HTTP 200.
     console.error('OWNER_SLIP_MAINTENANCE_UNAVAILABLE');
     return {statusCode:503,headers:{'Cache-Control':'no-store','Retry-After':'60'},body:'Owner slip maintenance unavailable'};
   }
+
+  // One batch can carry an ops group's messages and a customer's together.
+  // Private routing and the ops handlers read only group/room events and the
+  // customer turn reads none of them, so the two run at once: slow ops work
+  // no longer spends the customer's answer budget, and a failing ops stage
+  // no longer withholds the customer's answer. A single-kind batch runs
+  // exactly its own half.
+  const [groupOutcome, customerOutcome] = await Promise.allSettled([
+    groupEvents.length ? handleGroupEvents(groupEvents, channelSecret, accessToken, receivedAt) : Promise.resolve(null),
+    customerCandidates.length
+      ? handleCustomerEvents(customerCandidates, payload, event, channelSecret, accessToken, receivedAt)
+      : Promise.resolve(null),
+  ]);
+  if (groupOutcome.status === 'rejected') throw groupOutcome.reason;
+  if (customerOutcome.status === 'rejected') throw customerOutcome.reason;
+  // A failed ops stage keeps its retryable status so LINE redelivers the ops
+  // messages; the customer events in that redelivery are skipped by the turn
+  // claim (claimCustomerTurn) instead of being answered twice.
+  return groupOutcome.value ?? customerOutcome.value ?? { statusCode: 200, body: 'OK' };
+};
+
+/** The group/room half of a batch, after slip maintenance. Returns a
+ *  response only when the batch must be retried. */
+async function handleGroupEvents(
+  events: LineWebhookEvent[],
+  channelSecret: string,
+  accessToken: string,
+  receivedAt: number,
+): Promise<HandlerResponse | null> {
+  const incomingEvents = events;
   let privateHandled: Set<number>;
   try { privateHandled=await routePrivateOsEvents(incomingEvents,channelSecret); }
   catch (error) {
     console.error('SNK_PRIVATE_ROUTE_UNAVAILABLE',error instanceof Error ? error.message.slice(0,120) : 'unknown');
     return { statusCode:503,headers:{'Cache-Control':'no-store'},body:'Private route unavailable' };
   }
-  const allEvents=incomingEvents.filter((_item,index)=>!privateHandled.has(index));
-  for (const item of allEvents) {
+  const opsEvents=incomingEvents.filter((_item,index)=>!privateHandled.has(index));
+  for (const item of opsEvents) {
     logEventReceived(item);
     const { route, reason } = classifyRoute(item);
     logRouteSelected(item, route, reason);
-  }
-  const opsEvents = allEvents.filter(item => item.source?.type === 'group' || item.source?.type === 'room');
-  const customerCandidates = allEvents.filter(item => item.source?.type !== 'group' && item.source?.type !== 'room');
-
-  // Best effort (failures were already only logged), so it may use what is
-  // left of the answer budget but never the slice reserved for the reply.
-  // Group/room-only batches have nothing to register and keep their path.
-  if (customerCandidates.length) try {
-    const registrationBudgetMs = remainingTurnBudgetMs(receivedAt);
-    if (registrationBudgetMs <= 0) throw new TurnBudgetExhaustedError(registrationBudgetMs);
-    await withinTurnBudget(registerDirectUsers(customerCandidates), registrationBudgetMs);
-  } catch (error) {
-    console.error(
-      'LINE_OPERATIONAL_CONTACT_LINK_ERROR',
-      error instanceof Error ? error.message.slice(0, 180) : 'unknown',
-    );
   }
 
   if (opsEvents.length) {
@@ -772,6 +793,36 @@ export const handler: Handler = async (event, context) => {
         }));
       }
     });
+  }
+  return null;
+}
+
+/** The customer half of a batch: direct users, slips, then the turn. */
+async function handleCustomerEvents(
+  customerCandidates: LineWebhookEvent[],
+  payload: LineWebhookBody,
+  event: HandlerEvent,
+  channelSecret: string,
+  accessToken: string,
+  receivedAt: number,
+): Promise<HandlerResponse> {
+  for (const item of customerCandidates) {
+    logEventReceived(item);
+    const { route, reason } = classifyRoute(item);
+    logRouteSelected(item, route, reason);
+  }
+
+  // Best effort (failures were already only logged), so it may use what is
+  // left of the answer budget but never the slice reserved for the reply.
+  try {
+    const registrationBudgetMs = remainingTurnBudgetMs(receivedAt);
+    if (registrationBudgetMs <= 0) throw new TurnBudgetExhaustedError(registrationBudgetMs);
+    await withinTurnBudget(registerDirectUsers(customerCandidates), registrationBudgetMs);
+  } catch (error) {
+    console.error(
+      'LINE_OPERATIONAL_CONTACT_LINK_ERROR',
+      error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+    );
   }
 
   const customerEvents: LineWebhookEvent[] = [];
@@ -797,5 +848,5 @@ export const handler: Handler = async (event, context) => {
   }
 
   return response;
-};
+}
 

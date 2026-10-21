@@ -10,8 +10,11 @@ export type LineDeliveryResult = {
   status: number;
   /** One entry per customer text, in order; null = the customer got nothing. */
   replies: Array<LineReply | null>;
-  /** Every api.line.me call made while handling the batch. */
+  /** Every api.line.me call made while handling the batch, and every call
+   *  to the private ops router (endpoint 'snk-money'). */
   calls: Array<{ endpoint: string; status: number; body: Record<string, unknown> }>;
+  /** The signed batch as sent, to deliver it again (LINE redelivery). */
+  rawBody: string;
 };
 
 const SECRET = 'line-channel-test-secret';
@@ -27,6 +30,10 @@ export async function deliverLineTexts(
     replyStatus?: number;
     /** Extra latency for the private ops router, to model a slow group path. */
     opsDelayMs?: number;
+    /** Status the private ops router answers with (500 = router down). */
+    opsStatus?: number;
+    /** Send this exact batch again instead of building one. */
+    rawBody?: string;
   },
 ): Promise<LineDeliveryResult> {
   const now = Date.now();
@@ -48,7 +55,13 @@ export async function deliverLineTexts(
       message: { id: 'm-' + randomUUID(), type: 'text', text },
     });
   }
-  const body = JSON.stringify({ destination: 'U-test-bot', events });
+  const body = input.rawBody ?? JSON.stringify({ destination: 'U-test-bot', events });
+  if (input.rawBody) {
+    customerTokens.length = 0;
+    for (const item of (JSON.parse(input.rawBody) as { events: Array<{ replyToken: string; source: { type: string } }> }).events) {
+      if (item.source.type === 'user') customerTokens.push(item.replyToken);
+    }
+  }
   const signature = createHmac('sha256', SECRET).update(body, 'utf8').digest('base64');
 
   const calls: LineDeliveryResult['calls'] = [];
@@ -63,8 +76,14 @@ export async function deliverLineTexts(
       calls.push({ endpoint: u.replace(/^.*\/v2\/bot\//u, ''), status, body: parsed });
       return new Response(status === 200 ? '{}' : '{"message":"Invalid reply token"}', { status });
     }
-    if (input.opsDelayMs && u.includes('/api/line/snk-money')) {
-      await new Promise(resolve => setTimeout(resolve, input.opsDelayMs));
+    if (u.includes('/api/line/snk-money')) {
+      if (input.opsDelayMs) await new Promise(resolve => setTimeout(resolve, input.opsDelayMs));
+      const parsed = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      if (input.opsStatus && input.opsStatus !== 200) {
+        calls.push({ endpoint: 'snk-money', status: input.opsStatus, body: parsed });
+        return new Response('{"ok":false}', { status: input.opsStatus });
+      }
+      calls.push({ endpoint: 'snk-money', status: 200, body: parsed });
     }
     return inner(url, init);
   }) as typeof fetch;
@@ -81,7 +100,7 @@ export async function deliverLineTexts(
       const messages = (call.body.messages as Array<{ text?: string; altText?: string }> | undefined) ?? [];
       return { replyToken: token, status: call.status, texts: messages.map(m => m.text ?? m.altText ?? '') };
     });
-    return { status: (response as { statusCode: number }).statusCode, replies, calls };
+    return { status: (response as { statusCode: number }).statusCode, replies, calls, rawBody: body };
   } finally {
     global.fetch = inner;
     if (previousSecret === undefined) delete process.env.LINE_CHANNEL_SECRET;

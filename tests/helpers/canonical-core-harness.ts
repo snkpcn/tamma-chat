@@ -288,6 +288,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   let aiCostRows: Array<Record<string, unknown>> = [];
   let aiResponseTurns: Array<Record<string, unknown>> = [];
   const customerIntelligence = new Map<string, Record<string, unknown>>();
+  const turnOutcomes = new Map<string, Record<string, unknown>>();
   const modelQueue: HarnessGeminiReply[] = [];
   let modelCalls = 0;
   let weatherFetchResponse: { ok: boolean; body: unknown } | null = null;
@@ -694,6 +695,22 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     if (path.startsWith('journeys') && method === 'GET') return jsonResponse([]);
     if (path.startsWith('journeys') && method === 'POST') return jsonResponse([]);
     if (path.startsWith('guest_events') && method === 'POST') return jsonResponse([]);
+
+    // --- customer_turn_outcomes (the per-event turn claim) ---
+    // Models UNIQUE(channel,event_id,environment): the claim insert uses
+    // ignore-duplicates and gets [] for a redelivered event; the outcome
+    // write merges into the same row; a takeover PATCH only matches an
+    // abandoned claim, which a test turn never leaves.
+    if (path.startsWith('customer_turn_outcomes') && method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      const key = `${body.channel}:${body.event_id}:${body.environment ?? 'live'}`;
+      const prefer = String((init.headers as Record<string, string> | undefined)?.Prefer ?? '');
+      const existing = turnOutcomes.get(key);
+      if (existing && prefer.includes('ignore-duplicates')) return jsonResponse([]);
+      turnOutcomes.set(key, { ...(existing ?? {}), ...body });
+      return jsonResponse([turnOutcomes.get(key)]);
+    }
+    if (path.startsWith('customer_turn_outcomes') && method === 'PATCH') return jsonResponse([]);
 
     // --- guest_agent_state (taskState + conversationContext CAS store) ---
     if (path.startsWith('guest_agent_state') && method === 'GET') {
