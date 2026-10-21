@@ -34,7 +34,7 @@ async function expectBoth(seed: string, text: string, expected: RegExp, catalog:
 }
 
 test('an open round is answered with its real time and free places, web and LINE', async () => {
-  await expectBoth('avail-open', WITH_LENGTH, /ขี่ม้า 30 นาที วันที่ \d{4}-\d{2}-\d{2} ยังว่างรอบ 10:00 น\. \(ว่าง 3\)/u,
+  await expectBoth('avail-open', WITH_LENGTH, /ขี่ม้า 30 นาที พรุ่งนี้ \((?:อา|จ|อ|พ|พฤ|ศ|ส)\. \d{1,2} \S+\) ยังว่างรอบ 10:00 น\. \(ว่าง 3\)/u,
     { serviceResources: [horse], serviceSchedules: [round(1)] });
 });
 
@@ -77,7 +77,32 @@ test('a follow-up round question, and a bare "30 นาที" answer, stay on t
     for (const [channel, turns] of [['web', web], ['line', line]] as const) {
       assert.match(turns[0]!.reply, /อยากเช็กแบบกี่นาที/u, channel);
       for (const answered of [turns[1]!, turns[2]!]) {
-        assert.match(answered.reply, /ขี่ม้า 30 นาที วันที่ \d{4}-\d{2}-\d{2} ยังว่างรอบ 10:00 น\./u, `${channel}: ${answered.reply}`);
+        assert.match(answered.reply, /ขี่ม้า 30 นาที พรุ่งนี้ \((?:อา|จ|อ|พ|พฤ|ศ|ส)\. \d{1,2} \S+\) ยังว่างรอบ 10:00 น\./u, `${channel}: ${answered.reply}`);
+      }
+      for (const turn of turns) assert.equal(turn.calls, 0, channel);
+    }
+  }, { serviceResources: [horse], serviceSchedules: [round(1)] });
+});
+
+test('English: "Is horse riding available tomorrow?" asks the length, then answers the real round -- same customer, web and LINE', async () => {
+  await withHarness(async harness => {
+    const texts = ['Is horse riding available tomorrow?', '30 minutes', 'Is horse riding available tomorrow for 30 minutes?'];
+    const run = async (send: (text: string) => Promise<string>) => {
+      const replies: Array<{ reply: string; calls: number }> = [];
+      for (const text of texts) {
+        const before = harness.modelCallCount();
+        replies.push({ reply: await send(text), calls: harness.modelCallCount() - before });
+      }
+      return replies;
+    };
+    const gid = guestId('avail-en-web');
+    let index = 0;
+    const web = await run(async text => String(((await processThongthaiChatCore({ ...brainRequest(text, gid, 'web'), language: 'en' }, `avail-en-web-${index++}`)).payload as { message?: unknown }).message ?? ''));
+    const line = await run(async text => (await deliverLineTexts(harness, { userId: 'U-avail-en', texts: [text] })).replies[0]?.texts.join('\n') ?? '');
+    for (const [channel, turns] of [['web', web], ['line', line]] as const) {
+      assert.match(turns[0]!.reply, /^I can check live Horse riding slots for you — how long \(30 min \/ 45 min\)\?/u, `${channel}: ${turns[0]!.reply}`);
+      for (const answered of [turns[1]!, turns[2]!]) {
+        assert.match(answered.reply, /^Horse riding, 30 min, tomorrow \((?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{1,2} [A-Z][a-z]{2}\): open slots at 10:00 \(3 free\)/u, `${channel}: ${answered.reply}`);
       }
       for (const turn of turns) assert.equal(turn.calls, 0, channel);
     }

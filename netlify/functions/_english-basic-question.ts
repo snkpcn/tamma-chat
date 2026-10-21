@@ -12,7 +12,7 @@
  *  Anything outside these shapes -- a booking, a second question, "today",
  *  a named unit -- returns null and keeps the normal path. */
 
-export type EnglishBasicTopic = 'activities' | 'activity_price' | 'menu' | 'hours' | 'unit_hours';
+export type EnglishBasicTopic = 'activities' | 'activity_price' | 'menu' | 'hours' | 'unit_hours' | 'activity_availability' | 'length_reply';
 export type EnglishBasicQuestion = { topic: EnglishBasicTopic; canonical: string };
 
 const ACTIVITIES_CANONICAL = 'มีกิจกรรมอะไรบ้าง';
@@ -39,6 +39,13 @@ const HOURS_RE = /^(?:what\s+time\s+do\s+you\s+(?:open|close)|when\s+do\s+you\s+
 /** One unit's hours: the café or the restaurant. */
 const UNIT_HOURS_RE = /^(?:(?:what\s+time|when)\s+(?:does|do|is)\s+(?:the|your)\s+(?:cafe|café|coffee\s+shop|restaurant)\s+(?:open|close)|(?:what\s+are\s+)?(?:the|your)\s+(?:cafe|café|coffee\s+shop|restaurant)(?:'s)?\s+(?:opening\s+)?hours)$/u;
 
+/** "Is horse riding available tomorrow (for 30 minutes)?" -- one activity,
+ *  read as the Thai round lookup ("พรุ่งนี้ขี่ม้า 30 นาทีว่างไหม"). */
+const AVAILABILITY_RE = /^(?:is|are)\s+(?:the\s+)?(.+?)\s+(?:available|free|open)(?:\s+(today|tomorrow))?(?:\s+for\s+(\d{1,3})\s*(?:min|mins|minutes))?(?:\s+(today|tomorrow))?$|^(?:any|are\s+there\s+any)\s+(.+?)\s+(?:slots?|rounds?|times?)(?:\s+(today|tomorrow))?(?:\s+for\s+(\d{1,3})\s*(?:min|mins|minutes))?$/u;
+/** "30 minutes" -- the answer to the length Thongthai just asked for. */
+const LENGTH_REPLY_RE = /^(?:for\s+)?(\d{1,3})\s*(?:min|mins|minutes)$/u;
+const NOT_A_LOOKUP = /\b(?:book|booking|reserve|reservation|order|cancel|pay|payment|and|or)\b/u;
+
 function normalize(message: string): string {
   return message
     .normalize('NFC')
@@ -53,7 +60,21 @@ function normalize(message: string): string {
 export function readEnglishBasicQuestion(message: string): EnglishBasicQuestion | null {
   if (/[^\p{Script=Latin}\p{N}\p{P}\p{Zs}\p{S}]/u.test(message) || message.length > 80) return null;
   const text = normalize(message);
-  if (!text || NOT_BASIC.test(text)) return null;
+  if (!text) return null;
+  const length = LENGTH_REPLY_RE.exec(text);
+  if (length) return { topic: 'length_reply', canonical: `${Number(length[1])} นาที` };
+  const lookup = NOT_A_LOOKUP.test(text) ? null : AVAILABILITY_RE.exec(text);
+  if (lookup) {
+    const subject = lookup[1] ?? lookup[5] ?? '';
+    const named = ACTIVITY_NAMES.filter(([pattern]) => pattern.test(subject));
+    const day = lookup[2] ?? lookup[4] ?? lookup[6];
+    const minutes = lookup[3] ?? lookup[7];
+    if (named.length === 1) {
+      return { topic: 'activity_availability',
+        canonical: `${day === 'tomorrow' ? 'พรุ่งนี้' : day === 'today' ? 'วันนี้' : ''}${named[0]![1]}${minutes ? ` ${Number(minutes)} นาที` : ''}ว่างไหม` };
+    }
+  }
+  if (NOT_BASIC.test(text)) return null;
   if (ACTIVITIES_RE.test(text)) return { topic: 'activities', canonical: ACTIVITIES_CANONICAL };
   if (MENU_RE.test(text)) return { topic: 'menu', canonical: ENGLISH_MENU_CANONICAL };
   if (HOURS_RE.test(text)) return { topic: 'hours', canonical: HOURS_CANONICAL };

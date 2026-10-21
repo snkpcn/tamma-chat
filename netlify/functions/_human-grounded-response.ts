@@ -9,6 +9,8 @@ import type { SemanticTurn } from './_semantic-interpreter';
 import type { DialogDecision } from './_dialog-manager';
 import type { GroundedFact, KnowledgeBundle } from './_knowledge-resolver';
 import { resolveActivityCareFact, resourceCodeForActivityCode } from './_activity-care-policy';
+import { formatCustomerDate } from './_customer-date';
+import { ACTIVITY_ENGLISH_LABELS } from './_english-basic-question';
 import { HOMESTAY_FACTS, HOMESTAY_FACT_PROVENANCE } from './_tamma-domain-knowledge';
 
 export type HumanGroundedRenderInput = {
@@ -398,7 +400,10 @@ export function renderCafeUnavailableSourceResponse(input: HumanGroundedRenderIn
 
 export function renderActivityAvailability(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
   const turn=input.semanticTurn;
-  if(!turn || turn.domain!=='activity' || turn.informationNeed!=='availability' || input.language!=='th') return null;
+  if(!turn || turn.domain!=='activity' || turn.informationNeed!=='availability') return null;
+  const lookup=turn.intent==='activity_availability_lookup';
+  // English is rendered for the round lookup only.
+  if(input.language!=='th' && !(lookup && input.language==='en')) return null;
 
   const availabilitySources=input.knowledgeBundles
     .flatMap(bundle=>bundle.sources)
@@ -432,45 +437,14 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
     || semanticText(input).includes('no_booking')
     || semanticText(input).includes('ไม่จอง');
 
-  // A round search needs a day and a length: without them the live query
-  // returns nothing, which must not be read as "no free rounds". Ask.
-  const lookup=turn.intent==='activity_availability_lookup';
   const map=factMap(input);
   const activityCode=typeof entity.activityCode==='string' ? entity.activityCode : null;
   const activityName=activityCode && typeof map.get(`activity:${activityCode}:name`)==='string'
     ? String(map.get(`activity:${activityCode}:name`)) : 'กิจกรรมนี้';
-  if(lookup){
-    const durations=[...map.keys()]
-      .map(key=>key.match(new RegExp(`^activity:${activityCode ?? '[^:]+'}:(\\d+)min:price$`,'u'))?.[1])
-      .filter((value):value is string=>Boolean(value)).map(Number).sort((a,b)=>a-b);
-    const hasDate=typeof entity.date==='string' && entity.date.trim().length>0;
-    const hasDuration=Number.isInteger(Number(entity.durationMinutes)) && Number(entity.durationMinutes)>0;
-    if(!hasDate || !hasDuration){
-      const lengths=durations.length ? ` (มี ${durations.map(minutes=>`${minutes} นาที`).join(' / ')})` : '';
-      const ask=!hasDate && !hasDuration ? `วันไหน และแบบกี่นาที${lengths}ครับ`
-        : !hasDate ? 'วันไหนครับ' : `แบบกี่นาที${lengths}ครับ`;
-      return {message:`ทองไทยเช็กคิวว่างของ${activityName}จากระบบให้ได้ครับ อยากเช็ก${ask}`,usedFactKeys:[]};
-    }
-    if(availabilitySources.every(source=>source.status==='ok')){
-      const open=[...map.entries()]
-        .map(([key,value])=>({key,match:key.match(/^availability:([^:]+):(.+):capacity_available$/u),value}))
-        .filter(row=>row.match && typeof row.value==='number' && row.value>0)
-        .map(row=>({key:row.key,startAt:row.match![2]!,available:row.value as number}))
-        .sort((a,b)=>a.startAt.localeCompare(b.startAt));
-      if(open.length){
-        const time=(iso:string)=>new Intl.DateTimeFormat('th-TH',{timeZone:'Asia/Bangkok',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso));
-        return {
-          message:`${activityName} ${Number(entity.durationMinutes)} นาที วันที่ ${String(entity.date)} ยังว่างรอบ `
-            +open.slice(0,6).map(row=>`${time(row.startAt)} น. (ว่าง ${row.available})`).join(', ')
-            +` ครับ${noTransaction?' ยังไม่ได้จองอะไรให้':' ถ้าจะจองบอกรอบที่ต้องการได้เลยครับ'}`,
-          usedFactKeys:open.map(row=>row.key),
-        };
-      }
-    }
-  }
+  if(lookup) return renderRoundLookup(input, entity, map, activityCode, activityName, availabilitySources, noTransaction);
 
   if(availabilitySources.some(source=>source.status==='unavailable')){
-    const subject=names.length ? names.join(' / ') : lookup ? activityName : 'ม้าที่ถาม';
+    const subject=names.length ? names.join(' / ') : 'ม้าที่ถาม';
     return {
       message:`ตอนนี้ยังเช็กคิวสดของ ${subject} ให้ยืนยันไม่ได้ครับ${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''}`,
       usedFactKeys:[],
@@ -483,18 +457,73 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
         usedFactKeys:[],
       };
     }
-    if(lookup){
-      return {
-        message:`${activityName} ${Number(entity.durationMinutes)} นาที วันที่ ${String(entity.date)} ยังไม่มีคิวว่างที่ยืนยันได้ (รอบเต็มหรือยังไม่เปิดรอบ)${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''} ครับ`,
-        usedFactKeys:[],
-      };
-    }
     return {
       message:`ตอนนี้ยังไม่มีม้าตัวไหนที่มีคิวว่างยืนยันตรงเงื่อนไขที่ถามครับ${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''}`,
       usedFactKeys:[],
     };
   }
   return null;
+}
+
+/** "พรุ่งนี้ขี่ม้า 30 นาทีว่างไหม" / "Is horse riding available tomorrow?":
+ *  every state of a round lookup, in Thai or English. A round search needs a
+ *  day and a length: without them the live query returns nothing, which must
+ *  not be read as "no free rounds" -- so they are asked for first. */
+function renderRoundLookup(
+  input: HumanGroundedRenderInput,
+  entity: Record<string, unknown>,
+  map: Map<string, unknown>,
+  activityCode: string | null,
+  activityName: string,
+  sources: Array<{ status: string }>,
+  noTransaction: boolean,
+): HumanGroundedRenderResult {
+  const en=input.language==='en';
+  const name=en && activityCode && ACTIVITY_ENGLISH_LABELS[activityCode] ? ACTIVITY_ENGLISH_LABELS[activityCode]! : activityName;
+  const durations=[...map.keys()]
+    .map(key=>key.match(new RegExp(`^activity:${activityCode ?? '[^:]+'}:(\\d+)min:price$`,'u'))?.[1])
+    .filter((value):value is string=>Boolean(value)).map(Number).sort((a,b)=>a-b);
+  const hasDate=typeof entity.date==='string' && entity.date.trim().length>0;
+  const hasDuration=Number.isInteger(Number(entity.durationMinutes)) && Number(entity.durationMinutes)>0;
+  if(!hasDate || !hasDuration){
+    if(en){
+      const lengths=durations.length ? ` (${durations.map(minutes=>`${minutes} min`).join(' / ')})` : '';
+      const ask=!hasDate && !hasDuration ? `which day, and how long${lengths}` : !hasDate ? 'which day' : `how long${lengths}`;
+      return {message:`I can check live ${name} slots for you — ${ask}?`,usedFactKeys:[]};
+    }
+    const lengths=durations.length ? ` (มี ${durations.map(minutes=>`${minutes} นาที`).join(' / ')})` : '';
+    const ask=!hasDate && !hasDuration ? `วันไหน และแบบกี่นาที${lengths}ครับ`
+      : !hasDate ? 'วันไหนครับ' : `แบบกี่นาที${lengths}ครับ`;
+    return {message:`ทองไทยเช็กคิวว่างของ${name}จากระบบให้ได้ครับ อยากเช็ก${ask}`,usedFactKeys:[]};
+  }
+  const minutes=Number(entity.durationMinutes);
+  const day=formatCustomerDate(String(entity.date), input.language);
+  if(sources.some(source=>source.status==='unavailable')){
+    return {message:en
+      ? `I can’t confirm live ${name} slots right now.${noTransaction?' Nothing has been booked.':''}`
+      : `ตอนนี้ยังเช็กคิวสดของ ${name} ให้ยืนยันไม่ได้ครับ${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''}`,usedFactKeys:[]};
+  }
+  const open=[...map.entries()]
+    .map(([key,value])=>({key,match:key.match(/^availability:([^:]+):(.+):capacity_available$/u),value}))
+    .filter(row=>row.match && typeof row.value==='number' && row.value>0)
+    .map(row=>({key:row.key,startAt:row.match![2]!,available:row.value as number}))
+    .sort((a,b)=>a.startAt.localeCompare(b.startAt));
+  if(open.length){
+    const time=(iso:string)=>new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Bangkok',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso));
+    return en
+      ? {message:`${name}, ${minutes} min, ${day}: open slots at `
+          +open.slice(0,6).map(row=>`${time(row.startAt)} (${row.available} free)`).join(', ')
+          +`.${noTransaction?' Nothing has been booked.':' Tell me which slot you’d like to book.'}`,
+        usedFactKeys:open.map(row=>row.key)}
+      : {message:`${name} ${minutes} นาที ${day} ยังว่างรอบ `
+          +open.slice(0,6).map(row=>`${time(row.startAt)} น. (ว่าง ${row.available})`).join(', ')
+          +` ครับ${noTransaction?' ยังไม่ได้จองอะไรให้':' ถ้าจะจองบอกรอบที่ต้องการได้เลยครับ'}`,
+        usedFactKeys:open.map(row=>row.key)};
+  }
+  return {message:en
+    ? `${name}, ${minutes} min, ${day}: no free slot I can confirm (full, or not opened yet).${noTransaction?' Nothing has been booked.':''}`
+    : `${name} ${minutes} นาที ${day} ยังไม่มีคิวว่างที่ยืนยันได้ (รอบเต็มหรือยังไม่เปิดรอบ)${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''} ครับ`,
+  usedFactKeys:[]};
 }
 
 export function renderActivityRecommendation(input: HumanGroundedRenderInput): HumanGroundedRenderResult | null {
