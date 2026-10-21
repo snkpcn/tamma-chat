@@ -11,6 +11,7 @@ import type { GroundedFact, KnowledgeBundle } from './_knowledge-resolver';
 import { resolveActivityCareFact, resourceCodeForActivityCode } from './_activity-care-policy';
 import { formatCustomerDate } from './_customer-date';
 import { ACTIVITY_ENGLISH_LABELS } from './_english-basic-question';
+import { replyLanguage, T } from './_reply-templates';
 import { HOMESTAY_FACTS, HOMESTAY_FACT_PROVENANCE } from './_tamma-domain-knowledge';
 
 export type HumanGroundedRenderInput = {
@@ -402,8 +403,8 @@ export function renderActivityAvailability(input: HumanGroundedRenderInput): Hum
   const turn=input.semanticTurn;
   if(!turn || turn.domain!=='activity' || turn.informationNeed!=='availability') return null;
   const lookup=turn.intent==='activity_availability_lookup';
-  // English is rendered for the round lookup only.
-  if(input.language!=='th' && !(lookup && input.language==='en')) return null;
+  // Other languages are rendered for the round lookup only.
+  if(input.language!=='th' && !lookup) return null;
 
   const availabilitySources=input.knowledgeBundles
     .flatMap(bundle=>bundle.sources)
@@ -478,18 +479,19 @@ function renderRoundLookup(
   sources: Array<{ status: string }>,
   noTransaction: boolean,
 ): HumanGroundedRenderResult {
-  const en=input.language==='en';
-  const name=en && activityCode && ACTIVITY_ENGLISH_LABELS[activityCode] ? ACTIVITY_ENGLISH_LABELS[activityCode]! : activityName;
+  const other=input.language!=='th';
+  const rl=replyLanguage(input.language);
+  // English labels the activity id; other languages keep the stored name.
+  const name=rl==='en' && other && activityCode && ACTIVITY_ENGLISH_LABELS[activityCode] ? ACTIVITY_ENGLISH_LABELS[activityCode]! : activityName;
   const durations=[...map.keys()]
     .map(key=>key.match(new RegExp(`^activity:${activityCode ?? '[^:]+'}:(\\d+)min:price$`,'u'))?.[1])
     .filter((value):value is string=>Boolean(value)).map(Number).sort((a,b)=>a-b);
   const hasDate=typeof entity.date==='string' && entity.date.trim().length>0;
   const hasDuration=Number.isInteger(Number(entity.durationMinutes)) && Number(entity.durationMinutes)>0;
   if(!hasDate || !hasDuration){
-    if(en){
-      const lengths=durations.length ? ` (${durations.map(minutes=>`${minutes} min`).join(' / ')})` : '';
-      const ask=!hasDate && !hasDuration ? `which day, and how long${lengths}` : !hasDate ? 'which day' : `how long${lengths}`;
-      return {message:`I can check live ${name} slots for you — ${ask}?`,usedFactKeys:[]};
+    if(other){
+      const lengths=durations.length ? ` (${durations.map(minutes=>T.duration(rl,minutes)).join(' / ')})` : '';
+      return {message:T.rounds.ask[rl](name,!hasDate && !hasDuration ? 'both' : !hasDate ? 'day' : 'length',lengths),usedFactKeys:[]};
     }
     const lengths=durations.length ? ` (มี ${durations.map(minutes=>`${minutes} นาที`).join(' / ')})` : '';
     const ask=!hasDate && !hasDuration ? `วันไหน และแบบกี่นาที${lengths}ครับ`
@@ -499,8 +501,8 @@ function renderRoundLookup(
   const minutes=Number(entity.durationMinutes);
   const day=formatCustomerDate(String(entity.date), input.language);
   if(sources.some(source=>source.status==='unavailable')){
-    return {message:en
-      ? `I can’t confirm live ${name} slots right now.${noTransaction?' Nothing has been booked.':''}`
+    return {message:other
+      ? `${T.rounds.unreadable[rl](name)}${noTransaction?T.rounds.nothingBooked[rl]:''}`
       : `ตอนนี้ยังเช็กคิวสดของ ${name} ให้ยืนยันไม่ได้ครับ${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''}`,usedFactKeys:[]};
   }
   const open=[...map.entries()]
@@ -510,18 +512,17 @@ function renderRoundLookup(
     .sort((a,b)=>a.startAt.localeCompare(b.startAt));
   if(open.length){
     const time=(iso:string)=>new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Bangkok',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(iso));
-    return en
-      ? {message:`${name}, ${minutes} min, ${day}: open slots at `
-          +open.slice(0,6).map(row=>`${time(row.startAt)} (${row.available} free)`).join(', ')
-          +`.${noTransaction?' Nothing has been booked.':' Tell me which slot you’d like to book.'}`,
+    return other
+      ? {message:T.rounds.open[rl](T.rounds.head[rl](name,T.duration(rl,minutes),day),open.slice(0,6).map(row=>T.rounds.slot[rl](time(row.startAt),row.available)))
+          +(noTransaction?T.rounds.nothingBooked[rl]:T.rounds.bookHint[rl]),
         usedFactKeys:open.map(row=>row.key)}
       : {message:`${name} ${minutes} นาที ${day} ยังว่างรอบ `
           +open.slice(0,6).map(row=>`${time(row.startAt)} น. (ว่าง ${row.available})`).join(', ')
           +` ครับ${noTransaction?' ยังไม่ได้จองอะไรให้':' ถ้าจะจองบอกรอบที่ต้องการได้เลยครับ'}`,
         usedFactKeys:open.map(row=>row.key)};
   }
-  return {message:en
-    ? `${name}, ${minutes} min, ${day}: no free slot I can confirm (full, or not opened yet).${noTransaction?' Nothing has been booked.':''}`
+  return {message:other
+    ? `${T.rounds.none[rl](T.rounds.head[rl](name,T.duration(rl,minutes),day))}${noTransaction?T.rounds.nothingBooked[rl]:''}`
     : `${name} ${minutes} นาที ${day} ยังไม่มีคิวว่างที่ยืนยันได้ (รอบเต็มหรือยังไม่เปิดรอบ)${noTransaction?' และยังไม่ได้ทำรายการหรือจองอะไรให้':''} ครับ`,
   usedFactKeys:[]};
 }

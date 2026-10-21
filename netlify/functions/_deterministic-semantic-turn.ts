@@ -21,7 +21,8 @@ import {
 import { isExperienceDiscoveryIntent, PRIOR_REFERENCE_MARKER } from './_experience-discovery';
 import { isPromotionAcceptIntent, isPromotionDiscoveryIntent, isPromotionMention } from './_promotion-dialog';
 import { findEcosystemNode } from './_ecosystem-entity-graph';
-import { readEnglishBasicQuestion } from './_english-basic-question';
+import { readBasicQuestion } from './_multilingual-basic-question';
+import { detectMessageLanguage } from './_customer-language';
 
 export const DETERMINISTIC_SEMANTIC_TURN_VERSION = 'deterministic-semantic-turn-v1';
 
@@ -934,7 +935,8 @@ function activityRoundLookupTurn(message: string, context: SemanticContext, now:
   const previousTyped = [...(context.recentTurns ?? [])].reverse().find(item => item.role === 'user')?.content ?? '';
   // History keeps what the customer typed; an English lookup is read as the
   // Thai question it stood for.
-  const previous = readEnglishBasicQuestion(previousTyped)?.canonical ?? previousTyped;
+  const previousLanguage = detectMessageLanguage(previousTyped);
+  const previous = (previousLanguage && previousLanguage !== 'th' ? readBasicQuestion(previousTyped, previousLanguage)?.canonical : null) ?? previousTyped;
   const previousTopic = findActivityTopic(previous);
   if (!previousTopic || (topic && topic.activityCode !== previousTopic.activityCode)) return null;
   return turn(previousTopic, { ...slots(previous), ...answered });

@@ -25,6 +25,7 @@ import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
 import { extractTime } from './_slot-parsers';
 import { ACTIVITY_ENGLISH_LABELS } from './_english-basic-question';
+import { replyLanguage, T } from './_reply-templates';
 import { ungroundedNumericClaims } from './_grounded-numbers';
 import { formatCustomerDate } from './_customer-date';
 import { ORGANIZATION_CONFIG } from './_organization-config';
@@ -882,8 +883,10 @@ function activityDisplayName(activityId: string | null, facts: Map<string, unkno
 }
 
 function activityPriceAnswer(input: ResponseComposerInput): { message: string; keys: string[] } | null {
-  const en = input.language === 'en';
-  if ((input.language !== 'th' && !en) || !input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) return null;
+  // Every language other than Thai renders from the fixed templates.
+  const other = input.language !== 'th';
+  const rl = replyLanguage(input.language);
+  if (!input.knowledgeBundles.some(bundle => bundle.domain === 'activity')) return null;
   const priceRequested = PRICE_QUESTION_RE.test(input.userMessage ?? '')
     || input.dialogDecision.knowledgeRequests.some(request => request.domain === 'activity' && request.needs.includes('price'));
   if (!priceRequested) return null;
@@ -901,12 +904,14 @@ function activityPriceAnswer(input: ResponseComposerInput): { message: string; k
     .sort((a, b) => a.minutes - b.minutes);
 
   const used = display.key ? [display.key] : [];
-  // English labels the same activity id; the stored name is Thai.
+  // English labels the same activity id; in other languages the stored
+  // (Thai) name is kept, as there is no translation of it.
   const englishName = (activityId && ACTIVITY_ENGLISH_LABELS[activityId]) || (display.key ? display.name : 'this activity');
+  const otherName = rl === 'en' ? englishName : display.name;
   if (!entries.length || entries.every(entry => entry.value == null)) {
     return {
-      message: en
-        ? `I don’t have a confirmed price for ${englishName} in our system yet, so I won’t guess.`
+      message: other
+        ? T.price.unknown[rl](otherName)
         : `ราคาของ${display.name}ยังไม่มีข้อมูลยืนยันในระบบครับ ทองไทยไม่ขอเดา`,
       keys: used,
     };
@@ -914,10 +919,10 @@ function activityPriceAnswer(input: ResponseComposerInput): { message: string; k
 
   const lines = entries.map(entry => {
     used.push(entry.key);
-    const duration = en
-      ? (entry.minutes === 60 ? '1 hour' : `${entry.minutes} min`)
+    const duration = other
+      ? T.duration(rl, entry.minutes)
       : (entry.minutes === 60 ? '1 ชั่วโมง' : `${entry.minutes} นาที`);
-    if (en) return typeof entry.value === 'number' ? `${duration} for ${Math.round(entry.value)} THB` : `${duration} (no price set yet)`;
+    if (other) return typeof entry.value === 'number' ? T.price.option[rl](duration, T.money(rl, entry.value)) : `${duration} ${T.price.unset[rl]}`;
     return typeof entry.value === 'number'
       ? `${duration} ${Math.round(entry.value)} บาท`
       : `${duration} ยังไม่ได้ตั้งราคา`;
@@ -926,9 +931,9 @@ function activityPriceAnswer(input: ResponseComposerInput): { message: string; k
   const inventory = inventoryKey ? facts.get(inventoryKey) : undefined;
   if (inventoryKey && typeof inventory === 'number') used.push(inventoryKey);
   const inventoryCopy = activityId === 'pedal_boat' && typeof inventory === 'number'
-    ? (en ? ` We have ${inventory} pedal boats.` : ` ตอนนี้มีเรือเป็ด ${inventory} ลำ`)
+    ? (other ? T.price.boats[rl](inventory) : ` ตอนนี้มีเรือเป็ด ${inventory} ลำ`)
     : '';
-  if (en) return { message: `${englishName}: ${lines.join(' or ')} 😊${inventoryCopy}`, keys: [...new Set(used)] };
+  if (other) return { message: `${T.price.options[rl](otherName, lines)}${inventoryCopy}`, keys: [...new Set(used)] };
   return {
     message: `${display.name}มี ${lines.join(' หรือ ')}ครับ 😊${inventoryCopy}`,
     keys: [...new Set(used)],
@@ -1250,7 +1255,7 @@ function configuredCafeProfileResponse(input:ResponseComposerInput):ComposedResp
 }
 
 function configuredOrganizationScheduleResponse(input:ResponseComposerInput):ComposedResponse|null {
-  if((input.language!=='th' && input.language!=='en') || input.semanticTurn?.informationNeed!=='schedule' || input.dialogDecision.actionProposal)return null;
+  if(input.semanticTurn?.informationNeed!=='schedule' || input.dialogDecision.actionProposal)return null;
   const facts=allFacts(input.knowledgeBundles).filter(fact=>(fact.domain==='ecosystem' || fact.domain==='cafe') && fact.sourceType==='organization_config' && fact.authoritative && !fact.stale);
   const name=facts.find(fact=>fact.key==='organization:name');
   const hours=facts.find(fact=>fact.key==='organization:regularOpeningHours');
@@ -1262,8 +1267,10 @@ function configuredOrganizationScheduleResponse(input:ResponseComposerInput):Com
         && row.opens===rows[0].opens && row.closes===rows[0].closes
         && /^\d{2}:\d{2}$/u.test(row.opens) && /^\d{2}:\d{2}$/u.test(row.closes)))return null;
   return {
-    message:input.language==='en'
-      ? `Our regular hours are ${rows[0].opens}–${rows[0].closes} every day, with no weekly closing day.`
+    message:input.language!=='th'
+      ? (input.semanticTurn?.domain==='cafe'
+        ? T.hours.cafe[replyLanguage(input.language)](String(name.value),rows[0].opens,rows[0].closes)
+        : T.hours.venue[replyLanguage(input.language)](rows[0].opens,rows[0].closes))
       : `เวลาทำการปกติของ${String(name.value)}คือทุกวัน ${rows[0].opens}–${rows[0].closes} น. ไม่มีวันหยุดประจำสัปดาห์ครับ`,
     mode:'deterministic',usedFactKeys:[name.key,hours.key,timezone.key],
     composerVersion:RESPONSE_COMPOSER_VERSION,bibleVersion:THONGTHAI_BIBLE_VERSION,channel:input.channel,language:input.language,
@@ -1274,13 +1281,13 @@ function configuredOrganizationScheduleResponse(input:ResponseComposerInput):Com
  *  Say so; the venue's regular hours are given as the venue's, never as the
  *  restaurant's. */
 function restaurantHoursNotOnRecordResponse(input:ResponseComposerInput):ComposedResponse|null {
-  if(input.semanticTurn?.intent!=='restaurant_regular_hours_lookup' || (input.language!=='th' && input.language!=='en'))return null;
+  if(input.semanticTurn?.intent!=='restaurant_regular_hours_lookup')return null;
   const rows=ORGANIZATION_CONFIG.regularOpeningHours;
   const first=rows[0];
   const sameEveryDay=Boolean(first) && rows.length===7 && rows.every(row=>row.opens===first!.opens && row.closes===first!.closes);
-  const message=input.language==='en'
-    ? `I don’t have separate opening hours for the restaurant (${RESTAURANT_NAME_TH}) on record, so I won’t guess.`
-      +(sameEveryDay?` Thammachat as a whole is open ${first!.opens}–${first!.closes} every day; please check with the team before coming for an early or late meal.`:'')
+  const rl=replyLanguage(input.language);
+  const message=input.language!=='th'
+    ? T.hours.restaurantNone[rl](RESTAURANT_NAME_TH)+(sameEveryDay?T.hours.restaurantVenue[rl](first!.opens,first!.closes):'')
     : `ตอนนี้ระบบยังไม่มีเวลาเปิด–ปิดแยกของร้านอาหาร${RESTAURANT_NAME_TH}ครับ ทองไทยไม่ขอเดา`
       +(sameEveryDay?` ส่วนเวลาทำการปกติของพื้นที่${ORGANIZATION_CONFIG.nameTh}คือทุกวัน ${first!.opens}–${first!.closes} น. ถ้าจะมาทานช่วงเช้าหรือเย็น แนะนำสอบถามทีมงานก่อนครับ`:'');
   return {message:polishCustomerMessage(message,input.channel),mode:'deterministic',usedFactKeys:[],

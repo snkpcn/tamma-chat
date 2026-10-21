@@ -3,9 +3,11 @@ import { understandVisitorQuestion } from './_visitor-question-understanding';
 import { answerVisitorInformation } from './_visitor-information';
 import { searchMissingVisitorInformation } from './_visitor-web-search';
 import { normalizeCustomerText } from './_customer-text';
-import { resolveCustomerLanguage } from './_customer-language';
+import { detectMessageLanguage, resolveCustomerLanguage } from './_customer-language';
 import { canonicalQueryForOfferReply, isLiveOffer, offerAcceptsReply, parseOfferReply, withTopicMenuOffer } from './_offer-reply';
-import { ENGLISH_MENU_CANONICAL, readEnglishBasicQuestion } from './_english-basic-question';
+import { ENGLISH_MENU_CANONICAL } from './_english-basic-question';
+import { readBasicQuestion } from './_multilingual-basic-question';
+import { replyLanguage, T } from './_reply-templates';
 import { ungroundedNumericClaims } from './_grounded-numbers';
 import { deferTurnWrite, withTurnWrites } from './_turn-writes';
 import { formatCustomerDate } from './_customer-date';
@@ -54,7 +56,7 @@ import {
   resetLineBookingPlanningSession,
 } from './_operations-db';
 import { listRestaurantMenu, restaurantMenuAdvice } from './_restaurant-sot';
-import { answerItemQuestion, readItemQuestion } from './_single-item-question';
+import { answerItemQuestion, readItemQuestion, type ItemQuestion } from './_single-item-question';
 import { loadActivityWorldFacts } from './_activity-sot';
 import {
   listCafeMasterMenu,
@@ -62,7 +64,7 @@ import {
   type CafeMasterMenuItem,
   type CafeBranchModifier,
 } from './_cafe-sot';
-import { MENU_UNAVAILABLE_EN, parsePreferences as parseRestaurantConstraintSignals, parseRestaurantParty } from './_restaurant-intelligence';
+import { parsePreferences as parseRestaurantConstraintSignals, parseRestaurantParty } from './_restaurant-intelligence';
 import {
   applyConversationContextUpdate,
   emptyConversationContextState,
@@ -413,11 +415,13 @@ export function isSimpleGreetingMessage(message: string): boolean {
 
 export function deterministicGreetingResponse(request: BrainRequest): BrainResponse | null {
   if (!isSimpleGreetingMessage(request.message)) return null;
-  const isThai = request.language === 'th' || /[\u0E00-\u0E7F]/u.test(request.message);
+  // The customer's language decides, not the script: a Chinese, Lao or
+  // Vietnamese greeting reaches here as its Thai reading ("สวัสดีครับ").
+  const isThai = request.language === 'th';
   return {
     message: isThai
       ? 'สวัสดีครับ ผมทองไทยครับ 😊 วันนี้อยากให้ช่วยเรื่องกิน พัก กิจกรรม โลเคชั่น อากาศ หรือจัดทริปให้ดีครับ'
-      : "Hi, I'm Thongthai 😊 I can help with dining, stays, activities, location, weather, or planning your trip.",
+      : T.greeting[replyLanguage(request.language)],
     intent: 'greeting',
     contextUpdates: {},
     journeyAction: { type: 'none', journey: null },
@@ -1366,12 +1370,13 @@ function formatAdvisorMessage(
     // English is rendered for the plain list only: it is the one shape the
     // English menu question reaches (see _english-basic-question.ts). Dish
     // names are the stored names; there is no translation to show.
-    if (language === 'en' && advisor?.mode !== 'pairing' && !wantsAlternative && !constraintAck && !allergyNotice && !rememberedConstraintPhrase) {
+    if (language !== 'th' && advisor?.mode !== 'pairing' && !wantsAlternative && !constraintAck && !allergyNotice && !rememberedConstraintPhrase) {
+      const rl = replyLanguage(language);
       return composeLineShortReply([
-        '🍽️ Dishes worth trying right now',
-        ...shown.map((row: any) => `• ${row.name} — ${Number.isFinite(Number(row.price)) ? `${Math.round(Number(row.price))} THB` : '-'}`),
-        !partySizeKnown ? 'How many of you are coming? I can help size it for your table.'
-          : moreAvailable && !fullList ? 'I can send the full menu if you’d like to see more.' : '',
+        T.menu.intro[rl],
+        ...shown.map((row: any) => `• ${row.name} — ${Number.isFinite(Number(row.price)) ? T.money(rl, Number(row.price)) : '-'}`),
+        !partySizeKnown ? T.menu.askParty[rl]
+          : moreAvailable && !fullList ? T.menu.more[rl] : '',
       ]);
     }
     if (wantsAlternative && shown.length === 0) {
@@ -1412,9 +1417,9 @@ function formatAdvisorMessage(
       closing,
     ]);
   }
-  if (language === 'en') {
-    const reason = advisor?.unavailableReason as keyof typeof MENU_UNAVAILABLE_EN | null | undefined;
-    return reason ? MENU_UNAVAILABLE_EN[reason] : MENU_UNAVAILABLE_EN.constraints;
+  if (language !== 'th') {
+    const reason = advisor?.unavailableReason as keyof typeof T.menu.unavailable | null | undefined;
+    return T.menu.unavailable[reason ?? 'constraints'][replyLanguage(language)];
   }
   return notices[0] ?? 'ตอนนี้ยังไม่มีเมนูที่ตรงเงื่อนไขและพร้อมขายในสต๊อกครับ';
 }
@@ -2151,8 +2156,8 @@ function cafeRegularHoursAnswer(language: BrainRequest['language']): string | nu
   const rows = INTHANIN_TADTONE_CONFIG.regularOpeningHours;
   const first = rows[0];
   if (!first || rows.length !== 7 || !rows.every(row => row.opens === first.opens && row.closes === first.closes)) return null;
-  return language === 'en'
-    ? `The café (${INTHANIN_TADTONE_CONFIG.nameTh}) is open ${first.opens}–${first.closes} every day.`
+  return language !== 'th'
+    ? T.hours.cafe[replyLanguage(language)](INTHANIN_TADTONE_CONFIG.nameTh, first.opens, first.closes)
     : `เวลาทำการปกติของ${INTHANIN_TADTONE_CONFIG.nameTh}คือทุกวัน ${first.opens}–${first.closes} น. ไม่มีวันหยุดประจำสัปดาห์ครับ`;
 }
 
@@ -2480,8 +2485,9 @@ async function groundedRestaurantBeforePrimary(
   channel: BrainChannel,
 ): Promise<BrainResponse | null> {
   // English reaches here only as the menu question it was read as.
-  const englishMenuQuestion = request.language === 'en' && request.message === ENGLISH_MENU_CANONICAL;
-  if ((request.language !== 'th' && !englishMenuQuestion) || hasExplicitTransactionIntent(request.message)) return null;
+  // Another language reaches here only as the menu question it was read as.
+  const readMenuQuestion = request.language !== 'th' && request.message === ENGLISH_MENU_CANONICAL;
+  if ((request.language !== 'th' && !readMenuQuestion) || hasExplicitTransactionIntent(request.message)) return null;
   const text = request.message;
   if (classifyLocalConciergeQuestion(text)?.category === 'food_culture'
       && !LOCAL_CONCIERGE_ALLERGY_DEFER_RE.test(text)) return null;
@@ -6384,6 +6390,18 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     };
   }
 
+  // A message that does not show its language ("2", "ok?", an emoji): the web
+  // keeps its UI language; LINE has none, so it keeps the language of the
+  // customer's previous message in this conversation. Read only for such a
+  // message.
+  if (channel === 'line' && guestDbId && detectMessageLanguage(request.customerMessage ?? request.message) === null) {
+    const previous = await loadConversationContext(guestDbId)
+      .then(context => [...context.recentTurns].reverse().find(turn => turn.role === 'user')?.content ?? null)
+      .catch(() => null);
+    const previousLanguage = previous ? detectMessageLanguage(previous) : null;
+    if (previousLanguage) request = { ...request, language:previousLanguage };
+  }
+
   // One stable identity per transport turn. LINE supplies message.id; web
   // supplies eventId/request-id when available. Generate the fallback ONCE
   // per core invocation so every side effect in this turn shares it.
@@ -6538,12 +6556,13 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     }
   }
 
-  // A basic English question is read as the Thai question it is; the turn
-  // stays English and its responder renders English from the same data.
-  const englishBasic = request.language === 'en' ? readEnglishBasicQuestion(request.message) : null;
-  if (englishBasic) {
-    console.log('THONGTHAI_ENGLISH_BASIC_QUESTION', JSON.stringify({ event_id:transportEventId, channel, topic:englishBasic.topic }));
-    request = { ...request, customerMessage:request.customerMessage ?? request.message, message:englishBasic.canonical };
+  // A basic question in English, Chinese, Lao or Vietnamese is read as the
+  // Thai question it is; the turn keeps the customer's language and its
+  // responder renders that language from the same data.
+  const basicQuestion = readBasicQuestion(request.message, request.language);
+  if (basicQuestion) {
+    console.log('THONGTHAI_BASIC_QUESTION', JSON.stringify({ event_id:transportEventId, channel, language:request.language, topic:basicQuestion.topic }));
+    request = { ...request, customerMessage:request.customerMessage ?? request.message, message:basicQuestion.canonical };
   }
 
   // Broad-discovery turns ("มีกิจกรรมอะไรบ้าง") are answered entirely from
@@ -6675,14 +6694,16 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // "ผัดไทยมีไหม" / "Do you have pad thai?": one named live item, answered
   // from the menu and product list. A name matching no live item is not
   // claimed; café drinks keep the café path.
-  const itemQuestion = (request.language === 'th' || request.language === 'en') && !isCafeReadOnlyTurn(request.message, undefined)
-    ? readItemQuestion(request.message) : null;
+  const itemLanguages = ['th', 'en', 'zh', 'lo', 'vi'];
+  const itemQuestion = itemLanguages.includes(request.language) && !isCafeReadOnlyTurn(request.message, undefined)
+    ? readItemQuestion(request.message, request.language) : null;
   if (itemQuestion) {
     const [menu, products] = await Promise.all([
       listRestaurantMenu().catch(() => 'failed' as const),
       listOtopProductStock(request.environment === 'test' ? 'test' : 'live').catch(() => 'failed' as const),
     ]);
-    const itemAnswer = answerItemQuestion({ ...itemQuestion, language: request.language === 'en' ? 'en' : 'th' }, { menu, products });
+    // The customer's language, unless the message itself was Thai or English.
+    const itemAnswer = answerItemQuestion({ ...itemQuestion, language: request.language as ItemQuestion['language'] }, { menu, products });
     if (itemAnswer) {
       console.log('THONGTHAI_ITEM_QUESTION', JSON.stringify({ event_id:transportEventId, channel,
         menu_read:menu === 'failed' ? 'failed' : 'ok', products_read:products === 'failed' ? 'failed' : 'ok' }));
@@ -6841,8 +6862,8 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     // The request was read-only. A source failure must not start another
     // paid attempt or replace missing live menu facts with guesses.
     return {
-      message:request.language === 'en'
-        ? 'I couldn’t read the latest menu and prices just now, so I can’t recommend dishes yet. Please try again in a moment.'
+      message:request.language !== 'th'
+        ? T.menu.readFailed[replyLanguage(request.language)]
         : 'ตอนนี้ตรวจสอบข้อมูลเมนูและราคาล่าสุดไม่สำเร็จครับ ยังจัดชุดอาหารให้ตรงเงื่อนไขไม่ได้',
       intent:'information' as const,contextUpdates:{},journeyAction:{type:'none' as const,journey:null},suggestedActions:[],
       responseStyle:'direct' as const,semanticMemoryUpdates:[],toolCalls:[],

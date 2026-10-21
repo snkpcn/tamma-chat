@@ -18,13 +18,25 @@ const THAI_RE = /[ก-๎]/u;
 const LATIN_WORD_RE = /^[A-Za-z][A-Za-z'’-]*$/u;
 const ACRONYM_RE = /^[A-Z0-9]{2,}$/u;
 
-export function resolveCustomerLanguage(message: string, fallback: CustomerLanguage): CustomerLanguage {
+/** Vietnamese words that carry no Vietnamese-only letter ("Xin chào" has
+ *  only "à", which French or Spanish also use). One of these together with
+ *  a shared accent letter, or two of them, is Vietnamese. */
+const VI_WORDS = new Set(['xin', 'chào', 'chao', 'cảm', 'cám', 'ơn', 'không', 'có', 'giá', 'bao', 'nhiêu', 'mấy', 'giờ',
+  'tôi', 'bạn', 'ngày', 'mai', 'cho', 'được', 'là', 'gì', 'nào', 'ạ', 'ở', 'đâu', 'thế', 'vậy', 'của', 'và', 'với']);
+const SHARED_ACCENT_RE = /[àáãèéìíòóõùúý]/iu;
+
+/** The language the message itself shows, or null when it does not say
+ *  (a tie, a number, an emoji). */
+export function detectMessageLanguage(message: string): CustomerLanguage | null {
   const text = message.replace(/https?:\/\/\S+|\S+@\S+\.\S+/gu, ' ');
   if (/[຀-໿]/u.test(text)) return 'lo';
   if (/[぀-ヿ]/u.test(text)) return 'ja';
   if (/[가-힯]/u.test(text)) return 'ko';
   if (/[㐀-鿿]/u.test(text)) return 'zh';
   if (/[ăâđêôơưĂÂĐÊÔƠƯạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/u.test(text)) return 'vi';
+  const latinWords = text.toLowerCase().normalize('NFC').split(/[^\p{L}]+/u).filter(Boolean);
+  const viWords = latinWords.filter(word => VI_WORDS.has(word)).length;
+  if (viWords >= 2 || (viWords >= 1 && SHARED_ACCENT_RE.test(text))) return 'vi';
 
   let thai = 0;
   let latin = 0;
@@ -35,5 +47,9 @@ export function resolveCustomerLanguage(message: string, fallback: CustomerLangu
   }
   if (thai > latin) return 'th';
   if (latin > thai) return 'en';
-  return fallback;
+  return null;
+}
+
+export function resolveCustomerLanguage(message: string, fallback: CustomerLanguage): CustomerLanguage {
+  return detectMessageLanguage(message) ?? fallback;
 }

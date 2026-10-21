@@ -487,12 +487,6 @@ export const MENU_UNAVAILABLE_TH: Record<MenuUnavailableReason, string> = {
   no_items: 'ตอนนี้ยังไม่มีรายการเมนูในระบบให้ยืนยันครับ',
 };
 
-export const MENU_UNAVAILABLE_EN: Record<MenuUnavailableReason, string> = {
-  sold_out: 'Everything you asked about is sold out right now.',
-  no_stock_data: 'I don’t have current stock data for the menu, so I can’t confirm which dishes are available right now.',
-  constraints: 'No dish that fits those requirements is in stock right now.',
-  no_items: 'There are no menu items in our system to confirm right now.',
-};
 
 function scoreItem(item: RestaurantAdvisorItem, pref: ParsedPreferences, selectedRoles: string[]): Scored {
   let score = item.signature ? 1 : 0;

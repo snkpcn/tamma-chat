@@ -8,6 +8,7 @@
  * layer + golden eval corpus.
  */
 import { EXPERIENCES } from '../../src/data/experiences';
+import { replyLanguage, T } from './_reply-templates';
 
 type WorldFactLike = { fact_key?: unknown; fact_value?: unknown };
 
@@ -186,34 +187,34 @@ export function experienceCatalogLines(worldFacts: WorldFactLike[], language: st
   // substituted the static "ผจญภัย" catalog name, which reads as a
   // confident claim that activities are on offer. An unverified source must
   // say so and hand off instead.
+  const rl = replyLanguage(language);
   const activityLine = activity.status === 'ok'
-    ? `🌿 ${th ? 'กิจกรรม' : 'Activities'} — ${activity.names.join(' / ')}`
+    ? `🌿 ${th ? 'กิจกรรม' : T.catalog.activities[rl]} — ${activity.names.join(' / ')}`
     : activity.status === 'empty'
-      ? (th ? '🌿 กิจกรรม — ตอนนี้ยังไม่มีรอบกิจกรรมเปิดให้จองครับ' : '🌿 Activities — no activity rounds are open for booking right now')
+      ? (th ? '🌿 กิจกรรม — ตอนนี้ยังไม่มีรอบกิจกรรมเปิดให้จองครับ' : `🌿 ${T.catalog.activities[rl]} — ${T.catalog.noRounds[rl]}`)
       : (th
         ? '🌿 กิจกรรม — ตอนนี้ทองไทยยังเช็กรายการกิจกรรมล่าสุดไม่ได้ครับ เดี๋ยวให้แอดมินยืนยันให้'
-        : '🌿 Activities — I can’t check the latest activity list right now; our staff will confirm it');
+        : `🌿 ${T.catalog.activities[rl]} — ${T.catalog.unreadable[rl]}`);
 
   return [
-    `🍽️ ${th ? 'กิน' : 'Dining'} — ${catalogName('dining', 'ตำมา-ชาติ')}`,
+    `🍽️ ${th ? 'กิน' : T.catalog.dining[rl]} — ${catalogName('dining', 'ตำมา-ชาติ')}`,
     activityLine,
-    `🏡 ${th ? 'พัก' : 'Stay'} — ${catalogName('stay', 'ทำมา-ชาติ เฮือนสเตย์')}`,
-    `🌅 ${th ? 'ชิล' : 'Relax'} — ${catalogName('landscape', 'เดินชมพื้นที่กลาง')} / ${catalogName('sunset', 'ชมพระอาทิตย์ตก')}`,
-    `☕ ${th ? 'แวะพัก' : 'Café'} — ${catalogName('inthanin', 'Inthanin')}`,
+    `🏡 ${th ? 'พัก' : T.catalog.stay[rl]} — ${catalogName('stay', 'ทำมา-ชาติ เฮือนสเตย์')}`,
+    `🌅 ${th ? 'ชิล' : T.catalog.relax[rl]} — ${catalogName('landscape', 'เดินชมพื้นที่กลาง')} / ${catalogName('sunset', 'ชมพระอาทิตย์ตก')}`,
+    `☕ ${th ? 'แวะพัก' : T.catalog.cafe[rl]} — ${catalogName('inthanin', 'Inthanin')}`,
   ];
 }
 
 export function formatExperienceDiscoveryMessage(worldFacts: WorldFactLike[], language: string = 'th'): string {
   const activity = liveActivityState(worldFacts);
   const th = language === 'th';
+  const rl = replyLanguage(language);
   const closing = activity.status === 'ok'
-    ? (th ? 'บอกจำนวนคน + เวลาที่มีได้เลย ทองไทยจัดเป็นแพลนสั้น ๆ ให้ได้ครับ'
-      : 'Tell me how many people and when you’re free, and I’ll put together a short plan.')
-    : (th ? 'บอกจำนวนคน + เวลาที่มีได้เลยครับ ส่วนกิจกรรมเดี๋ยวแอดมินยืนยันรายการที่เปิดให้อีกรอบครับ'
-      : 'Tell me how many people and when you’re free. Our staff will confirm which activities are open.');
+    ? (th ? 'บอกจำนวนคน + เวลาที่มีได้เลย ทองไทยจัดเป็นแพลนสั้น ๆ ให้ได้ครับ' : T.catalog.closingOk[rl])
+    : (th ? 'บอกจำนวนคน + เวลาที่มีได้เลยครับ ส่วนกิจกรรมเดี๋ยวแอดมินยืนยันรายการที่เปิดให้อีกรอบครับ' : T.catalog.closingUnverified[rl]);
 
   return [
-    th ? 'มีครับ 😊 ที่ทำมา-ชาติมีหลายแบบ' : 'Here’s what Thammachat offers 😊',
+    th ? 'มีครับ 😊 ที่ทำมา-ชาติมีหลายแบบ' : T.catalog.opener[rl],
     '',
     ...experienceCatalogLines(worldFacts, language),
     '',

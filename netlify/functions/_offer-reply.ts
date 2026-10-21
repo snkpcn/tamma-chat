@@ -39,6 +39,8 @@ export type PendingOfferState = {
 const PARTICLES = '(?:\\s*(?:ครับ|คับ|ค่ะ|คะ|ค่า|นะ|จ้า|จ้ะ|ฮะ|เลย|ด้วย|please|pls))*\\s*[!.~]*';
 const ALL_TH = new RegExp(`^(?:เอา)?(?:ทั้งหมด|ทุกอย่าง|ทุกเรื่อง|หมดทุกอย่าง|ได้หมด|เอาหมด|หมดเลย)${PARTICLES}$`, 'u');
 const ALL_EN = new RegExp(`^(?:all|all of (?:them|it|the above)|everything|every thing|both)${PARTICLES}$`, 'iu');
+/** "All" in Chinese, Lao and Vietnamese, with their polite endings. */
+const ALL_OTHER = /^(?:全部|都要|全都要|所有|都可以|全部都要|ທັງໝົດ|ທຸກຢ່າງ|ເອົາທັງໝົດ|tất cả|tất cả luôn|cả|hết)[\s!.~。！]*(?:吧|啊|ເດີ້|ຄັບ|ạ|nhé)?[\s!.~。！]*$/iu;
 const OPTION_PATTERNS: Array<[TopicMenuOption, RegExp]> = [
   ['dining', /^(?:เรื่อง)?(?:กิน|อาหาร|ร้านอาหาร|ของกิน|food|dining|eat|eating|restaurant)$/iu],
   ['stay', /^(?:เรื่อง)?(?:พัก|ที่พัก|ห้องพัก|stay|stays|accommodation|room|rooms)$/iu],
@@ -53,7 +55,7 @@ const OPTION_PATTERNS: Array<[TopicMenuOption, RegExp]> = [
 export function parseOfferReply(message: string): OfferReply | null {
   const text = message.trim();
   if (!text || text.length > 40) return null;
-  if (ALL_TH.test(text) || ALL_EN.test(text)) return { kind: 'all' };
+  if (ALL_TH.test(text) || ALL_EN.test(text) || ALL_OTHER.test(text)) return { kind: 'all' };
   const number = /^([1-6])(?:\s*(?:ครับ|ค่ะ|คะ|นะ))*$/u.exec(text);
   if (number) return { kind: 'option', option: TOPIC_MENU_OPTIONS[Number(number[1]) - 1] };
   const bare = text
@@ -79,7 +81,9 @@ const CANONICAL: Record<'all' | TopicMenuOption, { th: string; en: string }> = {
 
 export function canonicalQueryForOfferReply(reply: OfferReply, language: string): string {
   const entry = CANONICAL[reply.kind === 'all' ? 'all' : reply.option];
-  return language === 'th' ? entry.th : entry.en;
+  // Chinese, Lao and Vietnamese replies go straight to the Thai question;
+  // the turn keeps its language and its responder renders that language.
+  return language === 'en' ? entry.en : entry.th;
 }
 
 /** Is this offer still the one the customer is answering? */
@@ -95,8 +99,8 @@ export function isLiveOffer(offer: unknown, lastTurnAt: string | null, now: numb
   return true;
 }
 
-const TOPIC_MENU_TEXT_RE = /กิน พัก กิจกรรม โลเคชั่น อากาศ|dining, stays, activities, location, weather/u;
-const CATALOG_LIST_TEXT_RE = /ที่ทำมา-ชาติมีหลายแบบ|Here’s what Thammachat offers/u;
+const TOPIC_MENU_TEXT_RE = /กิน พัก กิจกรรม โลเคชั่น อากาศ|dining, stays, activities, location, weather|餐饮、住宿、活动|ອາຫານ, ທີ່ພັກ, ກິດຈະກຳ|ăn uống, chỗ ở, hoạt động/u;
+const CATALOG_LIST_TEXT_RE = /ที่ทำมา-ชาติมีหลายแบบ|Here’s what Thammachat offers|Thammachat 提供的内容|ສິ່ງທີ່ Thammachat ມີ|những gì Thammachat có/u;
 
 /** Attach the offer to a reply that actually presents a menu of topics. */
 export function withTopicMenuOffer(response: BrainResponse, language: string, now: Date = new Date()): BrainResponse {
