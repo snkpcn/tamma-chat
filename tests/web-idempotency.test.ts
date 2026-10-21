@@ -51,3 +51,36 @@ test('different messages, a request without an eventId, and the same id on LINE 
     assert.match(line.replies[0]?.texts.join('\n') ?? '', /06:00–18:00/u);
   });
 });
+
+// The claim runs before the turn's own 9 s clock: a slow claim (insert finds
+// a row, then the takeover stalls) must not push the reply past the
+// function's 10 s limit. It is capped and fails open.
+test('a slow web claim is capped and fails open: the customer is still answered, promptly', async () => {
+  await withHarness(async harness => {
+    const inner = harness.fetchMock;
+    const stall = (ms: number, signal?: AbortSignal | null) => new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, ms);
+      signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+    });
+    const wrapped = (async (url: string | URL, init: RequestInit = {}) => {
+      const u = String(url);
+      const prefer = String((init.headers as Record<string, string> | undefined)?.Prefer ?? '');
+      if (u.includes('/rest/v1/customer_turn_outcomes') && init.method === 'POST' && prefer.includes('ignore-duplicates')) {
+        await stall(900, init.signal);
+        return new Response('[]', { status: 201 });
+      }
+      if (u.includes('/rest/v1/customer_turn_outcomes') && init.method === 'PATCH') {
+        await stall(5_000, init.signal);
+        return new Response('[]', { status: 200 });
+      }
+      return inner(url, init);
+    }) as typeof fetch;
+    harness.fetchMock = wrapped;
+    global.fetch = wrapped;
+    const started = Date.now();
+    const reply = await send({ ...brainRequest('เปิดกี่โมง', guestId('web-idem-slow'), 'web'), eventId: 'web:slow-claim' });
+    const elapsed = Date.now() - started;
+    assert.match(reply.payload.message ?? '', /06:00–18:00/u);
+    assert.ok(elapsed < 1_500, `answered in ${elapsed} ms`);
+  });
+});

@@ -75,7 +75,7 @@ import {
   type ConversationContextState,
 } from './_conversation-context';
 import { emptyTaskStateContainer, parseTaskState } from './_task-state';
-import { claimCustomerTurn, persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
+import { claimCustomerTurn, type TurnClaimOutcome, persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
 import { CUSTOMER_TURN_BUDGET_MS, CUSTOMER_TURN_HARD_DEADLINE_MS, remainingTurnBudgetMs, withinTurnBudget } from './_customer-turn-budget';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
@@ -1386,9 +1386,9 @@ function formatAdvisorMessage(
     const rememberedConstraintPhrase = constraintMentionedNow ? '' : naturalRestaurantConstraintPhrase(advisor);
     const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
     const partySizeKnown = parsed?.partySize != null;
-    // English is rendered for the plain list only: it is the one shape the
-    // English menu question reaches (see _english-basic-question.ts). Dish
-    // names are the stored names; there is no translation to show.
+    // Other languages are rendered for the plain list only: it is the one
+    // shape their menu question reaches (see _multilingual-basic-question.ts).
+    // Dish names are the stored names; there is no translation to show.
     if (language !== 'th' && advisor?.mode !== 'pairing' && !wantsAlternative && !constraintAck && !allergyNotice && !rememberedConstraintPhrase) {
       const rl = replyLanguage(language);
       return composeLineShortReply([
@@ -2503,8 +2503,8 @@ async function groundedRestaurantBeforePrimary(
   guestDbId: string | null,
   channel: BrainChannel,
 ): Promise<BrainResponse | null> {
-  // English reaches here only as the menu question it was read as.
-  // Another language reaches here only as the menu question it was read as.
+  // Any language other than Thai reaches here only as the menu question it
+  // was read as.
   const readMenuQuestion = request.language !== 'th' && request.message === ENGLISH_MENU_CANONICAL;
   if ((request.language !== 'th' && !readMenuQuestion) || hasExplicitTransactionIntent(request.message)) return null;
   const text = request.message;
@@ -9018,6 +9018,9 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   });
 }
 
+/** The web claim's share of the function's 10 s, ahead of the 9 s turn. */
+const WEB_TURN_CLAIM_BUDGET_MS = 750;
+
 export const handler: Handler = async (event: HandlerEvent) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
 
@@ -9045,14 +9048,16 @@ export const handler: Handler = async (event: HandlerEvent) => {
   // proxy retry, a second tab -- is not answered, charged or written twice.
   // A per-request header id is not a message identity, so only the page's
   // own id is claimed. Fails open: an unavailable claim never costs the
-  // answer.
+  // answer. It runs before the turn's own clock starts, so it is capped at
+  // WEB_TURN_CLAIM_BUDGET_MS: the claim's own timeouts (two requests of up
+  // to 1 s) plus the 9 s turn could otherwise pass the 10 s function limit.
   if (rawEventId) {
-    const claim = await claimCustomerTurn({
+    const claim = await withinTurnBudget(claimCustomerTurn({
       conversationId: request.guestId ?? null,
       eventId: rawEventId,
       channel: getBrainChannel(request.pageContext.section),
       environment: request.environment,
-    });
+    }), WEB_TURN_CLAIM_BUDGET_MS).catch((): TurnClaimOutcome => 'claim_failed_open');
     if (claim === 'duplicate_skipped') {
       const language = resolveCustomerLanguage(normalizeCustomerText(request.message), request.language);
       return json(200, {
