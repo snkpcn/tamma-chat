@@ -95,14 +95,12 @@ test('LINE turn not answered in time: orders are mentioned only for a transactio
 test('web turn not answered in time: the same rule, through the real core under a slow backend', async () => {
   await withHarness(async harness => {
     const inner = harness.fetchMock;
-    // Every backend read takes longer than the whole 8 s turn budget.
+    // Every backend call hangs longer than the whole 8 s turn budget, even
+    // past its own timeout. (A call that is aborted on time just fails, and
+    // since the turn's log writes no longer queue one after another, such a
+    // turn now answers honestly within budget -- that is not this case.)
     global.fetch = (async (url: string | URL, init: RequestInit = {}) => {
-      if (String(url).includes('/rest/v1/')) {
-        await new Promise((resolve, reject) => {
-          const timer = setTimeout(resolve, 9_000);
-          init.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(init.signal?.reason); }, { once: true });
-        });
-      }
+      if (String(url).includes('/rest/v1/')) await new Promise(resolve => setTimeout(resolve, 9_000));
       return inner(url, init);
     }) as typeof fetch;
     try {

@@ -7,6 +7,7 @@ import { resolveCustomerLanguage } from './_customer-language';
 import { canonicalQueryForOfferReply, isLiveOffer, offerAcceptsReply, parseOfferReply, withTopicMenuOffer } from './_offer-reply';
 import { ENGLISH_MENU_CANONICAL, readEnglishBasicQuestion } from './_english-basic-question';
 import { ungroundedNumericClaims } from './_grounded-numbers';
+import { deferTurnWrite, withTurnWrites } from './_turn-writes';
 import { formatCustomerDate } from './_customer-date';
 import { INTHANIN_TADTONE_CONFIG } from './_organization-config';
 import { touchAiConversation } from './_ai-cost-ledger';
@@ -73,7 +74,7 @@ import {
 } from './_conversation-context';
 import { emptyTaskStateContainer } from './_task-state';
 import { persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
-import { CUSTOMER_TURN_BUDGET_MS, withinTurnBudget } from './_customer-turn-budget';
+import { CUSTOMER_TURN_BUDGET_MS, CUSTOMER_TURN_HARD_DEADLINE_MS, remainingTurnBudgetMs, withinTurnBudget } from './_customer-turn-budget';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
 import { resolveRequestedCustomerMedia } from './_thongthai-media';
@@ -6217,19 +6218,24 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     // below. LINE additionally races this against its own remaining turn
     // budget (see _line-webhook-core.ts); whichever deadline is tighter
     // wins, so LINE's retry accounting is unchanged.
-    const result = await withinTurnBudget(
-      processThongthaiChatCoreInternal(request, turnId),
-      CUSTOMER_TURN_BUDGET_MS,
-    );
-    console.log('THONGTHAI_CUSTOMER_TURN', JSON.stringify({
-      event_id:turnId, channel, status_code:result.statusCode,
-      duration_ms:Date.now()-startedAt, outcome:'completed',
-    }));
-    await persistCustomerTurnOutcome({
-      conversationId:request.guestId ?? null,eventId:turnId,channel,
-      outcome:'completed',errorType:null,durationMs:Date.now()-startedAt,environment:request.environment,
-    });
-    return result;
+    // The turn's log writes run side by side and are all awaited here, before
+    // the reply -- bounded by what is left of the hard deadline.
+    const turnRequest = request;
+    return await withTurnWrites(async () => {
+      const result = await withinTurnBudget(
+        processThongthaiChatCoreInternal(turnRequest, turnId),
+        CUSTOMER_TURN_BUDGET_MS,
+      );
+      console.log('THONGTHAI_CUSTOMER_TURN', JSON.stringify({
+        event_id:turnId, channel, status_code:result.statusCode,
+        duration_ms:Date.now()-startedAt, outcome:'completed',
+      }));
+      void deferTurnWrite('customer_turn_outcomes', () => persistCustomerTurnOutcome({
+        conversationId:turnRequest.guestId ?? null,eventId:turnId,channel,
+        outcome:'completed',errorType:null,durationMs:Date.now()-startedAt,environment:turnRequest.environment,
+      }));
+      return result;
+    }, () => remainingTurnBudgetMs(startedAt, CUSTOMER_TURN_HARD_DEADLINE_MS));
   } catch (error) {
     // Never start a second paid attempt or repeat a transaction after an
     // uncertain backend failure. Both transports receive a usable response.
@@ -7220,10 +7226,13 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   const phase4CommercialBoundaryEligible =
     commercialBoundary.routeToOneMindBeforePrimary;
 
-  const activeTaskBeforePrimary = !prepareOnlyAgentEligible
-    && await hasActiveTaskBeforePrimary(guestDbId);
-  const boundedConversationBeforePrimary = !prepareOnlyAgentEligible
-    && await hasConversationContextBeforePrimary(guestDbId);
+  // Three independent reads of the guest's state, started together; none
+  // writes, and nothing below writes before they are used.
+  const [activeTaskBeforePrimary, boundedConversationBeforePrimary, cafeStateForPrePrimary] = await Promise.all([
+    prepareOnlyAgentEligible ? false : hasActiveTaskBeforePrimary(guestDbId),
+    prepareOnlyAgentEligible ? false : hasConversationContextBeforePrimary(guestDbId),
+    cafeStateBeforePrimary(request, guestDbId),
+  ]);
 
   // Phase 7 continuation authority:
   // - non-terminal ActiveTask, OR
@@ -7262,7 +7271,6 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       locationRequest: preserveVerifiedLocationBeforeSupervision
         || topLevelSemanticIntent === 'LOCATION_REQUEST',
     });
-  const cafeStateForPrePrimary = await cafeStateBeforePrimary(request, guestDbId);
   const cafeReadOnlyBeforePrimary =
     cafeStateForPrePrimary !== null && !openLanguageOrWorldwidePriority;
 

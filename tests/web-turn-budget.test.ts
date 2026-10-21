@@ -88,10 +88,10 @@ test('remainingTurnBudgetMs counts down from the turn start', () => {
 test('the web path bounds the shared core', () => {
   const entry = CHAT_SOURCE.indexOf('export async function processThongthaiChatCore(');
   assert.ok(entry > 0, 'the shared core entry point must still exist');
-  const body = CHAT_SOURCE.slice(entry, entry + 2_500);
+  const body = CHAT_SOURCE.slice(entry, entry + 4_000);
   assert.match(
     body,
-    /withinTurnBudget\(\s*processThongthaiChatCoreInternal\(request, turnId\),\s*CUSTOMER_TURN_BUDGET_MS,?\s*\)/u,
+    /withinTurnBudget\(\s*processThongthaiChatCoreInternal\((?:request|turnRequest), turnId\),\s*CUSTOMER_TURN_BUDGET_MS,?\s*\)/u,
     'the core must run inside the shared turn budget',
   );
   // The existing honest fallback is what a budget overrun now reaches.

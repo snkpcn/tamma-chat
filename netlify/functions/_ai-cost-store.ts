@@ -1,3 +1,4 @@
+import { deferTurnWrite } from './_turn-writes';
 import { backendFetch } from './_backend-fetch';
 import { CUSTOMER_TURN_BUDGET_MS } from './_customer-turn-budget';
 
@@ -301,7 +302,7 @@ export async function persistAiResponseTurn(row:PersistedAiResponseTurn):Promise
     grounded_knowledge_supplied:row.groundedKnowledgeSupplied,
     zero_cost_turn:row.zeroCostTurn,
   }));
-  await post('ai_response_turns','conversation_id,event_id',{
+  await deferTurnWrite('ai_response_turns', () => post('ai_response_turns','conversation_id,event_id',{
     conversation_id:row.conversationId.slice(0,180),
     event_id:row.eventId.slice(0,180),
     channel:row.channel.slice(0,40)||'unknown',
@@ -311,7 +312,7 @@ export async function persistAiResponseTurn(row:PersistedAiResponseTurn):Promise
     zero_cost_turn:Boolean(row.zeroCostTurn),
     environment:row.environment==='test'?'test':'live',
     occurred_at:row.occurredAt,
-  });
+  }));
 }
 
 /**
@@ -326,7 +327,9 @@ export async function persistAiResponseTurn(row:PersistedAiResponseTurn):Promise
  * zero-cost turn when the event has no paid call.
  */
 export async function persistAiResponseTurnIfAbsent(row:PersistedAiResponseTurn):Promise<void>{
-  await postIfAbsent('ai_response_turns','conversation_id,event_id',{
+  // Order-independent with persistAiResponseTurn: that upsert merges over
+  // this ignore-duplicates insert whichever lands first.
+  await deferTurnWrite('ai_response_turns_if_absent', () => postIfAbsent('ai_response_turns','conversation_id,event_id',{
     conversation_id:row.conversationId.slice(0,180),
     event_id:row.eventId.slice(0,180),
     channel:row.channel.slice(0,40)||'unknown',
@@ -336,7 +339,7 @@ export async function persistAiResponseTurnIfAbsent(row:PersistedAiResponseTurn)
     zero_cost_turn:Boolean(row.zeroCostTurn),
     environment:row.environment==='test'?'test':'live',
     occurred_at:row.occurredAt,
-  });
+  }));
 }
 
 /** Interpretation can precede a zero-model fact renderer. Mark the final

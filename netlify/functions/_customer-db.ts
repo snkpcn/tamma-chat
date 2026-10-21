@@ -1,3 +1,4 @@
+import { deferTurnWrite } from './_turn-writes';
 import { backendFetch } from './_backend-fetch';
 import { extractGuestPreferenceSignal, extractIntelligenceSignals } from './_customer-phrase-intelligence';
 import { recordIntelligenceEvent } from './_customer-intelligence-events';
@@ -245,18 +246,23 @@ export async function loadCustomerMemory(
 
     if (existing[0]) {
       guestDbId = existing[0].id;
-      await dbFetch('guests?id=eq.' + encodeURIComponent(guestDbId), {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          last_seen_at: now,
-          language: LANGUAGES.has(language) ? language : null,
-        }),
+      const touchedGuestDbId = guestDbId;
+      // Last-seen bookkeeping: started now, finished with the turn's other
+      // log writes, instead of delaying the memory reads below.
+      void deferTurnWrite('guests_last_seen', async () => {
+        await dbFetch('guests?id=eq.' + encodeURIComponent(touchedGuestDbId), {
+          method: 'PATCH',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            last_seen_at: now,
+            language: LANGUAGES.has(language) ? language : null,
+          }),
+        });
+        const previousVisit = Date.parse(existing[0]!.last_seen_at);
+        if (Number.isFinite(previousVisit) && Date.now() - previousVisit > 30 * 60 * 1000) {
+          await insertEvent(touchedGuestDbId, 'return_visit');
+        }
       });
-      const previousVisit = Date.parse(existing[0].last_seen_at);
-      if (Number.isFinite(previousVisit) && Date.now() - previousVisit > 30 * 60 * 1000) {
-        await insertEvent(guestDbId, 'return_visit');
-      }
     } else {
       const createdRes = await dbFetch('guests', {
         method: 'POST',

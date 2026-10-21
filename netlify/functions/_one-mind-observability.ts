@@ -1,3 +1,4 @@
+import { deferTurnWrite } from './_turn-writes';
 import { backendFetch } from './_backend-fetch';
 import { createHash } from 'node:crypto';
 // Phase J — safe structured observability for the One-Mind pipeline.
@@ -277,5 +278,5 @@ export async function persistOneMindTrace(trace:OneMindTraceEnvelope):Promise<bo
  * to finish; all errors are swallowed inside the observability boundary. */
 export async function recordOneMindTrace(trace:OneMindTraceEnvelope):Promise<void>{
   emitOneMindTrace(trace);
-  await persistOneMindTrace(trace).catch(()=>false);
+  await deferTurnWrite('one_mind_traces', () => persistOneMindTrace(trace).catch(()=>false));
 }

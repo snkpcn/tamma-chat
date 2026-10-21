@@ -1,3 +1,4 @@
+import { deferTurnWrite } from './_turn-writes';
 import { backendFetch } from './_backend-fetch';
 import type {
   BrainChannel, BrainResponse, BrainToolCall, BrainToolResult, BrainRuntimeContext, BrainRequest,
@@ -74,7 +75,8 @@ function safeMemoryValue(value: unknown): string | string[] | null {
   return [...new Set(value.filter((x): x is string => typeof x === 'string').map(x => safeShort(x,80)).filter((x): x is string => Boolean(x)).slice(0,12))];
 }
 async function insertEvent(guestDbId: string, eventType: string, intent: string | null, metadata: Record<string, unknown> = {}): Promise<void> {
-  await dbFetch('guest_events', { method:'POST', headers:{Prefer:'return=minimal'}, body:JSON.stringify({ guest_id:guestDbId,event_type:eventType,intent,metadata }) });
+  // An append-only analytics row: written alongside the turn's other logs.
+  await deferTurnWrite('guest_events', () => dbFetch('guest_events', { method:'POST', headers:{Prefer:'return=minimal'}, body:JSON.stringify({ guest_id:guestDbId,event_type:eventType,intent,metadata }) }));
 }
 
 export async function registerGuestIdentity(guestDbId: string | null, channel: BrainChannel, providerUserKey: string | undefined): Promise<void> {
