@@ -14,7 +14,7 @@
  *  scope, a deferred write is simply awaited. */
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-type Scope = { pending: Array<Promise<unknown>> };
+type Scope = { pending: Array<Promise<unknown>>; reads: Map<string, Promise<unknown>> };
 const storage = new AsyncLocalStorage<Scope>();
 
 /** Run one turn; resolves after `run` and every write it deferred -- but
@@ -23,7 +23,7 @@ const storage = new AsyncLocalStorage<Scope>();
  *  the leftovers of an abandoned, over-budget attempt) from holding the
  *  reply past the turn deadline. */
 export async function withTurnWrites<T>(run: () => Promise<T>, drainLimitMs: () => number): Promise<T> {
-  const scope: Scope = { pending: [] };
+  const scope: Scope = { pending: [], reads: new Map() };
   try {
     return await storage.run(scope, run);
   } finally {
@@ -55,6 +55,33 @@ export async function deferTurnWrite(label: string, write: () => Promise<unknown
       write: label, error: error instanceof Error ? error.message.slice(0, 200) : 'unknown',
     }));
   }));
+}
+
+/** One read of `key` per turn, shared by every caller that only LOOKS at
+ *  the value. A no-model turn read the same guest_agent_state row eight
+ *  times one after another, from read-only checks (is a task open? was ATV
+ *  discussed? is a question pending?) -- about 150 ms each in production.
+ *  Any write to that table in this turn forgets every memoised read (see
+ *  noteBackendWrite), so a later look sees the write. Never use it for a
+ *  read that feeds a compare-and-swap: those must read the row fresh, as
+ *  the cost ledger and patchGuestAgentState do. A failed read is not kept.
+ *  Outside a scope the read simply runs. */
+export function readOncePerTurn<T>(key: string, read: () => Promise<T>): Promise<T> {
+  const scope = storage.getStore();
+  if (!scope) return read();
+  const cached = scope.reads.get(key) as Promise<T> | undefined;
+  if (cached) return cached;
+  const pending = read();
+  scope.reads.set(key, pending);
+  pending.catch(() => { if (scope.reads.get(key) === pending) scope.reads.delete(key); });
+  return pending;
+}
+
+/** Called for every backend request that is not a GET: a write to
+ *  guest_agent_state makes every memoised read of this turn stale. */
+export function noteBackendWrite(url: string): void {
+  if (!url.includes('/rest/v1/guest_agent_state')) return;
+  storage.getStore()?.reads.clear();
 }
 
 /** True while a turn scope is collecting writes (for tests). */

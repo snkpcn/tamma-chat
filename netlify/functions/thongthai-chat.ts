@@ -9,7 +9,7 @@ import { ENGLISH_MENU_CANONICAL } from './_english-basic-question';
 import { readBasicQuestion } from './_multilingual-basic-question';
 import { replyLanguage, T } from './_reply-templates';
 import { ungroundedNumericClaims } from './_grounded-numbers';
-import { deferTurnWrite, withTurnWrites } from './_turn-writes';
+import { deferTurnWrite, readOncePerTurn, withTurnWrites } from './_turn-writes';
 import { formatCustomerDate } from './_customer-date';
 import { INTHANIN_TADTONE_CONFIG } from './_organization-config';
 import { touchAiConversation } from './_ai-cost-ledger';
@@ -74,7 +74,7 @@ import {
   persistConversationContext,
   type ConversationContextState,
 } from './_conversation-context';
-import { emptyTaskStateContainer } from './_task-state';
+import { emptyTaskStateContainer, parseTaskState } from './_task-state';
 import { claimCustomerTurn, persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
 import { CUSTOMER_TURN_BUDGET_MS, CUSTOMER_TURN_HARD_DEADLINE_MS, remainingTurnBudgetMs, withinTurnBudget } from './_customer-turn-budget';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
@@ -282,10 +282,29 @@ export function conversationContextOwnsConversationBeforePrimary(
   return hasConsideredSelection || hasCurrentTaskReference;
 }
 
+/** A read-only look at the guest's agent state: one read per turn, shared
+ *  by every check below that only inspects it (readOncePerTurn). Each
+ *  caller gets its own copy. Never for a read that feeds a write. */
+async function peekGuestAgentState(guestDbId: string | null) {
+  if (!guestDbId) return loadGuestAgentStateSnapshot(guestDbId);
+  return structuredClone(await readOncePerTurn(`guest_agent_state:${guestDbId}`, () => loadGuestAgentStateSnapshot(guestDbId)));
+}
+
+/** loadTaskState over the shared read; same empty container on failure. */
+async function peekTaskState(guestDbId: string | null): Promise<TaskStateContainer> {
+  if (!guestDbId) return emptyTaskStateContainer();
+  try {
+    return parseTaskState((await peekGuestAgentState(guestDbId)).state?.taskState);
+  } catch (error) {
+    console.error('TASK_STATE_LOAD_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
+    return emptyTaskStateContainer();
+  }
+}
+
 async function hasActiveTaskBeforePrimary(guestDbId: string | null): Promise<boolean> {
   if (!guestDbId) return false;
   try {
-    return activeTaskOwnsConversationBeforePrimary(await loadTaskState(guestDbId));
+    return activeTaskOwnsConversationBeforePrimary(await peekTaskState(guestDbId));
   } catch (error) {
     // Do not fail the whole turn because the task-state read itself failed.
     // Existing Agent/One-Mind routing can still degrade honestly.
@@ -319,7 +338,7 @@ async function cafeStateBeforePrimary(
   if (isCafeReadOnlyTurn(request.message)) return {};
   if (!guestDbId) return null;
   try {
-    const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+    const snapshot = await peekGuestAgentState(guestDbId);
     if (!isObject(snapshot.state)) return null;
     if (isCafeReadOnlyTurn(request.message, snapshot.state.active_topic)) return snapshot.state;
 
@@ -3269,7 +3288,7 @@ function hasActiveHorseBookingContext(request: BrainRequest): boolean {
 // disambiguation question at that point would be worse than just
 // honoring the obvious selection.
 async function hasEverDiscussedActivityDomain(guestDbId: string | null): Promise<boolean> {
-  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const snapshot = await peekGuestAgentState(guestDbId);
   const taskState = snapshot.state?.taskState as { activeTask?: { domain?: string } } | undefined;
   return taskState?.activeTask?.domain === 'activity';
 }
@@ -3522,7 +3541,7 @@ const DETAIL_CONFUSION_MARKER = /รายละเอียดอะไร|ห�
 
 async function loadHorseBookingTask(guestDbId: string | null) {
   if (!guestDbId) return null;
-  const container = await loadTaskState(guestDbId);
+  const container = await peekTaskState(guestDbId);
   const task = container.activeTask;
   if (!task || task.type !== 'activity_booking' || isTerminalTaskStatus(task.status)) return null;
   if (!task.slots.assetSelection) return null;
@@ -4012,7 +4031,7 @@ export function hasExplicitAtvIntent(text: string): boolean {
 // hasExplicitAtvIntent check on the CURRENT message alone would miss it.
 async function hasEverDiscussedAtv(guestDbId: string | null): Promise<boolean> {
   if (!guestDbId) return false;
-  const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(() => null);
+  const snapshot = await peekGuestAgentState(guestDbId).catch(() => null);
   const taskState = snapshot?.state?.taskState as { activeTask?: { slots?: Record<string, unknown> } } | undefined;
   return taskState?.activeTask?.slots?.resourceCode === 'activity-atv';
 }
@@ -4122,7 +4141,7 @@ export function hasExplicitArcheryIntent(text: string): boolean {
 
 async function hasEverDiscussedArchery(guestDbId: string | null): Promise<boolean> {
   if (!guestDbId) return false;
-  const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(() => null);
+  const snapshot = await peekGuestAgentState(guestDbId).catch(() => null);
   const taskState = snapshot?.state?.taskState as { activeTask?: { slots?: Record<string, unknown> } } | undefined;
   return taskState?.activeTask?.slots?.resourceCode === 'activity-archery';
 }
@@ -4500,7 +4519,7 @@ async function pendingQuestionContinuationResponse(
 ): Promise<BrainResponse | null> {
   if (!guestDbId) return null;
 
-  const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+  const snapshot = await peekGuestAgentState(guestDbId).catch(error => {
     console.error(
       'THONGTHAI_PENDING_QUESTION_STATE_ERROR',
       error instanceof Error ? error.message.slice(0, 220) : 'unknown',
@@ -8421,7 +8440,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   if (!preserveRestaurantFastPath
       && restaurantIntentClass === 'RECOMMENDATION_ONLY'
       && guestDbId) {
-    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+    const snapshot = await peekGuestAgentState(guestDbId).catch(error => {
       console.error(
         'THONGTHAI_RESTAURANT_PRECUTOVER_STATE_ERROR',
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
@@ -8458,7 +8477,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // still uses the fully loaded runtime later.
   let hasPendingPromotionRedemption = false;
   if (guestDbId) {
-    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+    const snapshot = await peekGuestAgentState(guestDbId).catch(error => {
       console.error(
         'THONGTHAI_PROMOTION_PRECUTOVER_STATE_ERROR',
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
@@ -8477,7 +8496,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   if (!preserveCafeFastPath
       && CAFE_READ_ONLY_FOLLOWUP_MARKER.test(request.message.trim())
       && guestDbId) {
-    const snapshot = await loadGuestAgentStateSnapshot(guestDbId).catch(error => {
+    const snapshot = await peekGuestAgentState(guestDbId).catch(error => {
       console.error(
         'THONGTHAI_CAFE_PRECUTOVER_STATE_ERROR',
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
