@@ -108,6 +108,7 @@ const REFUND_RE = new RegExp(
     `เงินคืน(?=${REFUND_QUESTION_AFTER})`,
     `เงินคืน(?!${REFUND_NIGHT_CONTEXT})`,
     'refund',
+    'money\\s+back',
     'รีฟันด์',
   ].join('|'),
   'iu',
@@ -156,6 +157,13 @@ const SPECIAL_DISCOUNT_RE = new RegExp(
   ].join('|'),
   'u',
 );
+// The same line in English: asking FOR a better price escalates; asking
+// whether a discount or promotion exists ("Are there any discounts?", "Do
+// you have discounts for kids?"), a cheaper OPTION ("Is there a cheaper
+// option?"), or less of an ingredient ("Can you reduce the spice?") does
+// not. "discounted" is not "discount": "Can I get the discounted price?"
+// asks for an existing promotion.
+const SPECIAL_DISCOUNT_EN_RE = /\b(?:can|could|would|will)\s+(?:you|i|we)\s+(?:please\s+)?(?:give|get|have|offer|do|make)\s+(?:me\s+|us\s+)?(?:a\s+|an?\s+extra\s+|some\s+|any\s+|a\s+little\s+|a\s+special\s+)?(?:discount|deal|lower\s+price|better\s+price|cheaper\s+price|special\s+price)\b|\b(?:give|offer)\s+(?:me|us)\s+(?:a\s+)?(?:discount|deal|better\s+price|special\s+price)\b|\b(?:lower|reduce|drop|cut)\s+(?:the\s+|your\s+)?price\b|\b(?:make\s+it|go)\s+cheaper\b|\bknock\s+(?:\w+\s+){0,3}off\b|\b(?:negotiate|haggle)\b/iu;
 const CLAIM_RE = /ขอเคลม|เคลมประกัน|(?:^|[\s,])เคลม(?:[\s,]|$)/u;
 // A LIABILITY QUESTION ("...รับผิดชอบไหม"), not a report that an
 // accident already happened -- deliberately requires the question
@@ -185,7 +193,7 @@ export function classifyEscalationBoundary(message: string): EscalationMatch | n
   if (REFUND_RE.test(text)) {
     return { category: 'refund_request', domainUnit: null, pureEscalation: true, escalates: true };
   }
-  if (SPECIAL_DISCOUNT_RE.test(text)) {
+  if (SPECIAL_DISCOUNT_RE.test(text) || SPECIAL_DISCOUNT_EN_RE.test(text)) {
     return { category: 'special_discount', domainUnit: null, pureEscalation: false, escalates: true };
   }
   if (CLAIM_RE.test(text)) {

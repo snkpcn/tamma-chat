@@ -5,6 +5,7 @@ import { searchMissingVisitorInformation } from './_visitor-web-search';
 import { normalizeCustomerText } from './_customer-text';
 import { resolveCustomerLanguage } from './_customer-language';
 import { canonicalQueryForOfferReply, isLiveOffer, offerAcceptsReply, parseOfferReply, withTopicMenuOffer } from './_offer-reply';
+import { ENGLISH_MENU_CANONICAL, readEnglishBasicQuestion } from './_english-basic-question';
 import { touchAiConversation } from './_ai-cost-ledger';
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
@@ -1266,6 +1267,7 @@ function formatAdvisorMessage(
   constraintMentionedNow = true,
   currentMessage = '',
   alreadyShownNames: string[] = [],
+  language: BrainRequest['language'] = 'th',
 ): string {
   const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
   // "แพ้กุ้ง ตำไทยกินได้ไหม" -- answer about THAT specific named dish from
@@ -1354,6 +1356,17 @@ function formatAdvisorMessage(
     const rememberedConstraintPhrase = constraintMentionedNow ? '' : naturalRestaurantConstraintPhrase(advisor);
     const parsed = advisor?.parsed && typeof advisor.parsed === 'object' ? advisor.parsed as Record<string, unknown> : null;
     const partySizeKnown = parsed?.partySize != null;
+    // English is rendered for the plain list only: it is the one shape the
+    // English menu question reaches (see _english-basic-question.ts). Dish
+    // names are the stored names; there is no translation to show.
+    if (language === 'en' && advisor?.mode !== 'pairing' && !wantsAlternative && !constraintAck && !allergyNotice && !rememberedConstraintPhrase) {
+      return composeLineShortReply([
+        '🍽️ Dishes worth trying right now',
+        ...shown.map((row: any) => `• ${row.name} — ${Number.isFinite(Number(row.price)) ? `${Math.round(Number(row.price))} THB` : '-'}`),
+        !partySizeKnown ? 'How many of you are coming? I can help size it for your table.'
+          : moreAvailable && !fullList ? 'I can send the full menu if you’d like to see more.' : '',
+      ]);
+    }
     if (wantsAlternative && shown.length === 0) {
       const prefix = rememberedConstraintPhrase ? `ถ้ายัง${rememberedConstraintPhrase}อยู่ ` : '';
       return composeLineShortReply([
@@ -2419,6 +2432,7 @@ async function deterministicRestaurantResponse(
       mentionsRestaurantConstraintNow(dietaryIntent),
       request.message,
       priorRecommendationNames,
+      request.language,
     ),
     intent: advice.mode === 'compare' ? 'information' : 'recommendation',
     contextUpdates:{},
@@ -2439,7 +2453,9 @@ async function groundedRestaurantBeforePrimary(
   guestDbId: string | null,
   channel: BrainChannel,
 ): Promise<BrainResponse | null> {
-  if (request.language !== 'th' || hasExplicitTransactionIntent(request.message)) return null;
+  // English reaches here only as the menu question it was read as.
+  const englishMenuQuestion = request.language === 'en' && request.message === ENGLISH_MENU_CANONICAL;
+  if ((request.language !== 'th' && !englishMenuQuestion) || hasExplicitTransactionIntent(request.message)) return null;
   const text = request.message;
   if (classifyLocalConciergeQuestion(text)?.category === 'food_culture'
       && !LOCAL_CONCIERGE_ALLERGY_DEFER_RE.test(text)) return null;
@@ -6489,6 +6505,14 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       });
       request = { ...request, message:canonical };
     }
+  }
+
+  // A basic English question is read as the Thai question it is; the turn
+  // stays English and its responder renders English from the same data.
+  const englishBasic = request.language === 'en' ? readEnglishBasicQuestion(request.message) : null;
+  if (englishBasic) {
+    console.log('THONGTHAI_ENGLISH_BASIC_QUESTION', JSON.stringify({ event_id:transportEventId, channel, topic:englishBasic.topic }));
+    request = { ...request, message:englishBasic.canonical };
   }
 
   // Broad-discovery turns ("มีกิจกรรมอะไรบ้าง") are answered entirely from
