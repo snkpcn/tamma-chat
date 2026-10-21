@@ -40,6 +40,9 @@ const ENGLISH_TERMS: ReadonlyArray<[RegExp, string]> = [
   [/\bscarf\b|\bscarves\b/u, 'ผ้าพันคอ'],
 ];
 
+/** The Thai side of that vocabulary: words known to name a dish or product. */
+const KNOWN_ITEM_WORDS = new Set(ENGLISH_TERMS.map(([, thai]) => thai));
+
 export function readItemQuestion(message: string): ItemQuestion | null {
   const text = message.normalize('NFC').trim();
   if (!text || text.length > 60) return null;
@@ -115,6 +118,14 @@ export function answerItemQuestion(question: ItemQuestion, sources: ItemSources)
     return en
       ? `I couldn’t read our live menu and product list just now, so I can’t confirm whether we have ${question.stem}. Please ask again in a moment.`
       : `ตอนนี้ตรวจสอบรายการเมนูและของฝากล่าสุดไม่สำเร็จครับ ทองไทยจึงยืนยันไม่ได้ว่ามี${question.stem}ไหม ลองถามอีกครั้งในอีกสักครู่นะครับ`;
+  }
+  // Both lists were read and neither carries it. Only a known dish/product
+  // word may be answered "not on the list": any other stem may not be an item
+  // question at all, so it keeps its path.
+  if (KNOWN_ITEM_WORDS.has(question.stem)) {
+    return en
+      ? `${question.stem} isn’t on our menu or souvenir list right now.`
+      : `ตอนนี้ไม่มี${question.stem}ในเมนูอาหารและรายการของฝากครับ`;
   }
   return null;
 }

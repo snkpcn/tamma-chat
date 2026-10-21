@@ -78,3 +78,16 @@ test('a name no live item carries is not claimed: other questions keep their pat
     }
   });
 });
+
+test('a known dish word the live menu does not carry: "not on the list", zero model calls, web and LINE', async () => {
+  await withHarness(async harness => {
+    // The default harness menu has no ต้มแซ่บ.
+    for (const [text, expected] of [['ต้มแซ่บมีไหม', /^ตอนนี้ไม่มีต้มแซ่บในเมนูอาหารและรายการของฝากครับ$/u],
+      ['Do you have larb?', /^ลาบ isn’t on our menu or souvenir list right now\.$/u]] as const) {
+      for (const answer of await askBothChannels(harness, `item-absent-${text.length}`, text)) {
+        assert.match(answer.reply, expected, `${answer.channel}: ${answer.reply}`);
+        assert.equal(answer.modelCalls, 0, answer.channel);
+      }
+    }
+  });
+});
