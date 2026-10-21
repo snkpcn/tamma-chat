@@ -1421,13 +1421,19 @@ export async function listBookingOptions(
   const requestedUnits = Math.max(1, Math.min(50, Math.floor(partySize ?? 1)));
   const activityDuration = normalizeActivityDuration(durationMinutes);
 
-  for (const resource of resources) {
+  // One schedule read per resource, side by side (they were awaited one
+  // after another); the output keeps resource order.
+  const scheduleRows = await Promise.all(resources.map(async resource => {
     const res = await dbFetch(
       `service_schedules?resource_id=eq.${resource.id}&environment=eq.${environment}&status=eq.open`
       + `&start_at=gte.${encodeURIComponent(bounds.start)}&start_at=lte.${encodeURIComponent(bounds.end)}`
       + '&select=id,start_at,end_at,capacity_total,capacity_reserved&order=start_at.asc',
     );
-    const rows = await res.json() as Array<{ id: string; start_at: string; end_at: string; capacity_total: number; capacity_reserved: number }>;
+    return await res.json() as Array<{ id: string; start_at: string; end_at: string; capacity_total: number; capacity_reserved: number }>;
+  }));
+
+  for (const [index, resource] of resources.entries()) {
+    const rows = scheduleRows[index]!;
 
     if (serviceType !== 'activity') {
       for (const row of rows) {
