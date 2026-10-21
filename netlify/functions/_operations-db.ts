@@ -2035,6 +2035,18 @@ export async function listOtopProducts(environment: 'live' | 'test' = 'live'): P
   return rows.map(row => ({ productId:row.id, sku: row.sku, name: row.name, description: row.description, price: Number(row.price), stock: Number(row.stock_qty) }));
 }
 
+/** Every listed product with its stock figure as recorded -- 0 (sold out)
+ *  and null (no figure) included -- for answering "X เหลือไหม". Read-only;
+ *  ordering keeps using listOtopProducts. */
+export async function listOtopProductStock(environment: 'live' | 'test' = 'live'): Promise<Array<{ sku: string; name: string; price: number; stock: number | null }>> {
+  const res = await dbFetch(
+    `otop_products?environment=eq.${environment}&active=eq.true&verified=eq.true`
+    + '&select=sku,name,price,stock_qty&order=name.asc',
+  );
+  const rows = await res.json() as Array<{ sku: string; name: string; price: number; stock_qty: number | null }>;
+  return rows.map(row => ({ sku: row.sku, name: row.name, price: Number(row.price), stock: row.stock_qty == null ? null : Number(row.stock_qty) }));
+}
+
 export async function createOtopOrder(input: {
   guestDbId?: string | null;
   channel: OpsChannel;

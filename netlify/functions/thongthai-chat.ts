@@ -47,10 +47,12 @@ import {
   activityDurationOptionsForResource,
   formatActivityAssetNote,
   listServiceResources,
+  listOtopProductStock,
   loadLatestBookingStatus,
   resetLineBookingPlanningSession,
 } from './_operations-db';
-import { restaurantMenuAdvice } from './_restaurant-sot';
+import { listRestaurantMenu, restaurantMenuAdvice } from './_restaurant-sot';
+import { answerItemQuestion, readItemQuestion } from './_single-item-question';
 import { loadActivityWorldFacts } from './_activity-sot';
 import {
   listCafeMasterMenu,
@@ -6661,6 +6663,36 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       journeyAction: polished.journeyAction,
       suggestedActions: polished.suggestedActions,
     });
+  }
+
+  // "ผัดไทยมีไหม" / "Do you have pad thai?": one named live item, answered
+  // from the menu and product list. A name matching no live item is not
+  // claimed; café drinks keep the café path.
+  const itemQuestion = (request.language === 'th' || request.language === 'en') && !isCafeReadOnlyTurn(request.message, undefined)
+    ? readItemQuestion(request.message) : null;
+  if (itemQuestion) {
+    const [menu, products] = await Promise.all([
+      listRestaurantMenu().catch(() => 'failed' as const),
+      listOtopProductStock(request.environment === 'test' ? 'test' : 'live').catch(() => 'failed' as const),
+    ]);
+    const itemAnswer = answerItemQuestion({ ...itemQuestion, language: request.language === 'en' ? 'en' : 'th' }, { menu, products });
+    if (itemAnswer) {
+      console.log('THONGTHAI_ITEM_QUESTION', JSON.stringify({ event_id:transportEventId, channel,
+        menu_read:menu === 'failed' ? 'failed' : 'ok', products_read:products === 'failed' ? 'failed' : 'ok' }));
+      try {
+        const currentContext = await loadConversationContext(guestDbId);
+        await persistConversationContext(guestDbId, applyConversationContextUpdate(currentContext, {
+          eventId:transportEventId, channel, userMessage:request.customerMessage ?? request.message, assistantMessage:itemAnswer,
+        }));
+      } catch (error) { console.error('THONGTHAI_ITEM_CONTEXT_ERROR', error instanceof Error ? error.name : 'unknown'); }
+      await persistAiResponseTurn({conversationId:request.guestId ?? guestDbId ?? 'unknown', eventId:transportEventId, channel,
+        finalResponseSource:'item_question', modelReplyUsed:false, groundedKnowledgeSupplied:menu !== 'failed' || products !== 'failed',
+        zeroCostTurn:true, environment:request.environment, occurredAt:new Date().toISOString()})
+        .catch(error => console.error('THONGTHAI_ITEM_TELEMETRY_ERROR', error instanceof Error ? error.name : 'unknown'));
+      const polished = polishedResponse({ message:itemAnswer, intent:'information', contextUpdates:{}, journeyAction:{type:'none',journey:null},
+        suggestedActions:[], responseStyle:'direct', semanticMemoryUpdates:[], toolCalls:[] }, channel);
+      return coreResult(200, { message:polished.message, intent:'information', contextUpdates:{}, journeyAction:{type:'none',journey:null}, suggestedActions:[] });
+    }
   }
 
   // Informational visitor questions must not become cafe menu lookups,
