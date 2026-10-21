@@ -6,6 +6,7 @@ import { normalizeCustomerText } from './_customer-text';
 import { resolveCustomerLanguage } from './_customer-language';
 import { canonicalQueryForOfferReply, isLiveOffer, offerAcceptsReply, parseOfferReply, withTopicMenuOffer } from './_offer-reply';
 import { ENGLISH_MENU_CANONICAL, readEnglishBasicQuestion } from './_english-basic-question';
+import { ungroundedNumericClaims } from './_grounded-numbers';
 import { touchAiConversation } from './_ai-cost-ledger';
 import type { Handler, HandlerEvent } from '@netlify/functions';
 import {
@@ -74,7 +75,7 @@ import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
 import { resolveRequestedCustomerMedia } from './_thongthai-media';
 import { experienceCatalogLines, formatExperienceDiscoveryMessage, isExperienceDiscoveryIntent } from './_experience-discovery';
 import {
-  budgetExhaustedMessage, fallbackCauseOf, isTransactionMessage, logFallback, providerUnavailableMessage, turnUnfinishedMessage,
+  budgetExhaustedMessage, fallbackCauseOf, isTransactionMessage, logFallback, providerUnavailableMessage, turnUnfinishedMessage, ungroundedNumberMessage,
 } from './_customer-fallback';
 import { classifyLocalConciergeQuestion, hasExplicitTransactionIntent, isHorseInfoOrComparisonQuestion, isCompareEntitiesAttributeQuestion } from './_local-concierge-intent';
 import { composeLocalConciergeResponse } from './_local-concierge-response';
@@ -8847,6 +8848,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
 
   let finalResponse = firstResponse;
   const toolCalls = firstResponse.toolCalls ?? [];
+  let brainToolResults: BrainToolResult[] = [];
   if (toolCalls.length) {
     const toolResults = await executeBrainTools(
       guestDbId,
@@ -8855,6 +8857,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
       firstResponse,
       request,
     );
+    brainToolResults = toolResults;
     const duplicatePreorderNotice = duplicateRestaurantPreorderMessage(request.language, toolResults);
     if (duplicatePreorderNotice) {
       finalResponse = {
@@ -8882,6 +8885,27 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
             : `${firstResponse.message}\n\nมีบางอย่างที่ทองไทยยังทำให้ไม่สำเร็จครับ ลองอีกครั้งได้เลย`,
         };
       }
+    }
+  }
+
+  // A price, time, length or percentage in the brain's reply must come from
+  // what its prompt carried or from the customer. When no tool ran, an
+  // invented figure is replaced; after a tool ran, the reply also reports
+  // that action, so it is kept and the figure is only logged for review.
+  const ungroundedNumbers = ungroundedNumericClaims(finalResponse.message, {
+    facts: [runtime.worldFacts, communityOfferings, EXPERIENCES, runtime.toolResults, brainToolResults,
+      request.guestContext, request.journeyContext, runtime.agentState],
+    customerText: [request.message, request.customerMessage ?? '',
+      ...request.chatHistory.filter(turn => turn.role === 'user').map(turn => turn.content)],
+  });
+  if (ungroundedNumbers.length) {
+    const replaced = !brainToolResults.length;
+    console.log('THONGTHAI_UNGROUNDED_NUMBER', JSON.stringify({
+      event_id:transportEventId, channel, source:'legacy_brain', replaced,
+      claims:ungroundedNumbers.map(claim => claim.kind),
+    }));
+    if (replaced) {
+      finalResponse = { ...finalResponse, toolCalls:[], suggestedActions:[], message:ungroundedNumberMessage(request.language) };
     }
   }
 

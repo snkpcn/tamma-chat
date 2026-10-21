@@ -25,6 +25,7 @@ import { THONGTHAI_HUMAN_SERVICE_VOICE } from './_thongthai-service-voice';
 import { resolveActivityDurationOptions, type ActivityDurationPolicyResult } from './_activity-catalog-policy';
 import { extractTime } from './_slot-parsers';
 import { ACTIVITY_ENGLISH_LABELS } from './_english-basic-question';
+import { ungroundedNumericClaims } from './_grounded-numbers';
 import {
   classifyCommercialBoundarySemantic,
   classifyCommercialBoundaryText,
@@ -370,7 +371,24 @@ export function parseComposedResponse(raw: string, input: ResponseComposerInput)
 
   assertOperationalClaimSafety(message, input.operationalOutcome);
   assertNoInventedTemporalStructure(message, input);
+  assertNumbersGrounded(message, input);
   return { message, usedFactKeys };
+}
+
+/** A price, time, length or percentage the model wrote must be in the facts
+ *  it was given or in the customer's own words. */
+export function assertNumbersGrounded(
+  message: string,
+  input: Pick<ResponseComposerInput, 'userMessage' | 'conversationContext' | 'knowledgeBundles'>,
+): void {
+  const ungrounded = ungroundedNumericClaims(message, {
+    facts: allFacts(input.knowledgeBundles).map(fact => ({ key: fact.key, value: fact.value })),
+    customerText: [
+      input.userMessage ?? '',
+      ...(input.conversationContext?.recentTurns ?? []).filter(turn => turn.role === 'user').map(turn => turn.content),
+    ],
+  });
+  if (ungrounded.length) throw new ResponseCompositionError(`composer_ungrounded_number:${ungrounded[0]!.text}`);
 }
 
 const SUCCESS_CLAIM_RE = /(?:จอง(?:เรียบร้อย|สำเร็จ|แล้ว)|ยืนยันการจองแล้ว|ส่ง(?:คำขอ|รายการ|ออเดอร์)เข้าระบบแล้ว|สั่ง(?:เรียบร้อย|สำเร็จ|แล้ว)|ชำระ(?:แล้ว|สำเร็จ)|ใช้สิทธิ์(?:แล้ว|สำเร็จ)|\b(?:booked|reserved|confirmed|submitted|ordered|paid|redeemed)\b)/iu;

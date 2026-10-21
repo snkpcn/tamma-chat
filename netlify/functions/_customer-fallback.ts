@@ -67,6 +67,16 @@ const PROVIDER_UNAVAILABLE: Record<DegradedCategory, Texts> = {
   },
 };
 
+/** The model's reply named a figure that is not in our data. */
+const UNGROUNDED_NUMBER: Texts = {
+  th: 'ตัวเลขที่จะตอบเรื่องนี้ ทองไทยยืนยันจากข้อมูลในระบบไม่ได้ครับ ถามแบบเจาะจงได้เลย เช่น ราคากิจกรรม เมนู หรือเวลาเปิด ทองไทยตอบจากข้อมูลจริงได้ทันทีครับ',
+  en: 'I can’t confirm the figures for this from our system. Ask something specific — an activity price, the menu, or opening hours — and I’ll answer from our live information.',
+};
+
+export function ungroundedNumberMessage(language: CustomerLanguage): string {
+  return pick(UNGROUNDED_NUMBER, language);
+}
+
 export function providerUnavailableMessage(category: DegradedCategory, language: CustomerLanguage): string {
   return pick(PROVIDER_UNAVAILABLE[category], language);
 }
