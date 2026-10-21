@@ -1420,6 +1420,22 @@ export function deriveDeterministicSemanticTurn(
       };
     }
 
+    // "พรุ่งนี้ขี่ม้าว่างไหม" asks about live rounds, not what the activity
+    // is: answering it with the catalog ("มีขี่ม้าครับ") reads as "yes".
+    if (!committing && AVAILABILITY_STATUS_MARKER.test(trimmed)) {
+      const date = extractDate(trimmed, now);
+      const time = extractTime(trimmed);
+      const durationMinutes = extractDurationMinutes(trimmed);
+      return {
+        domain: 'activity', intent: 'activity_availability_lookup', action: 'ask', informationNeed: 'availability',
+        entities: {
+          activityCode: activityTopic.activityCode, resourceCode: activityTopic.nodeId,
+          ...(date ? { date } : {}), ...(time ? { time } : {}), ...(durationMinutes ? { durationMinutes } : {}),
+        },
+        references: [], constraints: [], confidence: 0.88, needsClarification: false,
+      };
+    }
+
     return {
       domain: 'activity',
       intent: committing ? 'activity_booking_request' : 'activity_topic_narrow',

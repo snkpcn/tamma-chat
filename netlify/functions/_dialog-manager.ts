@@ -858,9 +858,13 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
         // option). Fetch both the live availability source and the verified
         // catalog/entity facts so the response does not collapse into an
         // empty availability sentence and discard the recommendation clause.
+        // A bare round lookup also needs the catalog: the activity's name and
+        // the lengths it is sold in, to ask for a missing length.
         const needs = hasRecommendationCriteria(turn)
           ? ['availability','entity_details','catalog'] as const
-          : ['availability'] as const;
+          : turn.intent === 'activity_availability_lookup'
+            ? ['availability','catalog'] as const
+            : ['availability'] as const;
         return [{ ...base, domain:'activity', needs:[...needs] }];
       }
       if (turn.informationNeed === 'schedule') return [{ ...base, domain: 'activity', needs: ['schedule'] }];

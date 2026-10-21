@@ -643,6 +643,14 @@ export function isTrustedZeroCostFactLookup(turn: SemanticTurn, message: string)
       && turn.informationNeed === 'schedule') {
     return true;
   }
+  // "พรุ่งนี้ขี่ม้า 30 นาทีว่างไหม": one named activity, read-only, and the
+  // day/length come from slot parsers; a missing slot is asked for, never
+  // guessed. Nothing here can book.
+  if (turn.intent === 'activity_availability_lookup' && turn.domain === 'activity'
+      && turn.action === 'ask' && turn.informationNeed === 'availability'
+      && typeof turn.entities.activityCode === 'string' && typeof turn.entities.resourceCode === 'string') {
+    return true;
+  }
   // Payment status is a guest-scoped, read-only lookup against the canonical
   // payment_requests row.  The deterministic turn carries an optional
   // canonical reference code and the adapter still enforces guest ownership,
