@@ -1,4 +1,3 @@
-import { backendFetch } from './_backend-fetch';
 // Phase C of the Thongthai one-mind architecture program (see THONGTHAI_HANDOFF.md).
 //
 // Server-side, canonical-guest-keyed conversation continuity. thongthai-chat no
@@ -31,7 +30,7 @@ import { backendFetch } from './_backend-fetch';
 
 import type { SemanticAction, SemanticContext, SemanticContextEntity, SemanticDomain, SemanticTurn } from './_semantic-interpreter';
 import { deriveSemanticMeaning } from './_semantic-meaning';
-import { patchGuestAgentState } from './_guest-agent-state-store';
+import { patchGuestAgentState, readGuestAgentStateSnapshot } from './_guest-agent-state-store';
 
 export const CONVERSATION_CONTEXT_SCHEMA_VERSION = 'conversation-context-v1';
 
@@ -484,16 +483,7 @@ function configuration(): { url: string; key: string } | null {
   const url = process.env.SUPABASE_URL; const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   return url && key ? { url: url.replace(/\/$/, ''), key } : null;
 }
-async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const c = configuration(); if (!c) throw new Error('Supabase configuration missing');
-  const res = await backendFetch(`${c.url}/rest/v1/${path}`, {
-    ...init,
-    headers: { apikey: c.key, Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
-  });
-  if (!res.ok) { const body = await res.text().catch(() => ''); throw new Error(`Supabase ${res.status}: ${body.slice(0, 180)}`); }
-  return res;
-}
-function eq(value: string): string { return encodeURIComponent(value); }
+
 
 function isConversationContextState(value: unknown): value is ConversationContextState {
   return Boolean(value) && typeof value === 'object' && (value as { schemaVersion?: unknown }).schemaVersion === CONVERSATION_CONTEXT_SCHEMA_VERSION;
@@ -511,9 +501,8 @@ export function parseConversationContextState(value: unknown, now: Date = new Da
 export async function loadConversationContext(guestDbId: string | null, now: Date = new Date()): Promise<ConversationContextState> {
   if (!guestDbId || !configuration()) return emptyConversationContextState(now);
   try {
-    const res = await dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`);
-    const rows = await res.json() as Array<{ state?: Record<string, unknown> }>;
-    return conversationContextFromAgentState(rows[0]?.state ?? {}, now);
+    const snapshot = await readGuestAgentStateSnapshot(guestDbId);
+    return conversationContextFromAgentState(snapshot.state, now);
   } catch (error) {
     console.error('CONVERSATION_CONTEXT_LOAD_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
     return emptyConversationContextState(now);

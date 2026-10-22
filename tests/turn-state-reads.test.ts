@@ -5,6 +5,9 @@ import { readOncePerTurn, withTurnWrites } from '../netlify/functions/_turn-writ
 import { processThongthaiChatCore } from '../netlify/functions/thongthai-chat';
 import { brainRequest, guestId, withHarness, type Harness } from './helpers/canonical-core-harness';
 import { deliverLineTexts } from './helpers/line-channel';
+import { loadConversationContext } from '../netlify/functions/_conversation-context';
+import { loadTaskState } from '../netlify/functions/_task-state';
+import { loadGuestAgentStateSnapshot, readGuestAgentStateSnapshot, patchGuestAgentState } from '../netlify/functions/_guest-agent-state-store';
 
 // A no-model turn read the same guest_agent_state row eight times one after
 // another from read-only checks, about 1.2 s at 150 ms per request. Those
@@ -70,4 +73,23 @@ test('a failed look is not kept for the rest of the turn', async () => {
     await assert.rejects(look());
     assert.equal(await look(), 2);
   }, () => 1_000);
+});
+
+test('context, task and routing readers share one snapshot while CAS writers still read fresh', async () => {
+  await withHarness(async harness => {
+    const reads = countStateReads(harness);
+    await withTurnWrites(async () => {
+      await Promise.all([loadConversationContext('shared-guest'), loadTaskState('shared-guest'), readGuestAgentStateSnapshot('shared-guest')]);
+      assert.equal(reads(), 1);
+      const copy = await readGuestAgentStateSnapshot('shared-guest');
+      copy.state.untrustedMutation = true;
+      assert.equal((await readGuestAgentStateSnapshot('shared-guest')).state.untrustedMutation, undefined);
+      await loadGuestAgentStateSnapshot('shared-guest');
+      assert.equal(reads(), 2, 'a CAS snapshot is never memoized');
+      await patchGuestAgentState('shared-guest', {set:{active_topic:'cafe'}});
+      const after = await readGuestAgentStateSnapshot('shared-guest');
+      assert.equal(after.state.active_topic, 'cafe', 'a write invalidates all shared readers');
+      assert.equal(reads(), 4);
+    }, () => 1_000);
+  });
 });

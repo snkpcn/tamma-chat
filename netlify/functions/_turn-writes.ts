@@ -14,7 +14,7 @@
  *  scope, a deferred write is simply awaited. */
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-type Scope = { pending: Array<Promise<unknown>>; reads: Map<string, Promise<unknown>> };
+type Scope = { pending: Array<Promise<unknown>>; reads: Map<string, Promise<unknown>>; answerDeadlineAt?: number };
 const storage = new AsyncLocalStorage<Scope>();
 
 /** Run one turn; resolves after `run` and every write it deferred -- but
@@ -22,8 +22,8 @@ const storage = new AsyncLocalStorage<Scope>();
  *  awaited before this change too; the cap only stops a stalled store (or
  *  the leftovers of an abandoned, over-budget attempt) from holding the
  *  reply past the turn deadline. */
-export async function withTurnWrites<T>(run: () => Promise<T>, drainLimitMs: () => number): Promise<T> {
-  const scope: Scope = { pending: [], reads: new Map() };
+export async function withTurnWrites<T>(run: () => Promise<T>, drainLimitMs: () => number, answerDeadlineAt?: number): Promise<T> {
+  const scope: Scope = { pending: [], reads: new Map(), answerDeadlineAt };
   try {
     return await storage.run(scope, run);
   } finally {
@@ -40,6 +40,14 @@ export async function withTurnWrites<T>(run: () => Promise<T>, drainLimitMs: () 
     }
     if (timer) clearTimeout(timer);
   }
+}
+
+/** The one absolute answer deadline includes identity, memory and sources.
+ * A downstream model stage must not start a fresh full budget after that
+ * work has already consumed most of the customer's turn. */
+export function remainingTurnAnswerMs(): number {
+  const deadline = storage.getStore()?.answerDeadlineAt;
+  return deadline === undefined ? Infinity : Math.max(0, deadline - Date.now());
 }
 
 /** Start `write` now; inside a turn scope, wait for it at the end of the

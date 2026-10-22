@@ -1,4 +1,3 @@
-import { backendFetch } from './_backend-fetch';
 // Phase D of the Thongthai one-mind architecture program (see THONGTHAI_HANDOFF.md).
 //
 // Working/Task State: what Thongthai is currently trying to DO, as distinct
@@ -38,7 +37,7 @@ import { backendFetch } from './_backend-fetch';
 import type { SemanticContextEntity, SemanticDomain } from './_semantic-interpreter';
 import { missingPromotionFields, type PendingPromotionRedemption } from './_promotion-dialog';
 import { missingRestaurantPreorderFields, type RestaurantProposedSetState } from './_restaurant-preorder-dialog';
-import { patchGuestAgentState } from './_guest-agent-state-store';
+import { patchGuestAgentState, readGuestAgentStateSnapshot } from './_guest-agent-state-store';
 
 export const TASK_STATE_SCHEMA_VERSION = 'task-state-v1';
 export const MAX_RECENT_EVENT_IDS = 8;
@@ -451,31 +450,21 @@ export function adaptPendingPromotionRedemptionToTask(pending: PendingPromotionR
 
 // ---------------------------------------------------------------------------
 // DB I/O -- same guest_agent_state.state JSONB blob Phase C extends, under a
-// sibling `taskState` key. Deliberately duplicated dbFetch/configuration/eq
-// helpers per file, matching this codebase's existing convention.
+// sibling `taskState` key. Read-only state shares the per-turn snapshot;
+// writes retain the fresh compare-and-swap boundary.
 // ---------------------------------------------------------------------------
 
 function configuration(): { url: string; key: string } | null {
   const url = process.env.SUPABASE_URL; const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   return url && key ? { url: url.replace(/\/$/, ''), key } : null;
 }
-async function dbFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const c = configuration(); if (!c) throw new Error('Supabase configuration missing');
-  const res = await backendFetch(`${c.url}/rest/v1/${path}`, {
-    ...init,
-    headers: { apikey: c.key, Authorization: `Bearer ${c.key}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
-  });
-  if (!res.ok) { const body = await res.text().catch(() => ''); throw new Error(`Supabase ${res.status}: ${body.slice(0, 180)}`); }
-  return res;
-}
-function eq(value: string): string { return encodeURIComponent(value); }
+
 
 export async function loadTaskState(guestDbId: string | null): Promise<TaskStateContainer> {
   if (!guestDbId || !configuration()) return emptyTaskStateContainer();
   try {
-    const res = await dbFetch(`guest_agent_state?guest_id=eq.${eq(guestDbId)}&select=state&limit=1`);
-    const rows = await res.json() as Array<{ state?: Record<string, unknown> }>;
-    return parseTaskState(rows[0]?.state?.taskState);
+    const snapshot = await readGuestAgentStateSnapshot(guestDbId);
+    return parseTaskState(snapshot.state.taskState);
   } catch (error) {
     console.error('TASK_STATE_LOAD_ERROR', error instanceof Error ? error.message.slice(0, 200) : 'unknown');
     return emptyTaskStateContainer();

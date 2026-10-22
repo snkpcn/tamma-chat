@@ -24,6 +24,9 @@ export const CUSTOMER_TURN_HARD_DEADLINE_MS = CUSTOMER_TURN_BUDGET_MS + CUSTOMER
 export const WEB_CUSTOMER_TURN_BUDGET_MS = 22_000;
 export const WEB_CUSTOMER_TURN_HARD_DEADLINE_MS = 23_000;
 
+/** Leave time after optional model phrasing for durable context and egress. */
+export const CUSTOMER_RESPONSE_COMPLETION_RESERVE_MS = 4_000;
+
 export function customerTurnTiming(channel: string): { answerMs: number; hardDeadlineMs: number } {
   return channel === 'web'
     ? { answerMs: WEB_CUSTOMER_TURN_BUDGET_MS, hardDeadlineMs: WEB_CUSTOMER_TURN_HARD_DEADLINE_MS }

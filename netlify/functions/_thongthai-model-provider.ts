@@ -1,4 +1,6 @@
 import { aiCostPolicy, type AiUsage } from './_ai-cost-policy';
+import { remainingTurnAnswerMs } from './_turn-writes';
+import { CUSTOMER_RESPONSE_COMPLETION_RESERVE_MS } from './_customer-turn-budget';
 import {
   AiBudgetBlockedError,
   finalizeAiCall,
@@ -115,6 +117,12 @@ export function providerTimingPolicyForCaller(callerLabel: string): {
       totalBudgetMs: SEMANTIC_CERT_TOTAL_PROVIDER_BUDGET_MS,
       perAttemptCapMs: SEMANTIC_CERT_PER_ATTEMPT_CAP_MS,
     };
+  }
+  // Web's required interpretation gets the available turn time first.
+  // A fixed 6s cutoff discarded valid first interpretations before the
+  // 22s parent deadline; optional phrasing now yields to completion instead.
+  if (callerLabel === 'semantic-interpreter' && Number.isFinite(remainingTurnAnswerMs())) {
+    return { totalBudgetMs:12_000, perAttemptCapMs:12_000 };
   }
   return {
     totalBudgetMs: TOTAL_PROVIDER_BUDGET_MS,
@@ -238,6 +246,11 @@ async function callOpenAIModel(
     ]);
   }
 
+  if (remainingTurnAnswerMs() - CUSTOMER_RESPONSE_COMPLETION_RESERVE_MS < MIN_ATTEMPT_BUDGET_MS) {
+    throw new LLMAvailabilityError('Customer answer deadline leaves no time for another model call', [
+      { provider:'openai', model, outcome:'timeout', elapsedMs:0 },
+    ]);
+  }
   const policy = aiCostPolicy();
   const maxOutputTokens = responseSchema.name === 'thongthai_visitor_question' ? 160
     : responseSchema.name === RESPONSE_COMPOSER_RESPONSE_SCHEMA.name
@@ -266,9 +279,14 @@ async function callOpenAIModel(
   }
 
   const timing = providerTimingPolicyForCaller(callerLabel);
-  const deadlineAt = Date.now() + timing.totalBudgetMs;
+  const deadlineAt = Date.now() + Math.min(timing.totalBudgetMs,
+    Math.max(0, remainingTurnAnswerMs() - CUSTOMER_RESPONSE_COMPLETION_RESERVE_MS));
   const remainingMs = deadlineAt - Date.now();
   if (remainingMs < MIN_ATTEMPT_BUDGET_MS) {
+    // Reservation itself used the remaining time. No provider request was
+    // sent, so release it with known zero usage rather than leaking a hold.
+    if (reservation) await finalizeAiCall(reservation,
+      {inputTokens:0,cachedInputTokens:0,outputTokens:0}, null, false);
     throw new LLMAvailabilityError('OpenAI shared timeout budget exhausted', [
       { provider:'openai', model, outcome:'timeout', elapsedMs:0 },
     ]);

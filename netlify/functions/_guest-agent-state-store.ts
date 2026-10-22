@@ -1,4 +1,5 @@
 import { backendFetch } from './_backend-fetch';
+import { readOncePerTurn } from './_turn-writes';
 // Shared optimistic-concurrency store for guest_agent_state.
 //
 // Why this exists: conversationContext, taskState and legacy brain working
@@ -75,6 +76,18 @@ export async function loadGuestAgentStateSnapshot(
   return row
     ? { exists:true, state:row.state ?? {}, updatedAt:row.updated_at ?? null }
     : { exists:false, state:{}, updatedAt:null };
+}
+
+/** Share read-only routing/context/task reads within one turn. Return copies
+ * so a caller cannot mutate another reader's snapshot. CAS and cost writers
+ * keep using loadGuestAgentStateSnapshot, which always reads fresh. Every
+ * backend write invalidates this cache before it starts and after it lands. */
+export async function readGuestAgentStateSnapshot(
+  guestDbId: string | null,
+): Promise<GuestAgentStateSnapshot> {
+  if (!guestDbId) return loadGuestAgentStateSnapshot(guestDbId);
+  return structuredClone(await readOncePerTurn(`guest_agent_state:${guestDbId}`,
+    () => loadGuestAgentStateSnapshot(guestDbId)));
 }
 
 export async function compareAndSwapGuestAgentState(

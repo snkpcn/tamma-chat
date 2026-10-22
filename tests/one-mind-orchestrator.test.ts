@@ -294,3 +294,31 @@ test('authoritative G.2 path gives up rather than stale-overwriting after bounde
     compareAndSwap: async () => ({ status:'conflict' as const }),
   }, NOW, 2), /one_mind_state_conflict_exhausted/);
 });
+
+test('a cost-ledger update during interpretation does not run the customer understanding twice', async () => {
+  let interpreterCalls = 0;
+  let loads = 0;
+  let writes = 0;
+  const result = await processThongthaiOneMindTurnAuthoritative({
+    channel:'web', message:'ช่วยดูตัวเลือกให้หน่อยครับ', eventId:'ledger-only-conflict',
+    canonicalAnonymousId:CANONICAL, guestDbId:GUEST_DB, persistState:true,
+  }, {
+    interpretSemanticTurn:async () => { interpreterCalls++; return semantic(); },
+    buildKnowledgeAdapters:() => ({}),
+  }, {
+    loadSnapshot:async () => ({
+      exists:true, state:{aiCostLedger:{callCount:++loads}}, updatedAt:`revision-${loads}`,
+    }),
+    compareAndSwap:async (_id, expected, patch) => {
+      writes++;
+      if (writes === 1) return {status:'conflict'};
+      assert.equal((expected.state.aiCostLedger as {callCount:number}).callCount, 2);
+      assert.equal(patch.set?.aiCostLedger, undefined, 'the ledger must never be overwritten');
+      return {status:'applied', snapshot:expected};
+    },
+  }, NOW);
+  assert.equal(interpreterCalls, 1, 'own billing writes must not restart the whole answer');
+  assert.equal(writes, 2);
+  assert.equal(result.trace.statePersisted, true);
+  assert.equal(result.trace.stateConflictRetries, 1);
+});

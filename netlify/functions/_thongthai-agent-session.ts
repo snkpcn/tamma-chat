@@ -2,7 +2,7 @@ import type { BrainChannel } from './_thongthai-brain-v3';
 import { THONGTHAI_PRODUCTION_AGENT_ID, THONGTHAI_STAGING_AGENT_ID } from './_thongthai-agent-profile';
 import { executeThongthaiAgentTool } from './_thongthai-agent-tools';
 import type { ThongthaiAgentTransactionMode } from './_thongthai-agent-transactions';
-import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
+import { patchGuestAgentState, readGuestAgentStateSnapshot } from './_guest-agent-state-store';
 import { calculateAiCostUsd, usdToThb, aiCostPolicy, pricingForModel } from './_ai-cost-policy';
 import { persistAiCallCost } from './_ai-cost-store';
 import { readActiveAiLedgerSpendThb } from './_ai-cost-ledger';
@@ -207,7 +207,7 @@ async function loadPersistedSession(
   guestDbId: string,
   runtime: AgentRuntimeConfig,
 ): Promise<SessionState | null> {
-  const snapshot = await loadGuestAgentStateSnapshot(guestDbId);
+  const snapshot = await readGuestAgentStateSnapshot(guestDbId);
   return parseState(snapshot.state[runtime.stateKey], runtime.agentId);
 }
 
@@ -600,6 +600,12 @@ async function runThongthaiAgentTurn(input: AgentShadowTurnInput): Promise<Agent
   }
 
   const capThb = aiCostPolicy().maxConversationCostUsd * (usdToThb(1));
+  // Reconcile any owed usage above first. When even an empty conversation
+  // cannot fund the configured reserve, there is no reason to load the
+  // legacy spend again on every ordinary question before falling through.
+  if (capThb < AGENT_TURN_RESERVE_THB) {
+    throw new Error('Thongthai Agent remaining combined budget is below the safe per-turn reserve.');
+  }
   const externalLegacySpendThb = runtime.mode === 'primary'
     ? await readActiveAiLedgerSpendThb(input.guestDbId, input.conversationId)
     : 0;

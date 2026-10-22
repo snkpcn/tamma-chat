@@ -1,4 +1,5 @@
 import { normalizeCustomerText } from './_customer-text';
+import { isDeepStrictEqual } from 'node:util';
 // Phase G.1 — canonical One-Mind orchestration entrypoint.
 //
 // This module is intentionally NOT wired to customer-visible routing yet.
@@ -1787,7 +1788,9 @@ async function mirrorActivityTaskIfLineSourced(
  * It reads ConversationContext + TaskState from ONE row snapshot, computes the
  * turn, then atomically CAS-writes both sibling keys against that same
  * updated_at revision. If another web/LINE/runtime request changed the row
- * meanwhile, the entire turn is reloaded and recomputed from the newer state.
+ * meanwhile, the turn is reloaded and recomputed from the newer state. A
+ * cost-ledger-only update reuses the computation and CAS-writes against the
+ * fresh revision without overwriting the newer ledger.
  * This prevents lost fast-message updates across server instances without
  * holding a database lock while a model/source call is in flight. */
 export async function processThongthaiOneMindTurnAuthoritative(
@@ -1822,6 +1825,7 @@ export async function processThongthaiOneMindTurnAuthoritative(
   let stateWriteMs = 0;
   let semanticMs = 0;
   let dialogAndKnowledgeMs = 0;
+  let previousComputation: { state:Record<string, unknown>; result:OneMindTurnResult } | null = null;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const stateReadStartedAt = Date.now();
@@ -1830,11 +1834,24 @@ export async function processThongthaiOneMindTurnAuthoritative(
     const conversationContextBefore = conversationContextFromAgentState(snapshot.state, now);
     const loadedTaskState = parseTaskState(snapshot.state.taskState);
     const { taskState:taskStateBefore, staleTaskSuspended } = normalizeTaskStateForConversation(loadedTaskState, now);
-    const result = await computeOneMindTurnFromState(
-      input, identity, conversationContextBefore, taskStateBefore, deps, now,
-    );
-    semanticMs += result.trace.timingsMs?.semantic ?? 0;
-    dialogAndKnowledgeMs += result.trace.timingsMs?.dialogAndKnowledge ?? 0;
+    // Paid interpretation reserves/finalizes its cost in this SAME JSON row.
+    // That changes the CAS revision during every paid first turn, even when
+    // no conversation changed. Rebase the already-computed result when only
+    // that ledger changed; every other change still recomputes against fresh
+    // context. CAS below always uses the newest snapshot and keeps its ledger.
+    const { aiCostLedger: _ledger, ...meaningState } = snapshot.state;
+    const reuseComputation = previousComputation
+      && isDeepStrictEqual(previousComputation.state, meaningState);
+    const result = reuseComputation
+      ? previousComputation!.result
+      : await computeOneMindTurnFromState(
+        input, identity, conversationContextBefore, taskStateBefore, deps, now,
+      );
+    if (!reuseComputation) {
+      semanticMs += result.trace.timingsMs?.semantic ?? 0;
+      dialogAndKnowledgeMs += result.trace.timingsMs?.dialogAndKnowledge ?? 0;
+    }
+    previousComputation = { state:structuredClone(meaningState), result };
 
     // Staleness normalization is a state-safety operation, not a response
     // cutover decision. Persist it even when this turn itself falls through

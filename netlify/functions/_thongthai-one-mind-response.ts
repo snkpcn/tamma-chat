@@ -12,6 +12,9 @@
 // structural proof that this module set never calls a transaction executor
 // itself, so that boundary cannot silently regress.
 import type { BrainChannel } from './_thongthai-brain-v3';
+import { remainingTurnAnswerMs } from './_turn-writes';
+import { CUSTOMER_RESPONSE_COMPLETION_RESERVE_MS } from './_customer-turn-budget';
+import { providerTimingPolicyForCaller } from './_thongthai-model-provider';
 import {
   processThongthaiOneMindTurnAuthoritative,
   isTrustedZeroCostFactLookup,
@@ -66,6 +69,11 @@ const READ_ONLY_ACTIONS = new Set(['ask','discover','recommend','compare','statu
 // gate below, where it is constrained to a canonical read-only lookup.
 const INITIAL_CUTOVER_DOMAINS = new Set(['restaurant','activity','stay','promotion','otop','ecosystem','membership','cafe','journey','general','local','incident']);
 const COMPOSER_MODEL_BUDGET_CUTOFF_MS = 18_000;
+
+function hasTimeForModelComposition(): boolean {
+  return remainingTurnAnswerMs() >= CUSTOMER_RESPONSE_COMPLETION_RESERVE_MS
+    + providerTimingPolicyForCaller('grounded-response-composition').perAttemptCapMs;
+}
 const FOOD_SAFETY_CONSTRAINTS = new Set([
   'no_shrimp','shrimp_allergy','no_seafood','seafood_allergy',
   'no_peanut','peanut_allergy','no_egg','egg_allergy','food_allergy',
@@ -94,7 +102,7 @@ export function shouldPreferGroundedDeterministicResponse(
   // emergency fallback, not the ordinary authority for discovery/read-only
   // turns with facts. Otherwise we pay for OpenAI understanding and then
   // silently discard the customer-facing reply/composer.
-  return elapsedMs >= COMPOSER_MODEL_BUDGET_CUTOFF_MS;
+  return elapsedMs >= COMPOSER_MODEL_BUDGET_CUTOFF_MS || !hasTimeForModelComposition();
 }
 
 /** True for a task-active turn whose DialogDecision only collects/clarifies
@@ -745,7 +753,8 @@ export async function processOneMindCustomerTurn(
       certificationMode: input.environment !== 'live'
         && process.env.THONGTHAI_SEMANTIC_CERTIFICATION_MODE === '1',
     } : null,
-    allowModelComposition: (composerStartedAt - totalStartedAt) < COMPOSER_MODEL_BUDGET_CUTOFF_MS,
+    allowModelComposition: (composerStartedAt - totalStartedAt) < COMPOSER_MODEL_BUDGET_CUTOFF_MS
+      && hasTimeForModelComposition(),
   };
   // Netlify's customer gateway has a finite request budget. In this
   // quality-first phase, latency pressure is the only reason a normal

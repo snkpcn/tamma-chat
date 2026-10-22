@@ -10,7 +10,7 @@ import { ENGLISH_MENU_CANONICAL } from './_english-basic-question';
 import { readBasicQuestion } from './_multilingual-basic-question';
 import { replyLanguage, T } from './_reply-templates';
 import { ungroundedNumericClaims } from './_grounded-numbers';
-import { deferTurnWrite, readOncePerTurn, withTurnWrites } from './_turn-writes';
+import { deferTurnWrite, withTurnWrites } from './_turn-writes';
 import { formatCustomerDate } from './_customer-date';
 import { INTHANIN_TADTONE_CONFIG } from './_organization-config';
 import { touchAiConversation } from './_ai-cost-ledger';
@@ -118,7 +118,7 @@ import {
   isTrustedZeroCostFactLookup,
   isShortStandaloneConceptCandidate,
 } from './_thongthai-one-mind-orchestrator';
-import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
+import { loadGuestAgentStateSnapshot, patchGuestAgentState, readGuestAgentStateSnapshot } from './_guest-agent-state-store';
 import { processOneMindCustomerTurn, isTrustedBoundedNoTransactionContinuation } from './_thongthai-one-mind-response';
 import { recordOneMindTrace } from './_one-mind-observability';
 import { runThongthaiAgentPrimaryTurn } from './_thongthai-agent-session';
@@ -287,8 +287,7 @@ export function conversationContextOwnsConversationBeforePrimary(
  *  by every check below that only inspects it (readOncePerTurn). Each
  *  caller gets its own copy. Never for a read that feeds a write. */
 async function peekGuestAgentState(guestDbId: string | null) {
-  if (!guestDbId) return loadGuestAgentStateSnapshot(guestDbId);
-  return structuredClone(await readOncePerTurn(`guest_agent_state:${guestDbId}`, () => loadGuestAgentStateSnapshot(guestDbId)));
+  return readGuestAgentStateSnapshot(guestDbId);
 }
 
 /** loadTaskState over the shared read; same empty container on failure. */
@@ -6277,7 +6276,8 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         outcome:'completed',errorType:null,durationMs:Date.now()-startedAt,environment:turnRequest.environment,
       }));
       return result;
-    }, () => remainingTurnBudgetMs(startedAt, timing.hardDeadlineMs));
+    }, () => remainingTurnBudgetMs(startedAt, timing.hardDeadlineMs),
+      channel === 'web' ? startedAt + timing.answerMs : undefined);
   } catch (error) {
     // Never start a second paid attempt or repeat a transaction after an
     // uncertain backend failure. Both transports receive a usable response.
