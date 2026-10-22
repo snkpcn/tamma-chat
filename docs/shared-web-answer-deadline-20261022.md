@@ -41,3 +41,25 @@ Validation: 3,488 / 3,488 tests passed with two workers and localhost access.
 Both web and LINE function bundles compiled. One unrelated SQL-test worker
 crashed at four-worker concurrency; its 14 checks passed alone before the
 complete two-worker run passed.
+
+## Hosted follow-up: missing recommendation knowledge
+
+The first shared-deadline deployment removed the two observed hard timeouts
+but three of the four baseline questions still returned a generic retry
+message. This was not counted as success. A live WebSocket log capture of
+`general-first-ecd93edf-a601-45a5-83c0-265e764a8417` showed the model correctly
+returning `ecosystem / recommend / recommendation` at high confidence, followed
+by `knowledge.sources: []` and an unusable deterministic response.
+
+The dialog planner supported `recommendation` as a knowledge facet, but fetched
+the ecosystem catalog only for `ask` and `discover`, omitting `recommend`.
+That action now loads the same authoritative catalog. The grounded fallback
+also accepts the recommendation facet, so time pressure or model-composition
+failure can still return known venue information. Other operational facets
+retain their separate sources. Tests vary free-form intent names and cover
+this semantic class under the inherited answer deadline; no phrase matching
+was added.
+
+After the recommendation fix, all 3,490 tests passed. Both transport bundles
+compiled. Hosted acceptance still requires useful response content, not just
+HTTP 200 or the absence of the original timeout wording.

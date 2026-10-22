@@ -1307,7 +1307,7 @@ export function composeGroundedDeterministicResponse(input: ResponseComposerInpu
   if(organizationSchedule)return organizationSchedule;
   if(input.language==='th' && input.semanticTurn?.domain==='ecosystem'
       && ['ask','discover','recommend'].includes(input.semanticTurn.action)
-      && ['none','catalog'].includes(input.semanticTurn.informationNeed ?? 'none')
+      && ['none','catalog','recommendation'].includes(input.semanticTurn.informationNeed ?? 'none')
       && !input.dialogDecision.actionProposal) {
     const facts=allFacts(input.knowledgeBundles).filter(fact=>fact.sourceId==='canonical_ecosystem_graph' && fact.authoritative);
     const name=facts.find(fact=>fact.key==='ecosystem:name');

@@ -68,3 +68,16 @@ test('Human Brain Phase 1.3 RED: unknown informationNeed values are rejected to 
   const turn = parseSemanticTurnResponse(raw, emptySemanticContext());
   assert.equal(turn.informationNeed, 'none');
 });
+
+test('ecosystem recommendations load verified knowledge independently of intent wording', () => {
+  for (const intent of ['first_visit_suggestions','relaxed_visit_recommendation','arbitrary_new_intent']) {
+    const plan = planDialogTurn({
+      semanticTurn:{domain:'ecosystem',intent,action:'recommend',informationNeed:'recommendation',
+        entities:{},references:[],constraints:[],confidence:.98,needsClarification:false},
+      conversationContext:emptyConversationContextState(NOW),taskState:emptyTaskStateContainer(),
+      channel:'web',eventId:`recommend-${intent}`,
+    }, NOW);
+    assert.equal(plan.knowledgeRequests[0]?.domain, 'ecosystem');
+    assert.deepEqual(plan.knowledgeRequests[0]?.needs, ['catalog']);
+  }
+});

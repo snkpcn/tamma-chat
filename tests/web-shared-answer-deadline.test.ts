@@ -8,10 +8,13 @@ import { brainRequest, guestId, withHarness } from './helpers/canonical-core-har
 for (const [domain, message, expected] of [
   ['otop', 'อยากรู้เรื่องของที่ชุมชนทำกันครับ', /น้ำผึ้ง|ผ้าพันคอ/u],
   ['activity', 'มีแนวไหนที่ผมพอลองได้บ้างครับ', /ขี่ม้า|ภาราดร|ทองไทย/u],
+  ['ecosystem', 'แนะนำแนวทางเที่ยวสำหรับคนที่ยังไม่เคยมาหน่อยครับ', /ทำมา-ชาติ|Inthanin/u],
 ] as const) {
   test(`${domain}: first response preserves model understanding and answers before the shared deadline`, async () => {
     await withHarness(async harness => {
-      harness.programGeminiReply({domain,intent:'catalog_question',action:'discover',informationNeed:'catalog',
+      harness.programGeminiReply({domain,intent:'catalog_question',
+        action:domain === 'ecosystem' ? 'recommend' : 'discover',
+        informationNeed:domain === 'ecosystem' ? 'recommendation' : 'catalog',
         speechAct:'question',entities:{},references:[],constraints:[],confidence:.98,needsClarification:false});
       const inner = harness.fetchMock;
       const originalNow = Date.now;

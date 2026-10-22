@@ -972,7 +972,7 @@ function planKnowledgeNeeds(turn: SemanticTurn, container: TaskStateContainer): 
       if (turn.informationNeed === 'inventory') return [{ ...base, domain:'ecosystem', needs:['inventory'] }];
       if (turn.informationNeed === 'ingredients') return [{ ...base, domain:'ecosystem', needs:['ingredients'] }];
       if (!['none','catalog','recommendation'].includes(turn.informationNeed ?? 'none')) return [];
-      if (turn.action === 'discover' || turn.action === 'ask') return [{ ...base, domain: 'ecosystem', needs: ['catalog'] }];
+      if (turn.action === 'discover' || turn.action === 'ask' || turn.action === 'recommend') return [{ ...base, domain: 'ecosystem', needs: ['catalog'] }];
       return [];
     case 'journey':
       // Journey composition is cross-domain by definition. Fetch the
