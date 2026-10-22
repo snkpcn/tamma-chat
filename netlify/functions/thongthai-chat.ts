@@ -12,6 +12,7 @@ import { replyLanguage, T } from './_reply-templates';
 import { ungroundedNumericClaims } from './_grounded-numbers';
 import { deferTurnWrite, withTurnWrites } from './_turn-writes';
 import { formatCustomerDate } from './_customer-date';
+import { continueStayInquiry } from './_stay-inquiry-continuation';
 import { INTHANIN_TADTONE_CONFIG } from './_organization-config';
 import { touchAiConversation } from './_ai-cost-ledger';
 import type { Handler, HandlerEvent } from '@netlify/functions';
@@ -6613,6 +6614,22 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   if (basicQuestion) {
     console.log('THONGTHAI_BASIC_QUESTION', JSON.stringify({ event_id:transportEventId, channel, language:request.language, topic:basicQuestion.topic }));
     request = { ...request, customerMessage:request.customerMessage ?? request.message, message:basicQuestion.canonical };
+  }
+
+  const stayInquiry = await continueStayInquiry(request, guestDbId, channel, transportEventId);
+  if (stayInquiry?.message) {
+    await persistAiResponseTurn({
+      conversationId:request.guestId ?? guestDbId ?? 'unknown',eventId:transportEventId,channel,
+      finalResponseSource:'stay_inquiry_continuation',modelReplyUsed:false,
+      groundedKnowledgeSupplied:false,zeroCostTurn:true,environment:request.environment,
+      occurredAt:new Date().toISOString(),
+    }).catch(error => console.error('STAY_INQUIRY_TELEMETRY_ERROR', error instanceof Error ? error.name : 'unknown'));
+    explicitAiResponseTurnPersisted = true;
+    return coreResult(200,{message:stayInquiry.message,intent:'information',contextUpdates:{},
+      journeyAction:{type:'none',journey:null},suggestedActions:[]});
+  }
+  if (stayInquiry?.canonicalMessage) {
+    request = {...request,customerMessage:request.customerMessage ?? request.message,message:stayInquiry.canonicalMessage};
   }
 
   // These complete, bounded conversational openings already have a useful
