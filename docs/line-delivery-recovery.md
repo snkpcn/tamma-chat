@@ -1,0 +1,15 @@
+# LINE delivery recovery
+
+Apply `supabase/migrations/20261021120000_line_customer_deliveries.sql` before deploying the new webhook code. The delivery store requires the existing `CUSTOMER_PII_ENCRYPTION_KEY`, `SUPABASE_URL`, and service role key.
+
+The production Netlify build performs read-only, zero-row probes for turn-claim columns, the monitor context column and the delivery outbox. A missing or inaccessible prerequisite stops the build before publication (exit 71), retaining the previously published deploy. This is a schema-availability guard; run the full SQL preflight for constraints, ACLs, RLS and expiry triggers. Pushing code does not apply the SQL migrations.
+
+`customer_turn_outcomes.completed` means processing finished and the LINE answer was stored. It does not mean LINE accepted the answer. `line_customer_deliveries.status` records delivery separately. Its encrypted payload contains the rendered LINE messages; the recipient is matched by a SHA-256 hash. Browser roles have no table access. Payloads expire after 24 hours and expired rows are pruned on subsequent inserts.
+
+An initial delivery uses the reply API. A definite initial 400 switches the stored delivery mode to push before sending. Failed pushes return HTTP 503, allowing LINE webhook redelivery (enable webhook redelivery in the channel configuration). The replay reads the stored answer and uses the same `X-Line-Retry-Key`, without entering the chat core, executing tools, or calling a model. A successful push or LINE's duplicate-key 409 marks delivery complete. Database leases prevent concurrent redeliveries from sending together; expired leases can be reclaimed after 10 seconds.
+
+A reply API timeout or server failure has an uncertain outcome. Replays retry the reply token but do not turn a subsequent 400 into a push: that token might already have delivered the answer. Such deliveries remain pending and return 503 for investigation rather than claiming delivery or blindly sending a duplicate. Push timeouts are recoverable with the stable retry key.
+
+If the delivery store is unavailable, the webhook returns 503 instead of sending an answer without a recovery record. A failure before the answer is saved leaves the processing claim in progress; after the stale window, the existing processing retry rules apply, including ledger and business-operation idempotency. Cached-answer recovery is guaranteed only once the outbox write has succeeded. A duplicate processing claim without a saved answer returns 503 rather than acknowledging a delivery that never happened. Old events that completed before this migration have no cached answer: they cannot be replayed and require investigation if redelivered; the brain is not rerun for those completed claims.
+
+Local verification includes real Postgres migration/lease/ACL/expiry tests via PGlite, and both-channel dietary-condition tests. Hosted migration, channel redelivery configuration, and actual LINE delivery still require deployment verification.

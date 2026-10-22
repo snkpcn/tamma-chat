@@ -77,7 +77,7 @@ test('C. food-culture questions: uses real style, handles constraints, does not 
     // cuisine blurb (see LOCAL_CONCIERGE_ALLERGY_DEFER_RE in
     // thongthai-chat.ts), so any price it shows comes from the real,
     // verified live menu, not an invented one -- covered separately below.
-    const messages = ['อาหารอีสานแท้ๆ คือแนวไหน', 'อยากกินนัวๆ แนะนำอะไร', 'ไม่กินเผ็ดกินอะไรได้', 'เมนูไหน local ที่สุด'];
+    const messages = ['อาหารอีสานแท้ๆ คือแนวไหน', 'อยากกินนัวๆ แนะนำอะไร', 'เมนูไหน local ที่สุด'];
     for (const [i, message] of messages.entries()) {
       const r = await ask(harness, `concierge-food-${i}`, message);
       assert.equal(r.statusCode, 200);
@@ -98,6 +98,19 @@ test('C2. a personalized dietary food-culture question ("เด็กกิน�
     // restaurant SOT advisor's own output), never a hallucinated one --
     // proven by it matching the actual seeded fixture menu items.
     assert.match(message_, /บาท/u, 'must give a real menu-grounded answer, not the generic Isan-cuisine blurb');
+  });
+});
+
+test('a dietary food question reads the actual menu and qualifies unknown preparation data', async () => {
+  await withHarness(async harness => {
+    const result = await ask(harness, 'concierge-food-grounded', 'ไม่กินเผ็ดกินอะไรได้');
+    assert.equal(result.statusCode, 200);
+    const text = msg(result.payload);
+    assert.match(text, /ไม่เผ็ด/u);
+    assert.match(text, /ยืนยัน.*ครัว/u);
+    const prices = [...text.matchAll(/(\d+)\s*บาท/gu)].map(match => Number(match[1]));
+    assert.ok(prices.every(price => [120, 180, 90].includes(price)), 'all displayed prices must come from the fixture menu');
+    assert.equal(harness.postsTo('restaurant_preorders_rpc').length, 0);
   });
 });
 

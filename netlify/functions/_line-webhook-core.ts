@@ -4,7 +4,8 @@ import { splitCustomerMessageForLine } from './_chat-copy-style';
 import { processThongthaiChatCore } from './thongthai-chat';
 import { isSimpleGreetingMessage, isCasualAttentionMessage, isShortUnclearTextMessage, categorizeDegradedFallback } from './thongthai-chat';
 import { loadCustomerMemory, persistCustomerSnapshot } from './_customer-db';
-import { claimCustomerTurn, type TurnClaimOutcome } from './_ai-cost-store';
+import { claimCustomerTurn, persistCustomerTurnOutcome, type TurnClaimOutcome } from './_ai-cost-store';
+import { loadLineDelivery, prepareLineDelivery, leaseLineDelivery, updateLineDelivery, lineDeliveryMessages } from './_line-delivery-store';
 import { resolveCustomerLanguage } from './_customer-language';
 import { isTransactionMessage, logFallback, retryLabel, turnUnfinishedMessage } from './_customer-fallback';
 import {
@@ -490,47 +491,50 @@ function lineRetryKey(turnId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
-/** Reply, and if LINE rejects the reply token (400: expired or already
- *  used, e.g. a slow turn or a redelivery whose token was spent), push the
- *  same answer to the user once. Only a definite 400 pushes: a timeout or
- *  network error may have delivered the reply, and a push then would be a
- *  second answer. Private one-on-one chats only (handleEvent is never
- *  reached for groups or rooms). Bounded by the same hard deadline. */
-async function replyOrPushOnce(
-  replyToken: string,
-  userId: string,
-  turnId: string | undefined,
-  messages: LineReplyMessage[],
-  accessToken: string,
-  turnStartedAt: number,
+/** Send the persisted answer under a delivery lease. Retrying a push uses
+ * the same LINE retry key, including when acceptance was lost to a timeout.
+ * A reply timeout is uncertain: retry its token, but never infer from a later
+ * 400 that it was not delivered and blindly push a second answer. */
+async function deliverPreparedAnswer(
+  replyToken: string, userId: string, turnId: string, accessToken: string, turnStartedAt: number,
 ): Promise<void> {
-  try {
-    await replyToLine(replyToken, messages, accessToken, turnStartedAt);
-    return;
-  } catch (error) {
-    if (!(error instanceof LineReplyRejectedError) || error.status !== 400 || !turnId) throw error;
-  }
-  const timeoutMs = remainingTurnBudgetMs(turnStartedAt, CUSTOMER_TURN_HARD_DEADLINE_MS);
-  if (timeoutMs <= 0) {
-    console.error('LINE_PUSH_FALLBACK', JSON.stringify({ outcome: 'skipped_deadline' }));
-    return;
+  const row = await leaseLineDelivery(turnId, userId);
+  if (!row) {
+    const current = await loadLineDelivery(turnId, userId);
+    if (current?.status === 'delivered') return;
+    throw new Error('LINE delivery is still in progress');
   }
   try {
+    const messages = lineDeliveryMessages<LineReplyMessage>(row);
+    if (row.mode !== 'push') {
+      // Persist uncertainty BEFORE the call, including a process killed while
+      // waiting for LINE or before saving the successful delivery status.
+      await updateLineDelivery(row, userId, { mode: 'reply_uncertain' });
+      try {
+        await replyToLine(replyToken, messages, accessToken, turnStartedAt);
+        await updateLineDelivery(row, userId, { status: 'delivered' });
+        return;
+      } catch (error) {
+        if (!(error instanceof LineReplyRejectedError) || error.status !== 400 || row.mode === 'reply_uncertain') throw error;
+      }
+      // Definite initial token rejection: persist push mode before sending.
+      await updateLineDelivery(row, userId, { mode: 'push' });
+    }
+    const timeoutMs = remainingTurnBudgetMs(turnStartedAt, CUSTOMER_TURN_HARD_DEADLINE_MS);
+    if (timeoutMs <= 0) throw new Error('LINE delivery deadline passed');
     const response = await fetch(LINE_PUSH_ENDPOINT, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-        'X-Line-Retry-Key': lineRetryKey(turnId),
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}`,
+        'X-Line-Retry-Key': lineRetryKey(turnId) },
       body: JSON.stringify({ to: userId, messages: messages.slice(0, MAX_LINE_MESSAGES) }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    // 409: this turn's push was already accepted -- the customer has it.
-    const outcome = response.ok ? 'pushed' : response.status === 409 ? 'already_pushed' : 'failed';
-    (outcome === 'failed' ? console.error : console.log)('LINE_PUSH_FALLBACK', JSON.stringify({ outcome, status: response.status }));
+    if (!response.ok && response.status !== 409) throw new Error(`LINE push failed ${response.status}`);
+    await updateLineDelivery(row, userId, { status: 'delivered' });
+    console.log('LINE_PUSH_FALLBACK', JSON.stringify({ outcome: response.status === 409 ? 'already_pushed' : 'pushed' }));
   } catch (error) {
-    console.error('LINE_PUSH_FALLBACK', JSON.stringify({ outcome: 'failed', error: error instanceof Error ? error.name : 'unknown' }));
+    await updateLineDelivery(row, userId, { status: 'pending' }).catch(() => {});
+    throw error;
   }
 }
 
@@ -638,9 +642,17 @@ async function handleEvent(
       channel: 'line',
     }), claimBudgetMs).catch((): TurnClaimOutcome => 'claim_failed_open')
     : 'claim_failed_open';
+  if (turnId) {
+    const delivery = await loadLineDelivery(turnId, userId);
+    if (delivery) {
+      if (delivery.status !== 'delivered') await deliverPreparedAnswer(replyToken, userId, turnId, accessToken, turnStartedAt);
+      return;
+    }
+  }
   if (claim === 'duplicate_skipped') {
-    console.log('LINE_DUPLICATE_DELIVERY_SKIPPED', JSON.stringify({ textCategory }));
-    return;
+    // A live/abandoned processing claim with no durable answer is not a
+    // delivered message. A 200 here would stop LINE's recovery redelivery.
+    throw new Error('LINE answer is not yet durably prepared');
   }
   // Show "typing" while the answer is worked out; it runs alongside the turn
   // and is settled before the reply (see startLineLoadingAnimation).
@@ -668,7 +680,17 @@ async function handleEvent(
   }
 
   await loading;
-  await replyOrPushOnce(replyToken, userId, turnId, buildReplyMessages(result, userId, channelSecret), accessToken, turnStartedAt);
+  const messages = buildReplyMessages(result, userId, channelSecret);
+  if (!turnId) throw new Error('LINE message has no stable delivery ID');
+  await prepareLineDelivery(turnId, userId, messages);
+  // Completion means the answer is durably prepared, not that LINE accepted it.
+  // Leave the turn claim in progress if preparation fails, so a later delivery
+  // can recover rather than being permanently skipped as a completed turn.
+  await Promise.all([
+    persistCustomerTurnOutcome({ conversationId: lineGuestId(userId), eventId: turnId,
+      channel: 'line', outcome: 'completed', errorType: null, durationMs: Date.now() - turnStartedAt }),
+    deliverPreparedAnswer(replyToken, userId, turnId, accessToken, turnStartedAt),
+  ]);
 }
 
 const LINE_LOADING_ENDPOINT = 'https://api.line.me/v2/bot/chat/loading/start';
@@ -733,7 +755,11 @@ export async function handleLineCustomerWebhook(
   if (!events.length) return { statusCode: 200, body: 'OK' };
 
   const results = await Promise.allSettled(
-    events.map(item => handleEvent(item, accessToken, channelSecret, turnStartedAt)),
+    events.map(item => {
+      const remaining = remainingTurnBudgetMs(turnStartedAt, CUSTOMER_TURN_HARD_DEADLINE_MS);
+      if (remaining <= 0) return Promise.reject(new TurnBudgetExhaustedError(remaining));
+      return withinTurnBudget(handleEvent(item, accessToken, channelSecret, turnStartedAt), remaining);
+    }),
   );
   const failures = results.filter(result => result.status === 'rejected');
   if (failures.length) {
@@ -745,7 +771,9 @@ export async function handleLineCustomerWebhook(
     }
   }
 
-  return { statusCode: 200, body: 'OK' };
+  return failures.length
+    ? { statusCode: 503, body: 'LINE delivery incomplete' }
+    : { statusCode: 200, body: 'OK' };
 }
 
 export const handler: Handler = async (event: HandlerEvent) => handleLineCustomerWebhook(event);

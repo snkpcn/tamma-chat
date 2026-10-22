@@ -1,3 +1,5 @@
+import { readFoodRequirements, assessFoodRequirements, describeFoodRequirement } from './_food-constraints';
+import { loadConversationContext } from './_conversation-context';
 import { backendFetch } from './_backend-fetch';
 import { decryptPii, piiHash } from './_operations-db';
 import { createHash } from 'node:crypto';
@@ -340,16 +342,51 @@ async function guestEnvironment(guestDbId: string): Promise<'live'|'test'> {
   return (await response.json() as Array<{ is_test:boolean }>)[0]?.is_test ? 'test' : 'live';
 }
 
+/** Final shared gate for legacy, Agent and promotion orders. The model's
+ * optional note is not the authority for what the guest required. */
+export async function validatePreorderFoodRequirements(input: {
+  guestDbId: string; note?: string | null; requirementTexts?: string[];
+  items: Array<{ name: string; quantity: number }>;
+}, menu: RestaurantMenuItem[]): Promise<string[]> {
+  const [response, context] = await Promise.all([
+    publicDbFetch(`guest_memory?guest_id=eq.${encodeURIComponent(input.guestDbId)}&memory_key=eq.constraints&select=memory_value`),
+    loadConversationContext(input.guestDbId),
+  ]);
+  const memory = await response.json() as Array<{ memory_value?: unknown }>;
+  const constraints = Array.isArray(memory[0]?.memory_value) ? memory[0].memory_value.filter((x): x is string => typeof x === 'string') : [];
+  const requirements = readFoodRequirements([
+    ...constraints, ...(context?.recentTurns ?? []).filter(turn => turn.role === 'user').slice(-8).map(turn => turn.content),
+    ...(input.requirementTexts ?? []), ...input.items.map(item => item.name), input.note ?? '',
+  ]);
+  if (!requirements.length) return [];
+  for (const requested of input.items) {
+    const item = resolveMenuName(requested.name, menu);
+    if (!item) continue; // Existing item resolution reports its own error.
+    const check = assessFoodRequirements({ name: item.name, ingredients: item.ingredient_names,
+      safety: item.safety, customization: item.customization }, requirements);
+    if (check.status !== 'verified') throw new Error(`food_requirements_${check.status}_kitchen_confirmation_required:${item.name}`);
+  }
+  return [...new Set(requirements.map(describeFoodRequirement))];
+}
+
+function validPreorderQuantity(quantity: number): number {
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 50) throw new Error('invalid_preorder_quantity');
+  return quantity;
+}
+
 export async function createRestaurantPreorder(input: {
   guestDbId: string; channel: string; date: string; time: string;
   items: Array<{ name: string; quantity: number }>;
   customerName: string; phone?: string | null; email?: string | null; note?: string | null;
+  requirementTexts?: string[];
   environment?: 'live' | 'test';
 }): Promise<PreorderCreateResult> {
   const requestedFor = new Date(`${input.date}T${input.time}:00+07:00`);
   if (Number.isNaN(requestedFor.valueOf())) throw new Error('invalid_requested_time');
   const menu = await listRestaurantMenu();
-  const resolved = input.items.map(item => ({ menu: resolveMenuName(item.name, menu), quantity: Math.max(1, Math.min(50, Math.floor(item.quantity || 1))) }));
+  const foodRequirements = await validatePreorderFoodRequirements(input, menu);
+  if (foodRequirements.length) input = { ...input, note: [input.note, `เงื่อนไขอาหารที่ลูกค้าแจ้ง: ${foodRequirements.join('; ')}`].filter(Boolean).join('\n') };
+  const resolved = input.items.map(item => ({ menu: resolveMenuName(item.name, menu), quantity: validPreorderQuantity(item.quantity) }));
   if (resolved.some(item => !item.menu)) throw new Error('menu_item_not_found');
   for (const item of resolved) {
     if (!item.menu!.is_orderable || (item.menu!.available_servings ?? 0) < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);
@@ -421,12 +458,15 @@ export async function createRestaurantPreorderWithPromotion(input: {
   guestDbId: string; channel: string; date: string; time: string;
   items: Array<{ name: string; quantity: number }>;
   customerName: string; phone?: string | null; email?: string | null; note?: string | null;
+  requirementTexts?: string[];
   promotionCampaignId: string; pricingOverride: Record<string, number>;
 }): Promise<PromotionPreorderCreateResult> {
   const requestedFor = new Date(`${input.date}T${input.time}:00+07:00`);
   if (Number.isNaN(requestedFor.valueOf())) throw new Error('invalid_requested_time');
   const menu = await listRestaurantMenu();
-  const resolved = input.items.map(item => ({ menu: resolveMenuName(item.name, menu), quantity: Math.max(1, Math.min(50, Math.floor(item.quantity || 1))) }));
+  const foodRequirements = await validatePreorderFoodRequirements(input, menu);
+  if (foodRequirements.length) input = { ...input, note: [input.note, `เงื่อนไขอาหารที่ลูกค้าแจ้ง: ${foodRequirements.join('; ')}`].filter(Boolean).join('\n') };
+  const resolved = input.items.map(item => ({ menu: resolveMenuName(item.name, menu), quantity: validPreorderQuantity(item.quantity) }));
   if (resolved.some(item => !item.menu)) throw new Error('menu_item_not_found');
   for (const item of resolved) {
     if (!item.menu!.is_orderable || (item.menu!.available_servings ?? 0) < item.quantity) throw new Error(`menu_item_unavailable:${item.menu!.name}`);

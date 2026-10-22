@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { BrainChannel } from './_thongthai-brain-v3';
 import { loadActivityWorldFacts } from './_activity-sot';
 import { createBooking, createCafeInquiry, createOtopOrder, formatActivityAssetNote, listBookingOptions, listOtopProducts, listServiceResources, listStayBookingOptions, upsertCustomerAccount } from './_operations-db';
-import { createRestaurantPreorder, listRestaurantMenu } from './_restaurant-sot';
+import { createRestaurantPreorder, listRestaurantMenu, validatePreorderFoodRequirements } from './_restaurant-sot';
 import { dispatchCreatedTransactionNotification } from './_transaction-notifications';
 import { loadGuestAgentStateSnapshot, patchGuestAgentState } from './_guest-agent-state-store';
 import { hasCancelMarker, hasCommitMarker, hasCorrectionMarker, hasExplicitNoTransactionMarker, hasStandaloneTransactionRequest } from './_slot-parsers';
@@ -297,6 +297,7 @@ type PreparedRestaurantPreorder = {
   expiresAt: string;
   environment: 'live' | 'test';
   payload: {
+    requirementTexts?: string[];
     date: string;
     time: string;
     items: Array<{ name: string; quantity: number; unitPrice: number; lineTotal: number }>;
@@ -1015,6 +1016,15 @@ async function prepareRestaurantPreorder(
     resolved.push({ name:item.name, quantity, unitPrice, lineTotal:unitPrice * quantity });
   }
 
+  const requirementTexts = [context.message, ...rawItems.map(row =>
+    row && typeof row === 'object' ? String((row as Record<string, unknown>).name ?? '') : '')];
+  let foodRequirementNotes: string[];
+  try {
+    foodRequirementNotes = await validatePreorderFoodRequirements({ guestDbId: context.guestDbId,
+      items: resolved, requirementTexts, note }, menu);
+  } catch {
+    return { ok: false, error: 'food_requirements_need_kitchen_confirmation', requires_kitchen_confirmation: true };
+  }
   const now = new Date();
   const prepared: PreparedRestaurantPreorder = {
     version: 1,
@@ -1026,13 +1036,14 @@ async function prepareRestaurantPreorder(
     expiresAt: new Date(now.getTime() + PREPARED_TTL_MS).toISOString(),
     environment: mode.environment,
     payload: {
+      requirementTexts,
       date: date!,
       time: time!,
       items: resolved,
       customerName: customerName!,
       phone: phone!,
       email,
-      note,
+      note: foodRequirementNotes.length ? [note, `เงื่อนไขอาหาร: ${foodRequirementNotes.join('; ')}`].filter(Boolean).join('\n') : note,
       expectedTotal: resolved.reduce((sum,item) => sum + item.lineTotal, 0),
     },
   };
@@ -1049,6 +1060,7 @@ async function prepareRestaurantPreorder(
       items: prepared.payload.items,
       expected_total: prepared.payload.expectedTotal,
       currency: 'THB',
+      food_requirements: foodRequirementNotes,
       customer_name: prepared.payload.customerName,
       phone: prepared.payload.phone,
     },
@@ -1129,6 +1141,7 @@ async function commitPreparedRestaurantPreorder(
     phone: prepared.payload.phone,
     email: prepared.payload.email,
     note: prepared.payload.note,
+    requirementTexts: [...(prepared.payload.requirementTexts ?? []), context.message],
   });
 
   const result = {

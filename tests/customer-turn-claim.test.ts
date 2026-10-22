@@ -334,8 +334,8 @@ test('source guard: the LINE customer path claims before it answers', () => {
   assert.ok(claimAt < askAt, 'the claim must happen before any work or reply');
   assert.match(
     CORE_SOURCE.slice(claimAt, askAt),
-    /duplicate_skipped[\s\S]*return;/u,
-    'a duplicate delivery must return without replying',
+    /duplicate_skipped[\s\S]*throw new Error/u,
+    'a duplicate claim without a durable answer must stop before rerunning the core',
   );
   // The dedupe key, the cost-ledger event id and the outcome row must agree.
   assert.match(CORE_SOURCE, /const turnId = event\.webhookEventId \?\? event\.message\.id/u);

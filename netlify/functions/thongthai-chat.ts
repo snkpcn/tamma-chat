@@ -1,3 +1,4 @@
+import { FOOD_MEMORY_CODES, readFoodRequirements } from './_food-constraints';
 import { regularArrivalInformation } from './_visitor-arrival';
 import { understandVisitorQuestion } from './_visitor-question-understanding';
 import { answerVisitorInformation } from './_visitor-information';
@@ -1299,6 +1300,14 @@ function formatAdvisorMessage(
   alreadyShownNames: string[] = [],
   language: BrainRequest['language'] = 'th',
 ): string {
+  const unverifiedRequirements = advisor?.foodRequirementsUnverified === true;
+  const requirementNotice = unverifiedRequirements ? ({
+    th: 'เมนูที่แสดงยังไม่ได้ยืนยันว่าตรงข้อจำกัดทั้งหมด กรุณายืนยันส่วนประกอบและวิธีทำกับทีมครัวก่อนสั่งครับ',
+    en: 'These dishes are not yet confirmed to meet all your requirements. Please check ingredients and preparation with the kitchen before ordering.',
+    zh: '这些菜品尚未确认符合您的全部饮食要求。点餐前请向厨房确认配料和做法。',
+    lo: 'ຍັງບໍ່ຢືນຢັນວ່າເມນູເຫຼົ່ານີ້ກົງກັບທຸກເງື່ອນໄຂ. ກະລຸນາຢືນຢັນກັບທີມຄົວກ່ອນສັ່ງ.',
+    vi: 'Các món này chưa được xác nhận đáp ứng tất cả yêu cầu. Vui lòng xác nhận nguyên liệu và cách chế biến với nhà bếp trước khi đặt món.',
+  } as Record<string, string>)[language] ?? 'Please confirm all food requirements with the kitchen.' : '';
   const notices: string[] = Array.isArray(advisor?.notices) ? advisor.notices : [];
   // "แพ้กุ้ง ตำไทยกินได้ไหม" -- answer about THAT specific named dish from
   // its real recorded ingredients/allergenFlags, never a generic
@@ -1308,19 +1317,23 @@ function formatAdvisorMessage(
   // recorded," never a claim of certainty, so a severe allergy still
   // gets pointed at staff/kitchen confirmation either way.
   if (advisor?.mode === 'item_safety_check' && advisor.itemSafety?.item) {
-    const { item, safe } = advisor.itemSafety as { item: { name: string }; safe: boolean };
+    const { item, safe } = advisor.itemSafety as { item: { name: string }; safe: boolean | null };
     const allergenLabelByCode: Record<string, string> = { peanut: 'ถั่ว', shrimp: 'กุ้ง/กุ้งแห้ง', fish: 'ปลา', egg: 'ไข่' };
     const allergenFlags: string[] = Array.isArray(advisor?.parsed?.allergenFlags) ? advisor.parsed.allergenFlags : [];
     const allergenLabel = allergenFlags.map(code => allergenLabelByCode[code]).filter(Boolean).join('/')
       || 'สารก่อภูมิแพ้ที่บอกไว้';
+    if (safe === null) return composeLineShortReply([
+      `ยังไม่มีข้อมูลยืนยันว่า ${item.name} ตรงเงื่อนไขแพ้อาหารที่แจ้งไว้ครับ`,
+      'รายการวัตถุดิบอย่างเดียวไม่ยืนยันสารก่อภูมิแพ้หรือการปนเปื้อน กรุณายืนยันกับทีมครัวก่อนสั่งครับ',
+    ]);
     return safe
       ? composeLineShortReply([
           `จากข้อมูลเมนูที่มี ${item.name} ไม่มี${allergenLabel}เป็นส่วนประกอบครับ`,
           'แต่ถ้าแพ้รุนแรง ขอให้แจ้งพนักงานอีกครั้งก่อนสั่ง เผื่อเรื่องครัวร่วมเพื่อความปลอดภัยครับ',
         ])
       : composeLineShortReply([
-          `${item.name} มี${allergenLabel}เป็นส่วนประกอบครับ ขอแนะนำให้เลี่ยงไว้ก่อนนะครับ`,
-          'ถ้าอยากได้เมนูทดแทนที่ปลอดภัยกว่า บอกได้เลยครับ เดี๋ยวช่วยแนะนำให้',
+          `${item.name} มีข้อมูลส่วนประกอบที่ขัดกับเงื่อนไขที่แจ้งไว้ครับ ขอแนะนำให้เลี่ยงและยืนยันกับทีมครัวก่อนนะครับ`,
+          'ถ้าอยากตรวจเมนูอื่นตามเงื่อนไขที่แจ้งไว้ บอกได้เลยครับ',
         ]);
   }
   if (advisor?.mode === 'compare' && Array.isArray(advisor.comparison) && advisor.comparison.length) {
@@ -1331,6 +1344,7 @@ function formatAdvisorMessage(
       return `• ${row.name}\n  ${details}`;
     });
     return [
+      requirementNotice,
       first && second ? `🍽️ ${first.name} vs ${second.name}` : '🍽️ เทียบจากเมนูจริง',
       '',
       ...lines,
@@ -1344,6 +1358,7 @@ function formatAdvisorMessage(
     const constraintAck = formatRestaurantConstraintAck(advisor, currentMessage);
     return [
       constraintAck,
+      requirementNotice,
       '🍽️ ชุดที่ทองไทยแนะนำ',
       '',
       ...lines,
@@ -1392,6 +1407,7 @@ function formatAdvisorMessage(
     if (language !== 'th' && advisor?.mode !== 'pairing' && !wantsAlternative && !constraintAck && !allergyNotice && !rememberedConstraintPhrase) {
       const rl = replyLanguage(language);
       return composeLineShortReply([
+        requirementNotice,
         T.menu.intro[rl],
         ...shown.map((row: any) => `• ${row.name} — ${Number.isFinite(Number(row.price)) ? T.money(rl, Number(row.price)) : '-'}`),
         !partySizeKnown ? T.menu.askParty[rl]
@@ -1427,6 +1443,7 @@ function formatAdvisorMessage(
       // remembered, not restated this turn -- see rememberedConstraintPhrase.
       constraintAck,
       allergyNotice,
+      requirementNotice,
       intro,
       ...shown.map((row: any) => {
         const reason = fullList && Array.isArray(row.reasons) && row.reasons.length
@@ -5710,6 +5727,7 @@ function deterministicThankYouCloseResponse(request: BrainRequest): BrainRespons
 export type ThongthaiChatCoreResult = { statusCode: number; payload: Record<string, unknown> };
 
 const RESTAURANT_DURABLE_CONSTRAINT_CODES = new Set([
+  ...FOOD_MEMORY_CODES,
   'vegetarian','no_spicy','mild_spice','no_pork','no_beef','no_chicken','no_fish','no_egg',
   'no_plara','no_peanut','no_shrimp','peanut_allergy','shrimp_allergy','fish_allergy','egg_allergy',
   'food_allergy','authentic_isan',
@@ -5731,6 +5749,7 @@ function hasDurableRestaurantConstraint(request: BrainRequest): boolean {
  * available to deterministicRestaurantResponse.
  */
 function isSafetyCriticalRestaurantRecommendation(message: string): boolean {
+  if (readFoodRequirements([message]).length && /แนะนำ|กินอะไร|มีเมนู|มีอาหาร|จัด.*ชุด|เซ็ต/u.test(message)) return true;
   if (/เด็ก/u.test(message) && /ไม่เผ็ด|ไม่กินเผ็ด|ไม่ทานเผ็ด/u.test(message) && /มีอาหาร|มีเมนู|กินอะไร|แนะนำ/u.test(message)) return true;
   if (!/แพ้(?:กุ้ง|ถั่ว|ปลา|ไข่|อาหารทะเล|ทะเล)/u.test(message)) return false;
   const intent = classifyRestaurantDietaryIntent(message);
@@ -6255,7 +6274,9 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         event_id:turnId, channel, status_code:result.statusCode,
         duration_ms:Date.now()-startedAt, outcome:'completed',
       }));
-      void deferTurnWrite('customer_turn_outcomes', () => persistCustomerTurnOutcome({
+      // LINE completes its processing claim only after its encrypted answer
+      // is durable in the delivery outbox. Web has no transport outbox.
+      if (channel !== 'line') void deferTurnWrite('customer_turn_outcomes', () => persistCustomerTurnOutcome({
         conversationId:turnRequest.guestId ?? null,eventId:turnId,channel,
         outcome:'completed',errorType:null,durationMs:Date.now()-startedAt,environment:turnRequest.environment,
       }));
@@ -6269,7 +6290,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
       duration_ms:Date.now()-startedAt, outcome:'failed',
       error_type:error instanceof Error ? error.name : 'UnknownError',
     }));
-    await persistCustomerTurnOutcome({
+    if (channel !== 'line') await persistCustomerTurnOutcome({
       conversationId:request.guestId ?? null,eventId:turnId,channel,
       outcome:'failed',errorType:error instanceof Error ? error.name : 'UnknownError',
       durationMs:Date.now()-startedAt,environment:request.environment,
@@ -6611,9 +6632,10 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // changes WHEN it is evaluated.
   const preserveExperienceDiscoveryFastPath = isExperienceDiscoveryIntent(request.message);
 
+  const originalItemQuestion = readItemQuestion(request.message, request.language);
   let visitorUnderstoodTopic:string|null=null;
   let visitorArrivalInformation:ReturnType<typeof regularArrivalInformation>=null;
-  if(!preserveExperienceDiscoveryFastPath && process.env.THONGTHAI_VISITOR_UNDERSTANDING==='1' && request.language==='th') {
+  if(!originalItemQuestion?.requiresConfirmation && !preserveExperienceDiscoveryFastPath && process.env.THONGTHAI_VISITOR_UNDERSTANDING==='1' && request.language==='th') {
     const history=request.chatHistory.length?request.chatHistory
       :(await loadConversationContext(guestDbId).catch(()=>null))?.recentTurns ?? [];
     const understanding=await understandVisitorQuestion({message:request.message,history,
@@ -6728,19 +6750,22 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // claimed; café drinks keep the café path.
   const itemLanguages = ['th', 'en', 'zh', 'lo', 'vi'];
   const itemQuestion = itemLanguages.includes(request.language) && !isCafeReadOnlyTurn(request.message, undefined)
-    ? readItemQuestion(request.message, request.language) : null;
+    ? originalItemQuestion : null;
   if (itemQuestion) {
+    const itemContext = await loadConversationContext(guestDbId).catch(() => null);
+    const itemHistory = (request.chatHistory.length ? request.chatHistory : itemContext?.recentTurns ?? [])
+      .filter(turn => turn.role === 'user').slice(-8).map(turn => turn.content);
     const [menu, products] = await Promise.all([
       listRestaurantMenu().catch(() => 'failed' as const),
       listOtopProductStock(request.environment === 'test' ? 'test' : 'live').catch(() => 'failed' as const),
     ]);
     // The customer's language, unless the message itself was Thai or English.
-    const itemAnswer = answerItemQuestion({ ...itemQuestion, language: request.language as ItemQuestion['language'] }, { menu, products });
+    const itemAnswer = answerItemQuestion({ ...itemQuestion, language: request.language as ItemQuestion['language'] }, { menu, products }, [...request.guestContext.constraints, ...itemHistory]);
     if (itemAnswer) {
       console.log('THONGTHAI_ITEM_QUESTION', JSON.stringify({ event_id:transportEventId, channel,
         menu_read:menu === 'failed' ? 'failed' : 'ok', products_read:products === 'failed' ? 'failed' : 'ok' }));
       try {
-        const currentContext = await loadConversationContext(guestDbId);
+        const currentContext = itemContext ?? await loadConversationContext(guestDbId);
         await persistConversationContext(guestDbId, applyConversationContextUpdate(currentContext, {
           eventId:transportEventId, channel, userMessage:request.customerMessage ?? request.message, assistantMessage:itemAnswer,
         }));

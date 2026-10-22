@@ -288,6 +288,7 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
   let aiCostRows: Array<Record<string, unknown>> = [];
   let aiResponseTurns: Array<Record<string, unknown>> = [];
   const customerIntelligence = new Map<string, Record<string, unknown>>();
+  const lineDeliveries = new Map<string, Record<string, unknown>>();
   const turnOutcomes = new Map<string, Record<string, unknown>>();
   const modelQueue: HarnessGeminiReply[] = [];
   let modelCalls = 0;
@@ -695,6 +696,31 @@ export function createHarness(catalogOverrides: HarnessCatalog = {}): Harness {
     if (path.startsWith('journeys') && method === 'GET') return jsonResponse([]);
     if (path.startsWith('journeys') && method === 'POST') return jsonResponse([]);
     if (path.startsWith('guest_events') && method === 'POST') return jsonResponse([]);
+
+    // Durable LINE outbox, including atomic lease filters used by redelivery.
+    if (path.startsWith('line_customer_deliveries')) {
+      const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+      const id = method === 'POST' ? String(body.event_id) : query.get('event_id')?.slice(3) ?? '';
+      const existing = lineDeliveries.get(id);
+      if (method === 'POST') {
+        if (existing) return jsonResponse([]);
+        const row = { lease_id: null, leased_at: null, expires_at: new Date(Date.now() + 86400000).toISOString(), ...body };
+        lineDeliveries.set(id, row);
+        return jsonResponse([row]);
+      }
+      if (!existing || (query.has('target_hash') && existing.target_hash !== query.get('target_hash')?.slice(3))
+        || (query.has('expires_at') && String(existing.expires_at) <= query.get('expires_at')!.slice(3))) return jsonResponse([]);
+      if (method === 'GET') return jsonResponse([existing]);
+      if (method === 'PATCH') {
+        if (query.has('lease_id') && existing.lease_id !== query.get('lease_id')?.slice(3)) return jsonResponse([]);
+        const stale = /leased_at.lt.([^)]*)/u.exec(query.get('or') ?? '')?.[1];
+        if (query.has('or') && existing.status !== 'pending'
+          && !(existing.status === 'sending' && stale && String(existing.leased_at) < stale)) return jsonResponse([]);
+        const row = { ...existing, ...body };
+        lineDeliveries.set(id, row);
+        return jsonResponse([row]);
+      }
+    }
 
     // --- customer_turn_outcomes (the per-event turn claim) ---
     // Models UNIQUE(channel,event_id,environment): the claim insert uses

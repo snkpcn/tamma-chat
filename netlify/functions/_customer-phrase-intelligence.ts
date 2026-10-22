@@ -1,3 +1,4 @@
+import { foodMemorySignals, foodConstraintPattern, foodMemoryRemovals } from './_food-constraints';
 // Master Roadmap Phase 2 -- Customer Intelligence Memory. Classifies a
 // customer message for service-useful signal: a normalized PREFERENCE
 // (durable, worth remembering per-guest -- an allergy, a mobility need,
@@ -128,6 +129,14 @@ export function extractPreferenceSignal(message: string): PreferenceSignal {
   if (/มือใหม่|ไม่เคยขี่ม้า|ไม่เคยขับ\s*(?:ATV|เอทีวี)/iu.test(text)) addConstraints.push('beginner_friendly');
   if (/ถ้าฝนตกไม่สะดวก|ไม่สะดวกถ้าฝนตก|ไม่อยากทำกิจกรรมตอนฝนตก|แพ้ฝน/u.test(text)) addConstraints.push('rain_sensitive');
 
+  const foodSignals = foodMemorySignals(text);
+  // The legacy substring reader must not turn "ไม่ได้แพ้ไข่" into an allergy.
+  for (let i = addConstraints.length - 1; i >= 0; i--) {
+    if (addConstraints[i].endsWith('_allergy') && addConstraints[i] !== 'food_allergy'
+      && !foodSignals.includes(addConstraints[i])) addConstraints.splice(i, 1);
+  }
+  for (const code of foodSignals) if (!addConstraints.includes(code)) addConstraints.push(code);
+  for (const code of foodMemoryRemovals(text)) if (!removeConstraints.includes(code)) removeConstraints.push(code);
   return { addConstraints, removeConstraints, pace, travelerType };
 }
 
@@ -157,8 +166,8 @@ const GUEST_SCOPED_CONSTRAINT_PATTERNS: Partial<Record<string,RegExp>> = {
   limited_walking:/เดินไม่ไหว|เดินไกลไม่ได้|เดินไม่ได้ไกล|เดินนานไม่ได้/u,
 };
 
-function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
-  const phrase=GUEST_SCOPED_CONSTRAINT_PATTERNS[code];
+function constraintIsOnlyAboutCompanion(message:string, code:string, removal=false):boolean{
+  const phrase=removal ? foodConstraintPattern(code,true) : GUEST_SCOPED_CONSTRAINT_PATTERNS[code] ?? foodConstraintPattern(code);
   if(!phrase)return false;
 
   // Classify each actual constraint occurrence by its NEAREST subject to the
@@ -166,8 +175,8 @@ function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
   // "ผม... แต่แฟนไม่กินกาแฟ" clause and incorrectly treating the whole
   // sentence as customer-owned memory.
   const phraseRe=new RegExp(phrase.source,'giu');
-  const companionRe=/(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน)/gu;
-  const selfRe=/(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง)/gu;
+  const companionRe=/(?:แฟน|ภรรยา|สามี|ลูก|เด็ก|แม่|พ่อ|คุณแม่|คุณพ่อ|เพื่อน|my wife|my husband|my child|my daughter|my son|my friend|朋友|孩子)/giu;
+  const selfRe=/(?:ผม|ฉัน|หนู|ดิฉัน|เราเอง|\bI\b|\bme\b|我)/giu;
 
   for(const match of message.matchAll(phraseRe)){
     const index=match.index??0;
@@ -194,7 +203,7 @@ function constraintIsOnlyAboutCompanion(message:string, code:string):boolean{
 export function extractGuestPreferenceSignal(message:string):PreferenceSignal{
   const raw=extractPreferenceSignal(message);
   let addConstraints=raw.addConstraints.filter(code=>!constraintIsOnlyAboutCompanion(message,code));
-  const remove=new Set(raw.removeConstraints);
+  const remove=new Set(raw.removeConstraints.filter(code=>!constraintIsOnlyAboutCompanion(message,code,true)));
 
   const dropAdd=(...codes:string[])=>{
     const set=new Set(codes);

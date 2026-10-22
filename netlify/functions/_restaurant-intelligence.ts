@@ -1,3 +1,4 @@
+import { readFoodRequirements, assessFoodRequirements } from './_food-constraints';
 import { extractPartySize } from './_slot-parsers';
 import { normalizeCustomerText } from './_customer-text';
 
@@ -603,11 +604,17 @@ function composeSet(candidates: Scored[], pref: ParsedPreferences) {
 export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: RestaurantAdvisorInput) {
   const pref = parsePreferences(input, items);
   const scope = recommendationScope(input);
-  const available = items.filter(item => !isHardExcluded(item,pref) && itemMatchesRecommendationScope(item, scope));
+  const foodRequirements = readFoodRequirements([...(input.constraints ?? []), ...(input.recentMessages ?? []), input.query]);
+  const available = items.filter(item => !isHardExcluded(item,pref) && itemMatchesRecommendationScope(item, scope)
+    && assessFoodRequirements({ name: item.name, ingredients: item.ingredients, safety: item.profile.safety,
+      customization: item.profile.customization }, foodRequirements).status !== 'conflict');
   const selectedRoles = selectedRoleHints(items,pref.selectedNames);
   const scored = available.map(item => scoreItem(item,pref,selectedRoles)).sort((a,b)=>b.score-a.score || a.item.price-b.item.price);
   const query = norm(input.query);
   const named = items.filter(item => query.includes(norm(item.name)));
+  const foodRequirementsUnverified = foodRequirements.length > 0 && (named.length ? named : available).some(item =>
+    assessFoodRequirements({ name: item.name, ingredients: item.ingredients, safety: item.profile.safety,
+      customization: item.profile.customization }, foodRequirements).status !== 'verified');
   // "แพ้กุ้ง ตำไทยกินได้ไหม" -- a yes/no safety question about ONE named
   // dish under a stated allergy, structurally distinct from both a
   // multi-item compareMode (named.length>=2) and a bare constraint
@@ -615,7 +622,7 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   // dish specifically from its real recorded ingredients/allergenFlags,
   // never a generic "I'll avoid X" acknowledgment that ignores the actual
   // question, and never a full ingredient dump.
-  const singleItemSafetyQuestion = named.length === 1 && pref.allergenFlags.length > 0
+  const singleItemSafetyQuestion = named.length === 1 && foodRequirements.some(r => r.kind === 'allergy')
     && /ได้ไหม|ได้มั้ย|ปลอดภัยไหม|ปลอดภัยมั้ย|เป็นไรไหม|เป็นไรมั้ย/u.test(query);
   const compareMode = named.length >= 2 && /ต่าง|เทียบ|compare|อันไหน|ไหนดีกว่า|เลือกอะไร/u.test(query);
   const pairingRequested = pref.selectedNames.length > 0 && /เพิ่มอะไร|กินคู่|เข้ากับ|คู่กับ|ต่ออะไร/u.test(query);
@@ -639,14 +646,19 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   if (singleItemSafetyQuestion) {
     const item = named[0]!;
     return {
-      mode:'item_safety_check', parsed:pref, notices, unavailableReason,
-      itemSafety:{ item:compactItem(item), safe:!isHardExcluded(item, pref) },
+      mode:'item_safety_check', parsed:pref, notices, foodRequirementsUnverified, unavailableReason,
+      itemSafety:{ item:compactItem(item), safe: (() => {
+        if (isHardExcluded(item, pref)) return false;
+        const check = assessFoodRequirements({ name: item.name, ingredients: item.ingredients,
+          safety: item.profile.safety, customization: item.profile.customization }, foodRequirements);
+        return check.status === 'verified' ? true : check.status === 'conflict' ? false : null;
+      })() },
       recommendations:[], comparison:null, set:null,
     };
   }
   if (compareMode) {
     return {
-      mode:'compare', parsed:pref, notices, unavailableReason,
+      mode:'compare', parsed:pref, notices, foodRequirementsUnverified, unavailableReason,
       comparison:named.slice(0,4).map(compactItem),
       recommendations:[], set:null,
     };
@@ -654,13 +666,13 @@ export function adviseRestaurantMenu(items: RestaurantAdvisorItem[], input: Rest
   if (composeMode) {
     const set = composeSet(scored,pref);
     return {
-      mode:'compose_set', parsed:pref, notices, unavailableReason, set,
+      mode:'compose_set', parsed:pref, notices, foodRequirementsUnverified, unavailableReason, set,
       recommendations:scored.slice(0,5).map(row=>({ ...compactItem(row.item), score:Number(row.score.toFixed(2)), reasons:row.reasons })),
       comparison:null,
     };
   }
   return {
-    mode:pairingMode?'pairing':'recommend', parsed:pref, notices, unavailableReason, set:null, comparison:null,
+    mode:pairingMode?'pairing':'recommend', parsed:pref, notices, foodRequirementsUnverified, unavailableReason, set:null, comparison:null,
     recommendations:scored.slice(0,5).map(row=>({ ...compactItem(row.item), score:Number(row.score.toFixed(2)), reasons:row.reasons })),
   };
 }

@@ -1,3 +1,4 @@
+import { FOOD_MEMORY_CODES } from './_food-constraints';
 import { deferTurnWrite } from './_turn-writes';
 import { backendFetch } from './_backend-fetch';
 import { extractGuestPreferenceSignal, extractIntelligenceSignals } from './_customer-phrase-intelligence';
@@ -99,6 +100,7 @@ const INTERESTS = new Set([
   'local_community', 'family', 'photography', 'wellness',
 ]);
 const CONSTRAINTS = new Set([
+  ...FOOD_MEMORY_CODES,
   'limited_walking', 'wheelchair_access', 'elderly_friendly', 'child_friendly',
   'vegetarian', 'no_spicy', 'rain_sensitive',
   'no_pork', 'no_beef', 'no_chicken', 'no_fish', 'no_egg',

@@ -59,3 +59,75 @@ test('LINE: a group batch with a rejected customer reply never pushes into the g
     for (const push of pushes(result.calls)) assert.equal(push.body.to, 'U-push-6');
   });
 });
+
+test('failed push returns 503; redelivery sends the stored answer with the same retry key and no core work', async () => {
+  await withHarness(async harness => {
+    const first = await deliverLineTexts(harness, { userId: 'U-push-retry', texts: ['เปิดกี่โมง'], replyStatus: 400, pushStatus: 503 });
+    assert.equal(first.status, 503);
+    const original = pushes(first.calls)[0]!;
+    const before = harness.modelCallCount();
+    const inner = harness.fetchMock;
+    const backendCalls: string[] = [];
+    harness.fetchMock = (async (url, init) => { backendCalls.push(String(url)); return inner(url, init); }) as typeof fetch;
+    const second = await deliverLineTexts(harness, { userId: 'U-push-retry', texts: [], rawBody: first.rawBody });
+    assert.equal(second.status, 200);
+    const replay = pushes(second.calls)[0]!;
+    assert.deepEqual(replay.body, original.body);
+    assert.equal(replay.headers!.get('x-line-retry-key'), original.headers!.get('x-line-retry-key'));
+    assert.equal(second.calls.filter(c => c.endpoint === 'message/reply').length, 0);
+    assert.equal(harness.modelCallCount(), before);
+    assert.ok(!backendCalls.some(url => /guest_agent_state|ai_api_cost_events|restaurant_preorders/u.test(url)), 'delivery retry must not run the brain or business writes');
+    const third = await deliverLineTexts(harness, { userId: 'U-push-retry', texts: [], rawBody: first.rawBody });
+    assert.equal(third.calls.length, 0, 'delivered answer is not sent again');
+  });
+});
+
+test('a retry-key conflict after an uncertain push is marked delivered', async () => {
+  await withHarness(async harness => {
+    const first = await deliverLineTexts(harness, { userId: 'U-push-409-retry', texts: ['สวัสดีครับ'], replyStatus: 400, pushStatus: 503 });
+    const second = await deliverLineTexts(harness, { userId: 'U-push-409-retry', texts: [], rawBody: first.rawBody, pushStatus: 409 });
+    assert.equal(second.status, 200);
+    const third = await deliverLineTexts(harness, { userId: 'U-push-409-retry', texts: [], rawBody: first.rawBody });
+    assert.equal(third.calls.length, 0);
+  });
+});
+
+test('a failed initial reply stays retryable without running the brain again', async () => {
+  await withHarness(async harness => {
+    const first = await deliverLineTexts(harness, { userId: 'U-reply-retry', texts: ['เปิดกี่โมง'], replyStatus: 500 });
+    assert.equal(first.status, 503);
+    const before = harness.modelCallCount();
+    const second = await deliverLineTexts(harness, { userId: 'U-reply-retry', texts: [], rawBody: first.rawBody });
+    assert.equal(second.status, 200);
+    assert.deepEqual(second.replies[0]?.texts, first.replies[0]?.texts);
+    assert.equal(harness.modelCallCount(), before);
+    assert.equal(pushes(second.calls).length, 0);
+  });
+});
+
+test('a later 400 after an uncertain reply never triggers a duplicate push', async () => {
+  await withHarness(async harness => {
+    const first = await deliverLineTexts(harness, { userId: 'U-reply-uncertain', texts: ['เปิดกี่โมง'], replyStatus: 500 });
+    const before = harness.modelCallCount();
+    const second = await deliverLineTexts(harness, { userId: 'U-reply-uncertain', texts: [], rawBody: first.rawBody, replyStatus: 400 });
+    assert.equal(second.status, 503);
+    assert.equal(pushes(second.calls).length, 0);
+    assert.equal(harness.modelCallCount(), before);
+  });
+});
+
+test('outbox outage before processing stays retryable while the claim is live', async () => {
+  await withHarness(async harness => {
+    const inner = harness.fetchMock;
+    harness.fetchMock = (async (url, init) => String(url).includes('/line_customer_deliveries')
+      ? new Response('store unavailable', { status: 503 }) : inner(url, init)) as typeof fetch;
+    const first = await deliverLineTexts(harness, { userId: 'U-outbox-outage', texts: ['เปิดกี่โมง'] });
+    assert.equal(first.status, 503);
+    assert.equal(first.calls.length, 0);
+    harness.fetchMock = inner;
+    const second = await deliverLineTexts(harness, { userId: 'U-outbox-outage', texts: [], rawBody: first.rawBody });
+    assert.equal(second.status, 503, 'a processing claim with no answer cannot acknowledge delivery');
+    assert.equal(second.calls.length, 0);
+    assert.equal(harness.modelCallCount(), 0);
+  });
+});

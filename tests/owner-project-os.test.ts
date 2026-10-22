@@ -169,6 +169,10 @@ test('a project-name completion closes the project, while an unfinished task blo
 });
 
 test('LINE flow previews and confirms four tasks once, then completes only the selected task', async () => {
+  // The fixture's timestamps and expiry are historical. Freeze the wall
+  // clock as well as passing event timestamps so expiry checks stay stable.
+  const oldNow = Date.now;
+  Date.now = () => Date.parse('2026-10-06T08:00:00Z');
   const oldFetch = globalThis.fetch;
   const oldUrl = process.env.SUPABASE_URL;
   const oldKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -248,6 +252,7 @@ test('LINE flow previews and confirms four tasks once, then completes only the s
     assert.ok(paths.includes('POST /rest/v1/rpc/owner_project_set_task_state_from_line_v1'));
     assert.ok(paths.includes('POST /rest/v1/rpc/owner_project_set_task_states_from_line_v1'));
   } finally {
+    Date.now = oldNow;
     globalThis.fetch = oldFetch;
     if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
     if (oldKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = oldKey;

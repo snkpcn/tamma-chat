@@ -1,9 +1,17 @@
 import { spawnSync } from 'node:child_process';
+import { checkCustomerTurnHostedReadiness } from './check-customer-turn-hosted-readiness.mjs';
 
 const NODE = process.execPath;
 // Release verification uses existing production build credentials in place.
 // It exposes no runtime endpoint and never prints secrets, bodies or financial rows.
 if (process.env.CONTEXT === 'production') {
+  const customerChecks = await checkCustomerTurnHostedReadiness({
+    baseUrl: process.env.SUPABASE_URL,
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  });
+  const customerReady = customerChecks.every(check => check.pass);
+  console.log('CUSTOMER_TURN_HOSTED_READONLY:' + JSON.stringify({ status: customerReady ? 'PASS' : 'FAIL', checks: customerChecks }));
+  if (!customerReady) process.exit(71);
   const checks = [];
   try {
     const base = process.env.SUPABASE_URL;

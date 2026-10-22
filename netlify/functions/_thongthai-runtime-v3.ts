@@ -276,6 +276,8 @@ export async function executeBrainTools(
             phone:typeof call.args.phone==='string' ? call.args.phone : null,
             email:typeof call.args.email==='string' ? call.args.email : null,
             note:typeof call.args.note==='string' ? call.args.note : null,
+            requirementTexts: [request.customerMessage ?? request.message, ...request.guestContext.constraints,
+              ...request.chatHistory.filter(turn => turn.role === 'user').slice(-8).map(turn => turn.content)],
             environment,
           });
           await insertEvent(guestDbId,'agent_action','order',{action:'create_restaurant_preorder',preorderCode:created.preorderCode,channel});

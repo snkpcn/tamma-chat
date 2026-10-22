@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import { createHarness } from './helpers/canonical-core-harness';
 import {
   CUSTOMER_TURN_BUDGET_MS,
   CUSTOMER_TURN_HARD_DEADLINE_MS,
@@ -39,12 +40,16 @@ async function withHangingNetwork<T>(
   Object.assign(process.env, ENV);
   const originalFetch = global.fetch;
   const originalNow = Date.now;
+  const deliveryStore = createHarness().fetchMock;
   const seen: Seen[] = [];
   const startedAt = Date.now();
   global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(typeof input === 'string' ? input : (input as Request).url ?? input);
     const entry: Seen = { url, at: originalNow() - startedAt, hasSignal: Boolean(init?.signal), body: String(init?.body ?? '') };
     seen.push(entry);
+    // The durable outbox is available; answer dependencies and LINE itself
+    // hang. Outbox outages are tested separately as retryable failures.
+    if (url.includes('/rest/v1/line_customer_deliveries')) return deliveryStore(input, init);
     const answer = answerAt?.(url);
     if (answer) return answer;
     const signal = init?.signal;
@@ -96,10 +101,10 @@ test('the clock starts at webhook entry, so pre-turn work spends the same budget
   await withHangingNetwork(async (seen, startedAt) => {
     const response = await handler(customerTextDelivery('ขี่ม้าราคาเท่าไหร่') as never, {} as never);
     const realElapsed = realNow() - startedAt;
-    assert.equal(response?.statusCode, 200);
+    assert.equal(response?.statusCode, 503, 'an unacknowledged LINE send must request redelivery');
 
     assert.ok(
-      !seen.some(entry => entry.url.includes('api.openai.com') || entry.url.includes('/customer_turn_outcomes')),
+      !seen.some(entry => entry.url.includes('api.openai.com') || (entry.url.includes('/customer_turn_outcomes') && entry.body?.includes('in_progress'))),
       'with no answer budget left, neither the claim nor a core turn may start',
     );
     const replies = seen.filter(entry => entry.url === LINE_REPLY);
@@ -138,7 +143,7 @@ test('worst case: every dependency hangs and the whole LINE turn still ends unde
   await withHangingNetwork(async (seen, startedAt) => {
     const response = await handler(customerTextDelivery('ขี่ม้าราคาเท่าไหร่') as never, {} as never);
     const elapsed = Date.now() - startedAt;
-    assert.equal(response?.statusCode, 200);
+    assert.equal(response?.statusCode, 503, 'an unacknowledged LINE send must request redelivery');
     assert.ok(elapsed < NETLIFY_SYNC_LIMIT_MS, `the turn took ${elapsed}ms`);
 
     assert.deepEqual(seen.filter(entry => !entry.hasSignal).map(entry => entry.url), [], 'every request must be bounded');

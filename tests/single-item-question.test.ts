@@ -92,3 +92,25 @@ test('a known dish word the live menu does not carry: "not on the list", zero mo
     }
   });
 });
+
+test('qualified food questions retain the condition and require kitchen confirmation, on both channels', async () => {
+  await withHarness(async harness => {
+    const cases = [
+      ['มีผัดไทย vegan ไหม', 'ผัดไทย vegan', /ยังยืนยัน.*ไม่ได้/u],
+      ['มีผัดไทยไม่ใส่ถั่วไหม', 'ผัดไทยไม่ใส่ถั่ว', /ยังยืนยัน.*ไม่ได้/u],
+      ['Do you have vegan pad thai?', 'vegan pad thai', /cannot confirm/u],
+      ['Do you have pad thai without peanuts?', 'pad thai without peanuts', /cannot confirm/u],
+      ['有没有不放花生的泰式炒河粉？', '不放花生的泰式炒河粉', /无法确认/u],
+      ['ມີຜັດໄທບໍ່ໃສ່ຖົ່ວບໍ່?', 'ຜັດໄທບໍ່ໃສ່ຖົ່ວ', /ຢືນຢັນ/u],
+      ['Có pad thai không đậu phộng không?', 'pad thai không đậu phộng', /chưa thể xác nhận/u],
+    ] as const;
+    for (const [question, condition, expected] of cases) {
+      for (const answer of await askBothChannels(harness, `diet-${question}`, question)) {
+        assert.ok(answer.reply.includes(condition), `${answer.channel}: lost ${condition}: ${answer.reply}`);
+        assert.match(answer.reply, expected);
+        assert.doesNotMatch(answer.reply, /is available|พร้อมสั่ง|现在可以点/u);
+        assert.equal(answer.modelCalls, 0);
+      }
+    }
+  });
+});

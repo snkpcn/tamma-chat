@@ -8,13 +8,14 @@
  *  name that matches nothing is not claimed, so other questions keep their
  *  path. The reply uses the same states as the menu and souvenir lists: in
  *  stock, sold out, no stock figure, and a failed read. */
+import { readFoodRequirements, assessFoodRequirements, describeFoodRequirement } from './_food-constraints';
 import type { RestaurantMenuItem } from './_restaurant-sot';
 
 import { replyLanguage, T } from './_reply-templates';
 
 /** `asked` is the customer's own word for the item, shown when it is not
  *  found (a Thai stem would mean nothing to them). */
-export type ItemQuestion = { stem: string; language: 'th' | 'en' | 'zh' | 'lo' | 'vi'; asked?: string };
+export type ItemQuestion = { stem: string; language: 'th' | 'en' | 'zh' | 'lo' | 'vi'; asked?: string; requiresConfirmation?: boolean };
 
 const PARTICLES = '(?:\\s*(?:ครับ|คับ|ค่ะ|คะ|ค่า|นะ|จ้า|จ้ะ|ฮะ|บ้าง|เลย))*\\s*[?!.~]*';
 const TH_SHAPES = [
@@ -74,14 +75,14 @@ export function readItemQuestion(message: string, language?: string): ItemQuesti
       const phrase = shape.exec(plain)?.[1]?.trim();
       if (!phrase) continue;
       const term = OTHER_TERMS[language].find(([pattern]) => pattern.test(phrase));
-      if (term) return { stem: term[1], language, asked: phrase };
+      if (term) return { stem: term[1], language, asked: phrase, requiresConfirmation: phrase.replace(term[0], '').trim().length > 0 };
     }
     return null;
   }
   if (/[฀-๿]/u.test(text)) {
     for (const shape of TH_SHAPES) {
       const stem = shape.exec(text)?.[1]?.trim();
-      if (stem && !NOT_AN_ITEM.test(stem)) return { stem, language: 'th' };
+      if (stem && !NOT_AN_ITEM.test(stem)) return { stem, language: 'th', asked: stem, requiresConfirmation: /vegan|vegetarian|gluten|แพ้|ไม่ใส่|ไม่เอา|ไม่มี|ปลอด|มังสวิรัติ|วีแกน|ฮาลาล|(?:อาหาร)?เจ(?:\s|$)/iu.test(stem) };
     }
     return null;
   }
@@ -90,7 +91,7 @@ export function readItemQuestion(message: string, language?: string): ItemQuesti
     const phrase = shape.exec(lower)?.[1]?.trim();
     if (!phrase || NOT_AN_ITEM.test(phrase)) continue;
     const term = ENGLISH_TERMS.find(([pattern]) => pattern.test(phrase));
-    if (term) return { stem: term[1], language: 'en', asked: phrase };
+    if (term) return { stem: term[1], language: 'en', asked: phrase, requiresConfirmation: phrase.replace(term[0], '').trim().length > 0 };
   }
   return null;
 }
@@ -111,7 +112,45 @@ export type ItemSources = {
 };
 
 /** null = the stem names no live item (and nothing failed): not ours. */
-export function answerItemQuestion(question: ItemQuestion, sources: ItemSources): string | null {
+export function answerItemQuestion(question: ItemQuestion, sources: ItemSources, constraints: string[] = []): string | null {
+  // The vocabulary match must never erase the rest of the question. A
+  // stock row cannot verify a recipe change, a dietary variant or cross-contact.
+  const requirements = readFoodRequirements([...constraints, question.asked ?? question.stem]);
+  const exactStemDishes = sources.menu === 'failed' ? [] : matching(sources.menu, question.stem);
+  const requirementDishes = exactStemDishes.length || !requirements.length || sources.menu === 'failed'
+    ? exactStemDishes : sources.menu.filter(item => compact(question.stem).includes(compact(item.name)));
+  const assessments = requirementDishes.map(item => assessFoodRequirements({
+    name: item.name, ingredients: item.ingredient_names, safety: item.safety, customization: item.customization,
+  }, requirements));
+  // Current wording and remembered requirements govern the quick stock path
+  // together. Only affirmative kitchen/recipe data may establish suitability.
+  if (question.requiresConfirmation || requirements.length) {
+    const asked = question.asked ?? question.stem;
+    const verified = requirements.length > 0 && !question.requiresConfirmation
+      && assessments.length > 0 && assessments.every(result => result.status === 'verified');
+    if (!verified) {
+    const messages = {
+      th: `สำหรับ “${asked}” ยังยืนยันส่วนประกอบและการปรับสูตรตามเงื่อนไขนี้ไม่ได้ครับ กรุณายืนยันกับทีมครัวก่อนสั่ง โดยเฉพาะกรณีแพ้อาหาร`,
+      en: `For “${asked}”, I cannot confirm the ingredients or recipe changes required. Please check with the kitchen before ordering, especially for food allergies.`,
+      zh: `关于“${asked}”，目前无法确认配料或是否能按此要求调整做法。请在点餐前向厨房确认，尤其是食物过敏的情况。`,
+      lo: `ສຳລັບ “${asked}” ຍັງຢືນຢັນສ່ວນປະກອບ ຫຼືການປັບສູດຕາມເງື່ອນໄຂນີ້ບໍ່ໄດ້. ກະລຸນາຢືນຢັນກັບທີມຄົວກ່ອນສັ່ງ ໂດຍສະເພາະຖ້າແພ້ອາຫານ.`,
+      vi: `Với “${asked}”, hiện chưa thể xác nhận nguyên liệu hoặc việc thay đổi công thức theo yêu cầu. Vui lòng xác nhận với nhà bếp trước khi gọi món, đặc biệt nếu bị dị ứng thực phẩm.`,
+    };
+    const remembered = constraints.filter(value => !/^[a-z]+(?:_[a-z]+)+$/u.test(value));
+    const context = remembered.length ? ` (${remembered.join('; ')})` : '';
+    const conflict = assessments.some(result => result.status === 'conflict');
+    const conflictText = {
+      th: 'ข้อมูลส่วนประกอบที่บันทึกไว้มีส่วนที่ขัดกับเงื่อนไขนี้ครับ ',
+      en: 'The recorded ingredients conflict with the requested conditions. ',
+      zh: '记录的配料与这些饮食要求冲突。',
+      lo: 'ສ່ວນປະກອບທີ່ບັນທຶກໄວ້ຂັດກັບເງື່ອນໄຂນີ້. ',
+      vi: 'Nguyên liệu được ghi nhận không phù hợp với yêu cầu này. ',
+    };
+    const memoryText = question.language === 'th' && requirements.length
+      ? ` เงื่อนไขที่ตรวจ: ${[...new Set(requirements.map(describeFoodRequirement))].join('; ')}` : context;
+    return (conflict ? conflictText[question.language] : '') + messages[question.language] + memoryText;
+    }
+  }
   // Thai keeps its own wording; every other language uses the templates.
   const other = question.language !== 'th';
   const rl = replyLanguage(question.language);
