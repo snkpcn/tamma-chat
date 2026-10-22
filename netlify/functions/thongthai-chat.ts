@@ -6615,6 +6615,37 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     request = { ...request, customerMessage:request.customerMessage ?? request.message, message:basicQuestion.canonical };
   }
 
+  // These complete, bounded conversational openings already have a useful
+  // answer. Previously they sat below Agent Primary / One-Mind: the first
+  // "อยากกิน" paid for semantic interpretation and could time out before
+  // reaching its own responder. Keep durable dietary advice on its existing
+  // path; only an unconstrained opening asks the preference question here.
+  const earlyConversationOpening = request.language === 'th'
+    ? deterministicVagueVisitIntentResponse(request)
+      ?? (!hasDurableRestaurantConstraint(request) ? deterministicFoodIntentStartResponse(request) : null)
+    : null;
+  // A short food phrase may instead answer the question we just asked
+  // (e.g. choosing food over café). Preserve that existing continuation.
+  const openingState = earlyConversationOpening
+    ? await peekGuestAgentState(guestDbId).catch(() => null) : null;
+  const openingTask = openingState ? parseTaskState(openingState.state?.taskState).activeTask : null;
+  if (earlyConversationOpening && !openingState?.state?.pending_question
+      && !(openingTask && !isTerminalTaskStatus(openingTask.status))) {
+    const polished = polishedResponse(earlyConversationOpening, channel);
+    await persistBrainRuntime(guestDbId, channel, polished);
+    await persistAiResponseTurn({
+      conversationId:request.guestId ?? guestDbId ?? 'unknown', eventId:transportEventId, channel,
+      finalResponseSource:'conversation_opening', modelReplyUsed:false,
+      groundedKnowledgeSupplied:false, zeroCostTurn:true,
+      environment:request.environment, occurredAt:new Date().toISOString(),
+    }).catch(error => console.error('THONGTHAI_OPENING_TELEMETRY_ERROR', error instanceof Error ? error.name : 'unknown'));
+    explicitAiResponseTurnPersisted = true;
+    return coreResult(200, {
+      message:polished.message, intent:polished.intent, contextUpdates:polished.contextUpdates,
+      journeyAction:polished.journeyAction, suggestedActions:polished.suggestedActions,
+    });
+  }
+
   // Broad-discovery turns ("มีกิจกรรมอะไรบ้าง") are answered entirely from
   // the verified activity/experience catalog by
   // deterministicExperienceDiscoveryResponse further down -- no model output
