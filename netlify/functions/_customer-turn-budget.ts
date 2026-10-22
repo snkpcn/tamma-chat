@@ -1,16 +1,7 @@
-/** Wall-clock budget for ONE customer turn, shared by every channel.
- *
- *  A synchronous Netlify function is killed at its request limit, the lowest
- *  of which is 10s. Nothing in the customer path is bounded by that on its
- *  own: each provider call owns an independent 7s budget, a turn makes two
- *  of them (interpretation then grounded composition), and LINE's retry
- *  doubles the whole thing -- a worst case near 29s. The function dies
- *  first, so the customer gets silence instead of the honest fallback each
- *  channel already has.
- *
- *  8s leaves room for the channel's own reply/serialization work inside 10s.
- *  This bounds when the customer gets AN ANSWER; it does not cancel
- *  already-issued database writes, which remain idempotent.
+/** LINE's short answer budget leaves a separate slice for delivery.
+ * Web uses its own budget below: a real provider call plus Supabase state
+ * and cost persistence can legitimately take more than eight seconds.
+ * Budgets bound waiting; already-issued idempotent writes may still settle.
  */
 export const CUSTOMER_TURN_BUDGET_MS = 8_000;
 
@@ -20,9 +11,24 @@ export const CUSTOMER_TURN_BUDGET_MS = 8_000;
  *  CUSTOMER_TURN_HARD_DEADLINE_MS from function entry. */
 export const CUSTOMER_REPLY_BUDGET_MS = 1_000;
 
-/** Absolute end of one turn, reply included, measured from function entry.
- *  Kept under the 10s synchronous limit with margin for the response. */
+/** LINE's absolute end, reply included, measured from function entry.
+ *  Retain the short delivery target independently of the web deadline. */
 export const CUSTOMER_TURN_HARD_DEADLINE_MS = CUSTOMER_TURN_BUDGET_MS + CUSTOMER_REPLY_BUDGET_MS;
+
+/** Below the browser's 30s request timeout, including a 750ms claim and
+ * transport overhead. Netlify synchronous functions default to 60s:
+ * https://docs.netlify.com/build/functions/configuration/
+ * A successful OpenAI interpretation must not be discarded merely because
+ * real database round trips pushed the whole web turn past LINE's 8s.
+ */
+export const WEB_CUSTOMER_TURN_BUDGET_MS = 22_000;
+export const WEB_CUSTOMER_TURN_HARD_DEADLINE_MS = 23_000;
+
+export function customerTurnTiming(channel: string): { answerMs: number; hardDeadlineMs: number } {
+  return channel === 'web'
+    ? { answerMs: WEB_CUSTOMER_TURN_BUDGET_MS, hardDeadlineMs: WEB_CUSTOMER_TURN_HARD_DEADLINE_MS }
+    : { answerMs: CUSTOMER_TURN_BUDGET_MS, hardDeadlineMs: CUSTOMER_TURN_HARD_DEADLINE_MS };
+}
 
 /** Below this there is not enough time left for a retry to plausibly
  *  finish, so spend the remaining time on the fallback reply instead of

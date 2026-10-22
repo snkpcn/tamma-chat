@@ -92,22 +92,25 @@ test('LINE turn not answered in time: orders are mentioned only for a transactio
   assert.doesNotMatch(english, /order/iu);
 });
 
-test('web turn not answered in time: the same rule, through the real core under a slow backend', async () => {
+test('web turn not answered in time: the same rule, through the real core under a stalled backend', async t => {
   await withHarness(async harness => {
     const inner = harness.fetchMock;
-    // Every backend call hangs longer than the whole 8 s turn budget, even
-    // past its own timeout. (A call that is aborted on time just fails, and
-    // since the turn's log writes no longer queue one after another, such a
-    // turn now answers honestly within budget -- that is not this case.)
+    // Advance the web deadline instead of waiting in real time. The
+    // diagnostic outcome write is available even while the read is stalled.
+    const { WEB_CUSTOMER_TURN_BUDGET_MS } = await import('../netlify/functions/_customer-turn-budget');
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
     global.fetch = (async (url: string | URL, init: RequestInit = {}) => {
-      if (String(url).includes('/rest/v1/')) await new Promise(resolve => setTimeout(resolve, 9_000));
+      if (String(url).includes('/rest/v1/') && !String(url).includes('/customer_turn_outcomes')) await new Promise(() => {});
       return inner(url, init);
     }) as typeof fetch;
     try {
-      const reply = message((await processThongthaiChatCore(brainRequest('ขี่ม้าราคาเท่าไหร่', guestId('fb-late-web'), 'web'), 'fb-late-web')).payload);
+      const pending = processThongthaiChatCore(brainRequest('ขี่ม้าราคาเท่าไหร่', guestId('fb-late-web'), 'web'), 'fb-late-web');
+      t.mock.timers.tick(WEB_CUSTOMER_TURN_BUDGET_MS + 1);
+      const reply = message((await pending).payload);
       assert.match(reply, /ตอบไม่ทันในรอบนี้/u);
       assert.doesNotMatch(reply, /คำขอจองหรือสั่งซื้อ|ออเดอร์/u, 'a price question never placed an order');
     } finally {
+      t.mock.timers.reset();
       global.fetch = inner;
     }
   });

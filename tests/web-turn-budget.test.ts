@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   CUSTOMER_TURN_BUDGET_MS,
+  WEB_CUSTOMER_TURN_BUDGET_MS,
+  WEB_CUSTOMER_TURN_HARD_DEADLINE_MS,
+  customerTurnTiming,
   CUSTOMER_MIN_RETRY_BUDGET_MS,
   TurnBudgetExhaustedError,
   remainingTurnBudgetMs,
@@ -22,13 +25,16 @@ const CORE_SOURCE = readFileSync(
   'utf8',
 );
 
-const NETLIFY_SYNC_LIMIT_MS = 10_000;
+const NETLIFY_SYNC_LIMIT_MS = 60_000;
 
-test('both channels share one turn budget', () => {
+test('web allows real provider and database latency while LINE retains its reply budget', () => {
   assert.equal(LINE_TURN_BUDGET_MS, CUSTOMER_TURN_BUDGET_MS);
   assert.equal(LINE_MIN_RETRY_BUDGET_MS, CUSTOMER_MIN_RETRY_BUDGET_MS);
   assert.ok(CUSTOMER_TURN_BUDGET_MS < NETLIFY_SYNC_LIMIT_MS);
-  assert.ok(NETLIFY_SYNC_LIMIT_MS - CUSTOMER_TURN_BUDGET_MS >= 1_500);
+  assert.equal(customerTurnTiming('line').answerMs, 8_000);
+  assert.equal(customerTurnTiming('web').answerMs, WEB_CUSTOMER_TURN_BUDGET_MS);
+  assert.ok(WEB_CUSTOMER_TURN_BUDGET_MS > CUSTOMER_TURN_BUDGET_MS);
+  assert.ok(WEB_CUSTOMER_TURN_HARD_DEADLINE_MS + 750 + 2_500 < 30_000, 'claim, drain and error persistence fit the browser timeout');
 });
 
 test('the budget helper lives in one place, not duplicated per channel', () => {
@@ -91,9 +97,10 @@ test('the web path bounds the shared core', () => {
   const body = CHAT_SOURCE.slice(entry, entry + 4_000);
   assert.match(
     body,
-    /withinTurnBudget\(\s*processThongthaiChatCoreInternal\((?:request|turnRequest), turnId\),\s*CUSTOMER_TURN_BUDGET_MS,?\s*\)/u,
-    'the core must run inside the shared turn budget',
+    /withinTurnBudget\(\s*processThongthaiChatCoreInternal\((?:request|turnRequest), turnId\),\s*timing.answerMs,?\s*\)/u,
+    'the core must run inside its channel deadline',
   );
+  assert.match(body, /customerTurnTiming\(channel\)/u);
   // The existing honest fallback is what a budget overrun now reaches.
   assert.match(body, /outcome:'failed'/u);
   assert.match(body, /error_type:error instanceof Error \? error\.name : 'UnknownError'/u);

@@ -77,7 +77,7 @@ import {
 } from './_conversation-context';
 import { emptyTaskStateContainer, parseTaskState } from './_task-state';
 import { claimCustomerTurn, type TurnClaimOutcome, persistAiResponseTurn, persistAiResponseTurnIfAbsent, persistCustomerTurnOutcome, markAiResponseTurnInterpreted } from './_ai-cost-store';
-import { CUSTOMER_TURN_BUDGET_MS, CUSTOMER_TURN_HARD_DEADLINE_MS, remainingTurnBudgetMs, withinTurnBudget } from './_customer-turn-budget';
+import { customerTurnTiming, remainingTurnBudgetMs, withinTurnBudget } from './_customer-turn-budget';
 import { polishCustomerMessage, limitAdvisoryList, composeLineShortReply, trimLongRecommendationForLine } from './_chat-copy-style';
 import { applyThongthaiCharacterKernel } from './_thongthai-character-kernel';
 import { resolveRequestedCustomerMedia } from './_thongthai-media';
@@ -6248,6 +6248,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
   const channel = getBrainChannel(request.pageContext.section);
   const turnId = eventId ?? `server:${channel}:${Date.now()}:${Math.random().toString(36).slice(2,12)}`;
   const startedAt = Date.now();
+  const timing = customerTurnTiming(channel);
   try {
     request = { ...request, message:normalizeCustomerText(request.message) };
     // Answer in the language of THIS message. The incoming language is only a
@@ -6255,24 +6256,19 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
     // language, LINE sends its own script check. Every path below, fallbacks
     // included, reads request.language.
     request = { ...request, language:resolveCustomerLanguage(request.message, request.language) };
-    // Bound the shared core inside the synchronous function limit. The web
-    // handler has no transport-level retry and no other deadline of its
-    // own, so without this a stalled turn runs past the request limit and
-    // the browser gets a dead connection instead of the honest fallback
-    // below. LINE additionally races this against its own remaining turn
-    // budget (see _line-webhook-core.ts); whichever deadline is tighter
-    // wins, so LINE's retry accounting is unchanged.
+    // Web has room for the real provider and database work before its 30s
+    // browser timeout. LINE retains its short transport/delivery deadline.
     // The turn's log writes run side by side and are all awaited here, before
     // the reply -- bounded by what is left of the hard deadline.
     const turnRequest = request;
     return await withTurnWrites(async () => {
       const result = await withinTurnBudget(
         processThongthaiChatCoreInternal(turnRequest, turnId),
-        CUSTOMER_TURN_BUDGET_MS,
+        timing.answerMs,
       );
       console.log('THONGTHAI_CUSTOMER_TURN', JSON.stringify({
         event_id:turnId, channel, status_code:result.statusCode,
-        duration_ms:Date.now()-startedAt, outcome:'completed',
+        duration_ms:Date.now()-startedAt, outcome:'completed', answer_budget_ms:timing.answerMs,
       }));
       // LINE completes its processing claim only after its encrypted answer
       // is durable in the delivery outbox. Web has no transport outbox.
@@ -6281,7 +6277,7 @@ export async function processThongthaiChatCore(request: BrainRequest, eventId: s
         outcome:'completed',errorType:null,durationMs:Date.now()-startedAt,environment:turnRequest.environment,
       }));
       return result;
-    }, () => remainingTurnBudgetMs(startedAt, CUSTOMER_TURN_HARD_DEADLINE_MS));
+    }, () => remainingTurnBudgetMs(startedAt, timing.hardDeadlineMs));
   } catch (error) {
     // Never start a second paid attempt or repeat a transaction after an
     // uncertain backend failure. Both transports receive a usable response.
@@ -6499,8 +6495,9 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   // and steal cold-start local-food/service-mind routing.
   const hadDurableRestaurantConstraintBeforeTurn = hasDurableRestaurantConstraint(request);
   const sameTurnPreferenceSignal = extractGuestPreferenceSignal(request.message);
-  // Independent identity, budget heartbeat and preference records need not
-  // add three consecutive database round trips to every customer reply.
+  // Identity/heartbeat bookkeeping overlaps response computation and is
+  // drained before replying. Preference capture stays awaited because this
+  // turn's food checks and state must observe the customer's new constraints.
   await Promise.all([
     // Identity registration is a last-seen upsert, never a precondition for
     // this turn: guestDbId is already resolved, and the memory/ledger/state
@@ -6511,13 +6508,13 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     // here because the call site must not DEPEND on that: if the inner
     // try/catch is ever narrowed, a customer reply must still not be lost to
     // a bookkeeping write.
-    registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId)
+    deferTurnWrite('guest_identity', () => registerGuestIdentity(guestDbId, channel, providerUserKey ?? request.guestId)
       .catch(error => {
         console.error(
           'THONGTHAI_GUEST_IDENTITY_REGISTER_ERROR',
           error instanceof Error ? error.message.slice(0, 220) : 'unknown',
         );
-      }),
+      })),
     // Heartbeat only: it bumps the ledger's lastActivityAt so a long
     // free-path conversation cannot reset paid spend. It is NOT the budget
     // gate. A failed heartbeat must never cost the customer their reply --
@@ -6529,7 +6526,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
     // read or written. Swallowing the heartbeat therefore cannot let an
     // unaccounted paid call through; it only risks losing one activity bump
     // (every paid reservation bumps lastActivityAt too).
-    touchAiConversation({
+    deferTurnWrite('conversation_heartbeat', () => touchAiConversation({
       conversationId:request.guestId ?? guestDbId ?? 'unknown',
       guestDbId, channel, eventId:transportEventId, callerLabel:'customer_activity',
     }).catch(error => {
@@ -6537,7 +6534,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
         'THONGTHAI_AI_CONVERSATION_HEARTBEAT_ERROR',
         error instanceof Error ? error.message.slice(0, 220) : 'unknown',
       );
-    }),
+    })),
     capturePreferenceSignals(guestDbId, request.message, {
       channel: channel === 'line' ? 'line' : channel === 'web' ? 'web' : 'other',
       eventId: transportEventId,
@@ -9056,7 +9053,7 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   });
 }
 
-/** The web claim's share of the function's 10 s, ahead of the 9 s turn. */
+/** Bound claim latency before the web turn and its browser response deadline. */
 const WEB_TURN_CLAIM_BUDGET_MS = 750;
 
 export const handler: Handler = async (event: HandlerEvent) => {
@@ -9087,8 +9084,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
   // A per-request header id is not a message identity, so only the page's
   // own id is claimed. Fails open: an unavailable claim never costs the
   // answer. It runs before the turn's own clock starts, so it is capped at
-  // WEB_TURN_CLAIM_BUDGET_MS: the claim's own timeouts (two requests of up
-  // to 1 s) plus the 9 s turn could otherwise pass the 10 s function limit.
+  // WEB_TURN_CLAIM_BUDGET_MS to preserve room for the answer and transport
+  // inside the browser's request deadline.
   if (rawEventId) {
     const claim = await withinTurnBudget(claimCustomerTurn({
       conversationId: request.guestId ?? null,
