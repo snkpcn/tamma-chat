@@ -30,3 +30,6 @@
 # 16:55 UTC = 23:55 Asia/Bangkok: aggregate the current day once, just before local midnight.
 [functions."ai-cost-notify-daily"]
   schedule = "55 16 * * *"
+
+[functions."customer-question-prune"]
+  schedule = "0 * * * *"

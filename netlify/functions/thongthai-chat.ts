@@ -11,6 +11,7 @@ import { readBasicQuestion } from './_multilingual-basic-question';
 import { replyLanguage, T } from './_reply-templates';
 import { ungroundedNumericClaims } from './_grounded-numbers';
 import { deferTurnWrite, withTurnWrites } from './_turn-writes';
+import { persistCustomerQuestion } from './_customer-question-store';
 import { formatCustomerDate } from './_customer-date';
 import { continueStayInquiry } from './_stay-inquiry-continuation';
 import { INTHANIN_TADTONE_CONFIG } from './_organization-config';
@@ -6407,6 +6408,14 @@ async function processThongthaiChatCoreInternal(request: BrainRequest, eventId: 
   }
 
   let guestDbId: string | null = null;
+  // Capture the customer's wording before semantic rewrites, on the shared
+  // web/LINE path. The same canonical conversation id joins cost accounting.
+  void deferTurnWrite('customer_question_history', () => persistCustomerQuestion({
+    conversationId: request.guestId ?? null,
+    eventId: eventId ?? `server:${channel}:${Date.now()}`,
+    channel, message: request.customerMessage ?? request.message,
+    environment: request.environment,
+  }));
   const customerState = await loadCustomerMemory(request.guestId, request.language, request.guestContext);
   if (customerState) {
     guestDbId = customerState.guestDbId;
